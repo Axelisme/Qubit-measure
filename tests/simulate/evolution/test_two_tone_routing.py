@@ -5,6 +5,9 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
+from zcu_tools.simulate.evolution.kernel import GuardResult
+from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
+from zcu_tools.simulate.evolution.kernels.floquet import FloquetAdmission, FloquetPlan
 
 from ._engine import RecordingKernel, batch, run, track
 from .contract.kernel_suite import synthetic_model
@@ -46,6 +49,83 @@ def route(batches, *, workers=1, chunks=1, reject=None):
         Engine(workers, 0, chunks_per_worker=chunks, kernels=kernels), src, batches
     )
     return result, attempts
+
+
+class PlannedFloquet(RecordingKernel):
+    """Identity dynamics that require the guard's exact per-row decisions."""
+
+    guard_builds = True
+
+    def __init__(self):
+        super().__init__("floquet")
+        self.admissions = {}
+
+    def guard_prepared(self, table, rows, source, budget):
+        admissions = {int(row): FloquetAdmission("modal") for row in rows}
+        self.admissions.update(admissions)
+        return GuardResult(np.ones(len(rows), dtype=bool), plan=FloquetPlan(admissions))
+
+    def apply(self, prepared, key_index, table, rows, states, context):
+        plan = context.plan
+        assert isinstance(plan, FloquetPlan)
+        for row in rows:
+            assert row in plan.admissions, "local plans must retain shared admissions"
+            assert plan.admissions[row] is self.admissions[row]
+        assert {int(table.timeline[row]) for row in plan.admissions} == set(
+            table.timeline[rows]
+        ), "deferred dispatch must keep plans local to its timeline"
+        return super().apply(prepared, key_index, table, rows, states, context)
+
+
+class PlannedDirect(RecordingKernel):
+    """Identity dynamics that require the dispatch's direct-solver plan."""
+
+    def __init__(self):
+        super().__init__("dop853")
+
+    def apply(self, prepared, key_index, table, rows, states, context):
+        assert isinstance(context.plan, DOP853Plan)
+        assert np.all(context.plan.frame[rows] == "lab")
+        return super().apply(prepared, key_index, table, rows, states, context)
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_deferred_floquet_retains_shared_admissions_alongside_direct_plans(workers):
+    n = 3
+    constant = EnvelopeSpec("constant")
+    shared = replace(
+        track(n, constant, duration=512),
+        frequency_ghz=np.full(n, 0.5),
+        phase_rad=np.arange(n) * 0.1,
+    )
+    local = replace(
+        shared, start_ns=np.full(n, 512.0), duration_ns=np.arange(n) + 513.0
+    )
+    direct = track(n, constant, start=1030, duration=1)
+    timeline = replace(
+        batch(n, duration=1031),
+        tracks=(
+            shared,
+            replace(shared, frequency_ghz=np.full(n, 0.425)),
+            local,
+            replace(local, frequency_ghz=np.full(n, 0.425)),
+            direct,
+            direct,
+            direct,
+        ),
+    )
+    floquet, dop853 = PlannedFloquet(), PlannedDirect()
+    result = run(
+        Engine(workers, 0, kernels=(floquet, dop853, RecordingKernel("t4"))),
+        ModelSource(
+            np.eye(16, dtype=np.complex128) / 16, lambda level: synthetic_model(16)
+        ),
+        (timeline,),
+    )
+    assert result.paths.segments_by_kernel["floquet"] == 2 * n
+    assert result.paths.segments_by_kernel["dop853"] == n
+    assert sum(len(rows) for _, rows, _ in floquet.calls) == 2 * n
+    assert sum(len(rows) for _, rows, _ in dop853.calls) == n
 
 
 def test_short_weak_direct_and_long_strong_floquet():

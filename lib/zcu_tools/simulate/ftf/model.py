@@ -1,6 +1,5 @@
 """Coupled F1-SQUID-F2 circuit projected once at the round's DC point."""
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from hashlib import sha256
@@ -47,15 +46,14 @@ RealArray = NDArray[np.float64]
 
 @dataclass(frozen=True)
 class FluxDynamics:
-    """Dependency description for a continuous absolute-ns flux callback.
+    """Caller metadata for absolute-ns flux events.
 
-    identity: stable descriptor of all circuit, line, control and bath inputs,
-        or None when persistent exact records are not used.
-    event_times_ns: finite absolute callback events, including delayed pulse
-        support and envelope/phase changes. Empty means no additional events.
-        JointModel unions them with bath ticks; Evolution quantizes the union.
-    This record keeps event geometry and persistence identity with one callback
-    description. Invalid event coordinates raise ValueError.
+    identity: optional caller-assigned dependency descriptor; not read by Engine
+        or included in NumericModel.
+    event_times_ns: finite absolute events, including delayed pulse support and
+        envelope/phase changes. Empty means no additional events.
+        JointModel.numeric_model quantizes and unions them with bath ticks.
+    Invalid event coordinates raise ValueError. This record performs no dynamics.
     """
 
     identity: str | None = None
@@ -166,6 +164,21 @@ class JointModel:
         if subsystem not in (0, 1, 2):
             raise ValueError("subsystem must be F1=0, C=1 or F2=2")
         return self._project(self._charges[subsystem])
+
+    def flux_operator(self, subsystem: int) -> Matrix:
+        """Return d(H/h)/df at DC in retained coordinates, in GHz/Phi0.
+
+        f = Phi/Phi0 is external reduced flux; subsystem is F1=0, C=1 or F2=2.
+        Uses the analytic derivative of this model's fixed-coordinate Hamiltonian,
+        projected through the DC local and joint bases, without rediagonalizing.
+        This is a fixed-DC small-signal operator, not H(Phi(t)) for fast flux.
+        An index outside 0..2 raises ValueError.
+        """
+        if subsystem not in (0, 1, 2):
+            raise ValueError("subsystem must be F1=0, C=1 or F2=2")
+        local = self._locals[subsystem]
+        derivative = local.derivative(float(self.dc_flux[subsystem]))
+        return self._project(self._lift(derivative, subsystem))
 
     def charge_squared_operator(self, subsystem: int) -> Matrix:
         """Return dimensionless native n² projected local then joint, not (P n P)².
@@ -319,9 +332,9 @@ class JointModel:
         requested evolution (caller must not use this for pulses/passive tails).
         sources: fixed-basis numeric quadratures in GHz per complex amplitude.
         resonators: two numeric readout modes supplying residual photon baths.
-        Includes the same full couplings, directional relaxation and effective
-        Markov dephasing as numeric_model at this flux, without callbacks/update
-        events. Initial Gibbs state remains separately explicit. Invalid shapes,
+        Includes full couplings, directional relaxation and effective Markov
+        dephasing at this flux, without event metadata. Initial Gibbs state
+        remains separately explicit. Invalid shapes,
         active degenerate secular transitions or invalid bath data raise ValueError.
         No physical applicability or basis convergence certification is performed.
         """
@@ -335,30 +348,25 @@ class JointModel:
 
     def numeric_model(
         self,
-        flux_at: Callable[[float], RealArray],
         sources: tuple[DriveSource, ...],
         *,
         end_ns: float,
         bath_segment_ns: float,
-        resonators: tuple[Resonator, Resonator],
         dynamics: FluxDynamics | None = None,
     ) -> NumericModel:
-        """Build fixed-basis continuous H with piecewise instantaneous baths.
+        """Return static DC Hamiltonian, sources and absolute-ns event metadata.
 
-        flux_at returns actual reduced (3,) flux at absolute ns; sources holds
-        lab-frame microwave quadratures and zero operators for flux-event sources.
-        end_ns is finite nonnegative evolution end. bath_segment_ns is the user's
-        positive update interval, rounded upward to at least one 2 ns event tick.
-        Baths use segment-start flux, remain fixed during each segment, and are
-        rotated back into this fixed basis. Evolution owns event partitioning and
-        integration; states are never reset. resonators supplies residual photons.
-        dynamics: callback event geometry and optional stable persistence identity;
-        None supplies no extra events or persistent identity.
-        Its events (including source delays) join bath updates on the evolution
-        owner's 2 ns grid. Baths refresh there too; no density/filter resets.
-        For exact persistence its identity describes flux-line/control contents,
-        circuit/bath/resonator values and numeric conventions. Invalid scales or
-        events raise ValueError. This is not a convergence certification.
+        sources: fixed-basis microwave quadratures in GHz per complex amplitude.
+        end_ns: finite nonnegative end of the event window.
+        bath_segment_ns: positive event spacing, rounded to the nearest 2 ns
+            with a minimum of one tick.
+        dynamics: optional extra events; quantized events in [0, end_ns) join
+            regular ticks and zero. None adds no extra events. Its identity is
+            not copied into the returned record.
+        The record has no collapse operators and performs no evolution or bath
+        updates. Engine uses ModelSource from model_source instead.
+        Invalid scales or event coordinates raise ValueError. This is not a
+        physical applicability or convergence certification.
         """
         if (
             not np.isfinite([end_ns, bath_segment_ns]).all()
@@ -381,29 +389,12 @@ class JointModel:
                 }
             )
         )
-        cached: dict[int, tuple[Matrix, ...]] = {}
-        h0 = self.hamiltonian(self.dc_flux)
-
-        def hamiltonian_at(t: float) -> Matrix:
-            return self.hamiltonian(flux_at(t)) - h0
-
-        def collapse_at(t: float) -> tuple[Matrix, ...]:
-            index = max(0, int(np.searchsorted(boundaries, t, side="right")) - 1)
-            if index not in cached:
-                cached[index] = self.collapse_operators(
-                    flux_at(boundaries[index]), resonators
-                )
-            return cached[index]
-
         return NumericModel(
             "ftf-joint-v1",
             self.basis,
-            h0,
+            self.hamiltonian(self.dc_flux),
             sources,
-            hamiltonian_at=hamiltonian_at,
-            collapse_at=collapse_at,
             event_times_ns=boundaries,
-            dynamics_identity=dynamics.identity,
         )
 
     def _occupation(self, resonator: Resonator) -> float:

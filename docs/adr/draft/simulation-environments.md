@@ -6,7 +6,7 @@ status: draft
 
 **狀態：** 已核准方向的設計草稿。明確環境、FTF 分段引擎及重算式單 round 重播已交付，現行入口見各 owner README。F1／F2 校準已跑通，conditional Ramsey 取得一點，依「能跑起來」標準接受。這些歷史證據屬舊 backend，並非目前版本的精度或成本保證。本文保留使用者裁決原話，不以早期候選敘述替代現行 owner 契約。
 
-**關聯：** [[0064]] 啟動組裝、[[0068]] remote transport、[[0069]] 實驗核心與前端、[[0071]] coherence 單位、[模組定位](../0072-module-boundaries.md)。模擬入口與責任以本文及各 owner README 為準，舊 TLS 遷移已完成。早期選項比較保留於[討論快照](../../discussions/2026-10-13-simulation-environment-ftf-preset.md)。
+**關聯：** [[0064]] 啟動組裝、[[0068]] remote transport、[[0069]] 實驗核心與前端、[[0071]] coherence 單位、[模組定位](../0072-module-boundaries.md)。演化引擎的黑盒邊界與內部分工見 [[0078]]。模擬入口與責任以本文及各 owner README 為準，舊 TLS 遷移已完成。早期選項比較保留於[討論快照](../../discussions/2026-10-13-simulation-environment-ftf-preset.md)。
 
 ## 目的
 
@@ -28,9 +28,9 @@ status: draft
 
 2026-10-14，使用者澄清：「但我預期模擬參數yaml中能夠設計ch，也就是說，build_enviroment回傳應該包含mock soc」。FTF builder 依 YAML 的 channel 設定組裝可執行的模擬 SoC、匹配 soccfg 與模型接線。GUI／Notebook 直接使用這一對物件，不另外呼叫預設設定 helper 建立第二份 soccfg。具體 channel schema 由實作完成。
 
-2026-10-16，對固定虛擬 QICK capability profile、只開放 channel 數量與接線的建議，使用者確認：「可以，請定稿spec與拆tickets，但不要實作，我會交給獨立agent實作」。第一版使用一套明確支援的能力規格，不接受任意 clock、DDS、channel type、memory limits 或整份 QICK dict 覆寫。實際使用未綁定的 channel 時明確報錯。這保留環境接線能力，不先建立通用虛擬硬體設定框架；具體 profile 數值由實作明訂，不把研究候選值當預設。
+2026-10-16，對固定虛擬 QICK capability profile、只開放 channel 數量與接線的建議，使用者確認：「可以，請定稿spec與拆tickets，但不要實作，我會交給獨立agent實作」。初版採用固定能力規格。現行 FTF 依 pulse／mux readout 選用對應的固定 compile profile，不接受任意 clock、DDS、channel type、memory limits 或整份 QICK dict 覆寫。實際使用未綁定的 channel 時明確報錯。這保留環境接線能力，不先建立通用虛擬硬體設定框架；具體 profile 數值由實作明訂，不把研究候選值當預設。
 
-同日，使用者提出：「可以有一個make_mock_soccfg(設定參數)，讓build_enviroment解析YAML並傳入。然後board是什麼？為什麼不直接soc？」對移除 board 包裝、環境直接提供 soc／soccfg 的方案回答：「好，採用，繼續」。Builder 讀取 YAML，將具名設定交給 program 的 make_mock_soccfg，再用同一份 soccfg 建立模擬 SoC。此設定入口不讀 YAML 或解釋 FTF 物理，不因保留名稱而保留舊無參數介面的相容層。
+同日，使用者提出：「可以有一個make_mock_soccfg(設定參數)，讓build_enviroment解析YAML並傳入。然後board是什麼？為什麼不直接soc？」對移除 board 包裝、環境直接提供 soc／soccfg 的方案回答：「好，採用，繼續」。Builder 讀取 YAML，將具名設定交給 program 的 `make_mock_soccfg` 或 mux 專用 `make_mux_mock_soccfg`，再用同一份 soccfg 建立模擬 SoC。此設定入口不讀 YAML 或解釋 FTF 物理，不因保留名稱而保留舊無參數介面的相容層。
 
 YAML 不是通用 environment DSL。Launcher／runtime 不辨識 FTF 欄位，不建立 registry、設定繼承、plugin 自動探索或 hot reload。環境檔是可信 Python，不提供 sandbox。
 
@@ -209,15 +209,15 @@ Private replay 保存模型設定、模板 request、snapshot 與抽樣身份。
 
 ### 多體演化與讀出模型
 
-Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture，不增加 resonator quantum Hilbert space。引擎演化至 readout 起點並回到 DC 能量基底。Readout 固定使用 DC 格點的 basis、rates／pulls，忽略殘餘 flux tail 及重疊 controls；起點之前的 control 部分仍正常演化。每點必須只有一個末端 readout pulse。這是讀出近似，不宣稱 tail 已消失或 ADC 支援時變 flux。二階 dispersive pulls 對所有可佔據 retained states 計算，virtual transitions 可來自較大的 parent space，不給 leakage／coupler states 任意零 pull。
+Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture，不增加 resonator quantum Hilbert space。引擎演化至 readout 起點並回到 DC 能量基底。Readout 固定使用 DC 格點的 basis、rates／pulls，忽略殘餘 flux tail 及重疊 controls；起點之前的 control 部分仍正常演化。每點只有一組末端 readout，單 pulse 或共同起點的 mux tones。這是讀出近似，不宣稱 tail 已消失或 ADC 支援時變 flux。二階 dispersive pulls 對所有可佔據 retained states 計算，virtual transitions 可來自較大的 parent space，不給 leakage／coupler states 任意零 pull。
 
-2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch；不合併 microwave／flux control 的其他 generators。兩 resonators 的分次換頻或同次多頻策略尚待收斂，不因本裁決擴大末端讀出時段的契約。
+2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。初版 FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch，不合併 microwave／flux control 的其他 generators。現行 FTF 另支援 mux readout，一個 generator 發出共同起點的有序 tones，每個 ADC receiver 接收全部 incident carriers，再以自己的頻率解調。同一 shot 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。單 pulse 與 mux 的現行設定及數值契約見 [FTF README](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
-R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。單一 receiver 觀測共同線路輸出，接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，ADC 以總讀取線延遲推遲物理輸出，再解調、取共軛成微波 I+iQ，套 receiver gain／phase／offset 並加入 noise。各 resonator 的 mismatch 相位只旋轉其散射項，不改 shared-line 動力學。數值與欄位契約見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md) 及 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
+R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。每個 receiver 觀測共同線路輸出，其接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，ADC 以總讀取線延遲推遲物理輸出，再解調、取共軛成微波 I+iQ，套 receiver gain／phase／offset 並加入 noise。各 resonator 的 mismatch 相位只旋轉其散射項，不改 shared-line 動力學。數值與欄位契約見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md) 及 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 2026-10-14，使用者對「保留空間內的多能階relaxation＋條件平均讀出，不追逐shot衰減細節」回答「好，同意」。對每個 readout 初始 joint state 計算含既有 directional relaxation／thermal transitions 的條件平均響應，涵蓋矩陣元允許的 cascade、直接跨級、coupler／leakage states 與熱激發，不限0↔1。不新增 readout T1、空間外態或 ground sink。
 
-響應保留 population 與 state-conditioned 場 moments 的關聯，不能只平均 resonator frequency 再解單一場方程。每 shot 從演化後的 populations 抽一次 readout 初態，單一 receiver 使用該 joint 初態下兩 resonators 的共同平均響應，再加入 I/Q receiver noise；raw／averaged 共用資料。這不同於每 shot 抽 thermal pure state 再重解量子演化。
+響應保留 population 與 state-conditioned 場 moments 的關聯，不能只平均 resonator frequency 再解單一場方程。每 shot 從演化後的 populations 抽一次 readout 初態，各 receiver 使用該 joint 初態下兩 resonators 的共同平均響應，再加入各自的 I/Q receiver noise；raw／averaged 共用資料。這不同於每 shot 抽 thermal pure state 再重解量子演化。
 
 此模型保留初態關聯與平均對比，不生成跳變時間造成的尾巴、額外 variance 或跨通道隨機關聯，不用來驗精細 single-shot fidelity。不保留逐 shot 軌跡切換模式，不新增 power-induced transitions、額外 readout Purcell、強 backaction 或 Kerr。相同物理條件可共用演化與條件平均響應，reps／rounds 主要增加抽樣及資料輸出，成本仍須實測。
 
@@ -259,14 +259,14 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 | C2 round 結果 | `experiment.ftf` | 顯式組合演化、population 轉換與 ADC 的正規化工具，再產生 round 結果。program mixin 消費 `core.simulation` 的統計或訊號結果，負責 QICK buffer 轉換。 |
 | C3 引擎 API | `simulate.evolution` | `experiment.ftf` 呼叫演化入口，消費 readout 起點的量子態與路徑診斷。每次 evolve 回報最終 rows 的最大 trace 誤差，空輸入為零；只報告，不修正或套用 ADC 容差。 |
 | C4 模型 | `simulate.ftf` | `simulate.evolution` 消費模型與 secular 形式，不讀 YAML 或裝置。 |
-| C5 kernel | `simulate.evolution` 內部的引擎排程與各 kernel | 排程提供分段工作與預算，kernel 提供 prepare、evolve-local input-bound payload、guard 交還的 prepared payload 與 apply。Floquet 透過 guard_prepared 交還 row-local acceptance mask 與 model-only preparation，其他 kernel 回傳 None 並沿用 guard。引擎只在單次 evolve 內對同 kernel、同 key、同 source 與同 budget 沿用；shared key 依原有 LRU 規則入 PrepareCache，singleton 不入 cache，kernel 不保留狀態。A-stage 的共用 prepared batch 可透過 bind_input 接收同 key、同 port、同輸入群組的 rows。輸入是 row basis 中的 source 初態，或引擎預演化的相同前綴輸出，包含有 drive 的前綴。引擎按時間順序演化每組代表前綴，巢狀前綴沿用已算出的較早輸入，再分類依賴該輸入的 probe rows。guard 可讀這些已知輸入，不讀 worker 的演化中 state，也不演化 density。有 drive 前綴須通過實際輸入的 B2，無 drive 前綴維持免 B2。前綴分組比較完整段序列、時間、level、每個 active tone 的 port、頻率、gain、phase 與 envelope，以及 probe 開始之前的 flux samples 和開始時或之後的第一個插值邊界 sample。更晚的 samples 不影響前綴分組。分組只在同一 source 與單次 evolve 內成立。唯讀 payload 只活在單次 evolve，不進 PrepareCache。回傳 None 時保留 per-batch apply。這是引擎內部接縫，不是跨 package API。 |
+| C5 kernel | `simulate.evolution` 內部的 dispatch、排程與各 kernel | 依 [[0078]]，dispatch 擁有候選順序、builder、frame 與 chain；kernel 擁有數值 build、apply 與 certificate。Table-building guards 透過 `guard_prepared` 交還 acceptance 與 model-only payload，dispatch 將 Floquet admission 合併成 family `RowPlan`。排程以 `ApplyContext` 原樣傳給 apply，不重做分類。Plan 與 input-bound payload 只活在一次 evolve；model-only shared keys 才依 LRU 規則入快取。這是內部接縫，不是跨 package API。完整契約與數值 owner 見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。 |
 | C6 readout 與統計 | `simulate.adc` | 擁有 1e-6 probability 容差及 `normalize_populations`。FTF 在 population 轉換後顯式呼叫一次：先驗證 finite、row sum 落在 float64 閉區間 [1−1e-6, 1+1e-6]、負值不低於 −1e-6，再將容差內負值歸零並逐 row 除總和。超界以 ValueError 回報拒絕 row 數，不回傳部分結果。sampling 只驗證非負值與相同 trace 容差，不做修補。FTF 消費條件響應與抽樣工具，組合成 C2 結果。 |
 
 ### Secular 形式由模型提供
 
 2026-10-16，對模型直接提供 secular 形式、模型不提供就 fast fail 的方案，使用者選擇「2A」。
 
-模型提供 rate matrix Q、coherence 衰減 Γ 與 H0 eigenbasis。快速路徑直接消費這些量，不在執行期從 collapse operators 反推 secular 結構。模型未提供時，在進入點報錯，不保留驗證失敗後退回另一條演化路徑的分支。
+模型以 `SecularModel` 提供 directional rates、pairwise pure dephasing 與 H0 eigenbasis。引擎的共用 secular 代數由這些資料建立 population generator Q 與 coherence 衰減 Γ，不從 collapse operators 反推 secular 結構。模型未提供時，在進入點報錯，不保留驗證失敗後退回另一條演化路徑的分支。
 
 ### 快速分段算法是預設數值方法
 
@@ -283,6 +283,6 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。這些數字不能代表現行分段引擎。
 
-現行 FTF backend 是 `ftf-segment-v5`，使用分段引擎與重算式 replay。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默升級。原校準、raw、seal 與成本證據維持原版本；此處不把舊證據當作目前版本的科學精度或效能驗收。
+現行 FTF backend 是 `ftf-segment-v6`，使用分段引擎、guarded ADC sums 與重算式 replay。舊版本 private archive 透過公開 replay 入口明確報版本不符，不靜默升級。原校準、raw、seal 與成本證據維持原版本；此處不把舊證據當作目前版本的科學精度或效能驗收。
 
 固定 original basis 的內部自洽驗證與跨 basis population 比較仍保留。跨 basis phase／complex 偏差照實保留，不作通過條件。模擬的絕對頻率與相位有 MHz 級 basis 偏差，不適合對照外部能譜或硬體絕對值。這些限制不改變既定物理模型，也不構成 runtime 收斂認證。

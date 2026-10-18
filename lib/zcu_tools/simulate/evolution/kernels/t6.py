@@ -8,15 +8,9 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm, solve
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
+from ._secular import coherence_decay
 
 
 @dataclass(frozen=True)
@@ -175,9 +169,11 @@ def _problem(
     frequency = float(table.tone_frequency_ghz[row, 0])
     duration = float(table.duration_ns[row])
     energies = model.energies_ghz
-    outgoing = model.rates_per_ns.sum(axis=0)
-    decay = (outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns
-    diagonal = (-2j * np.pi * (energies[:, None] - energies[None, :]) - decay).ravel()
+    decay = coherence_decay(model)
+    diagonal = np.asarray(
+        -2j * np.pi * (energies[:, None] - energies[None, :]) - decay,
+        dtype=np.complex128,
+    ).ravel()
     coupling = 2 * np.abs(amplitude * drive.in_phase_ghz)
     detuning = np.abs(energies[:, None] - energies[None, :] - frequency)
     driven = (coupling > 0) & ~np.eye(len(energies), dtype=bool)
@@ -258,15 +254,6 @@ class T6Kernel:
     A positive finite budget is required; integration or interpolation failure
     raises RuntimeError rather than silently selecting another algorithm.
     """
-
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("t6", "legacy-v1"),
-        eligibility=Eligibility(1, 1, "constant"),
-        guard=GuardDeclaration(),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("t6/legacy-v1/serial"),
-        fallback="terminal-domain",
-    )
 
     name = "t6"
     guard_builds = False
@@ -376,12 +363,14 @@ class T6Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Evaluate phase Fourier series and advance the aligned densities in place.
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        context.require_no_plan()
+        budget = context.budget
         _check_budget(budget)
         if not isinstance(prepared, _T6Prepared):
             raise ValueError("t6: incompatible prepared payload")

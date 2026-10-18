@@ -10,6 +10,7 @@ import pytest
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.linalg import expm
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 
 from .kernel_suite import KernelCase, KernelContract, synthetic_model
 
@@ -106,7 +107,7 @@ class DemoKernel:
         table: kernel.SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         if not isinstance(prepared, DemoPrepared):
             raise ValueError("demo requires DemoPrepared")
@@ -171,7 +172,7 @@ def test_suite_detects_incorrect_dynamics(kernel_case: KernelCase) -> None:
             table: kernel.SegmentTable,
             rows: NDArray[np.int64],
             states: NDArray[np.complex128],
-            budget: float,
+            context: ApplyContext,
         ) -> NDArray[np.bool_]:
             return np.zeros(len(rows), dtype=np.bool_)
 
@@ -209,9 +210,9 @@ def test_suite_detects_row_position_dependence(kernel_case: KernelCase) -> None:
             table: kernel.SegmentTable,
             rows: NDArray[np.int64],
             states: NDArray[np.complex128],
-            budget: float,
+            context: ApplyContext,
         ) -> NDArray[np.bool_]:
-            mask = super().apply(prepared, key_index, table, rows, states, budget)
+            mask = super().apply(prepared, key_index, table, rows, states, context)
             states[:] *= (np.arange(len(rows)) + 1)[:, None, None]
             return mask
 

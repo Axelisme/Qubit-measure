@@ -13,6 +13,7 @@ from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 from tests.simulate.evolution._engine import batch, track
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
+    kernel_context,
     reference,
     synthetic_model,
 )
@@ -61,7 +62,14 @@ def evolve_rows(case: KernelCase, rows: np.ndarray) -> np.ndarray:
         keys, case.table, rows[first], case.source, case.budget
     )
     actual = case.states[rows].copy()
-    mask = case.kernel.apply(prepared, inverse, case.table, rows, actual, case.budget)
+    mask = case.kernel.apply(
+        prepared,
+        inverse,
+        case.table,
+        rows,
+        actual,
+        kernel_context(case.kernel.name, case.table, case.budget),
+    )
     assert not mask.any()
     return actual
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
 
-from .engine import EnvelopeSpec, PathDiagnostics, TimelineBatch
+from .engine import DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
 from .kernel import SegmentTable
 from .secular import FluxWaveform, ModelSource
 
@@ -67,7 +67,57 @@ def _plateaus(envelope: EnvelopeSpec, duration: float):
     return times[first[valid]], times[last[valid]], envelope.samples[first[valid]]
 
 
-def _boundaries(batch: TimelineBatch):
+@dataclass(frozen=True)
+class _Support:
+    """Absolute half-open support shared by event emission and membership."""
+
+    active: NDArray[np.bool_]
+    start: NDArray[np.float64]
+    end: NDArray[np.float64]
+
+    def contains(self, point, start, end=None):
+        """Select points inside support, optionally requiring a whole interval."""
+        inside = (
+            self.active[point]
+            & (start >= self.start[point])
+            & (start < self.end[point])
+        )
+        if end is not None:
+            inside &= end <= self.end[point]
+        return inside
+
+
+@dataclass(frozen=True)
+class _TrackGeometry:
+    """Pulse and plateau endpoints, formed once in absolute lattice time."""
+
+    pulse: _Support
+    plateaus: tuple[tuple[_Support, complex], ...]
+
+
+def _track_geometry(track: DriveTrack) -> _TrackGeometry:
+    active = track.active & (track.duration_ns > 0) & (track.amplitude != 0)
+    pulse = _Support(active, track.start_ns, track.start_ns + track.duration_ns)
+    plateaus = []
+    for index, envelope in enumerate(track.envelopes):
+        selected = active & (track.envelope_index == index)
+        if envelope.kind != "sampled" or not selected.any():
+            continue
+        starts, ends, values = _plateaus(
+            envelope, float(track.duration_ns[selected].max())
+        )
+        for a, b, value in zip(starts, ends, values, strict=True):
+            clipped_end = np.minimum(b, track.duration_ns)
+            support = _Support(
+                selected & (clipped_end - a >= 10),
+                track.start_ns + a,
+                track.start_ns + clipped_end,
+            )
+            plateaus.append((support, complex(value)))
+    return _TrackGeometry(pulse, tuple(plateaus))
+
+
+def _boundaries(batch: TimelineBatch, tracks: Sequence[_TrackGeometry]):
     n = len(batch.points)
     point = np.arange(n)
     flux_point = np.repeat(point, np.diff(batch.flux.offsets))
@@ -76,32 +126,10 @@ def _boundaries(batch: TimelineBatch):
         _events(point, batch.end_ns),
         _events(flux_point, batch.flux.start_ns),
     ]
-    for track in batch.tracks:
-        active = track.active & (track.duration_ns > 0) & (track.amplitude != 0)
-        events.extend(
-            (
-                _events(point[active], track.start_ns[active]),
-                _events(point[active], (track.start_ns + track.duration_ns)[active]),
-            )
-        )
-        for index, envelope in enumerate(track.envelopes):
-            if envelope.kind != "sampled":
-                continue
-            selected = active & (track.envelope_index == index)
-            if not selected.any():
-                continue
-            starts, ends, _ = _plateaus(
-                envelope, float(track.duration_ns[selected].max())
-            )
-            clipped_ends = np.minimum(ends[None, :], track.duration_ns[:, None])
-            mask = selected[:, None] & (clipped_ends - starts[None, :] >= 10)
-            for boundary in (np.broadcast_to(starts, clipped_ends.shape), clipped_ends):
-                times = track.start_ns[:, None] + boundary
-                events.append(
-                    _events(
-                        np.broadcast_to(point[:, None], times.shape)[mask], times[mask]
-                    )
-                )
+    for track in tracks:
+        for support in (track.pulse, *(p for p, _ in track.plateaus)):
+            for boundary in (support.start, support.end):
+                events.append(_events(point[support.active], boundary[support.active]))
     merged = np.concatenate(events)
     merged = np.unique(
         merged[
@@ -111,12 +139,12 @@ def _boundaries(batch: TimelineBatch):
     valid = (merged["timeline"][1:] == merged["timeline"][:-1]) & (
         np.diff(merged["time"]) > 0
     )
-    return merged[:-1][valid], np.diff(merged["time"])[valid], flux_point
+    return merged[:-1][valid], merged[1:]["time"][valid], flux_point
 
 
-def _tone_columns(batch, table, source, flux_point):
+def _tone_columns(batch, tracks, table, source, flux_point):
     """Populate per-slot columns, fold plateau phase, and detect flux overlap."""
-    point, start, duration, level = table
+    point, start, end, level = table
     width, rows = len(batch.tracks), len(point)
     playing = np.zeros((rows, width), dtype=bool)
     port = np.full((rows, width), -1, dtype=np.int64)
@@ -130,14 +158,9 @@ def _tone_columns(batch, table, source, flux_point):
         batch.flux.level[1:] != batch.flux.level[:-1], axis=1
     )
     change[batch.flux.offsets[:-1]] = False
-    for slot, track in enumerate(batch.tracks):
+    for slot, (track, geometry) in enumerate(zip(batch.tracks, tracks, strict=True)):
         local = start - track.start_ns[point]
-        active = (
-            track.active[point]
-            & (local >= 0)
-            & (local < track.duration_ns[point])
-            & (track.amplitude[point] != 0)
-        )
+        active = geometry.pulse.contains(point, start, end)
         playing[:, slot] = active
         frequency[:, slot] = track.frequency_ghz[point]
         amplitude[:, slot] = track.amplitude[point]
@@ -146,25 +169,12 @@ def _tone_columns(batch, table, source, flux_point):
         base = len(envelopes)
         envelopes.extend(track.envelopes)
         env_index[active, slot] = base + track.envelope_index[point[active]]
-        for index, envelope in enumerate(track.envelopes):
-            selected = active & (track.envelope_index[point] == index)
-            if envelope.kind == "sampled" and selected.any():
-                starts, ends, values = _plateaus(
-                    envelope, float(track.duration_ns[point[selected]].max())
-                )
-                # Plateau count is envelope structure, not sweep point count.
-                for a, b, value in zip(starts, ends, values, strict=True):
-                    clipped_end = np.minimum(b, track.duration_ns[point])
-                    flat = (
-                        selected
-                        & (clipped_end - a >= 10)
-                        & (local >= a)
-                        & (local + duration <= clipped_end)
-                    )
-                    env_index[flat, slot] = 0
-                    amplitude[flat, slot] *= abs(value)
-                    theta[flat, slot] += np.angle(value)
-                    offset[flat, slot] = 0
+        for support, value in geometry.plateaus:
+            flat = active & support.contains(point, start, end)
+            env_index[flat, slot] = 0
+            amplitude[flat, slot] *= abs(value)
+            theta[flat, slot] += np.angle(value)
+            offset[flat, slot] = 0
         for lev in np.unique(level[active], axis=0):
             mask = active & np.all(level == lev, axis=1)
             model = source.model(tuple(int(v) for v in lev))
@@ -174,8 +184,8 @@ def _tone_columns(batch, table, source, flux_point):
         times = batch.flux.start_ns
         inside = (
             change
-            & (times > track.start_ns[flux_point])
-            & (times < (track.start_ns + track.duration_ns)[flux_point])
+            & geometry.pulse.contains(flux_point, times)
+            & (times > geometry.pulse.start[flux_point])
             & (times < batch.end_ns[flux_point])
         )
         np.logical_or.at(changed_points, flux_point, inside)
@@ -193,7 +203,7 @@ def _tone_columns(batch, table, source, flux_point):
     return playing.sum(axis=1).astype(np.int64), packed, tuple(envelopes), flux_drive
 
 
-def _waveform_varies(batch: TimelineBatch, point, start, duration):
+def _waveform_varies(batch: TimelineBatch, point, start, end):
     """Detect nonconstant interpolated sample intervals overlapping each row.
 
     Terminal samples hold DC after the model owner's tail truncation. Looking
@@ -215,22 +225,24 @@ def _waveform_varies(batch: TimelineBatch, point, start, duration):
         np.searchsorted(sample_events, _events(point, start), side="right") - 1,
         waveform.offsets[point],
     )
-    last = np.searchsorted(sample_events, _events(point, start + duration), side="left")
+    last = np.searchsorted(sample_events, _events(point, end), side="left")
     last = np.maximum(last, first)
     count = np.r_[0, np.cumsum(varying)]
     return count[last] > count[first]
 
 
 def _batch_geometry(batch: TimelineBatch, source: ModelSource) -> Geometry:
-    events, duration, flux_point = _boundaries(batch)
+    tracks = tuple(_track_geometry(track) for track in batch.tracks)
+    events, end, flux_point = _boundaries(batch, tracks)
     point, start = events["timeline"], events["time"]
+    duration = end - start
     flux_events = _events(flux_point, batch.flux.start_ns)
     flux_row = np.searchsorted(flux_events, events, side="right") - 1
     level = batch.flux.level[flux_row]
     tones, columns, envelopes, flux_drive = _tone_columns(
-        batch, (point, start, duration, level), source, flux_point
+        batch, tracks, (point, start, end, level), source, flux_point
     )
-    flux_drive |= (tones > 0) & _waveform_varies(batch, point, start, duration)
+    flux_drive |= (tones > 0) & _waveform_varies(batch, point, start, end)
     port, frequency, amplitude, theta, envelope_index, offset = columns
     table = SegmentTable(
         point,

@@ -20,11 +20,12 @@ from ..modules.control import Branch, Repeat
 from ..modules.delay import Delay, DelayAuto, Join, SoftDelay
 from ..modules.dmem import LoadValue, LoadWord, ScanWith
 from ..modules.pulse import Pulse, TableLengthPulse
-from ..modules.readout import PulseReadout, TablePulseReadout
+from ..modules.readout import MuxReadout, PulseReadout, TablePulseReadout
 from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
 from ..modules.util import merge_max_length, round_timestamp
 from ..modules.waveform import FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freqs_from_words
+from ._mux import mux_parameters
 from .templates import FlatTopEnvelopes, select_candidates, take_slot
 from .timeline import TimelineInterpreter
 
@@ -203,6 +204,8 @@ class VectorInterpreter:
             return self._pulse(module, t)
         if type(module) is PulseReadout:
             return self._readout(module, t)
+        if type(module) is MuxReadout:
+            return self._mux_readout(module, t)
         if type(module) in (SoftDelay, Delay, DelayAuto, Join):
             return self._delay(module, t)
         return self._control(module, t)
@@ -508,6 +511,52 @@ class VectorInterpreter:
             ) / self._prog.soccfg.get_maxv(cfg.gen_ch)
         self._events.append(
             (replace(event, source=module.name, frequency_mhz=gen, gain=gain), presence)
+        )
+        return t + module.total_length(self._prog)
+
+    def _mux_readout(self, module: MuxReadout, t: Time) -> Time:
+        cfg = module.cfg
+        start = self._ref + self._tick(t + cfg.pre_delay)
+        duration = self._scalar(self._prog.get_pulse_param(module.name, "total_length"))
+        trigger = self._ref + self._tick(t + cfg.trig_offset)
+        for tone in mux_parameters(self._prog, module):
+            self._events.append(
+                (
+                    EventSlot(
+                        cfg.gen_ch,
+                        module.name,
+                        tuple(self._iterations),
+                        start.copy(),
+                        duration.copy(),
+                        np.full(self._size, tone.frequency_mhz),
+                        np.full(self._size, tone.phase_deg),
+                        np.full(self._size, tone.gain),
+                        (None,),
+                        np.zeros(self._size, dtype=np.int64),
+                        self._active.copy(),
+                    ),
+                    self._presence.copy(),
+                )
+            )
+            self._reads[tone.channel].append(
+                _Read(
+                    trigger.copy(),
+                    np.full(self._size, tone.demodulation_mhz),
+                    np.full(self._size, tone.demodulation_phase_deg),
+                    np.full(self._size, cfg.gen_ch, dtype=np.int64),
+                    self._active.copy(),
+                )
+            )
+            self._ro_end[tone.channel] = np.where(
+                self._active,
+                trigger
+                + self._prog.cycles2us(
+                    self._prog.ro_chs[tone.channel]["length"], ro_ch=tone.channel
+                ),
+                self._ro_end[tone.channel],
+            )
+        self._gen_end[cfg.gen_ch] = np.where(
+            self._active, start + duration, self._gen_end[cfg.gen_ch]
         )
         return t + module.total_length(self._prog)
 

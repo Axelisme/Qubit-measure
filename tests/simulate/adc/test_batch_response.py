@@ -378,3 +378,29 @@ def test_mixed_integrated_contents_preserve_each_physical_response():
     field = adc.ConditionalReadout(m).responses(replace(inputs, include_traces=True))
     np.testing.assert_allclose(result.sums[0], field.sums[0], rtol=1e-10, atol=0)
     np.testing.assert_array_equal(result.sums[1:], field.sums[1:])
+
+
+@pytest.mark.parametrize("include_traces", [False, True])
+def test_multi_carrier_batch_matches_joint_field_and_adds_offset_once(include_traces):
+    m = model()
+    pulses = (
+        adc.ReadoutPulse(3.0, 23.0, 1.2 + 0.3j, 6.0, phase_rad=0.2),
+        adc.ReadoutPulse(3.0, 19.0, -0.7 + 0.1j, 6.018, phase_rad=-0.4),
+    )
+    grid = adc.SampleGrid(np.arange(-2.0, 31.0, 2.0), 6.005, 0.31)
+    try:
+        inputs = adc.ReadoutBatch(
+            m, (pulses,), ((grid,),), np.array([0], dtype=np.int64), include_traces
+        )
+    except ValueError as error:
+        pytest.fail(f"batched readout must accept coherent incident tones: {error}")
+    reference = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
+    expected = reference.response(pulses, grid).traces
+    # Independent linearity oracle, subtracting the offset counted twice.
+    separate = sum(reference.response((pulse,), grid).traces for pulse in pulses)
+    np.testing.assert_allclose(expected, separate - m.receiver.offset, atol=2e-8)
+    actual = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14).responses(inputs)
+    np.testing.assert_allclose(actual.sums[0, 0], expected.sum(axis=-2), atol=2e-8)
+    if include_traces:
+        assert actual.traces is not None
+        np.testing.assert_allclose(actual.traces[0, 0], expected, atol=2e-8)

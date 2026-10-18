@@ -9,6 +9,7 @@ import pytest
 from joblib.parallel import ThreadingBackend
 from threadpoolctl import threadpool_info, threadpool_limits
 from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 
 from ._engine import RecordingKernel, batch, source
 
@@ -40,7 +41,9 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
             observations.append(blas_widths())
             return super().prepare(keys, table, rows, source, budget)
 
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             observations.append(blas_widths())
             entered[self.index].set()
             # The controlling test releases both events in finally, even on
@@ -48,7 +51,7 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
             assert release[self.index].wait(30), "test failed to release evolve"
             if failure and self.index == 0:
                 raise RuntimeError("injected failure")
-            return super().apply(prepared, key_index, table, rows, states, budget)
+            return super().apply(prepared, key_index, table, rows, states, context)
 
     def evolve(index):
         engine = Engine(1, 0, kernels=(ObservedKernel(index),))
@@ -99,9 +102,11 @@ def test_serial_fast_path_does_not_open_joblib_pool(case, monkeypatch):
             return super().configure(*args, **kwargs)
 
     class ObservedKernel(RecordingKernel):
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             threads.append(current_thread())
-            return super().apply(prepared, key_index, table, rows, states, budget)
+            return super().apply(prepared, key_index, table, rows, states, context)
 
     batches = {
         "empty": (),
