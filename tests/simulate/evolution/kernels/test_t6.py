@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 
 from ..contract.kernel_suite import (
     KernelCase,
@@ -109,7 +109,12 @@ def test_channels_for_arbitrary_coherent_inputs(
     )
     actual = states.copy()
     case.kernel.apply(
-        prepared, np.zeros(count, dtype=np.int64), table, rows, actual, case.budget
+        prepared,
+        np.zeros(count, dtype=np.int64),
+        table,
+        rows,
+        actual,
+        ApplyContext(case.budget),
     )
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(states)]
@@ -188,7 +193,12 @@ def test_periods_and_tail_at_tight_budget(kernel_case: KernelCase) -> None:
     )
     actual = case.states[row].copy()
     case.kernel.apply(
-        prepared, np.array([0], dtype=np.int64), table, row, actual, budget
+        prepared,
+        np.array([0], dtype=np.int64),
+        table,
+        row,
+        actual,
+        ApplyContext(budget),
     )
     expected = reference(replace(case, table=table), 1, case.states[1])
     assert_budget(actual[0], expected, budget)

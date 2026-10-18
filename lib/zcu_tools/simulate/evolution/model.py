@@ -1,6 +1,5 @@
-"""Named pure-numeric Hamiltonian and solver settings."""
+"""Fixed-coordinate numeric model records, separate from Engine model sources."""
 
-from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -54,19 +53,11 @@ class NumericModel:
     sources: named quadrature operators in basis. Names must be unique.
     collapse_operators: Lindblad L matrices in ns**(-1/2), including rates through
         their amplitudes; may describe directional multilevel jumps/dephasing.
-    hamiltonian_at: optional pure callable of absolute ns returning an additive
-        Hermitian H/h matrix in GHz, in the same fixed basis (e.g. dynamic flux).
-    collapse_at: optional pure callable of absolute ns returning additional
-        Lindblad operators in ns**(-1/2), e.g. flux-dependent baths. Caller must
-        keep callbacks deterministic and unchanged while reusing this model.
-    event_times_ns: finite absolute model discontinuities (e.g. bath updates),
-        default empty. Evolution unions these with pulse events on the same 2 ns
-        grid, without imposing a waveform sampling grid.
-    dynamics_identity: reproducible descriptor of every callback dependency,
-        required only for persistent records when callbacks are supplied.
-        This is a caller contract, not a callable repr or output path.
-    Static matrices own read-only copies. Callbacks remain caller-owned. Shape,
-    finiteness or Hermiticity violations raise ValueError, including at runtime.
+    event_times_ns: finite absolute event coordinates in ns, default empty.
+        Metadata only; this record does not partition or perform evolution.
+    Matrices own read-only copies. Invalid identity, shape, finiteness or
+    Hermiticity raises ValueError at construction. Engine consumes ModelSource
+    and SecularModel rather than this fixed-coordinate record.
     No physical applicability/convergence certification is performed.
     """
 
@@ -75,11 +66,7 @@ class NumericModel:
     hamiltonian_ghz: ComplexMatrix
     sources: tuple[DriveSource, ...] = ()
     collapse_operators: tuple[ComplexMatrix, ...] = ()
-    hamiltonian_at: Callable[[float], ComplexMatrix] | None = None
-    collapse_at: Callable[[float], tuple[ComplexMatrix, ...]] | None = None
-
     event_times_ns: tuple[float, ...] = ()
-    dynamics_identity: str | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.event_times_ns).all():
@@ -98,30 +85,3 @@ class NumericModel:
             raise ValueError("collapse shapes must match model basis")
         object.__setattr__(self, "hamiltonian_ghz", h)
         object.__setattr__(self, "collapse_operators", collapse)
-
-
-@dataclass(frozen=True)
-class SolverSettings:
-    """Direct-solver accuracy controls, not a physical accuracy guarantee.
-
-    rtol/atol: positive finite DOP853 relative/absolute local error tolerances.
-    max_step_ns: positive maximum internal integration step in ns; infinity lets
-        the adaptive solver choose. This is unrelated to the 2 ns event grid.
-    Closed static intervals use expm. Closed single/commensurate-frequency flat
-    intervals may use one exact-frequency period and a tail, with binary powers.
-    Dissipative intervals always solve the full Lindblad equation; no closed
-    propagator substitutes for a bath. No offline persistence or fake backend.
-    """
-
-    rtol: float = 1e-10
-    atol: float = 1e-12
-    max_step_ns: float = np.inf
-
-    def __post_init__(self) -> None:
-        if (
-            not np.isfinite([self.rtol, self.atol]).all()
-            or min(self.rtol, self.atol) <= 0
-        ):
-            raise ValueError("solver tolerances must be positive finite")
-        if np.isnan(self.max_step_ns) or self.max_step_ns <= 0:
-            raise ValueError("maximum solver step must be positive")

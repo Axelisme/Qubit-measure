@@ -1,4 +1,10 @@
+---
+status: superseded
+---
+
 # 0077 — Numerical candidates、plan ownership 與 checked replay
+
+**狀態：** superseded，2026-10-18。實驗 constant planner、shadow graph、profiles、calibration 與 checked plan replay 已移除，不提供相容入口。現行模組邊界與 dispatch／kernel 分工由 [[0078]] 接替，API 與決策圖見 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md)。以下正文保留歷史設計，不是現行契約。實驗結果見 [planner 討論快照](../discussions/2026-10-18-planner-evidence-and-overhead.md)。
 
 ## 脈絡
 

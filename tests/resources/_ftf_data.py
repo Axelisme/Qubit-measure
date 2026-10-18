@@ -82,3 +82,21 @@ def ftf_document() -> dict[str, object]:
             "seed": 123,
         },
     }
+
+
+def mux_document(channels=(4, 1)) -> dict[str, object]:
+    """The same tiny circuit with explicit mux receiver bindings."""
+    document = ftf_document()
+    readout = document["readout"]
+    if not isinstance(readout, dict):
+        raise TypeError("fixture requires a readout mapping")
+    readout["drive"] = {"kind": "mux", "gen_ch": 0, "input_per_gain": 1.0}
+    readout["adc"] = [
+        {
+            "ro_ch": ch,
+            "gain": 10000.0 + 1000 * i,
+            "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+        }
+        for i, ch in enumerate(channels)
+    ]
+    return document

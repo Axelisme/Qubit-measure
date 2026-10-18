@@ -17,7 +17,7 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     SecularModel,
 )
-from zcu_tools.simulate.evolution.kernel import GuardResult
+from zcu_tools.simulate.evolution.kernel import ApplyContext, GuardResult
 
 from ._engine import Payload, RecordingKernel, batch, run, source, track
 from .contract.kernel_suite import synthetic_model
@@ -126,6 +126,104 @@ def test_flat_top_split_phase_offset_and_small_plateau():
         (replace(batch(1, duration=14), tracks=(track(1, short, duration=14),)),),
     )
     assert result.paths.segments_by_kernel == {"dop853": 1}
+
+
+@pytest.mark.parametrize("kind", ["sampled", "constant"])
+def test_pulse_support_ends_at_its_absolute_event(kind):
+    envelope = (
+        EnvelopeSpec("sampled", np.array([0.2, 1.0]), np.array([0.0, 0.8]))
+        if kind == "sampled"
+        else EnvelopeSpec("constant")
+    )
+    idle, direct, constant, flux = (
+        RecordingKernel(name) for name in ("t4", "dop853", "t6", "flux_dop853")
+    )
+    timeline = replace(
+        batch(1, duration=4.0),
+        # A level switch exactly at the first pulse's end does not overlap it.
+        flux=FluxSchedule(
+            np.array([0, 3]),
+            np.array([0.0, 2.8, 3.2]),
+            np.array([[0], [1], [1]]),
+        ),
+        tracks=(
+            track(1, envelope, start=2.0, duration=0.8),
+            track(1, envelope, start=3.2, duration=0.8),
+        ),
+    )
+    result = run(
+        Engine(
+            1,
+            0,
+            kernels=(
+                idle,
+                direct,
+                constant,
+                flux,
+                RecordingKernel("dyson", accepts=False),
+                RecordingKernel("floquet_period", accepts=False),
+            ),
+        ),
+        source(),
+        (timeline,),
+    )
+    observations = sorted(
+        (float(table.start_ns[row]), int(table.tones[row]))
+        for kernel in (idle, direct, constant, flux)
+        for table, rows, _ in kernel.calls
+        for row in rows
+    )
+    assert observations == [(0.0, 0), (2.0, 1), (2.8, 0), (3.2, 1)]
+    driven = direct if kind == "sampled" else constant
+    assert result.paths.segments_by_kernel == {"t4": 2, driven.name: 2}
+    for table, rows, _ in driven.calls:
+        np.testing.assert_array_equal(table.tone_envelope_offset_ns[rows, 0], 0.0)
+
+
+@pytest.mark.parametrize(
+    ("start", "plateau_start", "plateau_end", "duration"),
+    [(2.0, 0.8, 10.8, 12.8), (0.1, 0.8, 20.8, 22.8)],
+)
+def test_plateau_support_uses_absolute_events(
+    start, plateau_start, plateau_end, duration
+):
+    envelope = EnvelopeSpec(
+        "sampled",
+        np.array([0.0, 1j, 1j, 0.0]),
+        np.array([0.0, plateau_start, plateau_end, duration]),
+    )
+    direct, constant = RecordingKernel("dop853"), RecordingKernel("t6")
+    result = run(
+        Engine(
+            1,
+            0,
+            kernels=(
+                RecordingKernel("t4"),
+                direct,
+                constant,
+                RecordingKernel("dyson", accepts=False),
+                RecordingKernel("floquet_period", accepts=False),
+            ),
+        ),
+        source(),
+        (
+            replace(
+                batch(1, duration=start + duration),
+                tracks=(track(1, envelope, start=start, duration=duration),),
+            ),
+        ),
+    )
+    assert result.paths.segments_by_kernel == {"t4": 1, "dop853": 2, "t6": 1}
+    table, rows, _ = constant.calls[0]
+    np.testing.assert_allclose(table.start_ns[rows], start + plateau_start)
+    np.testing.assert_allclose(table.duration_ns[rows], plateau_end - plateau_start)
+    np.testing.assert_array_equal(table.tone_envelope_offset_ns[rows, 0], 0.0)
+    offsets = sorted(
+        float(table.tone_envelope_offset_ns[row, 0])
+        for table, rows, _ in direct.calls
+        for row in rows
+    )
+    np.testing.assert_allclose(offsets, [0.0, plateau_end])
 
 
 @pytest.mark.parametrize("expected", ["dyson", "floquet_period", "t6"])
@@ -407,7 +505,9 @@ def test_local_guard_tables_build_once_and_match_shared_guard_first_fallback(
         def guard(self, table, rows, source, budget):
             return self.guard_prepared(table, rows, source, budget).accepted
 
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             self.used.extend(
                 (
                     int(table.timeline[row] // self.copies),
@@ -415,7 +515,7 @@ def test_local_guard_tables_build_once_and_match_shared_guard_first_fallback(
                 )
                 for row, index in zip(rows, key_index, strict=True)
             )
-            return super().apply(prepared, key_index, table, rows, states, budget)
+            return super().apply(prepared, key_index, table, rows, states, context)
 
     outputs = []
     for copies, workers, chunks in ((2, 1, 1), (1, 1, 1), (1, 2, 1), (1, 2, 4)):
@@ -561,7 +661,9 @@ def test_cancel_between_chunks_and_nonfinite_failure():
         engine.close()
 
     class Broken(RecordingKernel):
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             states[:] = np.nan
             return np.zeros(len(rows), dtype=np.bool_)
 
@@ -660,8 +762,10 @@ def test_exceeded_counts_warn_once_per_evolve_and_keep_results(chunks: int) -> N
     class ReportingKernel(RecordingKernel):
         report = True
 
-        def apply(self, prepared, key_index, table, rows, states, budget):
-            super().apply(prepared, key_index, table, rows, states, budget)
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
+            super().apply(prepared, key_index, table, rows, states, context)
             return (table.timeline[rows] % 2 == 0) & self.report
 
     kernels = (ReportingKernel("dyson"), ReportingKernel("t4"))
@@ -727,7 +831,7 @@ class InputBindingKernel(RecordingKernel):
         self.bound_refs.append(weakref.ref(bound))
         return bound
 
-    def apply(self, prepared, key_index, table, rows, states, budget):
+    def apply(self, prepared, key_index, table, rows, states, context: ApplyContext):
         if isinstance(prepared, BoundPayload):
             assert np.all(key_index == 0)
             self.bound_rows.extend(table.timeline[rows].tolist())
@@ -853,7 +957,9 @@ def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():
 @pytest.mark.parametrize("residual", [2.62e-8, 2e-3])
 def test_trace_diagnostics_report_maximum_without_correcting_kernel_output(residual):
     class TraceResidualKernel(RecordingKernel):
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             states[:, 0, 0] += residual * (table.timeline[rows] + 1)
             return np.zeros(len(rows), dtype=np.bool_)
 
@@ -889,12 +995,27 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
                 prepared, key_index, table, rows, source_initial, budget
             )
 
-    class ReferenceDrive(DOP853Kernel):
+    class ReferenceDirect(DOP853Kernel):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
+            from .contract.kernel_suite import kernel_context
+
+            return super().apply(
+                prepared,
+                key_index,
+                table,
+                rows,
+                states,
+                kernel_context("dop853", table, context.budget),
+            )
+
+    class ReferenceDrive(ReferenceDirect):
         """Use full-carrier integration at the first constant-tone candidate."""
 
         name = "dyson"
 
-    class ReferenceIdle(DOP853Kernel):
+    class ReferenceIdle(ReferenceDirect):
         """Use full Lindblad integration for idle rows too."""
 
         name = "t4"
@@ -971,11 +1092,13 @@ def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bin
             self.delta = delta
             self.applied_rows = 0
 
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             self.applied_rows += len(rows)
             states[:, 0, 0] += self.delta
             states[:, 1, 1] -= self.delta
-            return super().apply(prepared, key_index, table, rows, states, budget)
+            return super().apply(prepared, key_index, table, rows, states, context)
 
     class ProbeKernel(RecordingKernel):
         def __init__(self):
@@ -1019,8 +1142,10 @@ def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bin
 
 def test_shared_prefix_paths_and_exceedances_count_each_adopting_timeline():
     class ExceededPrefix(RecordingKernel):
-        def apply(self, prepared, key_index, table, rows, states, budget):
-            super().apply(prepared, key_index, table, rows, states, budget)
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
+            super().apply(prepared, key_index, table, rows, states, context)
             return np.ones(len(rows), dtype=bool)
 
     class RejectedDirect(RecordingKernel):

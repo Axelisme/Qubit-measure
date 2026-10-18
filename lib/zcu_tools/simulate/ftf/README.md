@@ -1,12 +1,25 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-18, readout solver routing
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their
 product space with all g1c/g2c/g12 terms, then selects the lowest M joint states.
 Dynamic Hamiltonians stay in this fixed basis. Native n² is formed before local
 and joint projection; squared truncated n is not a substitute.
+
+`charge_operator(subsystem)` returns full dimensionless n in the retained basis.
+`flux_operator(subsystem)` returns the analytic derivative of this model's H/h
+with respect to reduced flux f = Phi/Phi0, evaluated at the round's DC point,
+in GHz/Phi0. Both use subsystem 0=F1, 1=coupler, 2=F2. The flux derivative is
+projected through the same fixed local and retained joint bases as H, without
+rediagonalization or a gauge change. In the oscillator coordinates used here,
+fluxonium has H/h = kinetic - EJ*cos(phi + 2*pi*f), so its derivative is
+2*pi*EJ*sin(phi + 2*pi*f), not a bare phase operator. The fixed-theta SQUID
+derivative is pi*EJmax*[sin(pi*f)*cos(theta) + d*cos(pi*f)*sin(theta)].
+Drive composition multiplies these by GHz/gain charge coefficients or Phi0/gain
+flux coefficients. Flux quadratures are a fixed-DC small-signal linearization,
+not a large-amplitude fast-flux Hamiltonian H(Phi(t)).
 
 `native_embedding()` maps the retained joint coordinates into physical native
 F1-oscillator × coupler-charge × F2-oscillator coordinates, including both local
@@ -31,18 +44,15 @@ charge/flux line losses require explicit impedance/mutual data. No fluxonium
 inductive/qp formula is applied to the SQUID. Active exactly degenerate secular
 transitions raise; near-degeneracy validity remains a model assumption.
 
-`numeric_model` returns an independent `NumericModel` with continuous H(flux(t))
-and piecewise instantaneous baths in the same fixed coordinates. Bath updates use
-segment-start flux. Explicit flux callback events, including delayed pulse
-support and envelope/phase changes, also refresh the baths and partition the
-continuous Hamiltonian. The requested segment length rounds to the nearest 2 ns,
-with a minimum of one tick. Evolution unions these model events with source
-boundaries. It owns integration and never resets the density at a bath update.
-`fixed_numeric_model` supplies the same Hamiltonian and full baths at an explicit
-constant reduced flux, without callbacks or bath-update boundaries. It is not
-valid for a driven flux source or passive tail. `FluxDynamics` keeps the callback's actual event coordinates and optional
-stable dependency identity together. This callback description does not create
-persistent density records.
+`numeric_model` returns an independent `NumericModel` containing the static DC
+Hamiltonian, supplied drive sources and event metadata, without collapse
+operators. Regular event spacing rounds to the nearest 2 ns, with a minimum of
+one tick. Quantized `FluxDynamics` events in the requested window join those
+ticks and zero. Its optional identity remains caller metadata.
+`fixed_numeric_model` supplies a static Hamiltonian and full baths at an explicit
+constant reduced flux, without event metadata. It is not valid for a driven
+flux source or passive tail. Neither record performs evolution. Engine consumes
+`ModelSource` from `model_source`, not `NumericModel`.
 
 `collapse_operators` combines multilevel relaxation with CP flux/residual-photon
 pure dephasing. Slopes/pulls use rad/us in the pure-rate formulas, then rates
@@ -78,10 +88,11 @@ zero reference frequency and neutral receiver for composition to calibrate.
 ## Readout and Floquet paths
 
 FTF passes readout populations and the DC readout model to `simulate.adc`.
-For constant readout pulses, `envelope=None`, the batch response uses the exact
-matrix exponential in the carrier frame, even when the carrier differs from
-the model reference. Only nonconstant readout envelopes use the DOP853 moment
-ODE on this acquisition path.
+For a single readout pulse with `envelope=None`, the batch response uses the
+exact matrix exponential in the carrier frame, even when the carrier differs
+from the model reference. Pulses with envelopes and multi-tone readout use the
+general DOP853 moment ODE on this acquisition path. Flat mux multi-tone pulses
+also use this ODE.
 
 Two constant microwave tones can use evolution's Floquet k=0 path when one is a
 weak probe and the Floquet guards pass. The strong tone defines the effective

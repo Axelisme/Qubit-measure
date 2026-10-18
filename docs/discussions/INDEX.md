@@ -11,6 +11,14 @@
 
 ## 模擬量測環境
 
+- 2026-10-18 [Dyson 的解析分類、輸入共用與 sparse scan](2026-10-18-dyson-input-reuse.md)：解析 B2 與 post-check 分工，共用前綴收縮輸入，sparse scan 只省 12.6% 因而未採用。
+- 2026-10-18 [Constant-tone period builders 的演進](2026-10-18-constant-period-builders.md)：比較 CF4、Padé7、Sambe 與 gain anchors，保留 carrier continuation 零命中及 RSS 超標的否決紀錄。
+- 2026-10-18 [Shaped periods、gate preparation 與 carrier reuse](2026-10-18-shaped-period-and-gates.md)：採 build-once handoff、phase-adaptive gates 與 narrow carrier interpolation，wide scan 保留 exact bypass。
+- 2026-10-18 [Two-tone Floquet 的 frame、sidebands 與成本交叉](2026-10-18-two-tone-floquet.md)：保留 divisor 修正、P residual 失敗與四項未認證假設，短段 throughput 最後改走 direct。
+- 2026-10-18 [Direct integration 的 RHS、step controls 與 interaction picture](2026-10-18-direct-integration.md)：採 Hermitian RHS、sample-spacing ceiling 與 row-independent IP，撤掉依賴 partition 的 gain grouping。
+- 2026-10-18 [Readout 的 guarded discrete sums](2026-10-18-readout-discrete-sums.md)：flat integrated readout 直接求 ADC 樣本和，unsupported contents 保留 field fallback，正式比較另補 clean pairs。
+- 2026-10-18 [Planner 的 evidence admission 與固定成本](2026-10-18-planner-evidence-and-overhead.md)：accuracy 通過仍未取得 performance admission，144 組比較有 100 組較慢，stage estimates 不代替完整 acquire。
+
 - 2026-10-17 [FTF 分段引擎：Dyson 門檻、分類成本與事後檢查](2026-10-17-ftf-dyson-guard-and-classification.md)：分類只做輕量判斷，同一段不演化兩次；Dyson 的 |Δp| 改為 apply 後只報告不重算，治本靠分類時的解析指標；門檻由每段預算推出，係數由掃描校準；不用 Rust。
 - 2026-10-16 [FTF 模擬加速：快速路徑、shot 統計、分段快取與分派決策圖](2026-10-16-ftf-simulation-speedup.md)：主要瓶頸是 acquire 重複 reps × rounds 次。改為每點只算一次並用統計抽樣，各段依決策圖分派到 Dyson、週期、靜態、gate 快取、Floquet 或 numba DOP853，使用者規模從約 8 天降到 13 分鐘至 2 小時；只用 numba，刪除離線 U 表與 density record。
 - 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：固定模型採離線建庫存檔、模擬載入插值；CPU可行性已有證據，GPU建表與檔案載入仍待驗證，四階精度以量測用途評估。已被 2026-10-16 的 FTF 模擬加速取代：FTF 一定有耗散，離線 U 表會刪除，改用 runtime lazy 快取。

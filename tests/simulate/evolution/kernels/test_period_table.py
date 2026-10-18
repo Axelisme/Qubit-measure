@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, SecularDrive
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 
 from ..contract.kernel_suite import (
     KernelCase,
@@ -96,7 +96,7 @@ def test_shaped_accuracy(kernel_case: KernelCase) -> None:
     )
     assert prepared.nbytes > 0
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, case.table, rows, actual, 1e-3)
+    case.kernel.apply(prepared, inverse, case.table, rows, actual, ApplyContext(1e-3))
     expected = np.stack([reference(case, r, s) for r, s in enumerate(case.states)])
     assert_budget(actual, expected, 1e-2)
 

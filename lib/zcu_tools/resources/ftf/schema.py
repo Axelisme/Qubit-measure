@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -155,7 +156,7 @@ class DCBias(Values):
     """offset_phi0: reduced-flux offsets. sources: named fixed-unit DC devices.
 
     Each source contributes its live value times its flux_per_unit loop map.
-    Names are nonempty and unique across DC sources and charge drive lines.
+    Names are nonempty and unique across DC sources and drive lines.
     """
 
     offset_phi0: LoopMap[Finite]
@@ -163,36 +164,77 @@ class DCBias(Values):
 
 
 class ComplexCoefficient(Values):
-    """Finite signed real/imag GHz per gain multiplying full charge n."""
+    """Finite signed real/imag coefficient; the containing map defines units."""
 
     real: Finite
     imag: Finite
 
 
 class DriveLine(Values):
-    """gen_ch: unique nonnegative generator; charge_drive_ghz_per_gain: loop map.
+    """One generator with charge or fixed-DC small-signal flux calibration.
 
-    Uses Re[c*g*w*exp(i carrier)]*n, no hidden n01 normalization or input RWA
-    factor. Every loop requires real and imag; explicit zeros disable coupling.
+    gen_ch: unique nonnegative generator. operator: charge (default) or flux.
+    charge_drive_ghz_per_gain: required only for charge, multiplies full n.
+    flux_drive_phi0_per_gain: required only for flux, multiplies d(H/h)/df at DC
+    in GHz/Phi0, where f = Phi/Phi0. The unused map must be absent, even if null.
+    Both maps require real/imag for F1/C/F2; explicit zeros disable coupling.
+    Uses Re[c*g*w*exp(i carrier)]*operator, without hidden n01 or RWA factors.
+    Flux is a linearized drive, not a time-dependent large-amplitude H(Phi(t)).
     """
 
     gen_ch: Index
-    charge_drive_ghz_per_gain: LoopMap[ComplexCoefficient]
+    operator: Literal["charge", "flux"] = "charge"
+    charge_drive_ghz_per_gain: LoopMap[ComplexCoefficient] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    flux_drive_phi0_per_gain: LoopMap[ComplexCoefficient] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    def coefficients(self) -> LoopMap[ComplexCoefficient]:
+        """Return the selected calibration, in GHz/gain or Phi0/gain.
+
+        Reject a missing/null active map or any supplied inactive map with
+        ValueError naming the field. This is also the schema pairing invariant.
+        """
+        if self.operator == "charge":
+            selected = self.charge_drive_ghz_per_gain
+            required = "charge_drive_ghz_per_gain"
+            forbidden = "flux_drive_phi0_per_gain"
+        else:
+            selected = self.flux_drive_phi0_per_gain
+            required = "flux_drive_phi0_per_gain"
+            forbidden = "charge_drive_ghz_per_gain"
+        if selected is None:
+            raise ValueError(f"{required}: required for operator {self.operator}")
+        if forbidden in self.model_fields_set:
+            raise ValueError(f"{forbidden}: forbidden for operator {self.operator}")
+        return selected
+
+    @model_validator(mode="after")
+    def calibration(self) -> Self:
+        """Validate operator/calibration pairing and return this frozen line."""
+        self.coefficients()
+        return self
 
 
 class ReadoutSource(Values):
-    """gen_ch: one generator serving both resonators; input_per_gain: signed
+    """kind: pulse (default) or mux fixed compile capability.\n\n    gen_ch: one generator serving both resonators; input_per_gain: signed
 
     finite incident amplitude sqrt(photons/ns) per program gain. Carrier/envelope
     and phase come only from the program, not this configuration.
     """
 
+    # Omitting the pulse default preserves existing settings/replay identities.
+    kind: Literal["pulse", "mux"] = Field(
+        default="pulse", exclude_if=lambda value: value == "pulse"
+    )
     gen_ch: Index
     input_per_gain: Finite
 
 
 class Receiver(Values):
-    """ro_ch: single ADC. gain: signed field-to-ADC sample gain, may be zero.
+    """ro_ch: one logical ADC. gain: signed field-to-ADC sample gain, may be zero.
 
     phase_deg: additive receiver phase (default 0). offset_adc: per-sample I/Q
     offset (default zero). noise_psd_adc2_ns: required symmetric PSD 2x2 spectral
@@ -274,11 +316,46 @@ class Resonators(Values):
 
 
 class Readout(Values):
-    """drive: shared incident field; resonators: physical pair; adc: receiver."""
+    """drive: shared incident field and pulse/mux compile capability.
+
+    resonators: the physical pair, independent of tone count. adc: one receiver
+    object for pulse, or a nonempty list of at most eight receivers for mux.
+    Channel indices must be unique; program tone order determines output order.
+    """
 
     drive: ReadoutSource
     resonators: Resonators
-    adc: Receiver
+    adc: Receiver | tuple[Receiver, ...]
+
+    @field_validator("adc", mode="before")
+    @classmethod
+    def parse_receivers(cls, value: object) -> Receiver | tuple[Receiver, ...]:
+        """Select the external container before validation to retain field paths.
+
+        A record validates as one receiver, sequences as a receiver tuple. The
+        kind validator then enforces which shape is legal for this readout.
+        """
+        if isinstance(value, (Mapping, Receiver)):
+            return Receiver.model_validate(value)
+        return TypeAdapter(tuple[Receiver, ...]).validate_python(value)
+
+    @model_validator(mode="after")
+    def receiver_shape(self) -> Self:
+        """Reject kind/ADC shape mismatches and duplicate mux receiver routes."""
+        if self.drive.kind == "pulse":
+            if not isinstance(self.adc, Receiver):
+                raise ValueError("adc: pulse requires one receiver object")
+        else:
+            if not isinstance(self.adc, tuple) or not 1 <= len(self.adc) <= 8:
+                raise ValueError("adc: mux requires a list of 1..8 receivers")
+            if len({receiver.ro_ch for receiver in self.adc}) != len(self.adc):
+                raise ValueError("adc: duplicate receiver channel")
+        return self
+
+    @property
+    def receivers(self) -> tuple[Receiver, ...]:
+        """Return all bound receivers as an immutable tuple, including pulse."""
+        return (self.adc,) if isinstance(self.adc, Receiver) else self.adc
 
 
 class FluxoniumTruncation(Values):
@@ -341,10 +418,11 @@ class FTFSettings(Values):
 
     format='zcu.ftf', version=2 (integer only). chip supplies physical values;
     dc_bias supplies startup/live DC calibration; drive_lines binds charge
-    microwave generators (omitted/empty disables). readout serves exactly two
-    resonators with one drive and ADC. numerics supplies truncations/solver/seed.
+    or small-signal flux generators (omitted/empty disables). readout serves two
+    resonators with one drive and one or more ADCs. numerics supplies
+    truncations/solver/seed.
     Channel counts derive from maximum configured indices plus one. Unknown
-    fields, including flux-pulse configuration and v1 aliases, are rejected.
+    fields, including large-amplitude flux controls and v1 aliases, are rejected.
     No model truth enters ordinary GUI/MCP metadata.
     """
 

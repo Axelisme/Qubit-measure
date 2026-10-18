@@ -16,6 +16,8 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulate.evolution.kernel import SegmentTable
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 
+from tests.simulate.evolution.contract.kernel_suite import kernel_context
+
 
 @pytest.mark.parametrize("tones", [1, 3])
 @pytest.mark.parametrize("budget", [1e-3, 1e-8])
@@ -58,7 +60,9 @@ def test_isolated_complex_sampled_feature_preserves_pulse_area(
         kernel.prepare_keys(table, rows), table, rows, source, budget
     )
     actual = initial[None].copy()
-    kernel.apply(prepared, rows, table, rows, actual, budget)
+    kernel.apply(
+        prepared, rows, table, rows, actual, kernel_context(kernel.name, table, budget)
+    )
     # Each shifted feature remains wholly inside the integration support.
     area = np.trapezoid(samples.real + 0.4 * samples.imag, times) * gain.sum()
     unitary = expm(-2j * np.pi * area * x)
@@ -107,7 +111,9 @@ def test_dense_smooth_envelope_matches_uncompressed_reference(budget: float) -> 
         kernel.prepare_keys(table, rows), table, rows, source, budget
     )
     actual = initial[None].copy()
-    kernel.apply(prepared, rows, table, rows, actual, budget)
+    kernel.apply(
+        prepared, rows, table, rows, actual, kernel_context(kernel.name, table, budget)
+    )
 
     def rhs(time, flat):
         rho = flat.reshape(2, 2)

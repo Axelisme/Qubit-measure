@@ -167,3 +167,60 @@ def make_mock_soccfg(n_gens: int = 2, n_readouts: int = 1) -> QickConfig:
     ):
         raise ValueError("channel counts must be nonnegative integers")
     return QickConfig(_build_mock_cfg(n_gens, n_readouts))
+
+
+def make_mux_mock_soccfg(
+    n_gens: int,
+    n_readouts: int,
+    *,
+    gen_ch: int,
+    ro_chs: tuple[int, ...],
+) -> QickConfig:
+    """Build the fixed offline mixmux8/PFBv4 profile for explicit readout routes.
+
+    n_gens/n_readouts are channel counts as in make_mock_soccfg. gen_ch selects
+    the single mixmux8 generator; ro_chs selects 1..8 unique logical ADCs on one
+    PFB, assigned distinct output ports in tuple order. Remaining channels retain
+    the ordinary v6/v2 profile. Mux DDS is 1536 MHz, PFB output 76.8 MHz.
+    Missing, duplicate or out-of-range channels raise ValueError. No hardware
+    or acquisition source is constructed, and callers cannot override clocks.
+    """
+    cfg = make_mock_soccfg(n_gens, n_readouts).get_cfg()
+    if type(gen_ch) is not int or not 0 <= gen_ch < n_gens:
+        raise ValueError("mux generator must be inside the configured channel count")
+    if (
+        not 1 <= len(ro_chs) <= 8
+        or len(set(ro_chs)) != len(ro_chs)
+        or any(type(ch) is not int or not 0 <= ch < n_readouts for ch in ro_chs)
+    ):
+        raise ValueError("mux requires 1..8 unique in-range ADC channels")
+    cfg["gens"][gen_ch].update(
+        type="axis_sg_mixmux8_v1",
+        has_mixer=True,
+        n_tones=8,
+        has_gain=True,
+        has_phase=True,
+        interpolation=8,
+        fdds_div=8,
+        f_dds=1536.0,
+    )
+    for port, ch in enumerate(ro_chs):
+        ro = cfg["readouts"][ch]
+        ro.pop("tproc_ctrl")
+        ro.update(
+            type="axis_pfb_readout_v4",
+            ro_type="axis_pfb_readout_v4",
+            ro_fullpath="pfb0",
+            pfb_port=port,
+            pfb_nout=8,
+            pfb_nch=64,
+            pfb_ch_offset=32,
+            pfb_dds_on_output=True,
+            has_outsel=False,
+            f_output=76.8,
+            f_dds=76.8,
+            fdds_div=32,
+            b_phase=32,
+            trigger_bit=port,
+        )
+    return QickConfig(cfg)

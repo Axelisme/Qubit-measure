@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
 from ..contract.kernel_suite import KernelCase, reference, synthetic_model
@@ -51,7 +51,7 @@ def test_low_carrier_uses_sambe_and_preserves_translated_coherent_tail():
     assert workspace.sambe_builds == 2
     assert workspace.attempts == workspace.hits == workspace.nbytes == 0
     actual = case.states.copy()
-    kernel.apply(prepared, rows, case.table, rows, actual, case.budget)
+    kernel.apply(prepared, rows, case.table, rows, actual, ApplyContext(case.budget))
     for row in rows:
         np.testing.assert_allclose(
             actual[row], reference(case, int(row), case.states[row]), atol=1e-4, rtol=0
@@ -80,7 +80,7 @@ def test_unresolved_cutoff_falls_back_to_independent_cf4():
     assert workspace.sambe_fallbacks == 1
     assert workspace.attempts == workspace.hits == workspace.nbytes == 0
     actual = case.states[:1].copy()
-    kernel.apply(prepared, np.array([0]), table, rows, actual, 1e-3)
+    kernel.apply(prepared, np.array([0]), table, rows, actual, ApplyContext(1e-3))
     # Independent exact solution for commuting diagonal H(t), tighter than a
     # numerical strict reference and with no integration-step assumptions.
     duration = table.duration_ns[0]
@@ -106,7 +106,7 @@ def test_high_carrier_keeps_existing_builder():
         )
         assert workspace.sambe_builds == workspace.sambe_fallbacks == 0
         actual = case.states.copy()
-        kernel.apply(prepared, rows, table, rows, actual, case.budget)
+        kernel.apply(prepared, rows, table, rows, actual, ApplyContext(case.budget))
         high = replace(case, table=table)
         np.testing.assert_allclose(
             actual[0], reference(high, 0, case.states[0]), atol=1e-4, rtol=0
@@ -127,7 +127,7 @@ def test_sambe_selection_and_playback_ignore_worker_and_key_order():
         case.budget,
     )
     expected = case.states.copy()
-    kernel.apply(prepared, rows, case.table, rows, expected, case.budget)
+    kernel.apply(prepared, rows, case.table, rows, expected, ApplyContext(case.budget))
     other, other_workspace = FloquetPeriodKernel().evolve_scope(case.table, case.source)
     actual = case.states.copy()
 
@@ -141,7 +141,9 @@ def test_sambe_selection_and_playback_ignore_worker_and_key_order():
             case.budget,
         )
         state = case.states[subset].copy()
-        other.apply(payload, np.array([0]), case.table, subset, state, case.budget)
+        other.apply(
+            payload, np.array([0]), case.table, subset, state, ApplyContext(case.budget)
+        )
         actual[subset] = state
 
     # The main thread and a distinct worker prepare in reverse order.
@@ -172,7 +174,7 @@ def test_sambe_subperiods_preserve_secular_dissipation():
     )
     assert workspace.sambe_builds == 2
     actual = case.states.copy()
-    kernel.apply(prepared, rows, table, rows, actual, case.budget)
+    kernel.apply(prepared, rows, table, rows, actual, ApplyContext(case.budget))
     np.testing.assert_allclose(
         actual[1], reference(case, 1, case.states[1]), atol=case.budget, rtol=0
     )
