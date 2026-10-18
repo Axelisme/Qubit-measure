@@ -1,8 +1,8 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, closed-form flat mux decimated readout
+**Last updated:** 2026-10-18, observable startup numeric preparation and closed-form flat mux decimated readout
 
-`ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
+`ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, applies their initial values once and binds the derived channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
@@ -28,6 +28,44 @@ Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
 `FTFSource.close()` clears preparations and the engine cache. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
+
+## Startup preparation
+
+The shared production GUI/Notebook environment entry opts into `warmup=True`.
+Building that environment immediately starts one process-wide background numeric
+worker. All opted-in environments share its future and terminal result. Direct
+`ftf()` callers keep `warmup=False`, just as they keep `workers=1`, to avoid
+unexpected CPU work. Authors can disable startup work with `ftf(..., warmup=False)`.
+Preparation uses small disposable numeric models, one evolution worker and no
+sampling. It never reads or changes the live environment's devices, binding seed,
+acquire sequence or resident engine cache. Compilation still consumes CPU and
+memory; it overlaps configuration work rather than reducing total compile cost.
+
+`env.warmup` is an `EnvironmentWarmup`, or None when disabled. Its immutable
+`status` reports `state` (pending/running/ready/failed), `completed` item names,
+`current`, `total` and an optional `error`. Poll it for progress.
+`env.warmup.start()` returns the same non-cancellable future on every call;
+callbacks receive the terminal status and must marshal GUI updates to the owner
+thread. `env.wait_ready(timeout=None)` waits for completion and returns the terminal
+status, or None when disabled. A timeout raises `TimeoutError` without cancelling
+work. Failure is logged, retained in status and permits ordinary on-demand
+compilation. The worker exits after completion. Process exit waits for an active
+worker rather than interrupting the compiler. Closing live devices does not cancel
+this independent numeric work.
+
+Acquire automatically waits after binding admission and before consuming its RNG
+sequence or constructing its request. Call `env.wait_ready()` **before starting a
+caller-owned timer** to exclude startup work from that timer. A timer wrapped
+around an immediately invoked blocking acquire necessarily includes its wait.
+No frontend timer or status display is installed by this backend API.
+
+The coverage manifest in `warmup.py` covers shaped carrier families (>9 carriers),
+shaped direct integration, Dyson gain batches, dense Floquet periods, t4 and ADC
+integrated/decimated/mux responses. It does not promise every possible signature
+or kernel. New routes require updating the representative inputs and checking
+real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
+
+## Acquisition and numeric composition
 
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's density and
