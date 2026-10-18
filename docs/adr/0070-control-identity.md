@@ -56,7 +56,7 @@ Local 有任何 modal dialog 時，owner connect 自動取得與 acquire 回 `lo
 
 Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 holder。Local 的合法輸入、取消、path、busy 與 validation 沿各 owner 契約。Finished 仍可退休單次輸入，防止關閉後的晚到提交。Inspect、Devices 與 ARB Waveforms 的 Remote 查看入口提供 read-only mode；Inspect 不開放 Add 與 library mutation；Arb Waveforms 入口仍可開，ARB 依宿主規則以唯讀開啟，不提供寫入。
 
-2026-10-15，使用者裁決「要不要唯讀應該是dialog提供一個方法」「讓gui根據需要控制是否唯讀吧」。共用 session 對話框 Setup、Inspect、Devices 與 ARB Waveforms 只提供 `set_read_only(...)`，不讀控制權或 run 狀態。宿主決定何時唯讀，並對自己的共用對話框套用同一條規則。Workflows 依 run lock，從 Start 到 terminal delivery 維持唯讀，並同步更新已開啟的對話框。新增的共用對話框也提供 `set_read_only`，接上宿主的同一條規則。
+2026-10-15，使用者裁決「要不要唯讀應該是dialog提供一個方法」「讓gui根據需要控制是否唯讀吧」。共用 session 對話框 Setup、Inspect、Devices 與 ARB Waveforms 只提供 `set_read_only(...)`，不讀控制權或 run 狀態。宿主決定何時唯讀。Measure 在 `set_writable` 時同步更新 Setup、Inspect、Devices 與 ARB Waveforms。Workflows 的 run lock 只套用 Devices、Inspect 與 ARB Waveforms，從 Start 到 terminal delivery 維持唯讀，並同步更新已開啟的對話框。Workflows 的 Setup 保持可寫，它修改 session，不影響已捕捉的 run。新增的共用對話框也提供 `set_read_only`，由宿主依自己的規則設定。
 
 2026-10-18，使用者裁決「1A，可以」，確認 Measure 由主視窗同步唯讀。Measure 的所有具名主選單對話框真正 non-modal，包含啟動時的 Setup。Remote 時使用者可開 Setup、Devices、Inspect 唯讀觀察。控制權變更時，主視窗同步更新仍開著的 Setup、Devices、Inspect 與 ARB Waveforms；交回 Local 即恢復可寫，既有 busy／valid gate 繼續生效。Inspect 的 ARB 入口使用當下的宿主狀態，不保留開窗時的舊值。Dialog 不自行訂閱 authority。
 

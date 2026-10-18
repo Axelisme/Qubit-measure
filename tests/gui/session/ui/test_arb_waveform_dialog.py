@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Literal, Never
+from typing import Literal, Never
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -20,6 +20,8 @@ from zcu_tools.resources.waveform_assets import (
     FormulaRecipe,
     render_formula_recipe,
 )
+
+from tests.gui._dialog_fakes import RecordingDialogPresenter
 
 from ._waveform_timer import PreviewClock
 
@@ -470,7 +472,8 @@ def test_A6_save_with_deep_invalid_formula_reports_save_failed(
 ) -> None:
     """Save in the optimistic window with a render-failing formula shows 'Save failed'."""
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)
+    dialogs = RecordingDialogPresenter()
+    dlg = ArbWaveformDialog(ctrl, dialog_presenter=dialogs)
     editor = _Editor(dlg)
     preview_clock.drain()
 
@@ -480,20 +483,12 @@ def test_A6_save_with_deep_invalid_formula_reports_save_failed(
     # Do NOT wait for debounce — we're in the optimistic Save-enabled window.
     assert editor.save.isEnabled()
 
-    critical_calls: list[tuple[str, str]] = []
-
-    def fake_critical(parent: Any, title: str, msg: str) -> None:
-        critical_calls.append((title, msg))
-
-    monkeypatch.setattr(
-        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
-        fake_critical,
-    )
     editor.save.click()
 
     # Service attempted render → failed → "Save failed" box shown.
-    assert len(critical_calls) == 1
-    assert critical_calls[0][0] == "Save failed"
+    assert len(dialogs.calls) == 1
+    assert dialogs.calls[0].kind == "critical"
+    assert dialogs.calls[0].title == "Save failed"
     # No asset was stored.
     assert "arb_data1" not in ctrl.assets
 
@@ -513,7 +508,8 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     _on_asset_selection_changed only catches ArbWaveformError, not RuntimeError.
     """
     ctrl = _FakeController()
-    dlg = ArbWaveformDialog(ctrl)
+    dialogs = RecordingDialogPresenter()
+    dlg = ArbWaveformDialog(ctrl, dialog_presenter=dialogs)
     editor = _Editor(dlg)
     preview_clock.drain()
 
@@ -530,16 +526,6 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
 
     monkeypatch.setattr(ctrl, "load_data", failing_load_once)
 
-    critical_calls: list[tuple[str, str]] = []
-
-    def fake_critical(parent: Any, title: str, msg: str) -> None:
-        critical_calls.append((title, msg))
-
-    monkeypatch.setattr(
-        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
-        fake_critical,
-    )
-
     editor.save.click()
 
     # Asset was saved successfully.
@@ -549,8 +535,9 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     assert selected is not None
     assert selected.text() == "arb_data1"
     # Error reported as "Reload failed", not "Save failed".
-    assert len(critical_calls) == 1
-    assert critical_calls[0][0] == "Reload failed"
+    assert len(dialogs.calls) == 1
+    assert dialogs.calls[0].kind == "critical"
+    assert dialogs.calls[0].title == "Reload failed"
 
 
 def test_asset_load_failure_keeps_editor_state(
@@ -569,10 +556,9 @@ def test_asset_load_failure_keeps_editor_state(
     save_observer = MagicMock(wraps=ctrl.set_formula)
     monkeypatch.setattr(ctrl, "set_formula", save_observer)
     questions = MagicMock(return_value=QMessageBox.StandardButton.No)
-    errors = MagicMock()
+    dialogs = RecordingDialogPresenter()
     monkeypatch.setattr(QMessageBox, "question", questions)
-    monkeypatch.setattr(QMessageBox, "critical", errors)
-    dlg = ArbWaveformDialog(ctrl)
+    dlg = ArbWaveformDialog(ctrl, dialog_presenter=dialogs)
     editor = _Editor(dlg)
     preview_clock.drain()
     draft_key = editor.key.text()
@@ -610,7 +596,7 @@ def test_asset_load_failure_keeps_editor_state(
     save_observer.assert_not_called()
     assert ctrl.assets["broken"] is original_data
     assert load_calls == ["broken"]
-    errors.assert_not_called()
+    dialogs.assert_no_unexpected_messages()
 
 
 # ---------------------------------------------------------------------------
@@ -652,17 +638,13 @@ def test_save_button_persists_without_remote_png(
         )
     )
     assets = arb_waveform.ArbWaveformService(state)
-    errors: list[tuple[str, str]] = []
+    dialogs = RecordingDialogPresenter()
 
     def unavailable(*_args: object, **_kwargs: object) -> str:
         raise OSError("PNG export unavailable")
 
     monkeypatch.setattr(arb_waveform, "render_preview_png", unavailable)
-    monkeypatch.setattr(
-        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
-        lambda _parent, title, message: errors.append((title, message)),
-    )
-    dialog = ArbWaveformDialog(assets)
+    dialog = ArbWaveformDialog(assets, dialog_presenter=dialogs)
     try:
         save = next(
             button
@@ -674,7 +656,7 @@ def test_save_button_persists_without_remote_png(
         assert assets.list_data_keys() == ["arb_data1"]
         assert assets.load_data("arb_data1").recipe is not None
         assert state.version.get("arb_waveforms") == 1
-        assert errors == []
+        dialogs.assert_no_unexpected_messages()
     finally:
         dialog.close()
 

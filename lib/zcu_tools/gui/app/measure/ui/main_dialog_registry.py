@@ -59,7 +59,8 @@ class MainDialogRegistry:
 
         templates returns the composition's current template catalog; it is
         read each time Inspect opens, so a reloaded catalog reaches the next
-        Inspect. dialog_presenter shows Inspect's questions and failures.
+        Inspect. dialog_presenter shows Inspect's questions and failures and
+        ARB's failure notifications.
         alias_presets is the composition's named alias catalog every Inspect
         offers through Load preset; None means no catalog.
         """
@@ -146,6 +147,7 @@ class MainDialogRegistry:
             dialog = ArbWaveformDialog(
                 self._ctrl.arb_waveforms,
                 parent=self._parent,
+                dialog_presenter=self._dialog_presenter,
             )
             dialog.set_read_only(read_only=not writable)
             return dialog
