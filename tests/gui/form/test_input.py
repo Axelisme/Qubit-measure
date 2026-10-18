@@ -1,5 +1,6 @@
 """Persistence and isolation through the public form input envelope."""
 
+import json
 import re
 from collections.abc import Callable
 from typing import Annotated, Literal
@@ -89,6 +90,18 @@ def test_form_entry_rejects_untagged_string_or_model_with_field_path(
     operation = operations[entry]
     with pytest.raises(ValueError, match=rf"{re.escape(path)}:.*str.*Model"):
         operation()
+
+
+@pytest.mark.parametrize("with_override", [False, True])
+def test_json_codec_keeps_raw_fields_and_typed_selection_paths(with_override: bool) -> None:
+    raw: dict[str, JsonValue] = {"data": {"expr": "unbound"}, "selections": [1, 2], "tones": [{"shape": {"style": "ramp", "length": "unfinished"}}]}
+    selections = {("tones", 0, "shape"): {"style": "flat"}} if with_override else {}
+    original = FormInput(FormModel, raw, selections=selections)
+
+    text = original.to_json()
+
+    assert json.loads(text) == {"data": raw, "selections": [{"path": ["tones", 0, "shape"], "value": {"style": "flat"}}] if with_override else []}
+    assert FormInput.from_json(FormModel, text).same_as(original)
 
 
 class InputForm(FormModel):
