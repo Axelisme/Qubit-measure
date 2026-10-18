@@ -27,9 +27,9 @@ class ObservedEngine(Engine):
         super().__init__(1, 1_000_000)
         self.sources: list[weakref.ReferenceType[ModelSource]] = []
 
-    def evolve(self, source, batches, *, cancel):
+    def evolve(self, source, batches, *, budget=1e-3, cancel):
         self.sources.append(weakref.ref(source))
-        return super().evolve(source, batches, cancel=cancel)
+        return super().evolve(source, batches, budget=budget, cancel=cancel)
 
 
 @pytest.fixture

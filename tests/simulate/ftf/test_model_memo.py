@@ -34,7 +34,7 @@ def test_exact_eigensystem_inputs_reuse_immutable_results_without_flux_aliasing(
     assert other_vectors is not vectors
     assert not energy.flags.writeable
     assert not vectors.flags.writeable
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="read-only"):
         vectors[0, 0] = 0
     reference_energy, reference_vectors = np.linalg.eigh(joint.hamiltonian(flux))
     np.testing.assert_array_equal(energy, reference_energy)
@@ -48,7 +48,7 @@ def test_exact_bath_inputs_reuse_immutable_rates_without_flux_or_joint_aliasing(
     assert joint.rates(joint.dc_flux.copy()) is rates
     assert other_rates is not rates
     assert not rates.flags.writeable
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="read-only"):
         rates[0, 1] = 123
     other_joint = JointModel(joint.parameters, other_flux, temperature_k=0.06)
     assert other_joint.rates(other_flux) is not rates

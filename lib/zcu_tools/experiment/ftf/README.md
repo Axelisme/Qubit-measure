@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, closed-form flat mux decimated readout
+**Last updated:** 2026-10-18, exact physical model reuse
 
 `ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -28,6 +28,13 @@ Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
 `FTFSource.close()` clears preparations and the engine cache. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
+The source retains at most one snapshot's `FTFModelFacts` across acquires.
+The exact key includes full settings, the entire snapshot and backend/numeric
+revisions. Facts own the joint projection, Gibbs/source, DC eigen/bath memo and
+neutral readout model. All templates share these physical inputs. Pulse contents,
+carrier references, receivers, grids, evolved densities and conditional responses
+remain acquire/template data. A changed key drops the previous physical facts;
+no projected operators, rates or readout response cross flux points.
 
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's density and
@@ -35,6 +42,9 @@ conditional response when the snapshot is equal. Every round draws a new stream.
 Opening another acquire invalidates the old session and drops its preparations.
 The binding serializes calls; direct author callers must do the same.
 
+`plan_template` accepts optional matching `FTFModelFacts` for shared physical
+inputs; standalone calls build their own facts. `FTFSource.model_facts` supplies
+the source-owned latest facts and rejects calls after close.
 `plan_template` converts QICK us/MHz/degrees into ns/GHz/radians with point
 arrays. It preserves signed gains, complex sampled envelopes and the common
 carrier origin for evolution. Readout converts the program's common-origin
