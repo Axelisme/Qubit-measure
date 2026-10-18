@@ -19,6 +19,51 @@ from zcu_tools.resources.entry.views import FieldView
 from .view_support import create_entry, field_view, registered_model
 
 
+def test_set_creates_only_freeform_mapping_paths_atomically(tmp_path: Path) -> None:
+    class Settings(BaseModel):
+        gain: float = 1.0
+
+    class Measured(ComponentSchema):
+        ext: YamlMap = Field(default_factory=dict)
+        settings: Settings = Field(default_factory=Settings)
+        routes: dict[str, Settings] = Field(default_factory=dict)
+
+    with registered_model("notebook/freeform-path", Measured) as kind:
+        entry, _, _ = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind)
+        point = entry.new_point("working")
+        with point.edit() as draft:
+            draft.set_meta("N1.ext.cal.sigma", {"comment": "keep"})
+            draft.set("N1.ext.cal.sigma", 1.0)
+            draft.set("N1.ext.cal.offset", 2.0)
+            assert document_value(snapshot(draft), "N1.ext") == {
+                "cal": {"sigma": 1.0, "offset": 2.0}
+            }
+            assert draft.meta("N1.ext.cal.sigma") == {"comment": "keep"}
+            draft.set("general.ext.session.result.value", 3.0)
+            assert document_value(snapshot(draft), "general.ext") == {
+                "session": {"result": {"value": 3.0}}
+            }
+            draft.set("N1.ext.blocked", 3)
+            before = snapshot(draft)
+            for path in (
+                "N1.ext.blocked.child.value",
+                "N1.settings.unknown.value",
+                "N1.unknown.child.value",
+                "N1.routes.missing.gain",
+            ):
+                with pytest.raises((AttributeError, KeyError)):
+                    draft.set(path, 4.0)
+                assert snapshot(draft) == before
+            draft.set("N1.ext.cal", {"sigma": 5.0})
+            assert document_value(snapshot(draft), "N1.ext.cal") == {"sigma": 5.0}
+            assert draft.meta("N1.ext.cal.sigma") == {"comment": "keep"}
+        assert document_value(snapshot(point), "N1.ext") == {
+            "cal": {"sigma": 5.0}, "blocked": 3
+        }
+        assert document_value(snapshot(entry.setup), "N1.ext") == {}
+
+
 @pytest.mark.parametrize("owner", ["setup", "point"])
 def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
     tmp_path: Path, registry_state_guard: None, owner: str
