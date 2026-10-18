@@ -221,7 +221,7 @@ class FTFSource:
     settings is a validated immutable FTF resource; devices supplies live DC
     readbacks to snapshot. engine optionally supplies a configured numerical
     executor; this source takes ownership, including close(). Without it, use
-    workers=1 and a 256 MiB prepare cache. private_replay is an optional absolute
+    workers=1 and a 1.5 GiB prepare cache. private_replay is an optional absolute
     author-only input archive directory; None performs no replay I/O. readout
     optionally supplies detached author capabilities, otherwise adapts settings.
     Replay rejects overrides that cannot be reconstructed from those settings.
@@ -255,7 +255,7 @@ class FTFSource:
         self.devices = devices
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
         self.private_replay = private_replay
-        self.engine = Engine(1, 256 * 1024**2) if engine is None else engine
+        self.engine = Engine(1, 3 * 1024**3 // 2) if engine is None else engine
         self.evaluations: tuple[FTFNumericUse, ...] = ()
         self._session: FTFAcquire | None = None
         self._closed = False
@@ -356,7 +356,7 @@ def ftf(
         coordinator = FTFSource(
             settings,
             devices,
-            engine=Engine(workers, 256 * 1024**2),
+            engine=Engine(workers, 3 * 1024**3 // 2),
             private_replay=private_replay,
         )
         gens = (

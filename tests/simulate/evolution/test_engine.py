@@ -351,12 +351,71 @@ def test_shared_cache_namespace_budget_eviction_and_singletons():
         assert k.preparations == 5
         for _ in range(2):
             engine.evolve(src, (batch(1, duration=8),), cancel=Event())
-        assert k.preparations == 7
+        assert k.preparations == 6, "the second singleton evolve must reuse its payload"
     finally:
         engine.close()
         engine.close()
     with pytest.raises(RuntimeError, match="closed"):
         engine.evolve(src, (batch(),), cancel=Event())
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_singleton_residents_reuse_payloads_across_evolves(workers):
+    kernel = TimelineKernel("t4")
+    src = source()
+    with closing(Engine(workers, 128, kernels=(kernel,))) as engine:
+        first = engine.evolve(src, (batch(8),), cancel=Event())
+        assert kernel.preparations == 8
+        second = engine.evolve(src, (batch(8),), cancel=Event())
+        assert kernel.preparations == 8, "resident singletons must not rebuild"
+        np.testing.assert_array_equal(second.densities, first.densities)
+        assert second.paths == first.paths
+
+
+def test_oversize_local_payload_does_not_evict_fitting_singleton():
+    class SizedKernel(RecordingKernel):
+        def prepare(self, keys, table, rows, context: KernelContext):
+            super().prepare(keys, table, rows, context)
+            return Payload(2 if table.duration_ns[rows[0]] == 4 else 1)
+
+    kernel = SizedKernel("t4")
+    src = source()
+    with closing(Engine(1, 16, kernels=(kernel,))) as engine:
+        engine.evolve(src, (batch(1),), cancel=Event())
+        for _ in range(2):
+            engine.evolve(src, (batch(1, duration=4),), cancel=Event())
+        engine.evolve(src, (batch(1),), cancel=Event())
+        assert kernel.preparations == 3, (
+            "oversize products must stream without eviction"
+        )
+
+
+def test_singleton_stream_preserves_current_shared_hit_and_fills_only_spare_bytes():
+    kernel = RecordingKernel("t4")
+    src = source()
+    shared = batch(2)
+    stream = replace(batch(3), points=np.arange(2, 5), end_ns=np.array([4.0, 5.0, 6.0]))
+    with closing(Engine(1, 32, kernels=(kernel,), chunks_per_worker=1)) as engine:
+        engine.evolve(src, (shared,), cancel=Event())
+        engine.evolve(src, (shared, stream), cancel=Event())
+        assert kernel.preparations == 4
+        engine.evolve(src, (shared,), cancel=Event())
+        assert kernel.preparations == 4, "streaming misses must not evict shared hits"
+        engine.evolve(src, (batch(1, duration=4),), cancel=Event())
+        assert kernel.preparations == 4, "the fitting local product must persist"
+
+
+def test_new_source_singleton_replaces_previous_source_resident():
+    kernel = RecordingKernel("t4")
+    src = source()
+    other = ModelSource(
+        src.initial_density,
+        lambda level: replace(src.model(level), identity="next-flux"),
+    )
+    with closing(Engine(1, 16, kernels=(kernel,))) as engine:
+        for current in (src, src, other, other, src):
+            engine.evolve(current, (batch(1),), cancel=Event())
+        assert kernel.preparations == 3, "old flux residents must yield to new ones"
 
 
 @pytest.mark.parametrize(

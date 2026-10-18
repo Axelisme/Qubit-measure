@@ -1,9 +1,13 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-18
 
 Views project controller snapshots and submit commands through control facets.
-They do not own result data or Save policy. See the [Measure README](../README.md)
+They do not own result data or Save policy. `MainDialogRegistry` retains truly
+non-modal named windows. `MainWindow.set_writable` synchronizes Setup, Devices,
+Inspect and ARB editing on control transfer, including windows already open.
+Error notifications are non-modal; confirmations, choosers and writeback editing
+keep their modal protection. See the [Measure README](../README.md)
 for pane ownership and operation lifecycles.
 
 For every adapter, `MainWindow` projects the current tab's cfg invalid reason to the bottom status on interaction refresh and tab selection, while Run stays disabled.

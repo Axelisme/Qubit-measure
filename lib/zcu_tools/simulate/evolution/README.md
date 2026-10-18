@@ -173,11 +173,19 @@ class's methods.
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py), with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. Separate from two-tone Floquet frames. |
 | Two-tone retained-sideband certificates and equations | [kernels/_floquet_sidebands.py](kernels/_floquet_sidebands.py), used by [floquet](kernels/floquet.py) guard admission and apply. |
 
-The engine deduplicates prepare keys across an evolve. Only keys used by distinct
-timelines enter shared preparation and the persistent LRU. Repeated keys within
-one timeline remain local. Local builders and repeated local keys stream one
-timeline at a time; single-use ordinary keys prepare at their apply wave.
+The engine deduplicates prepare keys across an evolve. Keys used by distinct
+timelines enter shared preparation. Local builders and repeated local keys stream
+one timeline at a time; single-use ordinary keys prepare at their apply wave.
+All classified keys, including singletons, can reuse the persistent LRU.
 Accepted guard products are reused even when only a subset of timelines accepts.
+
+The caller protects current cache hits and new shared payloads by their whole
+allocation sizes. Workers submit model-only local products to a thread-safe
+collector bounded by the remaining resident budget. After workers join, the
+caller admits these products through the LRU. This can evict old workloads, but
+streaming singletons cannot displace this evolve's protected allocations.
+Oversize products stream without admission. Pending products and old residents
+can coexist until the join; the resident limit is not a bound on that peak.
 
 [PrepareCache](cache.py) namespaces whole model-only payload batches by family,
 whole-source model identity and budget. The zero-level identity must describe the

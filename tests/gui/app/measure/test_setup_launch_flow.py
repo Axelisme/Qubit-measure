@@ -5,7 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton, QSpinBox
+from qtpy.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+)
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.persistence_types import (
     AppPersistedState,
     PersistedStartup,
@@ -13,8 +22,10 @@ from zcu_tools.gui.app.measure.services.persistence_types import (
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._app_launch import (
     LaunchedMeasureApp,
     click_toolbar_setup,
@@ -107,6 +118,23 @@ def test_restored_settings_prefill_one_setup_that_survives_screenshot_and_toolba
 
 
 @pytest.mark.uses_wall_clock
+def test_startup_setup_allows_owner_connect_and_tracks_control(qapp, tmp_path):
+    with launched_measure_app(qapp, tmp_path) as app:
+        (setup,) = visible_setup_dialogs(app.window)
+        assert not setup.isModal(), "Startup Setup must not block owner acquisition"
+        app.invoke("connect", {"port": app.remote.port, "mode": "owner"})
+        assert not _button(setup, "New entry…").isEnabled()
+        app.invoke(
+            "rpc_call", {"method": "entry.new", "params": {"name": "agent-entry"}}
+        )
+        assert setup.isVisible()
+        assert "agent-entry" in _field_texts(setup)
+        app.invoke("rpc_call", {"method": "control.release"})
+        assert _button(setup, "New entry…").isEnabled()
+        assert _button(setup, "Connect").isEnabled()
+
+
+@pytest.mark.uses_wall_clock
 def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_context(
     qapp: QApplication, tmp_path: Path
 ) -> None:
@@ -172,3 +200,83 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
             control.read_context()
         assert caught.value.reason_code == "no_context"
         check_setup_entry("chip-b")
+
+
+@pytest.mark.uses_wall_clock
+def test_local_true_modal_still_refuses_owner_and_allows_retry(qapp, tmp_path):
+    with launched_measure_app(qapp, tmp_path) as app:
+        app.window.close_dialog(DialogName.SETUP)
+        dialog = QDialog(app.window)
+        try:
+            dialog.open()
+            with pytest.raises(GuiInvocationError, match="local_busy"):
+                app.invoke("connect", {"port": app.remote.port, "mode": "owner"})
+            dialog.reject()
+            app.invoke("connect", {"port": app.remote.port, "mode": "owner"})
+            created = app.invoke(
+                "rpc_call", {"method": "entry.new", "params": {"name": "after-modal"}}
+            )
+            assert created["name"] == "after-modal"
+        finally:
+            dialog.reject()
+
+
+@pytest.mark.uses_wall_clock
+def test_error_notification_stays_visible_without_blocking_owner(qapp, tmp_path):
+    with launched_measure_app(qapp, tmp_path) as app:
+        app.window.show_error_dialog("Synthetic failure", "Agent operation failed")
+        qapp.processEvents()
+        box = app.window.findChild(QMessageBox)
+        assert box is not None and box.isVisible()
+        assert box.text() == "Agent operation failed"
+        assert not box.isModal()
+        app.invoke("connect", {"port": app.remote.port, "mode": "owner"})
+        created = app.invoke(
+            "rpc_call", {"method": "entry.new", "params": {"name": "after-error"}}
+        )
+        assert created["name"] == "after-error"
+        assert box.isVisible()
+        box.accept()
+
+
+@pytest.mark.uses_wall_clock
+@pytest.mark.parametrize(
+    "name", [DialogName.SETUP, DialogName.DEVICE, DialogName.INSPECT]
+)
+def test_observation_controls_recover_via_real_user_input(qapp, tmp_path, name):
+    with launched_measure_app(qapp, tmp_path) as app:
+        driver = ComponentDriver(app.window)
+        captions = {
+            DialogName.SETUP: ("Setup…", "New entry…"),
+            DialogName.DEVICE: ("Devices…", "Add Device"),
+            DialogName.INSPECT: ("Inspect…", "New"),
+        }
+        opener, action = captions[name]
+        driver.screenshot(tmp_path / f"{name.value}-01-local.png")
+        # Isolate toolbar reopening from the separately tested startup handoff.
+        driver.click("Close")
+        app.invoke("connect", {"port": app.remote.port, "mode": "owner"})
+        driver.click(opener)
+        assert driver.dialogs(), "Remote must allow opening the observation window"
+        if name is DialogName.INSPECT:
+            driver.select_tab("Modules")
+        assert not driver.observe(action).enabled
+        driver.screenshot(tmp_path / f"{name.value}-02-remote.png")
+        created = app.invoke(
+            "rpc_call", {"method": "entry.new", "params": {"name": "observed-entry"}}
+        )
+        assert created["name"] == "observed-entry"
+        driver.screenshot(tmp_path / f"{name.value}-03-agent-command.png")
+        driver.click(object_name="control_indicator")
+        assert driver.observe(action).enabled
+        assert driver.observe(object_name="control_indicator").text == "Local locked"
+        driver.screenshot(tmp_path / f"{name.value}-04-local-reclaim.png")
+        driver.click("Close")
+        assert driver.dialogs() == ()
+        driver.screenshot(tmp_path / f"{name.value}-05-closed.png")
+        driver.click(opener)
+        if name is DialogName.INSPECT:
+            driver.select_tab("Modules")
+        assert driver.observe(action).enabled
+        driver.screenshot(tmp_path / f"{name.value}-06-reopened.png")
+        driver.click("Close")
