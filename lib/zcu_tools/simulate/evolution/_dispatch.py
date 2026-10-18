@@ -13,9 +13,10 @@ from ._prepare_keys import group_keys
 from ._shaped_dispatch import preference
 from ._two_tone_dispatch import direct_preferred
 from .engine import PathDiagnostics
-from .kernel import GuardPreparation, Kernel, SegmentTable
+from .kernel import GuardPreparation, Kernel, Prepared, SegmentTable
 from .kernels._cf4_grid import coarse_count, finer_count, spectral_width
 from .kernels.floquet_period import PeriodBuilder
+from .kernels.gate_cache import GateCacheKernel
 from .secular import ModelSource, SecularModel
 
 
@@ -188,6 +189,31 @@ def require(
             f"segment {row} (timeline {table.timeline[row]}, start {table.start_ns[row]} ns) requires kernel {name}"
         )
     return kernels[name]
+
+
+def prepare(
+    kernel: Kernel,
+    keys: NDArray[np.void],
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    source: ModelSource,
+    budget: float,
+) -> Prepared:
+    """Select a key-level builder and prepare an aligned batch of representatives.
+
+    Called at the scheduler's normal build point, after cache lookup. Gate keys
+    with duration in (0, 30] ns try phase-adaptive preparation; all other gate
+    keys use sixteen nodes. Failed phase probes fall back inside the numerical
+    build. Other families use their ordinary prepare entry point unchanged.
+    Keys, representatives, budget and failure semantics follow Kernel.prepare.
+    """
+    if isinstance(kernel, GateCacheKernel):
+        duration = keys["duration"]
+        phase_adaptive = (duration > 0) & (duration <= 30.0)
+        return kernel.prepare(
+            keys, table, rows, source, budget, phase_adaptive=phase_adaptive
+        )
+    return kernel.prepare(keys, table, rows, source, budget)
 
 
 @dataclass(frozen=True)

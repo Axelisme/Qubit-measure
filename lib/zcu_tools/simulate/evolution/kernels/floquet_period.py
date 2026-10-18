@@ -15,6 +15,7 @@ from ..secular import ModelSource, SecularModel
 from . import _period_sambe
 from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._dop853 import Tolerances, integrate_dense
+from ._secular import secular_operators
 
 _MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
@@ -110,16 +111,8 @@ def _check_budget(budget: float) -> None:
         raise ValueError("Floquet period budget must be finite and positive")
 
 
-def _bath(model: SecularModel) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    outgoing = model.rates_per_ns.sum(axis=0)
-    return (
-        model.rates_per_ns - np.diag(outgoing),
-        (outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns,
-    )
-
-
 def _split_rate(model: SecularModel, port: int, frequency: float, gain: float) -> float:
-    generator, decay = _bath(model)
+    generator, decay = secular_operators(model)
     gamma = max(float(np.linalg.norm(generator, 2)), float(np.max(decay)))
     drive = model.drives[port]
     strength = (
@@ -501,7 +494,7 @@ def _build(
             Tolerances(tolerance, tolerance * 0.01, period / 4),
         )
         coefficients = coefficients.reshape(-1, 8, size, size)
-    generator, decay = _bath(model)
+    generator, decay = secular_operators(model)
     arrays = (
         times,
         coefficients,

@@ -17,13 +17,15 @@ from ._period_table import (
     PeriodPrepared,
     SecularMaps,
     UnitaryTable,
+    advance_tail,
+    band_keys,
     envelopes,
     periods,
 )
 from ._sambe import eigensystem
+from ._secular import coherence_decay, population_generator
 from ._shaped import drive_bounds, envelope_bounds
 from .dop853 import DOP853Kernel
-from .period_table import PeriodTableKernel, advance_tail
 
 
 def _spectral(
@@ -257,7 +259,7 @@ class ShapedSambeKernel:
         rows: NDArray[np.int64],
     ) -> NDArray[np.void]:
         """Key peak gain, weighted slope and duration to fix subperiod resolution."""
-        base = PeriodTableKernel().prepare_keys(table, rows)
+        base = band_keys(table, rows)
         keys = np.empty(
             len(rows),
             dtype=base.dtype.descr
@@ -396,15 +398,10 @@ class ShapedSambeKernel:
                 nodes = 8
                 coefficients, interpolation, _ = family.polynomial((nodes, modes))
             errors.append((error + interpolation) * cycles)
-            outgoing = model.rates_per_ns.sum(axis=0)
             populations = np.asarray(
-                expm(step / 2 * (model.rates_per_ns - np.diag(outgoing))), dtype=float
+                expm(step / 2 * population_generator(model.rates_per_ns)), dtype=float
             )
-            coherences = np.exp(
-                -step
-                / 2
-                * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
-            )
+            coherences = np.exp(-step / 2 * coherence_decay(model))
             for array in (coefficients, populations, coherences):
                 array.setflags(write=False)
             representative = rows[index : index + 1]
@@ -586,11 +583,7 @@ class ShapedSambeKernel:
                 u = left @ right
                 ratio = tail / step
                 population = np.asarray(
-                    expm(
-                        tail
-                        / 2
-                        * (model.rates_per_ns - np.diag(model.rates_per_ns.sum(axis=0)))
-                    ),
+                    expm(tail / 2 * population_generator(model.rates_per_ns)),
                     dtype=complex,
                 )
                 coherence = entry.coherences**ratio
