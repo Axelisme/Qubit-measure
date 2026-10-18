@@ -222,10 +222,10 @@ def test_purge_tolerates_unlink_oserror(
 
     real_unlink = Path.unlink
 
-    def fake_unlink(self: Path, *args: object, **kwargs: object) -> None:
+    def fake_unlink(self: Path, missing_ok: bool = False) -> None:
         if self == locked:
             raise PermissionError(32, "in use by another process")
-        real_unlink(self, *args, **kwargs)  # type: ignore[arg-type]
+        real_unlink(self, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", fake_unlink)
 

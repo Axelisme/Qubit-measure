@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from functools import partial
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -211,11 +210,9 @@ def plot_sample_t1(
     if show_value_axis:
         ax2 = ax.secondary_xaxis(
             "top",
-            functions=(  # type: ignore[arg-type]
-                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-                # is inferred from the float overload; runtime is correct (vectorises).
-                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            functions=(
+                lambda values: flux2value(np.asarray(values), flux_half, flux_period),
+                lambda values: value2flux(np.asarray(values), flux_half, flux_period),
             ),
         )
         ax2.set_xlabel(xlabel, fontsize=14)
@@ -283,11 +280,9 @@ def plot_t1_with_sample(
     if show_value_axis:
         ax2 = ax.secondary_xaxis(
             "top",
-            functions=(  # type: ignore[arg-type]
-                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-                # is inferred from the float overload; runtime is correct (vectorises).
-                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            functions=(
+                lambda values: flux2value(np.asarray(values), flux_half, flux_period),
+                lambda values: value2flux(np.asarray(values), flux_half, flux_period),
             ),
         )
         ax2.set_xlabel(xlabel, fontsize=14)
@@ -426,11 +421,9 @@ def plot_eff_t1_with_sample(
     if show_value_axis:
         ax2 = ax.secondary_xaxis(
             "top",
-            functions=(  # type: ignore[arg-type]
-                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-                # is inferred from the float overload; runtime is correct (vectorises).
-                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            functions=(
+                lambda values: flux2value(np.asarray(values), flux_half, flux_period),
+                lambda values: value2flux(np.asarray(values), flux_half, flux_period),
             ),
         )
         ax2.set_xlabel(xlabel, fontsize=14)

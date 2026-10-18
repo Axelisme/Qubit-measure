@@ -938,10 +938,8 @@ class MainWindow(QMainWindow):
         self._bus_subs.unsubscribe_all()
         if isinstance(self._current_editor, LinePickerWidget):
             self._current_editor.teardown()
-        if self._current_editor is not None and hasattr(
-            self._current_editor, "quiesce"
-        ):
-            self._current_editor.quiesce()  # type: ignore[union-attr]
+        if isinstance(self._current_editor, FindPointsWidget):
+            self._current_editor.quiesce()
         if self._analyze_panel is not None:
             self._analyze_panel.quiesce()
             self._analyze_panel.dispose()

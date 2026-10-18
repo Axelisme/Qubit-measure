@@ -28,7 +28,8 @@ def test_format_alu_op_str_rhs(mock_prog):
 
 def test_format_alu_op_invalid_rhs_raises(mock_prog):
     with pytest.raises(RuntimeError, match="invalid rhs"):
-        format_alu_op(mock_prog, "r0", "+", 3.14)  # type: ignore[arg-type]
+        # tolerated: Reject a float ALU operand at runtime.
+        format_alu_op(mock_prog, "r0", "+", 3.14)  # pyright: ignore[reportArgumentType]
 
 
 def test_format_alu_op_resolves_via_get_reg(mock_prog):

@@ -14,11 +14,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from matplotlib.figure import Figure
+from PyQt6.QtCore import pyqtSignal as Signal
 from qtpy.QtCore import (
     QCoreApplication,
     QObject,
     QThread,
-    Signal,  # type: ignore[reportPrivateImportUsage]
 )
 from qtpy.QtWidgets import QWidget
 

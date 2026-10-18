@@ -22,7 +22,7 @@ from typing import cast
 from matplotlib.backend_bases import Event, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+from PyQt6.QtCore import pyqtSignal as Signal
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,

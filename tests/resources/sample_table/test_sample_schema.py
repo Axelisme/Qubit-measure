@@ -755,7 +755,8 @@ def test_migrate_rejects_invalid_source_unit() -> None:
         migrate_sample_table_v2(
             pd.DataFrame({"calibrated mA": [1.0]}),
             dev_value_column="calibrated mA",
-            dev_value_unit="kA",  # type: ignore[arg-type]
+            # tolerated: Verify migration rejects unsupported kA units.
+            dev_value_unit="kA",  # pyright: ignore[reportArgumentType]
         )
     _assert_reason(exc.value, "invalid_unit")
 

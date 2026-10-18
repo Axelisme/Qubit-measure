@@ -185,7 +185,8 @@ def test_branch_roundtrip_strips_synthetic_big_pmem_jump_and_end_label():
 
 def test_basic_block_rejects_metainst_in_insts():
     with pytest.raises(ValueError, match="MetaInst"):
-        BasicBlockNode(insts=[MetaInst(type="BRANCH_START", name="bad")])  # type: ignore[list-item]
+        # tolerated: Reject structural metadata inside a basic instruction block.
+        BasicBlockNode(insts=[MetaInst(type="BRANCH_START", name="bad")])  # pyright: ignore[reportArgumentType]
 
 
 def test_unlink_inserts_labels_and_strips_p_addr():

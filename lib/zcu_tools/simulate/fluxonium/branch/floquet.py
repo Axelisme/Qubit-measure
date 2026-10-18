@@ -45,8 +45,10 @@ class _BaseFloquetBranchAnalysis:
             self.H_with_drive,
             2 * np.pi / self.r_f,
             args=self._floquet_args(photon),
-            options=self.solver_options,  # type: ignore[arg-type]  # qutip stubs declare dict but accept None
-            precompute=precompute,  # type: ignore[arg-type]  # qutip stubs declare ArrayLike but accept None
+            # tolerated: QuTiP accepts None solver options and forwards them to Propagator; its annotation omits None.
+            options=self.solver_options,  # pyright: ignore[reportArgumentType]
+            # tolerated: QuTiP explicitly builds its default time grid for None; its ArrayLike annotation omits None.
+            precompute=precompute,  # pyright: ignore[reportArgumentType]
         )
 
     def calc_branch_infos(
@@ -57,9 +59,8 @@ class _BaseFloquetBranchAnalysis:
         progress: bool = True,
     ) -> dict[int, list[int]]:
         branch_infos = {b: [] for b in branchs}
-        # qutip stubs have an overloaded `state` that doesn't accept int `t`;
-        # the actual API accepts t=0 for the initial-time state.
-        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]  # type: ignore[call-overload]
+        # tolerated: QuTiP returns a ket list with default data=False; its overload requires data and wrongly declares Qobj.
+        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]  # pyright: ignore[reportCallIssue]
         state_dim = len(fstate_n[0])
 
         for n in tqdm(

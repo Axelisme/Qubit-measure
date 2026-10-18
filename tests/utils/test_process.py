@@ -348,7 +348,8 @@ class TestPeakNAvgMaxMode:
 
     def test_invalid_mode_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid mode"):
-            peak_n_avg(np.array([1.0, 2.0]), n=1, mode="median")  # type: ignore[arg-type]
+            # tolerated: Verify unsupported peak selection modes fail.
+            peak_n_avg(np.array([1.0, 2.0]), n=1, mode="median")  # pyright: ignore[reportArgumentType]
 
     def test_large_random_consistency(self) -> None:
         """Optimised result must match the old loop on a large array."""
@@ -444,4 +445,5 @@ class TestWaveletSmoothing:
 
     def test_invalid_smooth_method_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid smoothing method"):
-            smooth_signal1d(np.arange(8.0), method="median")  # type: ignore[arg-type]
+            # tolerated: Verify unsupported smoothing methods fail.
+            smooth_signal1d(np.arange(8.0), method="median")  # pyright: ignore[reportArgumentType]

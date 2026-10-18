@@ -172,8 +172,11 @@ class EarlyStopMixin(TypedAcquireMixin):
         # Validate acquisition and early-stop behavior with existing public-interface tests.
         assert self.acquire_params is not None
         soc = self.acquire_params["soc"]
-        total_count = functools.reduce(operator.mul, self.loop_dims)  # type: ignore[arg-type]
-        reads_per_shot = [ro["trigs"] for ro in self.ro_chs.values()]  # type: ignore[union-attr]
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        assert self.loop_dims is not None
+        assert self.acc_buf is not None
+        total_count = functools.reduce(operator.mul, self.loop_dims)
+        reads_per_shot = [ro["trigs"] for ro in self.ro_chs.values()]
 
         count = 0
         stats_start = len(self.stats) if self.stats is not None else 0
@@ -186,7 +189,7 @@ class EarlyStopMixin(TypedAcquireMixin):
             soc.start_readout(
                 total_count,
                 counter_addr=self.counter_addr,
-                ch_list=list(self.ro_chs),  # type: ignore[arg-type]
+                ch_list=list(self.ro_chs),
                 reads_per_shot=reads_per_shot,
             )
             while count < total_count:
@@ -212,7 +215,7 @@ class EarlyStopMixin(TypedAcquireMixin):
                                 "got too much data: count=%d, new_points=%d, total_count=%d"
                                 % (count, new_points, total_count)
                             )
-                        self.acc_buf[ii].reshape((-1, 2))[  # type: ignore[index]
+                        self.acc_buf[ii].reshape((-1, 2))[
                             count * nreads : (count + new_points) * nreads
                         ] = data[ii]
                     count += new_points

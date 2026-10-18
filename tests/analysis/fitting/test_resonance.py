@@ -385,7 +385,12 @@ def test_model_fit_recovers_large_delay_nonuniform_truth(
         signals = _transmission_truth(freqs, **common)
 
     params = model.fit(freqs, signals, fit_bg_amp_slope=True)
-    fitted = model.calc_signals(freqs, **params)  # type: ignore[arg-type]
+    if model is HangerModel:
+        assert "Qc" in params
+        fitted = HangerModel.calc_signals(freqs, **params)
+    else:
+        assert "Qc" not in params
+        fitted = TransmissionModel.calc_signals(freqs, **params)
     nrmse = np.sqrt(np.mean(np.abs(fitted - signals) ** 2)) / np.ptp(np.abs(signals))
 
     np.testing.assert_allclose(params["freq"], freq, atol=0.08)
@@ -815,14 +820,26 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=True)
 
     supplied = Figure(figsize=(9, 8))
-    fig = model.visualize_fit(
-        freqs,
-        signals,
-        params,  # type: ignore[arg-type]
-        figure=supplied,
-        fit_bg_amp_slope=True,
-        fit_bg_phase_curvature=False,
-    )
+    if model is HangerModel:
+        assert "Qc" in params
+        fig = HangerModel.visualize_fit(
+            freqs,
+            signals,
+            params,
+            figure=supplied,
+            fit_bg_amp_slope=True,
+            fit_bg_phase_curvature=False,
+        )
+    else:
+        assert "Qc" not in params
+        fig = TransmissionModel.visualize_fit(
+            freqs,
+            signals,
+            params,
+            figure=supplied,
+            fit_bg_amp_slope=True,
+            fit_bg_phase_curvature=False,
+        )
     assert fig is supplied
     try:
         iq_ax, phase_ax, magnitude_ax = fig.axes
@@ -862,7 +879,11 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
         )
         np.testing.assert_allclose(
             np.asarray(total_fit.get_ydata(), dtype=np.float64),
-            np.abs(model.calc_signals(freqs, **params)),  # type: ignore[arg-type]
+            np.abs(
+                HangerModel.calc_signals(freqs, **params)
+                if "Qc" in params
+                else TransmissionModel.calc_signals(freqs, **params)
+            ),
         )
         np.testing.assert_allclose(
             np.asarray(envelope.get_ydata(), dtype=np.float64),
@@ -906,14 +927,26 @@ def test_visualization_omits_background_when_fit_is_disabled(
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=False)
 
     supplied = Figure(figsize=(9, 8))
-    fig = model.visualize_fit(
-        freqs,
-        signals,
-        params,  # type: ignore[arg-type]
-        figure=supplied,
-        fit_bg_amp_slope=False,
-        fit_bg_phase_curvature=False,
-    )
+    if model is HangerModel:
+        assert "Qc" in params
+        fig = HangerModel.visualize_fit(
+            freqs,
+            signals,
+            params,
+            figure=supplied,
+            fit_bg_amp_slope=False,
+            fit_bg_phase_curvature=False,
+        )
+    else:
+        assert "Qc" not in params
+        fig = TransmissionModel.visualize_fit(
+            freqs,
+            signals,
+            params,
+            figure=supplied,
+            fit_bg_amp_slope=False,
+            fit_bg_phase_curvature=False,
+        )
     assert fig is supplied
     try:
         magnitude_ax = fig.axes[2]

@@ -108,7 +108,8 @@ def test_subclass_with_invalid_info_model_raises_at_class_definition() -> None:
     with pytest.raises(TypeError, match="InvalidInfoModelDevice.*BaseDeviceInfo"):
 
         class InvalidInfoModelDevice(BaseDevice[BaseDeviceInfo]):
-            info_model = object  # type: ignore[assignment]
+            # tolerated: Invalid info_model must fail at subclass definition.
+            info_model = object  # pyright: ignore[reportAssignmentType]
 
             def _setup(
                 self,

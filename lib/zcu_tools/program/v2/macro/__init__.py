@@ -4,7 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Optional, Union
 
-from qick.asm_v2 import AsmV2, ConfigReadout, QickParam
+from qick.asm_v2 import AsmV2, ConfigReadout, QickParam, QickProgramV2
 
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
@@ -15,7 +15,7 @@ from .wmem import ConfigReadoutFromRegs, PulseFromLengthReg, PulseFromRegs
 from .write_reg import WriteRegOp
 
 
-class AdditionalMacroMixin(AsmV2):
+class AdditionalMacroMixin(QickProgramV2):
     def __init__(self, *args, **kwargs):
         self._delay_disabled = False
         self._temp_regs: list[str] = []
@@ -31,7 +31,7 @@ class AdditionalMacroMixin(AsmV2):
         # forgotten the name, causing _get_reg() lookups to fail.
         self._temp_regs = []
         self._reg_num_stack = []
-        super()._make_asm()  # type: ignore[misc]
+        super()._make_asm()
 
     def write_reg_op(
         self, dst: str, lhs: str, op: str, rhs: int | str | None = None
@@ -107,7 +107,7 @@ class AdditionalMacroMixin(AsmV2):
             # (extra dummy entry); the +1/+2 stride assumed below would land
             # on the wrong entry, so reject explicitly rather than corrupt
             # the pulse silently.
-            gen_type = self.soccfg["gens"][ch].get("type")  # type: ignore[attr-defined]
+            gen_type = self.soccfg["gens"][ch].get("type")
             if gen_type in ("axis_sg_int4_v1", "axis_sg_int4_v2"):
                 raise NotImplementedError(
                     f"pulse_by_reg(flat_top_pulse=True) is not supported on "
@@ -242,7 +242,7 @@ class AdditionalMacroMixin(AsmV2):
         # counters, swept-time registers and user add_reg() calls. Without this
         # check, a deeply nested acquire_temp_reg would surface as an opaque
         # QICK add_reg() error instead of pointing at the real cause.
-        dreg_qty = int(self.tproccfg.get("dreg_qty", 32))  # type: ignore[attr-defined]
+        dreg_qty = int(self.tproccfg.get("dreg_qty", 32))
         if total > dreg_qty:
             raise RuntimeError(
                 f"acquire_temp_reg: requested {total} nested temp registers "
@@ -252,7 +252,7 @@ class AdditionalMacroMixin(AsmV2):
 
         while len(self._temp_regs) < total:
             reg_name = f"temp_reg_{len(self._temp_regs)}"
-            self.add_reg(reg_name)  # pyright: ignore[reportAttributeAccessIssue]
+            self.add_reg(reg_name)
             self._temp_regs.append(reg_name)
 
         self._reg_num_stack.append(total)

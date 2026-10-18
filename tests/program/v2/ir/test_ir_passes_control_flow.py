@@ -301,14 +301,16 @@ def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
     # After merge: one block with two writes — dead write still present.
     merged_root = _run_chunk_passes_on_root(root, [BlockMergePass()])
     assert len(merged_root.insts) == 1
-    assert len(merged_root.insts[0].insts) == 2  # type: ignore[union-attr]
+    assert isinstance(merged_root.insts[0], BasicBlockNode)
+    assert len(merged_root.insts[0].insts) == 2
 
     # DeadWriteElimination clears the first (dead) write.
     out = _run_chunk_passes_on_root(merged_root, [DeadWriteEliminationPass()])
     merged = out.insts[0]
     assert isinstance(merged, BasicBlockNode)
     assert len(merged.insts) == 1
-    assert str(merged.insts[0].lit) == "#2"  # type: ignore[attr-defined]
+    assert isinstance(merged.insts[0], RegWriteInst)
+    assert str(merged.insts[0].lit) == "#2"
 
 
 def test_block_merge_chains_three_blocks():
@@ -323,7 +325,8 @@ def test_block_merge_chains_three_blocks():
     out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     assert len(out.insts) == 1
-    assert len(out.insts[0].insts) == 3  # type: ignore[union-attr]
+    assert isinstance(out.insts[0], BasicBlockNode)
+    assert len(out.insts[0].insts) == 3
 
 
 # ---------------------------------------------------------------------------

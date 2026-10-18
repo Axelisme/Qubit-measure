@@ -238,7 +238,7 @@ def build_database(
     GIL-holding Python ops, so thread workers contend and run slower than serial.
     ``n_jobs=-1`` (default) uses all cores; ``n_jobs=1`` forces serial.
     """
-    rows = [tuple(float(v) for v in p) for p in params]
+    rows = [(float(ej), float(ec), float(el)) for ej, ec, el in params]
 
     if n_jobs == 1:
         iterator = rows
@@ -246,7 +246,7 @@ def build_database(
             from tqdm.auto import tqdm
 
             iterator = tqdm(rows, desc="Calculating")
-        energies = [energy_fn(p) for p in iterator]  # type: ignore[arg-type]
+        energies = [energy_fn(p) for p in iterator]
     else:
         from joblib import Parallel, delayed
 

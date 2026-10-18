@@ -61,7 +61,7 @@ def test_make_soc_proxy_restores_timeout_after_success(monkeypatch):
             self._pyroTimeout: float | None = Pyro4.config.COMMTIMEOUT
             seen["timeout_at_construction"] = self._pyroTimeout
 
-        def get_cfg(self) -> dict:  # type: ignore[return]
+        def get_cfg(self) -> dict[str, object]:
             seen["timeout_at_get_cfg"] = self._pyroTimeout
             return {}  # minimal dict that QickConfig can receive
 

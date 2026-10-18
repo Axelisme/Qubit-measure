@@ -195,14 +195,12 @@ def test_predict_matrix_element_invalid_operator_raises() -> None:
     p = _make_predictor(PARAMS[0])
 
     with pytest.raises(ValueError, match="unsupported matrix operator"):
-        p.predict_matrix_element(0.1, (0, 1), "bad")  # type: ignore[arg-type]
+        # tolerated: Verify unsupported operator rejection through the scalar overload.
+        p.predict_matrix_element(0.1, (0, 1), "bad")  # pyright: ignore[reportCallIssue, reportArgumentType]
 
     with pytest.raises(ValueError, match="unsupported matrix operator"):
-        p.predict_matrix_element(
-            np.array([0.1]),
-            (0, 1),
-            "bad",  # type: ignore[arg-type]
-        )
+        # tolerated: Verify unsupported operator rejection through the array overload.
+        p.predict_matrix_element(np.array([0.1]), (0, 1), "bad")  # pyright: ignore[reportCallIssue, reportArgumentType]
 
 
 def test_predict_matrix_element_rejects_levels_above_one() -> None:

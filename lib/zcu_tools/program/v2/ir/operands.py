@@ -407,8 +407,9 @@ def parse_label(val: Label | LabelRef | str | None) -> LabelRef | None:
     name = val[1:] if val.startswith("&") else val
     if not name:
         return None
-    if name in PSEUDO_LABELS:
-        return LabelRef(name)  # type: ignore[arg-type]
+    for pseudo in PSEUDO_LABELS:
+        if name == pseudo:
+            return LabelRef(pseudo)
     return LabelRef(Label(name))
 
 

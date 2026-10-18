@@ -56,7 +56,8 @@ def test_basic_block_leaf_api_string_and_validation():
         block.replace_child(DummyNode(), DummyNode())
 
     with pytest.raises(ValueError, match="LabelInst"):
-        BasicBlockNode(insts=[LabelInst(name=Label("bad"))])  # type: ignore[list-item]
+        # tolerated: Reject label markers inside a basic instruction block.
+        BasicBlockNode(insts=[LabelInst(name=Label("bad"))])  # pyright: ignore[reportArgumentType]
 
     with pytest.raises(ValueError, match="JumpInst"):
         BasicBlockNode(insts=[JumpInst(label=LabelRef(Label("bad")))])
@@ -106,7 +107,8 @@ def test_irloop_body_rejects_non_block_node():
             name="loop",
             counter_reg=Register("r0"),
             n=3,
-            body=BasicBlockNode(insts=[NopInst()]),  # type: ignore[arg-type]
+            # tolerated: Reject a loop body that is not a BlockNode.
+            body=BasicBlockNode(insts=[NopInst()]),  # pyright: ignore[reportArgumentType]
         )
 
 
