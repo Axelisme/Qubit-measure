@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ._recipe_element_support import ElementGui, element_client
+from ._recipe_element_support import ANALYSIS_RECIPE, ElementGui, element_client
 
 
 @pytest.mark.parametrize(
@@ -88,6 +88,54 @@ def test_indexed_overrides_capture_all_element_sources_and_original_names(
             == expected
         )
         assert client.transport.sent == before
+
+
+def test_estimates_and_candidates_keep_author_identity_after_source_reset(
+    tmp_path: Path,
+) -> None:
+    gui = ElementGui()
+    with element_client(tmp_path, gui, ANALYSIS_RECIPE) as client:
+        reply = client.call(
+            "elements", {"participants": ["Q3", "Q1"], "overrides": []}
+        ).data
+        assert reply["status"] == "awaiting_answer", reply
+        pane = reply["analysis"]["primary"]
+        assert pane["estimates"] == {
+            "without_identity": {"value": 2.5, "stderr": None, "unit": None},
+            "fit": {
+                "value": 7.0,
+                "stderr": 0.2,
+                "unit": "us",
+                "element": {"index": 2, "name": "Q3"},
+            },
+        }
+        candidate = reply["writeback"]["stages"]["primary"][0]
+        assert candidate["element"] == {"index": 2, "name": "Q3"}
+        assert candidate["target"] == "trigger_offset"
+        assert candidate["proposed"] == 0.24 and candidate["current"] == 0.1
+        assert reply["writeback"]["destination"] == {
+            "context": {"active_label": "sample"}
+        }
+        assert reply["writeback"]["receipts"] == ()
+        assert reply["question_items"] == ("trigger_offset",)
+        gui.names = ["Q7", "Q8", "Q9"]
+        gui.native_summary.clear()
+        gui.candidate_element = {"index": 0, "name": "later"}
+        gui.reset_form({"qubit": "Q2"})
+        before = list(client.transport.sent)
+        retained = client.call("status", {"execution": reply["execution"]})
+        assert retained["analysis"] == reply["analysis"]
+        assert retained["actual"] == reply["actual"]
+        assert retained["writeback"] == reply["writeback"]
+        assert client.transport.sent == before
+        final = client.call(
+            "answer", {"recipe": reply["execution"], "decision": "skipped"}
+        ).data
+        assert final["status"] == "finished"
+        assert final["writeback"] == reply["writeback"]
+        assert all(
+            method != "tab.writeback_write" for method, _ in client.transport.sent
+        )
 
 
 @pytest.mark.parametrize(

@@ -1,13 +1,16 @@
 """Synthetic fixed-list author using public inputs, Form owner and Run capture."""
 
 from contextlib import contextmanager
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, TypedDict
 
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta, Range
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.form_adapter import FixedElements, Form
-from zcu_tools.mcp.measure.execution_reply import SummaryParameter
+from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
     RecipeExpression,
@@ -15,6 +18,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeGenerator,
     RecipeInputSchema,
     RecipeSession,
+    RecipeTab,
+    ask,
 )
 from zcu_tools.program.v2 import SweepCfg
 
@@ -79,11 +84,12 @@ INPUTS: RecipeInputSchema = {
 }
 
 
-def author(
-    session: RecipeSession, *, participants: list[str], overrides: list[Override]
-) -> RecipeGenerator:
+def configure(
+    session: RecipeSession, participants: list[str], overrides: list[Override]
+) -> RecipeTab:
+    """Install inputs through owner operations, never evaluate expressions here."""
     tab = session.open_tab("lookback")
-    tab.set(("participants",), participants)
+    tab.set(("participants",), [name for name in participants])
     for index in range(3):
         tab.retain_source(("tones", index, "drive", "gain"), "default")
         tab.retain_source(("tones", index, "sweep", "start"), "default")
@@ -91,7 +97,25 @@ def author(
     tab.set_fields(
         [RecipeFieldEdit(tuple(edit["path"]), edit["value"]) for edit in overrides]
     )
-    yield from tab.run_step()
+    return tab
+
+
+def author(
+    session: RecipeSession, *, participants: list[str], overrides: list[Override]
+) -> RecipeGenerator:
+    yield from configure(session, participants, overrides).run_step()
+
+
+def analysis_author(
+    session: RecipeSession, *, participants: list[str], overrides: list[Override]
+) -> RecipeGenerator:
+    result = yield from configure(session, participants, overrides).run_step()
+    run = result.run
+    if run is None:
+        return
+    run.save_raw()
+    yield from run.analyze_step("primary")
+    yield from ask(run.propose_writeback())
 
 
 RECIPE = RecipeDefinition(
@@ -112,6 +136,27 @@ RECIPE = RecipeDefinition(
 )
 
 
+ANALYSIS_RECIPE = replace(
+    RECIPE,
+    run=analysis_author,
+    summary_estimates=(
+        SummaryEstimate(
+            "missing", ("tones", 0, "fit"), element_key=("tones", 0, "element")
+        ),
+        SummaryEstimate(
+            "without_identity", ("tones", 1, "fit"), element_key=("tones", 1, "element")
+        ),
+        SummaryEstimate(
+            "fit",
+            ("tones", 2, "fit"),
+            ("tones", 2, "stderr"),
+            "us",
+            element_key=("tones", 2, "element"),
+        ),
+    ),
+)
+
+
 class ElementGui(ExecutionGui):
     """Wire collaborator delegates edits/admission to the real Form owner."""
 
@@ -120,6 +165,8 @@ class ElementGui(ExecutionGui):
         self.md["$qubit.freq"] = 4500.0
         self.names = ["Q1", "Q2", "Q3"]
         self.accepted: Group | None = None
+        self.native_summary: dict[str, object] = {}
+        self.candidate_element: ElementIdentity | None = None
 
     def make_form(self) -> Form[Group]:
         return Form(
@@ -141,7 +188,24 @@ class ElementGui(ExecutionGui):
     def __call__(self, method, params):
         if method == "tab.run_start":
             self.accepted = Group.model_validate(self.owner.accept().cfg)
+            element = ElementIdentity(index=2, name=self.accepted.tones[2].name)
+            self.candidate_element = element.copy()
+            self.native_summary = {
+                "tones": [
+                    {},
+                    {"fit": 2.5},
+                    {"fit": 7.0, "stderr": 0.2, "element": element},
+                ]
+            }
         return super().__call__(method, params)
+
+    def _analysis(self, method, params):
+        reply = super()._analysis(method, params)
+        if method == "tab.get_analyze_result":
+            reply["summary"] = deepcopy(self.native_summary)
+        elif method == "tab.writeback_preview":
+            reply["items"][0]["element"] = deepcopy(self.candidate_element)
+        return reply
 
 
 @contextmanager
