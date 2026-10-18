@@ -78,7 +78,16 @@ def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rp
             1
         ]["values"]
         assert owner.input.same_as(before)
+        fixture.state.set_tab_running(tab, running=True)
+        assert rpc.call("tab.read_elements", {"tab_id": tab, "path": ["tones"]})["ok"]
+        for bad_path in (["tones", 5, "drive"], ["tones", "1", "drive"], ["tones", -1, "drive"]):
+            refused = rpc.call("tab.read_module", {"tab_id": tab, "field": bad_path})
+            assert not refused["ok"], refused
+            assert refused["error"]["data"]["form_path"] == bad_path
+        assert owner.input.same_as(before)
+        fixture.state.set_tab_running(tab, running=False)
     finally:
+        fixture.state.set_tab_running(tab, running=False)
         fixture.ctrl.tab_control.close_tab(tab)
 
 
