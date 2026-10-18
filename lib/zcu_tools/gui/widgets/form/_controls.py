@@ -248,6 +248,14 @@ class _TextInput(QLineEdit):
             self.editingFinished.emit()
 
 
+@dataclass(frozen=True)
+class RowActions:
+    """Explicit row operations, separate from parsed value input."""
+
+    command: Callable[[FormWritePath, str], None]
+    select: Callable[[FormWritePath, JsonValue], None]
+
+
 class FieldRow:
     """Keep one described row stable while publication values change.
 
@@ -291,14 +299,14 @@ class FieldRow:
         changed: Callable[[FormWritePath, Mapping[FormWritePath, JsonValue]], None],
         unparsed: Callable[[FormWritePath, LocalText], None],
         folds: dict[FormWritePath, bool],
-        command: Callable[[FormWritePath, str], None],
+        actions: RowActions,
     ) -> None:
-        """Build under parent; call changed(path, batch), unparsed(path, text)
-        or command(path, name).
+        """Build under parent with synchronous edit callbacks.
 
-        path is this row's field path. batch maps write paths to JSON input:
-        one entry at path (an option row writes its chosen option's value).
-        command receives the name of a triggered option command.
+        changed(path, batch) writes parsed input; batch contains the row path.
+        unparsed(path, text) reports view-local drafts. select(path, value) sends
+        the declared option value, separately from raw value writes.
+        command(path, name) sends a triggered option command.
         Callbacks run synchronously for user input, never during display:
         for text, on Enter or focus loss while the row is editable, and not
         for text that already shows state's input.
@@ -311,7 +319,8 @@ class FieldRow:
         self._changed = changed
         self._unparsed = unparsed
         self._folds = folds
-        self._command = command
+        self._command = actions.command
+        self._select = actions.select
         # The selected option's command actions on the dropdown, in order.
         self._commands: list[QAction] = []
         self._field_actions: list[QAction] = []
@@ -595,8 +604,7 @@ class FieldRow:
         # The missing item (after the options) writes nothing.
         if self._displaying or not 0 <= index < len(options):
             return
-        # The core switches branches to fresh defaults; nothing is carried over.
-        self._write(options[index].value)
+        self._select(self.field.path, options[index].value)
 
     def _command_triggered(self, name: str) -> None:
         if not self._displaying:

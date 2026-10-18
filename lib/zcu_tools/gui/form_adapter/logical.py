@@ -34,7 +34,13 @@ class ModuleSelector:
 
 @dataclass(frozen=True)
 class LogicalEdit:
-    """One requested logical field path and its authored JSON value (Expr retained)."""
+    """One logical field and its exact authored JSON replacement, Expr retained.
+
+    A model/container target replaces its entire raw subtree without merging
+    defaults; leaf targets replace only that leaf. Generated selector-bearing
+    containers require the dedicated selection operations instead. Paths in a
+    batch must be nonoverlapping. No old branch is evaluated or converted.
+    """
 
     path: FormWritePath
     value: JsonValue

@@ -6,14 +6,17 @@ from copy import deepcopy
 from pydantic import BaseModel, JsonValue, create_model
 from pydantic.fields import FieldInfo
 
+from ._admission import check_change
 from ._evaluate import result, value_at
 from ._json import copy_json
 from ._selection import Field, resolve
 from ._sources import check_sources
 from ._structure import (
+    StructureError,
     alternatives,
     discriminator,
     intrinsic_tags,
+    list_model,
     model_types,
     selected,
 )
@@ -89,6 +92,11 @@ def _check_field(info: FieldInfo, value: JsonValue) -> None:
         if key is not None and value.get(key) not in intrinsic_tags(branch, key):
             raise FormCommandError("Command returned an illegal selection")
         _check_object(branch, value)
+    elif (element := list_model(info)) is not None and isinstance(value, list):
+        for item in value:
+            if not isinstance(item, dict):
+                raise FormCommandError("Replacement returned an illegal list element")
+            _check_object(element, item)
     elif isinstance(value, dict) and info.annotation in (
         int,
         float,
@@ -161,7 +169,41 @@ def prepare_command[F: FormModel](
         raise FormCommandError(f"Unavailable field command {name!r} at {path!r}")
     snapshot, context = observation(input, target, env)
     output = command.run(snapshot, context)
-    return install_field(input, target, output, env)
+    candidate = install_field(input, target, output, env)
+    check_change(input, candidate, (path,))
+    return candidate
+
+
+def prepare_write[F: FormModel](
+    input: FormInput[F], batch: Mapping[FormWritePath, JsonValue], env: FormEnv
+) -> FormInput[F]:
+    """Prepare exact nonoverlapping replacements, checking the final candidate."""
+    paths = tuple(batch)
+    if any(
+        not path or any(path != other and other[: len(path)] == path for other in paths)
+        for path in paths
+    ):
+        raise FormCommandError("Replacement paths must be nonempty and nonoverlapping")
+    candidate = input
+    for path, value in batch.items():
+        target = resolve(input.model, input.data, path, env, input.selections)
+        try:
+            candidate = install_field(
+                candidate,
+                target,
+                FormCommandResult(
+                    None,
+                    selected(target.info, value) if isinstance(value, dict) else None,
+                    value,
+                ),
+                env,
+                validate_sources=False,
+            )
+        except FormCommandError as exc:
+            raise StructureError(str(exc), path=path) from exc
+    check_sources(input.model, candidate.data, env, validate_paths=True)
+    check_change(input, candidate, paths)
+    return candidate
 
 
 def observation(
@@ -201,27 +243,36 @@ def install_field[F: FormModel](
     target: Field,
     output: FormCommandResult,
     env: FormEnv,
+    *,
+    validate_sources: bool = True,
 ) -> FormInput[F]:
-    """Admit a complete command/converter replacement at its mounted path."""
+    """Admit a complete replacement; batch preparation defers source checking."""
     data = input.data
     path = target.path
     try:
         replacement = _replacement(target, output)
     except ValueError as exc:
         raise FormCommandError(str(exc)) from exc
-    parent = data
+    parent: JsonValue = data
     for part in path[:-1]:
-        if not isinstance(part, str):
-            raise FormCommandError("Command target is not an active object")
-        child = parent[part]
-        if not isinstance(child, dict):
-            raise FormCommandError("Command target is not an active object")
-        parent = child
-    name = path[-1]
-    if not isinstance(name, str):
-        raise FormCommandError("Command target is not an active object field")
-    parent[name] = replacement
-    check_sources(input.model, data, env, validate_paths=True)
+        match parent, part:
+            case dict() as obj, str() as key:
+                if key not in obj:
+                    obj[key] = {}
+                parent = obj[key]
+            case list() as items, int() as index:
+                parent = items[index]
+            case _:
+                raise FormCommandError("Command target is not an active container")
+    match parent, path[-1]:
+        case dict() as obj, str() as key:
+            obj[key] = replacement
+        case list() as items, int() as index:
+            items[index] = replacement
+        case _:
+            raise FormCommandError("Command target is not an active field")
+    if validate_sources:
+        check_sources(input.model, data, env, validate_paths=True)
     selections = {
         key: value
         for key, value in input.selections.items()
