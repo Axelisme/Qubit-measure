@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-18，compiler-owned metadata emission and register resolution
+**Last updated:** 2026-10-19，readout configuration for frequency word decoding
 
 ## Testing & Type Checking Conventions
 
