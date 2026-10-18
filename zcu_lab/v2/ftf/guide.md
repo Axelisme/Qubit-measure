@@ -4,17 +4,17 @@
 
 ## 目前可用與待交付能力
 
-既有單 qubit 實驗的入口與操作見下方連結。本頁不新增實驗，也不表示 FTF two-qubit 實驗已出現在 GUI catalog。
+既有單 qubit 實驗的入口與操作見下方連結。Catalog 的 `ftf/joint_readout` 已提供四分支 raw 保存、離線分類與熱 population matrix，操作見 [joint readout 指南](joint_readout/guide.md)。這不代表實際 FTF mux 模擬已通過。
 
-下列 FTF 能力尚待後續實驗實作及外部 owner 交付。先確認對應公開契約與驗證結果，並確認更動已進入 main，再進行 acquisition 或控制鏈 smoke。
+MuxGroup 綁定與 tone-ordered raw 已落地。雙線 drive 配置、FTF mux 模擬及其餘校準實驗仍待交付。先確認對應公開契約與驗證結果，再進行實際 FTF 控制鏈 smoke。
 
-| 待交付能力 | 操作前要確認的內容 |
+| 能力與交付狀態 | 操作前要確認的內容 |
 | --- | --- |
-| MuxGroup 綁定 | mux owner 提供有序 `resonators`／`qubits` 對應，FTF 才能從 `qubits` 解析 F1/F2 的 tone。不要把目前的舊 `members` 設定當成已完成 qubit 綁定。 |
-| Tone-ordered raw shots | mux owner 公布呼叫方式、維度、tone 順序、shot 對應、normalization 與 rounds 語意。平均 mux 頻譜不能代替同 shot IQ。 |
+| MuxGroup 綁定，已提供 | 有序 `resonators`／`qubits` 對應已可用。F1/F2 tone 取角色在 `qubits` 的位置。舊 `members` 不受支援。Form 以固定 capture 驗證 component 關係。 |
+| Tone-ordered raw shots，已提供 | `MuxReadout.collect_raw_iq` 回最後一輪、原 loop 與 tone 順序的 normalized raw IQ。每 completed round 收集，host rounds 串接，不重複 normalization。平均 mux 頻譜不能代替同 shot IQ。 |
 | 雙 charge line | simulation owner 提供 `f1_charge`／`f2_charge` 配置與 operator 語意，對應兩個獨立 generator。串擾係數不代表新增 coupler drive。 |
 | FTF mux acquire | simulation owner 提供同一次 joint 態抽樣的多 receiver 讀出，不能用兩路獨立抽樣冒充 joint shots。 |
-| FTF 實驗與前端 | 後續實作提供 joint readout、ZZ、雙線校準、phase 分析與保存。本文的校準路線不是現有可執行 workflow。 |
+| FTF 實驗與前端，部分提供 | Joint readout 已提供 Form、Run、native save/load、counts 與 matrix。ZZ、雙線校準、phase 分析及端到端 FTF smoke 仍待交付。本文的校準路線不是自動 workflow。 |
 
 不要為了先跑通而另寫 raw parser、猜 ADC 排序，或從 simulator truth 補校準。本指南也不提供模擬器配置或啟動命令。
 
@@ -48,13 +48,13 @@ Open 或表單的 Reset 會固定捕捉當時的 aliases、parameters 與 Module
 
 Rabi 的 module 與 slot rows 可分開 Apply。只接受 module、不更新 slot 時，後續表單可能仍用舊 pulse。確認 x180/x90 指向這次接受的 keys；若 Ramsey 更新了 qubit frequency，也要核對後續實際使用的 pulse frequency，不能假設 scalar 更新會改寫 library pulse。
 
-單 qubit GE 校準要記錄 readout route、gain、frequency、積分窗口與其他讀出條件。後續 joint 分類需要與實際 mux IQ 相容的兩組 GE 中心。改讀出條件後要重新確認中心；完成既有單 qubit GE 不代表 mux raw 或 FTF joint 支援已交付。
+單 qubit GE 校準要記錄 readout route、gain、frequency、積分窗口與其他讀出條件。後續 joint 分類需要與實際 mux IQ 相容的兩組 GE 中心。改讀出條件後要重新確認中心；完成既有單 qubit GE 不代表其中心可直接用於不同 mux 讀出條件，也不代表實際 FTF joint 模擬已通過。
 
 這裡重用既有序列，不另做 FTF 版單 qubit 實驗，也不接管 mux 單 qubit Rabi／T1／T2。FTF 後續分支保留熱 population，不藉 heralding、純態注入或 post-selection 改善圖形。
 
 ## FTF 的四個角色與 tone 對應
 
-以下是後續 FTF 表單的綁定契約，須等 MuxGroup `qubits` 支援落地後使用。
+Joint readout 使用以下固定角色綁定，後續 FTF 表單沿用同一契約。MuxGroup `qubits` 支援已落地。
 
 | Scalar alias | 指向 | 用途 |
 | --- | --- | --- |
@@ -69,7 +69,7 @@ F1 的 tone 是 `$f1` component 在固定 capture 的 `$mux.qubits` 中的位置
 
 改角色後重新 Reset，核對 F1/F2 pulses、兩個 generator、mux readout 與 DC source。Core 使用具名 device 及 native 單位，不把 alias 語法送給 driver。F1/F2 bias 由操作員提供；掃 coupler source 不等於只改 coupler loop flux，也不會自動補償 F1/F2 的偏移。
 
-## 第一批 0b–6 的校準路線，待交付
+## 第一批 0b–6 的校準路線，0b 已提供離線驗證
 
 以下次序以 0a 的單 qubit pulses、readout 與人工記錄的 bias 為起點。各實驗分別 Run、分析、preview 與 Apply，不會自動啟動下一步。
 
@@ -77,7 +77,7 @@ F1 的 tone 是 `$f1` component 在固定 capture 的 `$mux.qubits` 中的位置
 
 | 次序 | 操作與圖 | 判讀與後續動作 |
 | --- | --- | --- |
-| 0b. Joint readout | 四個 `B(00)`／`B(01)`／`B(10)`／`B(11)` 分支各接一次 mux readout，收同 shot 兩 tone IQ。顯示 raw IQ、counts 與 4×4 confusion matrix。 | 行是名目準備，列是同 shot 的 00／01／10／11 分類，兩軸都依 F1、F2 順序。逐 tone 使用有效 GE 中心做最近中心 G/E 分類，再直接 joint 計數，不能乘兩張 marginal matrices。 |
+| 0b. [Joint readout](joint_readout/guide.md) | 四個 `B(00)`／`B(01)`／`B(10)`／`B(11)` 分支各接一次 mux readout，收同 shot 兩 tone IQ。保存 raw IQ，顯示 acquired shots、counts 與 4×4 confusion matrix。 | 行是名目準備，列是同 shot 的 00／01／10／11 分類，兩軸都依 F1、F2 順序。逐 tone 使用有效 GE 中心做最近中心 G/E 分類，再直接 joint 計數，不能乘兩張 marginal matrices。 |
 | 1. Idle ZZ | 選 F1 或 F2 為 target，spectator 做 I／Xπ 兩分支。掃 Ramsey delay，看兩條曲線、fit 與頻率差 ζ；需要時外層掃 coupler DC。 | 熱態可混合多個 conditional 頻率。無法辨識時說明原因，不硬給 pure ZZ。ζ 只作分析結果，不 writeback，也不自動改 DC 工作點。 |
 | 2. Conditional higher-level spectroscopy | 四個名目分支做雙線 weak probe，掃共同 frequency，可加 coupler DC 軸，並比較可選雙 Xπ 對比 pulse 的訊號。看四分支頻譜／熱圖。 | 人工從圖選目標 transition 與後續 probe 窗口。不自動把最深峰當 CZ frequency，不替峰命名 bare coupler 能級，也不擬合 EC/EJ/J。 |
 | 3a. Constructive phase | 在 `B(11)` 固定兩線 gain 比例，掃 relative phase × duration。看 Rabi 干涉圖與可辨識的 Rabi rate。 | 選目標 transition 的建設性 phase。有效結果可提出 F2 相對 F1 的 pulse phase 更新；不掃寄生線抵消，也不最佳化 relative gain ratio。 |
