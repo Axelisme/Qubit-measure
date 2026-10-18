@@ -65,7 +65,7 @@ Form 提供固定 model list 的共用描述、picker 與 indexed editing。元�
 
 需要名稱定位的表單在建立時拒絕重複元素名，錯誤指名重複名稱與原始 indices。Framework 只檢查宣告名稱的唯一性，不解讀 resonator，不改 [[0072]] 的 group schema。元素名取法歸實驗定義者；若實驗需要重複 resonator，可以宣告 R1#0、R1#1 等不同名稱，framework 不自行加後綴。這項限制由顧問於 2026-10-18 確認，避免 participants 與 recipe overrides 無法唯一定位。
 
-Workflow 的 `TunablesHost.apply` 在 native update 邊界拒絕含 int index 的 Form leaf，回 `FormErrors` 並保留原 typed path，說明 native tunables 不支援 list 元素。Engine、draft、base 與 accepted input 都不變。Native `TunableChange.path` 只接受 model-field dotted path，雖可替換完整 list，但不接受元素 index。Host 不把 index 字串化、不擴 native grammar，也不將 indexed leaves 改成 whole-list 提交。目前 workflow tunables 沒有固定 list；通用 Form 的 indexed editing 不等於 native tunables 已有相同的提交能力。這個明確拒絕邊界由顧問於 2026-10-18 依使用者的代裁授權採用。
+Workflow 的 Apply 以宣告的 Form.to_cfg() 轉成完整 native tunables model，再由 Engine 依 workflow 型別驗證、整體替換並增加 revision。List 與固定 list 隨完整 model 提交，不攤平 preview leaves，也不建立 native index path grammar。每次 Apply 的 journal 記 actor、revision_before／after 與完整新 tunables JSON。Append 成功後才發布值與 revision，宿主才接受 input／base。使用者於 2026-10-18 確認完整 model 直接套用、不比對差異，並在日誌寫法中確認「甲乙都可以」。採完整快照，不維護逐葉差異或舊格式相容層。當前 step capture 與 iteration record.json 格式不變，見 [[0062]]。
 
 Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `name` 由 capture 產生且不可編輯。Drive 類實驗以 qubit 名稱識別，onetone 以 resonator 名稱識別。每個元素都有必填 drive，有掃描的實驗另有 sweep。未參與元素保留設定，適用同一驗證規則，無效時也擋 Run。
 

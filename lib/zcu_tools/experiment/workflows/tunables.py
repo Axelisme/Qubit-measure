@@ -1,4 +1,4 @@
-"""Validated tunables snapshots and journal-before-publication batch updates."""
+"""Validated native model snapshots and journal-before-publication replacement."""
 
 from __future__ import annotations
 
@@ -10,9 +10,8 @@ from threading import RLock
 
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
-from .declaration import validate_tunable_path
-from .journal import ChangedValue, TunablesChanged
-from .models import Actor, RevisionConflict, TunableChange, TunablesSnapshot
+from .journal import TunablesChanged
+from .models import Actor, RevisionConflict, TunablesSnapshot
 
 _json_adapter = TypeAdapter(JsonValue)
 
@@ -39,7 +38,7 @@ class TunableValues[T: BaseModel]:
     and append, so model values and revision are published only after their
     journal line.
 
-    This package-internal seam hides schema paths, whole-model validation,
+    This package-internal seam hides whole-model validation,
     detached JSON projections, and atomic revision publication. Engine retains
     lifecycle/run-id policy and turns append errors into run failure.
     """
@@ -84,74 +83,41 @@ class TunableValues[T: BaseModel]:
 
     def update(
         self,
-        changes: tuple[TunableChange, ...],
+        tunables: BaseModel,
         *,
         expected_revision: int,
         actor: Actor,
     ) -> TunablesSnapshot:
-        """Validate and journal one nonempty leaf-replacement batch, then publish.
+        """Revalidate a complete declared native model, journal, then replace it.
 
-        paths use model field names and dot components, not aliases or array
-        indices. Lists/tuples are replaced as a whole. JSON arrays are valid
-        inputs for declared tuple fields, including strict models; the model's
-        strict scalar policy still applies. Unknown paths, model-layer
-        replacements, overlap, duplicates, and empty batches raise ValueError.
-        Updating through an absent optional model also raises ValueError.
-        None is a value, not deletion; model validation decides if it is legal.
-
-        expected_revision is a nonnegative integer. A stale value raises
-        RevisionConflict with expected/actual; schema and nonfinite errors
-        retain pydantic ValidationError locations. actor attributes the batch.
-        The complete candidate is validated, including cross-field rules.
-        append errors propagate with their original cause and publish nothing.
-        A successful batch increments revision once, including same-value edits.
-        Values and revision are installed only after append succeeds.
+        tunables must be an instance of model_type. Wrong model types raise
+        TypeError; invalid fields or nonfinite values raise ValidationError.
+        Values are revalidated from fields, not trusted model instances.
+        expected_revision must be a nonnegative integer; stale versions raise
+        RevisionConflict. actor attributes the complete replacement.
+        append errors propagate unchanged and publish nothing.
+        Every success increments revision once, even for identical values.
         """
         with self._lock:
             if type(expected_revision) is not int or expected_revision < 0:
                 raise ValueError("expected_revision must be a nonnegative integer")
             if expected_revision != self._revision:
                 raise RevisionConflict(expected_revision, self._revision)
-            _check_batch(changes)
-            before = _model_json(self._values)
-            candidate = deepcopy(before)
-            for change in changes:
-                validate_tunable_path(self._model_type, change.path)
-                _replace_leaf(candidate, change)
-            # Reject nonfinite values before JSON encoding can replace them with null.
-            _check_finite(candidate, (), self._model_type.__name__)
-            # JSON arrays remain valid inputs for model-declared strict tuples.
-            model = self._model_type.model_validate_json(
-                _json_adapter.dump_json(candidate), by_name=True, by_alias=False
+            if not isinstance(tunables, self._model_type):
+                raise TypeError("Expected an instance of the declared tunables model")
+            model = deepcopy(
+                self._model_type.model_validate(
+                    tunables.model_dump(mode="python"), by_name=True, by_alias=False
+                )
             )
             after = _model_json(model)
-            applied = tuple(
-                ChangedValue(
-                    change.path,
-                    deepcopy(_leaf_value(before, change.path)),
-                    deepcopy(_leaf_value(after, change.path)),
-                )
-                for change in changes
+            event = TunablesChanged(
+                actor, self._revision, self._revision + 1, deepcopy(after)
             )
-            event = TunablesChanged(actor, self._revision, self._revision + 1, applied)
             self._append(event)
             self._values = model
             self._revision += 1
             return TunablesSnapshot(self._revision, after)
-
-
-def _check_batch(changes: tuple[TunableChange, ...]) -> None:
-    if not changes:
-        raise ValueError("Tunable updates require a nonempty batch")
-    paths = tuple(change.path for change in changes)
-    unique_paths = set(paths)
-    if len(unique_paths) != len(paths):
-        raise ValueError("Duplicate tunable paths in batch")
-    for path in paths:
-        parts = path.split(".")
-        for end in range(1, len(parts)):
-            if ".".join(parts[:end]) in unique_paths:
-                raise ValueError("Overlapping parent/child tunable paths")
 
 
 def _model_json(model: BaseModel) -> dict[str, JsonValue]:
@@ -177,23 +143,3 @@ def _check_finite(
     elif isinstance(value, list):
         for index, child in enumerate(value):
             _check_finite(child, (*location, index), title)
-
-
-def _leaf_parent(values: dict[str, JsonValue], path: str) -> dict[str, JsonValue]:
-    current = values
-    for part in path.split(".")[:-1]:
-        child = current[part]
-        if not isinstance(child, dict):
-            raise ValueError(f"Cannot update through an absent model: {path!r}")
-        current = child
-    return current
-
-
-def _leaf_value(values: dict[str, JsonValue], path: str) -> JsonValue:
-    return _leaf_parent(values, path)[path.split(".")[-1]]
-
-
-def _replace_leaf(values: dict[str, JsonValue], change: TunableChange) -> None:
-    parent = _leaf_parent(values, change.path)
-    name = change.path.split(".")[-1]
-    parent[name] = deepcopy(change.value)
