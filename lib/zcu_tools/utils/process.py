@@ -251,7 +251,8 @@ def rescale(signals: NDArray[T_dtype], axis: int | None = None) -> NDArray[T_dty
         if np.sum(~np.isnan(signals)) > 1:  # at least 2 non-nan values
             np.divide(signals, np.nanstd(signals), out=signals)
 
-    elif isinstance(axis, int):
+    # tolerated: Untyped invalid axes must reach the ValueError branch, not swapaxes.
+    elif isinstance(axis, int):  # pyright: ignore[reportUnnecessaryIsInstance]
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         val_mask = np.sum(~np.isnan(signals), axis=0) > 1

@@ -10,7 +10,8 @@ from typing import Any
 
 import numpy as np
 
-Axis = namedtuple("Axis", ["name", "unit", "values"])
+# tolerated: Values pass through by identity without a normalized container contract.
+Axis = namedtuple("Axis", ["name", "unit", "values"])  # pyright: ignore[reportUntypedNamedTuple]
 
 _VARIABLE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
@@ -284,9 +285,9 @@ class LabberData:
         propagate, possibly leaving a partial new file.
         """
         if isinstance(self.data.values, list):
-            from .labber import _save_labber_trace_data
+            from .labber import write_labber_trace_file
 
-            return _save_labber_trace_data(path, self)
+            return write_labber_trace_file(path, self)
         from .labber import write_labber_data_file
         from .paths import format_ext
 
@@ -360,14 +361,16 @@ class GroupedLabberData:
                     "GroupedLabberData variable values must be LabberPayload, "
                     "not LabberData"
                 )
-            if not isinstance(payload, LabberPayload):
+            # tolerated: Untyped callers must get TypeError here, before payload I/O.
+            if not isinstance(payload, LabberPayload):  # pyright: ignore[reportUnnecessaryIsInstance]
                 raise TypeError(
                     "GroupedLabberData variable values must be LabberPayload "
                     f"(variable {variable!r} got {type(payload).__name__})"
                 )
             normalized[variable] = payload
 
-        if metadata is not None and not isinstance(metadata, LabberMetadata):
+        # tolerated: Reject invalid runtime metadata before storing it or opening a file.
+        if metadata is not None and not isinstance(metadata, LabberMetadata):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(
                 "GroupedLabberData metadata must be LabberMetadata "
                 f"(got {type(metadata).__name__})"

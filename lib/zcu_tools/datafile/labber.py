@@ -145,8 +145,13 @@ _STEP_NAME_API = "Step index API"
 _VLEN_STR = h5py.special_dtype(vlen=str)
 
 
-def _decode(value: Any) -> Any:
-    """Decode hdf5 bytes/arrays to python str (mirrors SR_HDF5.decodeAttribute)."""
+def decode_labber_attribute(value: Any) -> Any:
+    """Decode a borrowed HDF5 attribute using Labber's NoneValue convention.
+
+    Bytes become UTF-8 text, string/object arrays become new lists and numpy
+    booleans become bools. Other values pass through by identity. Invalid UTF-8
+    propagates UnicodeDecodeError; this does not read or mutate an HDF5 object.
+    """
     if isinstance(value, (bytes, str)):
         s = value.decode("utf-8") if isinstance(value, bytes) else value
         return None if s == "NoneValue" else s
@@ -163,7 +168,12 @@ def _decode(value: Any) -> Any:
     return value
 
 
-def _str_array(values: Sequence[str]) -> np.ndarray:
+def labber_string_array(values: Sequence[str]) -> np.ndarray:
+    """Copy text values into a new array with Labber's HDF5 vlen string dtype.
+
+    The input sequence is not mutated. Invalid values propagate numpy errors;
+    the returned array is owned by the caller and performs no file I/O.
+    """
     return np.array(list(values), dtype=_VLEN_STR)
 
 
@@ -366,7 +376,7 @@ def write_labber_data_file(path: str, ld: LabberData) -> str:
     return path
 
 
-def _write_payload_to_log(
+def write_payload_to_log(
     target: h5py.File | h5py.Group,
     payload: LabberPayload,
     metadata: LabberMetadata,
@@ -375,6 +385,15 @@ def _write_payload_to_log(
     creation_time: float | None = None,
     write_tags: bool = False,
 ) -> None:
+    """Populate a borrowed open log group from one inner-first payload.
+
+    List-valued data selects trace layout; other values select uniform layout.
+    log_name labels the log, creation_time overrides metadata's epoch origin,
+    and write_tags includes metadata tags/project/user when true. Inputs are
+    borrowed without mutation. The caller owns flush/close. Invalid shapes or
+    timestamps raise ValueError; HDF5 failures propagate and may leave partial
+    groups in target. This does not open a file or normalize a path.
+    """
     data = LabberData(payload=payload, metadata=metadata)
     if isinstance(data.data.values, list):
         _write_trace_log_group(
@@ -445,7 +464,7 @@ def _write_uniform_log_group(
     )
 
 
-def _write_uniform_multi_channel_log_group(
+def write_uniform_multi_channel_log_group(
     target: h5py.File | h5py.Group,
     payloads: Sequence[LabberPayload],
     metadata: LabberMetadata,
@@ -453,7 +472,15 @@ def _write_uniform_multi_channel_log_group(
     log_name: str,
     creation_time: float,
 ) -> None:
-    """Write scalar payloads as parallel channels on one shared grid."""
+    """Populate a borrowed log group with parallel common-grid scalar channels.
+
+    payloads is a nonempty ordered sequence already validated for equal
+    inner-first axes, shapes and timestamps by the grouped owner. metadata
+    provides shared tags and comment; log_name labels the log and creation_time
+    is its epoch origin. Inputs are not mutated. Empty payloads or invalid
+    timestamps raise ValueError; conversion/HDF5 failures propagate and may
+    leave partial groups. The caller owns the open target and flush/close.
+    """
     if not payloads:
         raise ValueError("at least one payload is required")
 
@@ -561,8 +588,15 @@ def save_labber_trace_data(
     ).save(path)
 
 
-def _save_labber_trace_data(path: str, ld: LabberData) -> str:
-    """Core writer for variable-length traces (the ``Traces/`` layout)."""
+def write_labber_trace_file(path: str, ld: LabberData) -> str:
+    """Write borrowed dataset ld as a new variable-length Traces-layout file.
+
+    Normalize path to .hdf5 and return that path. ld supplies inner-first axes,
+    trace values, metadata and timestamps without being mutated. The file is
+    closed before return. Existing paths raise FileExistsError; invalid shapes
+    or timestamps raise ValueError. I/O errors propagate and may leave a
+    partial new file; the destination is never overwritten.
+    """
     path = format_ext(path)
     log_name = os.path.splitext(os.path.basename(path))[0]
 
@@ -851,10 +885,10 @@ def _write_step_config_entry(parent, name, vals):
 
 def _write_tags(f, tags, project, user):
     g = f.create_group("Tags")
-    g.attrs["Project"] = _str_array([project])
-    g.attrs["User"] = _str_array([user])
+    g.attrs["Project"] = labber_string_array([project])
+    g.attrs["User"] = labber_string_array([user])
     if tags:
-        g.attrs["Tags"] = _str_array(tags)
+        g.attrs["Tags"] = labber_string_array(tags)
     else:
         g.attrs["Tags"] = np.array([], dtype=float)
 
@@ -998,7 +1032,7 @@ def load_labber_data(path: str) -> LabberData:
 
 def _load_labber_data(path: str) -> LabberData:
     """Core reader: build a :class:`LabberData` from a Labber HDF5 file."""
-    path = _resolve_path(path)
+    path = resolve_labber_path(path)
 
     with h5py.File(path, "r") as f:
         if "zcu_tools.grouped_dataset_version" in f.attrs:
@@ -1006,13 +1040,13 @@ def _load_labber_data(path: str) -> LabberData:
                 "file is a grouped Labber dataset; use load_grouped_labber_data"
             )
 
-        comment = _decode(f.attrs.get("comment", "")) or ""
-        tags, project, user = _read_tags(f)
+        comment = decode_labber_attribute(f.attrs.get("comment", "")) or ""
+        tags, project, user = read_labber_tags(f)
         creation_time = float(f.attrs.get("creation_time", 0.0) or 0.0)
 
-        logs = _all_log_refs(f)
-        z0, axes0, ts0 = _read_single_log(f, logs[0])
-        z_name, z_unit = _read_log_label(f, logs[0])
+        logs = labber_log_refs(f)
+        z0, axes0, ts0 = read_single_log(f, logs[0])
+        z_name, z_unit = read_log_label(f, logs[0])
 
         if len(logs) == 1:
             z = z0
@@ -1020,7 +1054,7 @@ def _load_labber_data(path: str) -> LabberData:
         else:
             z_list = [z0]
             for log in logs[1:]:
-                zi, axes_i, _tsi = _read_single_log(f, log)
+                zi, axes_i, _tsi = read_single_log(f, log)
                 if len(axes_i) != len(axes0):
                     raise ValueError("logs have different number of axes")
                 for (n0, _u0, v0), (_ni, _ui, vi) in zip(axes0, axes_i, strict=False):
@@ -1046,16 +1080,26 @@ def _load_labber_data(path: str) -> LabberData:
     )
 
 
-def _resolve_path(path: str) -> str:
+def resolve_labber_path(path: str) -> str:
+    """Choose an existing exact path, then its .hdf5-normalized alternative.
+
+    Return path unchanged when neither exists, leaving missing-file failures
+    to the reader. This only checks existence and never opens or changes files.
+    """
     if os.path.exists(path):
         return path
     cand = format_ext(path)
     return cand if os.path.exists(cand) else path
 
 
-def _all_log_refs(f: h5py.File) -> list[Any]:
-    """Root (if it holds Data) plus Log_2, Log_3 ... in sorted order."""
-    refs: list[Any] = []
+def labber_log_refs(f: h5py.File) -> list[h5py.File | h5py.Group]:
+    """List borrowed logs: root if it has Data, then numbered Log_N groups.
+
+    Numbered groups are sorted numerically and must contain Data. Raise
+    ValueError when no logs exist; HDF5 failures propagate. No data is copied
+    or changed. Returned handles remain valid only while caller-owned f is open.
+    """
+    refs: list[h5py.File | h5py.Group] = []
     if "Data" in f:
         refs.append(f)
     log_ns = sorted(
@@ -1073,7 +1117,7 @@ def _all_log_refs(f: h5py.File) -> list[Any]:
     return refs
 
 
-def _read_single_log(f, log):
+def read_single_log(f, log):
     """Read one log into an N-D complex array, its axes and timestamps.
 
     Two storage modes are auto-detected:
@@ -1087,15 +1131,21 @@ def _read_single_log(f, log):
     Returns ``(z, axes, ts_rel)``: ``axes`` is inner-first
     ``[(name, unit, values), ...]``; ``ts_rel`` is per-entry timestamps relative
     to ``creation_time``.  For trace mode, ``z`` is a list of ragged arrays when
-    entry lengths differ.
+    entry lengths differ. f is the borrowed root for fallback bookkeeping and
+    log is a borrowed root or Log_N group. Results are detached from HDF5;
+    neither input is mutated or closed. Missing or malformed bookkeeping
+    propagates lookup/shape errors and HDF5 failures to the caller.
     """
-    z_name, _z_unit = _read_log_label(f, log)
+    z_name, _z_unit = read_log_label(f, log)
     if "Traces" in log and z_name and z_name in log["Traces"]:
         return _read_trace_log(f, log, z_name)
 
     D = log["Data"]["Data"][()]  # (Nx, Ncol, Nentries)
     n_x, n_col, n_entry = D.shape
-    col_names = [(_decode(n), _decode(i)) for n, i in log["Data"]["Channel names"][()]]
+    col_names = [
+        (decode_labber_attribute(n), decode_labber_attribute(i))
+        for n, i in log["Data"]["Channel names"][()]
+    ]
     infos = [i for _n, i in col_names]
     log_complex = "Imaginary" in infos
 
@@ -1143,7 +1193,9 @@ def _read_v2_log_channel_bookkeeping(
     log_list = source.get("Log list")
     if not isinstance(log_list, h5py.Dataset):
         raise ValueError("grouped v2 log is missing Log list")
-    channel_names = [_decode(row["channel_name"]) or "" for row in log_list[()]]
+    channel_names = [
+        decode_labber_attribute(row["channel_name"]) or "" for row in log_list[()]
+    ]
     if not channel_names or any(not name for name in channel_names):
         raise ValueError("grouped v2 log channels must have non-empty labels")
     if len(set(channel_names)) != len(channel_names):
@@ -1153,9 +1205,9 @@ def _read_v2_log_channel_bookkeeping(
     if not isinstance(channels_dataset, h5py.Dataset):
         raise ValueError("grouped v2 log is missing Channels")
     configured_channels = [
-        _decode(row["name"]) or ""
+        decode_labber_attribute(row["name"]) or ""
         for row in channels_dataset[()]
-        if _decode(row["instrument"]) == _INSTR_LOG
+        if decode_labber_attribute(row["instrument"]) == _INSTR_LOG
     ]
     if configured_channels != channel_names:
         raise ValueError("grouped v2 Labber channel bookkeeping is inconsistent")
@@ -1186,9 +1238,9 @@ def _require_v2_step_bookkeeping(
 ) -> None:
     """Require consistent ordered step names across all Labber metadata tables."""
     configured_steps = [
-        _decode(row["name"]) or ""
+        decode_labber_attribute(row["name"]) or ""
         for row in channels_dataset[()]
-        if _decode(row["instrument"]) == _INSTR_STEP
+        if decode_labber_attribute(row["instrument"]) == _INSTR_STEP
     ]
     step_list = source.get("Step list")
     step_config = source.get("Step config")
@@ -1196,7 +1248,8 @@ def _require_v2_step_bookkeeping(
     if (
         configured_steps != step_names
         or not isinstance(step_list, h5py.Dataset)
-        or [_decode(row["channel_name"]) or "" for row in step_list[()]] != step_names
+        or [decode_labber_attribute(row["channel_name"]) or "" for row in step_list[()]]
+        != step_names
         or not isinstance(step_config, h5py.Group)
         or set(step_config) != set(step_names)
         or not isinstance(step_instrument, h5py.Group)
@@ -1237,14 +1290,22 @@ def _decode_v2_step_grid(
     return axes
 
 
-def _read_uniform_multi_channel_log(
+def read_uniform_multi_channel_log(
     f: h5py.File, log: h5py.File | h5py.Group
 ) -> tuple[
     dict[str, tuple[str, np.ndarray]],
     list[tuple[str, str, np.ndarray]],
     np.ndarray | None,
 ]:
-    """Read one scalar multi-channel log with strict Labber bookkeeping."""
+    """Read a borrowed scalar log with strict grouped-v2 Labber bookkeeping.
+
+    f is the open root for fallback metadata; log is a root or Log_N group.
+    Return channel-name-to-(unit, values), inner-first (name, unit, values)
+    axes, and per-entry timestamps relative to creation_time, or None.
+    Results are detached arrays and inputs are not mutated or closed.
+    Unsupported traces or inconsistent/missing bookkeeping raise ValueError;
+    conversion, lookup and HDF5 errors propagate.
+    """
     if "Traces" in log:
         raise ValueError("grouped v2 does not support vector or trace log channels")
 
@@ -1266,7 +1327,7 @@ def _read_uniform_multi_channel_log(
     data = np.asarray(data_dataset[()])
     n_x, n_col, n_entry = data.shape
     columns = [
-        (_decode(name) or "", _decode(info) or "")
+        (decode_labber_attribute(name) or "", decode_labber_attribute(info) or "")
         for name, info in channel_names_dataset[()]
     ]
     n_axes = n_col - 2 * len(channel_names)
@@ -1346,9 +1407,9 @@ def _read_trace_log(f, log, z_name):
     """
     g = log["Traces"]
     h5 = g[z_name]
-    is_complex = bool(_decode(h5.attrs.get("complex", False)))
-    x_name = _decode(h5.attrs.get("x, name", "")) or "Index"
-    x_unit = _decode(h5.attrs.get("x, unit", "")) or ""
+    is_complex = bool(decode_labber_attribute(h5.attrs.get("complex", False)))
+    x_name = decode_labber_attribute(h5.attrs.get("x, name", "")) or "Index"
+    x_unit = decode_labber_attribute(h5.attrs.get("x, unit", "")) or ""
     raw = h5[()]  # (maxN, ncol, Nentries)
     max_n, n_col, n_entry = raw.shape
     i_x = 2 if is_complex else 1
@@ -1415,7 +1476,10 @@ def _read_outer_step_axes(f, log):
     if "Data" not in log:
         return []
     D = log["Data"]["Data"][()]
-    col_names = [(_decode(n), _decode(i)) for n, i in log["Data"]["Channel names"][()]]
+    col_names = [
+        (decode_labber_attribute(n), decode_labber_attribute(i))
+        for n, i in log["Data"]["Channel names"][()]
+    ]
     units = _channel_units(f, log)
     _n_inner, _n_col, _n_entry = D.shape
 
@@ -1458,18 +1522,24 @@ def _data_step_dims(log, n_x, n_entry, n_axes):
     return [n_x, n_entry] + [1] * (n_axes - 2)
 
 
-def _read_tags(f) -> tuple[list[str], str, str]:
+def read_labber_tags(f: h5py.File) -> tuple[list[str], str, str]:
+    """Read tags, project and user from a borrowed open Labber root.
+
+    Return a new tags list and text values, defaulting to empty values when
+    absent. The file is not changed or closed. Invalid UTF-8 and HDF5 errors
+    propagate to the caller.
+    """
     tags: list[str] = []
     project = user = ""
     if "Tags" in f:
         a = f["Tags"].attrs
-        dec = _decode(a.get("Tags"))
+        dec = decode_labber_attribute(a.get("Tags"))
         if isinstance(dec, list):
             tags = list(dec)
-        proj = _decode(a.get("Project"))
+        proj = decode_labber_attribute(a.get("Project"))
         if isinstance(proj, list) and proj:
             project = proj[0]
-        usr = _decode(a.get("User"))
+        usr = decode_labber_attribute(a.get("User"))
         if isinstance(usr, list) and usr:
             user = usr[0]
     return tags, project or "", user or ""
@@ -1481,22 +1551,29 @@ def _channel_units(f, log) -> dict[str, str]:
     src = log if "Channels" in log else f
     if "Channels" in src:
         for row in src["Channels"][()]:
-            units[_decode(row["name"])] = _decode(row["unitPhys"]) or ""
+            units[decode_labber_attribute(row["name"])] = (
+                decode_labber_attribute(row["unitPhys"]) or ""
+            )
     return units
 
 
-def _read_log_label(f, log) -> tuple[str, str]:
-    """Return (z_name, z_unit) of the first log channel."""
+def read_log_label(f, log) -> tuple[str, str]:
+    """Read the first log channel's (name, unit) from borrowed open handles.
+
+    Use log bookkeeping when present, otherwise root f. Missing labels/units
+    are empty strings. Results are detached text and handles are not changed
+    or closed. Malformed bookkeeping, decoding and HDF5 errors propagate.
+    """
     z_name = ""
     src = log if "Log list" in log else f
     if "Log list" in src and len(src["Log list"]):
-        z_name = _decode(src["Log list"][()][0]["channel_name"]) or ""
+        z_name = decode_labber_attribute(src["Log list"][()][0]["channel_name"]) or ""
     if not z_name:
         # fall back: the log-instrument channel in Channels
         csrc = log if "Channels" in log else f
         if "Channels" in csrc:
             for row in csrc["Channels"][()]:
-                if _decode(row["instrument"]) == _INSTR_LOG:
-                    z_name = _decode(row["name"])
+                if decode_labber_attribute(row["instrument"]) == _INSTR_LOG:
+                    z_name = decode_labber_attribute(row["name"])
                     break
     return z_name, _channel_units(f, log).get(z_name, "")

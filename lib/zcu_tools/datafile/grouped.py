@@ -13,15 +13,15 @@ import h5py
 import numpy as np
 
 from .labber import (
-    _all_log_refs,
-    _decode,
-    _read_log_label,
-    _read_single_log,
-    _read_tags,
-    _read_uniform_multi_channel_log,
-    _resolve_path,
-    _str_array,
-    _write_uniform_multi_channel_log_group,
+    decode_labber_attribute,
+    labber_log_refs,
+    labber_string_array,
+    read_labber_tags,
+    read_log_label,
+    read_single_log,
+    read_uniform_multi_channel_log,
+    resolve_labber_path,
+    write_uniform_multi_channel_log_group,
 )
 from .models import (
     Axis,
@@ -90,7 +90,7 @@ def write_grouped_labber_data_file(path: str, grouped: GroupedLabberData) -> str
     channel_names = [payload.data.name for _variable, payload in variable_items]
 
     with h5py.File(path, "x") as f:
-        _write_uniform_multi_channel_log_group(
+        write_uniform_multi_channel_log_group(
             f,
             [payload for _variable, payload in variable_items],
             effective_metadata,
@@ -98,8 +98,8 @@ def write_grouped_labber_data_file(path: str, grouped: GroupedLabberData) -> str
             creation_time=creation_time,
         )
         f.attrs[GROUPED_VERSION_ATTR] = GROUPED_DATASET_VERSION
-        f.attrs[DATA_VARIABLES_ATTR] = _str_array(variable_names)
-        f.attrs[DATA_VARIABLE_CHANNELS_ATTR] = _str_array(channel_names)
+        f.attrs[DATA_VARIABLES_ATTR] = labber_string_array(variable_names)
+        f.attrs[DATA_VARIABLE_CHANNELS_ATTR] = labber_string_array(channel_names)
 
     return path
 
@@ -118,7 +118,7 @@ def load_grouped_labber_data(
     Invalid names, schema/version, mapping or variable set raise ValueError;
     unreadable files propagate their I/O error. Unmarked grouped v1 is rejected.
     """
-    path = _resolve_path(path)
+    path = resolve_labber_path(path)
     with h5py.File(path, "r") as f:
         raw_version = f.attrs.get(GROUPED_VERSION_ATTR)
         if raw_version is None:
@@ -178,13 +178,13 @@ def _load_grouped_v2(
     if any(not channel for channel in declared_channels):
         raise ValueError("grouped v2 variable channel labels must be non-empty")
 
-    logs = _all_log_refs(f)
+    logs = labber_log_refs(f)
     if len(logs) != 1 or any(
         isinstance(name, str) and name.startswith("Log_") for name in f
     ):
         raise ValueError("grouped v2 must contain exactly one root Labber log")
 
-    channel_values, axes, relative_timestamps = _read_uniform_multi_channel_log(f, f)
+    channel_values, axes, relative_timestamps = read_uniform_multi_channel_log(f, f)
     if list(channel_values) != declared_channels:
         raise ValueError(
             "grouped v2 variable-to-channel mapping does not match actual Labber channels"
@@ -220,7 +220,7 @@ def _load_streaming_grouped_v1(
     required_variables: Sequence[str | DataVariable] | None,
 ) -> GroupedLabberData:
     declared_variables = _read_declared_variables(f)
-    logs = _all_log_refs(f)
+    logs = labber_log_refs(f)
     if len(declared_variables) != len(logs):
         raise ValueError("grouped data variable list does not match log group count")
 
@@ -231,8 +231,8 @@ def _load_streaming_grouped_v1(
         variable = _read_log_variable(log)
         if variable in payloads:
             raise ValueError(f"duplicate data variable {variable!r}")
-        z, axes, relative_timestamps = _read_single_log(f, log)
-        z_name, z_unit = _read_log_label(f, log)
+        z, axes, relative_timestamps = read_single_log(f, log)
+        z_name, z_unit = read_log_label(f, log)
         timestamps = (
             None
             if relative_timestamps is None
@@ -373,8 +373,8 @@ def _validate_v2_payloads(
 
 
 def _read_metadata(f: h5py.File) -> LabberMetadata:
-    comment = _decode(f.attrs.get("comment", "")) or ""
-    tags, project, user = _read_tags(f)
+    comment = decode_labber_attribute(f.attrs.get("comment", "")) or ""
+    tags, project, user = read_labber_tags(f)
     creation_time = float(f.attrs.get("creation_time", 0.0) or 0.0)
     return LabberMetadata(
         comment=comment,
@@ -386,7 +386,7 @@ def _read_metadata(f: h5py.File) -> LabberMetadata:
 
 
 def _read_declared_variables(f: h5py.File) -> list[DataVariable]:
-    raw = _decode(f.attrs.get(DATA_VARIABLES_ATTR))
+    raw = decode_labber_attribute(f.attrs.get(DATA_VARIABLES_ATTR))
     if raw is None:
         raise ValueError("grouped dataset is missing data variable list")
     values: list[Any] = [raw] if isinstance(raw, str) else list(raw)
@@ -403,13 +403,13 @@ def _read_declared_variables(f: h5py.File) -> list[DataVariable]:
 
 
 def _read_declared_channels(f: h5py.File) -> list[str]:
-    raw = _decode(f.attrs.get(DATA_VARIABLE_CHANNELS_ATTR))
+    raw = decode_labber_attribute(f.attrs.get(DATA_VARIABLE_CHANNELS_ATTR))
     if raw is None:
         raise ValueError("grouped v2 is missing data variable channel mapping")
     values = [raw] if isinstance(raw, str) else list(raw)
     channels: list[str] = []
     for value in values:
-        decoded = _decode(value)
+        decoded = decode_labber_attribute(value)
         if not isinstance(decoded, str):
             raise ValueError("grouped v2 variable channel mapping must contain strings")
         channels.append(decoded)
@@ -417,7 +417,7 @@ def _read_declared_channels(f: h5py.File) -> list[str]:
 
 
 def _read_log_variable(log: h5py.File | h5py.Group) -> DataVariable:
-    raw = _decode(log.attrs.get(DATA_VARIABLE_ATTR))
+    raw = decode_labber_attribute(log.attrs.get(DATA_VARIABLE_ATTR))
     if raw is None:
         raise ValueError("grouped log is missing data variable")
     return DataVariable(raw)
