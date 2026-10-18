@@ -779,6 +779,37 @@ class FormState[F: FormModel]:
 
         return unsubscribe
 
+    def migrate_input(
+        self, saved: FormInput[FormModel], env: FormEnv
+    ) -> tuple[FormPath, ...]:
+        """Overlay an old RAM draft onto this state's current captured defaults.
+
+        saved may use an older declaration. Migrate its raw data leaf by leaf,
+        retaining expressions and ordinary invalid values; new fields keep this
+        state's defaults. Keep explicit selection overrides accepted by the new
+        annotation and migrated ancestry. Removed/incompatible leaves, source-
+        rejected restored leaves and inapplicable overrides are discarded and
+        returned as unique paths. No converter or options hook is called.
+
+        This is intentionally lossy declaration migration, not strict persistent
+        restore. Source/declaration failures not isolated to restored leaves
+        propagate before mutation. On success install once, preserve base and
+        notify only if the complete draft changed. saved is never modified.
+        """
+        from ._migration import migrate_selections
+        from ._sources import drop_unmatched_sources
+        from ._structure import restore
+
+        restored, dropped = restore(self._model, self._data, saved.data, env)
+        candidate, unmatched = drop_unmatched_sources(
+            self._model, restored, self._data, env
+        )
+        selections, discarded = migrate_selections(
+            self._model, candidate, saved.selections
+        )
+        self._install(FormInput(self._model, candidate, selections=selections))
+        return tuple(dict.fromkeys((*dropped, *unmatched, *discarded)))
+
     def write_compatible(
         self, saved: Mapping[str, JsonValue], env: FormEnv
     ) -> tuple[FormPath, ...]:
