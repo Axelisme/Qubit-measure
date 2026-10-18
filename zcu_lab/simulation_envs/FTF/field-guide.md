@@ -1,6 +1,6 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-18
+**Last updated:** 2026-10-18，mux receiver 與 charge/flux drive 設定
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
@@ -27,7 +27,7 @@ dc_bias: # Static offsets and live DC devices.
   # ...
 drive_lines: # Named charge/flux drive lines; may be omitted or empty.
   # ...
-readout: # Shared drive, two physical resonators and one ADC.
+readout: # Shared drive, two physical resonators and bound ADC receivers.
   # ...
 numerics: # Basis sizes, solver accuracy and root RNG seed.
   # ...
@@ -42,7 +42,7 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `chip` | 物理電路 record，見下一節 | 必填 |
 | `dc_bias` | 靜態磁通 offset 與具名電源 record | 必填 |
 | `drive_lines` | 名稱到 charge/flux drive line 的 map | 可省略或填 `{}`，都停用 drive 控制；不可填 `null` |
-| `readout` | `drive`、`resonators`、`adc` 三個必填 record | 必填，固定一個 drive、兩個 resonator、一個 ADC |
+| `readout` | `drive`、`resonators`、`adc` | 必填，一個 drive、兩個 resonator；pulse 使用一個 ADC object，mux 使用 receiver list |
 | `numerics` | `truncation`、`solver` 與可選 `seed` | 必填 |
 
 `dc_bias.sources` 與 `drive_lines` 的 map key 是非空字串名稱。前者成為 live device 名稱，後者識別微波線，兩類名稱不可重複。`f1_bias`、`coupler_bias`、`f2_bias`、`f1_charge`、`f2_charge` 是樣板選用的名稱，不是新增的 YAML 欄位。
@@ -156,15 +156,17 @@ Flux operator 在每 round 的 live DC 工作點用解析導數求值，經固�
 
 Resonator 的頻率、full-charge coupling 與 linewidth 決定物理響應。ADC 的 gain、phase、offset 與 noise 決定接收模型。把 ADC gain 調大不會改變 resonator photon number、物理 linewidth 或另外設定的 ADC noise PSD。
 
-FTF 在 readout 使用該 DC 工作點的模型與 energy-basis populations。Readout 開始前的 charge/flux drive controls 會演化狀態；readout 期間及之後的 drive controls 不納入讀出計算。每個 point 必須有恰好一個 active readout pulse，可對同一個綁定 ADC 開多個 trigger windows。模型假設 weak dispersive readout，強驅動下的適用性要另行確認。
+FTF 在 readout 使用該 DC 工作點的模型與 energy-basis populations。Readout 開始前的 charge/flux drive controls 會演化狀態；readout 期間及之後的 drive controls 不納入讀出計算。Pulse 模式每個 point 必須有恰好一個 active readout pulse。Mux 模式允許 1 至 8 個共用起點的 tone，每個 tone 有自己的 ADC。各 ADC 可有自己的 trigger windows，同一 shot index 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。所有 tone 都進入同一條 line，每個 ADC 解調總場，不把 tone 固定對應到 r1 或 r2。模型假設 weak dispersive readout，強驅動下的適用性要另行確認。
 
 ### Drive
+
+`readout.drive.kind` 只接受 `pulse` 或 `mux`，省略為 `pulse`。Pulse 使用既有 v6 generator／v2 ADC profile，mux 使用固定 mixmux8／PFBv4 profile。這是離線編譯能力，不代表連接真機，也不提供 clock override。
 
 `readout.drive` 的兩個欄位都必填。
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
-| `gen_ch` | 共用 readout generator | 無單位，整數 ≥ 0，不可與任一 charge drive 重複 | 必填 |
+| `gen_ch` | 共用 readout generator | 無單位，整數 ≥ 0，不可與任一 drive line 重複 | 必填 |
 | `input_per_gain` | Program gain 到 incident amplitude 的轉換 | sqrt(photons/ns)/gain，有限 signed 數，可為 0 | 必填，沒有猜測值 |
 
 Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入射場的刻度，不是 ADC gain。
@@ -187,6 +189,24 @@ Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入�
 `mismatch_phase_rad` 分別控制 r1、r2。微波 IQ 中，散射項乘 `exp(+i*phi)`，符號與 hanger 分析模型一致。零相位保留對稱線形，非零相位可產生不對稱線形。它不旋轉整個訊號，也不改 linewidth、shared-line damping 或量子演化。整體接收相位仍由 ADC 的 `phase_deg` 控制。
 
 ### ADC
+
+`kind: pulse` 時，`readout.adc` 是一個 object。`kind: mux` 時，它是 1 至 8 個 receiver object 的 list，ro_ch 必須唯一，只有一個 tone 也使用 list。以下欄位對每個 receiver 都適用。
+
+```yaml
+readout:
+  drive: {kind: mux, gen_ch: 0, input_per_gain: 10.0}
+  resonators: # Preserve the existing physical r1/r2 values.
+    # ...
+  adc:
+    - ro_ch: 0
+      gain: 100.0
+      noise_psd_adc2_ns: [[1.0, 0.0], [0.0, 1.0]]
+    - ro_ch: 1
+      gain: 100.0
+      noise_psd_adc2_ns: [[1.0, 0.0], [0.0, 1.0]]
+```
+
+這是 readout 結構示意，不是完整設定。Tone 的頻率、gain、phase、播放長度與 ADC window 仍由 program 的 MuxReadoutCfg 提供。YAML list 的順序不改輸出順序，raw 與 acquire 結果沿 program tone 的宣告順序排列。
 
 `readout.adc` 描述唯一接收通道，不描述物理 resonator。
 

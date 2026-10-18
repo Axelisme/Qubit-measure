@@ -20,7 +20,7 @@ from zcu_tools.core.simulation import (
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
@@ -40,6 +40,7 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 
+from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
 from .template import plan_template
 
@@ -147,7 +148,7 @@ class FTFAcquire:
         acquire = self.request
         owner = self._source
         plans = tuple(
-            plan_template(owner.settings, snapshot, template)
+            plan_template(owner.settings, snapshot, template, readout=owner.readout)
             for template in acquire.templates
         )
         evolved = owner.engine.evolve(
@@ -162,7 +163,7 @@ class FTFAcquire:
         # with the ADC model's explicit state order.
         readout_basis = Basis(
             dc_model.identity,
-            plans[0].readout.model.state_labels,
+            plans[0].readouts[0].batch.model.state_labels,
             dc_model.eigenvectors,
         )
         populations = batch_populations(evolved.densities, readout_basis, readout_basis)
@@ -175,37 +176,42 @@ class FTFAcquire:
                 ),
             )
             raise
-        response = ConditionalReadout(
-            plans[0].readout.model,
-            rtol=owner.settings.numerics.solver.rtol,
-            atol=owner.settings.numerics.solver.atol,
-        )
-        conditionals = []
-        traces = []
-        content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
-        offset = 0
-        for plan in plans:
-            conditional = response.responses(
-                replace(plan.readout, include_traces=acquire.mode == "decimated")
+        channels = []
+        for channel_index, first in enumerate(plans[0].readouts):
+            response = ConditionalReadout(
+                first.batch.model,
+                rtol=owner.settings.numerics.solver.rtol,
+                atol=owner.settings.numerics.solver.atol,
             )
-            conditionals.append(conditional)
-            if conditional.traces is not None:
-                traces.append(conditional.traces)
-            content_index[plan.batch.points] = offset + plan.readout.content_index
-            offset += len(conditional.sums)
-        conditional = ConditionalSums(
-            np.concatenate([item.sums for item in conditionals]),
-            conditionals[0].sample_counts,
-            np.concatenate(traces) if traces else None,
-        )
-        channel = ChannelReadout(
-            owner.settings.readout.adc.ro_ch,
-            conditional,
-            content_index.reshape(acquire.point_dims),
-            plans[0].readout.model.receiver,
-        )
+            conditionals = []
+            traces = []
+            content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
+            offset = 0
+            for plan in plans:
+                readout = plan.readouts[channel_index].batch
+                conditional = response.responses(
+                    replace(readout, include_traces=acquire.mode == "decimated")
+                )
+                conditionals.append(conditional)
+                if conditional.traces is not None:
+                    traces.append(conditional.traces)
+                content_index[plan.batch.points] = offset + readout.content_index
+                offset += len(conditional.sums)
+            conditional = ConditionalSums(
+                np.concatenate([item.sums for item in conditionals]),
+                conditionals[0].sample_counts,
+                np.concatenate(traces) if traces else None,
+            )
+            channels.append(
+                ChannelReadout(
+                    first.channel,
+                    conditional,
+                    content_index.reshape(acquire.point_dims),
+                    first.batch.model.receiver,
+                )
+            )
         return _Prepared(
-            probabilities.reshape((*acquire.point_dims, state_count)), (channel,)
+            probabilities.reshape((*acquire.point_dims, state_count)), tuple(channels)
         )
 
 
@@ -216,7 +222,9 @@ class FTFSource:
     readbacks to snapshot. engine optionally supplies a configured numerical
     executor; this source takes ownership, including close(). Without it, use
     workers=1 and a 256 MiB prepare cache. private_replay is an optional absolute
-    author-only input archive directory; None performs no replay I/O.
+    author-only input archive directory; None performs no replay I/O. readout
+    optionally supplies detached author capabilities, otherwise adapts settings.
+    Replay rejects overrides that cannot be reconstructed from those settings.
 
     open_acquire drops the previous session's density/conditional arrays. execute
     opens a session only when its request object changes, preserving preparation
@@ -232,9 +240,17 @@ class FTFSource:
         *,
         engine: Engine | None = None,
         private_replay: Path | None = None,
+        readout: FTFReadoutConfig | None = None,
     ) -> None:
         if private_replay is not None and not private_replay.is_absolute():
             raise ValueError("private replay requires an explicit absolute root")
+        self.readout = readout_configuration(settings) if readout is None else readout
+        if private_replay is not None and self.readout != readout_configuration(
+            settings
+        ):
+            raise ValueError(
+                "private replay requires readout settings to match author configuration"
+            )
         self.settings = settings
         self.devices = devices
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
@@ -347,7 +363,17 @@ def ftf(
             settings.readout.drive.gen_ch,
             *(s.gen_ch for s in settings.drive_lines.values()),
         )
-        soccfg = make_mock_soccfg(max(gens) + 1, settings.readout.adc.ro_ch + 1)
+        readout = coordinator.readout
+        receivers = tuple(r.ro_ch for r in readout.receivers)
+        if readout.kind == "mux":
+            soccfg = make_mux_mock_soccfg(
+                max(gens) + 1,
+                max(receivers) + 1,
+                gen_ch=settings.readout.drive.gen_ch,
+                ro_chs=receivers,
+            )
+        else:
+            soccfg = make_mock_soccfg(max(gens) + 1, max(receivers) + 1)
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
@@ -357,7 +383,7 @@ def ftf(
         soc = SimulationSoc(
             soccfg,
             binding,
-            routes=tuple((gen, settings.readout.adc.ro_ch) for gen in gens),
+            routes=tuple((gen, ch) for gen in gens for ch in receivers),
         )
         return SimulationEnvironment(
             soc,

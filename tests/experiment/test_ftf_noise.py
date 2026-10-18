@@ -52,17 +52,20 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
         single_point_template(timeline),
     )
     np.testing.assert_allclose(
-        plan.readout.model.receiver.noise_covariance,
+        plan.readouts[0].batch.model.receiver.noise_covariance,
         [[1.0, 0.2], [0.2, 2.0]],
         atol=1e-12,
         rtol=0,
     )
     np.testing.assert_allclose(
-        plan.readout.grids[0][1].times_ns, 120 + 10 * np.arange(8), atol=1e-12, rtol=0
+        plan.readouts[0].batch.grids[0][1].times_ns,
+        120 + 10 * np.arange(8),
+        atol=1e-12,
+        rtol=0,
     )
-    assert plan.readout.grids[0][1].demodulation_frequency_ghz == 6.1
+    assert plan.readouts[0].batch.grids[0][1].demodulation_frequency_ghz == 6.1
     np.testing.assert_allclose(
-        plan.readout.grids[0][1].phase_rad, np.pi / 2, atol=1e-12, rtol=0
+        plan.readouts[0].batch.grids[0][1].phase_rad, np.pi / 2, atol=1e-12, rtol=0
     )
 
 
@@ -99,8 +102,8 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
         plan = plan_template(
             settings, env.soc.binding.rounds[0].snapshot, request.templates[0]
         )
-        response = ADC(plan.readout.model, rtol=1e-8, atol=1e-10).response(
-            plan.readout.pulses[0], plan.readout.grids[0][0]
+        response = ADC(plan.readouts[0].batch.model, rtol=1e-8, atol=1e-10).response(
+            plan.readouts[0].batch.pulses[0], plan.readouts[0].batch.grids[0][0]
         )
         energy = plan.source.model((0, 0, 0)).energies_ghz
         weights = np.exp(-0.04799243073366221 * (energy - energy[0]) / 0.08)

@@ -118,7 +118,11 @@ class ConditionalReadout:
                 if key in self._sums:
                     summed.append(self._sums[key][1])
                     continue
-                if key not in self._responses and pulses[0].envelope is None:
+                if (
+                    key not in self._responses
+                    and len(pulses) == 1
+                    and pulses[0].envelope is None
+                ):
                     direct = solver._constant_line.integrated_sums(
                         batch.model, pulses[0], grids
                     )
@@ -129,7 +133,7 @@ class ConditionalReadout:
                         summed.append(sums)
                         continue
             if key not in self._responses:
-                constant = all(p.envelope is None for p in pulses)
+                constant = len(pulses) == 1 and pulses[0].envelope is None
                 # Building a sampled exponential for every time only pays off
                 # when enough contents reuse that exact relative grid.
                 projected = grid_uses[relative_key] >= len(times)

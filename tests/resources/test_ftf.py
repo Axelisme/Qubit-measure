@@ -14,7 +14,7 @@ def test_singular_receiver_spectral_density_is_legal() -> None:
     _set_field(document, "readout.adc.gain", 0.0)
     _set_field(document, "readout.adc.noise_psd_adc2_ns", [[1.0, 0.1], [0.1, 0.01]])
     config = parse_ftf(document)
-    assert config.readout.adc.noise_psd_adc2_ns == ((1.0, 0.1), (0.1, 0.01))
+    assert config.readout.receivers[0].noise_psd_adc2_ns == ((1.0, 0.1), (0.1, 0.01))
 
 
 def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
@@ -27,7 +27,7 @@ def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
     document.clear()
     assert config.chip.g_f1_f2_ghz == -0.02
     assert config.dc_bias.sources["bias"].unit == "V"
-    assert config.readout.adc.noise_psd_adc2_ns == ((0.0, 0.0), (0.0, 0.0))
+    assert config.readout.receivers[0].noise_psd_adc2_ns == ((0.0, 0.0), (0.0, 0.0))
     assert config.chip.coupler.ng == 0
     assert config.dc_bias.sources["bias"].flux_per_unit.coupler == 0.1
     assert config.dc_bias.offset_phi0.f2 == 0.4
@@ -35,7 +35,7 @@ def test_ftf_loads_detached_named_settings(tmp_path: Path) -> None:
     assert config.readout.resonators.r2.frequency_ghz == 6.2
     assert config.numerics.truncation.f1.native_cutoff == 8
     assert config.numerics.truncation.retained_levels == 8
-    assert config.readout.adc.offset_adc == (0.0, 0.0)
+    assert config.readout.receivers[0].offset_adc == (0.0, 0.0)
 
 
 def test_ftf_load_preserves_merge_defaults_and_explicit_overrides(
@@ -224,7 +224,7 @@ def test_v2_requires_every_named_loop(section: str, path: str) -> None:
 
 def test_receiver_delay_and_independent_mismatch_defaults_and_roundtrip() -> None:
     defaults = parse_ftf(ftf_document())
-    assert defaults.readout.adc.time_of_flight_ns == 0.0
+    assert defaults.readout.receivers[0].time_of_flight_ns == 0.0
     assert defaults.readout.resonators.r1.mismatch_phase_rad == 0.0
     assert defaults.readout.resonators.r2.mismatch_phase_rad == 0.0
     document = ftf_document()
@@ -233,7 +233,7 @@ def test_receiver_delay_and_independent_mismatch_defaults_and_roundtrip() -> Non
     _set_field(document, "readout.resonators.r2.mismatch_phase_rad", -0.4)
     configured = parse_ftf(document)
     restored = parse_ftf(configured.model_dump(mode="json"))
-    assert restored.readout.adc.time_of_flight_ns == 400.0
+    assert restored.readout.receivers[0].time_of_flight_ns == 400.0
     assert restored.readout.resonators.r1.mismatch_phase_rad == 0.6
     assert restored.readout.resonators.r2.mismatch_phase_rad == -0.4
 
@@ -243,7 +243,7 @@ def test_receiver_delay_invalid_values_report_field_path(value: object) -> None:
     # A valid nonzero value must parse before testing rejection diagnostics.
     document = ftf_document()
     _set_field(document, "readout.adc.time_of_flight_ns", 400.0)
-    assert parse_ftf(document).readout.adc.time_of_flight_ns == 400.0
+    assert parse_ftf(document).readout.receivers[0].time_of_flight_ns == 400.0
     _set_field(document, "readout.adc.time_of_flight_ns", value)
     with pytest.raises(ValueError, match=r"readout\.adc\.time_of_flight_ns"):
         parse_ftf(document)
@@ -261,3 +261,22 @@ def test_mismatch_invalid_values_report_resonator_field_path(
     _set_field(document, path, value)
     with pytest.raises(ValueError, match=path.replace(".", r"\.")):
         parse_ftf(document)
+
+
+@pytest.mark.parametrize("channels", [(4, 1), (1,)])
+def test_mux_settings_accept_explicit_kind_and_receiver_list(channels):
+    from tests.resources._ftf_data import mux_document
+
+    try:
+        config = parse_ftf(mux_document(channels))
+    except ValueError as error:
+        pytest.fail(f"explicit mux receiver list must parse: {error}")
+    assert config.readout.drive.kind == "mux"
+    assert tuple(r.ro_ch for r in config.readout.receivers) == channels
+
+
+def test_mux_settings_reject_duplicate_receiver_channel():
+    from tests.resources._ftf_data import mux_document
+
+    with pytest.raises(ValueError, match="duplicate.*receiver|receiver.*duplicate"):
+        parse_ftf(mux_document((1, 1)))

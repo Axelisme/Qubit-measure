@@ -33,7 +33,7 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     template = single_point_template(PointTimeline((), events, (window,), 2.5))
     plan = plan_template(settings, snapshot, template)
     np.testing.assert_array_equal(plan.batch.end_ns, [2000.0])
-    pulse = plan.readout.pulses[0][0]
+    pulse = plan.readouts[0].batch.pulses[0][0]
     assert pulse.frequency_ghz == 6.0
     assert pulse.phase_rad == pytest.approx(np.pi / 2, abs=1e-12, rel=0)
     track = plan.batch.tracks[0]
@@ -42,7 +42,10 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     np.testing.assert_array_equal(track.frequency_ghz, [0.02])
     np.testing.assert_array_equal(track.amplitude, [-0.2])
     np.testing.assert_allclose(
-        plan.readout.grids[0][0].times_ns, 1900 + 10 * np.arange(10), atol=1e-12, rtol=0
+        plan.readouts[0].batch.grids[0][0].times_ns,
+        1900 + 10 * np.arange(10),
+        atol=1e-12,
+        rtol=0,
     )
     # Native bias maps to DC coupler flux 0.2 + 0.1 * 0.2, independent of pulses.
     dc = np.array([0.3, 0.2 + 0.1 * 0.2, 0.4])
@@ -68,7 +71,7 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
         rtol=0,
     )
     np.testing.assert_allclose(
-        plan.readout.model.frequencies_ghz,
+        plan.readouts[0].batch.model.frequencies_ghz,
         joint.readout_frequencies_ghz(dc, resonators(settings)),
         atol=1e-12,
         rtol=0,

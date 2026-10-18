@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -218,18 +219,22 @@ class DriveLine(Values):
 
 
 class ReadoutSource(Values):
-    """gen_ch: one generator serving both resonators; input_per_gain: signed
+    """kind: pulse (default) or mux fixed compile capability.\n\n    gen_ch: one generator serving both resonators; input_per_gain: signed
 
     finite incident amplitude sqrt(photons/ns) per program gain. Carrier/envelope
     and phase come only from the program, not this configuration.
     """
 
+    # Omitting the pulse default preserves existing settings/replay identities.
+    kind: Literal["pulse", "mux"] = Field(
+        default="pulse", exclude_if=lambda value: value == "pulse"
+    )
     gen_ch: Index
     input_per_gain: Finite
 
 
 class Receiver(Values):
-    """ro_ch: single ADC. gain: signed field-to-ADC sample gain, may be zero.
+    """ro_ch: one logical ADC. gain: signed field-to-ADC sample gain, may be zero.
 
     phase_deg: additive receiver phase (default 0). offset_adc: per-sample I/Q
     offset (default zero). noise_psd_adc2_ns: required symmetric PSD 2x2 spectral
@@ -311,11 +316,46 @@ class Resonators(Values):
 
 
 class Readout(Values):
-    """drive: shared incident field; resonators: physical pair; adc: receiver."""
+    """drive: shared incident field and pulse/mux compile capability.
+
+    resonators: the physical pair, independent of tone count. adc: one receiver
+    object for pulse, or a nonempty list of at most eight receivers for mux.
+    Channel indices must be unique; program tone order determines output order.
+    """
 
     drive: ReadoutSource
     resonators: Resonators
-    adc: Receiver
+    adc: Receiver | tuple[Receiver, ...]
+
+    @field_validator("adc", mode="before")
+    @classmethod
+    def parse_receivers(cls, value: object) -> Receiver | tuple[Receiver, ...]:
+        """Select the external container before validation to retain field paths.
+
+        A record validates as one receiver, sequences as a receiver tuple. The
+        kind validator then enforces which shape is legal for this readout.
+        """
+        if isinstance(value, (Mapping, Receiver)):
+            return Receiver.model_validate(value)
+        return TypeAdapter(tuple[Receiver, ...]).validate_python(value)
+
+    @model_validator(mode="after")
+    def receiver_shape(self) -> Self:
+        """Reject kind/ADC shape mismatches and duplicate mux receiver routes."""
+        if self.drive.kind == "pulse":
+            if not isinstance(self.adc, Receiver):
+                raise ValueError("adc: pulse requires one receiver object")
+        else:
+            if not isinstance(self.adc, tuple) or not 1 <= len(self.adc) <= 8:
+                raise ValueError("adc: mux requires a list of 1..8 receivers")
+            if len({receiver.ro_ch for receiver in self.adc}) != len(self.adc):
+                raise ValueError("adc: duplicate receiver channel")
+        return self
+
+    @property
+    def receivers(self) -> tuple[Receiver, ...]:
+        """Return all bound receivers as an immutable tuple, including pulse."""
+        return (self.adc,) if isinstance(self.adc, Receiver) else self.adc
 
 
 class FluxoniumTruncation(Values):
@@ -379,7 +419,8 @@ class FTFSettings(Values):
     format='zcu.ftf', version=2 (integer only). chip supplies physical values;
     dc_bias supplies startup/live DC calibration; drive_lines binds charge
     or small-signal flux generators (omitted/empty disables). readout serves two
-    resonators with one drive and ADC. numerics supplies truncations/solver/seed.
+    resonators with one drive and one or more ADCs. numerics supplies
+    truncations/solver/seed.
     Channel counts derive from maximum configured indices plus one. Unknown
     fields, including large-amplitude flux controls and v1 aliases, are rejected.
     No model truth enters ordinary GUI/MCP metadata.
