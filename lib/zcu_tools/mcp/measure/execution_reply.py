@@ -35,14 +35,16 @@ class SummaryParameter:
 class SummaryEstimate:
     """One scalar analysis estimate declared by the recipe owner.
 
-    name is its public key; value_key/error_key select native summary values.
+    name is its public key, never a position. value_key/error_key are nonempty
+    tuples of str field names and int original list indexes into native summary.
+    Numeric strings stay names. Missing paths are omitted; present null stays null.
     error_key=None means no uncertainty field. unit labels the native value, or
     None when the recipe declares no unit. No conversion occurs.
     """
 
     name: str
-    value_key: str
-    error_key: str | None = None
+    value_key: RecipeFieldPath
+    error_key: RecipeFieldPath | None = None
     unit: str | None = None
 
 
@@ -110,6 +112,20 @@ def _actual(
     return parameters
 
 
+def _summary_value(
+    summary: dict[str, Any], path: RecipeFieldPath
+) -> tuple[bool, Any]:
+    value: Any = summary
+    for segment in path:
+        if isinstance(segment, str) and isinstance(value, dict) and segment in value:
+            value = value[segment]
+        elif type(segment) is int and isinstance(value, list) and 0 <= segment < len(value):
+            value = value[segment]
+        else:
+            return False, None
+    return True, value
+
+
 def _summary_estimates(
     details: dict[str, Any],
     definition: RecipeDefinition | None,
@@ -119,10 +135,10 @@ def _summary_estimates(
         return definition.summary_estimates
     # Analysis-only carries no recipe identity. Only unambiguous declarations
     # may project present scalar keys; never infer an experiment or read the GUI.
-    by_key: dict[str, SummaryEstimate] = {}
+    by_key: dict[RecipeFieldPath, SummaryEstimate] = {}
     for recipe in recipes:
         for estimate in recipe.summary_estimates:
-            if estimate.value_key not in details:
+            if not _summary_value(details, estimate.value_key)[0]:
                 continue
             previous = by_key.setdefault(estimate.value_key, estimate)
             if previous != estimate:
@@ -145,12 +161,13 @@ def _pane(
     estimates: dict[str, EstimateReply] = {}
     if isinstance(summary, dict):
         for estimate in _summary_estimates(summary, definition, recipes):
-            if estimate.value_key not in summary:
+            present, value = _summary_value(summary, estimate.value_key)
+            if not present:
                 continue
             estimates[estimate.name] = {
-                "value": summary[estimate.value_key],
-                "stderr": summary.get(estimate.error_key)
-                if estimate.error_key
+                "value": value,
+                "stderr": _summary_value(summary, estimate.error_key)[1]
+                if estimate.error_key is not None
                 else None,
                 "unit": estimate.unit,
             }
