@@ -8,8 +8,8 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm, solve
 
-from ..kernel import ApplyContext, Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularModel
 from ._secular import coherence_decay
 
 
@@ -262,10 +262,10 @@ class T6Kernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Accept exactly one unity envelope, irrespective of branch priority."""
+        source, budget = context.source, context.budget
         del source
         _check_budget(budget)
         accepted = table.tones[rows] == 1
@@ -278,9 +278,10 @@ class T6Kernel:
         return accepted
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Return fixed-width keys; equal rows share a phase-independent channel."""
+        del context
         keys = np.empty(
             len(rows),
             dtype=[
@@ -309,16 +310,16 @@ class T6Kernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable Fourier channels from representatives aligned to keys."""
+        source, budget = context.source, context.budget
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
-            keys, self.prepare_keys(table, rows)
+            keys, self.prepare_keys(table, rows, context)
         ):
             raise ValueError("t6: keys and representative rows must align")
-        if not self.guard(table, rows, source, budget).all():
+        if not self.guard(table, rows, context).all():
             raise ValueError("t6: prepare requires one constant tone")
         entries = [
             _fourier(
@@ -334,14 +335,24 @@ class T6Kernel:
         ]
         return _pack(entries)
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -351,9 +362,10 @@ class T6Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; apply uses the model-only prepared payload."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(

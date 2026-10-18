@@ -17,7 +17,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import ApplyContext
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
 
@@ -28,10 +28,12 @@ class ObservedDyson(DysonKernel):
     def __init__(self):
         self.inputs = []
 
-    def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+    def bind_input(
+        self, prepared, key_index, table, rows, source_initial, context: KernelContext
+    ):
         self.inputs.append((table.start_ns[rows].copy(), source_initial.copy()))
         return super().bind_input(
-            prepared, key_index, table, rows, source_initial, budget
+            prepared, key_index, table, rows, source_initial, context
         )
 
 

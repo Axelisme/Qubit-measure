@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 import zcu_tools.simulate.evolution as evolution
 from zcu_tools.simulate.evolution._dispatch import prepare
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
@@ -73,16 +78,22 @@ def test_guard_only_accepts_shaped_single_tone(kernel_case: KernelCase) -> None:
     # Repetition count belongs to the engine, not this local guard.
     table = shaped_table(1)
     rows = np.array([0], dtype=np.int64)
-    assert case.kernel.guard(table, rows, case.source, case.budget).tolist() == [True]
+    assert case.kernel.guard(
+        table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).tolist() == [True]
     constant = replace(table, envelopes=(evolution.EnvelopeSpec("constant"),))
-    assert not case.kernel.guard(constant, rows, case.source, case.budget).any()
+    assert not case.kernel.guard(
+        constant, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).any()
     silent = replace(
         table,
         tones=np.zeros(1, dtype=np.int64),
         tone_port=np.full((1, 1), -1, dtype=np.int64),
         tone_envelope=np.full((1, 1), -1, dtype=np.int64),
     )
-    assert not case.kernel.guard(silent, rows, case.source, case.budget).any()
+    assert not case.kernel.guard(
+        silent, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).any()
     dual = replace(
         table,
         tones=np.array([2]),
@@ -98,14 +109,18 @@ def test_guard_only_accepts_shaped_single_tone(kernel_case: KernelCase) -> None:
             )
         },
     )
-    assert not case.kernel.guard(dual, rows, case.source, case.budget).any()
+    assert not case.kernel.guard(
+        dual, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).any()
 
 
 def test_keys_use_content_and_exclude_start_phase(kernel_case: KernelCase) -> None:
     case = kernel_case
     table = case.table
     rows = np.arange(6, dtype=np.int64)
-    keys = case.kernel.prepare_keys(table, rows)
+    keys = case.kernel.prepare_keys(
+        table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    )
     assert keys.dtype.kind == "V"
     assert len(np.unique(keys)) == 1
     envelope = table.envelopes[0]
@@ -115,7 +130,12 @@ def test_keys_use_content_and_exclude_start_phase(kernel_case: KernelCase) -> No
         envelopes=(envelope, duplicate),
         tone_envelope=np.ones((6, 1), dtype=np.int64),
     )
-    np.testing.assert_array_equal(case.kernel.prepare_keys(alias, rows), keys)
+    np.testing.assert_array_equal(
+        case.kernel.prepare_keys(
+            alias, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
+        keys,
+    )
     for field, value in (
         ("level", np.ones((6, 1), dtype=np.int64)),
         ("duration_ns", np.full(6, 3.0)),
@@ -125,12 +145,22 @@ def test_keys_use_content_and_exclude_start_phase(kernel_case: KernelCase) -> No
         ("tone_envelope_offset_ns", np.zeros((6, 1))),
     ):
         changed = replace(table, **{field: value})
-        assert not np.any(case.kernel.prepare_keys(changed, rows) == keys), field
+        assert not np.any(
+            case.kernel.prepare_keys(
+                changed, rows, KernelContext(case.source, case.budget, WorkPlan())
+            )
+            == keys
+        ), field
     changed_envelope = evolution.EnvelopeSpec(
         "sampled", envelope.samples * 0.9, envelope.sample_ns
     )
     changed = replace(table, envelopes=(changed_envelope,))
-    assert not np.any(case.kernel.prepare_keys(changed, rows) == keys)
+    assert not np.any(
+        case.kernel.prepare_keys(
+            changed, rows, KernelContext(case.source, case.budget, WorkPlan())
+        )
+        == keys
+    )
 
 
 def test_prepared_entries_follow_key_mapping(kernel_case: KernelCase) -> None:
@@ -138,10 +168,18 @@ def test_prepared_entries_follow_key_mapping(kernel_case: KernelCase) -> None:
     rows = np.array([0, 2, 4], dtype=np.int64)
     table = replace(case.table, duration_ns=np.resize([0.0, 0.5, 1.0], 6))
     keys, representatives, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
+        return_index=True,
+        return_inverse=True,
     )
     prepared = prepare(
-        case.kernel, keys, table, rows[representatives], case.source, case.budget
+        case.kernel,
+        keys,
+        table,
+        rows[representatives],
+        KernelContext(case.source, case.budget, WorkPlan()),
     )
     actual = case.states[rows].copy()
     case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
@@ -203,9 +241,19 @@ def test_phase_interpolation_preserves_coherent_inputs(
     states = vectors[:, :, None] * vectors[:, None, :].conj()
     case = KernelCase(GateCacheKernel(), source, table, states)
     rows = np.arange(6, dtype=np.int64)
-    assert case.kernel.guard(table, rows, source, case.budget).all()
-    keys = case.kernel.prepare_keys(table, rows[:1])
-    prepared = prepare(case.kernel, keys, table, rows[:1], source, case.budget)
+    assert case.kernel.guard(
+        table, rows, KernelContext(source, case.budget, WorkPlan())
+    ).all()
+    keys = case.kernel.prepare_keys(
+        table, rows[:1], KernelContext(source, case.budget, WorkPlan())
+    )
+    prepared = prepare(
+        case.kernel,
+        keys,
+        table,
+        rows[:1],
+        KernelContext(source, case.budget, WorkPlan()),
+    )
     actual = states.copy()
     rejected = case.kernel.apply(
         prepared,

@@ -6,7 +6,7 @@ from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.core.control import ControlConnection
-from zcu_tools.mcp.measure.session import ConnectIdentity
+from zcu_tools.mcp.measure.session import ConnectIdentity, GuiStartupPaths
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_operation import status
 
@@ -31,9 +31,12 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
     simulate = arguments.get("simulate")
     if simulate is not None and (not isinstance(simulate, str) or not simulate):
         raise ValueError("simulate must be a non-empty environment Python path")
+    project_root = arguments.get("project_root")
+    if project_root is not None and not isinstance(project_root, str):
+        raise ValueError("project_root must be a string")
     connection = ctx.session.connect_to_gui(
         port=port,
-        simulate=simulate,
+        startup_paths=GuiStartupPaths(simulate=simulate, project_root=project_root),
         launch=launch,
         clean=clean,
         token=token,
@@ -59,6 +62,10 @@ CONNECT_TOOL: dict[str, Any] = {
                 "type": "string",
                 "minLength": 1,
                 "description": "Trusted environment Python path; only applies when launching a new GUI. Attach with a path is rejected.",
+            },
+            "project_root": {
+                "type": "string",
+                "description": "Data project root for a new GUI. Must be an absolute path to an existing directory; the launcher validates it. Attach with a root is rejected. Omit to use the repo root.",
             },
             "label": {"type": "string", "minLength": 1, "default": "agent"},
             "mode": {

@@ -2,98 +2,47 @@
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Self
 
 import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
+from ._carrier_plan import populate_carrier_plan
 from ._dop853_dispatch import direct_plans
+from ._gain_plan import plan_gain_groups
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
 from ._shaped_dispatch import preference
 from ._two_tone_dispatch import direct_preferred
+from .cache import PrepareCache, PreparedPayload
 from .engine import PathDiagnostics
-from .kernel import GuardPreparation, Kernel, Prepared, RowPlan, SegmentTable
-from .kernels._cf4_grid import coarse_count, finer_count, spectral_width
+from .kernel import (
+    GuardPreparation,
+    Kernel,
+    KernelContext,
+    Prepared,
+    RowPlan,
+    SegmentTable,
+)
 from .kernels.floquet import FloquetPlan
-from .kernels.floquet_period import PeriodBuilder
 from .kernels.gate_cache import GateCacheKernel
-from .secular import ModelSource, SecularModel
+from .secular import ModelSource
+from .workplan import WorkPlan
 
 
-def period_builder(
-    model: SecularModel, port: int, frequency: float, gain: float
-) -> PeriodBuilder:
-    """Select one constant-tone builder and retain its CF4 work ceiling.
+def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
+    """Create ownership for the complete evolve before prefix/worker planning.
 
-    Carriers at or above 1 GHz use dense DOP853. Below that, calibrated
-    cutoff-2/3 Sambe eigensolves cost 234 N-cubed units and must beat CF4's
-    coarse plus first-fine estimate. A declined Sambe numerical certificate
-    uses independent CF4, never gain anchors. No density or scheduling enters.
+    table is the full immutable geometry and source owns model identity.
+    Algorithm-specific group planners populate this plan before workers start;
+    no numerical routing or expensive candidate graph is constructed here.
     """
-    if abs(frequency) >= 1.0:
-        return PeriodBuilder("dop853")
-    drive = model.drives[port]
-    width = spectral_width(
-        model.energies_ghz, drive.in_phase_ghz, drive.quadrature_ghz, gain
-    )
-    coarse = coarse_count(1.5 * width / abs(frequency))
-    work = float(coarse + finer_count(coarse))
-    return PeriodBuilder("sambe" if work > 234.0 else "cf4", work)
-
-
-def period_gain_coordinates(
-    table: SegmentTable,
-) -> dict[tuple[tuple[int, ...], int, float], tuple[float, ...]]:
-    """Collect complete-table low-carrier gain groups, before model selection.
-
-    Only constant single tones with .03 <= |f| < 1 GHz participate; groups
-    need at least two distinct gains before removing spectral candidates.
-    """
-    groups: dict[tuple[tuple[int, ...], int, float], set[float]] = {}
-    rows = np.flatnonzero(table.tones == 1)
-    rows = rows[table.constant_envelopes(rows)]
-    for row in rows:
-        frequency = float(table.tone_frequency_ghz[row, 0])
-        if not 0.03 <= abs(frequency) < 1.0:
-            continue
-        key = (
-            tuple(int(v) for v in table.level[row]),
-            int(table.tone_port[row, 0]),
-            frequency,
-        )
-        groups.setdefault(key, set()).add(float(table.tone_amplitude[row, 0]))
-    return {
-        key: tuple(sorted(gains)) for key, gains in groups.items() if len(gains) >= 2
-    }
-
-
-def period_builders(
-    model: SecularModel, port: int, frequency: float, gains: tuple[float, ...]
-) -> dict[float, PeriodBuilder]:
-    """Select each group key once and fix its non-spectral CF4 dependencies.
-
-    gains is the complete sorted gain group, or a single standalone key.
-    Every 24th CF4 gain and both endpoints are independent anchors. Other CF4
-    keys use at most four nearest anchors, with lower gain winning distance
-    ties. Sambe candidates never participate, even if their certificate fails.
-    """
-    builders = {gain: period_builder(model, port, frequency, gain) for gain in gains}
-    ordered = [gain for gain in gains if builders[gain].kind == "cf4"]
-    if len(gains) < 2 or not ordered:
-        return builders
-    anchors = ordered[::24]
-    if anchors[-1] != ordered[-1]:
-        anchors.append(ordered[-1])
-    for gain in ordered:
-        dependencies = (
-            (gain,)
-            if gain in anchors
-            else tuple(sorted(sorted(anchors, key=lambda a: (abs(a - gain), a))[:4]))
-        )
-        builders[gain] = PeriodBuilder("cf4", builders[gain].work_limit, dependencies)
-    return builders
+    plan = WorkPlan()
+    populate_carrier_plan(table, source, plan)
+    plan_gain_groups(table, source, plan)
+    return plan
 
 
 @dataclass(frozen=True)
@@ -118,6 +67,7 @@ class Selection:
     two_tone_direct: acquire-wide global-row preference, or None without two tones.
     names: caller-accepted family context for timeline-local frame planning.
     plans: caller-accepted decisions to retain in the timeline-local plan.
+    cached: caller-looked-up model-only payload references for worker admission.
     A selection disables further deferral and retains accepted guard products.
     """
 
@@ -127,6 +77,7 @@ class Selection:
     two_tone_direct: NDArray[np.bool_] | None = None
     names: NDArray[np.str_] | None = None
     plans: Mapping[str, RowPlan] = field(default_factory=dict)
+    cached: Mapping[str, tuple[PreparedPayload, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -153,6 +104,7 @@ class Dispatch:
         None when no constant two-tone candidates exist.
     plans: immutable family-owned global-row decisions passed unchanged to apply;
         evolve-local plans never enter the model-only prepare cache.
+    cached: strong resident references passed to deferred workers without cache IO.
     chain: global-row chain IDs; -1 for independent rows. A timeline worker
         replaces provisional decisions locally after its deferred guards finish.
     """
@@ -171,6 +123,7 @@ class Dispatch:
     chain: NDArray[np.int64] = field(
         default_factory=lambda: np.empty(0, dtype=np.int64)
     )
+    cached: Mapping[str, tuple[PreparedPayload, ...]] = field(default_factory=dict)
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -210,8 +163,7 @@ def prepare(
     keys: NDArray[np.void],
     table: SegmentTable,
     rows: NDArray[np.int64],
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
 ) -> Prepared:
     """Select a key-level builder and prepare an aligned batch of representatives.
 
@@ -224,10 +176,31 @@ def prepare(
     if isinstance(kernel, GateCacheKernel):
         duration = keys["duration"]
         phase_adaptive = (duration > 0) & (duration <= 30.0)
-        return kernel.prepare(
-            keys, table, rows, source, budget, phase_adaptive=phase_adaptive
-        )
-    return kernel.prepare(keys, table, rows, source, budget)
+        return kernel.prepare(keys, table, rows, context, phase_adaptive=phase_adaptive)
+    return kernel.prepare(keys, table, rows, context)
+
+
+class _GuardCacheHits(tuple[PreparedPayload, ...]):
+    """Caller-indexed hits, borrowed unchanged by shared and deferred guards.
+
+    Tuple contents retain the whole-payload references used by resident
+    admission. by_key lists payload positions in hit order, including overlaps
+    so a numerical domain miss can still try the next covering payload.
+    """
+
+    by_key: Mapping[bytes, tuple[int, ...]]
+
+    def __new__(cls, payloads: Iterable[PreparedPayload]) -> Self:
+        hits = super().__new__(cls, payloads)
+        positions: dict[bytes, list[int]] = {}
+        for index, payload in enumerate(hits):
+            for key in dict.fromkeys(payload.keys):
+                positions.setdefault(key, []).append(index)
+        hits.by_key = {key: tuple(indices) for key, indices in positions.items()}
+        return hits
+
+
+_EMPTY_GUARD_HITS = _GuardCacheHits(())
 
 
 @dataclass(frozen=True)
@@ -241,12 +214,11 @@ class _Guarded:
 def _guard_key(
     kernel: Kernel,
     table: SegmentTable,
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
     rows: NDArray[np.int64],
 ) -> _Guarded:
     """Keep the exact guard product whenever any row accepts this key."""
-    result = kernel.guard_prepared(table, rows, source, budget)
+    result = kernel.guard_prepared(table, rows, context)
     if result is None:
         raise RuntimeError(
             f"kernel {kernel.name} declares guard_builds without a handoff"
@@ -255,6 +227,46 @@ def _guard_key(
     selected = rows[accepted]
     preparations = result.preparations if len(selected) else ()
     return _Guarded(selected, rows[~accepted], preparations, result.plan)
+
+
+def _guard_cached(
+    kernel: Kernel,
+    table: SegmentTable,
+    context: KernelContext,
+    rows: NDArray[np.int64],
+    hits: _GuardCacheHits,
+) -> tuple[_Guarded, ...]:
+    """Admit covered cached rows without building; build only domain misses."""
+    remaining = np.ones(len(rows), dtype=bool)
+    keys = kernel.prepare_keys(table, rows, context) if hits else ()
+    positions: dict[int, list[int]] = {}
+    for position, key in enumerate(keys):
+        for index in hits.by_key.get(key.tobytes(), ()):
+            positions.setdefault(index, []).append(position)
+    results: list[_Guarded] = []
+    # Keep hit order between payloads and original row order within each call.
+    for index in sorted(positions):
+        covered = np.array(positions[index], dtype=np.int64)
+        covered = covered[remaining[covered]]
+        if not len(covered):
+            continue
+        selected = rows[covered]
+        result = kernel.admit_prepared(hits[index].prepared, table, selected, context)
+        if result is None:
+            continue
+        remaining[covered] = False
+        accepted = result.accepted
+        results.append(
+            _Guarded(
+                selected[accepted],
+                selected[~accepted],
+                result.preparations if accepted.any() else (),
+                result.plan,
+            )
+        )
+    if remaining.any():
+        results.append(_guard_key(kernel, table, context, rows[remaining]))
+    return tuple(results)
 
 
 def _unshared_driven_input(table: SegmentTable) -> NDArray[np.bool_]:
@@ -285,18 +297,26 @@ class _Classifier:
         self,
         geometry: Geometry,
         kernels: Mapping[str, Kernel],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
         pool: Executor | None = None,
         selection: Selection | None = None,
+        cache: PrepareCache | None = None,
     ):
-        self.pool, self.selection = pool, selection
-        self.geometry, self.kernels, self.source, self.budget = (
-            geometry,
-            kernels,
-            source,
-            budget,
+        self.cache = cache
+        self.cached = (
+            {
+                name: hits
+                if isinstance(hits, _GuardCacheHits)
+                else _GuardCacheHits(hits)
+                for name, hits in selection.cached.items()
+            }
+            if selection is not None
+            else {}
         )
+        self.pool, self.selection = pool, selection
+        self.geometry, self.kernels = geometry, kernels
+        self.context = context
+        self.source, self.budget = context.source, context.budget
         self.table = geometry.table
         self.names = np.full(len(self.table.timeline), "", dtype="U16")
         self.costs = np.zeros(len(self.names))
@@ -320,8 +340,23 @@ class _Classifier:
         if self.selection is not None:
             # This worker owns one timeline. A single batch lets the kernel
             # reuse call-local work across distinct prepare keys, then drop it.
-            return (_guard_key(kernel, self.table, self.source, self.budget, rows),)
-        groups = group_keys(kernel, self.table, rows)
+            return _guard_cached(
+                kernel,
+                self.table,
+                self.context,
+                rows,
+                self.cached.get(kernel.name, _EMPTY_GUARD_HITS),
+            )
+        groups = group_keys(kernel, self.table, rows, self.context)
+        if self.cache is not None:
+            dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
+            self.cached[kernel.name] = _GuardCacheHits(
+                self.cache.find(
+                    (kernel.name, dc.identity, self.budget),
+                    {key.tobytes() for key in groups.keys},
+                )
+            )
+        hits = self.cached.get(kernel.name, _EMPTY_GUARD_HITS)
         local = rows[~groups.shared[groups.inverse]]
         self.deferred[local] = True
         if len(local):
@@ -330,15 +365,22 @@ class _Classifier:
             selected for index, selected in groups.selections() if groups.shared[index]
         )
         if self.pool is not None and np.count_nonzero(groups.shared) >= 8:
-            return self.pool(
-                delayed(_guard_key)(
-                    kernel, self.table, self.source, self.budget, selected
-                )
+            batches = self.pool(
+                delayed(_guard_cached)(kernel, self.table, self.context, selected, hits)
                 for selected in selections
             )
+            results: list[_Guarded] = []
+            for batch in batches:
+                if batch is None:
+                    raise RuntimeError("guard job returned no decision")
+                results.extend(batch)
+            return results
         return (
-            _guard_key(kernel, self.table, self.source, self.budget, selected)
+            result
             for selected in selections
+            for result in _guard_cached(
+                kernel, self.table, self.context, selected, hits
+            )
         )
 
     def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
@@ -353,7 +395,7 @@ class _Classifier:
         if kernel.guard_builds:
             results = self.guard_keys(kernel, eligible)
         else:
-            accepted = kernel.guard(self.table, eligible, self.source, self.budget)
+            accepted = kernel.guard(self.table, eligible, self.context)
             results = (_Guarded(eligible[accepted], eligible[~accepted], ()),)
         for result in results:
             if result is None:
@@ -385,7 +427,7 @@ class _Classifier:
         if self.shaped is None:
             self.shaped = ShapedPlan(
                 rows,
-                preference(self.table, rows, self.kernels),
+                preference(self.table, rows, self.kernels, self.context),
             )
         plan = self.shaped
         spectral = self.kernels.get("shaped_sambe")
@@ -444,7 +486,7 @@ class _Classifier:
         if self.two_tone_direct is None:
             self.two_tone_direct = np.zeros(len(self.names), dtype=bool)
             self.two_tone_direct[rows] = direct_preferred(
-                self.table, rows, self.source, self.budget
+                self.table, rows, self.context
             )
         selected = rows[self.scope[rows]]
         direct = self.two_tone_direct[selected]
@@ -508,16 +550,18 @@ class _Classifier:
             self.two_tone_direct,
             self.plans,
             chain,
+            self.cached,
         )
 
 
 def classify(
     geometry: Geometry,
     kernels: Mapping[str, Kernel],
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
     pool: Executor | None = None,
     selection: Selection | None = None,
+    *,
+    cache: PrepareCache | None = None,
 ) -> Dispatch:
     """Guard shared candidates now and resolve local candidates in their worker.
 
@@ -525,5 +569,8 @@ def classify(
     Smaller shared selections stay serial. Selection resolves one timeline's
     deferred rows without a nested pool, retaining guard products for apply.
     Both modes use the same acquire-wide cost plan and numerical guards.
+    cache=None means this call does not look up resident payloads. Engine callers
+    supply cache under their call lock; deferred workers borrow strong references
+    through Selection.cached and never access the resident cache themselves.
     """
-    return _Classifier(geometry, kernels, source, budget, pool, selection).classify()
+    return _Classifier(geometry, kernels, context, pool, selection, cache).classify()

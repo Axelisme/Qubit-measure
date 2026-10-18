@@ -1,4 +1,4 @@
-"""Calibrated gain reuse through scoped kernel preparation and density playback."""
+"""Calibrated gain reuse through planner records and kernel density playback."""
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -6,9 +6,18 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.cache import PrepareCache
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution._dispatch import create_work_plan
+from zcu_tools.simulate.evolution._gain_plan import (
+    admit_shared_builds,
+    gain_anchor_resource,
+)
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import synthetic_model
 
@@ -44,14 +53,27 @@ def source():
     return ModelSource(np.ones((3, 3), dtype=np.complex128) / 3, lambda level: model)
 
 
-def scoped(table, source):
-    return FloquetPeriodKernel().evolve_scope(table, source)
+def scoped(table, source, budget=1e-3):
+    context = KernelContext(source, budget, create_work_plan(table, source))
+    return FloquetPeriodKernel(), context
 
 
-def prepare(kernel, table, source, budget=1e-3, *, rows=None):
+def anchors(context):
+    return [
+        gain_anchor_resource(context, group, gain)
+        for group in context.work_plan.gain_groups
+        for gain in sorted({a for b in group.builders for a in b.anchors})
+    ]
+
+
+def prepare(kernel, table, source, budget=1e-3, *, rows=None, context=None):
     if rows is None:
         rows = np.arange(len(table.timeline), dtype=np.int64)
-    return kernel.prepare(kernel.prepare_keys(table, rows), table, rows, source, budget)
+    if context is None:
+        context = KernelContext(source, budget, WorkPlan())
+    return kernel.prepare(
+        kernel.prepare_keys(table, rows, context), table, rows, context
+    )
 
 
 def playback(kernel, prepared, table, source, budget=1e-3, *, rows=None):
@@ -66,18 +88,20 @@ def playback(kernel, prepared, table, source, budget=1e-3, *, rows=None):
 
 def test_gain_predictor_is_checked_and_matches_independent_playback(source):
     table = scan(np.arange(6) * 1e-5 + 0.003)
-    kernel, workspace = scoped(table, source)
-    cache = PrepareCache(0)
-    with cache.track_workspace(workspace):
-        assert cache.live_bytes == 0
-        first_rows, last_rows = np.arange(3), np.arange(3, 6)
-        first = prepare(kernel, table, source, rows=first_rows)
-        assert cache.live_bytes == workspace.nbytes > 0
-        last = prepare(kernel, table, source, rows=last_rows)
-        assert cache.live_bytes == workspace.nbytes == 0
-    assert cache.live_bytes == 0
-    assert workspace.attempts >= 1
-    assert workspace.hits >= 1
+    kernel, context = scoped(table, source)
+    rows = np.arange(6)
+    (group,) = context.work_plan.gain_groups
+    assert group.gains == tuple(table.tone_amplitude[:, 0])
+    assert group.builders[1].anchors == (group.gains[0], group.gains[-1])
+    # Prefix resolution replaces the full table with owned copies of its arrays.
+    admit_shared_builds(context, replace(table), rows, np.empty(0, dtype=np.int64))
+    handles = anchors(context)
+    assert all(h.sealed and not h.released for h in handles)
+    first_rows, last_rows = np.arange(3), np.arange(3, 6)
+    first = prepare(kernel, table, source, rows=first_rows, context=context)
+    assert any(h.remaining_consumers for h in handles)
+    last = prepare(kernel, table, source, rows=last_rows, context=context)
+    assert all(h.released and not h.remaining_consumers for h in handles)
     independent = prepare(FloquetPeriodKernel(), table, source)
     # Include translated phase, a cross-period tail, and coherent input.
     actual = np.concatenate(
@@ -94,22 +118,33 @@ def test_gain_predictor_is_checked_and_matches_independent_playback(source):
     )
     # A new evolve does not inherit the previous call's retained tables.
     _, fresh = scoped(table, source)
-    assert fresh.nbytes == fresh.attempts == fresh.hits == 0
+    assert all(not h.actual_consumers for h in anchors(fresh))
+    context.work_plan.close()
+    fresh.work_plan.close()
 
 
 @pytest.mark.parametrize("order", ["thread-handoff", "reverse"])
 def test_scoped_preparation_is_bitwise_invariant_to_worker_and_key_order(source, order):
     table = scan(np.arange(8) * 1e-5 + 0.003)
-    reference_kernel, _ = scoped(table, source)
+    reference_kernel, reference_context = scoped(table, source)
     reference = playback(
-        reference_kernel, prepare(reference_kernel, table, source), table, source
+        reference_kernel,
+        prepare(reference_kernel, table, source, context=reference_context),
+        table,
+        source,
     )
-    kernel, _ = scoped(table, source)
+    kernel, context = scoped(table, source)
+    # Deferred timeline builds admit incrementally, even after an early handoff.
+    admit_shared_builds(context, table, np.empty(0, dtype=np.int64), np.arange(8))
+    handles = anchors(context)
     actual = np.empty_like(reference)
 
     def prepare_rows(rows):
         prepared = kernel.prepare(
-            kernel.prepare_keys(table, rows), table, rows, source, 1e-3
+            kernel.prepare_keys(table, rows, context),
+            table,
+            rows,
+            context,
         )
         states = np.repeat(source.initial_density[None], len(rows), axis=0)
         kernel.apply(
@@ -127,24 +162,26 @@ def test_scoped_preparation_is_bitwise_invariant_to_worker_and_key_order(source,
         for row in range(7, -1, -1):
             prepare_rows(np.array([row]))
     np.testing.assert_array_equal(actual, reference)
+    assert all(not h.sealed and not h.released for h in handles)
+    assert all(h.actual_consumers == h.planned_consumers for h in handles)
+    assert all(not h.remaining_consumers for h in handles)
+    context.work_plan.close()
+    assert all(h.released for h in handles)
+    reference_context.work_plan.close()
 
 
 @pytest.mark.parametrize(
-    ("gains", "checked"),
+    "gains",
     [
-        ([0.003, 0.0031, 0.0032, 0.0033], True),
-        ([0.003, 0.006, 0.009, 0.012], False),
+        [0.003, 0.0031, 0.0032, 0.0033],
+        [0.003, 0.006, 0.009, 0.012],
     ],
     ids=["coarse-defect-rejection", "unequal-anchor-grids"],
 )
-def test_rejected_predictor_preserves_independent_result_bitwise(
-    source, gains, checked
-):
+def test_rejected_predictor_preserves_independent_result_bitwise(source, gains):
     table = scan(gains)
-    kernel, workspace = scoped(table, source)
-    actual = prepare(kernel, table, source, 1e-10)
-    assert (workspace.attempts > 0) == checked
-    assert workspace.hits == 0
+    kernel, context = scoped(table, source, 1e-10)
+    actual = prepare(kernel, table, source, 1e-10, context=context)
     independent = prepare(FloquetPeriodKernel(), table, source, 1e-10)
     np.testing.assert_array_equal(
         playback(kernel, actual, table, source, 1e-10),
@@ -152,29 +189,42 @@ def test_rejected_predictor_preserves_independent_result_bitwise(
     )
 
 
-def test_reverse_handoff_releases_workspace_and_repeated_keys_rebuild_bitwise(source):
+def test_reverse_handoff_releases_sealed_resources_and_repeated_keys_stay_bitwise(
+    source,
+):
     table = scan(np.arange(8) * 1e-5 + 0.003)
-    kernel, workspace = scoped(table, source)
-    cache = PrepareCache(0)
-    with cache.track_workspace(workspace):
-        last_row = np.array([7])
-        first = prepare(kernel, table, source, rows=last_row)
-        expected = playback(kernel, first, table, source, rows=last_row)
-        for row in range(6, -1, -1):
-            prepare(kernel, table, source, rows=np.array([row]))
-        assert cache.live_bytes == workspace.nbytes == 0
-        repeated = prepare(kernel, table, source, rows=last_row)
-        np.testing.assert_array_equal(
-            playback(kernel, repeated, table, source, rows=last_row), expected
-        )
-        assert cache.live_bytes == workspace.nbytes == 0
+    kernel, context = scoped(table, source)
+    # A key omitted by caller admission must use the independent fallback,
+    # including while other admitted keys still retain sealed anchors.
+    pending = np.array([0, 1, 2, 4, 5, 6, 7])
+    admit_shared_builds(context, table, pending, np.empty(0, dtype=np.int64))
+    handles = anchors(context)
+    omitted_row = np.array([3])
+    omitted = prepare(kernel, table, source, rows=omitted_row, context=context)
+    independent = prepare(FloquetPeriodKernel(), table, source, rows=omitted_row)
+    np.testing.assert_array_equal(
+        playback(kernel, omitted, table, source, rows=omitted_row),
+        playback(kernel, independent, table, source, rows=omitted_row),
+    )
+    last_row = np.array([7])
+    first = prepare(kernel, table, source, rows=last_row, context=context)
+    expected = playback(kernel, first, table, source, rows=last_row)
+    for row in range(6, -1, -1):
+        prepare(kernel, table, source, rows=np.array([row]), context=context)
+    assert all(h.released for h in handles)
+    repeated = prepare(kernel, table, source, rows=last_row, context=context)
+    np.testing.assert_array_equal(
+        playback(kernel, repeated, table, source, rows=last_row), expected
+    )
+    assert all(h.released for h in handles)
+    context.work_plan.close()
 
 
 @pytest.mark.parametrize("changed", ["carrier", "budget", "model", "port"])
 def test_history_never_crosses_physical_identity_or_budget(source, changed):
     table = scan([0.003, 0.00301])
-    kernel, workspace = scoped(table, source)
-    prepare(kernel, table, source)
+    kernel, context = scoped(table, source)
+    prepare(kernel, table, source, context=context)
     target = scan([0.00302])
     budget = 1e-3
     if changed == "carrier":
@@ -186,8 +236,10 @@ def test_history_never_crosses_physical_identity_or_budget(source, changed):
     else:
         model = replace(source.model((0,)), identity="another-model")
         source = ModelSource(source.initial_density, lambda level: model)
-    actual = prepare(kernel, target, source, budget)
-    assert workspace.attempts == 0
+    target_context = KernelContext(source, budget, context.work_plan)
+    if changed == "budget":
+        target_context = KernelContext(source, budget, WorkPlan())
+    actual = prepare(kernel, target, source, budget, context=target_context)
     independent = prepare(FloquetPeriodKernel(), target, source, budget)
     np.testing.assert_array_equal(
         playback(kernel, actual, target, source, budget),
