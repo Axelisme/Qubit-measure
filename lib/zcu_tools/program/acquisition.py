@@ -150,6 +150,7 @@ class EarlyStopMixin(TypedAcquireMixin):
 
     def finish_round(self) -> bool:
         assert self.acquire_params is not None
+        # tolerated(cast): QICK merges the typed acquire cancel_flag into its untyped, heterogeneous acquire_params mapping.
         cancel_flag = cast(
             CancelFlagProtocol | None, self.acquire_params.get("cancel_flag")
         )
@@ -301,6 +302,7 @@ class EarlyStopMixin(TypedAcquireMixin):
     def _is_stopped_before_first_completed_round(self) -> bool:
         if self.acquire_params is None:
             return False
+        # tolerated(cast): finish_acquire reads the same QICK-owned flag entry to distinguish no completed data from a valid partial result.
         cancel_flag = cast(
             CancelFlagProtocol | None, self.acquire_params.get("cancel_flag")
         )
@@ -423,6 +425,7 @@ class TrackerMixin(TypedAcquireMixin):
 
         assert self.acquire_params is not None
 
+        # tolerated(cast): QICK's extra_args update erases the typed acquire trackers list; retain the original objects for completed-round updates.
         trackers = cast(
             list[TrackerProtocol] | None, self.acquire_params.get("trackers")
         )
@@ -456,6 +459,7 @@ class TrackerMixin(TypedAcquireMixin):
 
                 if not ro["edge_counting"]:
                     d_rep = d_rep / ro["length"]
+                # tolerated(cast): The tracker protocol requires float64, but QICK edge-counting buffers stay int64; preserve this no-conversion handoff.
                 d_rep = cast(NDArray[np.float64], d_rep)
 
                 tracker.update(d_rep)  # (..., m, 2)
@@ -545,7 +549,7 @@ class RoundHookMixin(TypedAcquireMixin):
         assert acquire_params is not None
 
         # trigger the hook function after each round
-        round_hook = cast(RoundHookType | None, acquire_params.get("round_hook"))
+        round_hook = acquire_params.get("round_hook")
         if round_hook is not None:
             assert callable(round_hook), "round_hook must be a callable function"
             assert self.rounds_buf is not None
@@ -574,6 +578,7 @@ class RoundHookMixin(TypedAcquireMixin):
     def _round_hook_cancel_flag(self) -> CancelFlagProtocol:
         acquire_params = self.acquire_params
         assert acquire_params is not None
+        # tolerated(cast): QICK's dynamic mapping loses the flag protocol; the callback must receive the original acquire flag, not a replacement.
         cancel_flag = cast(CancelFlagProtocol | None, acquire_params.get("cancel_flag"))
         if cancel_flag is None:
             raise RuntimeError("round_hook requires acquire cancel_flag")
