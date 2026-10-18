@@ -53,6 +53,13 @@ class SnapshotOriginator(Protocol[StateT, ReportT_co]):
 
 @dataclass(frozen=True)
 class RestoreOutcome(Generic[ReportT]):
+    """Completed originator restore and any recoverable startup failure.
+
+    report is the app-owned result of the installed state. load_error is None on
+    clean/missing/successful reads, otherwise the error the host must display;
+    incompatible data errors include the preserved sibling backup path.
+    """
+
     report: ReportT
     load_error: PersistenceError | None
 
@@ -65,7 +72,14 @@ def _safe_cache_root() -> Path:
 
 
 class SingleFileCaretaker(Generic[StateT, ReportT]):
-    """Load and atomically replace one JSON snapshot file."""
+    """Load and atomically replace one JSON snapshot file.
+
+    Invalid JSON/UTF-8, codec ValueError and SnapshotIdentityError from restore
+    move the original to a unique timestamped sibling before default startup.
+    Backup failure raises PersistenceError, without installing defaults. Other
+    provider/restore failures propagate. Hosts display RestoreOutcome.load_error
+    and own save timing; recovered startup does not disable later flush.
+    """
 
     def __init__(
         self,
@@ -87,6 +101,13 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
         return self._path
 
     def restore_all(self, *, load: bool = True) -> RestoreOutcome[ReportT]:
+        """Restore persisted state or defaults and return the host display report.
+
+        load=False skips reading/backing up an existing file. Incompatibility
+        backs up the original before restoring defaults; failed backup aborts
+        startup. Read I/O errors retain the existing default/error policy.
+        Unclassified provider or originator failures propagate unchanged.
+        """
         logger.info("persistence restore: load=%s path=%s", load, self._path)
         if load:
             state, load_error = self._load()

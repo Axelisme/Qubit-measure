@@ -26,6 +26,8 @@ Generator 協作、recipe 的取消結果與尚未落實的 workflow agent yield
 
 FormInput 保存 expression 原文；宿主捕捉求值環境，決定 Start、Apply、Discard 與 input 保存時機。Engine 只接收已驗證的普通 plan／tunables 值，擁有 numeric validation、revision、step capture 與 journal publication，不求值或保存 expression。Journal append 成功後才發布新值；stale revision、model error 或 append failure 不發布候選。當前 step 的 capture 不隨新 revision 改變，後續 step 或 Resume 才取最新值。
 
+持久 snapshot 用 versioned FormInput envelopes strict 還原兩個完整草稿，任一 identity 不相容都不安裝。Source reload 與 RAM switching 則用獨立的 selection-aware migration 逐葉保留 raw 和現行 annotation 仍接受的 selection overrides。新欄位用 defaults，被丟棄的葉或 override 回報給使用者。Migration 不呼叫 converter 或 options hook，也不以 strict-success shortcut 跳過逐葉規則。啟動遇不相容持久快照先備份原檔，再開 defaults，移檔失敗則啟動失敗。兩種路徑的分工見 [[0079]]，共用 caretaker 政策見 [[0063]]。
+
 Workflow host 只有在 Engine 成功 publication 後才接受 input／base。失敗保留可修正的 draft，不以輸入已編輯推定 Engine 已接受。這避免 Engine 維護另一份 input 狀態，代價是 Engine journal 無法重建當時的 expression。Form／editor 的共用與宿主提交邊界見 [[0065]]，具體接線見 [workflows host](../../lib/zcu_tools/gui/app/workflows/README.md)。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入現行 ADR。
 
 ## 一個 run 的 operation

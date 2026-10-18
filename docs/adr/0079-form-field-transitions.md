@@ -63,7 +63,11 @@ Gauss→FlatTop 不把來源 waveform 放進 raise_waveform。FlatTop 沒有直�
 
 Ref family、ref 是否存在及 library 內容都不參與還原 identity，也不新增宣告 token。Library 可用後，ref 不存在或指向項目的 family 不符現行宣告時，一般驗證在消費欄位顯示錯誤，保留草稿並擋 Run。宣告的 ref_family 改變與 library 項目改變使用同一規則。Library 內容版本改變不等於元素 identity 改變。已 inline 的草稿不要求原 ref 仍存在，還原保留當時原稿，不從新 library 重新複製。
 
-不相容檔案的啟動處理，以及 source reload 遇到宣告變更時的草稿政策，仍待使用者裁決。不得把 defaults 後覆蓋原檔或新的 reload 行為視為本節已批准的策略。
+啟動遇 decode 或 identity 不相容時，共用 caretaker 先將原檔移到同目錄的 `<原檔名>.incompatible-<UTC 時間戳>-<唯一尾碼>`，不覆寫既有備份。成功後顯示錯誤及備份路徑，再以 defaults 開啟，之後照常保存。移檔失敗則啟動失敗並保留原檔，不安裝 defaults。所有 caretaker hosts 共用此政策，不新增保護狀態，不自動清理備份。Provider 與其他 restore 故障仍傳播。這避免正常 close 的保存覆蓋唯一的不相容原稿，細節見 [[0063]]。
+
+顧問於 2026-10-18 依使用者「可以，之後就交給advisor，我就不直接對話」的代裁授權採用啟動備份政策。持久 strict restore 不等於 source reload 或 RAM switching 的逐葉 migration，兩者使用分開命名的操作。
+
+Source reload 與 RAM switching 透過 Core 公開的 selection-aware migration 逐葉遷移 raw。相容欄位保留，新欄位用現行 defaults。新 annotation 和遷移後 ancestry 仍接受的明確 selection override 也保留。不適用的葉與 override 丟棄，列入既有 dropped 回報，host 顯示給使用者。Migration 不呼叫 converter 或 options hook，不因 strict restore 成功就跳過逐葉規則。這保留既有宣告更新的 defaults／dropped 行為，同時避免沒有 converter 的 branch A／selection B 在切換後無聲變回 A。顧問於 2026-10-18 依同一代裁授權確認此分工。
 
 ### 固定具名元素與參與清單
 

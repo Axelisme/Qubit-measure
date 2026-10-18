@@ -3,7 +3,7 @@
 from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
 
-from ._persistence import _check_selection
+from ._persistence import check_selection
 from ._structure import element_model, fixed_list, selected
 from .model import FormPath, FormWritePath
 
@@ -53,7 +53,7 @@ def migrate_selections(
             if not path:
                 raise ValueError("Selection requires a field path")
             info = _selection_info(model, data, path)
-            _check_selection(info, value)
+            check_selection(info, value)
         except ValueError:
             dropped.append(path)
         else:

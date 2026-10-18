@@ -9,14 +9,14 @@ from pydantic.fields import FieldInfo
 
 from ._selection import literal_values
 from ._structure import alternatives, discriminator, model_types, selected
-from .model import FormModel
+from .model import FormModel, FormWritePath
 
 
 class _Selection(BaseModel):
     """An explicit choice, independent of the branch stored in raw input."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
-    path: tuple[str, ...]
+    path: FormWritePath
     value: JsonValue
 
 
@@ -90,7 +90,7 @@ def declaration_identity(model: type[FormModel]) -> str:
 def encode(
     input_model: type[FormModel],
     data: dict[str, JsonValue],
-    selections: dict[tuple[str, ...], JsonValue],
+    selections: dict[FormWritePath, JsonValue],
 ) -> str:
     """Encode an authored tree and independent choices without evaluation."""
     return _Draft(
@@ -106,7 +106,7 @@ def encode(
 
 def decode(
     model: type[FormModel], text: str
-) -> tuple[dict[str, JsonValue], dict[tuple[str, ...], JsonValue]]:
+) -> tuple[dict[str, JsonValue], dict[FormWritePath, JsonValue]]:
     """Reject mismatched declarations; return untouched raw input and choices."""
     try:
         draft = _Draft.model_validate_json(text)
@@ -116,7 +116,7 @@ def decode(
         raise ValueError(
             "Saved draft type identity is incompatible with the trusted declaration"
         )
-    selections: dict[tuple[str, ...], JsonValue] = {}
+    selections: dict[FormWritePath, JsonValue] = {}
     for selection in draft.selections:
         if not selection.path or selection.path in selections:
             raise ValueError("Invalid or duplicate saved selection path")
@@ -124,7 +124,7 @@ def decode(
     _check_model(model, draft.data)
     for path, value in selections.items():
         info = _selection_field(model, draft.data, path)
-        _check_selection(info, value)
+        check_selection(info, value)
     return draft.data, selections
 
 
@@ -163,11 +163,10 @@ def _check_model(model: type[BaseModel], data: dict[str, JsonValue]) -> None:
 
 
 def _selection_field(
-    model: type[BaseModel], data: dict[str, JsonValue], path: tuple[str, ...]
+    model: type[BaseModel], data: dict[str, JsonValue], path: FormWritePath
 ) -> FieldInfo:
     name, *remaining = path
-    info = model.model_fields.get(name)
-    if info is None:
+    if not isinstance(name, str) or (info := model.model_fields.get(name)) is None:
         raise ValueError(f"Saved selection path identity is incompatible: {path!r}")
     if not remaining:
         return info
@@ -178,7 +177,13 @@ def _selection_field(
     return _selection_field(branch, value, tuple(remaining))
 
 
-def _check_selection(info: FieldInfo, value: JsonValue) -> None:
+def check_selection(info: FieldInfo, value: JsonValue) -> None:
+    """Reject a choice outside annotation structure, without hooks or evaluation.
+
+    info is the trusted target field; value is its partial explicit override.
+    Model branch tags and provided children must fit the annotation. Ordinary
+    scalar choices must have the declared type. Raise ValueError on mismatch.
+    """
     branch = _branch(info, value)
     if branch is not None and isinstance(value, dict):
         for name, child in value.items():
@@ -187,7 +192,7 @@ def _check_selection(info: FieldInfo, value: JsonValue) -> None:
                 raise ValueError(
                     f"Saved selection field identity is incompatible: {name!r}"
                 )
-            _check_selection(field, child)
+            check_selection(field, child)
         return
     values = literal_values(info.annotation)
     if values is not None:

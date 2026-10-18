@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-18，Inspect 完整表單草稿的 unsaved 判斷
+**Last updated:** 2026-10-18，完整草稿與不相容快照的共用啟動備份
 
 # gui/session/ — 量測 session core
 
@@ -34,6 +34,11 @@ DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，�
 
 `persistence.py` 是 app-neutral、強型別的 single-file caretaker；app 注入 codec 並保留
 schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
+Decode 或 host 明確回報的 `SnapshotIdentityError` 觸發共用備份政策。Caretaker 先將原檔移到
+同目錄、不覆寫舊備份的 `<原檔名>.incompatible-<UTC 時間戳>-<唯一尾碼>`，再還原 defaults。
+`RestoreOutcome.load_error` 含備份路徑，host 負責顯示，之後照常保存。移檔失敗則啟動失敗，
+不安裝 defaults，也不覆蓋原檔。Caretaker 不清理備份，provider 和其他 restore 故障仍傳播。
+持久還原與允許丟葉的 RAM/source migration 是不同操作，見 ADR-0063、ADR-0079。
 
 ```
 session/
