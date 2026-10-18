@@ -33,7 +33,7 @@ def test_drive_line_selects_operator_and_units(operator: str | None) -> None:
     except ValueError as error:
         pytest.fail(f"supported drive operator must validate: {error}")
     control = settings.drive_lines["control"]
-    assert getattr(control, "operator", None) == (operator or "charge")
+    assert control.operator == (operator or "charge")
     # JSON replay must retain the chosen physical calibration without aliases.
     restored = parse_ftf(settings.model_dump(mode="json"))
     assert restored == settings
@@ -89,6 +89,10 @@ def test_drive_line_requires_only_its_operator_calibration(
 @pytest.mark.parametrize("value", [None, float("nan"), float("inf")])
 def test_flux_calibration_requires_finite_complex_components(value: object) -> None:
     coupling = _coupling() | {"f1": {"real": value, "imag": 0.0}}
-    line = {"gen_ch": 2, "operator": "flux", "flux_drive_phi0_per_gain": coupling}
+    line: dict[str, object] = {
+        "gen_ch": 2,
+        "operator": "flux",
+        "flux_drive_phi0_per_gain": coupling,
+    }
     with pytest.raises(ValueError, match=r"flux_drive_phi0_per_gain.f1.real"):
         parse_ftf(_document(line))

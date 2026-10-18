@@ -78,7 +78,7 @@ def test_mixed_lines_use_dc_flux_derivative_and_signed_complex_crosstalk() -> No
             sources[1].in_phase_ghz, expected_x, rtol=2e-8, atol=1e-10
         )
         np.testing.assert_allclose(
-            sources[1].quadrature_ghz, expected_y, rtol=2e-8, atol=1e-10
+            np.asarray(sources[1].quadrature_ghz), expected_y, rtol=2e-8, atol=1e-10
         )
         # Secular conversion rotates these fixed-DC operators, not a new derivative
         # at the displaced level. This covers the actual SecularDrive seam too.

@@ -157,15 +157,15 @@ def test_readout_uses_dc_joint_state_order_and_baths(joint, resonators):
 
 @pytest.mark.parametrize("subsystem", [0, 1, 2])
 @pytest.mark.parametrize("symmetric", [False, True])
-def test_flux_operator_is_dc_derivative_in_retained_basis(joint, subsystem, symmetric):
+def test_flux_operator_is_dc_derivative_in_retained_basis(
+    joint: ftf.JointModel, subsystem: int, symmetric: bool
+):
     if symmetric:
         parameters = replace(
             joint.parameters, coupler=replace(joint.parameters.coupler, asymmetry=0.0)
         )
         joint = ftf.JointModel(parameters, np.zeros(3), temperature_k=0.0)
-    operator = getattr(joint, "flux_operator", None)
-    assert callable(operator), "JointModel must provide the fixed-DC flux derivative"
-    actual = operator(subsystem)
+    actual = joint.flux_operator(subsystem)
     delta = np.eye(3)[subsystem] * 1e-5
     expected = (
         joint.hamiltonian(joint.dc_flux + delta)
@@ -184,17 +184,21 @@ def test_flux_operator_is_dc_derivative_in_retained_basis(joint, subsystem, symm
         a = np.diag(np.sqrt(np.arange(1, p.native_cutoff)), 1)
         phi = (2 * p.ec_ghz / p.el_ghz) ** 0.25 * (a + a.T)
 
-        def potential(flux):
+        def fluxonium_potential(flux):
             return -p.ej_ghz * cosm(phi + 2 * np.pi * flux * np.eye(len(phi)))
+
+        potential = fluxonium_potential
     else:
         shift = np.eye(2 * p.charge_cutoff + 1, k=1)
         cosine, sine = (shift + shift.T) / 2, (shift - shift.T) / (2j)
 
-        def potential(flux):
+        def squid_potential(flux):
             return p.ejmax_ghz * (
                 -np.cos(np.pi * flux) * cosine
                 + p.asymmetry * np.sin(np.pi * flux) * sine
             )
+
+        potential = squid_potential
 
     derivative = (potential(f + 1e-5) - potential(f - 1e-5)) / 2e-5
     embedded = np.moveaxis(joint.native_embedding(), subsystem, 0)
@@ -207,8 +211,6 @@ def test_flux_operator_is_dc_derivative_in_retained_basis(joint, subsystem, symm
 
 
 @pytest.mark.parametrize("subsystem", [-1, 3])
-def test_flux_operator_rejects_unknown_subsystem(joint, subsystem):
-    operator = getattr(joint, "flux_operator", None)
-    assert callable(operator), "JointModel must provide the fixed-DC flux derivative"
+def test_flux_operator_rejects_unknown_subsystem(joint: ftf.JointModel, subsystem: int):
     with pytest.raises(ValueError, match="subsystem"):
-        operator(subsystem)
+        joint.flux_operator(subsystem)
