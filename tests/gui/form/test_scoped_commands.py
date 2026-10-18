@@ -123,7 +123,7 @@ def test_command_rejects_bad_structure_scope_and_required_evaluation_atomically(
         other: float = 7
 
         @classmethod
-        def options(cls, env):
+        def options(cls, env: api.FormEnv) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
             return {
                 ("value",): (
                     api.Option(
