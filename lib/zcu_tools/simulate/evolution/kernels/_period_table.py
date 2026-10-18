@@ -35,7 +35,7 @@ class UnitaryTable(NamedTuple):
     """Immutable interpolation and carrier lattice for period playback.
 
     bound: positive absolute gain ceiling for the Chebyshev interval [0,bound].
-    coefficients: (P,8,16,M,M) padded amplitude/Fourier coefficients.
+    coefficients: (P,D,16,M,M) amplitude/Fourier coefficients, 1 <= D <= 8.
     subdivisions: positive subperiod count per carrier period.
     block_cycles: positive maximum block length; one for subdivided periods.
     project_unitary: whether to apply two Newton polar iterations to U.
@@ -124,6 +124,8 @@ class PeriodEntry:
     block_cycles: positive maximum integer-subperiod block, one when subdivided.
     project_unitary: retract interpolated U with two Newton polar iterations.
     harmonics: retained absolute Fourier cutoff, 8 for ordinary full tables.
+    degrees: number of coefficients used by Clenshaw, at least one and no
+        greater than coefficients.shape[1]; the highest degree is degrees - 1.
     All retained arrays are read-only. No field depends on input density.
     """
 
@@ -138,6 +140,7 @@ class PeriodEntry:
     block_cycles: int = 1
     project_unitary: bool = False
     harmonics: int = 8
+    degrees: int = 8
 
     def expanded_coefficients(self) -> NDArray[np.complex128]:
         """Borrow dense coefficients, or expand compact storage for this playback."""
@@ -188,7 +191,14 @@ def _phase_coefficients(coefficients, theta, harmonics):
         mode = mode_index if mode_index < 8 else mode_index - 16
         if abs(mode) > harmonics:
             continue
-        result += np.exp(1j * mode * theta) * coefficients[:, mode_index]
+        phase = np.exp(1j * mode * theta)
+        # Preserve harmonic accumulation order without a matrix-sized temporary.
+        for degree in range(coefficients.shape[0]):
+            for i in range(coefficients.shape[2]):
+                for j in range(coefficients.shape[3]):
+                    result[degree, i, j] += (
+                        phase * coefficients[degree, mode_index, i, j]
+                    )
     return result
 
 
@@ -196,7 +206,7 @@ def _phase_coefficients(coefficients, theta, harmonics):
 def _amplitude_unitary(coefficients, x):
     previous = np.zeros_like(coefficients[0])
     current = previous.copy()
-    for degree in range(7, 0, -1):
+    for degree in range(coefficients.shape[0] - 1, 0, -1):
         updated = 2 * x * current - previous + coefficients[degree]
         previous, current = current, updated
     return x * current - previous + coefficients[0]
@@ -311,8 +321,10 @@ def envelopes(
 ) -> NDArray[np.complex128]:
     """Evaluate playback in a row batch using the common envelope interface."""
     values = np.empty(elapsed.shape, dtype=np.complex128)
-    for index, envelope in enumerate(table.envelopes):
-        mask = table.tone_envelope[rows, 0] == index
+    envelope_ids = table.tone_envelope[rows, 0]
+    for index in np.unique(envelope_ids):
+        envelope = table.envelopes[int(index)]
+        mask = envelope_ids == index
         local = elapsed[mask] + table.tone_envelope_offset_ns[rows[mask], 0, None]
         values[mask] = envelope.values(local)
     return values * table.tone_amplitude[rows, 0, None]

@@ -64,7 +64,7 @@ def subdivisions(
     from .kernels._shaped import drive_bounds
     from .kernels._workload_facts import envelope_bounds
 
-    strength, gamma = drive_bounds(table, rows, source)
+    strength, gamma = drive_bounds(table, rows, source, work_plan)
     bounds = envelope_bounds(table, work_plan)
     peaks, slopes = bounds.peaks, bounds.slopes
     envelope = table.tone_envelope[rows, 0]

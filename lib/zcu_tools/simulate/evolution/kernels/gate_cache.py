@@ -112,7 +112,7 @@ class GateCacheKernel:
         if not np.any(accepted):
             return accepted
         selected = rows[accepted]
-        strength, gamma = drive_bounds(table, selected, source)
+        strength, gamma = drive_bounds(table, selected, source, context.work_plan)
         peaks = envelope_bounds(table, context.work_plan).peaks
         peak = peaks[table.tone_envelope[selected, 0]]
         estimate = (

@@ -55,6 +55,46 @@ def envelope_bounds(table: SegmentTable, work_plan: WorkPlan) -> EnvelopeBounds:
     return work_plan.fact(key, build)
 
 
+@dataclass(frozen=True)
+class DriveBound:
+    """Model/port scalars for shaped guards, independent of density and gain.
+
+    strength is the maximum spectral norm of the two drive quadratures in GHz.
+    rate is the larger of total outgoing rates and pure-dephasing rates, in /ns.
+    """
+
+    strength: float
+    rate: float
+
+
+def drive_bound(model: SecularModel, port: int, work_plan: WorkPlan) -> DriveBound:
+    """Resolve shaped drive/rate bounds once per full model identity/level/port.
+
+    port indexes model.drives. Use the original spectral-norm and rate-reduction
+    formulas; only their immutable scalar results live until WorkPlan.close.
+    """
+    key = FactKey(("shaped-drive-bound", model.identity, model.level, port), DriveBound)
+
+    def build() -> DriveBound:
+        drive = model.drives[port]
+        return DriveBound(
+            float(
+                max(
+                    np.linalg.norm(drive.in_phase_ghz, 2),
+                    np.linalg.norm(drive.quadrature_ghz, 2),
+                )
+            ),
+            float(
+                max(
+                    model.rates_per_ns.sum(axis=0).max(),
+                    model.dephasing_per_ns.max(),
+                )
+            ),
+        )
+
+    return work_plan.fact(key, build)
+
+
 def split_rate(
     model: SecularModel,
     port: int,
