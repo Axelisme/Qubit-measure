@@ -3,7 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from zcu_tools.gui.form import FormPathError
+from zcu_tools.gui.form import FormInputRejected, FormPathError
 from zcu_tools.gui.form_adapter import LogicalEditError, LogicalSourceError
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
@@ -27,6 +27,16 @@ def cfg_error_to_remote(exc: CfgPreconditionError) -> RemoteError:
     )
 
 
+def input_rejected_to_remote(exc: FormInputRejected) -> RemoteError:
+    """Preserve a declaration refusal and its original typed mutation path."""
+    return RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        str(exc),
+        reason="form_input_rejected",
+        data={"form_path": list(exc.path)},
+    )
+
+
 @contextmanager
 def recipe_form_errors() -> Generator[None]:
     """Translate declared logical/cfg failures without reclassifying author bugs.
@@ -38,6 +48,8 @@ def recipe_form_errors() -> Generator[None]:
         yield
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
+    except FormInputRejected as exc:
+        raise input_rejected_to_remote(exc) from exc
     except FormPathError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,

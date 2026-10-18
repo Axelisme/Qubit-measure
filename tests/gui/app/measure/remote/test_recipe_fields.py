@@ -211,7 +211,7 @@ def test_typed_recipe_rpc_passes_original_index_to_owner_errors(form_rpc, method
     assert owner.input.data == before
 
 
-@pytest.mark.parametrize("value", [{}, 4])
+@pytest.mark.parametrize("value", [4])
 def test_recipe_rpc_structure_rejection_identifies_first_edit_atomically(
     container_recipe_rpc, value
 ) -> None:

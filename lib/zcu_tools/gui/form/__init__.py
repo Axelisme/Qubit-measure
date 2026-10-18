@@ -18,13 +18,13 @@ from .description import (
 )
 from .model import (
     Display,
-    FixedList,
     FormChange,
     FormCommandError,
     FormConversionError,
     FormEnv,
     FormErrors,
     FormInput,
+    FormInputRejected,
     FormModel,
     FormPath,
     FormPathError,
@@ -35,7 +35,6 @@ from .model import (
     InputCommand,
     InputConverter,
     InputPolicy,
-    Participants,
     WriteRejected,
     field_error,
 )

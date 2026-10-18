@@ -36,6 +36,18 @@ from zcu_tools.resources.context.library import (
 from tests.gui._form_converters import RebuildingForm
 
 
+def test_logical_container_edit_replaces_exact_raw_value_without_merging_defaults():
+    definition = adapter.Form(LogicalCfg, {"real": {"module": {"value": 7}}})
+    env = FormEnv()
+    input = definition.default_input(env)
+    candidate = definition.prepare_logical_edits(
+        input, (adapter.LogicalEdit(("real", "module"), {}),), env
+    )
+    assert candidate.input.data["real"] == {"module": {}}
+    assert input.data["real"] == {"module": {"value": 7}}
+    assert candidate.changed
+
+
 class RealLeaf(ConfigBase):
     value: int = 2
 
@@ -190,7 +202,7 @@ def test_batch_rejection_has_original_index_and_no_success_prefix(
     assert input.to_json() == before
 
 
-@pytest.mark.parametrize("value", [{}, 4])
+@pytest.mark.parametrize("value", [4])
 def test_structure_rejection_reports_first_edit_without_changing_input(value) -> None:
     form = adapter.Form(LogicalCfg, {})
     env = FormEnv()
@@ -517,7 +529,7 @@ def test_locked_selector_rejects_library_and_preserves_inline_noop() -> None:
     assert input.to_json() == before
 
 
-def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_structure() -> (
+def test_ordinary_union_write_keeps_only_authored_raw_and_initial_active_structure() -> (
     None
 ):
     from typing import Annotated, Literal
@@ -537,7 +549,11 @@ def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_str
 
     form = adapter.Form(LogicalCfg, {}, extras=Extras, lower=lambda extras, cfg: cfg)
     input = FormInput(
-        form.model, {"extras": {"shape": {"kind": "flat", "length": 9.0}}}
+        form.model,
+        {
+            "real": {"module": {"value": 2}},
+            "extras": {"shape": {"kind": "flat", "length": 9.0}},
+        },
     )
     env = FormEnv()
     candidate = form.prepare_logical_edits(
@@ -548,8 +564,10 @@ def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_str
     assert object_at(candidate.input.data, ("extras", "shape")) == {
         "kind": "ramp",
         "start": 3.0,
-        "stop": 1.0,
     }
+    result = FormState(candidate.input).result(env)
+    assert isinstance(result, FormModel)
+    assert result.model_dump()["extras"]["shape"]["stop"] == 1.0
     with pytest.raises(adapter.LogicalEditError) as failure:
         form.prepare_logical_edits(
             input,

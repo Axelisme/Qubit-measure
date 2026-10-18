@@ -298,7 +298,7 @@ def test_absent_non_nullable_nested_model_accepts_child_leaf_writes() -> None:
 
     defaults = FormState(PlainForm.default_input(env))
     defaults.write({("section", "required"): 3.0}, env)
-    assert defaults.input.data == {"section": {"level": 2.0, "required": 3.0}}
+    assert defaults.input.data == {"section": {"required": 3.0}}
     result = defaults.result(env)
     assert isinstance(result, PlainForm)
     assert result.section == PlainSection(level=2.0, required=3.0)
@@ -488,7 +488,7 @@ def test_structural_write_failure_does_not_publish_a_partial_batch(
     assert notifications == []
 
 
-def test_mapping_replacement_is_a_leaf_but_key_and_model_patches_are_rejected() -> None:
+def test_mapping_replacement_is_a_leaf_but_key_patches_are_rejected() -> None:
     env = environment()
     mapping = FormState(
         FormInput(DraftForm, {"offsets": {"rack.left": 3.0, "remove": 1.0}})
@@ -520,17 +520,11 @@ def test_mapping_replacement_is_a_leaf_but_key_and_model_patches_are_rejected() 
     assert changes[0].input == {}
     assert changes[0].value == {}
 
-    model = FormState(BoundsForm.default_input(env))
-    before_model = model.input.data
-    with pytest.raises(ValueError, match="leaf|model|replacement|path"):
-        model.write({("bounds",): {"start": 2.0, "stop": 4.0}}, env)
-    assert model.input.data == before_model
-
 
 def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
     env = environment()
     branch = FormState(BranchForm.default_input(env))
-    branch.write({("branch", "kind"): "context"}, env)
+    branch.select(("branch",), {"kind": "context"}, env)
     changes = branch.changes(env)
     assert not isinstance(changes, FormErrors)
     by_path = {change.path: change for change in changes}
@@ -554,29 +548,36 @@ def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
     assert changes[0].value is None
 
 
-def test_discriminator_first_factory_and_explicit_content_order() -> None:
+def test_selection_and_leaf_write_are_separate_initial_active_operations() -> None:
     env = environment(8.0)
     state = FormState(BranchForm.default_input(env))
     state.write({("branch", "shared"): 5.0}, env)
     notifications: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: notifications.append(state.input.data))
-    # Non-discriminator content deliberately precedes kind in the batch.
-    state.write({("branch", "context_only"): 12.0, ("branch", "kind"): "context"}, env)
+    before = state.input
+    with pytest.raises(ValueError, match="path"):
+        state.write(
+            {("branch", "context_only"): 12.0, ("branch", "kind"): "context"}, env
+        )
+    assert state.input.same_as(before)
+    assert notifications == []
+    state.select(("branch",), {"kind": "context"}, env)
+    state.write({("branch", "context_only"): 12.0}, env)
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert isinstance(result.branch, ContextBranch)
     assert result.branch.context_only == 12.0
-    assert len(notifications) == 1
+    assert len(notifications) == 2
 
-    state.write({("branch", "kind"): "static"}, env)
-    state.write({("branch", "kind"): "context"}, env)
+    state.select(("branch",), {"kind": "static"}, env)
+    state.select(("branch",), {"kind": "context"}, env)
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert isinstance(result.branch, ContextBranch)
     assert result.branch.context_only == 8.0
 
-    state.write({("branch", "kind"): "static"}, env)
-    state.write({("branch", "kind"): "required"}, env)
+    state.select(("branch",), {"kind": "static"}, env)
+    state.select(("branch",), {"kind": "required"}, env)
     result = state.result(env)
     assert isinstance(result, FormErrors)
     assert ("branch", "required") in result.messages
@@ -636,7 +637,7 @@ def test_compatible_restore_applies_branch_discriminator_before_saved_leaves() -
 def test_compatible_restore_without_tag_overlays_current_branch_once(kind: str) -> None:
     env = environment()
     state = FormState(BranchForm.default_input(env))
-    state.write({("branch", "kind"): kind}, env)
+    state.select(("branch",), {"kind": kind}, env)
     before = state.input.data
     current = before["branch"]
     assert isinstance(current, dict)
@@ -743,13 +744,13 @@ def test_null_tagged_section_rejects_discriminator_child_write_until_activation(
     base = state.base.data
     notifications: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: notifications.append(state.input.data))
-    with pytest.raises(ValueError, match="null|activat"):
+    with pytest.raises(ValueError, match="null|activat|[Ii]nactive"):
         state.write({("branch", "kind"): "context"}, env)
     assert state.input.data == before
     assert state.base.data == base
     assert notifications == []
     state.write({("branch",): {"kind": "static"}}, env)
-    state.write({("branch", "kind"): "context"}, env)
+    state.select(("branch",), {"kind": "context"}, env)
     result = state.result(env)
     assert isinstance(result, NullableBranchForm)
     assert isinstance(result.branch, ContextBranch)

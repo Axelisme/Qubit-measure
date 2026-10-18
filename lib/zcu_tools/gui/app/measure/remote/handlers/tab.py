@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.form import FormCommandError, FormPathError
+from zcu_tools.gui.form import FormCommandError, FormInputRejected, FormPathError
 from zcu_tools.gui.form_adapter import LogicalEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -370,6 +370,10 @@ def h_tab_run_cfg_command(
     try:
         resource = adapter.cfg_lookup(tab_id)
         resource.run_command(path, str(params["name"]))
+    except FormInputRejected as exc:
+        from ..form_errors import input_rejected_to_remote
+
+        raise input_rejected_to_remote(exc) from exc
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     except FormPathError as exc:
@@ -398,6 +402,10 @@ def h_tab_edit_cfg(
     try:
         resource = adapter.cfg_lookup(tab_id)
         resource.write(batch)
+    except FormInputRejected as exc:
+        from ..form_errors import input_rejected_to_remote
+
+        raise input_rejected_to_remote(exc) from exc
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     except ValueError as exc:

@@ -1,12 +1,12 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-18，同名同型別 raw 繼承
+**Last updated:** 2026-10-18，宣告 owner 的固定元素政策與同名同型別 raw 繼承
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
 主要生成入口如下：
 
-- `Form(core_cfg, tree, *, extras=None, lower=None)`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。Form 的 cfg 結果型別具協變性，具體 `Form[SampleCfg]` 可交給 generic-free host，`to_cfg` 仍回傳 SampleCfg 或 FormErrors。Core annotations 決定形狀與驗證；樹決定起始值、鎖定、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的 Expr start／stop 也沿用這個規則，不回落 LinRange 的 0／1。Range 端點為 None 時顯示空白且必填，對應 input key 缺席也不使用 0／1。Literal 端點與未宣告的掃描仍保留原有預設。
+- `Form(core_cfg, tree, *, extras=None, lower=None, fixed_elements=())`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。Form 的 cfg 結果型別具協變性，具體 `Form[SampleCfg]` 可交給 generic-free host，`to_cfg` 仍回傳 SampleCfg 或 FormErrors。Core annotations 決定形狀與驗證；樹決定起始值、鎖定、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的 Expr start／stop 也沿用這個規則，不回落 LinRange 的 0／1。Range 端點為 None 時顯示空白且必填，對應 input key 缺席也不使用 0／1。Literal 端點與未宣告的掃描仍保留原有預設。
 - `module_form(spec_type)`：為一個具體持久 module 或 waveform Spec class 建 Form。生成的 model 可當 FormState root，也可當 `ModuleInline` 的 module 欄位；host 的選項沿用自己的 `choices(env)`。`to_cfg` 回傳同一個 Spec，child library key 保持字串，不讀 library、asset，也不轉 native cfg。`Form.input_from_spec(spec, env)` 把既有 Spec（library entry 或 writeback proposal）投影成 input；它只接受這類 Form 的同型 Spec。
 - `FormContext(parameters)`：實驗 `make_form(ctx)` 使用的固定來源查詢。parameters 是捕捉的 ParameterContext，缺來源時為 None。`has(ref)` 接受 library root 或 point module slot，含 `$alias` 前綴。缺 key、未設定或懸空的 slot、缺或未綁 alias 回 False；語法錯誤、其他 alias 解析錯誤與來源故障仍 raise。它不 materialize module、不讀 asset、不 refresh。
 - `ModuleValues`：`Form.read_module` 回傳的單一 module 欄位實際值、模式與來源。
@@ -42,6 +42,14 @@ Spec Form 的 `template_input(Template(id), catalog, env)` 直接建立範本的
 回傳的 `input.model` 可以是 `Form.model` 的專用 subclass，讓不同範本的 required 欄位與 lock 互不影響。用回傳 input 建新 `FormState`。同一範本重算初值用 `input.model.default_input(env)`，換範本則建新 state。原 Form.model、範本目錄與 captured sources 不變。
 
 Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、`_seeds.py`、`_display.py`、`_types.py`，由 `form.py` 與公開欄位入口 `module_input.py` 組合。
+
+## 固定元素宣告
+
+`FixedElements(list_path, name_field, participants_path)` 指定 root-relative typed paths 與元素的 str 名稱欄位。手寫表單繼承 `FixedElementsForm`，以 `fixed_elements` tuple 列出宣告；生成器接受 `Form(..., fixed_elements=(... ,))`。Fresh `default_input` 先呼叫 Core，再檢查宣告與捕捉名稱唯一性。重名錯誤列出名稱及原始 indices。這個共用能力集中名稱與 participants 政策，Core、widgets 和各 host 不再各自維護。
+
+普通 mutation 比較目前與候選的有序 raw 名稱，增刪、重排或改名以 `FormInputRejected` 原子拒絕。元素的一般 invalid 值仍可保存。Participants 在一般 Pydantic 驗證檢查非空、無重複且名稱存在，錯誤保留欄位與 index，輸入順序不變。未參與元素照常驗證。還原不比新 capture，存檔 list 成為普通 mutation 的邊界；Reset 才建 fresh input。
+
+宣告者另外提供 `Display(element_label=name_field)` 與名稱欄位的 `Display(readonly=True)`。這些是呈現提示，不執行固定政策。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 
 ## Sweep 表示
 

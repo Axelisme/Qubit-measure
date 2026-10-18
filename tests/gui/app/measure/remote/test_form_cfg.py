@@ -53,7 +53,7 @@ class ExtrasAdapter(SampleAdapter):
 def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -> None:
     from pydantic import create_model
 
-    from tests.gui.form._fixed_models import named_form, named_input
+    from tests.gui.form_adapter._fixed_models import named_form, named_input
 
     model = named_form()
     core = create_model(
@@ -70,7 +70,11 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
         @staticmethod
         def make_form(ctx: FormContext):
             del ctx
-            return Form(core, {"sweep": Range.between(1.0, 2.0, expts=3)})
+            return Form(
+                core,
+                {"sweep": Range.between(1.0, 2.0, expts=3)},
+                fixed_elements=model.fixed_elements,
+            )
 
     fixture, _, rpc = form_rpc
     fixture.registry.register("fixed-elements", FixedAdapter)
@@ -104,6 +108,18 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
         assert local["result"]["input_present"] is True
         assert local["result"]["input"] == {"expr": "3 * 2"}
         assert local["result"]["value"] == 6
+        refused = rpc.call(
+            "tab.edit_cfg",
+            {"tab_id": tab, "edits": [{"path": ["tones", 0, "label"], "value": "C"}]},
+        )
+        assert not refused["ok"], refused
+        assert refused["error"]["reason"] == "form_input_rejected"
+        assert refused["error"]["data"]["form_path"] == ["tones", 0, "label"]
+        unchanged = rpc.call(
+            "tab.describe_cfg", {"tab_id": tab, "path": ["tones", 0, "label"]}
+        )
+        assert unchanged["ok"], unchanged
+        assert unchanged["result"]["input"] == "A"
         for path in [
             ["tones", "1", "gain"],
             ["tones", -1],
@@ -553,7 +569,7 @@ def test_existing_inline_draft_is_a_guarded_noop(
     tab = fixture.ctrl.new_tab("module-rpc")
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
-        owner.write({("pulse",): {"kind": "inline"}})
+        owner.select(("pulse",), {"kind": "inline", "module": {"type": "pulse"}})
         if draft == "invalid-expression":
             owner.write(
                 {
@@ -561,9 +577,10 @@ def test_existing_inline_draft_is_a_guarded_noop(
                     ("pulse", "module", "nqz"): 1,
                     ("pulse", "module", "freq"): {"expr": "1 / 0"},
                     ("pulse", "module", "gain"): 0.2,
-                    ("pulse", "module", "waveform", "kind"): "inline",
-                    ("pulse", "module", "waveform", "module", "style"): "const",
-                    ("pulse", "module", "waveform", "module", "length"): 0.1,
+                    ("pulse", "module", "waveform"): {
+                        "kind": "inline",
+                        "module": {"style": "const", "length": 0.1},
+                    },
                 }
             )
         before = owner.input.data
@@ -638,7 +655,7 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
         # Selecting Inline uses ordinary type defaults, not hidden fallback.
-        owner.write({("pulse",): {"kind": "inline"}})
+        owner.select(("pulse",), {"kind": "inline", "module": {"type": "pulse"}})
         assert owner.input.data["pulse"]["kind"] == "inline"
         assert notifications == ["changed"]
         owner.write(
@@ -647,9 +664,10 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
                 ("pulse", "module", "nqz"): 1,
                 ("pulse", "module", "freq"): {"expr": "50 * 2"},
                 ("pulse", "module", "gain"): 0.2,
-                ("pulse", "module", "waveform", "kind"): "inline",
-                ("pulse", "module", "waveform", "module", "style"): "const",
-                ("pulse", "module", "waveform", "module", "length"): 0.1,
+                ("pulse", "module", "waveform"): {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.1},
+                },
                 ("gain",): {"expr": "1 / 0"},
             }
         )

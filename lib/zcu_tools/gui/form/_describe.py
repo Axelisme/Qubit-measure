@@ -15,8 +15,8 @@ from ._structure import (
     alternatives,
     branch_tags,
     expression_allowed,
-    fixed_list,
     fixed_tag,
+    list_model,
     model_types,
 )
 from .description import (
@@ -36,8 +36,8 @@ def _kind(target: Field) -> FormFieldKind:
     members = tuple(
         item for item in alternatives(target.info.annotation) if item is not type(None)
     )
-    if model_types(target.info.annotation) or fixed_list(target.info) is not None:
-        return "elements" if fixed_list(target.info) is not None else "model"
+    if list_model(target.info) is not None or model_types(target.info.annotation):
+        return "elements" if list_model(target.info) is not None else "model"
     if literal_values(target.info.annotation) is not None:
         return (
             "enum"
@@ -160,11 +160,6 @@ def _fixed_value(target: Field) -> tuple[bool, JsonValue]:
     and declaration-fixed complete option values. An unfixed field returns
     (False, None); a fixed null returns (True, None).
     """
-    if target.level.items is None and target.name == target.level.name_field:
-        # A FixedList element's identity is fixed by its captured input.
-        name = target.level.value(target.name)
-        if isinstance(name, str):
-            return True, name
     if target.pinned and isinstance(target.name, str):
         return True, target.level.pinned[target.name]
     values = literal_values(target.info.annotation)
@@ -219,6 +214,7 @@ def _metadata(
         fixed_value=copy_json(fixed_value),
         constraints=_constraints(target),
         selector=display.selector,
+        readonly=display.readonly,
         branch=target.branch_option.value if target.branch_option is not None else None,
         commands=tuple(
             FormCommandDescription(
@@ -234,19 +230,27 @@ def _metadata(
 
 
 def _elements(target: Field) -> tuple[FormElementDescription, ...] | None:
-    """List a FixedList field's raw elements by original index and name."""
-    fixed = fixed_list(target.info)
-    if fixed is None:
+    """Describe model-list positions and optional declaration-supplied labels."""
+    if list_model(target.info) is None:
         return None
     raw = target.level.value(target.name)
     items = raw if isinstance(raw, list) else []
+    label = next(
+        (
+            item.element_label
+            for item in reversed(target.info.metadata)
+            if isinstance(item, Display)
+        ),
+        None,
+    )
     return tuple(
         FormElementDescription(
             index,
             name
-            if isinstance(item, dict)
-            and isinstance(name := item.get(fixed.name_field), str)
-            else "",
+            if label is not None
+            and isinstance(item, dict)
+            and isinstance(name := item.get(label), str)
+            else str(index),
             (*target.path, index),
         )
         for index, item in enumerate(items)

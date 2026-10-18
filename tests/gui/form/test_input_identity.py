@@ -31,9 +31,9 @@ def test_selection_only_identity_dirty_accept_discard_and_noop() -> None:
     state.subscribe(lambda: events.append(state.is_dirty))
     assert not state.is_dirty
     assert base.same_as(FormInput(Choice, raw))
-    state.write({("branch",): {"kind": "first"}}, env)
+    state.select(("branch",), {"kind": "first"}, env)
     assert events == []
-    state.write({("branch",): {"kind": "second"}}, env)
+    state.select(("branch",), {"kind": "second"}, env)
     assert state.is_dirty
     assert state.input.data == state.base.data == raw
     assert state.changes(env) == (), "Value-leaf changes are not a dirty predicate"
@@ -47,14 +47,14 @@ def test_selection_only_identity_dirty_accept_discard_and_noop() -> None:
     accepted = state.input
     state.reset(accepted)
     assert not state.is_dirty
-    state.write({("branch",): {"kind": "first"}}, env)
+    state.select(("branch",), {"kind": "first"}, env)
     assert state.is_dirty
     state.reset(state.base)
     assert not state.is_dirty
     restored = state.describe(("branch",), env).target
     assert restored is not None and restored.selected == 1
     state.reset(state.base)
-    state.write({("branch",): {"kind": "second"}}, env)
+    state.select(("branch",), {"kind": "second"}, env)
     assert events == [True, False, True, False]
     assert state.input.data == raw
 
