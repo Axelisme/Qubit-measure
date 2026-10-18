@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 from qick.asm_v2 import QickParam, QickRawParam
@@ -38,6 +38,19 @@ def _minimum(value: float | QickParam) -> float:
     return float(value)
 
 
+@dataclass(frozen=True)
+class _EnvelopeContent:
+    """Exact compiled DAC inputs; playback duration matters only for flat-tops."""
+
+    dtype: str
+    shape: tuple[int, ...]
+    samples: bytes
+    maxv: float
+    fabric_mhz: float
+    samples_per_clock: int
+    flat_duration_us: float | None
+
+
 class TimelineInterpreter:
     """Interpret a compiled ModularProgramV2 into detached execution timelines.
 
@@ -65,6 +78,10 @@ class TimelineInterpreter:
     def __init__(self, prog: ModularProgramV2) -> None:
         """Borrow a compiled program and initialize isolated execution state."""
         self.prog = prog
+        # Compiled tables and clocks are fixed during one preparation. Names
+        # are only local aliases; distinct names/channels can share exact content.
+        self._envelope_names: dict[tuple[int, str, float | None], PulseEnvelope] = {}
+        self._envelope_contents: dict[_EnvelopeContent, PulseEnvelope] = {}
         self.point: dict[str, int] = {}
         self.ref = 0.0
         self.events: list[PulseEvent] = []
@@ -404,18 +421,40 @@ class TimelineInterpreter:
         None; flat-top adds the half-gain plateau without sampling its interior.
         duration supplies the actual total quantized playback length, including
         both ramps. Returned tuples never borrow the compiled sample buffers.
+        Equal compiled contents share immutable tuples within this interpreter
+        only; names are not content identities across programs/preparations.
         """
         cfg = module.cfg
         if cfg is None or isinstance(cfg.waveform, ConstWaveformCfg):
             return None
         ch = cfg.ch
         name = self.prog.pulses[module.pulse_id].params["envelope"]
+        flat_duration = (
+            duration if isinstance(cfg.waveform, FlatTopWaveformCfg) else None
+        )
+        alias = (ch, name, flat_duration)
+        if alias in self._envelope_names:
+            return self._envelope_names[alias]
         envelopes = self.prog.envelopes[ch]["envs"]
         if not isinstance(envelopes, dict):
             raise ValueError("compiled generator envelope table is missing")
         data = envelopes[name]["data"]
-        values = (data[:, 0] + 1j * data[:, 1]) / self.prog.soccfg.get_maxv(ch)
         clock = self.prog.soccfg["gens"][ch]
+        maxv = self.prog.soccfg.get_maxv(ch)
+        key = _EnvelopeContent(
+            data.dtype.str,
+            data.shape,
+            data.tobytes(),
+            maxv,
+            clock["f_fabric"],
+            clock["samps_per_clk"],
+            flat_duration,
+        )
+        if key in self._envelope_contents:
+            envelope = self._envelope_contents[key]
+            self._envelope_names[alias] = envelope
+            return envelope
+        values = (data[:, 0] + 1j * data[:, 1]) / maxv
         period = 1 / (clock["f_fabric"] * clock["samps_per_clk"])
         axis = np.arange(len(values)) * period
         if isinstance(cfg.waveform, FlatTopWaveformCfg):
@@ -430,9 +469,12 @@ class TimelineInterpreter:
                     axis[:half] + duration - ramp_us,
                 )
             )
-        return PulseEnvelope(
+        envelope = PulseEnvelope(
             tuple(float(v) for v in axis), tuple(complex(v) for v in values)
         )
+        self._envelope_contents[key] = envelope
+        self._envelope_names[alias] = envelope
+        return envelope
 
     def frequencies(
         self, module: PulseReadout, words: tuple[int, int] | None

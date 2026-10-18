@@ -102,20 +102,28 @@ class FTFTemplatePlan:
     readouts: tuple[FTFReadoutPlan, ...]
 
 
-def _envelopes(event: EventSlot) -> tuple[EnvelopeSpec, ...]:
-    return tuple(
-        EnvelopeSpec("constant")
-        if envelope is None
-        else EnvelopeSpec(
-            "sampled",
-            samples=np.array(envelope.values, dtype=np.complex128),
-            sample_ns=np.array(envelope.sample_us) * 1000,
-        )
-        for envelope in event.envelopes
-    )
+def _envelopes(
+    event: EventSlot, memo: dict[int, EnvelopeSpec]
+) -> tuple[EnvelopeSpec, ...]:
+    """Reuse immutable specs by identity while the template retains all inputs."""
+    specs = []
+    for envelope in event.envelopes:
+        key = id(envelope)
+        if key not in memo:
+            memo[key] = (
+                EnvelopeSpec("constant")
+                if envelope is None
+                else EnvelopeSpec(
+                    "sampled",
+                    samples=np.array(envelope.values, dtype=np.complex128),
+                    sample_ns=np.array(envelope.sample_us) * 1000,
+                )
+            )
+        specs.append(memo[key])
+    return tuple(specs)
 
 
-def _track(event: EventSlot, port: str) -> DriveTrack:
+def _track(event: EventSlot, port: str, memo: dict[int, EnvelopeSpec]) -> DriveTrack:
     start = event.start_us * 1000
     # Match the old numeric owner's absolute nearest-2-ns support, ties even.
     quantized = 2 * np.rint(start / 2)
@@ -128,7 +136,7 @@ def _track(event: EventSlot, port: str) -> DriveTrack:
         np.deg2rad(event.phase_deg)
         - 2 * np.pi * event.frequency_mhz * event.phase_reference_us,
         event.gain,
-        _envelopes(event),
+        _envelopes(event, memo),
         event.envelope_index,
         event.active,
     )
@@ -139,6 +147,7 @@ def _timeline_batch(
     joint: JointModel,
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
+    memo: dict[int, EnvelopeSpec],
 ) -> TimelineBatch:
     """Map charge/flux drive tracks onto the engine's fixed-DC schedule."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
@@ -148,7 +157,7 @@ def _timeline_batch(
             continue
         if event.gen_ch not in microwave:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
-        drives.append(_track(event, microwave[event.gen_ch]))
+        drives.append(_track(event, microwave[event.gen_ch], memo))
     fixed_dc = schedule(
         (),
         dc_flux=joint.dc_flux,
@@ -164,6 +173,7 @@ def _readout_contents(
     template: TimelineTemplate,
     config: FTFReadoutConfig,
     window: ReadoutSlot,
+    memo: dict[int, EnvelopeSpec],
 ) -> tuple[
     NDArray[np.float64],
     tuple[tuple[ReadoutPulse, ...], ...],
@@ -202,7 +212,7 @@ def _readout_contents(
         values[rows, rank, 5] += np.where(
             event.active, event.envelope_index + len(envelopes), 0
         )
-        envelopes.extend(_envelopes(event))
+        envelopes.extend(_envelopes(event, memo))
     if np.any(values[:, :, 0] != values[:, :1, 0]):
         raise ValueError("FTF mux tones require a common pulse start per point")
     features = np.column_stack(
@@ -327,11 +337,14 @@ def plan_template(
         raise ValueError("FTF requires at least one bound receiver")
     if len({window.channel for window in template.readouts}) != len(template.readouts):
         raise ValueError("duplicate FTF receiver")
+    # Identity lookup is safe: template keeps every input envelope alive for
+    # this call. No memo survives a plan or retains compiled program buffers.
+    memo: dict[int, EnvelopeSpec] = {}
     contents = []
     for window in template.readouts:
         if window.channel not in receivers:
             raise ValueError(f"unbound FTF receiver {window.channel}")
-        contents.append(_readout_contents(settings, template, config, window))
+        contents.append(_readout_contents(settings, template, config, window, memo))
     end_ns = contents[0][0]
     if facts is None:
         facts = FTFModelFacts(settings, snapshot)
@@ -378,5 +391,7 @@ def plan_template(
             )
         )
     return FTFTemplatePlan(
-        source, _timeline_batch(settings, joint, template, end_ns), tuple(readouts)
+        source,
+        _timeline_batch(settings, joint, template, end_ns, memo),
+        tuple(readouts),
     )
