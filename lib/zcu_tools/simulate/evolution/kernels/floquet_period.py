@@ -11,9 +11,10 @@ from scipy.linalg import expm
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
-from ..workplan import WorkPlan
+from ..workplan import ResourceHandle, WorkPlan
 from . import _period_sambe
 from ._cf4_grid import coarse_count, finer_count, spectral_width
+from ._cf4_spectral import CF4Nodes, build_nodes, spectral_prefixes
 from ._dop853 import Tolerances, integrate_dense
 from ._secular import secular_operators
 from ._workload_facts import split_rate
@@ -183,14 +184,22 @@ class _Neighbour:
     interaction: NDArray[np.complex128] | None = None
 
 
+@dataclass(frozen=True)
+class _Continuation:
+    # Target-key interpolation supports and its optional shared coarse guard.
+    neighbours: list[_Neighbour]
+    coarse_nodes: ResourceHandle[CF4Nodes] | None = None
+
+
 def _continued_prefixes(
-    neighbours: list[_Neighbour],
+    continuation: _Continuation,
     context: _Hamiltonian,
     gain: float,
     tolerance: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.complex128]] | None:
     # Interpolate gain or carrier between fixed anchors in the interaction picture, then
     # independently check the new key with the original coarse-grid probes.
+    neighbours = continuation.neighbours
     h0, x, y, frequency = context
     count = len(neighbours[-1].period.times) - 1
     if any(
@@ -234,7 +243,32 @@ def _continued_prefixes(
         candidate = _interpolate_prefixes(
             tuple(n.period.coefficients for n in neighbours), tuple(weights)
         )
-    _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_size)
+    return _guarded_prefixes(
+        context, times, candidate, tolerance, coarse_size, continuation.coarse_nodes
+    )
+
+
+def _guarded_prefixes(
+    context: _Hamiltonian,
+    times: NDArray[np.float64],
+    candidate: NDArray[np.complex128],
+    tolerance: float,
+    coarse_size: int,
+    coarse_nodes: ResourceHandle[CF4Nodes] | None,
+) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
+    # Keep the coarse numerical certificate and its independent refinement
+    # together; shared spectral nodes alter neither the probes nor tolerance.
+    h0, x, y, frequency = context
+    count = len(candidate) - 1
+    if coarse_nodes is None:
+        _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_size)
+    else:
+        nodes = coarse_nodes.get(
+            partial(build_nodes, h0, x, y, float(np.sign(frequency)), coarse_size)
+        )
+        coarse = spectral_prefixes(
+            nodes.values, nodes.outgoing, nodes.overlaps, nodes.transitions, frequency
+        )
     error = float(
         np.max(
             [
@@ -243,6 +277,20 @@ def _continued_prefixes(
             ]
         )
     )
+    if coarse_nodes is not None:
+        # The spectral recurrence changes only guard rounding. Near the decision
+        # boundary, retain the original Padé comparison. Rejected predictions
+        # also refine from the original coarse array to keep fallback bitwise.
+        roundoff = 128 * np.finfo(float).eps * coarse_size * len(h0)
+        if not np.isfinite(error) or error >= tolerance - roundoff:
+            _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_size)
+            if np.isfinite(error) and abs(error - tolerance) <= roundoff:
+                error = max(
+                    np.linalg.norm(
+                        candidate[j * count // 8] - coarse[j * coarse_size // 8]
+                    )
+                    for j in range(9)
+                )
     if not np.isfinite(error) or error > tolerance:
         times, fine = _magnus_refine(context, tolerance, coarse_size, coarse)
         return times, fine
@@ -271,7 +319,7 @@ def _build(
     builder: PeriodBuilder,
     *,
     work_plan: WorkPlan,
-    neighbours: list[_Neighbour] | None = None,
+    neighbours: _Continuation | None = None,
 ) -> PeriodData:
     port, frequency, gain = tone
     size = len(model.energies_ghz)
@@ -365,6 +413,7 @@ def _prepare_entry(
     # Both interpolation axes share admission, single-flight construction and
     # release. Only their physical coordinates and IP transform differ.
     from .._gain_plan import (
+        admit_carrier_nodes,
         build_plan,
         carrier_anchor_resource,
         carrier_build_plan,
@@ -427,6 +476,11 @@ def _prepare_entry(
             )
         )
         neighbours.append(_Neighbour(coordinate, anchor.period, anchor.interaction))
+    coarse_nodes = (
+        admit_carrier_nodes(context, carrier, frequency)
+        if carrier is not None
+        else None
+    )
     entry = (
         neighbours[0].period
         if len(dependencies) == 1 and dependencies[0][0] == consumer
@@ -436,9 +490,11 @@ def _prepare_entry(
             context.budget,
             builder,
             work_plan=context.work_plan,
-            neighbours=neighbours,
+            neighbours=_Continuation(neighbours, coarse_nodes),
         )
     )
+    if coarse_nodes is not None:
+        coarse_nodes.handoff(consumer)
     for _, handle in dependencies:
         handle.handoff(consumer)
     return entry

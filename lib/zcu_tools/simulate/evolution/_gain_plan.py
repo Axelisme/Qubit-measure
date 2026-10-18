@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 from .kernel import KernelContext, SegmentTable
 from .kernels._cf4_grid import coarse_count, finer_count, spectral_width
+from .kernels._cf4_spectral import CF4Grids, CF4Nodes, carrier_grids
 from .kernels.floquet_period import PeriodAnchor, PeriodBuilder
 from .secular import ModelSource, SecularModel
 from .workplan import (
@@ -220,6 +221,82 @@ def carrier_anchor_resource(
     )
 
 
+def carrier_node_resources(
+    context: KernelContext, group: CF4CarrierGroupPlan
+) -> dict[int, ResourceHandle[CF4Nodes]]:
+    """Return single-flight coarse-node resources, partitioned by exact grid.
+
+    Only non-anchor consumers participate. Model, gain, port, carrier sign and
+    grid are physical identities; admission and handoff follow anchor lifetime.
+    No numerical products build here or enter the resident cache.
+    """
+
+    def inventory() -> CF4Grids:
+        model = context.source.model(group.level)
+        drive = model.drives[group.port]
+        return carrier_grids(
+            model.energies_ghz,
+            group.gain * drive.in_phase_ghz,
+            group.gain * drive.quadrature_ghz,
+            tuple(f for f in group.carriers_ghz if f not in group.anchors_ghz),
+        )
+
+    # This WorkPlan's complete carrier inventory is fixed before any consumers.
+    grids = context.work_plan.fact(
+        FactKey(
+            (
+                "cf4-carrier-grids",
+                group.model_identity,
+                group.level,
+                group.port,
+                group.gain,
+            ),
+            CF4Grids,
+        ),
+        inventory,
+    )
+    return {
+        count: context.work_plan.resource(
+            FactKey(
+                (
+                    "cf4-carrier-nodes",
+                    group.model_identity,
+                    group.level,
+                    group.port,
+                    group.gain,
+                    context.budget,
+                    np.sign(group.carriers_ghz[0]),
+                    count,
+                ),
+                CF4Nodes,
+            ),
+            planned_consumers=frozenset[Hashable](carriers),
+        )
+        for count, carriers in grids.by_count
+    }
+
+
+def admit_carrier_nodes(
+    context: KernelContext, group: CF4CarrierGroupPlan, frequency: float
+) -> ResourceHandle[CF4Nodes] | None:
+    """Admit one actual non-anchor key to its grid's node resource.
+
+    Anchor, released, sealed-out and already delivered consumers use the
+    independent coarse guard. The caller must hand off every returned handle
+    after its key build, even when incompatible anchors skip interpolation.
+    """
+    if frequency in group.anchors_ghz:
+        return None
+    for handle in carrier_node_resources(context, group).values():
+        if frequency not in handle.planned_consumers or handle.released:
+            continue
+        if not handle.sealed and frequency not in handle.actual_consumers:
+            handle.admit(frequency)
+        if frequency in handle.remaining_consumers:
+            return handle
+    return None
+
+
 def build_plan(
     context: KernelContext,
     model: SecularModel,
@@ -316,10 +393,15 @@ def admit_shared_builds(
             pending,
             stays_open=stays_open,
         )
+        _admit_anchors(
+            carrier_node_resources(context, group).values(),
+            pending,
+            stays_open=stays_open,
+        )
 
 
-def _admit_anchors(
-    handles: Iterable[ResourceHandle[PeriodAnchor]],
+def _admit_anchors[T](
+    handles: Iterable[ResourceHandle[T]],
     pending: set[float],
     *,
     stays_open: bool,

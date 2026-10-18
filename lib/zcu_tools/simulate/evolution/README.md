@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives, simultaneous and single-tone covariant gate reuse, unified resident/pending budget, long-period playback and guarded CF4 carrier anchors
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives, simultaneous and single-tone covariant gate reuse, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -320,6 +320,15 @@ consumers stay open until WorkPlan closes. Prefix preparation cannot seal a
 group needed by later timeline work. Gain and constant-CF4 carrier anchors share
 this admission and handoff mechanism. Carrier interaction-picture prefixes belong
 only to the evolve-local anchor resource, not to resident period payloads.
+Non-anchor carrier guards also share single-flight CF4 node eigensystems and
+adjacent eigenbasis overlaps, partitioned by exact model, port, gain, carrier
+sign and coarse phase grid. Each carrier still advances every coarse interval
+and checks the original nine probes at the same tolerance. A comparison within
+a grid/dimension-scaled roundoff margin of the threshold uses the original
+Padé coarse grid; rejected predictions also refine from that original grid.
+These spectral products follow the same admission, sealing and handoff lifetime
+as anchors. They do not enlarge resident period payloads. Standalone builds and
+gain interpolation retain their original Padé coarse guards.
 
 Carrier interpolation uses a mutable `CarrierWorkspace`, separate from immutable
 facts and resource products. WorkPlan creates it lazily from published carrier
