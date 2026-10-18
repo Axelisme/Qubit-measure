@@ -27,6 +27,7 @@ from ._period_table import (
     envelopes,
     periods,
 )
+from ._sambe import eigensystem
 from ._shaped import drive_bounds, envelope_bounds
 from .dop853 import DOP853Kernel
 from .period_table import PeriodTableKernel, advance_tail
@@ -51,16 +52,7 @@ def _spectral_blocks(energies, coupling, frequency, modes, duration):
     """Run matrix assembly, eigensolve and reconstruction without the GIL."""
     size = len(energies)
     count = 2 * modes + 1
-    matrix = np.zeros((count * size, count * size), dtype=np.complex128)
-    for k in range(count):
-        block = slice(k * size, (k + 1) * size)
-        matrix[block, block] = np.diag(energies + (k - modes) * frequency)
-        if k:
-            previous = slice((k - 1) * size, k * size)
-            matrix[block, previous] = coupling
-            matrix[previous, block] = coupling.conj().T
-    values, vectors = np.linalg.eigh(matrix)
-    central = np.ascontiguousarray(vectors[modes * size : (modes + 1) * size])
+    values, vectors, central = eigensystem(energies, coupling, frequency, modes)
     evolved = (vectors * np.exp(-2j * np.pi * values * duration)) @ central.conj().T
     result = np.zeros((16, size, size), dtype=np.complex128)
     for index in range(count):

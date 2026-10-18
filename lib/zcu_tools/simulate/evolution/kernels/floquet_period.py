@@ -20,6 +20,7 @@ from ..declarations import (
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from . import _period_sambe
+from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._dop853 import Tolerances, integrate_dense
 
 _MIN_FREQUENCY_GHZ = 0.03
@@ -399,11 +400,9 @@ def _continued_prefixes(
     if len(set(coordinates)) != len(coordinates):
         return None
     period = 1 / abs(frequency)
-    width = float(
-        np.max(h0.real) - np.min(h0.real) + 2 * (np.linalg.norm(x) + np.linalg.norm(y))
-    )
-    coarse_count = max(8, 8 * int(np.ceil(1.5 * period * width / 8)))
-    if count < 8 * int(np.ceil(1.5 * coarse_count / 8)):
+    width = spectral_width(h0, x, y)
+    coarse_size = coarse_count(1.5 * period * width)
+    if count < finer_count(coarse_size):
         return None
     times = np.linspace(0.0, period, count + 1)
     # Identical model, carrier and uniform grid give every predecessor the
@@ -420,19 +419,17 @@ def _continued_prefixes(
     candidate = _interpolate_prefixes(
         tuple(n.period.coefficients for n in neighbours), tuple(weights)
     )
-    _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_count)
+    _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_size)
     error = float(
         np.max(
             [
-                np.linalg.norm(
-                    candidate[j * count // 8] - coarse[j * coarse_count // 8]
-                )
+                np.linalg.norm(candidate[j * count // 8] - coarse[j * coarse_size // 8])
                 for j in range(9)
             ]
         )
     )
     if not np.isfinite(error) or error > tolerance:
-        times, fine = _magnus_refine(context, tolerance, coarse_count, coarse)
+        times, fine = _magnus_refine(context, tolerance, coarse_size, coarse)
         return times, fine, False
     return times, candidate, True
 
@@ -572,10 +569,8 @@ def _magnus_build(h0, x, y, frequency, tolerance):
     period = 1 / abs(frequency)
     # Keep both grids away from a full spectral turn, where sampled carrier
     # motion can alias. The retained grid stays below half a spectral turn.
-    width = (
-        np.max(h0.real) - np.min(h0.real) + 2 * (np.linalg.norm(x) + np.linalg.norm(y))
-    )
-    count = max(8, 8 * int(np.ceil(1.5 * period * width / 8)))
+    width = spectral_width(h0, x, y)
+    count = coarse_count(1.5 * period * width)
     _, coarse = _magnus_prefixes(h0, x, y, frequency, count)
     return _magnus_refine(_Hamiltonian(h0, x, y, frequency), tolerance, count, coarse)
 
@@ -585,7 +580,7 @@ def _magnus_refine(context, tolerance, count, coarse):
     h0, x, y, frequency = context
     # A rejected continuation has already built the independent coarse grid.
     for _ in range(12):
-        finer = 8 * int(np.ceil(1.5 * count / 8))
+        finer = finer_count(count)
         times, fine = _magnus_prefixes(h0, x, y, frequency, finer)
         error = 0.0
         # Compare micromotion at eight phase intervals, not just U(T), where

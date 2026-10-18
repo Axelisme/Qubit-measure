@@ -580,17 +580,17 @@ def _legacy_acceptance(
     )
 
 
-def _acceptance(
+def _admission(
     entry: _Entry, parameters: NDArray[np.float64], budget: float
-) -> NDArray[np.bool_]:
-    accepted = _legacy_acceptance(entry, parameters, budget)
-    for index in np.flatnonzero(~accepted):
-        p = parameters[index]
-        if entry.valid and entry.convergence * p[0] + entry.frame_error <= budget / 40:
-            entry = _with_sidebands(entry)
-            selected = _sideband_plan(entry, p)
-            accepted[index] = selected.bound <= budget * 0.95
-    return accepted
+) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
+    """Return legacy accepts and rejected rows eligible for sideband certificates."""
+    legacy = _legacy_acceptance(entry, parameters, budget)
+    sideband = (
+        (~legacy)
+        & entry.valid
+        & (entry.convergence * parameters[:, 0] + entry.frame_error <= budget / 40)
+    )
+    return legacy, sideband
 
 
 @njit(nogil=True, cache=True)
@@ -851,12 +851,8 @@ class FloquetKernel:
             )
             members = np.flatnonzero(inverse == key_index)
             entry = prepared.entries[0]
-            legacy = _legacy_acceptance(entry, params[members], budget)
-            eligible = (~legacy) & (
-                entry.convergence * params[members, 0] + entry.frame_error
-                <= budget / 40
-            )
-            if entry.valid and eligible.any():
+            legacy, eligible = _admission(entry, params[members], budget)
+            if eligible.any():
                 entry = _with_sidebands(entry)
                 if entry.sidebands is None:
                     raise RuntimeError("Floquet sideband preparation failed")
@@ -871,9 +867,12 @@ class FloquetKernel:
             preparations.append(
                 GuardPreparation(keys[key_index : key_index + 1], prepared)
             )
-            accepted[positions[members]] = _acceptance(
-                prepared.entries[0], params[members], budget
-            )
+            for local in np.flatnonzero(eligible):
+                selected_plan = _sideband_plan(
+                    prepared.entries[0], params[members[local]]
+                )
+                legacy[local] = selected_plan.bound <= budget * 0.95
+            accepted[positions[members]] = legacy
         return GuardResult(accepted, tuple(preparations))
 
     def prepare_keys(
@@ -964,7 +963,7 @@ class FloquetKernel:
             positions = np.flatnonzero(key_index == key)
             entry = prepared.entries[int(key)]
             chunk = states[positions].copy()
-            old = _legacy_acceptance(entry, parameters[positions], budget)
+            old, eligible = _admission(entry, parameters[positions], budget)
             if old.all():
                 # Preserve the incumbent apply batch and its numerical path.
                 _advance(entry, parameters[positions], chunk, budget)
@@ -976,11 +975,7 @@ class FloquetKernel:
             for local in np.flatnonzero(~old):
                 p = parameters[positions[local]]
                 selected = _sideband_plan(entry, p)
-                if (
-                    not entry.valid
-                    or entry.convergence * p[0] + entry.frame_error > budget / 40
-                    or selected.bound > budget * 0.95
-                ):
+                if not eligible[local] or selected.bound > budget * 0.95:
                     raise RuntimeError(
                         f"Floquet guard failed at segments {rows[positions[local : local + 1]]}"
                     )
