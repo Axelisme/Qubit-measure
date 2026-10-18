@@ -11,8 +11,10 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     kernel,
 )
+from zcu_tools.simulate.evolution.kernel import KernelContext
 from zcu_tools.simulate.evolution.kernels import _floquet_sidebands as sidebands
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import KernelCase, reference
 
@@ -129,11 +131,14 @@ def test_resonant_bath_sidebands_are_evolved_instead_of_averaged() -> None:
     source = ModelSource(states[0], lambda level: model)
     solver = FloquetKernel()
     rows = np.array([0])
-    assert solver.guard(table, rows, source, 0.001).all()
+    assert solver.guard(table, rows, KernelContext(source, 0.001, WorkPlan())).all()
     case = KernelCase(solver, source, table, states.copy())
     expected = reference(case, 0, states[0])[None]
     prepared = solver.prepare(
-        solver.prepare_keys(table, rows), table, rows, source, 0.001
+        solver.prepare_keys(table, rows, KernelContext(source, 0.001, WorkPlan())),
+        table,
+        rows,
+        KernelContext(source, 0.001, WorkPlan()),
     )
     solver.apply(prepared, rows, table, rows, states, case.context(rows))
     np.testing.assert_allclose(states, expected, atol=0.001, rtol=0)
@@ -212,9 +217,15 @@ def test_multiple_probe_bins_preserve_row_admission(
         tone_envelope=np.repeat(table.tone_envelope, 3, axis=0),
         tone_envelope_offset_ns=np.repeat(table.tone_envelope_offset_ns, 3, axis=0),
     )
-    batch = case.kernel.guard(repeated, np.arange(3), case.source, case.budget)
+    batch = case.kernel.guard(
+        repeated, np.arange(3), KernelContext(case.source, case.budget, WorkPlan())
+    )
     independent = [
-        case.kernel.guard(repeated, np.array([row]), case.source, case.budget)[0]
+        case.kernel.guard(
+            repeated,
+            np.array([row]),
+            KernelContext(case.source, case.budget, WorkPlan()),
+        )[0]
         for row in range(3)
     ]
     np.testing.assert_array_equal(batch, independent)
@@ -224,28 +235,31 @@ def test_multiple_probe_bins_preserve_row_admission(
 def test_ill_conditioned_floquet_frame_is_rejected() -> None:
     case = _adversarial_case("ill-conditioned")
     assert not case.kernel.guard(
-        case.table, np.array([0]), case.source, case.budget
+        case.table, np.array([0]), KernelContext(case.source, case.budget, WorkPlan())
     ).any()
 
 
 def test_long_duration_outside_modal_dynamic_range_is_rejected() -> None:
     case = _adversarial_case("long-duration")
     assert not case.kernel.guard(
-        case.table, np.array([0]), case.source, case.budget
+        case.table, np.array([0]), KernelContext(case.source, case.budget, WorkPlan())
     ).any()
 
 
 def test_exact_resonant_divisor_is_accepted_and_matches_lindblad() -> None:
     case = _adversarial_case("exact-resonance")
     rows = np.array([0])
-    assert case.kernel.guard(case.table, rows, case.source, case.budget).all()
+    assert case.kernel.guard(
+        case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).all()
     expected = reference(case, 0, case.states[0])[None]
     prepared = case.kernel.prepare(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
         case.table,
         rows,
-        case.source,
-        case.budget,
+        KernelContext(case.source, case.budget, WorkPlan()),
     )
     case.kernel.apply(prepared, rows, case.table, rows, case.states, case.context(rows))
     np.testing.assert_allclose(case.states, expected, atol=1e-3, rtol=0)

@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-18, workspace accounting
+**Last updated:** 2026-10-18, evolve-local work ownership
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -109,7 +109,8 @@ additional package integration entry points.
   one family in one evolve. Floquet stores admissions and retained equations;
   the direct solvers store frame or chain decisions. Plans never enter
   `PrepareCache` or persistent kernel state.
-- `ApplyContext(budget, plan)` supplies the finite positive per-segment allowance
+- `KernelContext(source, budget, work_plan)` supplies preparation, key and guard
+  calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
   and the family's plan. Floquet and both direct solvers require their own plan;
   a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
   Families without plans reject a non-`None` plan with `ValueError`.
@@ -120,6 +121,24 @@ bindings and input-bound bindings, then supplies it unchanged in `ApplyContext`.
 It neither slices nor interprets plans. A timeline worker resolves deferred
 neighbors before building its local plan and chains. It does not mutate the
 caller dispatch's shared decisions.
+
+[WorkPlan](workplan.py) owns one evolve's lazy immutable facts, typed gain/carrier/
+ramp group records, and single-flight resource handles. Prefix representatives
+and timeline workers share the same plan. Table-indexed fact identities must
+separate representative tables from the complete table. Builders publish owned
+read-only copies and never retain densities or adaptive solver history.
+
+Resource handles distinguish planned inventory from incrementally admitted
+actual consumers. Open resources allow deferred timeline admission. Sealing
+closes admission; the last actual handoff then releases the resource. Deferred
+groups stay open until evolve exit. Engine drains its pool before closing the
+plan on success, cancellation or failure. Cache ownership remains separate.
+
+`admit_prepared` is the cache-first numerical admission hook. It returns current
+row decisions and a row plan without construction when the payload domain covers
+all required products. None means domain miss and retains the ordinary build
+path. Production families currently decline this hook; cache lookup and routing
+remain unchanged.
 
 Guards are row-local: splitting or reordering a guard call must preserve its
 acceptance mask. A guard may read the source initial density or an

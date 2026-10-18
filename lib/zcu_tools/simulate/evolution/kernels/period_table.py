@@ -5,8 +5,8 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
-from ..kernel import ApplyContext, Prepared, SegmentTable
-from ..secular import ModelSource, SecularDrive, SecularModel
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularDrive, SecularModel
 from ._period_table import (
     PeriodEntry,
     PeriodPlayback,
@@ -93,8 +93,7 @@ class PeriodTableKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Check model-only envelope, interpolation and splitting estimates.
 
@@ -102,8 +101,9 @@ class PeriodTableKernel:
         not certify arbitrary multilevel dynamics against the segment budget.
         No density is read and no trial evolution is performed.
         """
+        source, budget = context.source, context.budget
         del budget
-        keys = self.prepare_keys(table, rows)
+        keys = self.prepare_keys(table, rows, context)
         frequencies = np.abs(keys["frequency"])
         period = 1 / np.where(frequencies > 0, frequencies, 1)
         strength, gamma = drive_bounds(table, rows, source)
@@ -124,9 +124,10 @@ class PeriodTableKernel:
         )
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Share a port's band table across shape, duration and phase changes."""
+        del context
         return band_keys(table, rows)
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
@@ -139,14 +140,14 @@ class PeriodTableKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable band tables and half-period dissipators, without rho.
 
         rows are representative table rows aligned with keys; numerical solver
         failure raises RuntimeError. DC entries retain only model data.
         """
+        source, budget = context.source, context.budget
         del table, rows
         tail_budget = min(budget, 1e-8)
         entries = []
@@ -182,14 +183,24 @@ class PeriodTableKernel:
             )
         return PeriodPrepared(tuple(entries))
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -199,9 +210,10 @@ class PeriodTableKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; apply uses the model-only prepared payload."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(

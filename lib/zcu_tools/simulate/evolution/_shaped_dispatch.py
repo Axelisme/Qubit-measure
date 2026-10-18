@@ -5,22 +5,27 @@ from collections.abc import Mapping
 import numpy as np
 from numpy.typing import NDArray
 
-from .kernel import Kernel, SegmentTable
+from .kernel import Kernel, KernelContext, SegmentTable
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.period_table import PeriodTableKernel
 
 
 def _usage(
-    kernel: Kernel, table: SegmentTable, rows: NDArray[np.int64]
+    kernel: Kernel, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
 ) -> NDArray[np.int64]:
     _, inverse, counts = np.unique(
-        kernel.prepare_keys(table, rows), return_inverse=True, return_counts=True
+        kernel.prepare_keys(table, rows, context),
+        return_inverse=True,
+        return_counts=True,
     )
     return counts[inverse]
 
 
 def preference(
-    table: SegmentTable, rows: NDArray[np.int64], kernels: Mapping[str, Kernel]
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    kernels: Mapping[str, Kernel],
+    context: KernelContext,
 ) -> NDArray[np.int64]:
     """Order gate, period table and direct solver by estimated amortized work.
 
@@ -39,14 +44,16 @@ def preference(
     # low-carrier frequency term, where lab-frame stability limits integration.
     carrier_work = 1 + 0.3 * frequency - 0.07 * np.maximum(0, frequency - 1)
     direct = 0.8 * duration * carrier_work
-    gate_work = duration * (60 + 3 * frequency) / _usage(gate, table, rows) + 0.04
+    gate_work = (
+        duration * (60 + 3 * frequency) / _usage(gate, table, rows, context) + 0.04
+    )
     safe_frequency = np.where(frequency > 0, frequency, 1)
     cycles = duration * frequency
     tail = np.maximum(0, duration - np.floor(cycles + 1e-10) / safe_frequency)
     complex_envelopes = np.array([np.any(e.samples.imag != 0) for e in table.envelopes])
     complex_rows = complex_envelopes[table.tone_envelope[rows, 0]]
     period_work = (
-        (150 + 550 / safe_frequency) / _usage(period, table, rows)
+        (150 + 550 / safe_frequency) / _usage(period, table, rows, context)
         + np.where(complex_rows, 0.064, 0.008) * cycles
         + 4 * tail * (1 + 0.3 * frequency)
     )

@@ -33,7 +33,7 @@ class ScopedKernel(RecordingKernel):
         self.fail = fail
         self.workspace = None
 
-    def evolve_scope(self, table, source):
+    def evolve_scope(self, table, context):
         workspace = Workspace(self.reads)
         self.scopes.append(weakref.ref(workspace))
         scoped = ScopedKernel(

@@ -12,7 +12,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from .kernel import Kernel, SegmentTable
+    from .kernel import Kernel, KernelContext, SegmentTable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -357,10 +357,11 @@ class Engine:
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
-        from ._dispatch import classify
+        from ._dispatch import classify, create_work_plan
         from ._planning import plan
         from ._prefix import PrefixResolver
         from ._schedule import Schedule
+        from .kernel import KernelContext
 
         with self._lock, native_limit.acquire():
             if self._closed:
@@ -385,12 +386,15 @@ class Engine:
             # Reuse belongs to this evolve, not the registry or prepare LRU.
             # ExitStack also releases earlier scopes if a later factory fails.
             with ExitStack() as scopes, execution_pool(workers) as pool:
-                kernels = self._scoped_kernels(geometry.table, source, scopes)
-                geometry = PrefixResolver(
-                    geometry, kernels, source, budget, cancel
-                ).resolve(self._cache, pool, self._chunks)
-                dispatch = classify(geometry, kernels, source, budget, pool=pool)
-                schedule = Schedule(geometry, dispatch, source, budget, cancel)
+                work_plan = create_work_plan(geometry.table, source, budget)
+                scopes.callback(work_plan.close)
+                context = KernelContext(source, budget, work_plan)
+                kernels = self._scoped_kernels(geometry.table, context, scopes)
+                geometry = PrefixResolver(geometry, kernels, context, cancel).resolve(
+                    self._cache, pool, self._chunks
+                )
+                dispatch = classify(geometry, kernels, context, pool=pool)
+                schedule = Schedule(geometry, dispatch, context, cancel)
                 result = schedule.run(kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
@@ -408,7 +412,7 @@ class Engine:
             return result
 
     def _scoped_kernels(
-        self, table: SegmentTable, source: ModelSource, scopes: ExitStack
+        self, table: SegmentTable, context: KernelContext, scopes: ExitStack
     ) -> dict[str, Kernel]:
         """Register optional per-evolve reuse without knowing numeric families."""
         from .kernel import EvolveScopedKernel
@@ -416,7 +420,7 @@ class Engine:
         kernels = dict(self._kernels)
         for name, kernel in kernels.items():
             if isinstance(kernel, EvolveScopedKernel):
-                scoped, workspace = kernel.evolve_scope(table, source)
+                scoped, workspace = kernel.evolve_scope(table, context)
                 scopes.enter_context(self._cache.track_workspace(workspace))
                 kernels[name] = scoped
         return kernels

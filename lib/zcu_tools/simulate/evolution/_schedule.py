@@ -16,8 +16,7 @@ from ._planning import Geometry
 from ._prepare_keys import group_keys
 from .cache import PrepareCache, PreparedPayload
 from .engine import Cancelled, EvolutionResult, PathDiagnostics
-from .kernel import ApplyContext, Kernel, RowPlan, SegmentTable
-from .secular import ModelSource
+from .kernel import ApplyContext, Kernel, KernelContext, RowPlan, SegmentTable
 
 
 @dataclass(frozen=True)
@@ -49,13 +48,16 @@ class _ChunkResult:
 
 
 def _deduplicate(
-    table: SegmentTable, dispatch: Dispatch, kernels: Mapping[str, Kernel]
+    table: SegmentTable,
+    dispatch: Dispatch,
+    kernels: Mapping[str, Kernel],
+    context: KernelContext,
 ) -> list[_Entries]:
     entries: list[_Entries] = []
     for name in np.unique(dispatch.names[dispatch.names != ""]):
         kernel = kernels[str(name)]
         rows = np.flatnonzero(dispatch.names == name)
-        groups = group_keys(kernel, table, rows)
+        groups = group_keys(kernel, table, rows, context)
         entries.append(
             _Entries(
                 kernel,
@@ -74,15 +76,14 @@ def _build(
     entry: _Entries,
     selection: NDArray[np.int64],
     table: SegmentTable,
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
     cancel: Event,
 ) -> PreparedPayload:
     if cancel.is_set():
         raise Cancelled()
     keys = entry.keys[selection]
     prepared = prepare(
-        entry.kernel, keys, table, entry.representative[selection], source, budget
+        entry.kernel, keys, table, entry.representative[selection], context
     )
     return PreparedPayload(prepared, tuple(key.tobytes() for key in keys))
 
@@ -119,21 +120,18 @@ class Schedule:
         self,
         geometry: Geometry,
         dispatch: Dispatch,
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
         cancel: Event,
         initial_density: NDArray[np.complex128] | None = None,
     ):
-        self.geometry, self.dispatch, self.source, self.budget, self.cancel = (
-            geometry,
-            dispatch,
-            source,
-            budget,
-            cancel,
-        )
+        self.geometry, self.dispatch, self.cancel = geometry, dispatch, cancel
+        self.context = context
+        self.source, self.budget = context.source, context.budget
         self.table = geometry.table
         self.initial_density = (
-            source.initial_density if initial_density is None else initial_density
+            context.source.initial_density
+            if initial_density is None
+            else initial_density
         )
 
     def prepare_shared(
@@ -191,9 +189,7 @@ class Schedule:
                 )
         # Coarse key chunks, grouped by kernel; prepare never receives density.
         built = pool(
-            delayed(_build)(
-                entry, selected, self.table, self.source, self.budget, self.cancel
-            )
+            delayed(_build)(entry, selected, self.table, self.context, self.cancel)
             for entry, selected, _ in jobs
         )
         for (entry, _, namespace), payload in zip(jobs, built, strict=True):
@@ -235,7 +231,7 @@ class Schedule:
                     self.table,
                     rows,
                     initial,
-                    self.budget,
+                    self.context,
                 )
                 if payload is not None:
                     bound.append(
@@ -283,7 +279,7 @@ class Schedule:
     ) -> EvolutionResult:
         """Return point-ordered densities and aggregate post-apply diagnostics."""
         self.kernels = kernels
-        entries = _deduplicate(self.table, self.dispatch, kernels)
+        entries = _deduplicate(self.table, self.dispatch, kernels, self.context)
         shared = self.prepare_shared(entries, cache, pool, chunks)
         count = len(self.geometry.points)
         cost = np.bincount(
@@ -346,8 +342,7 @@ class Schedule:
         dispatch = classify(
             self.geometry,
             self.kernels,
-            self.source,
-            self.budget,
+            self.context,
             selection=Selection(
                 rows,
                 self.dispatch.shaped,
@@ -358,7 +353,7 @@ class Schedule:
             ),
         )
         bindings: list[_Binding] = []
-        for entry in _deduplicate(self.table, dispatch, self.kernels):
+        for entry in _deduplicate(self.table, dispatch, self.kernels, self.context):
             for preparation in dispatch.preparations.get(entry.kernel.name, ()):
                 payload = PreparedPayload(
                     preparation.prepared,
@@ -373,9 +368,7 @@ class Schedule:
             missing = np.array([int(row) not in covered for row in entry.rows])
             unique = np.unique(entry.inverse[missing])
             if len(unique):
-                payload = _build(
-                    entry, unique, self.table, self.source, self.budget, self.cancel
-                )
+                payload = _build(entry, unique, self.table, self.context, self.cancel)
                 bindings.append(_bind(entry, payload, missing, dispatch))
         # Workers write disjoint row slices; only the caller reads all names
         # after the pool joins. Entries and bindings never read this array.
@@ -449,9 +442,7 @@ class Schedule:
             )
             unique = np.unique(entry.inverse[local])
             if len(unique):
-                payload = _build(
-                    entry, unique, self.table, self.source, self.budget, self.cancel
-                )
+                payload = _build(entry, unique, self.table, self.context, self.cancel)
                 local_bindings.append(_bind(entry, payload, local, local_dispatch))
         bindings = [*shared, *self.bind_inputs(local_bindings)]
         return _Chunk(self, points, selected, bindings, entries, local_dispatch).run()
@@ -562,7 +553,9 @@ class _Chunk:
                 self.table,
                 rows,
                 states,
-                ApplyContext(self.schedule.budget, binding.plan),
+                ApplyContext(
+                    self.schedule.budget, binding.plan, self.schedule.context.work_plan
+                ),
             )
         except RuntimeError as error:
             raise RuntimeError(
@@ -604,8 +597,7 @@ class _Chunk:
             entry,
             unique,
             self.table,
-            self.schedule.source,
-            self.schedule.budget,
+            self.schedule.context,
             self.schedule.cancel,
         )
         indices = (
