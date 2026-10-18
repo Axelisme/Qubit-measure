@@ -52,9 +52,14 @@ from collections.abc import Callable
 for _blas_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_blas_var, "1")
 
-import h5py as h5
-import numpy as np
-from numpy.typing import NDArray
+# tolerated: h5py can load NumPy, so BLAS defaults must already be set.
+import h5py as h5  # noqa: E402
+
+# tolerated: NumPy initializes BLAS on import; set caller-respecting defaults first.
+import numpy as np  # noqa: E402
+
+# tolerated: numpy.typing also loads NumPy and must follow BLAS defaults.
+from numpy.typing import NDArray  # noqa: E402
 
 # Preset (EJb, ECb, ELb) bounding boxes — the notebook's named ranges (GHz).
 PRESETS: dict[
