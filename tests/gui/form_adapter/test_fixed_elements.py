@@ -8,6 +8,10 @@ from pydantic import Field, JsonValue, create_model
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui import form as core
 from zcu_tools.gui import form_adapter as adapter
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 
 
@@ -149,8 +153,9 @@ def test_resource_uses_declaring_owner_for_whole_list_and_recipe_edits():
         resource.write({("tones", 0, "gain"): 4, ("participants",): ["Q4"]})
         assert resource.input.data["participants"] == ["Q4"]
         assert isinstance(resource.result(), core.FormErrors)
-        with pytest.raises(ValueError, match="not valid"):
+        with pytest.raises(CfgPreconditionError, match="not valid") as caught:
             resource.accept()
+        assert caught.value.reason is CfgPreconditionReason.NOT_VALID
     finally:
         resource.revoke()
 
