@@ -22,6 +22,7 @@ from ..secular import SecularModel
 from ..workplan import RampFamilyPlan
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
+    CompactPolynomial,
     PeriodEntry,
     PeriodPlayback,
     PeriodPrepared,
@@ -292,6 +293,7 @@ class ShapedSambeKernel:
         # Spectral products remain call-local; only the family inventory moved
         # to the planner. Accepted payloads retain immutable coefficient arrays.
         families: dict[RampFamilyPlan, _SpectralFamily] = {}
+        compact: dict[int, CompactPolynomial] = {}
         for index, key in enumerate(keys):
             model = source.model(tuple(int(v) for v in key["level"]))
             port, f, bound = (
@@ -324,6 +326,8 @@ class ShapedSambeKernel:
             if ratio > 0.25 or interpolation * cycles > budget / 8:
                 nodes = 8
                 coefficients, interpolation, _ = family.polynomial((nodes, modes))
+            if id(coefficients) not in compact:
+                compact[id(coefficients)] = CompactPolynomial.from_dense(coefficients)
             errors.append((error + interpolation) * cycles)
             populations = np.asarray(
                 expm(step / 2 * population_generator(model.rates_per_ns)), dtype=float
@@ -350,7 +354,7 @@ class ShapedSambeKernel:
                     min(budget, 1e-8),
                     f,
                     bound,
-                    coefficients,
+                    compact[id(coefficients)],
                     populations,
                     coherences,
                     m,
@@ -494,7 +498,7 @@ class ShapedSambeKernel:
                 ),
                 UnitaryTable(
                     entry.bound,
-                    entry.coefficients,
+                    entry.expanded_coefficients(),
                     entry.subdivisions,
                     entry.block_cycles,
                     entry.project_unitary,

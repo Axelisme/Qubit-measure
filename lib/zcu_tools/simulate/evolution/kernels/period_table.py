@@ -265,7 +265,7 @@ class PeriodTableKernel:
                     ),
                     UnitaryTable(
                         entry.bound,
-                        entry.coefficients,
+                        entry.expanded_coefficients(),
                         entry.subdivisions,
                         entry.block_cycles,
                         entry.project_unitary,
