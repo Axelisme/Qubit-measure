@@ -606,7 +606,8 @@ class FormState[F: FormModel]:
 
         Only this operation runs the field converter. Without a converter,
         model selections preserve their branch and authored raw input. Scalar
-        selections write the listed value. Unavailable options or failed
+        selections write the listed value and retain an explicit override for
+        later options-membership validation. Unavailable options or failed
         conversion raise FormConversionError; owner refusal retains path in
         FormInputRejected. Source failures remain directed. Use the candidate
         in the same guarded turn/current input/env as prepare_write.

@@ -12,10 +12,8 @@ from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origi
 from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
 
-from ._json import copy_json, copy_object, default_json
-from .defaults import static_defaults
+from ._json import default_json
 from .model import (
-    FormEnv,
     FormPath,
     FormWritePath,
     InputConverter,
@@ -321,8 +319,6 @@ def _choice_fields(model: type[BaseModel], path: FormPath) -> tuple[FieldInfo, .
     ):
         return ()
     return (info,)
-
-
 
 
 def _field_leaves(
