@@ -30,6 +30,8 @@ from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
+from ._helpers import dispatch_handler as _dispatch
+
 
 def _items() -> list[WritebackItem]:
     md = ParameterWriteback(
@@ -130,9 +132,6 @@ def _ctrl() -> MagicMock:
     ctrl.writeback_control = wc
     ctrl.writeback_control.has_tab.return_value = True
     return ctrl
-
-
-from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 
 def test_entry_edit_reply_is_lean_and_preserves_invalid_authored_input():
