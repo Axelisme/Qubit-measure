@@ -1,19 +1,36 @@
 """Writeback preview and explicit apply against the real owner-thread socket."""
 
+from dataclasses import replace
+from pathlib import Path
 from socket import socket
+from uuid import UUID
 
 import numpy as np
 import pytest
 from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import ParameterWriteback
+from zcu_tools.datafile import load_run_data, save_run_data
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import (
+    ModuleWriteback,
+    ParameterWriteback,
+    WritebackItem,
+    WritebackRequest,
+)
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.writeback import WritebackEdit
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
+from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui._qt_waits import qt_until
+from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
+    PaneSummary,
+)
 from tests.gui.app.measure._synthetic import (
     MODULE_PROPOSAL_TARGET,
     MODULE_PROPOSAL_WAVEFORM,
@@ -526,3 +543,95 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         controller.tab_control.close_tab(tab)
         window.deleteLater()
         qapp.processEvents()
+
+
+class CapturedCouplerAdapter(AnalysisSavingAdapter):
+    """Produce a concrete library destination and an explicit captured alias."""
+
+    def get_writeback_items(
+        self,
+        req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
+    ) -> list[WritebackItem]:
+        parameters = req.ctx.parameters
+        if parameters is None or req.run_result.cfg is None:
+            raise ValueError("This proposal needs a captured source and native cfg")
+        return [
+            ModuleWriteback(
+                parameters.library_key("coupler.pulses.cz_f2"),
+                "Pulse",
+                _stored_pulse(gain=req.run_result.cfg.gain),
+            ),
+            ParameterWriteback(
+                "$coupler.rate",
+                "Rate",
+                proposed_value=parameters.value("$coupler.rate"),
+            ),
+        ]
+
+
+@pytest.fixture
+def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_guard):
+    """Register a synthetic producer and native history without executing Run."""
+    fx = Fixture(project_root=str(tmp_path), headless=True)
+    fx.registry.register("captured-coupler", CapturedCouplerAdapter)
+    context = fx.ctrl.context_control
+    context.add_component("coupler", "fake/drive/a", {"rate": 0.4})
+    target = context.read_context().target
+    context.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
+    context.set_module(target, "coupler.pulses.cz_f2", _stored_pulse(gain=0.2))
+    context.set_alias_rows((AliasRow("coupler", "coupler"),))
+    path = tmp_path / "source.h5"
+    write_native_file(path, tag=CapturedCouplerAdapter.experiment_tag or "", gain=0.4)
+    stored = load_run_data(path)
+    metadata = replace(
+        stored.metadata,
+        snapshot=replace(
+            stored.metadata.snapshot,
+            entry_id=UUID(target.entry_id),
+            point=target.point,
+            roles={"coupler": "coupler"},
+        ),
+    )
+    save_run_data(path, stored.payload, metadata, cfg=stored.cfg, replace=True)
+    tab = fx.ctrl.new_tab("captured-coupler")
+    port = fx.start()
+    try:
+        with open_client(port) as client:
+            yield fx, client, tab, path
+    finally:
+        fx.stop()
+
+
+def test_registered_source_only_load_analyze_preview_keeps_concrete_collision_target(
+    coupler_load_application,
+) -> None:
+    fx, client, tab, path = coupler_load_application
+    context = fx.ctrl.context_control
+    source = context.read_context().target
+    before_form = call(client, "tab.get_cfg", {"tab_id": tab})
+    loaded = call(client, "tab.load_data", {"tab_id": tab, "data_path": str(path)})
+    assert loaded["ok"], loaded
+    assert call(client, "tab.get_cfg", {"tab_id": tab}) == before_form
+    context.set_module(source, "coupler.pulses.cz_f2", _stored_pulse(gain=0.6))
+    context.set_parameter(source, "coupler.rate", 0.7)
+    fx.ctrl.setup_control.new_point(
+        PointCreateRequest("other", "", CommandOrigin("gui"))
+    )
+    context.add_component("Q2", "fake/drive/a", {"rate": 9.0})
+    context.set_alias_rows((AliasRow("coupler", "Q2"),))
+    active = context.read_context().target
+    started = call(client, "tab.analyze", {"tab_id": tab})
+    assert started["ok"], started
+    assert_terminal_finished(fx, client, started["result"]["operation_id"])
+    preview = call(
+        client, "tab.writeback_preview", {"tab_id": tab, "subtab_id": "analysis"}
+    )
+    assert preview["ok"], preview
+    pulse, rate = preview["result"]["items"]
+    assert pulse["actual_path"] == "coupler.pulses.cz_f2"
+    assert pulse["current"]["gain"] == 0.6
+    assert pulse["proposed"]["gain"] == 0.4
+    assert rate["actual_path"] == "coupler.rate"
+    assert (rate["current"], rate["proposed"]) == (0.7, 0.4)
+    assert context.read_context().target == active
+    assert context.get_alias_rows() == (AliasRow("coupler", "Q2"),)

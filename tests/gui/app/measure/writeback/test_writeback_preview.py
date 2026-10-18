@@ -77,7 +77,7 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
         draft = service.create_draft(
             [
                 ParameterWriteback(
-                    "driver.frequency", "Frequency", proposed_value=20.09, stderr=0.18
+                    "$driver.frequency", "Frequency", proposed_value=20.09, stderr=0.18
                 )
             ],
             parameters=captured,
@@ -95,7 +95,7 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
             refreshed = service.preview_values(draft)["param-1"]
             assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
             assert (refreshed.current, refreshed.proposed) == (21.5, 20.09)
-            draft.edit("param-1", target_name="driver.duration")
+            draft.edit("param-1", target_name="$driver.duration")
             unset = service.preview_values(draft)["param-1"]
             assert (unset.actual_path, unset.unit) == ("U1.duration", "us")
             assert (unset.current, unset.proposed) == (None, 20.09)

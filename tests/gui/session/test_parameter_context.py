@@ -64,7 +64,7 @@ def source(tmp_path: Path) -> Generator[tuple[PointDocument, LibrarySnapshot]]:
                 rate=rate,
                 sense=sense,
                 module={
-                    "x180": "capture_driver.pulses.pi",
+                    "x180": "$capture_driver.pulses.pi",
                     "empty": None,
                     "dangling": "Q1.pulses.missing",
                 },
@@ -183,11 +183,11 @@ def test_manual_capture_reinfers_only_nonmanual_roles_from_fixed_focus(
     for role in declarations():
         if role not in expected:
             with pytest.raises(RoleResolutionError) as error:
-                updated.resolve_path(f"{role}.rate")
+                updated.resolve_path(f"${role}.rate")
             assert error.value.role == role
     restored = updated.bind_roles(declarations(), focus=binding.focus, explicit={})
-    assert restored.resolve_path("capture_driver.rate") == "Q1.rate"
-    assert restored.resolve_path("capture_sensor.rate") == "R1.rate"
+    assert restored.resolve_path("$capture_driver.rate") == "Q1.rate"
+    assert restored.resolve_path("$capture_sensor.rate") == "R1.rate"
 
 
 def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
@@ -210,9 +210,9 @@ def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
     rebound = bound.bind_roles(
         declarations(), focus="Q1", explicit={"capture_driver": "Q2"}
     )
-    assert bound.value("capture_driver.rate") == 4300.0
-    assert rebound.value("capture_driver.rate") == 5100.0
-    assert rebound.value("capture_sensor.rate") == 6500.0
+    assert bound.value("$capture_driver.rate") == 4300.0
+    assert rebound.value("$capture_driver.rate") == 5100.0
+    assert rebound.value("$capture_sensor.rate") == 6500.0
     assert bound.target == context.target
     assert rebound.target == context.target
     assert context.roles is None
@@ -230,7 +230,7 @@ def test_bind_roles_returns_partial_aliases_after_ambiguous_inference(
     assert partial.target == context.target
     for role in declarations():
         with pytest.raises(RoleResolutionError, match=f"{role}.*not bound"):
-            partial.value(f"{role}.rate")
+            partial.value(f"${role}.rate")
 
 
 @pytest.mark.parametrize("same_name_component", [False, True])
@@ -248,23 +248,16 @@ def test_partial_capture_reports_unbound_role_only_when_read(
         target=SavedPoint(entry_id="entry", point="working"),
         roles=RoleBinding(None, declarations(), {"capture_sensor": "R1"}),
     )
-    assert context.value("capture_sensor.rate") == 6500.0
+    assert context.value("$capture_sensor.rate") == 6500.0
     assert context.value("Q1.rate") == 4300.0
+    if same_name_component:
+        assert context.value("capture_driver.rate") == 5100.0
     assert context.roles is not None
     assert "capture_driver" not in context.roles.names
     with pytest.raises(RoleResolutionError, match="capture_driver.*not bound"):
-        context.value("capture_driver.rate")
+        context.value("$capture_driver.rate")
     with pytest.raises(RoleResolutionError, match="capture_driver.*not bound"):
-        context.library_key("capture_driver.module.x180")
-
-
-def test_empty_roles_do_not_use_notebook_shorthand(
-    source: tuple[PointDocument, LibrarySnapshot],
-) -> None:
-    bound = capture(source).bind_roles({}, focus="Q1", explicit={})
-    assert bound.roles == RoleBinding("Q1", {}, {})
-    with pytest.raises(RoleResolutionError):
-        bound.value("capture_driver.rate")
+        context.library_key("$capture_driver.module.x180")
 
 
 @pytest.mark.parametrize(
@@ -285,8 +278,8 @@ def test_captured_names_are_not_reinferred_and_targets_are_checked(
         "Q1", declarations(), {"capture_driver": "Q2", "capture_sensor": "R1"}
     )
     context = capture(source, roles=roles)
-    assert context.value("capture_driver.rate") == 5100.0
-    assert context.value("capture_sensor.rate") == 6500.0
+    assert context.value("$capture_driver.rate") == 5100.0
+    assert context.value("$capture_sensor.rate") == 6500.0
     bad = RoleBinding(
         "Q1", declarations(), {"capture_driver": "R1", "capture_sensor": "R2"}
     )
@@ -353,10 +346,10 @@ def test_library_and_slot_reads_use_same_fixed_role_binding(
     source: tuple[PointDocument, LibrarySnapshot],
 ) -> None:
     context = capture(source).bind_roles(declarations(), focus="Q1", explicit={})
-    assert context.library_key("capture_driver.pulses.pi") == "Q1.pulses.pi"
-    assert context.library_key("capture_driver.module.x180") == "Q1.pulses.pi"
-    assert context.value("capture_driver.module.x180") == "capture_driver.pulses.pi"
-    assert context.value("capture_driver.module.x180.gain") == 0.25
+    assert context.library_key("$capture_driver.pulses.pi") == "Q1.pulses.pi"
+    assert context.library_key("$capture_driver.module.x180") == "Q1.pulses.pi"
+    assert context.value("$capture_driver.module.x180") == "$capture_driver.pulses.pi"
+    assert context.value("$capture_driver.module.x180.gain") == 0.25
     assert context.lookup("Q1.pulses.missing.gain") == DocumentValue(False, None)
     assert context.lookup("Q1.pulses.pi.mixer_freq") == DocumentValue(True, None)
     assert context.value("Q1.pulses.pi.waveform.length") == 0.05
@@ -574,3 +567,29 @@ def test_alias_projection_source_fault_fails_the_whole_read(
     )
     with pytest.raises(ContextSourceUnavailableError):
         context.resolved_aliases()
+
+
+@pytest.mark.parametrize("authored", [True, False], ids=["run", "load"])
+@pytest.mark.parametrize("role_target", ["coupler", "Q1"])
+def test_library_key_keeps_bare_component_distinct_from_same_named_role(
+    source: tuple[PointDocument, LibrarySnapshot], authored: bool, role_target: str
+) -> None:
+    point, library = source
+    point.components["coupler"] = point.components["Q2"].model_copy(deep=True)
+    context = capture(
+        (point, library),
+        roles=RoleBinding(
+            "Q1",
+            {"coupler": RoleSpec("capture/drive")},
+            {"coupler": role_target},
+            aliases=(AliasRow("coupler", role_target),) if authored else None,
+        ),
+    )
+    point.components.clear()
+    assert context.library_key("coupler.pulses.cz_f2") == "coupler.pulses.cz_f2"
+    assert context.resolve_path("coupler.rate") == "coupler.rate"
+    assert context.value("coupler.rate") == 5100.0
+    assert context.library_key("$coupler.pulses.cz_f2") == f"{role_target}.pulses.cz_f2"
+    assert context.value("$coupler.rate") == (
+        5100.0 if role_target == "coupler" else 4300.0
+    )
