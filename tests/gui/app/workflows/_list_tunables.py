@@ -1,9 +1,10 @@
 """Synthetic declaration whose Form and native tunables have different shapes."""
 
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
-from zcu_tools.gui.form import FixedList, FormModel, Participants
+from zcu_tools.gui.form import Display, FormModel, InputPolicy
+from zcu_tools.gui.form_adapter import FixedElements, FixedElementsForm
 
 
 class Channel(BaseModel):
@@ -19,17 +20,18 @@ class NativeTunables(BaseModel):
 
 
 class Tone(FormModel):
-    label: str
+    label: Annotated[str, Display(readonly=True), InputPolicy(expression=False)]
     gain: float = Field(gt=0)
 
 
-class ListForm(FormModel):
-    tones: Annotated[list[Tone], FixedList(name_field="label")] = Field(
+class ListForm(FixedElementsForm):
+    fixed_elements: ClassVar[tuple[FixedElements, ...]] = (
+        FixedElements(("tones",), "label", ("participants",)),
+    )
+    tones: Annotated[list[Tone], Display(element_label="label")] = Field(
         default_factory=lambda: [Tone(label="A", gain=1), Tone(label="B", gain=2)]
     )
-    participants: Annotated[list[str], Participants(list_path=("tones",))] = Field(
-        default_factory=lambda: ["B"]
-    )
+    participants: list[str] = Field(default_factory=lambda: ["B"])
 
     def to_cfg(self) -> NativeTunables:
         return NativeTunables(
