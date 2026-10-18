@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Self
 
 import numpy as np
 from joblib import delayed
@@ -183,6 +184,29 @@ def prepare(
     return kernel.prepare(keys, table, rows, context)
 
 
+class _GuardCacheHits(tuple[PreparedPayload, ...]):
+    """Caller-indexed hits, borrowed unchanged by shared and deferred guards.
+
+    Tuple contents retain the whole-payload references used by resident
+    admission. by_key lists payload positions in hit order, including overlaps
+    so a numerical domain miss can still try the next covering payload.
+    """
+
+    by_key: Mapping[bytes, tuple[int, ...]]
+
+    def __new__(cls, payloads: Iterable[PreparedPayload]) -> Self:
+        hits = super().__new__(cls, payloads)
+        positions: dict[bytes, list[int]] = {}
+        for index, payload in enumerate(hits):
+            for key in dict.fromkeys(payload.keys):
+                positions.setdefault(key, []).append(index)
+        hits.by_key = {key: tuple(indices) for key, indices in positions.items()}
+        return hits
+
+
+_EMPTY_GUARD_HITS = _GuardCacheHits(())
+
+
 @dataclass(frozen=True)
 class _Guarded:
     rows: NDArray[np.int64]
@@ -214,20 +238,24 @@ def _guard_cached(
     table: SegmentTable,
     context: KernelContext,
     rows: NDArray[np.int64],
-    hits: tuple[PreparedPayload, ...],
+    hits: _GuardCacheHits,
 ) -> tuple[_Guarded, ...]:
     """Admit covered cached rows without building; build only domain misses."""
     remaining = np.ones(len(rows), dtype=bool)
     keys = kernel.prepare_keys(table, rows, context) if hits else ()
+    positions: dict[int, list[int]] = {}
+    for position, key in enumerate(keys):
+        for index in hits.by_key.get(key.tobytes(), ()):
+            positions.setdefault(index, []).append(position)
     results: list[_Guarded] = []
-    for payload in hits:
-        covered = remaining & np.array(
-            [key.tobytes() in payload.keys for key in keys], dtype=bool
-        )
-        selected = rows[covered]
-        if not len(selected):
+    # Keep hit order between payloads and original row order within each call.
+    for index in sorted(positions):
+        covered = np.array(positions[index], dtype=np.int64)
+        covered = covered[remaining[covered]]
+        if not len(covered):
             continue
-        result = kernel.admit_prepared(payload.prepared, table, selected, context)
+        selected = rows[covered]
+        result = kernel.admit_prepared(hits[index].prepared, table, selected, context)
         if result is None:
             continue
         remaining[covered] = False
@@ -279,7 +307,16 @@ class _Classifier:
         cache: PrepareCache | None = None,
     ):
         self.cache = cache
-        self.cached = dict(selection.cached) if selection is not None else {}
+        self.cached = (
+            {
+                name: hits
+                if isinstance(hits, _GuardCacheHits)
+                else _GuardCacheHits(hits)
+                for name, hits in selection.cached.items()
+            }
+            if selection is not None
+            else {}
+        )
         self.pool, self.selection = pool, selection
         self.geometry, self.kernels = geometry, kernels
         self.context = context
@@ -308,18 +345,22 @@ class _Classifier:
             # This worker owns one timeline. A single batch lets the kernel
             # reuse call-local work across distinct prepare keys, then drop it.
             return _guard_cached(
-                kernel, self.table, self.context, rows, self.cached.get(kernel.name, ())
+                kernel,
+                self.table,
+                self.context,
+                rows,
+                self.cached.get(kernel.name, _EMPTY_GUARD_HITS),
             )
         groups = group_keys(kernel, self.table, rows, self.context)
         if self.cache is not None:
             dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
-            self.cached[kernel.name] = tuple(
+            self.cached[kernel.name] = _GuardCacheHits(
                 self.cache.find(
                     (kernel.name, dc.identity, self.budget),
                     {key.tobytes() for key in groups.keys},
                 )
             )
-        hits = self.cached.get(kernel.name, ())
+        hits = self.cached.get(kernel.name, _EMPTY_GUARD_HITS)
         local = rows[~groups.shared[groups.inverse]]
         self.deferred[local] = True
         if len(local):
