@@ -118,6 +118,7 @@ def test_generic_expected_error_translation_has_exact_wire_contract(
 
 
 def test_generic_translation_rejects_structural_expected_error_duck() -> None:
+    # tolerated(cast): A non-nominal duck must reach the ExpectedError runtime rejection.
     duck = cast(ExpectedError, _StructuralExpectedDuck("structural"))
 
     with pytest.raises(TypeError, match="nominal ExpectedError"):
@@ -185,6 +186,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     cases: list[tuple[Callable[[], object], WireTuple]] = [
         (
             lambda: h_tab_run_start(
+                # tolerated(cast): The run-control namespace is not a RemoteControlAdapter.
                 cast(Any, run_adapter),
                 {"tab_id": "t1", "expected": {"cfg_id": "cfg-t1", "revision": "0"}},
             ),
@@ -197,7 +199,9 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
         ),
         (
             lambda: h_tab_load_data(
-                cast(Any, load_adapter), {"tab_id": "t1", "data_path": "bad.h5"}
+                # tolerated(cast): The load-control namespace is not a RemoteControlAdapter.
+                cast(Any, load_adapter),
+                {"tab_id": "t1", "data_path": "bad.h5"},
             ),
             (
                 ErrorCode.PRECONDITION_FAILED,
@@ -208,12 +212,14 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
         ),
         (
             lambda: h_device_connect(
+                # tolerated(cast): The device namespace is not a RemoteControlAdapter.
                 cast(Any, device_adapter),
                 {"type_name": "fake", "name": "flux", "address": "mock"},
             ),
             (ErrorCode.PRECONDITION_FAILED, "Device busy", "", None),
         ),
         (
+            # tolerated(cast): The waveform namespace is not a RemoteControlAdapter.
             lambda: h_arb_waveform_list(cast(Any, arb_adapter), {}),
             (
                 ErrorCode.PRECONDITION_FAILED,
@@ -224,7 +230,9 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
         ),
         (
             lambda: h_tab_get_figure(
-                cast(Any, view_adapter), {"tab_id": "t1", "subtab_id": "analysis"}
+                # tolerated(cast): The render/tab namespace is not a RemoteControlAdapter.
+                cast(Any, view_adapter),
+                {"tab_id": "t1", "subtab_id": "analysis"},
             ),
             (
                 ErrorCode.PRECONDITION_FAILED,
@@ -235,6 +243,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
         ),
         (
             lambda: h_tab_writeback_set(
+                # tolerated(cast): The writeback namespace is not a RemoteControlAdapter.
                 cast(Any, writeback_adapter),
                 {
                     "tab_id": "t1",
@@ -253,6 +262,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
 
 def test_dialog_screenshot_expected_errors_use_producer_taxonomy() -> None:
     render_view = MagicMock()
+    # tolerated(cast): The dialog-render namespace is not a RemoteControlAdapter.
     adapter = cast(Any, SimpleNamespace(render_view=render_view))
 
     assert _remote_error(lambda: h_dialog_screenshot(adapter, {"name": "unknown"})) == (
