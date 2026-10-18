@@ -243,7 +243,8 @@ def entry_lower_bound(
     nogil=True,
     parallel=True,
 )
-def _lower_bound_kernel(
+# tolerated: Only _scan_candidates supplies Numba arrays and six scalar EJ/EC/EL bounds.
+def _lower_bound_kernel(  # noqa: PLR0913
     sf_energies: NDArray[np.float64],
     f_params: NDArray[np.float64],
     pairs: NDArray[np.int32],
@@ -283,7 +284,8 @@ def _lower_bound_kernel(
     "float64[:], float64, float64)",
     nogil=True,
 )
-def search_one_entry(
+# tolerated: Only _scan_candidates supplies Numba arrays and entry-specific scale limits.
+def search_one_entry(  # noqa: PLR0913
     sf_energies_i: NDArray[np.float64],
     pairs: NDArray[np.int32],
     coeffs: NDArray[np.float64],
