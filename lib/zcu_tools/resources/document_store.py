@@ -645,6 +645,7 @@ class DocumentStore[T: BaseModel]:
         raw = yaml.load(original.decode("utf-8"))
         # Validate the recursive shape without discarding ruamel's round-trip nodes.
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
+        # tolerated(cast): Strict validation cannot narrow raw; its return drops round-trip nodes.
         document = cast(YamlMap, raw)
         removed: tuple[str, ...] = ()
         if self._read_cleanup is not None:
