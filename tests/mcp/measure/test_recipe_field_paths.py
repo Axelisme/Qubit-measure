@@ -19,6 +19,8 @@ class CarrierGui(LookbackGui):
     """Return prescribed wire facts; never claim to install indexed Form input."""
 
     def __call__(self, method, params):
+        if method == "tab.read_module":
+            return {"value": {"gain": 0.5}, "mode": "inline", "source": "0"}
         if method == "tab.edit_recipe_fields":
             return {"changed": True, "errors": []}
         if method == "tab.read_recipe_field":
@@ -30,6 +32,19 @@ class CarrierGui(LookbackGui):
             reply.update(input=value, value=value)
             return reply
         return super().__call__(method, params)
+
+
+def test_read_module_forwards_str_segments_and_rejects_unsupported_indexes(tmp_path: Path) -> None:
+    with recipe_client(tmp_path, CarrierGui()) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        before = len(client.transport.sent)
+        observed = tab.read_module(("0",))
+        assert observed.value == {"gain": 0.5}
+        assert client.transport.sent[before:] == [("tab.read_module", {"tab_id": "t", "field": ["0"]})]
+        before = len(client.transport.sent)
+        with pytest.raises(ValueError, match="str|index"):
+            tab.read_module(("tones", 1))
+        assert client.transport.sent[before:] == []
 
 
 def test_indexed_batch_read_and_run_capture_keep_original_position(tmp_path: Path) -> None:
