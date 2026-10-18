@@ -118,3 +118,19 @@ def test_bind_input_contract(kernel_case: KernelCase, prefix_input: bool) -> Non
     KernelContract().test_bind_input_is_read_only_and_apply_equivalent(
         kernel_case, prefix_input
     )
+
+
+def test_shaped_sambe_cached_convergence_admission(kernel_case: KernelCase) -> None:
+    from zcu_tools.simulate.evolution.kernels.shaped_sambe import ShapedSambeKernel
+
+    solver = ShapedSambeKernel()
+    case = kernel_case
+    rows = np.array([0, 1, 4])
+    context = KernelContext(case.source, case.budget, WorkPlan())
+    built = solver.guard_prepared(case.table, rows, context)
+    prepared = built.preparations[0].prepared
+    admitted = solver.admit_prepared(prepared, case.table, rows[::-1], context)
+    assert admitted is not None, "covered spectral periods must reuse convergence"
+    np.testing.assert_array_equal(admitted.accepted, built.accepted[::-1])
+    changed = replace(case.table, duration_ns=case.table.duration_ns + 1)
+    assert solver.admit_prepared(prepared, changed, rows, context) is None
