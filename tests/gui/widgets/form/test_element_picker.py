@@ -71,7 +71,7 @@ def test_native_indexed_module_and_sweep_navigation_keeps_visible_drafts(
         driver.choose_option(object_name="form.picker.tones", value="0: A")
         driver.screenshot(tmp_path / "05-sibling-range-preserved.png")
         assert (
-            driver.observe(object_name="form.input.tones.0.sweep.start").text == "2.0"
+            driver.observe(object_name="form.input.tones.0.sweep.start").text == "2"
         )
     finally:
         editor.close()

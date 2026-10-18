@@ -107,7 +107,8 @@ def test_indexed_restore_uses_saved_positions_selections_and_reports_dropped():
         )
         dropped = resource.restore_input(saved)
         assert ("tones", 0, "old_gain") in dropped
-        assert len(resource.input.data["tones"]) == 1
+        restored = resource.input.data["tones"]
+        assert isinstance(restored, list) and len(restored) == 1
         assert element(resource.input.data, 0)["phase"] == 0
         assert resource.input.selections[("tones", 0, "sweep")] == {"kind": "center"}
         sweep = element(resource.input.data, 0)["sweep"]
@@ -118,7 +119,8 @@ def test_indexed_restore_uses_saved_positions_selections_and_reports_dropped():
             resource.write({("tones", 0, "name"): "A"})
         assert resource.input.same_as(before)
         resource.reset()
-        assert len(resource.input.data["tones"]) == 2
+        reset = resource.input.data["tones"]
+        assert isinstance(reset, list) and len(reset) == 2
     finally:
         resource.revoke()
 
