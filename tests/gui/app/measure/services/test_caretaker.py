@@ -96,6 +96,20 @@ def test_restore_corrupt_file_falls_back_with_error(tmp_path: Path):
     assert receiver.restored == AppPersistedState()
 
 
+def test_raw_only_form_snapshot_opens_defaults_with_visible_error(tmp_path: Path) -> None:
+    receiver = _FakeOriginator(AppPersistedState())
+    caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
+    caretaker.state_path.write_text(
+        f'{{"version": {APP_STATE_VERSION}, "session": {{"tabs": [{{"adapter_name": "fake", "form_input": {{"x": 1}}}}]}}}}'
+    )
+
+    outcome = caretaker.restore_all()
+
+    assert outcome.load_error is not None
+    assert "Failed to read GUI state" in str(outcome.load_error)
+    assert receiver.restored == AppPersistedState()
+
+
 def test_restore_wrong_version_falls_back_with_error(tmp_path: Path):
     receiver = _FakeOriginator(AppPersistedState())
     caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)

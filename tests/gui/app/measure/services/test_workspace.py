@@ -1,5 +1,7 @@
 """Workspace captures authored input and reports per-tab preparation failures."""
 
+import json
+from typing import Literal
 from unittest.mock import MagicMock
 
 from zcu_tools.cfg_model import ConfigBase
@@ -10,6 +12,10 @@ from zcu_tools.gui.app.measure.services.persistence_types import (
     PersistedTab,
 )
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
+from zcu_tools.gui.app.measure.services.caretaker import AppSnapshotCodec
+from zcu_tools.gui.app.measure.services.persistence_types import AppPersistedState
+from zcu_tools.gui.form import FormEnv, FormInput
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.form_adapter import Form
@@ -39,6 +45,28 @@ def add_tab(state: State, tab_id: str, adapter_name: str) -> None:
             cfg=make_form(Form(WorkspaceCfg, {}), state=state),
         ),
     )
+
+
+class ChoiceCfg(ConfigBase):
+    mode: Literal["a", "b"] = "a"
+
+
+def test_workspace_roundtrip_keeps_raw_and_independent_selection() -> None:
+    svc, state, _, _ = make_service()
+    form = Form(ChoiceCfg, {})
+    authored = FormInput(form.model, {"mode": "a"}, selections={("mode",): "b"})
+    initial = json.loads(authored.to_json())
+    resource = TabFormResource(lambda _ctx: form, capture=lambda _aliases: TabFormSources(FormEnv()), mutation_allowed=lambda: True, initial=initial)
+    state.add_tab("choice", Session(adapter_name="choice", adapter=MagicMock(), cfg=resource))
+
+    session = svc.capture_session()
+    encoded = AppSnapshotCodec().encode(AppPersistedState(session=session))
+    decoded = AppSnapshotCodec().decode(json.loads(json.dumps(encoded)))
+    restored = TabFormResource(lambda _ctx: form, capture=lambda _aliases: TabFormSources(FormEnv()), mutation_allowed=lambda: True, initial=decoded.session.tabs[0].form_input)
+
+    assert restored.input.data == {"mode": "a"}
+    assert restored.input.selections == {("mode",): "b"}
+    assert decoded.session.tabs[0].form_input == {"data": {"mode": "a"}, "selections": [{"path": ["mode"], "value": "b"}]}
 
 
 def test_new_tab_owns_active_tab_and_event() -> None:
