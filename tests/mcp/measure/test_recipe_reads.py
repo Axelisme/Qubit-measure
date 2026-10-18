@@ -171,14 +171,14 @@ def test_read_field_observes_current_input_and_propagates_failed_edits(
         ] == ["tab.edit_recipe_fields"]
 
 
-@pytest.mark.parametrize("field", ["", "missing", "modules..readout", "rounds.child"])
+@pytest.mark.parametrize("field", [(), ("missing",), ("modules", "", "readout"), ("rounds", "child")])
 def test_read_field_rejects_malformed_paths_locally_and_unknown_paths_at_owner(
-    tmp_path: Path, field: str
+    tmp_path: Path, field: tuple[str | int, ...]
 ) -> None:
     with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        if not field or ".." in field:
+        if not field or "" in field:
             with pytest.raises(ValueError, match="field"):
                 tab.read_field(field)
             assert len(client.transport.sent) == before
@@ -187,7 +187,7 @@ def test_read_field_rejects_malformed_paths_locally_and_unknown_paths_at_owner(
                 tab.read_field(field)
             assert caught.value.code == "invalid_params"
             assert caught.value.reason == "form_path"
-            assert caught.value.data == {"form_path": field.split(".")}
+            assert caught.value.data == {"form_path": list(field)}
             assert len(client.transport.sent) == before + 1
             assert tab.read_field(('rounds',)).input_present
 

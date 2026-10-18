@@ -61,10 +61,10 @@ def test_retain_source_records_scalar_and_sweep_without_cfg_edits(
 
 
 @pytest.mark.parametrize(
-    "field,source", [("missing", "caller"), ("rounds", ""), ("range", " ")]
+    "field,source", [(("missing",), "caller"), (("rounds",), ""), (("range",), " ")]
 )
 def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
-    tmp_path: Path, field: str, source: str
+    tmp_path: Path, field: tuple[str | int, ...], source: str
 ) -> None:
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
@@ -72,11 +72,11 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
         before = list(client.transport.sent)
         with pytest.raises((GuiRpcError, ValueError)) as caught:
             tab.retain_source(field, source)
-        if field == "missing":
+        if field == ("missing",):
             assert isinstance(caught.value, GuiRpcError)
             assert caught.value.reason == "form_path"
             assert caught.value.code == "invalid_params"
-            assert caught.value.data == {"form_path": [field]}
+            assert caught.value.data == {"form_path": list(field)}
         else:
             assert isinstance(caught.value, ValueError)
             assert "source must be" in str(caught.value)
@@ -161,7 +161,7 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
         snapshot = tab.run().snapshot()
         assert snapshot is not None
         assert (
-            snapshot.actual["fields"]["modules.readout.freq"].get("source")
+            snapshot.actual["fields"]["frequency"].get("source")
             == "caller_low"
         )
         assert snapshot.actual["fields"]["rounds"].get("source") == "gui_default"
@@ -169,10 +169,10 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
 
 @pytest.mark.parametrize(
     "bad_field,bad_source",
-    [("missing", "explicit"), ("modules.readout", "explicit"), ("rounds", " ")],
+    [(("missing",), "explicit"), (("modules", "readout"), "explicit"), (("rounds",), " ")],
 )
 def test_batch_preflight_rejects_all_before_first_edit(
-    tmp_path: Path, bad_field: str, bad_source: str
+    tmp_path: Path, bad_field: tuple[str | int, ...], bad_source: str
 ) -> None:
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
@@ -185,13 +185,13 @@ def test_batch_preflight_rejects_all_before_first_edit(
                     recipe.RecipeFieldEdit(bad_field, 9, bad_source),
                 ]
             )
-        if bad_field == "missing":
+        if bad_field == ("missing",):
             assert isinstance(caught.value, GuiRpcError)
             assert caught.value.reason == "form_path"
             assert caught.value.code == "invalid_params"
             assert caught.value.data == {
-                "path": [bad_field],
-                "form_path": [bad_field],
+                "path": list(bad_field),
+                "form_path": list(bad_field),
                 "edit_index": 1,
             }
         elif bad_field == "modules.readout":

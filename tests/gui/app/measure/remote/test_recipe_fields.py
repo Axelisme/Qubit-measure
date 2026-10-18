@@ -316,13 +316,13 @@ def assert_run_keeps_nested_length_after_updates(prepared, nested_recipe_rpc) ->
     assert result["tabs"][0]["result_state"]["available"] is True
     captured = operation.snapshot()
     assert captured is not None
-    assert captured.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
+    assert captured.actual["fields"]["length"]["value"] == 0.08
     context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.7))
     prepared.set(('pulse', 'waveform', 'length'), 0.16)
     assert prepared.read_field(('pulse', 'waveform', 'length')).value == 0.16
     after_updates = operation.snapshot()
     assert after_updates is not None
-    assert after_updates.actual["fields"]["pulse.waveform.length"]["value"] == 0.08
+    assert after_updates.actual["fields"]["length"]["value"] == 0.08
 
 
 def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(

@@ -18,6 +18,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui.app.measure.remote.form_description import description_wire
 from zcu_tools.gui.app.measure.remote.form_observation import observe_form
+from zcu_tools.gui.app.measure.remote.handlers.tab import module_path
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import (
     FormEnv,
@@ -86,10 +87,10 @@ class FormGui(LookbackGui):
             return {"operation_id": 71}
         if method == "tab.read_module":
             return asdict(
-                self.owner.read_module(tuple(str(params["field"]).split(".")))
+                self.owner.read_module(module_path(params["field"]))
             )
         if method == "tab.use_inline":
-            path = tuple(str(params["field"]).split("."))
+            path = module_path(params["field"])
             self.owner.require_mutation_allowed()
             if self.owner.read_module(path).mode == "key":
                 self.owner.run_command(path, "to_inline")
@@ -419,9 +420,9 @@ def test_locked_inline_slot_rejects_library_selection_at_owner(
         ]
 
 
-@pytest.mark.parametrize("field", ["pulse.kind", "locked_pulse.kind"])
+@pytest.mark.parametrize("field", [("pulse", "kind"), ("locked_pulse", "kind")])
 def test_read_field_does_not_expose_option_selected_tag_leaves(
-    tmp_path: Path, field: str
+    tmp_path: Path, field: tuple[str | int, ...]
 ) -> None:
     gui = FormGui()
     with recipe_client(tmp_path, gui) as client:
@@ -432,7 +433,7 @@ def test_read_field_does_not_expose_option_selected_tag_leaves(
             tab.read_field(field)
         assert caught.value.code == "invalid_params"
         assert caught.value.reason == "form_path"
-        assert caught.value.data == {"form_path": field.split(".")}
+        assert caught.value.data == {"form_path": list(field)}
         assert gui.owner.input.data == before
         assert tab.read_field(('locked_pulse', 'freq')).value == 100.0
 
@@ -493,17 +494,17 @@ def test_retained_module_source_keeps_key_and_numeric_summary(tmp_path: Path) ->
         operation = tab.run()
         captured = operation.snapshot()
         assert captured is not None
-        assert captured.actual["fields"]["pulse.freq"] == {
+        assert captured.actual["fields"]["frequency"] == {
             "value": 100.0,
             "source": "library:Q1.pulses.pi",
             "unit": "MHz",
         }
         tab.use_inline(('pulse',))
         tab.set(('pulse', 'freq'), 125.0, source="calibration")
-        assert captured.actual["fields"]["pulse.freq"]["value"] == 100.0
+        assert captured.actual["fields"]["frequency"]["value"] == 100.0
         next_capture = tab.run().snapshot()
         assert next_capture is not None
-        assert next_capture.actual["fields"]["pulse.freq"] == {
+        assert next_capture.actual["fields"]["frequency"] == {
             "value": 125.0,
             "source": "calibration",
             "unit": "MHz",
@@ -527,7 +528,7 @@ def test_invalid_module_projection_records_no_success_prefix(tmp_path: Path) -> 
             )
         captured = tab.run().snapshot()
         assert captured is not None
-        assert "pulse.freq" not in captured.actual["fields"]
+        assert "frequency" not in captured.actual["fields"]
 
 
 def test_logical_ref_scalar_and_copy_keep_summary_facts_detached(
@@ -560,10 +561,10 @@ def test_logical_ref_scalar_and_copy_keep_summary_facts_detached(
         tab.retain_source(('pulse', 'freq'), "library:Q1.pulses.pi")
         captured = tab.run().snapshot()
         assert captured is not None
-        assert captured.actual["fields"]["pulse.freq"]["value"] == 100.0
+        assert captured.actual["fields"]["frequency"]["value"] == 100.0
         tab.use_inline(('pulse',))
         tab.set(('pulse', 'freq'), 125.0)
-        assert captured.actual["fields"]["pulse.freq"]["value"] == 100.0
+        assert captured.actual["fields"]["frequency"]["value"] == 100.0
         assert observed.value == 100.0
 
 

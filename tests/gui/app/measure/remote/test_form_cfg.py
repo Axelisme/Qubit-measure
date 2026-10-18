@@ -678,10 +678,10 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
 
 
 @pytest.mark.parametrize(
-    "field", ["gain", "missing", "pulse.module.freq", "pulse..freq"]
+    "field", [["gain"], ["missing"], ["pulse", "module", "freq"], ["pulse", "", "freq"]]
 )
 def test_module_rpc_rejects_nonmodule_paths_without_mutation(
-    form_rpc, field: str
+    form_rpc, field: list[str]
 ) -> None:
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)

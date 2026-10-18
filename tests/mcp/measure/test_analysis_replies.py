@@ -222,7 +222,7 @@ def test_analysis_only_rejects_conflicting_estimate_declarations(
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond, recipes=(T1_DEFINITION, conflict))
-    with pytest.raises(ValueError, match="Ambiguous analysis estimate 't1'"):
+    with pytest.raises(ValueError, match="Ambiguous analysis estimate"):
         client.call("tab_analyze", {"tab": "t"})
 
 

@@ -32,8 +32,8 @@ def pipeline(
 ) -> RecipeGenerator:
     tab = session.open_tab("lookback", reuse=reuse_tab_id)
     for path, reference in (
-        ("modules.reset", use_reset),
-        ("modules.init_pulse", init_pulse_ref),
+        (("modules", "reset"), use_reset),
+        (("modules", "init_pulse"), init_pulse_ref),
     ):
         if reference is None:
             tab.disable_library(path)

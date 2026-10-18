@@ -28,7 +28,7 @@ def test_run_starts_immediately_with_detached_conditions(tmp_path):
         tab.set(('rounds',), 7)
         tab.disable_library(('modules', 'reset'))
         tab.read_value("$resonator.freq")
-        for path in ("modules.readout.freq",):
+        for path in (("modules", "readout", "freq"),):
             tab.set(path, {"expr": "$resonator.freq"}, source="$resonator.freq")
         operation = tab.run()
         assert gui.ran
@@ -41,11 +41,11 @@ def test_run_starts_immediately_with_detached_conditions(tmp_path):
             "value": 7,
             "source": "explicit",
         }
-        assert before.actual["fields"]["modules.reset"] == {
+        assert before.actual["fields"]["reset"] == {
             "value": None,
             "source": "disabled",
         }
-        assert before.actual["fields"]["modules.readout.freq"] == {
+        assert before.actual["fields"]["frequency"] == {
             "value": 6100.0,
             "source": "$resonator.freq",
         }

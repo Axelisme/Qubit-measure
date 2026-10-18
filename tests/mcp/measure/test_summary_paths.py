@@ -2,6 +2,8 @@
 
 from dataclasses import replace
 
+rom typing import Any
+
 import pytest
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, project_execution
 
@@ -12,7 +14,7 @@ def unused_recipe(_session):
     yield from ()
 
 
-def analysis_snapshot():
+def analysis_snapshot() -> dict[str, Any]:
     return {
         "execution": "a", "stage": "primary", "tab": "t", "op": 1,
         "status": "finished", "phase": "finished", "cancel_requested": False,

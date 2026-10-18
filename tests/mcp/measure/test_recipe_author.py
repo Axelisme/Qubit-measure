@@ -107,21 +107,21 @@ def test_author_reuse_resets_the_observed_cfg_before_editing(tmp_path):
     assert gui.publication["input"]["rounds"] == 9
 
 
-@pytest.mark.parametrize("field", ["", "missing", "modules..readout", "rounds.child"])
+@pytest.mark.parametrize("field", [(), ("missing",), ("modules", "", "readout"), ("rounds", "child")])
 def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = gui.owner.input.data
         sent_before = len(client.transport.sent)
-        if field in ("missing", "rounds.child"):
+        if field in (("missing",), ("rounds", "child")):
             with pytest.raises(GuiRpcError) as error:
                 tab.set(field, 5)
             assert error.value.code == "invalid_params"
             assert error.value.reason == "form_path"
             assert error.value.data == {
-                "form_path": field.split("."),
-                "path": field.split("."),
+                "form_path": list(field),
+                "path": list(field),
                 "edit_index": 0,
             }
         else:
@@ -134,11 +134,11 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
                     "tab.edit_recipe_fields",
                     {
                         "tab_id": "t",
-                        "edits": [{"path": field.split("."), "value": 5}],
+                        "edits": [{"path": list(field), "value": 5}],
                     },
                 )
             ]
-            if field in ("missing", "rounds.child")
+            if field in (("missing",), ("rounds", "child"))
             else []
         )
 
@@ -150,7 +150,7 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
             None,
             None,
             MissingParameter(
-                "readout_ref", "Provide a valid modules.readout library key"
+                "readout_ref", "Provide a valid ('modules', 'readout') library key"
             ),
         ),
         (None, "R1.readout.main", None),
@@ -265,12 +265,12 @@ def test_author_sweep_captures_individual_labels_and_omitted_gui_sources(tmp_pat
         tab = RecipeSession(
             client.context,
             summary_parameters=tuple(
-                SummaryParameter(name, name)
-                for name in (
-                    "sweep.freq",
-                    "sweep.freq.start",
-                    "sweep.freq.stop",
-                    "sweep.freq.n",
+                SummaryParameter(name, path)
+                for name, path in (
+                    ("sweep.freq", ("sweep", "freq")),
+                    ("sweep.freq.start", ("sweep", "freq", "start")),
+                    ("sweep.freq.stop", ("sweep", "freq", "stop")),
+                    ("sweep.freq.n", ("sweep", "freq", "n")),
                 )
             ),
         ).open_tab("lookback")

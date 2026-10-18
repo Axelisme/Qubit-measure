@@ -7,7 +7,10 @@ original owner scenario remains in commit 393b89c71 for that acceptance seam.
 from copy import deepcopy
 from pathlib import Path
 
+rom typing import Any
+
 import pytest
+from pydantic import JsonValue
 from zcu_tools.gui.app.measure.remote.form_description import recipe_field_wire
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeFieldEdit, RecipeSession
@@ -18,7 +21,7 @@ from ._recipe_support import LookbackGui, recipe_client
 class CarrierGui(LookbackGui):
     """Return prescribed wire facts; never claim to install indexed Form input."""
 
-    def __call__(self, method, params):
+    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.read_module":
             return {"value": {"gain": 0.5}, "mode": "inline", "source": "0"}
         if method == "tab.edit_recipe_fields":
@@ -27,10 +30,12 @@ class CarrierGui(LookbackGui):
             reply = deepcopy(recipe_field_wire(self.owner.read_recipe_field(("rounds",))))
             path = params["path"]
             reply["description"]["path"] = path
-            reply["description"]["target"]["path"] = path
-            value = [3, 4] if path[-1] == "samples" else 0.75
+            target = reply["description"]["target"]
+            assert target is not None
+            target["path"] = path
+            value: JsonValue = [3, 4] if path[-1] == "samples" else 0.75
             reply.update(input=value, value=value)
-            return reply
+            return dict(reply)
         return super().__call__(method, params)
 
 
@@ -70,6 +75,7 @@ def test_indexed_batch_read_and_run_capture_keep_original_position(tmp_path: Pat
             ("tab.read_recipe_field", {"tab_id": "t", "path": ["tones", 1, "drive", "samples"]}),
             ("tab.edit_recipe_fields", {"tab_id": "t", "edits": [{"path": ["tones", 1, "drive", "samples"], "value": [7, 8]}]}),
         ]
+        assert isinstance(previous.value, list)
         previous.value.append(99)
         assert tab.read_field(("tones", 1, "drive", "samples")).value == [3, 4]
         captured = tab.run().snapshot()
