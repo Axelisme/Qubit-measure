@@ -17,10 +17,20 @@ import pytest
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
+from zcu_tools.simulate.evolution._dop853_dispatch import direct_plans
 from zcu_tools.simulate.evolution.kernel import ApplyContext
 
 if TYPE_CHECKING:
     from zcu_tools.simulate.evolution import kernel
+
+
+def kernel_context(
+    family: str, table: kernel.SegmentTable, budget: float
+) -> ApplyContext:
+    """Use the production timeline planner when invoking a direct solver seam."""
+    names = np.full(len(table.timeline), family)
+    plans, _ = direct_plans(table, names)
+    return ApplyContext(budget, plans.get(family))
 
 
 def synthetic_model(size: int = 3) -> evolution.SecularModel:
@@ -66,7 +76,9 @@ class KernelCase:
         result = self.kernel.guard_prepared(self.table, rows, self.source, self.budget)
         if result is not None:
             assert result.accepted.all()
-        return ApplyContext(self.budget, None if result is None else result.plan)
+        if result is not None and result.plan is not None:
+            return ApplyContext(self.budget, result.plan)
+        return kernel_context(self.kernel.name, self.table, self.budget)
 
 
 def _reference_hamiltonian(

@@ -8,6 +8,19 @@ product space with all g1c/g2c/g12 terms, then selects the lowest M joint states
 Dynamic Hamiltonians stay in this fixed basis. Native n² is formed before local
 and joint projection; squared truncated n is not a substitute.
 
+`charge_operator(subsystem)` returns full dimensionless n in the retained basis.
+`flux_operator(subsystem)` returns the analytic derivative of this model's H/h
+with respect to reduced flux f = Phi/Phi0, evaluated at the round's DC point,
+in GHz/Phi0. Both use subsystem 0=F1, 1=coupler, 2=F2. The flux derivative is
+projected through the same fixed local and retained joint bases as H, without
+rediagonalization or a gauge change. In the oscillator coordinates used here,
+fluxonium has H/h = kinetic - EJ*cos(phi + 2*pi*f), so its derivative is
+2*pi*EJ*sin(phi + 2*pi*f), not a bare phase operator. The fixed-theta SQUID
+derivative is pi*EJmax*[sin(pi*f)*cos(theta) + d*cos(pi*f)*sin(theta)].
+Drive composition multiplies these by GHz/gain charge coefficients or Phi0/gain
+flux coefficients. Flux quadratures are a fixed-DC small-signal linearization,
+not a large-amplitude fast-flux Hamiltonian H(Phi(t)).
+
 `native_embedding()` maps the retained joint coordinates into physical native
 F1-oscillator × coupler-charge × F2-oscillator coordinates, including both local
 and coupled eigenvector phases. Authors can compare projectors, coherences and

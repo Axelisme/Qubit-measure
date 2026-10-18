@@ -97,20 +97,30 @@ def dc_flux(
 
 
 def drive_sources(settings: FTFSettings, joint: JointModel) -> tuple[DriveSource, ...]:
-    """Translate calibrated microwave quadratures to fixed-DC numeric source operators."""
+    """Return named charge/flux quadratures in joint's fixed DC basis, GHz/gain.
+
+    Charge coefficients (GHz/gain) multiply full n. Flux coefficients (Phi0/gain)
+    multiply the analytic d(H/h)/df at DC (GHz/Phi0), not a dynamic H(Phi(t)).
+    Both use Re[c*z] = Re(c)*Re(z) - Im(c)*Im(z), including signed crosstalk.
+    """
     zero = np.zeros_like(joint.hamiltonian(joint.dc_flux))
     sources = []
     for name, source in settings.drive_lines.items():
         coefficients = tuple(
-            complex(c.real, c.imag) for c in source.charge_drive_ghz_per_gain.as_tuple()
+            complex(c.real, c.imag) for c in source.coefficients().as_tuple()
         )
-        # Re[c*z] = Re(c)*Re(z)-Im(c)*Im(z); n itself is Hermitian.
+        operator = (
+            joint.charge_operator
+            if source.operator == "charge"
+            else joint.flux_operator
+        )
+        # Re[c*z] = Re(c)*Re(z)-Im(c)*Im(z); both operators are Hermitian.
         x = sum(
-            (c.real * joint.charge_operator(i) for i, c in enumerate(coefficients)),
+            (c.real * operator(i) for i, c in enumerate(coefficients)),
             zero.copy(),
         )
         y = sum(
-            (-c.imag * joint.charge_operator(i) for i, c in enumerate(coefficients)),
+            (-c.imag * operator(i) for i, c in enumerate(coefficients)),
             zero.copy(),
         )
         sources.append(DriveSource(name, x, y))

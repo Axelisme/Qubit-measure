@@ -57,6 +57,7 @@ from ..kernel import (
 )
 from ..secular import ModelSource, SecularModel
 from . import _floquet_sidebands as sb
+from ._secular import coherence_decay
 
 
 @dataclass(frozen=True)
@@ -266,7 +267,7 @@ def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
     """Transform each sample once and return full harmonics and convergence."""
     count, size, _ = rotations.shape
     loss = model.rates_per_ns.sum(axis=0)
-    gamma = (loss[:, None] + loss[None, :]) / 2 + model.dephasing_per_ns
+    gamma = coherence_decay(model)
     # Population rows use the transfer matrix, which already contains -loss.
     np.fill_diagonal(gamma, loss)
     baths = np.empty((count, size * size, size * size), dtype=np.complex128)

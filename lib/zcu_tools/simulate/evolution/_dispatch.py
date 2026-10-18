@@ -7,15 +7,93 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
+from ._dop853_dispatch import direct_plans
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
 from ._shaped_dispatch import preference
 from ._two_tone_dispatch import direct_preferred
 from .engine import PathDiagnostics
-from .kernel import GuardPreparation, Kernel, RowPlan, SegmentTable
+from .kernel import GuardPreparation, Kernel, Prepared, RowPlan, SegmentTable
+from .kernels._cf4_grid import coarse_count, finer_count, spectral_width
 from .kernels.floquet import FloquetPlan
-from .secular import ModelSource
+from .kernels.floquet_period import PeriodBuilder
+from .kernels.gate_cache import GateCacheKernel
+from .secular import ModelSource, SecularModel
+
+
+def period_builder(
+    model: SecularModel, port: int, frequency: float, gain: float
+) -> PeriodBuilder:
+    """Select one constant-tone builder and retain its CF4 work ceiling.
+
+    Carriers at or above 1 GHz use dense DOP853. Below that, calibrated
+    cutoff-2/3 Sambe eigensolves cost 234 N-cubed units and must beat CF4's
+    coarse plus first-fine estimate. A declined Sambe numerical certificate
+    uses independent CF4, never gain anchors. No density or scheduling enters.
+    """
+    if abs(frequency) >= 1.0:
+        return PeriodBuilder("dop853")
+    drive = model.drives[port]
+    width = spectral_width(
+        model.energies_ghz, drive.in_phase_ghz, drive.quadrature_ghz, gain
+    )
+    coarse = coarse_count(1.5 * width / abs(frequency))
+    work = float(coarse + finer_count(coarse))
+    return PeriodBuilder("sambe" if work > 234.0 else "cf4", work)
+
+
+def period_gain_coordinates(
+    table: SegmentTable,
+) -> dict[tuple[tuple[int, ...], int, float], tuple[float, ...]]:
+    """Collect complete-table low-carrier gain groups, before model selection.
+
+    Only constant single tones with .03 <= |f| < 1 GHz participate; groups
+    need at least two distinct gains before removing spectral candidates.
+    """
+    groups: dict[tuple[tuple[int, ...], int, float], set[float]] = {}
+    rows = np.flatnonzero(table.tones == 1)
+    rows = rows[table.constant_envelopes(rows)]
+    for row in rows:
+        frequency = float(table.tone_frequency_ghz[row, 0])
+        if not 0.03 <= abs(frequency) < 1.0:
+            continue
+        key = (
+            tuple(int(v) for v in table.level[row]),
+            int(table.tone_port[row, 0]),
+            frequency,
+        )
+        groups.setdefault(key, set()).add(float(table.tone_amplitude[row, 0]))
+    return {
+        key: tuple(sorted(gains)) for key, gains in groups.items() if len(gains) >= 2
+    }
+
+
+def period_builders(
+    model: SecularModel, port: int, frequency: float, gains: tuple[float, ...]
+) -> dict[float, PeriodBuilder]:
+    """Select each group key once and fix its non-spectral CF4 dependencies.
+
+    gains is the complete sorted gain group, or a single standalone key.
+    Every 24th CF4 gain and both endpoints are independent anchors. Other CF4
+    keys use at most four nearest anchors, with lower gain winning distance
+    ties. Sambe candidates never participate, even if their certificate fails.
+    """
+    builders = {gain: period_builder(model, port, frequency, gain) for gain in gains}
+    ordered = [gain for gain in gains if builders[gain].kind == "cf4"]
+    if len(gains) < 2 or not ordered:
+        return builders
+    anchors = ordered[::24]
+    if anchors[-1] != ordered[-1]:
+        anchors.append(ordered[-1])
+    for gain in ordered:
+        dependencies = (
+            (gain,)
+            if gain in anchors
+            else tuple(sorted(sorted(anchors, key=lambda a: (abs(a - gain), a))[:4]))
+        )
+        builders[gain] = PeriodBuilder("cf4", builders[gain].work_limit, dependencies)
+    return builders
 
 
 @dataclass(frozen=True)
@@ -38,6 +116,8 @@ class Selection:
     rows: global rows owned by this worker's timeline.
     shaped: acquire-wide cost plan, or None if no selected row is shaped.
     two_tone_direct: acquire-wide global-row preference, or None without two tones.
+    names: caller-accepted family context for timeline-local frame planning.
+    plans: caller-accepted decisions to retain in the timeline-local plan.
     A selection disables further deferral and retains accepted guard products.
     """
 
@@ -45,6 +125,8 @@ class Selection:
     shaped: ShapedPlan | None
     rejected: Mapping[str, NDArray[np.bool_]]
     two_tone_direct: NDArray[np.bool_] | None = None
+    names: NDArray[np.str_] | None = None
+    plans: Mapping[str, RowPlan] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -69,8 +151,10 @@ class Dispatch:
     rejected: caller guard decisions to skip in worker-local fallback chains.
     two_tone_direct: global-row cost preference fixed before either two-tone guard;
         None when no constant two-tone candidates exist.
-    plans: family-specific per-row decisions, borrowed unchanged by apply;
-        these evolve-local plans never enter the model-only prepare cache.
+    plans: immutable family-owned global-row decisions passed unchanged to apply;
+        evolve-local plans never enter the model-only prepare cache.
+    chain: global-row chain IDs; -1 for independent rows. A timeline worker
+        replaces provisional decisions locally after its deferred guards finish.
     """
 
     names: NDArray[np.str_]
@@ -84,6 +168,9 @@ class Dispatch:
     rejected: Mapping[str, NDArray[np.bool_]] = field(default_factory=dict)
     two_tone_direct: NDArray[np.bool_] | None = None
     plans: Mapping[str, RowPlan] = field(default_factory=dict)
+    chain: NDArray[np.int64] = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -116,6 +203,31 @@ def require(
             f"segment {row} (timeline {table.timeline[row]}, start {table.start_ns[row]} ns) requires kernel {name}"
         )
     return kernels[name]
+
+
+def prepare(
+    kernel: Kernel,
+    keys: NDArray[np.void],
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    source: ModelSource,
+    budget: float,
+) -> Prepared:
+    """Select a key-level builder and prepare an aligned batch of representatives.
+
+    Called at the scheduler's normal build point, after cache lookup. Gate keys
+    with duration in (0, 30] ns try phase-adaptive preparation; all other gate
+    keys use sixteen nodes. Failed phase probes fall back inside the numerical
+    build. Other families use their ordinary prepare entry point unchanged.
+    Keys, representatives, budget and failure semantics follow Kernel.prepare.
+    """
+    if isinstance(kernel, GateCacheKernel):
+        duration = keys["duration"]
+        phase_adaptive = (duration > 0) & (duration <= 30.0)
+        return kernel.prepare(
+            keys, table, rows, source, budget, phase_adaptive=phase_adaptive
+        )
+    return kernel.prepare(keys, table, rows, source, budget)
 
 
 @dataclass(frozen=True)
@@ -338,8 +450,31 @@ class _Classifier:
         direct = self.two_tone_direct[selected]
         self.accept(selected[direct], ("dop853", "floquet"))
         self.accept(selected[~direct], ("floquet", "dop853"))
-        if self.guard_plans.get("floquet"):
-            self.plans["floquet"] = FloquetPlan.merge(self.guard_plans["floquet"])
+        self.retain_floquet_plan()
+
+    def retain_floquet_plan(self) -> None:
+        """Keep caller-accepted admissions alongside this timeline's guard results."""
+        plans = list(self.guard_plans.get("floquet", ()))
+        if self.selection is not None:
+            previous = self.selection.plans.get("floquet")
+            if previous is not None:
+                if not isinstance(previous, FloquetPlan):
+                    raise TypeError("Floquet requires its own row plan")
+                timeline = self.table.timeline[self.selection.rows[0]]
+                first, stop = np.searchsorted(
+                    self.table.timeline, [timeline, timeline + 1]
+                )
+                plans.append(
+                    FloquetPlan(
+                        {
+                            row: previous.admissions[row]
+                            for row in range(int(first), int(stop))
+                            if row in previous.admissions
+                        }
+                    )
+                )
+        if plans:
+            self.plans["floquet"] = FloquetPlan.merge(plans)
 
     def _result(self) -> Dispatch:
         for name in np.unique(self.names[self.names != ""]):
@@ -347,6 +482,21 @@ class _Classifier:
             self.costs[rows] = self.kernels[str(name)].cost(self.table, rows)
         if not np.isfinite(self.costs).all() or np.any(self.costs < 0):
             raise ValueError("kernel costs must be finite and nonnegative")
+        if self.selection is not None and self.selection.names is not None:
+            point = int(self.table.timeline[self.selection.rows[0]])
+            first, stop = (
+                np.searchsorted(self.table.timeline, point, side="left"),
+                np.searchsorted(self.table.timeline, point, side="right"),
+            )
+            context_rows = np.arange(first, stop, dtype=np.int64)
+            context = self.names[context_rows].copy()
+            unresolved = context == ""
+            context[unresolved] = self.selection.names[context_rows[unresolved]]
+            context[~self.geometry.pending[context_rows]] = ""
+            plans, chain = direct_plans(self.table, context, context_rows)
+        else:
+            plans, chain = direct_plans(self.table, self.names)
+        self.plans.update(plans)
         return Dispatch(
             self.names,
             diagnostics(self.table, self.names),
@@ -357,6 +507,7 @@ class _Classifier:
             self.rejected,
             self.two_tone_direct,
             self.plans,
+            chain,
         )
 
 

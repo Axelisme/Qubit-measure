@@ -7,12 +7,13 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import SegmentTable
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 
 from tests.simulate.evolution._engine import batch, track
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
+    kernel_context,
     reference,
     synthetic_model,
 )
@@ -62,7 +63,12 @@ def evolve_rows(case: KernelCase, rows: np.ndarray) -> np.ndarray:
     )
     actual = case.states[rows].copy()
     mask = case.kernel.apply(
-        prepared, inverse, case.table, rows, actual, ApplyContext(case.budget)
+        prepared,
+        inverse,
+        case.table,
+        rows,
+        actual,
+        kernel_context(case.kernel.name, case.table, case.budget),
     )
     assert not mask.any()
     return actual
