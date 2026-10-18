@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
-from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath
+from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath, field_path
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe import RecipeDefinition
@@ -30,6 +30,9 @@ class SummaryParameter:
     field: RecipeFieldPath
     unit: str | None = None
 
+    def __post_init__(self) -> None:
+        field_path(self.field)
+
 
 @dataclass(frozen=True)
 class SummaryEstimate:
@@ -46,6 +49,11 @@ class SummaryEstimate:
     value_key: RecipeFieldPath
     error_key: RecipeFieldPath | None = None
     unit: str | None = None
+
+    def __post_init__(self) -> None:
+        field_path(self.value_key)
+        if self.error_key is not None:
+            field_path(self.error_key)
 
 
 class StepReply(TypedDict):
