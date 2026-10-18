@@ -51,7 +51,9 @@ def test_restored_unlisted_selection_is_shown_without_rewriting_raw_input(
         key: str
 
         @classmethod
-        def options(cls, _env: FormEnv) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
+        def options(
+            cls, _env: FormEnv
+        ) -> Mapping[api.FormPath, tuple[api.Option, ...]]:
             return {("key",): (api.Option("A", "A"), api.Option("B", "B"))}
 
         @classmethod
@@ -89,7 +91,9 @@ def test_restored_unlisted_selection_is_shown_without_rewriting_raw_input(
         driver.choose_option(object_name="form.input.key", value="B")
         snapshot("03-valid-selection")
         assert driver.observe(object_name="form.input.key").text == "B"
-        assert "current options" not in driver.observe(object_name="form.row.key").tooltip
+        assert (
+            "current options" not in driver.observe(object_name="form.row.key").tooltip
+        )
         assert state.input.data == {"key": "B"}
         # Converted raw B needs no override; a plain switch keeps its explicit choice.
         assert state.input.selections == ({} if with_converter else {("key",): "B"})
