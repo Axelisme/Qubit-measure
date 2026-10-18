@@ -40,7 +40,6 @@ def test_logical_container_edit_replaces_exact_raw_value_without_merging_default
     definition = adapter.Form(LogicalCfg, {"real": {"module": {"value": 7}}})
     env = FormEnv()
     input = definition.default_input(env)
-    assert hasattr(FormState, "prepare_replace"), "Missing explicit exact replacement"
     candidate = definition.prepare_logical_edits(
         input, (adapter.LogicalEdit(("real", "module"), {}),), env
     )
@@ -530,7 +529,7 @@ def test_locked_selector_rejects_library_and_preserves_inline_noop() -> None:
     assert input.to_json() == before
 
 
-def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_structure() -> (
+def test_ordinary_union_write_keeps_only_authored_raw_and_initial_active_structure() -> (
     None
 ):
     from typing import Annotated, Literal
@@ -561,8 +560,10 @@ def test_ordinary_union_partial_write_keeps_core_defaults_and_initial_active_str
     assert object_at(candidate.input.data, ("extras", "shape")) == {
         "kind": "ramp",
         "start": 3.0,
-        "stop": 1.0,
     }
+    result = FormState(candidate.input).result(env)
+    assert isinstance(result, FormModel)
+    assert result.model_dump()["extras"]["shape"]["stop"] == 1.0
     with pytest.raises(adapter.LogicalEditError) as failure:
         form.prepare_logical_edits(
             input,

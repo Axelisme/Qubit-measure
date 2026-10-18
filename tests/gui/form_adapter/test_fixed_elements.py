@@ -199,7 +199,7 @@ def test_owner_checks_complete_command_converter_and_prepared_replacements(opera
         if operation == "command":
             state.run_command(("tones",), "clear", core.FormEnv())
         elif operation == "converter":
-            state.write({("tones",): []}, core.FormEnv())
+            state.select(("tones",), [], core.FormEnv())
         else:
             state.install_input(
                 core.FormInput(Commands, {"tones": [], "participants": ["B"]})
