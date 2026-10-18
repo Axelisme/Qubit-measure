@@ -888,7 +888,11 @@ def test_apply_failure_preserves_edited_draft_and_selection_without_closing_wind
         assert any("not a field container" in text for text in error.texts)
         driver.screenshot(images / "06-click-failure.png")
         driver.click("OK")
-        assert driver.observe(object_name="writebackProposed") == proposed
+        assert tuple(
+            widget
+            for widget in driver.visible().widgets
+            if widget.object_name == "writebackProposed"
+        ) == (proposed,)
         assert driver.observe("general.ext.blocked.sigma*") == selected
         assert driver.observe("Apply Selected").enabled
         assert "Writeback applied" not in driver.status().text
