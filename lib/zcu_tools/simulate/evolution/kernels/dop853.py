@@ -18,7 +18,7 @@ from ..declarations import (
 from ..kernel import Prepared, SegmentTable
 from ..secular import ModelSource
 from ._dop853 import tolerances
-from ._dop853_chain import run_chain
+from ._dop853_chain import run_chain, touching
 from ._dop853_data import (
     Context,
     Models,
@@ -142,17 +142,10 @@ def _interaction_mask(segments: Segments, rows: NDArray[np.int64]) -> NDArray[np
         return np.zeros(len(rows), dtype=np.bool_)
     eligible = (segments.tones[rows] == 1) & (segments.gain[rows, 0] != 0)
     previous, following = rows[:-1], rows[1:]
-    touching = (segments.timeline[previous] == segments.timeline[following]) & (
-        np.abs(
-            segments.start[following]
-            - segments.start[previous]
-            - segments.duration[previous]
-        )
-        <= 1e-9
-    )
+    chained = touching(segments, previous, following)
     # Both endpoints of each touching edge belong to the lab-frame chain.
-    eligible[:-1] &= ~touching
-    eligible[1:] &= ~touching
+    eligible[:-1] &= ~chained
+    eligible[1:] &= ~chained
     return eligible
 
 

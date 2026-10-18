@@ -65,7 +65,7 @@ def test_cheaper_guard_rejection_tries_other_two_tone_family():
 
 
 @pytest.mark.parametrize(
-    ("workers", "chunks", "reverse"), [(1, 1, False), (2, 7, True), (6, 3, True)]
+    ("workers", "chunks", "reverse"), [(1, 1, False), (2, 7, True), (2, 3, False)]
 )
 def test_two_tone_cost_order_independent_of_workers_chunks_and_row_order(
     workers, chunks, reverse

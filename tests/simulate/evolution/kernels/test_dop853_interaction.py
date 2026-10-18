@@ -1,13 +1,7 @@
-"""Independent-row accuracy and batching contracts at public numerical seams.
+"""Interaction-picture accuracy, lab-frame chains and row partition contracts."""
 
-The lab-frame endpoint fixtures pin the unchanged fallback contract. Retire them
-when touching chains, zero-gain calls or mixed-tone calls leave that runner.
-"""
-
-import json
 from contextlib import closing
 from dataclasses import replace
-from pathlib import Path
 from threading import Event
 
 import numpy as np
@@ -155,17 +149,19 @@ def fallback_case(mode: str) -> KernelCase:
 
 
 @pytest.mark.parametrize("mode", ["zero", "mixed", "chain"])
-def test_fallback_rows_preserve_original_lab_frame_endpoints_exactly(
-    mode: str,
-) -> None:
-    case = fallback_case(mode)
+def test_fallback_rows_match_full_lab_frame_reference(mode: str) -> None:
+    case = replace(fallback_case(mode), budget=1e-8)
     actual = evolve_rows(case, np.arange(len(case.states)))
-    stored = json.loads(
-        Path(__file__).with_name("dop853_lab_endpoints.json").read_text()
-    )[mode]
-    expected = np.array(stored["real"]) + 1j * np.array(stored["imag"])
     lab_rows = np.arange(len(case.states)) if mode == "chain" else np.array([0])
-    np.testing.assert_array_equal(actual[lab_rows], expected[lab_rows])
+    expected = []
+    for row in lab_rows:
+        state = expected[-1] if mode == "chain" and len(expected) else case.states[row]
+        expected.append(reference(case, int(row), state))
+    # Strict lab-frame integration is independent of the production RHS. The
+    # tighter budget checks coherent endpoints without pinning solver roundoff.
+    np.testing.assert_allclose(
+        actual[lab_rows], np.stack(expected), atol=case.budget, rtol=0
+    )
 
 
 @pytest.mark.parametrize("mode", ["zero", "mixed"])
@@ -243,3 +239,27 @@ def test_zero_tone_table_without_drive_slots_matches_lab_reference() -> None:
         [reference(case, row, state) for row, state in enumerate(case.states)]
     )
     np.testing.assert_allclose(actual, expected, atol=case.budget, rtol=0)
+
+
+def test_touching_rows_at_large_absolute_start_match_lab_frame_chain() -> None:
+    case = common_controls()
+    starts = case.table.start_ns.copy()
+    starts[:2] = [1e8, np.float64(1e8 + 0.1)]
+    case = replace(
+        case,
+        budget=1e-8,
+        table=replace(
+            case.table,
+            timeline=np.zeros(len(case.states), dtype=np.int64),
+            start_ns=starts,
+            duration_ns=np.full(len(case.states), 0.1),
+        ),
+    )
+    actual = evolve_rows(case, np.array([0, 1]))
+    # Integrate in local time to avoid rounding the oracle's absolute endpoint.
+    local = replace(case, table=replace(case.table, start_ns=np.zeros(len(starts))))
+    first = reference(local, 0, case.states[0])
+    second = reference(local, 1, first)
+    np.testing.assert_allclose(
+        actual, np.stack([first, second]), atol=case.budget, rtol=0
+    )

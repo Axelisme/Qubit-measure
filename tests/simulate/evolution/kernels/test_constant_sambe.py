@@ -48,7 +48,7 @@ def test_low_carrier_uses_sambe_and_preserves_translated_coherent_tail():
         case.source,
         case.budget,
     )
-    assert getattr(workspace, "sambe_builds", 0) == 2
+    assert workspace.sambe_builds == 2
     assert workspace.attempts == workspace.hits == workspace.nbytes == 0
     actual = case.states.copy()
     kernel.apply(prepared, rows, case.table, rows, actual, case.budget)

@@ -7,6 +7,8 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ..secular import SecularModel
+from ._cf4_grid import coarse_count, finer_count, spectral_width
+from ._sambe import eigensystem
 
 
 class Spectrum(NamedTuple):
@@ -35,11 +37,11 @@ def work_limit(model: SecularModel, port: int, frequency: float, gain: float) ->
     This is a model/key-only estimate, not a runtime timing measurement.
     """
     drive = model.drives[port]
-    width = np.ptp(model.energies_ghz) + 2 * abs(gain) * (
-        np.linalg.norm(drive.in_phase_ghz) + np.linalg.norm(drive.quadrature_ghz)
+    width = spectral_width(
+        model.energies_ghz, drive.in_phase_ghz, drive.quadrature_ghz, gain
     )
-    coarse = max(8, 8 * int(np.ceil(1.5 * width / abs(frequency) / 8)))
-    return float(coarse + 8 * int(np.ceil(1.5 * coarse / 8)))
+    coarse = coarse_count(1.5 * width / abs(frequency))
+    return float(coarse + finer_count(coarse))
 
 
 def preferred(model: SecularModel, port: int, frequency: float, gain: float) -> bool:
@@ -50,24 +52,6 @@ def preferred(model: SecularModel, port: int, frequency: float, gain: float) -> 
     No scan geometry, worker count, density or execution history is consulted.
     """
     return abs(frequency) < 1.0 and work_limit(model, port, frequency, gain) > 234.0
-
-
-@njit(nogil=True, cache=True)
-def _eigensystem(energies, coupling, frequency, modes):
-    size = len(energies)
-    count = 2 * modes + 1
-    matrix = np.zeros((count * size, count * size), dtype=np.complex128)
-    for k in range(count):
-        for j in range(size):
-            matrix[k * size + j, k * size + j] = energies[j] + (k - modes) * frequency
-        if k:
-            matrix[k * size : (k + 1) * size, (k - 1) * size : k * size] = coupling
-            matrix[(k - 1) * size : k * size, k * size : (k + 1) * size] = (
-                coupling.conj().T
-            )
-    values, vectors = np.linalg.eigh(matrix)
-    central = np.ascontiguousarray(vectors[modes * size : (modes + 1) * size].conj().T)
-    return values, vectors, central
 
 
 @njit(nogil=True, cache=True)
@@ -117,7 +101,8 @@ def build(
         if spent > limit:
             break
         try:
-            data = _eigensystem(energies, coupling, frequency, modes)
+            values, vectors, central = eigensystem(energies, coupling, frequency, modes)
+            data = values, vectors, np.ascontiguousarray(central.conj().T)
         except np.linalg.LinAlgError:
             return None
         if not all(np.isfinite(array).all() for array in data):

@@ -475,3 +475,43 @@ def test_micromotion_bath_matches_independent_lindblad_jumps(
     )
     np.testing.assert_allclose(actual, expected, rtol=0, atol=3e-6)
     assert case.kernel.guard(long_table, rows, closed_source, case.budget).all()
+
+
+def test_prepared_bytes_exclude_shared_models(kernel_case: KernelCase) -> None:
+    import gc
+    import tracemalloc
+
+    case = kernel_case
+    model = case.source.model((0,))
+    # Several ports make repeated model charges larger than Python bookkeeping.
+    model = replace(
+        model,
+        drives=tuple(replace(model.drives[0], name=f"port-{p}") for p in range(24)),
+    )
+    source = ModelSource(case.states[0], lambda _: model)
+    gains = case.table.tone_amplitude.copy()
+    gains[:, 0] = [0.10, 0.11, 0.12, 0.13]
+    table = replace(case.table, tone_amplitude=gains)
+    rows = np.arange(len(case.states))
+    keys = case.kernel.prepare_keys(table, rows)
+    # Warm imports and solver/library caches using a different set of frames.
+    case.kernel.prepare(
+        case.kernel.prepare_keys(case.table, rows[:1]),
+        case.table,
+        rows[:1],
+        source,
+        case.budget,
+    )
+    gc.collect()
+    tracemalloc.start()
+    try:
+        before = tracemalloc.take_snapshot()
+        prepared = case.kernel.prepare(keys, table, rows, source, case.budget)
+        gc.collect()
+        after = tracemalloc.take_snapshot()
+        retained = sum(stat.size_diff for stat in after.compare_to(before, "traceback"))
+        # NumPy reports its allocations to tracemalloc. Retained memory includes
+        # Python overhead too, so it is an upper bound on owned array bytes.
+        assert prepared.nbytes <= retained
+    finally:
+        tracemalloc.stop()

@@ -23,13 +23,11 @@ class ShapedPlan:
 
     rows: all ordinary shaped global rows, in ascending order.
     order: (len(rows), 3) gate/period/direct index permutations.
-    spectral: all shaped global rows, eligible for the spectral guard attempt.
     Workers borrow these arrays and never recalculate reuse from their subset.
     """
 
     rows: NDArray[np.int64]
     order: NDArray[np.int64]
-    spectral: NDArray[np.int64]
 
 
 @dataclass(frozen=True)
@@ -267,12 +265,11 @@ class _Classifier:
             self.shaped = ShapedPlan(
                 rows,
                 preference(self.table, rows, self.kernels),
-                rows,
             )
         plan = self.shaped
         spectral = self.kernels.get("shaped_sambe")
         if spectral is not None:
-            selected = plan.spectral[self.scope[plan.spectral]]
+            selected = plan.rows[self.scope[plan.rows]]
             if len(selected):
                 self.try_kernel(spectral, selected)
         pending = (
