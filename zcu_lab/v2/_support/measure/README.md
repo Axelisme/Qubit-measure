@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-17，共用初值 owner 邊界與 arb Rabi 來源
+**Last updated:** 2026-10-18，固定來源的 mux 綁定驗證 owner
 
 # Measure domain support
 
@@ -17,6 +17,10 @@ helper 留在群組內 `_shared.py`。
 表單形狀與初值由各實驗的 `form.py` 提供 `make_form(ctx)`，共用生成器位於
 `zcu_tools.gui.form_adapter`。持久範本表由 `zcu_lab.templates.TEMPLATES` 擁有，
 組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
+
+`mux_bindings` 擁有固定 ParameterContext 的 qubit／resonator 對應驗證。
+Onetone 的缺 qubits bring-up 政策與 qubit 實驗的完整綁定要求分開，兩者不讀 live 來源。
+Group model 仍擁有長度與重複 qubit 的結構規則。
 
 `ctx_helpers.t1_initial_time` 集中 T1 衍生初值的選源。它從固定 capture 讀普通 T1，tone 掃描先讀歷史 tone T1，只有缺值才下探普通 T1。無 capture 或所有候選 leaf 缺失／null 時使用 30 µs 時間尺度；已存無效值回 None，讓衍生必填欄位留空。來源與 alias／path 錯誤仍傳遞，不寫回校準。各 Form 明確指定等待或掃描所需倍率，自然等待不使用 tone T1。
 
