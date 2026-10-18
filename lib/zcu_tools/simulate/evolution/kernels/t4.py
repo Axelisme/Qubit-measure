@@ -7,7 +7,7 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import ModelSource
 
 
@@ -138,12 +138,15 @@ class T4:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance states in place without changing the shared payload.
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        if context.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+        budget = context.budget
         del table, budget
         if not isinstance(prepared, _Static):
             raise ValueError("T4 requires its own prepared payload")

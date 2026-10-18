@@ -13,7 +13,7 @@ from ._prepare_keys import group_keys
 from ._shaped_dispatch import preference
 from ._two_tone_dispatch import direct_preferred
 from .engine import PathDiagnostics
-from .kernel import GuardPreparation, Kernel, SegmentTable
+from .kernel import GuardPreparation, Kernel, RowPlan, SegmentTable
 from .secular import ModelSource
 
 
@@ -80,6 +80,7 @@ class Dispatch:
     shaped: ShapedPlan | None = None
     rejected: Mapping[str, NDArray[np.bool_]] = field(default_factory=dict)
     two_tone_direct: NDArray[np.bool_] | None = None
+    plans: Mapping[str, RowPlan] = field(default_factory=dict)
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:

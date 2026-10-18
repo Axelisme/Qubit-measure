@@ -16,7 +16,7 @@ from ._planning import Geometry
 from ._prepare_keys import group_keys
 from .cache import PrepareCache, PreparedPayload
 from .engine import Cancelled, EvolutionResult, PathDiagnostics
-from .kernel import Kernel, SegmentTable
+from .kernel import ApplyContext, Kernel, RowPlan, SegmentTable
 from .secular import ModelSource
 
 _CHAINABLE_KERNELS = frozenset(("dop853", "flux_dop853"))
@@ -39,6 +39,7 @@ class _Binding:
     payload: PreparedPayload
     rows: NDArray[np.int64]
     indices: NDArray[np.int64]
+    plan: RowPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,10 @@ def _build(
 
 
 def _bind(
-    entry: _Entries, payload: PreparedPayload, eligible: NDArray[np.bool_]
+    entry: _Entries,
+    payload: PreparedPayload,
+    eligible: NDArray[np.bool_],
+    dispatch: Dispatch,
 ) -> _Binding:
     positions = {key: i for i, key in enumerate(payload.keys)}
     chosen = np.flatnonzero(eligible)
@@ -100,7 +104,11 @@ def _bind(
     indices = lookup[inverse]
     present = indices >= 0
     return _Binding(
-        entry.kernel, payload, entry.rows[chosen[present]], indices[present]
+        entry.kernel,
+        payload,
+        entry.rows[chosen[present]],
+        indices[present],
+        dispatch.plans.get(entry.kernel.name),
     )
 
 
@@ -148,7 +156,9 @@ class Schedule:
             namespace = entry.kernel.name, dc.identity, self.budget
             hits = cache.find(namespace, key_set)
             for payload in hits:
-                bindings.append(_bind(entry, payload, shared[entry.inverse]))
+                bindings.append(
+                    _bind(entry, payload, shared[entry.inverse], self.dispatch)
+                )
                 key_set.difference_update(payload.keys)
             available = {key.tobytes() for key in entry.keys}
             shared_keys = {key.tobytes() for key in entry.keys[shared]}
@@ -163,7 +173,9 @@ class Schedule:
                 eligible = np.array(
                     [key.tobytes() in reusable for key in entry.keys], dtype=bool
                 )
-                bindings.append(_bind(entry, payload, eligible[entry.inverse]))
+                bindings.append(
+                    _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+                )
                 if set(payload.keys).issubset(shared_keys):
                     cache.add(namespace, payload)
                 key_set.difference_update(payload.keys)
@@ -188,7 +200,9 @@ class Schedule:
             if payload is None:
                 raise RuntimeError("prepare job returned no payload")
             cache.add(namespace, payload)
-            bindings.append(_bind(entry, payload, entry.shared[entry.inverse]))
+            bindings.append(
+                _bind(entry, payload, entry.shared[entry.inverse], self.dispatch)
+            )
         return self.bind_inputs(bindings)
 
     def bind_inputs(self, bindings: list[_Binding]) -> list[_Binding]:
@@ -230,6 +244,7 @@ class Schedule:
                             PreparedPayload(payload, (), lifetime="evolve"),
                             rows,
                             np.zeros(len(rows), dtype=np.int64),
+                            binding.plan,
                         )
                     )
         # Later bindings override model-only ones for eligible rows in _Chunk.
@@ -345,7 +360,9 @@ class Schedule:
                     tuple(key.tobytes() for key in preparation.keys),
                 )
                 bindings.append(
-                    _bind(entry, payload, np.ones(len(entry.rows), dtype=bool))
+                    _bind(
+                        entry, payload, np.ones(len(entry.rows), dtype=bool), dispatch
+                    )
                 )
             covered = {int(row) for binding in bindings for row in binding.rows}
             missing = np.array([int(row) not in covered for row in entry.rows])
@@ -354,7 +371,7 @@ class Schedule:
                 payload = _build(
                     entry, unique, self.table, self.source, self.budget, self.cancel
                 )
-                bindings.append(_bind(entry, payload, missing))
+                bindings.append(_bind(entry, payload, missing, dispatch))
         # Workers write disjoint row slices; only the caller reads all names
         # after the pool joins. Entries and bindings never read this array.
         self.dispatch.names[rows] = dispatch.names[rows]
@@ -418,7 +435,7 @@ class Schedule:
                 payload = _build(
                     entry, unique, self.table, self.source, self.budget, self.cancel
                 )
-                local_bindings.append(_bind(entry, payload, local))
+                local_bindings.append(_bind(entry, payload, local, self.dispatch))
         bindings = [*shared, *self.bind_inputs(local_bindings)]
         return _Chunk(self, points, selected, bindings, entries).run()
 
@@ -528,7 +545,7 @@ class _Chunk:
                 self.table,
                 rows,
                 states,
-                self.schedule.budget,
+                ApplyContext(self.schedule.budget, binding.plan),
             )
         except RuntimeError as error:
             raise RuntimeError(
@@ -581,7 +598,13 @@ class _Chunk:
             if chainable
             else np.zeros(1, dtype=np.int64)
         )
-        binding = _Binding(entry.kernel, payload, rows, indices)
+        binding = _Binding(
+            entry.kernel,
+            payload,
+            rows,
+            indices,
+            self.schedule.dispatch.plans.get(entry.kernel.name),
+        )
         transient = len(self.bindings)
         self.bindings.append(binding)
         self.binding[rows], self.key[rows] = transient, indices

@@ -11,6 +11,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     kernel,
 )
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 from zcu_tools.simulate.evolution.kernels import _floquet_sidebands as sidebands
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
 
@@ -135,7 +136,7 @@ def test_resonant_bath_sidebands_are_evolved_instead_of_averaged() -> None:
     prepared = solver.prepare(
         solver.prepare_keys(table, rows), table, rows, source, 0.001
     )
-    solver.apply(prepared, rows, table, rows, states, 0.001)
+    solver.apply(prepared, rows, table, rows, states, ApplyContext(0.001))
     np.testing.assert_allclose(states, expected, atol=0.001, rtol=0)
 
 
@@ -247,5 +248,7 @@ def test_exact_resonant_divisor_is_accepted_and_matches_lindblad() -> None:
         case.source,
         case.budget,
     )
-    case.kernel.apply(prepared, rows, case.table, rows, case.states, case.budget)
+    case.kernel.apply(
+        prepared, rows, case.table, rows, case.states, ApplyContext(case.budget)
+    )
     np.testing.assert_allclose(case.states, expected, atol=1e-3, rtol=0)

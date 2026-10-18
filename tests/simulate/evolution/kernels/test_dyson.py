@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from scipy.linalg import expm
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
 
 from ..contract.kernel_suite import (
@@ -110,7 +110,7 @@ def test_full_carrier_and_tight_budget(kernel_case: KernelCase) -> None:
     prepared = case.kernel.prepare(keys, table, rows[first], source, case.budget)
     before = prepared.nbytes
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
     expected = np.stack(
         [reference(case, i, state) for i, state in enumerate(case.states)]
     )
@@ -138,7 +138,7 @@ def test_batch_of_distinct_coherent_inputs(kernel_case: KernelCase) -> None:
     )
     prepared = case.kernel.prepare(keys, table, rows[first], case.source, case.budget)
     actual = states.copy()
-    case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(states)]
     )
@@ -190,7 +190,9 @@ def test_resonant_repeated_and_nearby_modes(
             states[2] = np.diag(np.arange(1, size + 1) / sum(range(1, size + 1)))
             states[3] = states[0].conj()
         actual = states.copy()
-        case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+        case.kernel.apply(
+            prepared, inverse, table, rows, actual, ApplyContext(case.budget)
+        )
         expected = np.stack(
             [reference(case, row, state) for row, state in enumerate(states)]
         )
@@ -356,7 +358,7 @@ def test_population_bound_is_conservative_for_ground_mixed_and_coherent_inputs(
         )
         prepared = kernel.prepare(keys, table, rows[first], source, budget)
         actual = np.repeat(initial[None], n, axis=0)
-        kernel.apply(prepared, inverse, table, rows, actual, budget)
+        kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(budget))
         free = np.stack(
             [expm(q * t) @ np.real(np.diag(initial)) for t in duration.ravel()]
         )
@@ -485,7 +487,9 @@ def test_apply_reports_population_transfer_without_correcting_output(
     )
     prepared = case.kernel.prepare(keys, table, rows[first], src, budget)
     actual = np.repeat(coherent[None], 4, axis=0)
-    mask = case.kernel.apply(prepared, inverse, table, rows, actual, budget)
+    mask = case.kernel.apply(
+        prepared, inverse, table, rows, actual, ApplyContext(budget)
+    )
     assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
     # 2*pi*g is the population transfer. .003 crosses the budget-scaled
     # threshold .0131 but not the .02 cap; .004 crosses both.
@@ -510,7 +514,7 @@ def test_apply_reports_population_transfer_without_correcting_output(
                 table,
                 np.array([row]),
                 state,
-                budget,
+                ApplyContext(budget),
             )
         )
         np.testing.assert_allclose(state[0], actual[slot], rtol=0, atol=1e-14)
@@ -528,7 +532,9 @@ def test_apply_population_check_subtracts_free_decay(kernel_case: KernelCase) ->
     )
     prepared = case.kernel.prepare(keys, table, rows[first], case.source, case.budget)
     actual = case.states.copy()
-    mask = case.kernel.apply(prepared, inverse, table, rows, actual, case.budget)
+    mask = case.kernel.apply(
+        prepared, inverse, table, rows, actual, ApplyContext(case.budget)
+    )
     assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
     assert not mask.any()
     change = np.diagonal(actual - case.states, axis1=1, axis2=2)
@@ -580,7 +586,7 @@ def test_input_bound_paths_match_reference_at_modal_boundaries(
                 table,
                 subset,
                 states,
-                case.budget,
+                ApplyContext(case.budget),
             )
             actual[subset] = states
         expected = np.stack([reference(case, int(row), initial) for row in rows])

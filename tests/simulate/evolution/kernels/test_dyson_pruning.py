@@ -6,7 +6,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels import dyson
 
 from ..contract.kernel_suite import synthetic_model
@@ -173,7 +173,12 @@ def test_bound_apply_error_is_bounded_and_preserves_hermiticity(
     for subset in (rows[::2][::-1], rows[1::2][::-1]):
         states = actual[subset].copy()
         kernel.apply(
-            bound, np.zeros(len(subset), dtype=np.int64), table, subset, states, budget
+            bound,
+            np.zeros(len(subset), dtype=np.int64),
+            table,
+            subset,
+            states,
+            ApplyContext(budget),
         )
         actual[subset] = states
     expected = []
@@ -219,7 +224,12 @@ def test_ground_with_excited_only_drive_has_empty_table_and_free_output(
             prepared = kernel.bind_input(prepared, 0, table, rows, initial, budget)
             assert prepared is not None
         mask = kernel.apply(
-            prepared, np.zeros(4, dtype=np.int64), table, rows, actual, budget
+            prepared,
+            np.zeros(4, dtype=np.int64),
+            table,
+            rows,
+            actual,
+            ApplyContext(budget),
         )
     except IndexError as error:
         pytest.fail(f"empty path tables must return free evolution, not {error!r}")
@@ -254,5 +264,7 @@ def test_bound_apply_returns_free_evolution_when_all_paths_are_pruned() -> None:
     bound = kernel.bind_input(prepared, 0, table, rows, initial, 1e-3)
     assert bound is not None
     actual = np.repeat(initial[None], 4, axis=0)
-    kernel.apply(bound, np.zeros(4, dtype=np.int64), table, rows, actual, 1e-3)
+    kernel.apply(
+        bound, np.zeros(4, dtype=np.int64), table, rows, actual, ApplyContext(1e-3)
+    )
     np.testing.assert_array_equal(actual, np.repeat(initial[None], 4, axis=0))

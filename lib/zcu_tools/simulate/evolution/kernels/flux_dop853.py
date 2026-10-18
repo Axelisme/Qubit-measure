@@ -7,7 +7,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import FluxExpansion, ModelSource
 from ._dop853 import tolerances
 from ._dop853_chain import run_chain
@@ -214,7 +214,7 @@ class FluxDOP853Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance independent rows or touching same-timeline interval chains.
 
@@ -230,6 +230,9 @@ class FluxDOP853Kernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        if context.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+        budget = context.budget
         controls = tolerances(budget)
         if not isinstance(prepared, _Prepared):
             raise ValueError("flux DOP853 requires its own prepared data")

@@ -8,7 +8,7 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
+from ..kernel import ApplyContext, GuardPreparation, GuardResult, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
@@ -511,13 +511,16 @@ class ShapedSambeKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance real envelopes; fractional steps use frozen spectral tails.
 
         Incompatible payloads raise ValueError; nonfinite output raises
         RuntimeError. Return an all-False accuracy-exceedance mask.
         """
+        if context.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+        budget = context.budget
         del budget
         if not isinstance(prepared, _Data):
             raise ValueError("shaped_sambe requires its own prepared payload")

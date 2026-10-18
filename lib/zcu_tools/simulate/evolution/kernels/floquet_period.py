@@ -10,7 +10,7 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from . import _period_sambe
 from ._cf4_grid import coarse_count, finer_count, spectral_width
@@ -954,7 +954,7 @@ class FloquetPeriodKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance aligned states in place; return all False without a posterior check.
 
@@ -962,6 +962,9 @@ class FloquetPeriodKernel:
         No refinement, normalization, retry or dispatch occurs here. Prepared
         data remain read-only across reordered/split calls and worker threads.
         """
+        if context.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+        budget = context.budget
         _check_budget(budget)
         if not isinstance(prepared, _Periods):
             raise ValueError("Floquet period requires its own prepared payload")

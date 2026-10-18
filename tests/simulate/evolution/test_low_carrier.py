@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
 from ._engine import RecordingKernel, batch, run, track
@@ -131,7 +131,9 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
             weakref.finalize(payload, release, len(keys))
             return payload
 
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             return np.zeros(len(rows), dtype=bool)
 
     count = 17
