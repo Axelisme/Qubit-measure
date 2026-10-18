@@ -261,3 +261,22 @@ def test_mismatch_invalid_values_report_resonator_field_path(
     _set_field(document, path, value)
     with pytest.raises(ValueError, match=path.replace(".", r"\.")):
         parse_ftf(document)
+
+
+@pytest.mark.parametrize("channels", [(4, 1), (1,)])
+def test_mux_settings_accept_explicit_kind_and_receiver_list(channels):
+    from tests.resources._ftf_data import mux_document
+
+    try:
+        config = parse_ftf(mux_document(channels))
+    except ValueError as error:
+        pytest.fail(f"explicit mux receiver list must parse: {error}")
+    assert config.readout.drive.kind == "mux"
+    assert tuple(r.ro_ch for r in config.readout.receivers) == channels
+
+
+def test_mux_settings_reject_duplicate_receiver_channel():
+    from tests.resources._ftf_data import mux_document
+
+    with pytest.raises(ValueError, match="duplicate.*receiver|receiver.*duplicate"):
+        parse_ftf(mux_document((1, 1)))
