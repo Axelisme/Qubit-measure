@@ -8,17 +8,10 @@ from numba import njit
 from numpy.typing import NDArray
 
 from .._envelope import sample_value
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
-from ..kernel import Prepared, SegmentTable
-from ..secular import ModelSource
+from ..kernel import ApplyContext, Prepared, SegmentTable
+from ..secular import ModelSource, SecularModel
 from ._dop853 import tolerances
-from ._dop853_chain import run_chain, touching
+from ._dop853_chain import run_chain
 from ._dop853_data import (
     Context,
     Models,
@@ -29,13 +22,21 @@ from ._dop853_data import (
 )
 
 
+@dataclass(frozen=True)
+class DOP853Plan:
+    """Global-row frames and chain IDs fixed by dispatch for this evolve."""
+
+    frame: NDArray[np.str_]
+    chain: NDArray[np.int64]
+
+
 class _Data(NamedTuple):
     models: Models
     segments: Segments
 
 
 @dataclass(frozen=True)
-class _Prepared:
+class DOP853Prepared:
     models: Models
 
     @property
@@ -126,7 +127,7 @@ def _run_interaction(data, row_models, states, controls):
     # Only independent rows enter: each starts at sigma(0)=rho(0), with its own
     # controller and seed. The callback-free entry point has a stable disk key.
     run_chain(_interaction_rhs, _context, data, row_models, states, controls)
-    rows, model_index = row_models
+    rows, model_index, _ = row_models
     for index in range(len(rows)):
         row, model = rows[index], model_index[index]
         phases = np.exp(
@@ -137,18 +138,6 @@ def _run_interaction(data, row_models, states, controls):
                 states[index, i, j] *= phases[i] * phases[j].conjugate()
 
 
-def _interaction_mask(segments: Segments, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
-    if segments.gain.shape[1] == 0:
-        return np.zeros(len(rows), dtype=np.bool_)
-    eligible = (segments.tones[rows] == 1) & (segments.gain[rows, 0] != 0)
-    previous, following = rows[:-1], rows[1:]
-    chained = touching(segments, previous, following)
-    # Both endpoints of each touching edge belong to the lab-frame chain.
-    eligible[:-1] &= ~chained
-    eligible[1:] &= ~chained
-    return eligible
-
-
 class DOP853Kernel:
     """C5 fallback for all tone counts and complex sampled envelopes.
 
@@ -157,15 +146,6 @@ class DOP853Kernel:
     operators, never a density. All row iteration/integration releases the GIL
     in single-threaded numba code. Input ports must exist in each row's model.
     """
-
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("dop853", "interaction-v2"),
-        eligibility=Eligibility(min_tones=1),
-        guard=GuardDeclaration(),
-        accuracy="adaptive",
-        reuse=ReuseDeclaration("dop853/interaction-v2/independent"),
-        fallback="terminal-domain",
-    )
 
     name = "dop853"
     guard_builds = False
@@ -217,7 +197,7 @@ class DOP853Kernel:
         models = [
             source.model(tuple(int(value) for value in key["level"])) for key in keys
         ]
-        return _Prepared(pack_models(models))
+        return prepare_models(models)
 
     def guard_prepared(
         self,
@@ -248,7 +228,7 @@ class DOP853Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance independent rows or consecutive same-timeline intervals.
 
@@ -271,11 +251,10 @@ class DOP853Kernel:
         carries between rows or calls, so row order and worker/apply partition
         do not change an independent row's numerical path, including mixed
         IP/lab calls. Zero-gain and non-single-tone rows, and every row in a
-        touching chain, retain the unchanged lab-frame runner. Chains are
-        recognized only between adjacent rows in this apply call, not in the
-        complete table. Splitting a chain across calls can change its frame;
-        such restarts preserve results within budget, not bitwise. No RWA,
-        drive truncation, splitting, routing or envelope changes are made.
+        touching chain, retain the unchanged lab-frame runner. Dispatch fixes
+        frames and chain membership from the complete timeline. Apply executes
+        those decisions even when a prepared-payload boundary splits a chain.
+        No RWA, drive truncation, splitting or envelope changes are made.
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows
@@ -283,8 +262,14 @@ class DOP853Kernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
-        controls = tolerances(budget)
-        if not isinstance(prepared, _Prepared):
+        plan = context.plan
+        if plan is None:
+            raise ValueError("DOP853 requires a row plan")
+        if not isinstance(plan, DOP853Plan):
+            raise TypeError("DOP853 requires its own row plan")
+        budget = context.budget
+        tolerances(budget)
+        if not isinstance(prepared, DOP853Prepared):
             raise ValueError("DOP853 requires its own prepared data")
         if key_index.shape != rows.shape or states.shape[0] != len(rows):
             raise ValueError("DOP853 state/index shape mismatch")
@@ -298,19 +283,50 @@ class DOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
-        segments = pack_segments(table)
-        interaction = _interaction_mask(segments, rows)
-        boundaries = np.r_[
-            0, np.flatnonzero(interaction[1:] != interaction[:-1]) + 1, len(rows)
-        ]
-        # Keep contiguous runs: gathering all lab rows could accidentally join
-        # chains separated by an independent row in the caller's ordering.
-        for begin, end in zip(boundaries[:-1], boundaries[1:], strict=True):
-            runner = _run_interaction if interaction[begin] else _run
-            runner(
-                _Data(models, segments),
-                (rows[begin:end], key_index[begin:end]),
-                states[begin:end],
-                controls,
-            )
+        advance_endpoints(
+            prepared.models,
+            pack_segments(table),
+            (rows, key_index),
+            states,
+            budget,
+            plan,
+        )
         return np.zeros(len(rows), dtype=np.bool_)
+
+
+def prepare_models(models: list[SecularModel]) -> DOP853Prepared:
+    """Copy secular operators for direct endpoints, without kernel selection."""
+    return DOP853Prepared(pack_models(models))
+
+
+def advance_endpoints(
+    models: Models,
+    segments: Segments,
+    row_models: tuple[NDArray[np.int64], NDArray[np.int64]],
+    states: NDArray[np.complex128],
+    budget: float,
+    plan: DOP853Plan,
+) -> None:
+    """Integrate endpoints using explicit global-row frames and chain IDs.
+
+    Inputs are validated packed secular operators and segments. states has one
+    slot per row, in its model eigenbasis. Each chain reads its first slot and
+    writes every endpoint; independent rows read their own slots. Numerical
+    failure can leave earlier endpoints written. No frame selection occurs here.
+    """
+    controls = tolerances(budget)
+    rows, key_index = row_models
+    if not len(rows):
+        return
+    interaction = plan.frame[rows] == "interaction"
+    boundaries = np.r_[
+        0, np.flatnonzero(interaction[1:] != interaction[:-1]) + 1, len(rows)
+    ]
+    for begin, end in zip(boundaries[:-1], boundaries[1:], strict=True):
+        runner = _run_interaction if interaction[begin] else _run
+        runner(
+            _Data(models, segments),
+            (rows[begin:end], key_index[begin:end], plan.chain),
+            states[begin:end],
+            controls,
+        )

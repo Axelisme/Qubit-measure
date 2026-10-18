@@ -7,9 +7,6 @@ from ..kernel import SegmentTable
 from ..secular import SecularModel
 from ._gate_endpoints import build_endpoints
 
-# Longer gates retain the original sixteen-node preparation.
-MAX_DURATION_NS = 30.0
-
 
 def _interpolate(
     samples: NDArray[np.complex128], phases: NDArray[np.float64]
@@ -27,8 +24,8 @@ def build(
 ) -> NDArray[np.complex128] | None:
     """Return checked (4,16,M,M) coefficients, or None to request legacy build.
 
-    Require a sampled single tone with duration in (0, MAX_DURATION_NS] ns and
-    a finite positive budget. Integrate six equispaced phases and two independent probes
+    Require a sampled single tone with positive duration and a finite positive
+    budget. Dispatch owns the duration cutoff. Integrate six equispaced phases and two independent probes
     (pi/6 and sqrt(3) radians), using unchanged temporal tolerances and knot
     restarts. Every Strang endpoint must match both probes in full-unitary
     Frobenius norm within min(1e-4, budget*0.1). A failed phase check returns None;
@@ -41,8 +38,10 @@ def build(
     """
     if not np.isfinite(budget) or budget <= 0:
         raise ValueError("phase budget must be finite and positive")
-    if table.tones[row] != 1 or not 0 < table.duration_ns[row] <= MAX_DURATION_NS:
-        raise ValueError("phase preparation requires a short single-tone gate")
+    if table.tones[row] != 1 or table.duration_ns[row] <= 0:
+        raise ValueError(
+            "phase preparation requires a positive-duration single-tone gate"
+        )
     envelope = table.envelopes[int(table.tone_envelope[row, 0])]
     if envelope.kind != "sampled":
         raise ValueError("phase preparation requires a sampled envelope")

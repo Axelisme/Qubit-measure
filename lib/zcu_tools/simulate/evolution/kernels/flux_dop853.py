@@ -7,14 +7,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import FluxExpansion, ModelSource
 from ._dop853 import tolerances
 from ._dop853_chain import run_chain
@@ -26,6 +19,13 @@ from ._dop853_data import (
     pack_models,
     pack_segments,
 )
+
+
+@dataclass(frozen=True)
+class FluxDOP853Plan:
+    """Global-row chain IDs fixed by dispatch for this evolve."""
+
+    chain: NDArray[np.int64]
 
 
 class _Expansion(NamedTuple):
@@ -141,15 +141,6 @@ class FluxDOP853Kernel:
     No flux/DAC midpoint freezing occurs.
     """
 
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("flux_dop853", "legacy-v1"),
-        eligibility=Eligibility(min_tones=1),
-        guard=GuardDeclaration(),
-        accuracy="adaptive",
-        reuse=ReuseDeclaration("flux_dop853/legacy-v1/serial"),
-        fallback="terminal-domain",
-    )
-
     name = "flux_dop853"
     guard_builds = False
 
@@ -230,7 +221,7 @@ class FluxDOP853Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance independent rows or touching same-timeline interval chains.
 
@@ -246,6 +237,12 @@ class FluxDOP853Kernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        plan = context.plan
+        if plan is None:
+            raise ValueError("flux DOP853 requires a row plan")
+        if not isinstance(plan, FluxDOP853Plan):
+            raise TypeError("flux DOP853 requires its own row plan")
+        budget = context.budget
         controls = tolerances(budget)
         if not isinstance(prepared, _Prepared):
             raise ValueError("flux DOP853 requires its own prepared data")
@@ -281,5 +278,5 @@ class FluxDOP853Kernel:
             prepared.expansion,
             _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
         )
-        _run(data, (rows, inverse), states, controls)
+        _run(data, (rows, inverse, plan.chain), states, controls)
         return np.zeros(len(rows), dtype=np.bool_)

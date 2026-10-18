@@ -24,7 +24,7 @@ components:
     flux_source: f2_bias
     flux_unit: A
     wiring:
-      ch: 2 # Shared microwave line; all three loops have real 0.1 GHz/gain.
+      ch: 3 # F2 charge line; coupler crosstalk is real 0.01 GHz/gain.
   coupler:
     kind: qubit/transmon
     EJmax: 16.4 # GHz

@@ -208,30 +208,6 @@ class ControlSequence:
                 raise ValueError("same-source pulses must not overlap")
             ends[pulse.source] = end
 
-    def boundaries_ns(self, *, start_ns: float, end_ns: float) -> tuple[float, ...]:
-        """Return sorted unique absolute nearest-2-ns interval endpoints.
-
-        Union includes all sources and frame events. Long constant plateaus are
-        not subdivided on a 2 ns grid. Rounded end must not precede start.
-        This exposes event geometry, not solver steps or a state trajectory.
-        """
-        start, end = quantize_ns(start_ns), quantize_ns(end_ns)
-        if end < start:
-            raise ValueError("evolution end must not precede start")
-        points = {start, end}
-        for pulse in self.pulses:
-            points.update(
-                q
-                for t in (pulse.start_ns, pulse.end_ns, *pulse.breakpoints_ns)
-                if start <= (q := quantize_ns(t)) <= end
-            )
-        points.update(
-            q
-            for event in self.phase_events
-            if start <= (q := quantize_ns(event.time_ns)) <= end
-        )
-        return tuple(sorted(points))
-
     def amplitude(self, pulse: ControlPulse, time_ns: float) -> complex:
         """Evaluate an active pulse's envelope, carrier and persistent frame.
 

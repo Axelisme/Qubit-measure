@@ -43,8 +43,13 @@ before conjugation, giving the hanger model's +phi sign in microwave IQ. The
 reciprocal shared-line generator and transition rates are unchanged. This is a
 scattering-phase model, not a full impedance network or a global signal rotation.
 
-`ConditionalReadout` computes state-conditioned responses once per distinct
-content. Integrated batches without traces use direct discrete sums for flat
+`ReadoutBatch` accepts one or more coherent incident pulses per content and
+independent demodulation grids. Every grid observes the sum of all incident
+carriers through the same physical line; receiver offset is applied once, not
+once per tone. `ConditionalReadout` computes state-conditioned responses once
+per distinct content. Multi-pulse contents use the general field ODE. The direct,
+constant-interval and projected fast paths require exactly one pulse and never
+silently discard additional carriers. Integrated batches without traces use direct discrete sums for flat
 pulses (`envelope=None`) on uniform ADC grids. The constant moment solution
 comes from `(M+iω)X−XQ=B`. In the eigenbases of M and Q, its coefficients are
 `Y_ab=(Um⁻¹ B Uq)_ab/(μ_a+iω−λ_b)`. Each demodulated exponential sums to

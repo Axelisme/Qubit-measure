@@ -2,24 +2,22 @@
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Event
 
 import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
-from ._dispatch import Dispatch, Selection, classify
+from ._dispatch import Dispatch, Selection, classify, prepare
 from ._dispatch import diagnostics as dispatch_diagnostics
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
 from .cache import PrepareCache, PreparedPayload
 from .engine import Cancelled, EvolutionResult, PathDiagnostics
-from .kernel import Kernel, SegmentTable
+from .kernel import ApplyContext, Kernel, RowPlan, SegmentTable
 from .secular import ModelSource
-
-_CHAINABLE_KERNELS = frozenset(("dop853", "flux_dop853"))
 
 
 @dataclass(frozen=True)
@@ -39,6 +37,8 @@ class _Binding:
     payload: PreparedPayload
     rows: NDArray[np.int64]
     indices: NDArray[np.int64]
+    plan: RowPlan | None = None
+    chain: NDArray[np.int64] | None = None
 
 
 @dataclass(frozen=True)
@@ -81,14 +81,17 @@ def _build(
     if cancel.is_set():
         raise Cancelled()
     keys = entry.keys[selection]
-    prepared = entry.kernel.prepare(
-        keys, table, entry.representative[selection], source, budget
+    prepared = prepare(
+        entry.kernel, keys, table, entry.representative[selection], source, budget
     )
     return PreparedPayload(prepared, tuple(key.tobytes() for key in keys))
 
 
 def _bind(
-    entry: _Entries, payload: PreparedPayload, eligible: NDArray[np.bool_]
+    entry: _Entries,
+    payload: PreparedPayload,
+    eligible: NDArray[np.bool_],
+    dispatch: Dispatch,
 ) -> _Binding:
     positions = {key: i for i, key in enumerate(payload.keys)}
     chosen = np.flatnonzero(eligible)
@@ -100,7 +103,12 @@ def _bind(
     indices = lookup[inverse]
     present = indices >= 0
     return _Binding(
-        entry.kernel, payload, entry.rows[chosen[present]], indices[present]
+        entry.kernel,
+        payload,
+        entry.rows[chosen[present]],
+        indices[present],
+        dispatch.plans.get(entry.kernel.name),
+        dispatch.chain,
     )
 
 
@@ -128,35 +136,6 @@ class Schedule:
             source.initial_density if initial_density is None else initial_density
         )
 
-    @classmethod
-    def from_legacy_plan(
-        cls,
-        geometry: Geometry,
-        kernels: Mapping[str, Kernel],
-        source: ModelSource,
-        budget: float,
-        cancel: Event,
-        pool: Executor,
-    ) -> "Schedule":
-        """Build and consume one call-local legacy single-interval cover.
-
-        geometry must come from this Engine call's prefix resolution; source,
-        positive budget and kernels must be those used to resolve its prefixes.
-        pool is the call's borrowed executor, not a new parallel layer. Missing
-        registry entries, terminal rejection and guard exceptions propagate.
-
-        Dispatch is the typed execution plan: each pending interval has either
-        a selected family or a deferred contingent selection. Keep its accepted
-        guard products and acquire-wide shaped/rejected decisions intact. run
-        consumes that cover through ordinary shared preparation and timeline
-        waves, adopting computed prefixes and resolving deferred rows once.
-        No second shared classification, cost assignment or shadow graph admission
-        runs here. The returned scheduler is evolve-local and must use the same
-        registry and executor in run; it is not a portable replay plan.
-        """
-        dispatch = classify(geometry, kernels, source, budget, pool=pool)
-        return cls(geometry, dispatch, source, budget, cancel)
-
     def prepare_shared(
         self, entries: list[_Entries], cache: PrepareCache, pool: Executor, chunks: int
     ) -> list[_Binding]:
@@ -177,7 +156,9 @@ class Schedule:
             namespace = entry.kernel.name, dc.identity, self.budget
             hits = cache.find(namespace, key_set)
             for payload in hits:
-                bindings.append(_bind(entry, payload, shared[entry.inverse]))
+                bindings.append(
+                    _bind(entry, payload, shared[entry.inverse], self.dispatch)
+                )
                 key_set.difference_update(payload.keys)
             available = {key.tobytes() for key in entry.keys}
             shared_keys = {key.tobytes() for key in entry.keys[shared]}
@@ -192,7 +173,9 @@ class Schedule:
                 eligible = np.array(
                     [key.tobytes() in reusable for key in entry.keys], dtype=bool
                 )
-                bindings.append(_bind(entry, payload, eligible[entry.inverse]))
+                bindings.append(
+                    _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+                )
                 if set(payload.keys).issubset(shared_keys):
                     cache.add(namespace, payload)
                 key_set.difference_update(payload.keys)
@@ -217,7 +200,9 @@ class Schedule:
             if payload is None:
                 raise RuntimeError("prepare job returned no payload")
             cache.add(namespace, payload)
-            bindings.append(_bind(entry, payload, entry.shared[entry.inverse]))
+            bindings.append(
+                _bind(entry, payload, entry.shared[entry.inverse], self.dispatch)
+            )
         return self.bind_inputs(bindings)
 
     def bind_inputs(self, bindings: list[_Binding]) -> list[_Binding]:
@@ -259,6 +244,8 @@ class Schedule:
                             PreparedPayload(payload, (), lifetime="evolve"),
                             rows,
                             np.zeros(len(rows), dtype=np.int64),
+                            binding.plan,
+                            binding.chain,
                         )
                     )
         # Later bindings override model-only ones for eligible rows in _Chunk.
@@ -347,7 +334,9 @@ class Schedule:
             float(np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))),
         )
 
-    def resolve_deferred(self, rows: NDArray[np.int64]) -> list[_Binding]:
+    def resolve_deferred(
+        self, rows: NDArray[np.int64]
+    ) -> tuple[list[_Binding], Dispatch]:
         """Guard/fall back once inside a timeline and reuse accepted guard data.
 
         rows belong to this worker's single timeline. Classification receives
@@ -364,6 +353,8 @@ class Schedule:
                 self.dispatch.shaped,
                 self.dispatch.rejected,
                 self.dispatch.two_tone_direct,
+                self.dispatch.names,
+                self.dispatch.plans,
             ),
         )
         bindings: list[_Binding] = []
@@ -374,7 +365,9 @@ class Schedule:
                     tuple(key.tobytes() for key in preparation.keys),
                 )
                 bindings.append(
-                    _bind(entry, payload, np.ones(len(entry.rows), dtype=bool))
+                    _bind(
+                        entry, payload, np.ones(len(entry.rows), dtype=bool), dispatch
+                    )
                 )
             covered = {int(row) for binding in bindings for row in binding.rows}
             missing = np.array([int(row) not in covered for row in entry.rows])
@@ -383,11 +376,11 @@ class Schedule:
                 payload = _build(
                     entry, unique, self.table, self.source, self.budget, self.cancel
                 )
-                bindings.append(_bind(entry, payload, missing))
+                bindings.append(_bind(entry, payload, missing, dispatch))
         # Workers write disjoint row slices; only the caller reads all names
         # after the pool joins. Entries and bindings never read this array.
         self.dispatch.names[rows] = dispatch.names[rows]
-        return bindings
+        return bindings, dispatch
 
     def chunk(
         self,
@@ -429,9 +422,21 @@ class Schedule:
                 np.concatenate([result.states for result in results]),
                 exceeded,
             )
-        local_bindings = (
-            self.resolve_deferred(np.flatnonzero(deferred)) if np.any(deferred) else []
+        local_bindings, local_dispatch = (
+            self.resolve_deferred(np.flatnonzero(deferred))
+            if np.any(deferred)
+            else ([], self.dispatch)
         )
+        # A local guard can change the frame of an already accepted neighbor.
+        # Borrow its payload but use this worker's complete timeline decisions.
+        shared = [
+            replace(
+                binding,
+                plan=local_dispatch.plans.get(binding.kernel.name),
+                chain=local_dispatch.chain,
+            )
+            for binding in shared
+        ]
         covered = np.zeros(len(selected), dtype=bool)
         for binding in (*shared, *local_bindings):
             covered[binding.rows] = True
@@ -447,9 +452,9 @@ class Schedule:
                 payload = _build(
                     entry, unique, self.table, self.source, self.budget, self.cancel
                 )
-                local_bindings.append(_bind(entry, payload, local))
+                local_bindings.append(_bind(entry, payload, local, local_dispatch))
         bindings = [*shared, *self.bind_inputs(local_bindings)]
-        return _Chunk(self, points, selected, bindings, entries).run()
+        return _Chunk(self, points, selected, bindings, entries, local_dispatch).run()
 
 
 class _Chunk:
@@ -460,8 +465,10 @@ class _Chunk:
         selected: NDArray[np.bool_],
         bindings: Sequence[_Binding],
         entries: Sequence[_Entries],
+        dispatch: Dispatch,
     ):
         self.schedule, self.points = schedule, points
+        self.dispatch = dispatch
         self.table = schedule.table
         self.bindings = list(bindings)
         self.entries = entries
@@ -523,18 +530,16 @@ class _Chunk:
         lengths = np.ones(len(slots), dtype=np.int64)
         rows, state_slots = first, slots
         last = np.arange(len(slots))
-        chainable = binding.kernel.name in _CHAINABLE_KERNELS
+        chain = binding.chain
+        chainable = chain is not None and np.any(chain[first] >= 0)
         if chainable:
             # Extend each chain until the binding, timeline or continuity changes.
             while True:
                 next_row = first + lengths
                 safe = np.minimum(next_row, len(self.binding) - 1)
                 extend = (next_row < self.end[slots]) & (self.binding[safe] == index)
-                previous = safe - 1
-                extend &= (
-                    self.table.start_ns[safe]
-                    == self.table.start_ns[previous] + self.table.duration_ns[previous]
-                )
+                if chain is not None:
+                    extend &= (chain[first] >= 0) & (chain[safe] == chain[first])
                 if not extend.any():
                     break
                 lengths += extend
@@ -557,7 +562,7 @@ class _Chunk:
                 self.table,
                 rows,
                 states,
-                self.schedule.budget,
+                ApplyContext(self.schedule.budget, binding.plan),
             )
         except RuntimeError as error:
             raise RuntimeError(
@@ -584,16 +589,14 @@ class _Chunk:
             raise RuntimeError(f"missing preparation for segment {row}")
         entry = self.entries[index]
         rows = np.array([row], dtype=np.int64)
-        chainable = entry.kernel.name in _CHAINABLE_KERNELS
+        chain = self.dispatch.chain
+        chainable = chain[row] >= 0
         if chainable:
             candidates = np.arange(row, self.end[slot], dtype=np.int64)
             contiguous = (self.local_entry[candidates] == index) & (
                 self.binding[candidates] < 0
             )
-            previous = candidates[:-1]
-            contiguous[1:] &= self.table.start_ns[candidates[1:]] == (
-                self.table.start_ns[previous] + self.table.duration_ns[previous]
-            )
+            contiguous &= chain[candidates] == chain[row]
             stop = np.flatnonzero(~contiguous)
             rows = candidates[: int(stop[0]) if len(stop) else len(candidates)]
         unique = np.unique(self.local_key[rows]) if chainable else self.local_key[rows]
@@ -610,7 +613,14 @@ class _Chunk:
             if chainable
             else np.zeros(1, dtype=np.int64)
         )
-        binding = _Binding(entry.kernel, payload, rows, indices)
+        binding = _Binding(
+            entry.kernel,
+            payload,
+            rows,
+            indices,
+            self.dispatch.plans.get(entry.kernel.name),
+            chain,
+        )
         transient = len(self.bindings)
         self.bindings.append(binding)
         self.binding[rows], self.key[rows] = transient, indices

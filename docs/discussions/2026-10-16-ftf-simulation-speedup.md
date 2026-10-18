@@ -3,6 +3,13 @@ date: 2026-10-16
 status: active
 superseded_by: null
 related:
+  - docs/discussions/2026-10-18-dyson-input-reuse.md
+  - docs/discussions/2026-10-18-constant-period-builders.md
+  - docs/discussions/2026-10-18-shaped-period-and-gates.md
+  - docs/discussions/2026-10-18-two-tone-floquet.md
+  - docs/discussions/2026-10-18-direct-integration.md
+  - docs/discussions/2026-10-18-readout-discrete-sums.md
+  - docs/discussions/2026-10-18-planner-evidence-and-overhead.md
   - docs/adr/draft/simulation-environments.md
   - docs/discussions/2026-10-15-offline-propagator-library.md
 basis:
@@ -392,3 +399,11 @@ bath 在建構時就是 secular 的：jump 是 H0 eigenbasis 上的 |i⟩⟨j|�
 - batch 的組成與還原只用索引陣列。
 
 驗收時，在使用者規模下單獨 profile Python 層。點數加倍時，這部分的耗時不能跟著加倍。
+
+## 後記，2026-10-18
+
+上文保留 2026-10-16 的方案與當時估算，不是 main `f152eff67` 的完整決策圖。固定 reuse 門檻、RWA 的候選位置，以及早期 prepare/replay 敘述都有後續變更，不能直接當現況規格。
+
+後續試驗按家族分開保存。[Dyson input reuse](2026-10-18-dyson-input-reuse.md)記錄解析 B2、共同前綴與 sparse-scan 否決；[constant builders](2026-10-18-constant-period-builders.md)比較 CF4、Padé7、Sambe 與 gain anchors；[shaped preparation](2026-10-18-shaped-period-and-gates.md)保存成本交叉與 narrow carrier reuse。
+
+[Two-tone Floquet](2026-10-18-two-tone-floquet.md)說明 sideband admission 的未認證限制與 direct-first crossover；[direct integration](2026-10-18-direct-integration.md)保存 IP 與 gain grouping 撤回理由；[readout sums](2026-10-18-readout-discrete-sums.md)記錄 v6 的離散樣本和。這些算法收益不能再算成 [planner 的預期收益](2026-10-18-planner-evidence-and-overhead.md)，後者的 whole-acquire admission 曾因固定成本失敗。

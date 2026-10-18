@@ -7,18 +7,10 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
-from ..kernel import Prepared, SegmentTable
+from ..kernel import ApplyContext, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._dyson_bound import accepts_population_bound
-from ._dyson_paths import build_shared_paths, contractible_modes
-from ._weak import (
+from ._dyson_model import (
     commutator,
     constant_mask,
     drive_ratios,
@@ -28,6 +20,7 @@ from ._weak import (
     model_keys,
     parameters,
 )
+from ._dyson_paths import build_shared_paths, contractible_modes
 
 
 @njit(nogil=True, cache=True)
@@ -733,15 +726,6 @@ class DysonKernel:
     keeps its existing per-batch pruning policy.
     """
 
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("dyson", "legacy-v1"),
-        eligibility=Eligibility(1, 1, "constant"),
-        guard=GuardDeclaration(("no-build", "certified-input")),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("dyson/legacy-v1/serial"),
-        fallback="legacy-order",
-    )
-
     name = "dyson"
     guard_builds = False
 
@@ -915,7 +899,7 @@ class DysonKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance states in place; return a bool exceedance mask aligned with rows.
 
@@ -925,6 +909,8 @@ class DysonKernel:
         population block. Exceedance is not failure: retain the uncorrected
         output without retry. Numerical failure raises RuntimeError.
         """
+        context.require_no_plan()
+        budget = context.budget
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
         if not isinstance(prepared, (_Prepared, _BoundInput)):

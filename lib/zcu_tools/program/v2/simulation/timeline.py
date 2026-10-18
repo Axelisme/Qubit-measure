@@ -23,11 +23,12 @@ from ..modules.control import Branch, Repeat
 from ..modules.delay import Delay, DelayAuto, Join, SoftDelay
 from ..modules.dmem import LoadValue, LoadWord, ScanWith
 from ..modules.pulse import Pulse, TableLengthPulse
-from ..modules.readout import PulseReadout, TablePulseReadout
+from ..modules.readout import MuxReadout, PulseReadout, TablePulseReadout
 from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
 from ..modules.util import round_timestamp
 from ..modules.waveform import ConstWaveformCfg, FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freq_from_word, readout_freq_from_words
+from ._mux import mux_parameters
 from .dependencies import register_access, validate_loop_hooks, validate_modules
 
 
@@ -156,6 +157,8 @@ class TimelineInterpreter:
             return self.pulse(module, t)
         if type(module) is PulseReadout:
             return self.readout(module, t)
+        if type(module) is MuxReadout:
+            return self.mux_readout(module, t)
         return self.timing(module, t)
 
     def timing(self, module: Module, t: float | QickParam) -> float | QickParam:
@@ -483,6 +486,46 @@ class TimelineInterpreter:
                 nqz=cfg.nqz,
             )
         return gen, ro
+
+    def mux_readout(
+        self, module: MuxReadout, t: float | QickParam
+    ) -> float | QickParam:
+        """Emit all rounded mux carriers and simultaneous static ADC triggers.
+
+        module must be initialized with this program. Time is processor-local
+        us. Return its blocking end, including playback and every ADC window.
+        """
+        cfg = module.cfg
+        start = self.ref + self.tick(t + cfg.pre_delay)
+        duration = self.scalar(self.prog.get_pulse_param(module.name, "total_length"))
+        trigger = self.ref + self.tick(t + cfg.trig_offset)
+        for tone in mux_parameters(self.prog, module):
+            self.events.append(
+                PulseEvent(
+                    cfg.gen_ch,
+                    start,
+                    duration,
+                    tone.frequency_mhz,
+                    tone.phase_deg,
+                    tone.gain,
+                    source=module.name,
+                    iterations=tuple(self.iterations),
+                )
+            )
+            self.routes[tone.channel] = cfg.gen_ch
+            self.reads[tone.channel].append(
+                (
+                    trigger,
+                    tone.demodulation_mhz,
+                    tone.demodulation_phase_deg,
+                    cfg.gen_ch,
+                )
+            )
+            self.ro_end[tone.channel] = trigger + self.prog.cycles2us(
+                self.prog.ro_chs[tone.channel]["length"], ro_ch=tone.channel
+            )
+        self.gen_end[cfg.gen_ch] = start + duration
+        return t + module.total_length(self.prog)
 
     def readout(
         self,

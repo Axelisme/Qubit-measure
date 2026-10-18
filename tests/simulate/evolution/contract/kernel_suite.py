@@ -17,9 +17,20 @@ import pytest
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
+from zcu_tools.simulate.evolution._dop853_dispatch import direct_plans
+from zcu_tools.simulate.evolution.kernel import ApplyContext
 
 if TYPE_CHECKING:
     from zcu_tools.simulate.evolution import kernel
+
+
+def kernel_context(
+    family: str, table: kernel.SegmentTable, budget: float
+) -> ApplyContext:
+    """Use the production timeline planner when invoking a direct solver seam."""
+    names = np.full(len(table.timeline), family)
+    plans, _ = direct_plans(table, names)
+    return ApplyContext(budget, plans.get(family))
 
 
 def synthetic_model(size: int = 3) -> evolution.SecularModel:
@@ -59,6 +70,15 @@ class KernelCase:
     table: kernel.SegmentTable
     states: NDArray[np.complex128]
     budget: float = 1e-3
+
+    def context(self, rows: NDArray[np.int64]) -> ApplyContext:
+        """Guard rows once and retain any family plan for repeated apply calls."""
+        result = self.kernel.guard_prepared(self.table, rows, self.source, self.budget)
+        if result is not None:
+            assert result.accepted.all()
+        if result is not None and result.plan is not None:
+            return ApplyContext(self.budget, result.plan)
+        return kernel_context(self.kernel.name, self.table, self.budget)
 
 
 def _reference_hamiltonian(
@@ -223,7 +243,9 @@ class KernelContract:
         )
         assert prepared.nbytes >= 0
         actual = case.states.copy()
-        case.kernel.apply(prepared, inverse, case.table, rows, actual, case.budget)
+        case.kernel.apply(
+            prepared, inverse, case.table, rows, actual, case.context(rows)
+        )
         expected = np.stack(
             [reference(case, row, state) for row, state in enumerate(case.states)]
         )
@@ -278,7 +300,12 @@ class KernelContract:
                 chosen = subset[selected]
                 actual = case.states[chosen].copy()
                 case.kernel.apply(
-                    item.prepared, indices, case.table, chosen, actual, case.budget
+                    item.prepared,
+                    indices,
+                    case.table,
+                    chosen,
+                    actual,
+                    ApplyContext(case.budget, result.plan),
                 )
                 fresh_keys, first, inverse = np.unique(
                     keys[selected], return_index=True, return_inverse=True
@@ -288,7 +315,12 @@ class KernelContract:
                 )
                 expected = case.states[chosen].copy()
                 case.kernel.apply(
-                    fresh, inverse, case.table, chosen, expected, case.budget
+                    fresh,
+                    inverse,
+                    case.table,
+                    chosen,
+                    expected,
+                    ApplyContext(case.budget, result.plan),
                 )
                 np.testing.assert_array_equal(actual, expected)
 
@@ -303,9 +335,10 @@ class KernelContract:
         prepared = case.kernel.prepare(
             keys, case.table, rows[first], case.source, case.budget
         )
+        context = case.context(rows)
         whole = case.states.copy()
         whole_mask = case.kernel.apply(
-            prepared, inverse, case.table, rows, whole, case.budget
+            prepared, inverse, case.table, rows, whole, context
         )
         assert isinstance(whole_mask, np.ndarray), "apply must return an exceeded mask"
         assert whole_mask.shape == (len(rows),)
@@ -318,7 +351,12 @@ class KernelContract:
         for subset in (rows[::2][::-1], rows[1::2][::-1]):
             chunk = split[subset].copy()
             mask = case.kernel.apply(
-                prepared, inverse[subset], case.table, subset, chunk, case.budget
+                prepared,
+                inverse[subset],
+                case.table,
+                subset,
+                chunk,
+                context,
             )
             assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
             assert mask.shape == (len(subset),)
@@ -353,6 +391,7 @@ class KernelContract:
         prepared = case.kernel.prepare(
             keys, case.table, rows[first], no_density_source(), case.budget
         )
+        context = case.context(rows)
         for states in (
             case.states,
             np.repeat(
@@ -364,7 +403,7 @@ class KernelContract:
             ),
         ):
             actual = states.copy()
-            case.kernel.apply(prepared, inverse, case.table, rows, actual, case.budget)
+            case.kernel.apply(prepared, inverse, case.table, rows, actual, context)
             expected = np.stack(
                 [reference(case, row, state) for row, state in enumerate(states)]
             )
@@ -392,6 +431,7 @@ class KernelContract:
         prepared = case.kernel.prepare(
             keys, table, rows[first], case.source, case.budget
         )
+        context = replace(case, table=table).context(rows)
         initial = case.states[0].copy()
         if prefix_input:
             # Independently evolve a no-drive prefix. The hook accepts this
@@ -435,7 +475,7 @@ class KernelContract:
                     table,
                     selected,
                     expected,
-                    case.budget,
+                    context,
                 )
                 # Repeated reversed/non-contiguous applies may not consume or mutate
                 # the payload. Empty batches must also be harmless.
@@ -451,7 +491,7 @@ class KernelContract:
                         table,
                         selected[subset],
                         actual,
-                        case.budget,
+                        context,
                     )
                     if len(subset):
                         allowance = (

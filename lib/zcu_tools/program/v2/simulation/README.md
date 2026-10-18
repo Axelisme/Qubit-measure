@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-18，fixed mux profile 與 frontend lowering
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -91,13 +91,12 @@ points or reps.
 `core.simulation` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary. Time is us, frequency MHz, phase degrees and
 gain normalized DAC amplitude. The frontend interprets exact supported Module
-classes, not arbitrary tProcessor instructions. Unknown subclasses (including mux
-readouts), raw program setup/body/cleanup or make_program overrides, raw loop
+classes, not arbitrary tProcessor instructions. Unknown subclasses, raw program setup/body/cleanup or make_program overrides, raw loop
 hooks and undefined or
 incorrectly typed registers fail before the backend produces any data. Errors
 identify the concrete Module type/name, loop coordinates and relevant register.
 
-Supported controls are Pulse, PulseReadout, Delay, SoftDelay, DelayAuto,
+Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
 LoadValue, LoadWord, Repeat, Branch, ScanWith, ComputedPulse, TableLengthPulse,
 TablePulseReadout, Join and the existing reset wrappers. Join interleaves branches
 in the same static minimum-time order as hardware emission and rejects
@@ -124,6 +123,14 @@ Const uses a unity envelope (`None`). A flat-top with at least 10 ns of plateau
 becomes adjacent up-ramp, half-gain constant and down-ramp slots. Short flat-tops
 keep whole sampled-envelope candidates. Long plateaus never expand onto a fine
 grid. Ramp boundary samples preserve the scalar envelope's linear interpolation.
+
+MuxReadout lowers the real compiled mixmux tones into simultaneous EventSlots
+on one generator, with one static PFB ADC slot per declared tone. DDS, gain,
+phase and demodulation rounding come from QICK's compiled parameters. Tone order
+is ADC declaration order; channels are not sorted. The fixed mux compile profile
+is opt-in through `make_mux_mock_soccfg`, with 1..8 explicit ADC routes. The
+ordinary `make_mock_soccfg` defaults and clocks do not change. Numeric environments
+must separately bind every requested route and supply any physical mux response.
 
 `ReadoutWindow` keeps ADC samples/rate independent of generator duration. Per-point
 windows retain trigger emission order, demodulation MHz/degrees and the generator
