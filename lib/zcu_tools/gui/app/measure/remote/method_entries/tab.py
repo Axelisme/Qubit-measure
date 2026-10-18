@@ -261,14 +261,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_read_module",
         MethodSpec(
             5.0,
-            "Read {value, mode, source} for one dotted core module field from fixed "
+            "Read {value, mode, source} for one str-segment core module path from fixed "
             "Open/Reset sources. Key mode reads the captured library; inline mode "
             "evaluates only this module. Other invalid fields do not block reads. "
             "No native cfg or extras lowering, mutation or source refresh occurs. "
             "This module's invalid values are rejected. Busy reads are allowed.",
             (
                 required_string("tab_id"),
-                required_string("field", "Dotted core module field"),
+                ParamSpec("field", JsonType.ARRAY, description="Nonempty str names; int indexes unsupported"),
             ),
             readonly=True,
         ),
@@ -278,7 +278,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_use_inline",
         MethodSpec(
             5.0,
-            "Convert one dotted core module field to inline input through guarded "
+            "Convert one str-segment core module path to inline input through guarded "
             "option command. Copy a key from the fixed captured library. Preserve "
             "locks. Existing inline is a guarded no-op. Disabled or unresolved "
             "modules fail; select an Inline option to use template/type defaults. "
@@ -287,7 +287,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Returns the complete Form observation.",
             (
                 required_string("tab_id"),
-                required_string("field", "Dotted core module field"),
+                ParamSpec("field", JsonType.ARRAY, description="Nonempty str names; int indexes unsupported"),
             ),
         ),
     ),

@@ -1064,7 +1064,9 @@ class RecipeTab:
     def read_module(self, field: RecipeFieldPath) -> RecipeModuleValues:
         """Read one core module's value, mode and source from fixed Reset sources.
 
-        field is a nonempty dotted core module path, not an inline leaf. Values
+        field is a nonempty tuple of str core module field names, not an inline
+        leaf. Int indexes are unsupported by this materialization owner and raise
+        ValueError before dispatch. Numeric strings remain literal names. Values
         are detached module JSON, without full-cfg validation, native to_cfg or
         extras lowering. Other invalid fields do not block this read. The owner
         rejects this module's invalid values with NOT_VALID, unknown/nonmodule
@@ -1073,6 +1075,8 @@ class RecipeTab:
         source refresh or retry occurs. GUI/source/connection failures propagate.
         """
         field_path(field)
+        if any(not isinstance(segment, str) for segment in field):
+            raise ValueError("read_module supports str fields only, not list indexes")
         return read_module_values(
             self._binding.tools.send_gui_rpc(
                 "tab.read_module", {"tab_id": self._binding.tab, "field": list(field_path(field))}
