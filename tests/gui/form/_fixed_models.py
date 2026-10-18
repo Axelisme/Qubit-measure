@@ -22,7 +22,10 @@ def named_form() -> type[FormModel]:
         "NamedElements",
         __base__=FormModel,
         tones=(Annotated[list[Element], api.FixedList(name_field="label")], ...),
-        participants=(Annotated[list[str], api.Participants(list_path=("tones",))], ...),
+        participants=(
+            Annotated[list[str], api.Participants(list_path=("tones",))],
+            ...,
+        ),
     )
 
 

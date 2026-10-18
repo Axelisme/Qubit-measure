@@ -448,10 +448,11 @@ def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
     core = create_model(
         "NamedCore",
         __base__=ConfigBase,
-        **{
-            name: (info.rebuild_annotation(), named_input(model).data[name])
-            for name, info in model.model_fields.items()
-        },
+        tones=(
+            model.model_fields["tones"].rebuild_annotation(),
+            named_input(model).data["tones"],
+        ),
+        participants=(model.model_fields["participants"].rebuild_annotation(), ["B"]),
     )
     resource = resource_api.TabFormResource(
         lambda _ctx: Form(core, {}),
@@ -459,7 +460,9 @@ def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
         mutation_allowed=lambda: True,
     )
     assert resource.accept().values["participants"] == ["B"]
-    assert resource.describe(("tones", 1, "gain")).target.path == ("tones", 1, "gain")
+    target = resource.describe(("tones", 1, "gain")).target
+    assert target is not None
+    assert target.path == ("tones", 1, "gain")
     resource.write({("tones", 0, "gain"): -2})
     result = resource.result()
     assert isinstance(result, FormErrors)
