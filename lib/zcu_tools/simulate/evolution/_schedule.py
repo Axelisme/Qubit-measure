@@ -9,7 +9,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
-from ._dispatch import Dispatch, Selection, classify
+from ._dispatch import Dispatch, Selection, classify, prepare
 from ._dispatch import diagnostics as dispatch_diagnostics
 from ._parallel import Executor
 from ._planning import Geometry
@@ -82,8 +82,8 @@ def _build(
     if cancel.is_set():
         raise Cancelled()
     keys = entry.keys[selection]
-    prepared = entry.kernel.prepare(
-        keys, table, entry.representative[selection], source, budget
+    prepared = prepare(
+        entry.kernel, keys, table, entry.representative[selection], source, budget
     )
     return PreparedPayload(prepared, tuple(key.tobytes() for key in keys))
 

@@ -5,6 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 import zcu_tools.simulate.evolution as evolution
+from zcu_tools.simulate.evolution._dispatch import prepare
 from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
 
 from tests.simulate.evolution.contract.kernel_suite import (
@@ -139,8 +140,8 @@ def test_prepared_entries_follow_key_mapping(kernel_case: KernelCase) -> None:
     keys, representatives, inverse = np.unique(
         case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
     )
-    prepared = case.kernel.prepare(
-        keys, table, rows[representatives], case.source, case.budget
+    prepared = prepare(
+        case.kernel, keys, table, rows[representatives], case.source, case.budget
     )
     actual = case.states[rows].copy()
     case.kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(case.budget))
@@ -204,7 +205,7 @@ def test_phase_interpolation_preserves_coherent_inputs(
     rows = np.arange(6, dtype=np.int64)
     assert case.kernel.guard(table, rows, source, case.budget).all()
     keys = case.kernel.prepare_keys(table, rows[:1])
-    prepared = case.kernel.prepare(keys, table, rows[:1], source, case.budget)
+    prepared = prepare(case.kernel, keys, table, rows[:1], source, case.budget)
     actual = states.copy()
     rejected = case.kernel.apply(
         prepared,

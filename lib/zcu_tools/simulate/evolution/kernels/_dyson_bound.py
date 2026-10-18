@@ -5,7 +5,8 @@ from numpy.typing import NDArray
 
 from ..kernel import SegmentTable
 from ..secular import ModelSource, SecularModel
-from ._weak import parameters
+from ._dyson_model import parameters
+from ._secular import coherence_decay, population_generator
 
 
 def population_bound(
@@ -34,15 +35,15 @@ def population_bound(
     drive = model.drives[port]
     plus = (drive.in_phase_ghz - 1j * drive.quadrature_ghz) / 2
     minus = plus.conj().T
-    outgoing = model.rates_per_ns.sum(axis=0)
-    q_matrix = model.rates_per_ns - np.diag(outgoing)
+    coherence_loss = coherence_decay(model)
+    q_matrix = population_generator(model.rates_per_ns)
     q = float(np.linalg.norm(q_matrix, 1))
     q_inf = float(np.linalg.norm(q_matrix, np.inf))
     diagonal = np.zeros(len(params))
     linear = np.zeros(len(params))
     for i in range(len(populations)):
         for j in range(i + 1, len(populations)):
-            gamma = (outgoing[i] + outgoing[j]) / 2 + model.dephasing_per_ns[i, j]
+            gamma = coherence_loss[i, j]
             decay = -gamma - 2j * np.pi * (
                 model.energies_ghz[i] - model.energies_ghz[j]
             )
