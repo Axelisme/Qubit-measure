@@ -43,11 +43,11 @@ def test_workflow_step_expression_and_prepare(
     driver = sampling_window
     driver.screenshot(tmp_path / "00-workflow-range-expts.png")
     driver.invoke_context_action(
-        object_name="form.input.sweep.n", action="Switch to Step"
+        object_name="form.fold.sweep", action="Switch to Step"
     )
     driver.screenshot(tmp_path / "01-workflow-range-step.png")
     driver.invoke_context_action(
-        object_name="form.input.sweep.start", action="Switch to Center / Span"
+        object_name="form.fold.sweep", action="Switch to Center / Span"
     )
     driver.screenshot(tmp_path / "02-workflow-center-step.png")
     driver.invoke_context_action(
