@@ -152,7 +152,7 @@ def test_active_envelopes_control_eligibility_and_legacy_dispatch_in_any_row_ord
         candidates = provider.eligible(geometry.table, rows)
         np.testing.assert_array_equal(candidates["dyson"], expected_constant)
         np.testing.assert_array_equal(candidates["shaped_sambe"], expected_shaped)
-    expected = ["t4", "dyson", "shaped_sambe", "floquet", "dop853", "dop853"]
+    expected = ["t4", "dyson", "shaped_sambe", "dop853", "dop853", "dop853"]
     dispatch = provider.classify(geometry, src, 1e-3)
     np.testing.assert_array_equal(dispatch.names, expected)
     for rows in (np.arange(6)[::-1], np.array([5, 0, 3, 2])):
@@ -168,8 +168,7 @@ def test_active_envelopes_control_eligibility_and_legacy_dispatch_in_any_row_ord
         "t4": 1,
         "dyson": 1,
         "shaped_sambe": 1,
-        "floquet": 1,
-        "dop853": 2,
+        "dop853": 3,
     }
     np.testing.assert_array_equal(
         result.densities, np.repeat(src.initial_density[None], 6, axis=0)

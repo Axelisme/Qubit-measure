@@ -30,7 +30,7 @@ def test_cover_preserves_all_legacy_domains(execution):
         ((), "t4"),
         ((EnvelopeSpec("constant"),), "dyson"),
         ((shaped,), "shaped_sambe"),
-        ((EnvelopeSpec("constant"),) * 2, "floquet"),
+        ((EnvelopeSpec("constant"),) * 2, "dop853"),
         ((shaped, EnvelopeSpec("constant")), "dop853"),
         ((EnvelopeSpec("constant"),) * 3, "dop853"),
     ]

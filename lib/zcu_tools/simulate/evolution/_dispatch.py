@@ -11,6 +11,7 @@ from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
 from ._shaped_dispatch import preference
+from ._two_tone_dispatch import direct_preferred
 from .engine import PathDiagnostics
 from .kernel import GuardPreparation, Kernel, SegmentTable
 from .secular import ModelSource
@@ -37,12 +38,14 @@ class Selection:
 
     rows: global rows owned by this worker's timeline.
     shaped: acquire-wide cost plan, or None if no selected row is shaped.
+    two_tone_direct: acquire-wide global-row preference, or None without two tones.
     A selection disables further deferral and retains accepted guard products.
     """
 
     rows: NDArray[np.int64]
     shaped: ShapedPlan | None
     rejected: Mapping[str, NDArray[np.bool_]]
+    two_tone_direct: NDArray[np.bool_] | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,8 @@ class Dispatch:
     deferred: worker-owned row mask, or None when no rows need worker classification.
     shaped: fixed acquire-wide cost plan, or None when no shaped work exists.
     rejected: caller guard decisions to skip in worker-local fallback chains.
+    two_tone_direct: global-row cost preference fixed before either two-tone guard;
+        None when no constant two-tone candidates exist.
     """
 
     names: NDArray[np.str_]
@@ -76,6 +81,7 @@ class Dispatch:
     deferred: NDArray[np.bool_] | None = None
     shaped: ShapedPlan | None = None
     rejected: Mapping[str, NDArray[np.bool_]] = field(default_factory=dict)
+    two_tone_direct: NDArray[np.bool_] | None = None
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -184,6 +190,9 @@ class _Classifier:
         if selection is not None:
             self.scope &= np.isin(np.arange(len(self.names)), selection.rows)
         self.shaped = selection.shaped if selection is not None else None
+        self.two_tone_direct = (
+            selection.two_tone_direct if selection is not None else None
+        )
         self.preparations: dict[str, list[GuardPreparation]] = {}
         self.rejected: dict[str, NDArray[np.bool_]] = {}
 
@@ -299,10 +308,9 @@ class _Classifier:
         shaped = np.flatnonzero(single & ~constant & self.scope)
         if np.any(self.scope[shaped]):
             self.classify_shaped(shaped)
-        self.accept(
-            rows[(ordinary & (table.tones == 2) & constant)[rows]],
-            ("floquet", "dop853"),
-        )
+        two_tone = np.flatnonzero(ordinary & (table.tones == 2) & constant)
+        if len(two_tone):
+            self.classify_two_tone(two_tone)
         self.accept(
             rows[
                 (ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)))[
@@ -312,6 +320,18 @@ class _Classifier:
             ("dop853",),
         )
         return self._result()
+
+    def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
+        """Fix acquire-wide costs before either guard; workers borrow the plan."""
+        if self.two_tone_direct is None:
+            self.two_tone_direct = np.zeros(len(self.names), dtype=bool)
+            self.two_tone_direct[rows] = direct_preferred(
+                self.table, rows, self.source, self.budget
+            )
+        selected = rows[self.scope[rows]]
+        direct = self.two_tone_direct[selected]
+        self.accept(selected[direct], ("dop853", "floquet"))
+        self.accept(selected[~direct], ("floquet", "dop853"))
 
     def _result(self) -> Dispatch:
         for name in np.unique(self.names[self.names != ""]):
@@ -327,6 +347,7 @@ class _Classifier:
             self.deferred,
             self.shaped,
             self.rejected,
+            self.two_tone_direct,
         )
 
 

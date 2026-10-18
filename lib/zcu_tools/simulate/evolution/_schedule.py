@@ -359,7 +359,12 @@ class Schedule:
             self.kernels,
             self.source,
             self.budget,
-            selection=Selection(rows, self.dispatch.shaped, self.dispatch.rejected),
+            selection=Selection(
+                rows,
+                self.dispatch.shaped,
+                self.dispatch.rejected,
+                self.dispatch.two_tone_direct,
+            ),
         )
         bindings: list[_Binding] = []
         for entry in _deduplicate(self.table, dispatch, self.kernels):

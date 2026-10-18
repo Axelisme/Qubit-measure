@@ -174,7 +174,7 @@ legacy selection. It returns the existing `Dispatch` record with guard products,
 deferred rows, acquire-wide shaped ordering and rejected-family masks.
 
 For a deferred timeline, pass
-`Selection(timeline_rows, dispatch.shaped, dispatch.rejected)` back to
+`Selection(timeline_rows, dispatch.shaped, dispatch.rejected, dispatch.two_tone_direct)` back to
 `provider.classify(..., selection=selection)`. No local builder runs until that
 selection. Obtain the original kernel through `provider.entry(name).kernel`.
 Use accepted `dispatch.preparations[name]` payloads directly, with their
@@ -445,10 +445,39 @@ at least 10 ns split into constant segments; shorter flat-tops stay shaped.
 | Shaped gate cache passes its split guard | Four Strang subsegments, closed-system U plus secular dissipation, and 16 carrier-phase Fourier modes with checked adaptive preparation. |
 | Shaped period table passes its envelope-motion, bandwidth and split guards | Midpoint-frozen envelopes, eight amplitude Chebyshev nodes and 16 phase Fourier samples for the actual drive port. Integrate the fractional-period tail directly. |
 | Shaped approximations rejected, or direct integration costs less | DOP853, with no input-state restriction. |
-| Two constant tones with a valid Floquet frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
+| Two constant tones | Estimate DOP853 and amortized Floquet cost before either guard. Try the cheaper family first; guard rejection tries the other family. Costs use duration, dimension, spectral width, carrier, gain-weighted drive norms, budget, frame-key reuse and probe-bin counts over the whole acquire. |
+| Two constant tones trying Floquet, with a valid frame and passing harmonic omission and convergence bounds | Floquet k=0 preparation. Passing probe guards select modal second-order Dyson in H_F + D₀; other probes use periodic propagation in the same accepted frame. |
 | Two constant tones rejected by the k=0 omission bound, with a valid frame and passing calibrated finite-Fourier bound | Retain near-resonant bath/probe modal edges in a sparse interaction-picture ODE. |
-| Other two-tone segments, including failed Floquet guards | Sum both drives in batched numba DOP853. |
+| Shaped two-tone segments, or constant rows whose preferred Floquet guard rejects | Sum both drives in batched numba DOP853. A rejected preferred DOP853 guard instead tries Floquet. |
 | Three or more tones | Sum all drives in batched numba DOP853. |
+
+Constant two-tone ordering uses a **calibrated cost model**, not a numerical
+admission rule. Calibration covers the 16-level FTF S9 throughput (16 ns,
+Stark gain .02, .5 GHz), S9 qualitative (about 514 ns, gain .5, 7.29 GHz),
+and boundary rows at 16--512 ns and gains .02--.5. DOP853's estimated seconds
+scale as `8e-5*tau*(W + max(abs(f)) + 2*S)*(1 + 4*sqrt(S) + 4*S)*(d/16)^3`
+times `(1e-3/budget)^(1/8)`. Here W is the model spectral width in GHz and S
+is the sum of each tone's absolute gain times its port's two quadrature
+spectral norms. This estimates step work, not a step limit.
+
+Floquet charges `.07*(d/16)^6` per row for modal playback, plus frame and
+probe-bin certificate work divided by all candidate rows sharing its canonical
+level/Stark-port/frequency/gain key. Frame work is `1.4*(H/512)*(d/16)^5`,
+with H estimated from the frame's power-of-two phase-sample grid, capped at
+4096. Certificate work is `1.05*b*(d/16)^6*min(1, tau*S/.15)`, with b the
+number of distinct probe-port/2 MHz-bin pairs in that frame group. The smooth
+drive-action factor predicts certificate cost without evaluating omission or
+convergence. It need not predict whether a certificate will be needed.
+These coefficients estimate relative cost within the calibration domain;
+small dimensions, new ports and other spectra are extrapolations.
+
+The engine fixes this order across the complete candidate table before either
+guard. Timeline workers borrow it without recounting accepted rows or reuse.
+Neither worker count, chunking, prepare-cache warmth nor row execution order
+enters the estimate. Both numerical guards and their acceptance rules remain
+unchanged. Rejection tries the other family; prepare/apply exceptions still
+propagate without reclassification. Other tone counts and shaped rows retain
+their existing dispatch.
 
 The additional two-tone route is **calibrated finite-Fourier admission**, not a
 per-segment error guarantee. It only runs after the original Duhamel guard
