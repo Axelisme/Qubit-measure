@@ -32,20 +32,8 @@ class MuxT1Fit:
     fit: T1Analysis
 
 
-def analyze_t1(
-    result: MuxT1Result, options: T1AnalyzeOptions, *, plots: Plots
-) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
-    """Fit each IQ row against shared requested us after skip/finite filtering.
-
-    Require float64 nonnegative strictly increasing times (P,), int64 unique
-    nonnegative original indices (K,) and complex128 signals (K,P), with K,P>0.
-    NaN IQ is allowed for partial acquisition. Invalid sources and negative or
-    noninteger skip raise ValueError before fitting. Existing single/dual decay
-    fitters and quality consume only acquired points. Numeric failures return
-    indexed MuxFitFailure reasons; plotting and resource errors propagate.
-    plots owns fit_i, independent of duplicate readout labels; caller
-    finishes/releases figures. No cfg or hardware is read.
-    """
+def _validate_result(result: MuxT1Result) -> None:
+    """Reject invalid source axes, indices and IQ shape/dtype before analysis."""
     times, indices, signals = result.times, result.tone_indices, result.signals
     if (
         times.ndim != 1
@@ -63,6 +51,24 @@ def analyze_t1(
         or signals.shape != (len(indices), len(times))
     ):
         raise ValueError("invalid MuxT1Result axes or IQ shape/dtype")
+
+
+def analyze_t1(
+    result: MuxT1Result, options: T1AnalyzeOptions, *, plots: Plots
+) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
+    """Fit each IQ row against shared requested us after skip/finite filtering.
+
+    Require float64 nonnegative strictly increasing times (P,), int64 unique
+    nonnegative original indices (K,) and complex128 signals (K,P), with K,P>0.
+    NaN IQ is allowed for partial acquisition. Invalid sources and negative or
+    noninteger skip raise ValueError before fitting. Existing single/dual decay
+    fitters and quality consume only acquired points. Numeric failures return
+    indexed MuxFitFailure reasons; plotting and resource errors propagate.
+    plots owns fit_i, independent of duplicate readout labels; caller
+    finishes/releases figures. No cfg or hardware is read.
+    """
+    _validate_result(result)
+    times, indices, signals = result.times, result.tone_indices, result.signals
     if type(options.skip) is not int or options.skip < 0:
         raise ValueError("skip must be a nonnegative integer")
     outcomes: list[MuxT1Fit | MuxFitFailure] = []
