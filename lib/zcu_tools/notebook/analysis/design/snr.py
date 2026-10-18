@@ -11,7 +11,8 @@ from zcu_tools.simulate.fluxonium.branch.floquet import (
 )
 
 
-def calc_snr(
+# tolerated: Notebook passes the physical inputs and truncation controls positionally.
+def calc_snr(  # noqa: PLR0913
     params,
     r_f,
     g,
