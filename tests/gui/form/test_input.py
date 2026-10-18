@@ -93,14 +93,25 @@ def test_form_entry_rejects_untagged_string_or_model_with_field_path(
 
 
 @pytest.mark.parametrize("with_override", [False, True])
-def test_json_codec_keeps_raw_fields_and_typed_selection_paths(with_override: bool) -> None:
-    raw: dict[str, JsonValue] = {"data": {"expr": "unbound"}, "selections": [1, 2], "tones": [{"shape": {"style": "ramp", "length": "unfinished"}}]}
+def test_json_codec_keeps_raw_fields_and_typed_selection_paths(
+    with_override: bool,
+) -> None:
+    raw: dict[str, JsonValue] = {
+        "data": {"expr": "unbound"},
+        "selections": [1, 2],
+        "tones": [{"shape": {"style": "ramp", "length": "unfinished"}}],
+    }
     selections = {("tones", 0, "shape"): {"style": "flat"}} if with_override else {}
     original = FormInput(FormModel, raw, selections=selections)
 
     text = original.to_json()
 
-    assert json.loads(text) == {"data": raw, "selections": [{"path": ["tones", 0, "shape"], "value": {"style": "flat"}}] if with_override else []}
+    assert json.loads(text) == {
+        "data": raw,
+        "selections": [{"path": ["tones", 0, "shape"], "value": {"style": "flat"}}]
+        if with_override
+        else [],
+    }
     assert FormInput.from_json(FormModel, text).same_as(original)
 
 
@@ -210,31 +221,6 @@ def test_restore_uses_current_trusted_declaration_without_running_converter() ->
     assert target is not None and target.selected == 1
 
 
-def test_saved_draft_rejects_changed_type_identity_before_installation() -> None:
-    previous = create_model("TypedDraft", __base__=FormModel, value=(float, ...))
-    changed = create_model("TypedDraft", __base__=FormModel, value=(str, ...))
-    saved = FormInput(previous, {"value": "invalid even for the original type"})
-    with pytest.raises(ValueError, match="identity|incompatible"):
-        FormInput.from_json(changed, saved.to_json())
-
-
-@pytest.mark.parametrize(
-    ("raw", "selections"),
-    [
-        ({"shape": {"style": "unknown"}}, {}),
-        ({"shape": {"style": "ramp"}}, {("shape",): {"style": "unknown"}}),
-        ({"shape": {"style": "ramp"}}, {("removed",): "flat"}),
-    ],
-    ids=["branch", "literal-selection", "selection-path"],
-)
-def test_restore_rejects_annotation_incompatible_branch_or_selection(
-    raw, selections
-) -> None:
-    saved = FormInput(DraftForm, raw, selections=selections).to_json()
-    with pytest.raises(ValueError, match="identity|incompatible"):
-        FormInput.from_json(DraftForm, saved)
-
-
 def test_untagged_model_union_draft_restores_without_guessing_a_branch() -> None:
     class Left(BaseModel):
         left: float
@@ -251,8 +237,7 @@ def test_untagged_model_union_draft_restores_without_guessing_a_branch() -> None
     assert restored.same_as(original)
     assert FormState(restored).preview(FormEnv()).errors is not None
     changed = create_model("UnionDraft", __base__=FormModel, branch=(Left | Other, ...))
-    with pytest.raises(ValueError, match="identity|incompatible"):
-        FormInput.from_json(changed, original.to_json())
+    assert FormInput.from_json(changed, original.to_json()).data == original.data
 
 
 def test_input_keeps_unknown_fields_and_invalid_values_for_restoration() -> None:

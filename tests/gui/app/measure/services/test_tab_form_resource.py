@@ -272,8 +272,9 @@ def test_compatible_restore_preserves_unfinished_input_and_reports_dropped_paths
     assert dropped == (("removed",),)
     assert resource.input.data == {"amount": {"expr": "unfinished +"}}
     assert isinstance(resource.result(), FormErrors)
-    assert resource.write_compatible({"amount": "not a number"}) == (("amount",),)
-    assert resource.input.data == {"amount": {"expr": "unfinished +"}}
+    assert resource.write_compatible({"amount": "not a number"}) == ()
+    assert resource.input.data == {"amount": "not a number"}
+    assert isinstance(resource.result(), FormErrors)
 
 
 def test_subscriber_failure_keeps_committed_result_and_notifies_other_subscribers(

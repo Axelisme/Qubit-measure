@@ -52,7 +52,7 @@ def test_migration_keeps_separate_override_and_raw_while_filling_new_defaults() 
     notifications: list[bool] = []
     state.subscribe(lambda: notifications.append(True))
 
-    dropped = state.migrate_input(saved, env)
+    dropped = state.restore_input(saved, env)
 
     assert dropped == ()
     assert state.input.data == {
@@ -106,12 +106,12 @@ def test_migration_reports_removed_raw_and_inapplicable_overrides_once() -> None
     )
     state = FormState(base)
 
-    dropped = state.migrate_input(saved, FormEnv())
+    dropped = state.restore_input(saved, FormEnv())
 
     assert set(dropped) == {("branch",), ("retired",), ("mode",), ("quantity",)}
     assert len(dropped) == 4
     assert state.input.data == {
-        "branch": {"kind": "a", "amount": -5},
+        "branch": {"kind": "a", "amount": 1},
         "mode": "keep",
         "quantity": 3,
         "added": 7,

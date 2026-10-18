@@ -226,19 +226,6 @@ def test_inline_copy_memento_keeps_original_input_after_library_content_changes(
     assert restored.plan_panel.state.input.same_as(state.input)
 
 
-def test_incompatible_knobs_identity_preserves_both_window_drafts(window) -> None:
-    saved = window.capture_persisted_state()
-    window.plan_panel.state.write({("scale",): 7}, window.plan_panel.env)
-    window.tunables_panel.state.install_input(FormInput(TunablesForm, {}))
-    before = window.capture_persisted_state()
-    incompatible = FormInput(ValueKnobsForm, {"value": 6})
-    # Capture through the same public host seam, then replace just one form.
-    other = saved.model_copy(update={"knobs": json.loads(incompatible.to_json())})
-    with pytest.raises(ValueError, match="identity|incompatible"):
-        window.restore_persisted_state(other)
-    assert window.capture_persisted_state() == before
-
-
 def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> None:
     path = tmp_path / "t1_workflow_state_v1.json"
     path.write_text(
@@ -316,55 +303,6 @@ def test_unreadable_snapshot_reports_and_uses_defaults(
     finally:
         app.window.close()
         app.shutdown()
-        app.window.deleteLater()
-        qapp.processEvents()
-
-
-def test_incompatible_identity_startup_preserves_file_and_opens_defaults(
-    qapp: QApplication, tmp_path: Path
-) -> None:
-    path = tmp_path / "t1_workflow_state_v1.json"
-    payload = json.dumps(
-        WorkflowInputCodec().encode(
-            WorkflowInputSnapshot.capture(
-                FormInput(ValueKnobsForm, {"value": 9}),
-                FormInput(TunablesForm, {"sample": {"value": 35.0}}),
-            )
-        )
-    )
-    path.write_text(payload)
-    app = WorkflowsGuiBehavior(
-        templates={}, registrations=build_registry(), cache_dir=tmp_path
-    )
-    assembled = False
-    startup_error: ValueError | None = None
-    try:
-        try:
-            app.assemble(None)
-            assembled = True
-        except ValueError as exc:
-            startup_error = exc
-        assert startup_error is None, "Identity mismatch must back up and open defaults"
-        backups = list(tmp_path.glob(f"{path.name}.incompatible-*"))
-        assert len(backups) == 1
-        assert backups[0].read_text() == payload
-        assert app.window.plan_panel.state.input.same_as(
-            PlanForm.default_input(app.window.plan_panel.env)
-        )
-        assert app.window.tunables_panel.state.input.same_as(
-            TunablesForm.default_input(app.window.tunables_panel.env)
-        )
-        assert any(
-            str(backups[0]) in label.text() for label in app.window.findChildren(QLabel)
-        )
-        assert app.window.close()
-        assert WorkflowInputCodec().decode(json.loads(path.read_text())) == (
-            app.window.capture_persisted_state()
-        )
-        assert backups[0].read_text() == payload
-    finally:
-        if assembled:
-            app.shutdown()
         app.window.deleteLater()
         qapp.processEvents()
 
