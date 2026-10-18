@@ -515,21 +515,24 @@ def h_tab_read_elements(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Forward one readonly aggregate to its owner; never focus or refresh."""
-    from ..form_errors import cfg_error_to_remote
+    from ..form_errors import recipe_form_errors
     from ..form_observation import observe_elements
 
     path = module_path(params["path"])
-    try:
-        return dict(observe_elements(adapter.cfg_lookup(str(params["tab_id"])), path))
-    except CfgPreconditionError as exc:
-        raise cfg_error_to_remote(exc) from exc
-    except FormPathError as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            str(exc),
-            reason="form_path",
-            data={"form_path": list(exc.path)},
-        ) from exc
+    with recipe_form_errors():
+        raw_fields = params.get("fields", [])
+        if not isinstance(raw_fields, list):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "fields must be an array",
+                reason="form_errors",
+            )
+        fields = tuple(_recipe_path(field) for field in raw_fields)
+        return dict(
+            observe_elements(
+                adapter.cfg_lookup(str(params["tab_id"])), path, fields=fields
+            )
+        )
 
 
 def _recipe_path(raw: object, *, root: bool = False) -> tuple[str | int, ...]:

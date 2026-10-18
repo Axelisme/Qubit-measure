@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import TypedDict
 
 from zcu_tools.gui.form import FormInputRejected, FormPathError
 from zcu_tools.gui.form_adapter import LogicalEditError, LogicalSourceError
@@ -12,6 +13,13 @@ from zcu_tools.gui.remote.errors import (
 )
 
 from ..services.form_contracts import CfgPreconditionError
+
+
+class FormError(TypedDict):
+    """One validation error; path contains model fields and sequence indexes."""
+
+    path: list[str | int]
+    message: str
 
 
 def cfg_error_to_remote(exc: CfgPreconditionError) -> RemoteError:

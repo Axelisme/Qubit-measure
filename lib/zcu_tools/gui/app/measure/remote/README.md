@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-19，Recipe 與 module RPC typed path carriers
+**Last updated:** 2026-10-19，完整元素 logical fields wire
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -54,7 +54,7 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 
 `tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 typed array，str 是欄位名，int 是原始 model-list 位置。兩者經共同 Form owner 操作，不保留 dotted-string reader。Unknown、越界或非 index 的數字字串保留完整請求路徑，回 form_path。
 
-`tab.read_elements(path)` 在一次 readonly owner turn 回傳全部元素的 index、name、canonical path、authored input、可用 preview values 與定向 errors。Values 使用完整 canonical typed paths，不是 lowered native cfg。完整 Form errors 另列在最外層，包含 participants 錯誤。某個元素 invalid 不會隱藏其他元素。RPC 只序列化 owner 的 aggregate，不逐元素 describe/read 拼接，不改 picker、focus、capture 或草稿。Busy 與 observer reads 仍可用。
+`tab.read_elements(path)` 在一次 readonly owner turn 回傳全部元素的 index、name、canonical path、authored input、可用 preview values 與定向 errors。Values 使用完整 canonical typed paths，不是 lowered native cfg。完整 Form errors 另列在最外層，包含 participants 錯誤。某個元素 invalid 不會隱藏其他元素。RPC 只序列化 owner 的 aggregate，不逐元素 describe/read 拼接，不改 picker、focus、capture 或草稿。Busy 與 observer reads 仍可用。可選 `fields` 是元素相對 logical typed paths，例如 `[["drive", "gain"], ["sweep", "start"]]`。每個 row 的 `fields` 按請求順序回同一 owner turn 的 RecipeFieldObservation，包含 FixedElements identity、ref source、value_status 與 errors。省略 fields 保留原 aggregate。錯誤 carrier/path 沿既有 Form 錯誤投影。
 
 Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref；readonly 表示穿過 ref 祖先，不代表 declaration lock。讀取不改 input、base、cfg version 或通知，也不授權寫入。
 

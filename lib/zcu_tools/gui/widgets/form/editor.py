@@ -661,32 +661,43 @@ class FormEditor[F: FormModel](QWidget):
         )
         if command is not None and any(key in self._local for key in command.inputs):
             return
-        saved = dict(self._local) if command is not None else {}
+        self._dispatch_command(
+            path, name, command.inputs if command is not None else None
+        )
+
+    def _dispatch_command(
+        self,
+        path: FormWritePath,
+        name: str,
+        inputs: tuple[FormWritePath, ...] | None,
+    ) -> None:
+        """Keep local drafts across a guarded command and its state publication.
+
+        inputs names participating paths for a field command; None denotes an
+        option action, whose row-local error is cleared before dispatch.
+        """
+        saved = dict(self._local) if inputs is not None else {}
         publication = self._publication_count
-        if command is None:
+        if inputs is None:
             self._local.pop(path, None)
         try:
             if self._host_command is None:
-                state.run_command(path, name, self._require_env())
+                self._require_state().run_command(path, name, self._require_env())
             else:
                 self._host_command(path, name)
         except (WriteRejected, FormInputRejected) as exc:
             message = exc.message if isinstance(exc, WriteRejected) else str(exc)
             self._local[path] = self._rows[path].rejected_input(message)
         except FormCommandError:
-            if command is None:
+            if inputs is None:
                 raise
             # State preview already reports the participating expression/missing
             # error. Do not create a local parse error on a valid peer field.
             self._local.update(saved)
         else:
-            if command is not None:
+            if inputs is not None:
                 self._local.update(
-                    {
-                        key: local
-                        for key, local in saved.items()
-                        if key not in command.inputs
-                    }
+                    {key: local for key, local in saved.items() if key not in inputs}
                 )
         if self._publication_count == publication or saved:
             self._publish()

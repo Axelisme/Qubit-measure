@@ -368,19 +368,12 @@ class Field:
         )
         if self.branch_option is not None:
             pinned = self.branch_option.value
-        # Model-list declarations apply to each of its elements, so an
-        # element inherits them without an index component.
         element = self.level.items is not None
-        choices = {
-            (path if element else path[1:]): values
-            for path, values in self.level.choices.items()
-            if element or (len(path) > 1 and path[0] == self.name)
-        }
-        options = {
-            (path if element else path[1:]): values
-            for path, values in self.level.options.items()
-            if element or (len(path) > 1 and path[0] == self.name)
-        }
+        choices = _child_declarations(self.level.choices, self.name, element=element)
+        options = _child_declarations(self.level.options, self.name, element=element)
+        converters = _child_declarations(
+            self.level.converters, self.name, element=element
+        )
         if list_model(self.info) is not None:
             return Level(
                 model,
@@ -390,11 +383,7 @@ class Field:
                 options,
                 variants=(model,),
                 selections=self.level.selections,
-                converters={
-                    path[1:]: item
-                    for path, item in self.level.converters.items()
-                    if len(path) > 1 and path[0] == self.name
-                },
+                converters=converters,
                 items=tuple(value) if isinstance(value, list) else (),
                 element_label=next(
                     (
@@ -414,16 +403,23 @@ class Field:
             pinned if isinstance(pinned, dict) else {},
             model_types(self.info.annotation),
             self.level.selections,
-            {
-                **{
-                    (path if element else path[1:]): value
-                    for path, value in self.level.converters.items()
-                    if element or (len(path) > 1 and path[0] == self.name)
-                },
-                **_local_converters(model, env),
-            },
+            {**converters, **_local_converters(model, env)},
             element_label=self.level.element_label if element else None,
         )
+
+
+def _child_declarations[T](
+    declarations: Mapping[FormPath, T], name: str | int, *, element: bool
+) -> dict[FormPath, T]:
+    """Rebase descendant declarations, or retain shared element-relative paths."""
+    if element:
+        # A model-list declaration already addresses fields within every element.
+        return dict(declarations)
+    return {
+        path[1:]: value
+        for path, value in declarations.items()
+        if len(path) > 1 and path[0] == name
+    }
 
 
 def validate_path(path: object) -> None:

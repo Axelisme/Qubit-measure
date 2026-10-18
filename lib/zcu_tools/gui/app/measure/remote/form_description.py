@@ -1,10 +1,11 @@
 """Public measure wire types for one current, single-layer Form observation."""
 
 from collections.abc import Mapping
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from pydantic import JsonValue
 
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.form import (
     FormDescription,
     FormFieldDescription,
@@ -14,7 +15,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form_adapter import LogicalFieldObservation
 
 from ..services.tab_form import TabFormResource
-from .form_observation import FormError
+from .form_errors import FormError
 from .handlers._wire_values import context_wire_value
 
 
@@ -359,12 +360,15 @@ class RecipeFieldObservation(FormFieldObservation):
     selectors, source identifies the nearest supplying ref or None. readonly
     means a ref ancestor was traversed, not declaration-fixed or write authority.
     Root has target/selector/source=None and an ordinary logical subtree value.
+    element, when present, is the FixedElements owner's same-read original
+    index/name. Fields outside declared elements omit it.
     """
 
     value_status: Literal["available", "missing", "unavailable"]
     selector: RecipeSelectorWire | None
     source: RecipeSourceWire | None
     readonly: bool
+    element: NotRequired[ElementIdentity]
 
 
 class RecipeEditResult(TypedDict):
@@ -389,6 +393,27 @@ class RecipeSelectionResult(TypedDict):
     field: RecipeFieldObservation
 
 
+class RecipeElementFieldsWire(TypedDict):
+    """Requested fields for one original element in a read_elements response.
+
+    index is the original complete-list index. fields contains detached logical
+    observations in the request's relative-path order, including owner identity.
+    """
+
+    index: int
+    fields: list[RecipeFieldObservation]
+
+
+class RecipeElementsWire(TypedDict):
+    """Logical subset of read_elements when relative fields were requested.
+
+    elements includes all original elements, never just participants.
+    Other aggregate input/preview/error fields remain on the full RPC response.
+    """
+
+    elements: list[RecipeElementFieldsWire]
+
+
 def recipe_field_wire(observation: LogicalFieldObservation) -> RecipeFieldObservation:
     """Encode one adapter observation, preserving logical paths and source facts.
 
@@ -397,7 +422,7 @@ def recipe_field_wire(observation: LogicalFieldObservation) -> RecipeFieldObserv
     """
     selector = observation.selector
     source = observation.source
-    return {
+    result: RecipeFieldObservation = {
         "description": description_wire(observation.description),
         "input_present": observation.input_present,
         "input": observation.input,
@@ -426,3 +451,6 @@ def recipe_field_wire(observation: LogicalFieldObservation) -> RecipeFieldObserv
         else None,
         "readonly": observation.readonly,
     }
+    if observation.element is not None:
+        result["element"] = observation.element.copy()
+    return result

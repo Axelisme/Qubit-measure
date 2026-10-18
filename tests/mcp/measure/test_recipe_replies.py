@@ -23,7 +23,12 @@ from ._support import full_execution_reply, make_client
                 "trigger_offset_us": 0.2,
                 "rounds": 7,
             },
-            {},
+            {
+                "frequency_mhz": {"value": 6020.0, "source": "explicit", "unit": "MHz"},
+                "readout_length_us": {"value": 2.5, "source": "explicit", "unit": "us"},
+                "trigger_offset_us": {"value": 0.2, "source": "explicit", "unit": "us"},
+                "rounds": {"value": 7, "source": "explicit"},
+            },
         ),
         (
             {
@@ -32,6 +37,9 @@ from ._support import full_execution_reply, make_client
                 "trigger_offset_us": 0.2,
             },
             {
+                "frequency_mhz": {"value": 6120.0, "source": "explicit", "unit": "MHz"},
+                "readout_length_us": {"value": 2.5, "source": "explicit", "unit": "us"},
+                "trigger_offset_us": {"value": 0.2, "source": "explicit", "unit": "us"},
                 "rounds": {"value": 3, "source": "gui_default"},
             },
         ),

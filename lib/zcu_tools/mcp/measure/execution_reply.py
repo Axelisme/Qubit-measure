@@ -7,6 +7,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
+from pydantic import TypeAdapter
+
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
 from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath, field_path
 
@@ -42,18 +45,69 @@ class SummaryEstimate:
     tuples of str field names and int original list indexes into native summary.
     Numeric strings stay names. Missing paths are omitted; present null stays null.
     error_key=None means no uncertainty field. unit labels the native value, or
-    None when the recipe declares no unit. No conversion occurs.
+    None when the recipe declares no unit. No conversion occurs. element_key
+    optionally selects an author-provided ElementIdentity in that same native
+    summary. Missing identity is omitted, never inferred from value_key or name.
     """
 
     name: str
     value_key: RecipeFieldPath
     error_key: RecipeFieldPath | None = None
     unit: str | None = None
+    element_key: RecipeFieldPath | None = None
 
     def __post_init__(self) -> None:
         field_path(self.value_key)
         if self.error_key is not None:
             field_path(self.error_key)
+        if self.element_key is not None:
+            field_path(self.element_key)
+
+
+@dataclass(frozen=True)
+class SummaryElements:
+    """Capture declared leaves for every original model-list element at each Run.
+
+    name prefixes opaque public keys "name/index/parameter.name"; these keys are
+    labels, not field paths. field is the nonempty canonical model-list path.
+    parameters declares nonempty relative logical leaf paths, units and labels,
+    shared by every element. source is a nonblank author-chosen fallback label
+    for leaves without a recorded origin (for example "default"). It never
+    replaces missing/invalid values or an explicit/derived recorded origin.
+    Names come only from the owner's FixedElements capture, never participants.
+    """
+
+    name: str
+    field: RecipeFieldPath
+    parameters: tuple[SummaryParameter, ...]
+    source: str
+
+    def __post_init__(self) -> None:
+        field_path(self.field)
+        if not self.parameters or not self.source.strip():
+            raise ValueError("Element summaries require leaves and a source label")
+
+
+@dataclass(frozen=True)
+class SummaryEstimateRows:
+    """Project relative scalar declarations for each captured native summary row.
+
+    name prefixes opaque keys "name/row/estimate.name"; row is the summary list
+    position, NOT an ElementIdentity. rows_key selects a native summary list;
+    missing/null lists contribute no estimates, non-list values raise ValueError.
+    estimates supplies relative value/error/element paths for each row in native
+    order. Only an explicit author-provided ElementIdentity at element_key is
+    projected. No position/name fields, participants or row indexes are inferred.
+    """
+
+    name: str
+    rows_key: RecipeFieldPath
+    estimates: tuple[SummaryEstimate, ...]
+
+    def __post_init__(self) -> None:
+        field_path(self.rows_key)
+        if not self.estimates:
+            raise ValueError("Row summaries require estimate declarations")
 
 
 class StepReply(TypedDict):
@@ -62,15 +116,31 @@ class StepReply(TypedDict):
 
 
 class ParameterReply(TypedDict):
+    """One captured condition, including explicitly supplied values.
+
+    value is the resolved native value. source preserves the author\'s label or
+    per-component sweep labels. unit, when present, is a native display label.
+    element, when present, is the declaring owner\'s captured original identity.
+    """
+
     value: Any
     source: Any
     unit: NotRequired[str]
+    element: NotRequired[ElementIdentity]
 
 
 class EstimateReply(TypedDict):
+    """One author-provided scalar estimate from the captured native summary.
+
+    value is the estimate, including an author-provided null. stderr is the
+    declared uncertainty or None. unit is a native label or None. element is
+    optional author-supplied identity; absence never triggers identity lookup.
+    """
+
     value: Any
     stderr: Any
     unit: str | None
+    element: NotRequired[ElementIdentity]
 
 
 def project_control(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -99,24 +169,27 @@ def _actual(
 ) -> dict[str, Any]:
     fields = captured["fields"] if captured is not None else {}
     parameters: dict[str, ParameterReply] = {}
-    for parameter in definition.summary_parameters if definition else ():
-        fact = fields.get(parameter.name)
-        if fact is None:
-            continue
+    static = (
+        {
+            parameter.name: parameter
+            for parameter in definition.summary_parameters
+            if isinstance(parameter, SummaryParameter)
+        }
+        if definition
+        else {}
+    )
+    for name, fact in fields.items():
         source = fact.get("source")
-        if source == "explicit" or (
-            isinstance(source, dict)
-            and all(source.get(key) == "explicit" for key in ("start", "stop", "expts"))
-        ):
-            continue
         projected: ParameterReply = {
             "value": deepcopy(fact["value"]),
             "source": deepcopy(source),
         }
-        unit = fact.get("unit", parameter.unit)
+        if "element" in fact:
+            projected["element"] = deepcopy(fact["element"])
+        unit = fact.get("unit", static[name].unit if name in static else None)
         if unit is not None:
             projected["unit"] = unit
-        parameters[parameter.name] = projected
+        parameters[name] = projected
     return parameters
 
 
@@ -137,18 +210,51 @@ def _summary_value(summary: dict[str, Any], path: RecipeFieldPath) -> tuple[bool
     return True, value
 
 
+def _expand_estimates(
+    summary: dict[str, Any],
+    declarations: tuple[SummaryEstimate | SummaryEstimateRows, ...],
+) -> tuple[SummaryEstimate, ...]:
+    expanded: list[SummaryEstimate] = []
+    for declaration in declarations:
+        if isinstance(declaration, SummaryEstimate):
+            expanded.append(declaration)
+            continue
+        present, rows = _summary_value(summary, declaration.rows_key)
+        if not present or rows is None:
+            continue
+        if not isinstance(rows, list):
+            raise ValueError(f"Estimate rows {declaration.rows_key!r} must be a list")
+        for index in range(len(rows)):
+            prefix = (*declaration.rows_key, index)
+            for estimate in declaration.estimates:
+                expanded.append(
+                    SummaryEstimate(
+                        f"{declaration.name}/{index}/{estimate.name}",
+                        (*prefix, *estimate.value_key),
+                        (*prefix, *estimate.error_key)
+                        if estimate.error_key is not None
+                        else None,
+                        estimate.unit,
+                        (*prefix, *estimate.element_key)
+                        if estimate.element_key is not None
+                        else None,
+                    )
+                )
+    return tuple(expanded)
+
+
 def _summary_estimates(
     details: dict[str, Any],
     definition: RecipeDefinition | None,
     recipes: Sequence[RecipeDefinition],
 ) -> tuple[SummaryEstimate, ...]:
     if definition is not None:
-        return definition.summary_estimates
+        return _expand_estimates(details, definition.summary_estimates)
     # Analysis-only carries no recipe identity. Only unambiguous declarations
     # may project present scalar keys; never infer an experiment or read the GUI.
     by_key: dict[RecipeFieldPath, SummaryEstimate] = {}
     for recipe in recipes:
-        for estimate in recipe.summary_estimates:
+        for estimate in _expand_estimates(details, recipe.summary_estimates):
             if not _summary_value(details, estimate.value_key)[0]:
                 continue
             previous = by_key.setdefault(estimate.value_key, estimate)
@@ -182,6 +288,12 @@ def _pane(
                 else None,
                 "unit": estimate.unit,
             }
+            if estimate.element_key is not None:
+                present, element = _summary_value(summary, estimate.element_key)
+                if present and element is not None:
+                    estimates[estimate.name]["element"] = TypeAdapter(
+                        ElementIdentity
+                    ).validate_python(element, strict=True)
     return {
         "params": result.get("params", execution.get("params")),
         "estimates": estimates,
@@ -244,6 +356,10 @@ def _candidate(item: dict[str, Any]) -> dict[str, Any]:
         "proposed": deepcopy(item.get("proposed", item.get("proposed_value"))),
         "current": deepcopy(item.get("current")),
     }
+    if item.get("element") is not None:
+        candidate["element"] = TypeAdapter(ElementIdentity).validate_python(
+            item["element"], strict=True
+        )
     if item.get("kind") == "module":
         proposed = candidate["proposed"]
         current = candidate["current"]
@@ -346,9 +462,9 @@ def project_execution(
     definition selects one recipe's actual/estimate fields; None means standalone
     analysis. Conflicting present estimate keys raise ValueError. detail selects
     the operator summary or detached native detail. Both expose recipe actual as
-    a flat summary-name mapping of value/source/unit, omitting scalar explicit
-    values and sweeps whose three sources are explicit. Mixed sweeps remain
-    complete. Internal cfg refs never appear in actual or candidates. Each analysis pane
+    a flat summary-name mapping of value/source/unit, including explicit inputs
+    and individually labeled sweep components. Internal cfg refs never appear
+    in actual or candidates. Each analysis pane
     exposes params, declared scalar estimates, unchanged native summary and
     unchanged native invalid entries. No fit_quality interpretation occurs.
     artifacts preserves each captured native Save report's section/member/output

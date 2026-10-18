@@ -79,12 +79,18 @@ def test_caretaker_load_failure_logs_warning(tmp_path: Path, caplog) -> None:
 
     caretaker = PersistenceCaretaker(_Originator(), cache_dir=tmp_path)
     caretaker.state_path.write_text("{ not json", encoding="utf-8")
-    with caplog.at_level(
-        logging.WARNING, logger="zcu_tools.gui.app.measure.services.caretaker"
-    ):
-        caretaker.restore_all(load=True)
-    warnings = [r for r in caplog.records if "persistence load failed" in r.message]
+    with caplog.at_level(logging.WARNING, logger="zcu_tools.gui.session.persistence"):
+        outcome = caretaker.restore_all(load=True)
+    assert outcome.load_error is not None
+    warnings = [
+        record
+        for record in caplog.records
+        if record.name == "zcu_tools.gui.session.persistence"
+        and record.message == str(outcome.load_error)
+    ]
     assert warnings and warnings[0].levelno == logging.WARNING
+    assert "Failed to read GUI state" in warnings[0].message
+    assert "using defaults" in warnings[0].message
 
 
 def test_background_worker_exception_logs_traceback(qapp, caplog) -> None:
