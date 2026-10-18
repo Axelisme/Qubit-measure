@@ -2,7 +2,9 @@
 
 import numpy as np
 import pytest
+from matplotlib.axes import Axes
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
+from zcu_tools.experiment.utils.single_shot import ge
 from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
 from zcu_tools.experiment.utils.single_shot.ge.base import fitting_ge_and_plot
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -73,6 +75,10 @@ def test_ge_analysis_custom_names_coexist_with_default_owned_figures(selection):
         baseline = singleshot_ge_analysis(
             signals, plots=plots, length_ratio=0.0, **selection
         )
+        assert 0.9 < baseline[0] <= 1.0
+        np.testing.assert_allclose(baseline[1], [[1.0, 0.0], [0.0, 1.0]], atol=0.03)
+        assert baseline[2]["g_center"] == pytest.approx(-1.0, abs=0.03)
+        assert baseline[2]["e_center"] == pytest.approx(1.0, abs=0.03)
         original = plots["fit"]
         for name in ("fit_0", "fit_2"):
             fitted = singleshot_ge_analysis(
@@ -91,3 +97,48 @@ def test_ge_analysis_custom_names_coexist_with_default_owned_figures(selection):
         plots.release()
         other_plots.finish(present=False)
         other_plots.release()
+
+
+@pytest.mark.parametrize(
+    "selection", [{"backend": "pca"}, {"backend": "center"}, {"angle": 0.0}]
+)
+def test_ge_analysis_degenerate_iq_has_named_numerical_error_with_cause(selection):
+    # Finite but indistinguishable preparations cannot supply a GE calibration.
+    signals = np.ones((2, 32), dtype=np.complex128)
+    plots = Plots(NonPresentingHost())
+    try:
+        with pytest.raises(Exception) as raised:
+            singleshot_ge_analysis(signals, plots=plots, length_ratio=0.0, **selection)
+        assert hasattr(ge, "GENumericalError"), "GE must expose its numerical failure"
+        assert isinstance(raised.value, ge.GENumericalError)
+        assert isinstance(
+            raised.value.__cause__,
+            (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError),
+        )
+        assert raised.value.__cause__ is not raised.value
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+@pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
+def test_ge_analysis_propagates_original_matplotlib_error(monkeypatch, error_type):
+    from scipy.special import ndtri
+
+    noise = 0.25 * ndtri((np.arange(1000) + 0.5) / 1000)
+    quadrature = 0.1j * np.sin(np.arange(1000))
+    signals = np.asarray([-1 + noise + quadrature, 1 + noise + quadrature])
+    fault = error_type("external scatter failure")
+
+    def fail_scatter(*args, **kwargs):
+        raise fault
+
+    monkeypatch.setattr(Axes, "scatter", fail_scatter)
+    plots = Plots(NonPresentingHost())
+    try:
+        with pytest.raises(error_type) as raised:
+            singleshot_ge_analysis(signals, plots=plots, length_ratio=0.0)
+        assert raised.value is fault
+    finally:
+        plots.finish(present=False)
+        plots.release()
