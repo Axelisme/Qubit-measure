@@ -1,5 +1,6 @@
 """Calibrated gain reuse through scoped kernel preparation and density playback."""
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import numpy as np
@@ -44,8 +45,6 @@ def source():
 
 
 def scoped(table, source):
-    factory = getattr(FloquetPeriodKernel(), "evolve_scope", None)
-    assert callable(factory), "period preparation needs an evolve-local scope"
     return FloquetPeriodKernel().evolve_scope(table, source)
 
 
@@ -84,6 +83,36 @@ def test_gain_predictor_is_checked_and_matches_independent_playback(source):
     # A new evolve does not inherit the previous call's retained tables.
     _, fresh = scoped(table, source)
     assert fresh.nbytes == fresh.attempts == fresh.hits == 0
+
+
+@pytest.mark.parametrize("order", ["thread-handoff", "reverse"])
+def test_scoped_preparation_is_bitwise_invariant_to_worker_and_key_order(source, order):
+    table = scan(np.arange(8) * 1e-5 + 0.003)
+    reference_kernel, _ = scoped(table, source)
+    reference = playback(
+        reference_kernel, prepare(reference_kernel, table, source), table, source
+    )
+    kernel, _ = scoped(table, source)
+    actual = np.empty_like(reference)
+
+    def prepare_rows(rows):
+        prepared = kernel.prepare(
+            kernel.prepare_keys(table, rows), table, rows, source, 1e-3
+        )
+        states = np.repeat(source.initial_density[None], len(rows), axis=0)
+        kernel.apply(prepared, np.arange(len(rows)), table, rows, states, 1e-3)
+        actual[rows] = states
+
+    if order == "thread-handoff":
+        prepare_rows(np.arange(4))
+        # A separate worker necessarily has a different identity from the
+        # calling thread. Await it explicitly, without relying on timing.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(prepare_rows, np.arange(4, 8)).result(timeout=25)
+    else:
+        for row in range(7, -1, -1):
+            prepare_rows(np.array([row]))
+    np.testing.assert_array_equal(actual, reference)
 
 
 def test_rejected_predictor_preserves_independent_result_bitwise(source):
