@@ -32,17 +32,13 @@ from .secular import ModelSource
 from .workplan import WorkPlan
 
 
-def create_work_plan(
-    table: SegmentTable, source: ModelSource, budget: float
-) -> WorkPlan:
+def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
     """Create ownership for the complete evolve before prefix/worker planning.
 
-    table is the full immutable geometry, source owns model identity, and budget
-    is the per-segment allowance validated by Engine. Algorithm-specific group
-    planners populate this plan before workers start; no numerical routing or
-    expensive candidate graph is constructed here.
+    table is the full immutable geometry and source owns model identity.
+    Algorithm-specific group planners populate this plan before workers start;
+    no numerical routing or expensive candidate graph is constructed here.
     """
-    del budget
     plan = WorkPlan()
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)

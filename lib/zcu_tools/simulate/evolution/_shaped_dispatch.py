@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .kernel import Kernel, KernelContext, SegmentTable
+from .kernels._workload_facts import envelope_bounds
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.period_table import PeriodTableKernel
 
@@ -50,7 +51,7 @@ def preference(
     safe_frequency = np.where(frequency > 0, frequency, 1)
     cycles = duration * frequency
     tail = np.maximum(0, duration - np.floor(cycles + 1e-10) / safe_frequency)
-    complex_envelopes = np.array([np.any(e.samples.imag != 0) for e in table.envelopes])
+    complex_envelopes = ~envelope_bounds(table, context.work_plan).real
     complex_rows = complex_envelopes[table.tone_envelope[rows, 0]]
     period_work = (
         (150 + 550 / safe_frequency) / _usage(period, table, rows, context)

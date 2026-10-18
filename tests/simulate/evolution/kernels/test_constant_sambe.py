@@ -47,7 +47,7 @@ def test_low_carrier_uses_sambe_and_preserves_translated_coherent_tail():
     case = sambe_case()
     kernel = FloquetPeriodKernel()
     context = KernelContext(
-        case.source, case.budget, create_work_plan(case.table, case.source, case.budget)
+        case.source, case.budget, create_work_plan(case.table, case.source)
     )
     rows = np.arange(2)
     for row in rows:
@@ -89,7 +89,7 @@ def test_unresolved_cutoff_falls_back_to_independent_cf4():
     table = replace(case.table, tone_amplitude=np.ones((2, 1)))
     rows = np.array([0])
     kernel = FloquetPeriodKernel()
-    context = KernelContext(source, 0.001, create_work_plan(table, source, 0.001))
+    context = KernelContext(source, 0.001, create_work_plan(table, source))
     assert period_builder(model, 0, 0.05, 1.0).kind == "sambe"
     prepared = kernel.prepare(
         kernel.prepare_keys(table, rows, context),
@@ -120,7 +120,7 @@ def test_high_carrier_keeps_existing_builder():
         table = replace(case.table, tone_frequency_ghz=np.full((2, 1), frequency))
         kernel = FloquetPeriodKernel()
         context = KernelContext(
-            case.source, case.budget, create_work_plan(table, case.source, case.budget)
+            case.source, case.budget, create_work_plan(table, case.source)
         )
         rows = np.arange(2)
         prepared = kernel.prepare(
@@ -144,7 +144,7 @@ def test_sambe_selection_and_playback_ignore_worker_and_key_order():
     rows = np.arange(2)
     kernel = FloquetPeriodKernel()
     context = KernelContext(
-        case.source, case.budget, create_work_plan(case.table, case.source, case.budget)
+        case.source, case.budget, create_work_plan(case.table, case.source)
     )
     prepared = kernel.prepare(
         kernel.prepare_keys(case.table, rows, context),
@@ -156,7 +156,7 @@ def test_sambe_selection_and_playback_ignore_worker_and_key_order():
     kernel.apply(prepared, rows, case.table, rows, expected, ApplyContext(case.budget))
     other = FloquetPeriodKernel()
     other_context = KernelContext(
-        case.source, case.budget, create_work_plan(case.table, case.source, case.budget)
+        case.source, case.budget, create_work_plan(case.table, case.source)
     )
     actual = case.states.copy()
 
@@ -193,7 +193,7 @@ def test_sambe_subperiods_preserve_secular_dissipation():
     table = replace(case.table, tone_amplitude=np.full((2, 1), 0.1))
     case = replace(case, source=source, table=table)
     kernel = FloquetPeriodKernel()
-    context = KernelContext(source, 0.001, create_work_plan(table, source, 0.001))
+    context = KernelContext(source, 0.001, create_work_plan(table, source))
     rows = np.arange(2)
     prepared = kernel.prepare(
         kernel.prepare_keys(table, rows, context),

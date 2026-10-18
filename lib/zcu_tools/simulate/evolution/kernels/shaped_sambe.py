@@ -16,6 +16,7 @@ from ..kernel import (
     KernelContext,
     Prepared,
     SegmentTable,
+    prepared_key_indices,
 )
 from ..secular import SecularModel
 from ..workplan import RampFamilyPlan
@@ -388,8 +389,8 @@ class ShapedSambeKernel:
         if not isinstance(prepared, _Data):
             raise TypeError("shaped_sambe requires its own prepared payload")
         keys = self.prepare_keys(table, rows, context)
-        indices = {key.tobytes(): i for i, key in enumerate(prepared.keys)}
-        if any(key.tobytes() not in indices for key in keys):
+        indices = prepared_key_indices(prepared.keys, keys)
+        if indices is None:
             return None
         inverse = np.array([indices[key.tobytes()] for key in keys], dtype=np.int64)
         accepted = self._eligible(table, rows, context)

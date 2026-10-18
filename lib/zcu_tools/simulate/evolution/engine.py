@@ -385,7 +385,7 @@ class Engine:
             )
             # Drain workers before releasing evolve-local facts and workspaces.
             with (
-                closing(create_work_plan(geometry.table, source, budget)) as work_plan,
+                closing(create_work_plan(geometry.table, source)) as work_plan,
                 execution_pool(workers) as pool,
             ):
                 context = KernelContext(source, budget, work_plan)

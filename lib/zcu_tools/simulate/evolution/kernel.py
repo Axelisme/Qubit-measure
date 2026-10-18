@@ -190,6 +190,19 @@ class SegmentTable:
         object.__setattr__(self, "tone_envelope", envelopes)
 
 
+def prepared_key_indices(
+    available: NDArray[np.void], required: NDArray[np.void]
+) -> dict[bytes, int] | None:
+    """Index opaque prepared keys by bytes if they cover every required key.
+
+    Return None for a domain miss. Duplicate available keys use the last index.
+    """
+    indices = {key.tobytes(): i for i, key in enumerate(available)}
+    if any(key.tobytes() not in indices for key in required):
+        return None
+    return indices
+
+
 class Prepared(Protocol):
     """Opaque kernel payload, shared read-only by workers.
 

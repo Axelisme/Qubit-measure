@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import pytest
 from zcu_tools.simulate.evolution.cache import PrepareCache, PreparedPayload
 
+from ._engine import Payload
+
 SPACE = ("synthetic", "source", 1e-4)
 OTHER_SPACE = ("synthetic", "other-source", 1e-4)
 
@@ -101,3 +103,19 @@ def test_invalid_charges_and_conflicting_allocation_metadata_fail_before_evictio
         cache.add(OTHER_SPACE, whole)
     assert cache.find(SPACE, {b"a"}) == before
     assert cache.bytes == 10
+
+
+def test_cache_admits_singleton_whole_allocation_and_preserves_active_reference():
+    cache = PrepareCache(32)
+    namespace = ("synthetic", "source", 0.001)
+    singleton = PreparedPayload(Payload(2), (b"one",))
+    cache.add(namespace, singleton)
+    active = cache.find(namespace, {b"one"})
+    assert active == [singleton]
+    assert cache.bytes == 32
+    cache.add(namespace, PreparedPayload(Payload(3), (b"oversize",)))
+    assert cache.bytes == 32
+    assert cache.find(namespace, {b"one"}) == [singleton]
+    cache.add(namespace, PreparedPayload(Payload(1), (b"replacement",)))
+    assert cache.find(namespace, {b"one"}) == []
+    assert active[0].prepared.nbytes == 32

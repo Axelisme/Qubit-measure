@@ -7,7 +7,6 @@ from threading import Barrier, Event, Lock
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Cancelled, Engine
-from zcu_tools.simulate.evolution.cache import PrepareCache, PreparedPayload
 from zcu_tools.simulate.evolution.kernel import KernelContext
 
 from ._engine import Payload, RecordingKernel, batch, source
@@ -123,22 +122,6 @@ def test_sealed_resource_releases_after_last_actual_handoff():
     kernel = SealingKernel()
     with closing(Engine(1, 0, kernels=(kernel,))) as engine:
         engine.evolve(source(), (batch(1),), cancel=kernel.event)
-
-
-def test_cache_admits_singleton_whole_allocation_and_preserves_active_reference():
-    cache = PrepareCache(32)
-    namespace = ("synthetic", "source", 0.001)
-    singleton = PreparedPayload(Payload(2), (b"one",))
-    cache.add(namespace, singleton)
-    active = cache.find(namespace, {b"one"})
-    assert active == [singleton]
-    assert cache.bytes == 32
-    cache.add(namespace, PreparedPayload(Payload(3), (b"oversize",)))
-    assert cache.bytes == 32
-    assert cache.find(namespace, {b"one"}) == [singleton]
-    cache.add(namespace, PreparedPayload(Payload(1), (b"replacement",)))
-    assert cache.find(namespace, {b"one"}) == []
-    assert active[0].prepared.nbytes == 32
 
 
 def test_declined_cached_admission_keeps_guard_build_handoff():

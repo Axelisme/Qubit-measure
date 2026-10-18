@@ -54,7 +54,7 @@ def source():
 
 
 def scoped(table, source, budget=1e-3):
-    context = KernelContext(source, budget, create_work_plan(table, source, budget))
+    context = KernelContext(source, budget, create_work_plan(table, source))
     return FloquetPeriodKernel(), context
 
 

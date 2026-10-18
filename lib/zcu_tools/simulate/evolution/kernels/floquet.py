@@ -55,6 +55,7 @@ from ..kernel import (
     Prepared,
     RowPlan,
     SegmentTable,
+    prepared_key_indices,
 )
 from ..secular import SecularModel
 from . import _floquet_sidebands as sb
@@ -926,8 +927,8 @@ class FloquetKernel:
             return GuardResult(accepted)
         selected = rows[positions]
         keys = self.prepare_keys(table, selected, context)
-        indices = {key.tobytes(): i for i, key in enumerate(prepared.keys)}
-        if any(key.tobytes() not in indices for key in keys):
+        indices = prepared_key_indices(prepared.keys, keys)
+        if indices is None:
             return None
         parameters = _parameters(table, selected)
         admissions: dict[int, FloquetAdmission] = {}
