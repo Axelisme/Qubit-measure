@@ -199,14 +199,13 @@ def test_field_type_choices_typing_optional_unwraps():
     """Baseline: typing.Optional[float] is unwrapped to ('float', None)."""
     from typing import Optional
 
-    result = _setup_field_result(Optional[float])  # noqa: UP045 — runtime arg not annotation
+    # tolerated: Pass legacy typing.Optional to the public handler via a synthetic model.
+    result = _setup_field_result(Optional[float])  # noqa: UP045
     assert result == ("float", None)
 
 
 def test_field_type_choices_pep604_optional_unwraps():
     """PEP 604: float | None must also be unwrapped to ('float', None)."""
-    import types  # noqa: F401 — ensure types.UnionType is available
-
     # Construct the PEP 604 union at runtime (not via annotation string eval).
     annotation = float | None
     result = _setup_field_result(annotation)
