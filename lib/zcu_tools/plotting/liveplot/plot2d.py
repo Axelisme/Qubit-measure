@@ -92,6 +92,7 @@ class LivePlot2D(BaseSegmentLivePlot, Generic[Seg2D_T]):
         return self.axs[0][0]
 
     def get_segment(self) -> Seg2D_T:
+        # tolerated(cast): AbsSegment storage erases the uniform-selected Seg2D_T.
         return cast(Seg2D_T, self.segments[0][0])
 
 
@@ -218,4 +219,5 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
 
     def get_segment(self, name: Literal["2d", "1d"]) -> Plot1DSegment | Seg2D_T:
         segment_map = ["2d", "1d"]
+        # tolerated(cast): AbsSegment storage erases the 2D/1D slot types used by overloads.
         return cast(Plot1DSegment | Seg2D_T, self.segments[0][segment_map.index(name)])

@@ -58,4 +58,5 @@ class LivePlotScatter(BaseSegmentLivePlot):
         return self.axs[0][0]
 
     def get_segment(self) -> ScatterSegment:
+        # tolerated(cast): segments stores AbsSegment; this slot starts as ScatterSegment.
         return cast(ScatterSegment, self.segments[0][0])
