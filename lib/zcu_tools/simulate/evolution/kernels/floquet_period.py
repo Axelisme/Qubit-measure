@@ -161,11 +161,11 @@ class _Neighbour:
 
 
 class _GainBlock:
-    """Serialize a fixed sorted gain trajectory, memoizing only unclaimed keys.
+    """Serialize a fixed gain trajectory with four recent unclaimed memo keys.
 
     The block lock covers numerical construction. The separate inventory lock
-    protects byte snapshots; readers never acquire a block lock. Repeated keys
-    that have already been handed off replay the same trajectory from its start.
+    protects byte snapshots; readers never acquire a block lock. Keys no longer
+    memoized replay the same trajectory from its start.
     """
 
     def __init__(
@@ -218,6 +218,12 @@ class _GainBlock:
                     self.history = (self.history + [_Neighbour(coordinate, result)])[
                         -4:
                     ]
+                    recent = {neighbour.gain for neighbour in self.history}
+                    self.memo = {
+                        key: period
+                        for key, period in self.memo.items()
+                        if key in recent
+                    }
                     if coordinate not in self.delivered or coordinate == gain:
                         self.memo[coordinate] = result
                     self.next_index += 1
@@ -750,10 +756,11 @@ class FloquetPeriodKernel:
     sixteen gains per trajectory before adding another. Each trajectory splits
     into fixed blocks of at most 32 gains. This plan never reads worker count,
     chunk size or execution order. Under one block lock, any caller builds the
-    fixed predecessors up to its requested key. Unclaimed results are memoized
-    until handoff; only the last four predecessors support further prediction.
-    Completing a block releases its history. Repeated already-delivered keys
-    replay the same fixed predecessors. A caller holds only one block lock.
+    fixed predecessors up to its requested key. The last four built coordinates
+    support prediction and memoize unclaimed results. Handoff removes a key's
+    memo; older unclaimed keys are evicted rather than retaining unused scan
+    prefixes. Completing a block releases its history. A key no longer memoized
+    replays the same fixed predecessors. A caller holds only one block lock.
     Tables are bitwise invariant to workers, chunks and request order for the
     same table, source and budget. Workspace bytes charge history and memo.
 
@@ -762,8 +769,8 @@ class FloquetPeriodKernel:
     Lagrange extrapolation of interaction-picture uniform prefixes. Because H0
     and the grid are identical, the analytic H0 transform and inverse cancel in
     the weighted sum, avoiding redundant phase exponentials. Repeated gains,
-    unequal retained grid counts, a last
-    gain-gap ratio above two, or a retained count below this key's first fine
+    unequal retained grid counts, a last gain-gap ratio above two, or a retained
+    count below this key's first fine
     grid disable the predictor. Carrier continuation is never attempted.
     The candidate must pass the same independent coarse-grid comparison at
     eight phase intervals, including U(T), with min(1e-4, budget*0.1). Failure

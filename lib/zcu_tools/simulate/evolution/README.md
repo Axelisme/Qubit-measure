@@ -789,10 +789,11 @@ Neither worker count nor chunking enters this plan.
 
 A block lock serializes construction in its fixed gain order up to the requested
 key. Different blocks can build concurrently. Each block retains at most four
-predecessors for prediction and memoizes unclaimed results. Handoff removes a
-key from the memo. Finishing the block releases its predecessor history.
-An already-delivered key can be requested again; replaying its fixed predecessors
-returns the same table. Each caller holds only one block lock. Prepared tables
+predecessors for prediction and memoizes their unclaimed results. Handoff removes
+a key from the memo. Older unclaimed keys are evicted, so unused scan prefixes
+do not accumulate. Finishing the block releases its predecessor history.
+A key no longer memoized replays its fixed predecessors and returns the same
+table. Each caller holds only one block lock. Prepared tables
 and resulting populations are bitwise invariant to worker count, chunking and
 request order for the same complete table, source and budget.
 
