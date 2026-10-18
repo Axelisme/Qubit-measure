@@ -56,6 +56,7 @@ from ._seeds import persistent_input, supported_input, template_seed_tree
 from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
+from .fixed_elements import FixedElements, FixedElementsForm
 from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
 from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
@@ -296,7 +297,7 @@ class _Section:
         )
         model = new_class(
             f"{core.__name__}Form",
-            (FormModel,),
+            (FixedElementsForm,),
             exec_body=lambda ns: ns.update(namespace),
         )
         if not issubclass(model, FormModel):
@@ -485,6 +486,9 @@ class Form[C: ConfigBase]:
     Template/type defaults, never copy the key or retain another kind's draft.
     A core_cfg that is a concrete persistent module or waveform Spec builds the
     same Spec form as module_form and requires an empty tree.
+    fixed_elements is a tuple of root-relative FixedElements declarations for
+    core cfg Forms. It supplies owner identity admission and participants value
+    validation; default_input rejects duplicate capture names with indices.
     """
 
     def __init__[E: BaseModel](
@@ -494,6 +498,7 @@ class Form[C: ConfigBase]:
         *,
         extras: type[E] | None = None,
         lower: Callable[[E, C], C] | None = None,
+        fixed_elements: tuple[FixedElements, ...] = (),
     ) -> None:
         if (extras is None) != (lower is None):
             raise ValueError("extras and lower must be provided together")
@@ -531,6 +536,10 @@ class Form[C: ConfigBase]:
                 raise TypeError("Generated extras model must implement FormModel")
             self.model = model
             self._section.model = model
+        if fixed_elements:
+            if not issubclass(self.model, FixedElementsForm):
+                raise ValueError("Fixed elements require a core cfg Form")
+            self.model.fixed_elements = fixed_elements
 
     @property
     def core_cfg(self) -> type[C]:
@@ -596,9 +605,10 @@ class Form[C: ConfigBase]:
         source admission reject the entire batch with LogicalEditError and the
         original edit index. Whole replacement is also rejected when any declared
         branch, nested model or container item contains a generated selector. Use
-        reachable logical children and dedicated selector operations instead;
-        sequence/mapping items do not gain writable paths. Ordinary nullable,
-        union and container fields without selectors keep core write semantics.
+        reachable logical children and dedicated selector operations instead.
+        Model-list items expose indexed logical paths; other sequence/mapping
+        items remain whole leaves. Ordinary nullable, union and container fields
+        without selectors keep core write semantics.
         Ordinary invalid values and Expr remain drafts.
         No live state is installed, captured or published. Use the candidate only
         within the same guarded owner turn/input/env, without await/reset. Wrong

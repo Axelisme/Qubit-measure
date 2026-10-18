@@ -6,8 +6,13 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels import dyson
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import synthetic_model
 
@@ -165,9 +170,19 @@ def test_bound_apply_error_is_bounded_and_preserves_hermiticity(
     kernel = dyson.DysonKernel()
     rows = np.arange(4, dtype=np.int64)
     prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows[:1]), table, rows[:1], source, budget
+        kernel.prepare_keys(table, rows[:1], KernelContext(source, budget, WorkPlan())),
+        table,
+        rows[:1],
+        KernelContext(source, budget, WorkPlan()),
     )
-    bound = kernel.bind_input(prepared, 0, table, rows[::-1], initial, budget)
+    bound = kernel.bind_input(
+        prepared,
+        0,
+        table,
+        rows[::-1],
+        initial,
+        KernelContext(source, budget, WorkPlan()),
+    )
     assert bound is not None
     actual = np.repeat(initial[None], 4, axis=0)
     for subset in (rows[::2][::-1], rows[1::2][::-1]):
@@ -216,12 +231,22 @@ def test_ground_with_excited_only_drive_has_empty_table_and_free_output(
     rows = np.arange(4, dtype=np.int64)
     budget = 1e-3
     prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows[:1]), table, rows[:1], source, budget
+        kernel.prepare_keys(table, rows[:1], KernelContext(source, budget, WorkPlan())),
+        table,
+        rows[:1],
+        KernelContext(source, budget, WorkPlan()),
     )
     actual = np.repeat(initial[None], 4, axis=0)
     try:
         if bound_input:
-            prepared = kernel.bind_input(prepared, 0, table, rows, initial, budget)
+            prepared = kernel.bind_input(
+                prepared,
+                0,
+                table,
+                rows,
+                initial,
+                KernelContext(source, budget, WorkPlan()),
+            )
             assert prepared is not None
         mask = kernel.apply(
             prepared,
@@ -259,9 +284,14 @@ def test_bound_apply_returns_free_evolution_when_all_paths_are_pruned() -> None:
     kernel = dyson.DysonKernel()
     rows = np.arange(4, dtype=np.int64)
     prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows[:1]), table, rows[:1], source, 1e-3
+        kernel.prepare_keys(table, rows[:1], KernelContext(source, 0.001, WorkPlan())),
+        table,
+        rows[:1],
+        KernelContext(source, 0.001, WorkPlan()),
     )
-    bound = kernel.bind_input(prepared, 0, table, rows, initial, 1e-3)
+    bound = kernel.bind_input(
+        prepared, 0, table, rows, initial, KernelContext(source, 0.001, WorkPlan())
+    )
     assert bound is not None
     actual = np.repeat(initial[None], 4, axis=0)
     kernel.apply(

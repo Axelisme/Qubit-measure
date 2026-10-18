@@ -156,8 +156,8 @@ def test_nullable_single_branch_keeps_inner_selector_editable(enabled: bool) -> 
 
     if not enabled:
         assert description.children == ()
-        state.write(
-            {("nullable_multi",): {"kind": "inline", "module": {"kind": "first"}}}, env
+        state.select(
+            ("nullable_multi",), {"kind": "inline", "module": {"kind": "first"}}, env
         )
         assert state.describe(("nullable_multi",), env).children == ()
         state.install_input(
@@ -180,13 +180,13 @@ def test_nullable_single_branch_keeps_inner_selector_editable(enabled: bool) -> 
         {"kind": "first"},
         {"kind": "second"},
     ]
-    state.write({("nullable_multi", "module", "kind"): "second"}, env)
+    state.select(("nullable_multi", "module"), {"kind": "second"}, env)
     state.write({("nullable_multi", "module", "value"): 7.0}, env)
     switched = state.describe(("nullable_multi", "module"), env).target
     assert switched is not None and switched.selected == 1
     assert state.preview(env).values[("nullable_multi", "module", "value")] == 7.0
 
-    state.write({("nullable_multi",): None}, env)
+    state.select(("nullable_multi",), None, env)
     disabled = state.describe(("nullable_multi",), env)
     assert disabled.target is not None
     assert disabled.target.selection_fixed is True

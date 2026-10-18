@@ -90,7 +90,7 @@ def _control_presentation(
         return "elements", None
     options = field.options if field.selector else None
     if (
-        field.fixed
+        (field.fixed or field.readonly)
         and field.kind != "model"
         and not field.can_expand
         and (options is None or not any(option.commands for option in options))
@@ -150,7 +150,7 @@ def project_field(
         nullable=field.nullable,
         active=not field.nullable or (present and current is not None),
         can_expand=field.can_expand,
-        expression=field.expression and not field.fixed,
+        expression=field.expression and not (field.fixed or field.readonly),
         options=options,
         selected=field.selected,
         selection=selections.get(field.path, current),
@@ -161,7 +161,7 @@ def project_field(
         value=preview.values.get(field.path),
         has_value=field.path in preview.values,
         decimals=field.decimals,
-        fixed=field.fixed,
+        fixed=field.fixed or field.readonly,
         group=field.group,
         commands=field.commands,
         elements=field.elements,

@@ -163,7 +163,7 @@ def test_copy_command_does_not_reapply_initial_set() -> None:
     assert not isinstance(value, FormErrors), value
     initial = form.to_cfg(value, env)
     assert isinstance(initial, Core) and initial.probe.gain == 0.8
-    state.write({("probe", "kind"): "ref", ("probe", "name"): "Q.pulses.probe"}, env)
+    state.select(("probe",), {"kind": "ref", "name": "Q.pulses.probe"}, env)
     state.run_command(("probe",), "to_inline", env)
     value = state.result(env)
     assert not isinstance(value, FormErrors), value

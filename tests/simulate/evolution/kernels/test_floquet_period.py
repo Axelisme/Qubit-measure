@@ -5,7 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import KernelCase, KernelContract, synthetic_model
 
@@ -87,7 +88,9 @@ class TestFloquetPeriod(KernelContract):
 def test_key_excludes_apply_only_parameters(kernel_case: KernelCase) -> None:
     case = kernel_case
     rows = np.array([1, 2], dtype=np.int64)
-    keys = case.kernel.prepare_keys(case.table, rows)
+    keys = case.kernel.prepare_keys(
+        case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    )
     assert keys[0] == keys[1]
     for field in (
         "duration_ns",
@@ -98,12 +101,19 @@ def test_key_excludes_apply_only_parameters(kernel_case: KernelCase) -> None:
         values = getattr(case.table, field).copy()
         values[2] += 0.31
         changed = replace(case.table, **{field: values})
-        np.testing.assert_array_equal(case.kernel.prepare_keys(changed, rows), keys)
+        np.testing.assert_array_equal(
+            case.kernel.prepare_keys(
+                changed, rows, KernelContext(case.source, case.budget, WorkPlan())
+            ),
+            keys,
+        )
     for field in ("level", "tone_port", "tone_frequency_ghz", "tone_amplitude"):
         values = getattr(case.table, field).copy()
         values[2] += 1
         changed = replace(case.table, **{field: values})
-        other = case.kernel.prepare_keys(changed, rows)
+        other = case.kernel.prepare_keys(
+            changed, rows, KernelContext(case.source, case.budget, WorkPlan())
+        )
         assert other[0] != other[1], field
 
 
@@ -119,21 +129,31 @@ def test_guard_rejects_low_carrier_shapes_and_large_split_estimate(
             raise AssertionError("guard must not read density")
 
     source = NoDensity(case.states[0], case.source.model)
-    assert case.kernel.guard(case.table, rows, source, case.budget).all()
+    assert case.kernel.guard(
+        case.table, rows, KernelContext(source, case.budget, WorkPlan())
+    ).all()
     low = replace(case.table, tone_frequency_ghz=np.full((len(rows), 1), 0.01))
-    assert not case.kernel.guard(low, rows, source, case.budget).any()
+    assert not case.kernel.guard(
+        low, rows, KernelContext(source, case.budget, WorkPlan())
+    ).any()
     sampled = EnvelopeSpec("sampled", np.ones(2, complex), np.array([0.0, 10.0]))
     shaped = replace(case.table, envelopes=(sampled,))
-    assert not case.kernel.guard(shaped, rows, source, case.budget).any()
+    assert not case.kernel.guard(
+        shaped, rows, KernelContext(source, case.budget, WorkPlan())
+    ).any()
     long = replace(case.table, duration_ns=np.full(len(rows), 1e12))
-    assert not case.kernel.guard(long, rows, source, case.budget).any()
+    assert not case.kernel.guard(
+        long, rows, KernelContext(source, case.budget, WorkPlan())
+    ).any()
     idle = replace(
         case.table,
         tones=np.zeros(len(rows), dtype=np.int64),
         tone_port=np.full((len(rows), 1), -1, dtype=np.int64),
         tone_envelope=np.full((len(rows), 1), -1, dtype=np.int64),
     )
-    assert not case.kernel.guard(idle, rows, source, case.budget).any()
+    assert not case.kernel.guard(
+        idle, rows, KernelContext(source, case.budget, WorkPlan())
+    ).any()
 
 
 def test_engine_dispatches_rejected_dyson_rows_to_hilbert_period() -> None:

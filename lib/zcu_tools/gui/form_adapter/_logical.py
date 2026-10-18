@@ -229,7 +229,7 @@ def _resolve(
     level = root_level(input.model, input.data, env, input.selections)
     source: LogicalSource | None = None
     for index, name in enumerate(path):
-        if name not in level.model.model_fields:
+        if not level.has(name):
             raise FormPathError(path, f"Unknown logical field: {path!r}")
         if source is not None:
             source = replace(source, spec_path=(*source.spec_path, name))

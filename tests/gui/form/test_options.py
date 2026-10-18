@@ -17,7 +17,6 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
-    FormWritePath,
 )
 
 from tests.gui._form_converters import RebuildingForm
@@ -181,19 +180,14 @@ def test_option_matches_typed_leaves_first_match_and_missing_without_mutation() 
         Option("bad fields", "key", fields=First)
 
 
-@pytest.mark.parametrize(
-    "batch", [{("branch",): {"kind": "second"}}, {("branch", "kind"): "second"}]
-)
-def test_branch_selection_starts_from_fresh_defaults_and_commits_once(
-    batch: Mapping[FormWritePath, JsonValue],
-) -> None:
+def test_branch_selection_starts_from_fresh_defaults_and_commits_once() -> None:
     env = FormEnv()
     state = FormState(
         FormInput(Picks, {"branch": {"kind": "first", "shared": {"expr": "99"}}})
     )
     observed: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: observed.append(state.input.data))
-    state.write(batch, env)
+    state.select(("branch",), {"kind": "second"}, env)
     assert state.input.data == {"branch": {"kind": "second", "shared": 8}}
     assert observed == [state.input.data]
     result = state.result(env)
@@ -381,7 +375,7 @@ def test_commands_only_use_the_active_branch_declaration() -> None:
     assert state.input.data == before
     state.run_command(("branch", "value"), "active", env)
     assert state.input.data == {"branch": {"kind": "active", "value": 2}}
-    state.write({("branch", "kind"): "inactive"}, env)
+    state.select(("branch",), {"kind": "inactive"}, env)
     state.run_command(("branch", "value"), "inactive", env)
     assert state.input.data == {"branch": {"kind": "inactive", "value": 3}}
 
@@ -430,7 +424,7 @@ def test_shared_child_commands_follow_active_ancestor_branch() -> None:
     state.run_command(("branch", "child", "value"), "active", env)
     assert state.input.data == {"branch": {"kind": "active", "child": {"value": 2}}}
     assert events == [state.input.data]
-    state.write({("branch", "kind"): "inactive"}, env)
+    state.select(("branch",), {"kind": "inactive"}, env)
     with pytest.raises(ValueError, match="command"):
         state.run_command(("branch", "child", "value"), "active", env)
     state.run_command(("branch", "child", "value"), "inactive", env)
@@ -511,9 +505,7 @@ class SourceFailureForm(FormModel):
     flag: bool = False
 
 
-def test_partial_branch_source_failure_preserves_parent_path_and_batch_atomicity() -> (
-    None
-):
+def test_selection_source_failure_preserves_parent_path_and_atomicity() -> None:
     env = FormEnv()
     state = FormState(SourceFailureForm.default_input(env))
     before = state.input.data
@@ -522,9 +514,7 @@ def test_partial_branch_source_failure_preserves_parent_path_and_batch_atomicity
     with pytest.raises(
         PydanticCustomError, match="Unavailable captured source"
     ) as caught:
-        state.write(
-            {("flag",): True, ("outer", "branch"): {"kind": "unavailable"}}, env
-        )
+        state.select(("outer", "branch"), {"kind": "unavailable"}, env)
     assert (caught.value.context or {}).get("path") == ("outer", "branch", "source")
     assert state.input.data == before
     assert state.base.data == before
@@ -586,7 +576,7 @@ def test_every_intrinsic_tag_is_a_typed_option_sharing_its_branch_fields(
     assert [option.label for option in target.options] == [str(tag) for tag in tags]
     assert target.selected == tags.index(alias)
     assert {child.path[-1] for child in description.children} == {"shared", "a_only"}
-    state.write({("branch",): {"kind": tags[-1]}}, env)
+    state.select(("branch",), {"kind": tags[-1]}, env)
     assert {child.path[-1] for child in state.describe(("branch",), env).children} == {
         "shared",
         "b_only",

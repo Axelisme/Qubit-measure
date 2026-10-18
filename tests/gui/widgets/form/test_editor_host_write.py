@@ -39,6 +39,11 @@ type Write = Callable[[Mapping[FormWritePath, JsonValue]], None]
 type Build = Callable[[FormState[HostForm], Write | None], Editor]
 
 
+def no_selection(path: FormWritePath, selection: JsonValue) -> None:
+    """This host exposes no option fields."""
+    pytest.fail(f"Unexpected selection {selection!r} at {path!r}")
+
+
 def no_command(path: FormWritePath, name: str) -> None:
     """A host command route for a form whose options declare no command."""
     pytest.fail(f"Unexpected option command {name!r} at {path!r}")
@@ -53,7 +58,13 @@ def build(qapp: QApplication) -> Iterator[Build]:
         editor = (
             FormEditor(state, FormEnv())
             if write is None
-            else FormEditor(state, FormEnv(), write=write, run_command=no_command)
+            else FormEditor(
+                state,
+                FormEnv(),
+                write=write,
+                select=no_selection,
+                run_command=no_command,
+            )
         )
         editors.append(editor)
         return editor

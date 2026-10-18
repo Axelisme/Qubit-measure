@@ -15,12 +15,12 @@ from ._sources import local_choices
 from ._structure import (
     alternatives,
     discriminator,
-    element_model,
-    fixed_list,
     intrinsic_tags,
+    list_model,
     model_types,
 )
 from .model import (
+    Display,
     FormEnv,
     FormModel,
     FormPath,
@@ -148,10 +148,9 @@ class Level:
     models use an empty mapping without generating defaults. pinned carries
     the enclosing selected option's partial value for structural-tag omission.
     variants retains enclosing annotation branches for command-result admission.
-    A FixedList's level has items, its raw elements, and its fields are the
-    element indexes. Its model is the element model, shared by every element.
-    name_field is the FixedList's identity field, set on the list level and on
-    each element level; None elsewhere.
+    A model-list level has raw items and fields addressed by element index.
+    Its model is shared by every element. element_label is a Display hint for
+    picker text, passed from the list level to its elements; None elsewhere.
     """
 
     model: type[BaseModel]
@@ -164,11 +163,11 @@ class Level:
     selections: Mapping[FormWritePath, JsonValue] = field(default_factory=dict)
     converters: Mapping[FormPath, InputConverter] = field(default_factory=dict)
     items: tuple[JsonValue, ...] | None = None
-    name_field: str | None = None
+    element_label: str | None = None
 
     @property
     def names(self) -> tuple[str | int, ...]:
-        """Declared field names, or the element indexes of a FixedList level."""
+        """Declared field names, or the indexes of a model-list level."""
         if self.items is not None:
             return tuple(range(len(self.items)))
         return tuple(self.model.model_fields)
@@ -238,9 +237,9 @@ class Field:
 
     @property
     def element_name(self) -> str:
-        """Identity of a FixedList element field; its index text when unnamed."""
+        """Display label of a model-list element; its index text when unspecified."""
         item = self.level.value(self.name)
-        key = self.level.name_field
+        key = self.level.element_label
         name = item.get(key) if isinstance(item, dict) and key is not None else None
         return name if isinstance(name, str) and name else str(self.name)
 
@@ -339,8 +338,8 @@ class Field:
         models require an object; selectors use the raw child branch's matching
         option fields, independently of an overridden selection. A reachable model may have no displayed fields after expansion.
         """
-        if fixed_list(self.info) is not None:
-            return element_model(self.info)
+        if (element := list_model(self.info)) is not None:
+            return element
         models = model_types(self.info.annotation)
         if not models:
             return None
@@ -369,7 +368,7 @@ class Field:
         )
         if self.branch_option is not None:
             pinned = self.branch_option.value
-        # Declarations of a FixedList apply to each of its elements, so an
+        # Model-list declarations apply to each of its elements, so an
         # element inherits them without an index component.
         element = self.level.items is not None
         choices = {
@@ -382,8 +381,7 @@ class Field:
             for path, values in self.level.options.items()
             if element or (len(path) > 1 and path[0] == self.name)
         }
-        fixed = fixed_list(self.info)
-        if fixed is not None:
+        if list_model(self.info) is not None:
             return Level(
                 model,
                 self.path,
@@ -398,7 +396,14 @@ class Field:
                     if len(path) > 1 and path[0] == self.name
                 },
                 items=tuple(value) if isinstance(value, list) else (),
-                name_field=fixed.name_field,
+                element_label=next(
+                    (
+                        item.element_label
+                        for item in reversed(self.info.metadata)
+                        if isinstance(item, Display)
+                    ),
+                    None,
+                ),
             )
         return Level(
             model,
@@ -417,7 +422,7 @@ class Field:
                 },
                 **_local_converters(model, env),
             },
-            name_field=self.level.name_field if element else None,
+            element_label=self.level.element_label if element else None,
         )
 
 

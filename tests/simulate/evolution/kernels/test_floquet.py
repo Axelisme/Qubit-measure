@@ -5,7 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, kernel
-from zcu_tools.simulate.evolution.kernel import ApplyContext
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from .._engine import RecordingKernel
 from ..contract.kernel_suite import (
@@ -86,9 +87,9 @@ def test_engine_reuses_guard_preparations_once_per_key(
         def __init__(self):
             self.prepared_keys = []
 
-        def prepare(self, keys, table, rows, source, budget):
+        def prepare(self, keys, table, rows, context: KernelContext):
             self.prepared_keys.extend(key.tobytes() for key in keys)
-            return super().prepare(keys, table, rows, source, budget)
+            return super().prepare(keys, table, rows, context)
 
     case = kernel_case
     tracks = tuple(
@@ -122,11 +123,12 @@ def test_engine_reuses_guard_preparations_once_per_key(
         assert len(counted.prepared_keys) == 2
     rows = np.array([0], dtype=np.int64)
     prepared = case.kernel.prepare(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
         case.table,
         rows,
-        case.source,
-        case.budget,
+        KernelContext(case.source, case.budget, WorkPlan()),
     )
     expected = case.source.initial_density[None].copy()
     case.kernel.apply(prepared, rows, case.table, rows, expected, case.context(rows))
@@ -140,7 +142,9 @@ def test_probe_parameters_share_prepare_but_stark_and_level_do_not(
 ) -> None:
     case = kernel_case
     rows = np.arange(4, dtype=np.int64)
-    keys = case.kernel.prepare_keys(case.table, rows)
+    keys = case.kernel.prepare_keys(
+        case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    )
     assert len(np.unique(keys)) == 1
     for table in (
         replace(
@@ -149,7 +153,12 @@ def test_probe_parameters_share_prepare_but_stark_and_level_do_not(
         replace(case.table, tone_amplitude=case.table.tone_amplitude * [2.0, 1.0]),
         replace(case.table, level=np.ones((4, 1), dtype=np.int64)),
     ):
-        assert not np.any(case.kernel.prepare_keys(table, rows) == keys)
+        assert not np.any(
+            case.kernel.prepare_keys(
+                table, rows, KernelContext(case.source, case.budget, WorkPlan())
+            )
+            == keys
+        )
     costs = case.kernel.cost(case.table, rows)
     assert costs.shape == (4,)
     assert np.all(np.isfinite(costs) & (costs >= 0))
@@ -173,8 +182,12 @@ def test_tone_order_does_not_change_physical_result(kernel_case: KernelCase) -> 
     )
     rows = np.arange(4, dtype=np.int64)
     assert np.array_equal(
-        case.kernel.prepare_keys(swapped, rows),
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            swapped, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
     )
     KernelContract().test_error_within_budget(replace(case, table=swapped))
 
@@ -217,12 +230,21 @@ def test_full_micromotion_with_arbitrary_start_phase(kernel_case: KernelCase) ->
     )
     case = replace(case, source=source, table=table)
     rows = np.arange(4, dtype=np.int64)
-    assert case.kernel.guard(table, rows, source, case.budget).all()
+    assert case.kernel.guard(
+        table, rows, KernelContext(source, case.budget, WorkPlan())
+    ).all()
     keys, representatives, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(source, case.budget, WorkPlan())
+        ),
+        return_index=True,
+        return_inverse=True,
     )
     prepared = case.kernel.prepare(
-        keys, table, rows[representatives], source, case.budget
+        keys,
+        table,
+        rows[representatives],
+        KernelContext(source, case.budget, WorkPlan()),
     )
     actual = case.states.copy()
     case.kernel.apply(prepared, inverse, table, rows, actual, case.context(rows))
@@ -256,14 +278,18 @@ def test_guard_rejects_strong_probe_shapes_and_untrackable_modes(
         ),
         replace(case.table, tone_frequency_ghz=np.zeros((4, 2))),
     ):
-        assert not case.kernel.guard(table, rows, case.source, case.budget).any()
+        assert not case.kernel.guard(
+            table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ).any()
 
 
 def test_guard_uses_error_budget_for_omitted_harmonics(kernel_case: KernelCase) -> None:
     case = kernel_case
     rows = np.arange(4, dtype=np.int64)
     table = replace(case.table, duration_ns=np.full(4, 5.0))
-    assert not case.kernel.guard(table, rows, case.source, 1e-12).any()
+    assert not case.kernel.guard(
+        table, rows, KernelContext(case.source, 1e-12, WorkPlan())
+    ).any()
 
 
 def test_probe_changes_coherent_state_and_matches_strict_reference(
@@ -273,12 +299,17 @@ def test_probe_changes_coherent_state_and_matches_strict_reference(
     case = kernel_case
     rows = np.arange(4, dtype=np.int64)
     keys, representatives, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
     prepared = case.kernel.prepare(
-        keys, case.table, rows[representatives], case.source, case.budget
+        keys,
+        case.table,
+        rows[representatives],
+        KernelContext(case.source, case.budget, WorkPlan()),
     )
     actual = case.states.copy()
     case.kernel.apply(prepared, inverse, case.table, rows, actual, case.context(rows))
@@ -345,12 +376,21 @@ def test_probe_guard_failure_uses_period_propagation_in_floquet_frame(
     )
     case = replace(case, source=source, table=table)
     rows = np.arange(4, dtype=np.int64)
-    assert case.kernel.guard(table, rows, source, case.budget).all()
+    assert case.kernel.guard(
+        table, rows, KernelContext(source, case.budget, WorkPlan())
+    ).all()
     keys, representatives, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(source, case.budget, WorkPlan())
+        ),
+        return_index=True,
+        return_inverse=True,
     )
     prepared = case.kernel.prepare(
-        keys, table, rows[representatives], source, case.budget
+        keys,
+        table,
+        rows[representatives],
+        KernelContext(source, case.budget, WorkPlan()),
     )
     actual = case.states.copy()
     case.kernel.apply(prepared, inverse, table, rows, actual, case.context(rows))
@@ -388,19 +428,27 @@ def test_unused_zero_port_preserves_acceptance_and_density(
     table = replace(case.table, tone_port=case.table.tone_port + int(zero_first))
     rows = np.arange(len(case.states), dtype=np.int64)
     for budget in (case.budget, 1e-12):
-        expected = floquet.guard_prepared(case.table, rows, case.source, budget)
-        actual = floquet.guard_prepared(table, rows, source, budget)
+        expected = floquet.guard_prepared(
+            case.table, rows, KernelContext(case.source, budget, WorkPlan())
+        )
+        actual = floquet.guard_prepared(
+            table, rows, KernelContext(source, budget, WorkPlan())
+        )
         np.testing.assert_array_equal(actual.accepted, expected.accepted)
         if budget != case.budget:
             assert not actual.accepted.all()
             continue
         assert actual.accepted.all()
         keys, first, inverse = np.unique(
-            floquet.prepare_keys(table, rows),
+            floquet.prepare_keys(
+                table, rows, KernelContext(case.source, budget, WorkPlan())
+            ),
             return_index=True,
             return_inverse=True,
         )
-        prepared = floquet.prepare(keys, table, rows[first], source, budget)
+        prepared = floquet.prepare(
+            keys, table, rows[first], KernelContext(source, budget, WorkPlan())
+        )
         baseline = case.states.copy()
         result = case.states.copy()
         handed_off = case.states.copy()
@@ -454,13 +502,19 @@ def test_micromotion_bath_matches_independent_lindblad_jumps(
     )
     case = replace(case, source=source, table=table)
     rows = np.arange(4, dtype=np.int64)
-    assert case.kernel.guard(table, rows, source, case.budget).all()
+    assert case.kernel.guard(
+        table, rows, KernelContext(source, case.budget, WorkPlan())
+    ).all()
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(table, rows),
+        case.kernel.prepare_keys(
+            table, rows, KernelContext(source, case.budget, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
-    prepared = case.kernel.prepare(keys, table, rows[first], source, case.budget)
+    prepared = case.kernel.prepare(
+        keys, table, rows[first], KernelContext(source, case.budget, WorkPlan())
+    )
     actual = case.states.copy()
     case.kernel.apply(prepared, inverse, table, rows, actual, case.context(rows))
     expected = np.stack(
@@ -475,9 +529,13 @@ def test_micromotion_bath_matches_independent_lindblad_jumps(
 
     # Retaining the rotating bath extends admission without dropping its effect.
     long_table = replace(table, duration_ns=np.full(4, 128.0))
-    assert case.kernel.guard(long_table, rows, source, case.budget).all()
+    assert case.kernel.guard(
+        long_table, rows, KernelContext(source, case.budget, WorkPlan())
+    ).all()
     long_case = replace(case, table=long_table)
-    prepared = case.kernel.prepare(keys, long_table, rows[first], source, case.budget)
+    prepared = case.kernel.prepare(
+        keys, long_table, rows[first], KernelContext(source, case.budget, WorkPlan())
+    )
     actual = case.states.copy()
     case.kernel.apply(
         prepared, inverse, long_table, rows, actual, long_case.context(rows)
@@ -486,7 +544,9 @@ def test_micromotion_bath_matches_independent_lindblad_jumps(
         [reference(long_case, r, state) for r, state in enumerate(case.states)]
     )
     np.testing.assert_allclose(actual, expected, rtol=0, atol=3e-6)
-    assert case.kernel.guard(long_table, rows, closed_source, case.budget).all()
+    assert case.kernel.guard(
+        long_table, rows, KernelContext(closed_source, case.budget, WorkPlan())
+    ).all()
 
 
 def test_prepared_bytes_exclude_shared_models(kernel_case: KernelCase) -> None:
@@ -505,20 +565,25 @@ def test_prepared_bytes_exclude_shared_models(kernel_case: KernelCase) -> None:
     gains[:, 0] = [0.10, 0.11, 0.12, 0.13]
     table = replace(case.table, tone_amplitude=gains)
     rows = np.arange(len(case.states))
-    keys = case.kernel.prepare_keys(table, rows)
+    keys = case.kernel.prepare_keys(
+        table, rows, KernelContext(source, case.budget, WorkPlan())
+    )
     # Warm imports and solver/library caches using a different set of frames.
     case.kernel.prepare(
-        case.kernel.prepare_keys(case.table, rows[:1]),
+        case.kernel.prepare_keys(
+            case.table, rows[:1], KernelContext(source, case.budget, WorkPlan())
+        ),
         case.table,
         rows[:1],
-        source,
-        case.budget,
+        KernelContext(source, case.budget, WorkPlan()),
     )
     gc.collect()
     tracemalloc.start()
     try:
         before = tracemalloc.take_snapshot()
-        prepared = case.kernel.prepare(keys, table, rows, source, case.budget)
+        prepared = case.kernel.prepare(
+            keys, table, rows, KernelContext(source, case.budget, WorkPlan())
+        )
         gc.collect()
         after = tracemalloc.take_snapshot()
         retained = sum(stat.size_diff for stat in after.compare_to(before, "traceback"))

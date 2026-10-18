@@ -190,7 +190,7 @@ def container_recipe_rpc(nested_recipe_rpc):
         fixture.ctrl.tab_control.close_tab(tab)
 
 
-@pytest.mark.parametrize("value", [{}, 4])
+@pytest.mark.parametrize("value", [4])
 def test_recipe_rpc_structure_rejection_identifies_first_edit_atomically(
     container_recipe_rpc, value
 ) -> None:

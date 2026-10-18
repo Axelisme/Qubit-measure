@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-18，依名與形狀遞迴還原及完整 JSON 草稿
+**Last updated:** 2026-10-18，遞迴還原、中性 model-list 與宣告 admission
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
@@ -24,7 +24,7 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 `InputConverter` 是一個欄位的單一 converter，處理全部目標選項。可在 Annotated metadata 或 `FormModel.converters(env)` 宣告。Local metadata 覆蓋祖先宣告，同一 model 的 hook 再覆蓋自身 metadata。Callable 接收 readonly snapshot、目標 selection 與局部 evaluate context，回 `FormConversionResult(structure, input)`。它與 command 共用原子 installer，Core 不補 defaults。
 
-沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Partial selector object 在轉換後套用明確提供的 children，tag 葉寫入也走同一個 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。`FormInput.to_json/from_json` 固定編解碼 `{data,selections}`，保留 raw branch 與明確選項的差異。沒有 override 時 selections 為空 list。不存版本、型別 identity 或 callable，也不雙讀舊格式。
+沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Caller 用 `select(path, selection, env)` 明確切換選項；`prepare_selection` 只準備 detached candidate。值寫入與 tag 葉寫入都不執行 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。`FormInput.to_json/from_json` 固定編解碼 `{data,selections}`，保留 raw branch 與明確選項的差異。沒有 override 時 selections 為空 list。不存版本、型別 identity 或 callable，也不雙讀舊格式。
 
 `FormState.restore_input(saved, env)` 接受具名 FormInput。啟動、source reload 與 RAM switching 共用這個入口。Model 按現行欄位名遞迴，缺值用 host 提供的 defaults，多出欄位列 dropped。List 照存檔位置與長度還原，逐元素補新欄位 defaults。合法 selection 保留，不合法則 default+dropped。無 discriminator 的 union 不猜 branch，raw 照搬。葉欄位保留 expression 與 invalid raw，由一般驗證處理。形狀不符列 dropped。還原不跑 converter、options hook、來源檢查或求值。成功時一次安裝，base 不變，完整草稿有變才通知一次。Provider/defaults 故障在安裝前傳播。還原與 Reset 不經普通 mutation 的 owner 檢查。
 
@@ -42,21 +42,21 @@ Sweep 的四種數值 model、座標／採樣換算與 row command 宣告由 `gu
 
 Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_adapter` 擁有。Core 只讀普通 annotation、`Option` 與 `InputPolicy`，不以領域 subclass 判定行為。`InputPolicy(expression=False)` 放在 field 的 Annotated metadata，關閉 describe、decode/result 與 defaults evaluation 的 expression 能力。Restore 仍保留這些 invalid raw。True 不會替 Literal、enum、bool、choices 或混合 union 開啟原本不支援的能力。Write 仍保存普通 invalid draft，由 result 回報。
 
-Editor 與 MCP 讀同一份 description options，照 label 列選項，一次寫入 value，首次展開才 describe 選中項目的 children。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 由 `form_adapter` 的集中 converter 決定繼承或新建 input。
+Editor 與 MCP 讀同一份 description options，照 label 列選項，透過明確 selection 操作選擇 option.value，首次展開才 describe 選中項目的 children。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 由 `form_adapter` 的集中 converter 決定繼承或新建 input。
 
-`Annotated[list[Element], FixedList(name_field="label")]` 宣告固定具名 model list。`Element` 是一般 Pydantic model，identity 欄位必須宣告為 str，capture 提供 literal 名稱、數量與順序。建立 `FormInput` 時拒絕重複名稱，錯誤列出名稱與原始 indices。`describe(("tones",), env)` 的 target 有 `kind="elements"` 與 `elements`，每項包含 index、name 與完整 path；children 是元素 model，`describe(("tones", 1), env)` 列該位置的真實欄位。名稱欄位標為 fixed。索引必須是非負且未越界的 int；數字字串與 bool 不當成 index。
+`list[Model]` 直接提供 indexed editing，不需要政策標記。`describe(("tones",), env)` 回 `kind="elements"`、目前各位置的 index、label 與 typed path，children 是元素 model。`Display(element_label="label")` 指定 picker 使用哪個字串欄位，未指定或非字串時顯示 index。`Display(readonly=True)` 只要求唯讀呈現，不限制 Core 寫入。數字字串、bool、負數與越界 index 都不是合法 path。字串 list 與其他 sequence、typed mapping 仍是整個 leaf。
 
-普通 indexed write、whole-list replacement、converter／command 的最終安裝與 `install_input` 共用固定 identity admission。改名、增刪或重排會 raise ValueError，整批不安裝、不通知；元素的普通 invalid 值仍可編輯。`prepare_write` 回傳前也檢查 identity，供 host 在安裝前檢查候選。只有 host 的 `reset(base)` 能換入新的 capture。這個 admission 不求值、不讀 library，也不執行 converter。
+`FormModel.check_input_change(before, after)` 由 root 宣告提供。Core 在普通 write、command 與選項切換的完整候選準備後呼叫它。兩棵 JSON tree 都是深複本，改動不會寫回 draft 或 base。宣告以 `FormInputRejected(path, message)` 拒絕時，整批 input、base、selections 與通知不變，原始請求 path 保留。`install_input` 會對 current input 重新檢查，保護直接傳入的候選。檢查不讀新來源、不執行 options 或 converter；一般值驗證仍由 Pydantic 處理。還原與 reset 不執行這個檢查。
 
-`Annotated[list[str], Participants(list_path=("tones",))]` 宣告獨立參與名單。list_path 從持有該欄位的 model 出發，指向 FixedList。Result／preview 檢查名單非空、無重複且每個名稱存在，保留輸入順序。名單不篩選元素，也不改原始 index；全部元素的值與 expression 都驗證，錯誤保留完整原始 index。Core 不解讀名稱的 domain 意義。
+固定 identity、名稱唯一性與 participants 政策由 `gui.form_adapter.FixedElementsForm` 擁有。Core 不認識元素名字、參與名單、capture 或 group。普通 model-list 可改名稱、長度與順序；固定政策只在宣告者選用的 admission 中生效。
 
-Scalar、FixedList 以外的整個 sequence 與整個 typed mapping 都是 leaf。普通 nested model 只編輯子欄位，一般可留空 model 區段仍用 Enabled 控制 object／null 啟停。Choices 使用 model-field leaf paths，驗證與 description 共用同一份當次選項。Parent 與 child 宣告同一 leaf 時，最深 nested FormModel 的 local choices 優先，包含空選項。非重疊的 parent 選項保持有效，重用同型 nested model 的欄位各自隔離。
+`write(batch, env)` 一律覆寫指定 path 的完整 raw 子樹，不合併 defaults、不執行 converter、不求值舊 draft。新值決定 branch，該 path 及 descendants 的 selection overrides 會清除。只改一欄就寫該欄完整 typed path。寫入 model object 時，未提供的欄位只在 result 依 Pydantic defaults 補值或報錯，不回填 raw。Annotation、來源與宣告 admission 仍在原子安裝前檢查。
 
 還原不檢查 library 或一般 leaf 值是否合法。Missing ref、family 與 hook membership 走既有 result／preview 欄位錯誤，保留 invalid draft 並擋 Run。已 inline 的原稿不從 library 重建。
 
 `FormModel.check_sources(data, env)` 檢查本層 raw input 真正消費的來源。Hook 不遞迴、不補 defaults、不驗證普通值，也不改 capture。Core 沿 active children 與被消費的靜態 defaults 呼叫同一 hook，供 defaults、write 與 preview/result 共用。`field_error` 的相對路徑由 core 加上 consuming ancestry。還原不執行這項檢查。
 
-`FormState.prepare_write(batch, env)` 回 detached `FormInput`，完成與 write 相同的結構及來源 admission，不安裝、不通知。`install_input(candidate)` 只接受同 model 與相同固定元素 identity，保留 base，內容改變才通知一次。Host 先 guard，再 prepare，再 install。候選只限同一 owner turn、current input 與 env 使用，不能跨 await、Reset 或 guard 邊界保存，也不是授權或 revision token。普通 `write` 使用同一流程。
+`FormState.prepare_write(batch, env)` 回 detached `FormInput`，完成與 write 相同的結構及來源 admission，不安裝、不通知。`install_input(candidate)` 只接受同 model，並重新執行宣告 admission，保留 base，內容改變才通知一次。Host 先 guard，再 prepare，再 install。候選只限同一 owner turn、current input 與 env 使用，不能跨 await、Reset 或 guard 邊界保存，也不是授權或 revision token。普通 `write` 使用同一流程。
 
 FormEnv 借用 host 捕捉的 ParameterContext、library 與 detached `BaseDeviceInfo` snapshots（含 custom driver info）。共用工具只讀裝置名稱；需要特定 driver 欄位的表單自己用 `isinstance` 收窄。沒有 parameter capture 時仍可編輯 ordinary input 與純數學 expression；參數引用失敗會落在消費欄位的 error path。工具不寫來源、不 refresh 或 poll。領域來源 hook 可以讀固定 Spec；to_cfg 的 materialization 與 range 展開歸具體表單。
 
