@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-18，固定元素 typed paths 與 native tunables 提交邊界
+**Last updated:** 2026-10-19，完整 native tunables Apply
 
 ## 註冊與組裝
 
@@ -22,7 +22,7 @@
 
 `WorkflowController` 在 Window 的生命週期內保持固定。每次 Start 交入 EnginePorts、pending TunablesHost 與固定 capture。一 run 只有一 operation。Native Engine 的 status、records 與 artifacts 是權威，operation token 只是提交 receipt。Replacement 等待 terminal cleanup。
 
-`TunablesHost` 擁有該 run 唯一的 FormState、固定 evaluation capture 與 accepted expression input。GUI 與 RPC Apply 共用 Controller entry。只有 Engine 成功 publication 才接受 input/base；invalid input 保留 draft。Engine 擁有 numeric validation、revision、step capture 與 journal publication。沒有 holder enforcement 或 GUI revision guard。
+`TunablesHost` 擁有該 run 唯一的 FormState、固定 evaluation capture 與 accepted expression input。GUI 與 RPC Apply 共用 Controller entry。TunablesHost 以驗證後的完整 Form 呼叫 WorkflowAttachment 的 knobs_to_cfg，與 Start 使用同一個 Form.to_cfg() 宣告。只有 Engine 成功 publication 才接受 input/base；invalid input、轉接失敗與 native failure 保留可修正 draft。Engine 擁有 numeric validation、revision、step capture 與 journal publication。沒有 holder enforcement 或 GUI revision guard。
 
 Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots。Resume 重用同一 token 和 settlement，不重新 init 或 capture。Terminal delivery 先清理原生 run 與 admission，再通知 view；view 錯誤只記錄，不改 native outcome。SessionDevices 使用 shared public drivers，每次 env.run callback 前讀 connected device evidence。Driver 擁有硬體限制、單位與 setup。Window 在 terminal delivery 後請 DeviceService 背景讀一次已連線儀器，成功台更新觀察 cache，失敗台保留既有值。Pause 不觸發這項讀回。讀回不改寫 acquisition evidence、native outcome 或原本的 settlement／lease 職責。
 
@@ -34,7 +34,7 @@ Sweep 表單沿用 `gui.form_adapter` 的 Range／Center × Expts／Step input �
 
 Description 的 options 只帶 value／label／commands，selected index 由 core 判定，children 保留完整 path。can_expand 只表示結構可展開，不保證 children 非空。selection_fixed 表示本層只有一個非 null selector 分支，不凍結內層 choices。null 只控制啟停，不算另一個分支，停用時也一樣。fixed／fixed_value 表示完整值固定。Wire 直接投影 core 的這些能力，不重算規則。未知、inactive 或穿入 whole leaf 的 path 以 FormPathError 回報。RPC 將它投影為 invalid_params／form_path，data 帶完整 form_path。其他 ValueError 保留 controller_error。
 
-FixedList 的 description 直接投影 elements，包含原始 index、captured name 與 typed path。Form 可編輯及預覽 indexed leaves，但 `TunablesHost.apply` 不將它們交給 native Engine。Native tunables 的 dotted path 不支援 list 元素，host 回保留原 typed path 的 `FormErrors`，Engine、draft、base 與 accepted input 都不變。Host 不轉成 whole-list 提交，也不把 index 字串化。見 ADR-0079。
+FixedList 的 description 直接投影 elements，包含原始 index、captured name 與 typed path。GUI／RPC 繼續用 typed paths 編輯共同草稿。Apply 轉換完整 native model，list 隨 model 提交，不攤平 preview leaves、不字串化 index。Engine 驗證完整宣告型別並整體替換，每次成功都增加 revision，同值也一樣。Journal append 成功後才發布值，再接受草稿與 base。當前 step capture 不變。見 ADR-0062、ADR-0079。
 
 Memento 2 保存既有 tagged ref／inline input，格式未變。舊版沿既有 codec／caretaker 拒絕，不 migration 或雙讀。`defaults(env)` 只建 fresh 初值，沒有 previous。相容 saved leaves 的 overlay 仍由 host 完成。
 

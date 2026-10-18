@@ -10,6 +10,7 @@ from pydantic import JsonValue, create_model
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     GaussWaveformCfg,
+    ModuleSpec,
     PulseSpec,
 )
 from zcu_tools.gui import form as api
@@ -40,12 +41,9 @@ def choose[F: FormModel](
 ) -> None:
     target = state.describe(path, env).target
     assert target is not None and target.options is not None
-    state.write(
-        {
-            path: next(
-                option.value for option in target.options if option.label == label
-            )
-        },
+    state.select(
+        path,
+        next(option.value for option in target.options if option.label == label),
         env,
     )
 
@@ -53,9 +51,7 @@ def choose[F: FormModel](
 @pytest.mark.parametrize(
     "source,target", list(permutations(("const", "cosine", "gauss", "drag"), 2))
 )
-def test_explicit_waveform_pairs_preserve_raw_length_and_only_approved_sigma(
-    source, target
-):
+def test_waveform_switch_preserves_shared_length_and_sigma(source, target):
     form = module_form(PulseSpec)
     env = FormEnv()
     draft: dict[str, JsonValue] = {"style": source, "length": {"expr": "4 / 5"}}
@@ -73,7 +69,7 @@ def test_explicit_waveform_pairs_preserve_raw_length_and_only_approved_sigma(
     assert state.input.data["waveform"] == {"kind": "inline", "module": expected}
 
 
-def test_ref_inline_copy_is_fixed_and_arb_flat_top_cross_pairs_do_not_inherit():
+def test_ref_inline_copy_is_fixed_and_flat_top_inherits_only_shared_length():
     form = module_form(PulseSpec)
     env = FormEnv(
         library=LibrarySnapshot(
@@ -101,7 +97,7 @@ def test_ref_inline_copy_is_fixed_and_arb_flat_top_cross_pairs_do_not_inherit():
     choose(state, ("waveform",), "Inline: flat_top", env)
     assert state.input.data["waveform"] == {
         "kind": "inline",
-        "module": {"style": "flat_top"},
+        "module": {"style": "flat_top", "length": 0.8},
     }
     state.write({("waveform", "module", "length"): {"expr": "1 / 0"}}, env)
     before = state.input.data
@@ -119,6 +115,159 @@ def test_ref_inline_copy_is_fixed_and_arb_flat_top_cross_pairs_do_not_inherit():
     assert state.input.data["waveform"] == {
         "kind": "inline",
         "module": {"style": "const"},
+    }
+
+
+def module_selection_model() -> type[FormModel]:
+    field = ModuleInputField(ModuleSpec)
+
+    class Consumer(FormModel):
+        @classmethod
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+            return {("selection",): field.options(env)}
+
+        @classmethod
+        def converters(cls, env: FormEnv) -> Mapping[FormPath, api.InputConverter]:
+            return {("selection",): field.converter(env)}
+
+    return create_model(
+        "ModuleSelection", __base__=Consumer, selection=(field.annotation, ...)
+    )
+
+
+def test_pulse_to_readout_retains_nested_raw_draft_and_missing_fields():
+    env = FormEnv()
+    waveform: dict[str, JsonValue] = {
+        "kind": "inline",
+        "module": {
+            "style": "flat_top",
+            "length": {"expr": "1 / 0"},
+            "raise_waveform": {
+                "kind": "inline",
+                "module": {"style": "drag", "length": "invalid", "alpha": -7},
+            },
+        },
+    }
+    state = FormState(
+        FormInput(
+            module_selection_model(),
+            {
+                "selection": {
+                    "kind": "inline",
+                    "module": {
+                        "type": "pulse",
+                        "ch": 4,
+                        "nqz": 2,
+                        "freq": {"expr": "100 + 3"},
+                        "gain": "invalid",
+                        "waveform": waveform,
+                    },
+                }
+            },
+        )
+    )
+    choose(state, ("selection",), "Inline: readout/pulse", env)
+    assert state.input.data["selection"] == {
+        "kind": "inline",
+        "module": {
+            "type": "readout/pulse",
+            "nqz": 2,
+            "freq": {"expr": "100 + 3"},
+            "gain": "invalid",
+            "waveform": waveform,
+            "trig_offset": 0.0,
+        },
+    }
+    assert isinstance(state.result(env), FormErrors)
+
+
+def test_readout_to_mux_compares_declared_types_not_raw_python_values():
+    env = FormEnv()
+    state = FormState(
+        FormInput(
+            module_selection_model(),
+            {
+                "selection": {
+                    "kind": "inline",
+                    "module": {
+                        "type": "readout/pulse",
+                        "gen_ch": "invalid channel",
+                        "nqz": 2,
+                        "mixer_freq": 300.0,
+                        "ro_length": {"expr": "2 / 5"},
+                        "pre_delay": {"expr": "1 / 0"},
+                        "post_delay": -1,
+                    },
+                }
+            },
+        )
+    )
+    choose(state, ("selection",), "Inline: readout/mux", env)
+    assert state.input.data["selection"] == {
+        "kind": "inline",
+        "module": {
+            "type": "readout/mux",
+            "gen_ch": "invalid channel",
+            "nqz": 2,
+            "ro_length": {"expr": "2 / 5"},
+            "pre_delay": {"expr": "1 / 0"},
+            "post_delay": -1,
+        },
+    }
+    assert isinstance(state.result(env), FormErrors)
+
+
+@pytest.mark.parametrize(
+    "kind,child",
+    [
+        ("reset/pulse", "pulse_cfg"),
+        ("reset/two_pulse", "pulse1_cfg"),
+        ("reset/bath", "cavity_tone_cfg"),
+    ],
+)
+def test_reset_nested_waveform_switch_inherits_raw_length(kind: str, child: str):
+    env = FormEnv()
+    state = FormState(
+        FormInput(
+            module_selection_model(),
+            {
+                "selection": {
+                    "kind": "inline",
+                    "module": {
+                        "type": kind,
+                        child: {
+                            "kind": "inline",
+                            "module": {
+                                "type": "pulse",
+                                "freq": {"expr": "missing"},
+                                "waveform": {
+                                    "kind": "inline",
+                                    "module": {
+                                        "style": "gauss",
+                                        "length": {"expr": "4 / 5"},
+                                        "sigma": 0.2,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                }
+            },
+        )
+    )
+    path = ("selection", "module", child, "module", "waveform")
+    choose(state, path, "Inline: flat_top", env)
+    pulse = obj(obj(obj(state.input.data["selection"])["module"])[child])
+    assert pulse == {
+        "kind": "inline",
+        "module": {
+            "type": "pulse",
+            "freq": {"expr": "missing"},
+            "waveform": {
+                "kind": "inline",
+                "module": {"style": "flat_top", "length": {"expr": "4 / 5"}},
+            },
+        },
     }
 
 

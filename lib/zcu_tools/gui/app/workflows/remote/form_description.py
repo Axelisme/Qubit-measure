@@ -105,6 +105,7 @@ class FormFieldReply(TypedDict):
     selected: int | None
     selection_fixed: bool
     fixed: bool
+    readonly: bool
     fixed_value: JsonValue
     constraints: FormConstraintsReply
     commands: list[FormInputCommandReply]
@@ -176,6 +177,7 @@ def _project_field(field: FormFieldDescription) -> FormFieldReply:
         ],
         "selection_fixed": field.selection_fixed,
         "fixed": field.fixed,
+        "readonly": field.readonly,
         "fixed_value": field.fixed_value,
         "constraints": {
             "ge": hints.ge,

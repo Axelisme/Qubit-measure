@@ -193,13 +193,17 @@ def test_same_batch_explicit_inline_content_follows_branch_selection() -> None:
     state = FormState(ModuleForm.default_input(env))
     state.write(
         {
-            ("drive", "module", "gain"): 0.9,
-            ("drive", "module", "waveform"): "Q1.waveforms.not_materialized",
-            ("drive", "module", "type"): "pulse",
-            ("drive", "module", "ch"): 0,
-            ("drive", "module", "nqz"): 1,
-            ("drive", "module", "freq"): 100.0,
-            ("drive", "kind"): "inline",
+            ("drive",): {
+                "kind": "inline",
+                "module": {
+                    "gain": 0.9,
+                    "waveform": "Q1.waveforms.not_materialized",
+                    "type": "pulse",
+                    "ch": 0,
+                    "nqz": 1,
+                    "freq": 100.0,
+                },
+            },
         },
         env,
     )

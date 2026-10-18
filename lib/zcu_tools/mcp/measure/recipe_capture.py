@@ -38,7 +38,8 @@ class ActualField(TypedDict):
 class RecipeActual(TypedDict):
     """Run-before-start capture; later queries do not replace it with live data.
 
-    fields maps declared summary cfg fields to value/source/unit facts.
+    fields maps public SummaryParameter names to value/source/unit facts.
+    Typed cfg paths are used only to select these facts before capture.
     Facts are detached from caller state; no cfg inputs are retained.
     """
 

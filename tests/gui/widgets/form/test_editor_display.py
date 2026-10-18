@@ -245,7 +245,7 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
     assert row_names(view, "drive.module") == []
     assert row_label(view, "drive.module.level") == "Level"
     assert row_label(view, "choice") == "Choice"
-    state.write({("choice", "kind"): "alpha"}, FormEnv())
+    state.select(("choice",), {"kind": "alpha"}, FormEnv())
     assert row_label(view, "choice") == "Choice"
 
 

@@ -126,6 +126,7 @@ class FormFieldWire(TypedDict):
     selected: int | None
     selection_fixed: bool
     fixed: bool
+    readonly: bool
     fixed_value: JsonValue
     constraints: FormConstraintsWire
     commands: list[FormInputCommandWire]
@@ -219,6 +220,7 @@ def _field_wire(field: FormFieldDescription) -> FormFieldWire:
         "selector": field.selector,
         "selection_fixed": field.selection_fixed,
         "fixed": field.fixed,
+        "readonly": field.readonly,
         "fixed_value": field.fixed_value,
         "commands": [
             {

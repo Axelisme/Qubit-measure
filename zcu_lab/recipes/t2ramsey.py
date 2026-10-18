@@ -82,39 +82,41 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         reuse=reuse_tab_id,
     )
     if use_reset is None:
-        tab.disable_library("modules.reset")
+        tab.disable_library(("modules", "reset"))
     else:
-        tab.use_library("modules.reset", use_reset)
-    tab.use_library("modules.readout", readout_ref)
+        tab.use_library(("modules", "reset"), use_reset)
+    tab.use_library(("modules", "readout"), readout_ref)
 
     # Report every absent calibration before Run, as the existing tool does.
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
-        "modules.readout.freq",
+        ("modules", "readout", "freq"),
         calibration="$resonator.freq",
         required="readout_ref",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.readout")
+        tab.use_inline(("modules", "readout"))
         apply_frequency(tab, frequency.edit)
     if (
-        parameter := tab.use_library("modules.pi2_pulse", pi2_ref, required="pi2_ref")
+        parameter := tab.use_library(
+            ("modules", "pi2_pulse"), pi2_ref, required="pi2_ref"
+        )
     ) is not None:
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
     tab.set_sweep(
-        "sweep.length",
+        ("sweep", "length"),
         stop=max_delay_us,
         expts=points,
         sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    tab.set("reps", reps, source="explicit")
-    tab.set("rounds", rounds, source="explicit")
-    tab.set("extras.detune_ratio", detune_ratio, source="explicit")
+    tab.set(("reps",), reps, source="explicit")
+    tab.set(("rounds",), rounds, source="explicit")
+    tab.set(("extras", "detune_ratio"), detune_ratio, source="explicit")
 
     result = yield from tab.run_step()
     run = result.run
@@ -158,19 +160,19 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.freq",
+            ("modules", "readout", "freq"),
             "MHz",
         ),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("use_reset", "modules.reset"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("delay", "sweep.length", "us"),
-        SummaryParameter("detune_ratio", "extras.detune_ratio"),
-        SummaryParameter("pi2_ref", "modules.pi2_pulse"),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("use_reset", ("modules", "reset")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("delay", ("sweep", "length"), "us"),
+        SummaryParameter("detune_ratio", ("extras", "detune_ratio")),
+        SummaryParameter("pi2_ref", ("modules", "pi2_pulse")),
     ),
     summary_estimates=(
-        SummaryEstimate("t2r", "t2r", "t2r_err", "us"),
-        SummaryEstimate("detune", "detune", unit="MHz"),
+        SummaryEstimate("t2r", ("t2r",), ("t2r_err",), "us"),
+        SummaryEstimate("detune", ("detune",), unit="MHz"),
     ),
 )

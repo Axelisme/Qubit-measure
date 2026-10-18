@@ -20,11 +20,11 @@ def _set_readout_timing(
 ) -> None:
     """Keep omitted key values and provenance; convert only for explicit edits."""
     for field, value in (
-        ("modules.readout.ro_length", readout_length_us),
-        ("modules.readout.trig_offset", trigger_offset_us),
+        (("modules", "readout", "ro_length"), readout_length_us),
+        (("modules", "readout", "trig_offset"), trigger_offset_us),
     ):
         if value is not None:
-            tab.use_inline("modules.readout")
+            tab.use_inline(("modules", "readout"))
             tab.set(field, value, source="explicit")
         else:
             retain_scalar(tab, field)
@@ -60,18 +60,18 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
-    tab.use_library("modules.readout", readout_ref)
+    tab.use_library(("modules", "readout"), readout_ref)
     if use_reset is None:
-        tab.disable_library("modules.reset")
+        tab.disable_library(("modules", "reset"))
     else:
-        tab.use_library("modules.reset", use_reset)
+        tab.use_library(("modules", "reset"), use_reset)
     if init_pulse_ref is None:
-        tab.disable_library("modules.init_pulse")
+        tab.disable_library(("modules", "init_pulse"))
     else:
-        tab.use_library("modules.init_pulse", init_pulse_ref)
+        tab.use_library(("modules", "init_pulse"), init_pulse_ref)
     frequency = choose_frequency(
         tab,
-        "modules.readout.freq",
+        ("modules", "readout", "freq"),
         frequency_mhz,
         calibration="$resonator.freq",
         prefer_library=readout_ref is not None,
@@ -80,10 +80,10 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     if frequency.missing:
         raise RecipeNeedsParameters(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.readout")
+        tab.use_inline(("modules", "readout"))
         apply_frequency(tab, frequency.edit)
     _set_readout_timing(tab, readout_length_us, trigger_offset_us)
-    tab.set("rounds", rounds, source="explicit")
+    tab.set(("rounds",), rounds, source="explicit")
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
@@ -129,13 +129,19 @@ DEFINITION = RecipeDefinition(
     run=lookback,
     adapter_name="lookback",
     summary_parameters=(
-        SummaryParameter("frequency_mhz", "modules.readout.freq", "MHz"),
-        SummaryParameter("readout_length_us", "modules.readout.ro_length", "us"),
-        SummaryParameter("trigger_offset_us", "modules.readout.trig_offset", "us"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("use_reset", "modules.reset"),
-        SummaryParameter("init_pulse_ref", "modules.init_pulse"),
+        SummaryParameter("frequency_mhz", ("modules", "readout", "freq"), "MHz"),
+        SummaryParameter(
+            "readout_length_us", ("modules", "readout", "ro_length"), "us"
+        ),
+        SummaryParameter(
+            "trigger_offset_us", ("modules", "readout", "trig_offset"), "us"
+        ),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("use_reset", ("modules", "reset")),
+        SummaryParameter("init_pulse_ref", ("modules", "init_pulse")),
     ),
-    summary_estimates=(SummaryEstimate("predict_offset", "predict_offset", unit="us"),),
+    summary_estimates=(
+        SummaryEstimate("predict_offset", ("predict_offset",), unit="us"),
+    ),
 )

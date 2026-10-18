@@ -10,11 +10,11 @@ Editor 初次只建立可見層與初始展開的 model rows。Group 預設折�
 
 Host 可訂閱 `errors_changed`，在 `errors()` 結果改變時取得新的 `FormErrors`，全部有效時取得 `None`。本地 parse／拒絕錯誤與 state publication 都會觸發比較；錯誤集合相同時不重送，detach 後不再發出。`validity_changed` 仍只在有效與無效之間切換時發出 bool。
 
-FixedList 的 `form.picker.<path>` 依 Core 的 elements 列出「index: name」。Picker 只控制哪個元素可見，不寫 FormState、不改 participants，也不抓取來源。切走保留該元素的 controls、未提交文字及 parse errors；切回能繼續修正。隱藏元素的錯誤標在 list 標題，row tooltip 指出元素名稱與欄位。Participants 使用獨立 JSON 清單輸入。唯讀模式仍可切 picker、展開與複製，不能編輯值。
+Model-list 的 `form.picker.<path>` 依 Core 的 elements 列出「index: name」。Picker 只控制哪個元素可見，不寫 FormState、不改 participants，也不抓取來源。切走保留該元素的 controls、未提交文字及 parse errors；切回能繼續修正。隱藏元素的錯誤標在 list 標題，row tooltip 指出元素名稱與欄位。Participants 使用獨立 JSON 清單輸入。`Display` 提供元素 label 與 readonly 呈現提示，固定 identity 的拒絕由宣告 owner 提供。唯讀模式仍可切 picker、展開與複製，不能編輯值。
 
 `selection_fixed` 不鎖內層選項。`fixed` option.value 也不凍結 children 或移除 commands；只有固定 scalar 且沒有 command 時畫成唯讀文字。
 
-Host 可成對傳入 `write=` 與 `run_command=`，使每批 parsed input 與選項指令走同一 guard。Editor 不另寫 state。Host 以 `WriteRejected(message)` 拒絕時，文字保留且顯示訊息；dropdown、checkbox 與 Enabled 回到已發布值。兩條 write 路徑都以同樣方式處理明確的 `FormConversionError`。失敗時顯示 row tooltip，selector 回到已提交的 selection，不重跑 write 或 converter，也不發布 mutation。每個 row 有 `form.row.<canonical path>` objectName，可定位該列及其拒絕原因。其他例外照常拋出。沒有 callback 時，editor 直接呼叫 FormState 的公開寫入與指令介面。
+Host 必須同時傳入 `write=`、`select=` 與 `run_command=`，或全部省略。三者分別接收 parsed input batch、typed path 與 option.value、typed path 與 command 名稱，並使用同一 guard。Dropdown 只呼叫 select，不以值寫入觸發 converter。Editor 不另寫 state。Host 以 `WriteRejected(message)` 拒絕時，文字保留且顯示訊息；dropdown、checkbox 與 Enabled 回到已發布值。各 mutation 路徑都處理明確的 `FormConversionError` 或 `FormInputRejected`。失敗時顯示 row tooltip，selector 回到已提交的 selection，不重跑 write 或 converter，也不發布 mutation。每個 row 有 `form.row.<canonical path>` objectName，可定位該列及其拒絕原因。其他例外照常拋出。沒有 callback 時，editor 直接呼叫 FormState 的 write、select 與 run_command。
 
 `set_editing_enabled(enabled=False)` 保持表單可讀，不停用整個 widget。文字可選取與複製，fold titles 可展開、折疊與捲動；寫入與 commands 不可用。唯讀時第一次展開的 controls 也遵守這項限制。`refresh(env)` 使用新 capture 重讀已建層的 descriptions，不沿用舊 choices 或 active branch。Detach 與 close 只解除訂閱，不關閉 caller 的 state。
 

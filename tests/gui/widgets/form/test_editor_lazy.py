@@ -203,6 +203,19 @@ def test_collapsing_focused_text_neither_commits_nor_parses_it(
     assert field.text() == draft
 
 
+def select_unless_busy(
+    state: FormState[LazyForm],
+    env: FormEnv,
+    busy: bool,
+    path: FormWritePath,
+    selection: JsonValue,
+) -> None:
+    """Share the host busy policy with the explicit selection callback."""
+    if busy:
+        raise WriteRejected("Host busy")
+    state.select(path, selection, env)
+
+
 @pytest.mark.parametrize("reject", [False, True])
 def test_restored_focused_draft_commits_once_on_normal_focus_loss(
     qapp: QApplication,
@@ -220,7 +233,15 @@ def test_restored_focused_draft_commits_once_on_normal_focus_loss(
         state.write(batch, env)
 
     unsubscribe = state.subscribe(lambda: publications.append(1))
-    editor = FormEditor(state, env, write=write, run_command=lambda _path, _name: None)
+    editor = FormEditor(
+        state,
+        env,
+        write=write,
+        select=lambda path, selection: select_unless_busy(
+            state, env, reject, path, selection
+        ),
+        run_command=lambda _path, _name: None,
+    )
     try:
         editor.show()
         qapp.processEvents()
@@ -270,6 +291,7 @@ def test_replacing_a_focused_branch_does_not_commit_retired_text(
         state,
         env,
         write=lambda batch: batches.append(dict(batch)),
+        select=lambda path, selection: state.select(path, selection, env),
         run_command=lambda _path, _name: None,
     )
     try:
@@ -280,7 +302,7 @@ def test_replacing_a_focused_branch_does_not_commit_retired_text(
         assert field.hasFocus()
         field.selectAll()
         type_text(field, "7")
-        state.write({("branch",): {"kind": "second"}}, env)
+        state.select(("branch",), {"kind": "second"}, env)
         qapp.processEvents()
         assert batches == []
         assert state.input.data["branch"] == {"kind": "second", "two": 2.0}

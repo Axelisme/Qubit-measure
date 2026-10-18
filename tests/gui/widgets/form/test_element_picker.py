@@ -9,7 +9,7 @@ from zcu_tools.gui.form import FormEnv, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import ComponentDriver
-from tests.gui.form._fixed_models import named_form, named_input
+from tests.gui.form_adapter._fixed_models import named_form, named_input
 
 
 def test_picker_keeps_uncommitted_text_errors_and_participants(
@@ -78,5 +78,74 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
         driver.choose_option(object_name="form.picker.tones", value="0: A")
         snapshot("10-readonly-unchanged")
         assert driver.observe(object_name="form.input.tones.0.gain").text == "3.0"
+    finally:
+        editor.close()
+
+
+def test_owner_identity_refusal_is_visible_and_navigation_still_works(
+    qapp: QApplication, tmp_path: Path
+):
+    from typing import Annotated
+
+    from pydantic import create_model
+    from zcu_tools.gui import form as core
+    from zcu_tools.gui import form_adapter as owner
+
+    assert hasattr(owner, "FixedElementsForm"), "Missing declaring owner"
+
+    class Element(core.FormModel):
+        label: Annotated[str, core.Display(readonly=True)]
+        gain: float
+
+    model = create_model(
+        "Owner",
+        __base__=owner.FixedElementsForm,
+        tones=(
+            Annotated[
+                list[Element],
+                core.Display(element_label="label"),
+                core.InputCommand(
+                    "clear",
+                    "Clear elements",
+                    (),
+                    lambda _snapshot, _context: core.FormCommandResult(None, None, []),
+                ),
+            ],
+            [{"label": "A", "gain": 1}, {"label": "B", "gain": 2}],
+        ),
+        participants=(list[str], ["B"]),
+    )
+    model.fixed_elements = (
+        owner.FixedElements(("tones",), "label", ("participants",)),
+    )
+    editor = FormEditor(core.FormState(model.default_input(FormEnv())), FormEnv())
+    editor.resize(640, 340)
+    editor.show()
+    qapp.processEvents()
+    driver = ComponentDriver(editor)
+    try:
+        driver.screenshot(tmp_path / "01-owner-open.png")
+        driver.invoke_context_action(
+            object_name="form.fold.tones",
+            action="Clear elements",
+            evidence=tmp_path / "02-owner-menu.png",
+        )
+        driver.screenshot(tmp_path / "03-owner-refused.png")
+        assert "identity" in driver.observe(object_name="form.row.tones").tooltip
+        assert driver.observe(object_name="form.picker.tones").text == "0: A"
+        driver.choose_option(object_name="form.picker.tones", value="1: B")
+        driver.enter_text(object_name="form.input.tones.1.gain", value="4")
+        driver.enter_text(object_name="form.input.participants", value='["Q4"]')
+        driver.screenshot(tmp_path / "04-owner-invalid-participant.png")
+        assert driver.observe(object_name="form.input.tones.1.gain").text == "4.0"
+        assert "Q4" in driver.observe(object_name="form.row.participants").tooltip
+        driver.enter_text(object_name="form.input.participants", value='["B", "A"]')
+        driver.screenshot(tmp_path / "05-owner-recovered.png")
+        assert (
+            driver.observe(object_name="form.input.participants").text == '["B", "A"]'
+        )
+        (tmp_path / "owner-visible.json").write_text(
+            json.dumps(asdict(driver.visible()), indent=2), encoding="utf-8"
+        )
     finally:
         editor.close()

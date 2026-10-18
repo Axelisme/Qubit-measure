@@ -50,8 +50,9 @@ type Editor = FormEditor[FormModel]
 type Batch = Mapping[FormWritePath, JsonValue]
 type Write = Callable[[Batch], None]
 type Command = Callable[[FormWritePath, str], None]
+type Select = Callable[[FormWritePath, JsonValue], None]
 type Build = Callable[
-    [FormState[FormModel], FormEnv, Write | None, Command | None], Editor
+    [FormState[FormModel], FormEnv, Write | None, Command | None, Select | None], Editor
 ]
 
 KEY = "Q.waveforms.flat"
@@ -114,11 +115,14 @@ def build(qapp: QApplication) -> Iterator[Build]:
         env: FormEnv,
         write: Write | None,
         command: Command | None,
+        select: Select | None,
     ) -> Editor:
-        if write is None and command is None:
+        if write is None and command is None and select is None:
             editor = FormEditor(state, env)
         else:
-            editor = FormEditor(state, env, write=write, run_command=command)
+            editor = FormEditor(
+                state, env, write=write, select=select, run_command=command
+            )
         editors.append(editor)
         return editor
 
@@ -191,7 +195,7 @@ def test_a_valid_waveform_key_selects_its_own_option_label_and_value(
 ) -> None:
     env = waveform_env()
     state = pulse_state(KEY, env)
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
     current = state.input.data["waveform"]
     declared = form_adapter.module_form(PulseSpec).model.options(env)[("waveform",)]
     first = next(option for option in declared if option.matches(current))
@@ -205,20 +209,27 @@ def test_a_valid_waveform_key_selects_its_own_option_label_and_value(
     assert state.input.data["waveform"] == {"kind": "ref", "name": KEY}
 
 
-def test_choosing_an_option_writes_its_value_once_and_draws_its_fields(
+def test_choosing_an_option_selects_its_value_once_and_draws_its_fields(
     build: Build,
 ) -> None:
     env = waveform_env()
     state = pulse_state(KEY, env)
     batches: list[dict[FormWritePath, JsonValue]] = []
+    selections: list[tuple[FormWritePath, JsonValue]] = []
+
+    def select(path: FormWritePath, selection: JsonValue) -> None:
+        selections.append((path, selection))
+        state.select(path, selection, env)
+
     editor = build(
-        state, env, recording_write(state, env, batches), lambda _p, _n: None
+        state, env, recording_write(state, env, batches), lambda _p, _n: None, select
     )
 
     choose(child(editor, QComboBox, "form.input.waveform"), "Inline: gauss")
 
     gauss: JsonValue = {"kind": "inline", "module": {"style": "gauss"}}
-    assert batches == [{("waveform",): gauss}]
+    assert selections == [(("waveform",), gauss)]
+    assert batches == []
     assert Option("Inline: gauss", gauss).matches(state.input.data["waveform"])
     dropdown = child(editor, QComboBox, "form.input.waveform")
     assert dropdown.currentText() == "Inline: gauss"
@@ -231,7 +242,7 @@ def test_choosing_an_option_writes_its_value_once_and_draws_its_fields(
 
     choose(dropdown, KEY)
 
-    assert batches[-1] == {("waveform",): {"kind": "ref", "name": KEY}}
+    assert selections[-1] == (("waveform",), {"kind": "ref", "name": KEY})
     assert state.input.data["waveform"] == {"kind": "ref", "name": KEY}
     assert editor.findChild(QWidget, "form.input.waveform.module.length") is None
 
@@ -241,7 +252,7 @@ def test_unmatched_input_shows_the_current_value_as_missing_and_keeps_state(
 ) -> None:
     env = waveform_env()
     state = pulse_state("Q.waveforms.gone", env)
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
     current = state.input.data["waveform"]
 
     dropdown = child(editor, QComboBox, "form.input.waveform")
@@ -273,7 +284,7 @@ def test_nullable_modules_offer_none_keys_and_inline_kinds_without_enabled(
     env = module_env()
     form = form_adapter.Form(ModuleCore, {})
     state = new_state(form.model, {"pulse": None, "reset": None})
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
 
     pulse = child(editor, QComboBox, "form.input.pulse")
     assert [text for text, _ in items(pulse)] == ["None", "Q1.pulses.pi", "Inline"]
@@ -316,7 +327,7 @@ def test_default_none_module_selection_via_component_events(
     env = module_env()
     form = form_adapter.Form(EventCore, {})
     state = FormState(form.default_input(env))
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
     editor.resize(760, 360)
     editor.show()
     qapp.processEvents()
@@ -366,7 +377,7 @@ def test_literal_enum_and_choice_leaves_use_the_same_option_dropdown(
         "device": "yoko1",
     }
     state = new_state(PickForm, data)
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
 
     for name in ("nqz", "maybe", "color", "device"):
         dropdown = child(editor, QComboBox, f"form.input.{name}")
@@ -425,7 +436,7 @@ def test_tagged_union_dropdown_draws_the_selected_branch_and_starts_new_ones_fre
 ) -> None:
     env = FormEnv()
     state = new_state(ShapeForm, {"shape": {"kind": "flat", "length": 5.0}})
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
 
     dropdown = child(editor, QComboBox, "form.input.shape")
     assert items(dropdown) == [("flat", {"kind": "flat"}), ("ramp", {"kind": "ramp"})]
@@ -470,7 +481,7 @@ class NumericForm(RebuildingForm):
 def test_numeric_tags_are_written_as_typed_option_values(build: Build) -> None:
     env = FormEnv()
     state = new_state(NumericForm, {"branch": {"kind": 1}})
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
 
     dropdown = child(editor, QComboBox, "form.input.branch")
     assert items(dropdown) == [("1", {"kind": 1}), ("3", {"kind": 3})]
@@ -503,7 +514,7 @@ class AliasShapeForm(RebuildingForm):
 def test_an_alias_tag_is_its_own_option_with_its_branch_fields(build: Build) -> None:
     env = FormEnv()
     state = new_state(AliasShapeForm, {"shape": {"kind": "plateau", "length": 5.0}})
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
 
     dropdown = child(editor, QComboBox, "form.input.shape")
     assert items(dropdown) == schema_items(state, env, "shape")
@@ -552,7 +563,7 @@ def test_a_numeric_alias_tag_is_a_typed_option_with_its_branch_fields(
 ) -> None:
     env = FormEnv()
     state = new_state(NumericAliasForm, {"branch": {"kind": 2, "a_only": 7.0}})
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
 
     dropdown = child(editor, QComboBox, "form.input.branch")
     assert items(dropdown) == [
@@ -583,7 +594,7 @@ def test_a_key_option_lists_its_commands_and_runs_them_on_the_state(
 ) -> None:
     env = waveform_env()
     state = pulse_state(KEY, env)
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
     dropdown = child(editor, QComboBox, "form.input.waveform")
 
     assert dropdown.contextMenuPolicy() == Qt.ContextMenuPolicy.ActionsContextMenu
@@ -618,7 +629,13 @@ def test_host_command_route_receives_the_command_and_its_rejection_shows(
             raise WriteRejected("Busy host")
 
     batches: list[dict[FormWritePath, JsonValue]] = []
-    editor = build(state, env, recording_write(state, env, batches), run)
+    editor = build(
+        state,
+        env,
+        recording_write(state, env, batches),
+        run,
+        lambda path, selection: state.select(path, selection, env),
+    )
     before = state.input.data
 
     command(editor, "waveform", "to_inline").trigger()
@@ -680,7 +697,13 @@ def test_fixed_option_keeps_editable_children_and_guarded_commands(
         # The host owns execution; this plain model accepts only leaf writes.
         state.write({("shape", "length"): 8.0}, env)
 
-    editor = build(state, env, lambda batch: state.write(batch, env), run)
+    editor = build(
+        state,
+        env,
+        lambda batch: state.write(batch, env),
+        run,
+        lambda path, selection: state.select(path, selection, env),
+    )
     length = child(editor, QLineEdit, "form.input.shape.length")
     assert not length.isReadOnly()
     action = command(editor, "shape", "lengthen")
@@ -700,7 +723,7 @@ def test_fixed_option_keeps_editable_children_and_guarded_commands(
 def test_read_only_editor_keeps_commands_listed_but_disabled(build: Build) -> None:
     env = waveform_env()
     state = pulse_state(KEY, env)
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
     before = state.input.data
 
     editor.set_editing_enabled(enabled=False)
@@ -772,7 +795,7 @@ def test_generated_nested_copy_and_fresh_selection_via_component_events(
             },
         )
     )
-    editor = build(state, env, None, None)
+    editor = build(state, env, None, None, None)
     editor.resize(760, 1000)
     editor.show()
     qapp.processEvents()

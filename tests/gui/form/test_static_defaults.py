@@ -52,5 +52,5 @@ def test_enabling_ordinary_model_keeps_none_absent_and_validated_value_unchanged
     env = FormEnv()
     state = FormState(StaticForm.default_input(env))
     state.write({("child", "kind"): "child"}, env)
-    assert state.input.data == {"child": {"kind": "child", "values": [2]}}
+    assert state.input.data == {"child": {"kind": "child"}}
     assert state.result(env) == StaticForm(child=StaticChild())

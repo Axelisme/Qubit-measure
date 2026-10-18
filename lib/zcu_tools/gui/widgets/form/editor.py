@@ -19,6 +19,7 @@ from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
     FormFieldDescription,
+    FormInputRejected,
     FormModel,
     FormPath,
     FormPreview,
@@ -28,7 +29,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
-from ._controls import FieldRow, GroupBlock, LocalText
+from ._controls import FieldRow, GroupBlock, LocalText, RowActions
 from ._fold import ROW_SPACING
 from ._view import FieldView, project_field
 
@@ -185,7 +186,7 @@ class FormEditor[F: FormModel](QWidget):
     a wheel turn over them scrolls an enclosing scroll area instead. Option
     command actions stay listed but disabled. Fold titles still take Tab
     focus and fold and unfold on a click, Space, Return or Enter, without
-    writing state. FixedList pickers also remain usable for navigation.
+    writing state. Model-list pickers also remain usable for navigation.
 
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
@@ -211,6 +212,7 @@ class FormEditor[F: FormModel](QWidget):
         *,
         write: Callable[[Mapping[FormWritePath, JsonValue]], None] | None = None,
         run_command: Callable[[FormWritePath, str], None] | None = None,
+        select: Callable[[FormWritePath, JsonValue], None] | None = None,
     ) -> None:
         """Build controls for state using env, then subscribe to state changes.
 
@@ -244,13 +246,19 @@ class FormEditor[F: FormModel](QWidget):
         the command on state; the callable runs it on this same state, for
         example through the host's guarded entry. It refuses with
         WriteRejected(message) before changing state, which the field shows
-        like a rejected write; any other exception propagates. write and
-        run_command are passed together or not at all: a host that guards
-        writes must also route commands, so passing only one raises
-        ValueError before any subscription.
+        like a rejected write.
+
+        select receives (path, option.value) for dropdown changes. Without host
+        callbacks, the editor calls state.select(path, selection, env); it never
+        infers selection from a value write. A host callback must run selection
+        through its same busy/owner guard before publishing to this state.
+        write, select and run_command are all supplied or all omitted; a partial
+        set raises ValueError before subscribing. FormConversionError and
+        FormInputRejected show recoverable row errors and preserve state.
+        Other exceptions propagate.
         """
-        if (write is None) != (run_command is None):
-            raise ValueError("FormEditor needs both write and run_command, or neither")
+        if len({write is None, run_command is None, select is None}) != 1:
+            raise ValueError("FormEditor needs write, select and run_command together")
         app = QApplication.instance()
         if not isinstance(app, QApplication) or app.thread() != QThread.currentThread():
             raise RuntimeError("FormEditor requires the QApplication GUI thread")
@@ -259,6 +267,7 @@ class FormEditor[F: FormModel](QWidget):
         self._env: FormEnv | None = env
         self._host_write = write
         self._host_command = run_command
+        self._host_select = select
         self._unsubscribe: Callable[[], None] | None = None
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
@@ -534,7 +543,7 @@ class FormEditor[F: FormModel](QWidget):
                     self._write,
                     self._unparsed,
                     self._model_expanded,
-                    self._run_command,
+                    RowActions(command=self._run_command, select=self._select),
                 )
                 row.connect_fold(self._fold_changed)
                 row.connect_pick(self._pick_changed)
@@ -611,13 +620,29 @@ class FormEditor[F: FormModel](QWidget):
                 state.write(batch, self._require_env())
             else:
                 self._host_write(batch)
-        except (WriteRejected, FormConversionError) as exc:
+        except (WriteRejected, FormConversionError, FormInputRejected) as exc:
             # Both routes installed nothing. Redraw the committed selector,
             # retaining unrelated local text; never retry a refused conversion.
             message = exc.message if isinstance(exc, WriteRejected) else str(exc)
             self._local[path] = self._rows[path].rejected_input(message)
         # A changed write already rendered synchronously in the subscriber.
         # Unchanged/rejected writes still need to update view-local errors.
+        if self._publication_count == publication:
+            self._publish()
+
+    def _select(self, path: FormWritePath, selection: JsonValue) -> None:
+        """Dispatch dropdown selection through the same owner guard as value writes."""
+        state = self._require_state()
+        publication = self._publication_count
+        self._local.pop(path, None)
+        try:
+            if self._host_select is None:
+                state.select(path, selection, self._require_env())
+            else:
+                self._host_select(path, selection)
+        except (WriteRejected, FormConversionError, FormInputRejected) as exc:
+            message = exc.message if isinstance(exc, WriteRejected) else str(exc)
+            self._local[path] = self._rows[path].rejected_input(message)
         if self._publication_count == publication:
             self._publish()
 
@@ -643,8 +668,9 @@ class FormEditor[F: FormModel](QWidget):
                 state.run_command(path, name, self._require_env())
             else:
                 self._host_command(path, name)
-        except WriteRejected as exc:
-            self._local[path] = self._rows[path].rejected_input(exc.message)
+        except (WriteRejected, FormInputRejected) as exc:
+            message = exc.message if isinstance(exc, WriteRejected) else str(exc)
+            self._local[path] = self._rows[path].rejected_input(message)
         except FormCommandError:
             if command is None:
                 raise
