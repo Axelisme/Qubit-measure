@@ -77,11 +77,10 @@ class FormOptionDescription:
 
 @dataclass(frozen=True)
 class FormElementDescription:
-    """One FixedList element: its original index, captured name and field path.
+    """One model-list element: current index, display label and field path.
 
-    name is the raw input's literal string name, or "" while the input holds
-    none. The index is the element's position in the captured list, which
-    never changes during one capture.
+    name comes from Display.element_label when it names a string value;
+    otherwise it is the index text. It is presentation, not an identity rule.
     """
 
     index: int
@@ -126,10 +125,10 @@ class FormFieldDescription:
     detached option value describing actual child structure, independently of
     selected; None denotes no matched structural option. A selection-only write
     changes selected without rebuilding branch or its local child drafts.
-    A FixedList field has kind "elements", can_expand and its element models
-    as children; elements lists them by index and name. A child element has
-    path ending in its index and name equal to the element's captured name;
-    its identity field is fixed. elements is None for every other field.
+    A list[Model] field has kind "elements", can_expand and its element models
+    as children; elements lists current indices and display labels. A child
+    element path ends in its index. elements is None for every other field.
+    readonly is Display's presentation hint, never mutation authorization.
     """
 
     path: FormWritePath
@@ -155,6 +154,7 @@ class FormFieldDescription:
     constraints: FormConstraints
     commands: tuple[FormCommandDescription, ...] = ()
     selector: bool = True
+    readonly: bool = False
     branch: JsonValue = None
     elements: tuple[FormElementDescription, ...] | None = None
 

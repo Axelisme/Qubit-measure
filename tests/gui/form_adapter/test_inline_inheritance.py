@@ -41,12 +41,9 @@ def choose[F: FormModel](
 ) -> None:
     target = state.describe(path, env).target
     assert target is not None and target.options is not None
-    state.write(
-        {
-            path: next(
-                option.value for option in target.options if option.label == label
-            )
-        },
+    state.select(
+        path,
+        next(option.value for option in target.options if option.label == label),
         env,
     )
 

@@ -10,7 +10,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import TYPE_CHECKING, ClassVar, Self, final
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic_core import PydanticCustomError
@@ -36,7 +36,7 @@ _logger = getLogger(__name__)
 type FormPath = tuple[str | int, ...]
 """Relative model-field/mapping-key error path; integers are sequence indexes."""
 type FormWritePath = tuple[str | int, ...]
-"""Model-field path; only a FixedList field may be followed by an element index.
+"""Model-field path; list[Model] fields may be followed by an element index.
 
 Other sequence indexes and mapping-key writes are rejected.
 """
@@ -68,6 +68,20 @@ class FormConversionError(FormCommandError):
     Editors may display this reason and restore the committed selector without
     retrying a write, converter or notification.
     """
+
+
+class FormInputRejected(ValueError):
+    """A declaration refused an ordinary mutation before any state was installed.
+
+    path is the original typed write/command path, or the affected field for
+    direct install_input. The message is safe to display in widgets and RPC.
+    This is not value validation: invalid values remain editable drafts.
+    """
+
+    def __init__(self, path: FormWritePath, message: str) -> None:
+        """Record the refused canonical path and a user-facing explanation."""
+        super().__init__(message)
+        self.path = path
 
 
 class FormPathError(ValueError):
@@ -136,34 +150,6 @@ class InputPolicy:
 
 
 @dataclass(frozen=True)
-class FixedList:
-    """Annotated metadata for a list[Model] whose element identities are fixed.
-
-    The captured input names each element with its name_field, a str field of
-    the element model. The names and their order stay fixed for the life of one
-    capture: writes, whole-list replacement and installed inputs may edit
-    element values but cannot add, remove, rename or reorder elements. A
-    duplicate name is rejected. Names must be literal strings. The core knows no domain
-    meaning of a name; editors address an element by its original index.
-    """
-
-    name_field: str
-
-
-@dataclass(frozen=True)
-class Participants:
-    """Annotated metadata for a list[str] naming FixedList elements.
-
-    list_path is the model-field path, from the model holding this field, to
-    the FixedList. Entries must name existing elements, be unique and the list
-    must not be empty. Its order is independent of element order. Participation
-    never filters validation: every element is validated.
-    """
-
-    list_path: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class Display:
     """Presentation metadata carried by Annotated fields.
 
@@ -184,6 +170,10 @@ class Display:
     validation, defaults, choices or input.
     selector=False hides the dropdown, retaining its description and active
     branch. Explicit commands then provide the editing action.
+    element_label names a model-list element field to use as picker text;
+    None uses the index. readonly requests a non-editable scalar control. Both
+    are display hints, not validation or mutation admission. Any enforcement
+    belongs to the declaring owner.
     Declaration order sets order; nested models set sections. No layout registry.
     """
 
@@ -196,6 +186,8 @@ class Display:
     hidden: bool = False
     group: str | None = None
     selector: bool = True
+    element_label: str | None = None
+    readonly: bool = False
 
     def __post_init__(self) -> None:
         """Reject a negative decimals count or an empty group with ValueError."""
@@ -304,7 +296,8 @@ class FormModel(BaseModel):
 
     Override defaults for initial input (an Expr default is
     evaluated into its value), and choices for dynamic path-to-options
-    mappings. default_input is final.
+    mappings. Owner default_input overrides must call super first and only add
+    owner admission to its complete fresh input.
     No instances carry input, environment, revision or editing state. Ordinary
     nested BaseModel types remain supported without inheriting FormModel.
     default_input and FormInput reject untagged str | Model
@@ -317,10 +310,11 @@ class FormModel(BaseModel):
     """Actions mounted on occurrences of this active model, not its parent."""
 
     @classmethod
-    @final
     def default_input(cls, env: FormEnv) -> FormInput[Self]:
         """Build isolated input from declared defaults; required keys stay absent.
 
+        Owner overrides must call super first, then add only owner build
+        admission. Core owns defaults, shape, sources and expression evaluation.
         Calls defaults(env) before checking sources and assembling input.
         Used missing library or device sources raise field_error with the
         consuming path. A text-field {"expr": text} default (int, float,
@@ -362,6 +356,19 @@ class FormModel(BaseModel):
 
         del env
         return static_defaults(cls)
+
+    @classmethod
+    def check_input_change(
+        cls, before: dict[str, JsonValue], after: dict[str, JsonValue]
+    ) -> None:
+        """Admit an ordinary root-input mutation, or raise FormInputRejected.
+
+        Both trees are detached deep copies. Editing them has no effect on the
+        candidate, current input or base. Do not read new sources, execute
+        converters/options, or publish changes here. This root declaration
+        check runs after complete preparation, before installation. It is not
+        ordinary value validation. Restoration and reset do not call it.
+        """
 
     @classmethod
     def check_sources(cls, data: Mapping[str, JsonValue], env: FormEnv) -> None:
@@ -447,17 +454,13 @@ class FormInput[F: FormModel]:
         Structural selectors require ordinary typed tags, not Expr envelopes.
         Non-JSON/nonfinite data raises ValueError; unknown fields, malformed tags
         and invalid values remain input for result/compatible restoration.
-        A FixedList with two elements of one name raises ValueError naming the
-        original indices.
         """
-        from ._fixed import check_unique_names
         from ._json import copy_object
         from ._structure import check_form_shape
 
         check_form_shape(model)
         self._model = model
         self._data = copy_object(data)
-        check_unique_names(model, self._data)
         self._selections = {
             path: copy_object({"value": value})["value"]
             for path, value in (selections or {}).items()
@@ -556,38 +559,25 @@ class FormState[F: FormModel]:
         return not self.input.same_as(self.base)
 
     def write(self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv) -> None:
-        """Install one input batch, keeping model-invalid drafts editable.
+        """Overwrite each requested raw subtree and atomically install the batch.
 
-        Selector/tag changes apply before other leaves. A field's single
-        converter receives its readonly old draft, requested selection and local
-        evaluation context. Core admits the complete replacement with the same
-        installer used by commands, without supplying defaults. Without a
-        converter, changing a model selection preserves its raw child branch
-        and input; describe reports selection and branch separately. Scalar
-        selections remain ordinary leaf writes. Partial selector objects apply
-        explicitly supplied child edits after conversion. Unknown structures,
-        tags or child fields reject the entire batch. Writes use
-        model-field leaf paths. Sequences other than FixedList and typed
-        mappings are whole leaves; replace a mapping to delete, rename or clear
-        its keys. Other sequence-index and mapping-key patches raise ValueError. Ordinary model replacement is
-        rejected. A first child-leaf write into an absent non-nullable nested
-        model creates its static defaults object before applying the leaf.
-        Nullable model sections accept None or an object to deactivate/activate;
-        an explicit null section requires object activation before child edits.
-        Nonempty
-        partial union objects write supplied children; ordinary non-nullable
-        model replacement outside a union remains rejected.
-        Structurally unknown or overlapping paths raise ValueError without
-        installing a partial batch.
-        Ordinary invalid values/Expr are retained for result to report. Missing
-        used library/devices raises field_error naming its consuming path.
-        FixedList elements are edited as ("list", index, field) paths. A write
-        that changes their names, count or order, even by whole-list
-        replacement, raises ValueError and installs nothing.
-        Notify subscribers once after a changed batch is installed, not for
-        intermediate branches. No Engine update, revision check or I/O occurs.
+        batch maps typed paths to JSON values. Values replace their complete
+        subtree without merging defaults or running converters. Each write clears
+        selection overrides at its path and descendants; raw values determine
+        the new branch. Use select for an explicit option change.
+        Paths resolve against the initial input. Unknown, inactive or overlapping
+        paths and out-of-annotation structures reject the complete batch.
+        Model-list elements accept ("list", index, field) paths. Other sequences
+        and typed mappings are whole leaves. Child writes into absent non-nullable
+        models create only the necessary objects, not static defaults. Explicit
+        null sections require object activation before child edits.
+        Ordinary invalid values remain editable; result reports their errors.
+        Used-source checks and root check_input_change run before installation.
+        Owner refusal raises FormInputRejected with the original request path.
+        Rejection preserves input, base, selections and notifications. A changed
+        batch notifies once. This method performs no Engine update or I/O.
         """
-        self.install_input(self.prepare_write(batch, env))
+        self._install(self.prepare_write(batch, env))
 
     def prepare_write(
         self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv
@@ -600,26 +590,52 @@ class FormState[F: FormModel]:
         without crossing await, reset or guard boundaries; not an authorization
         or revision token. install_input does not repeat defaults/source checks.
         """
-        from ._transitions import prepare_write
+        from ._commands import prepare_write
 
         return prepare_write(self.input, batch, env)
+
+    def prepare_selection(
+        self, path: FormWritePath, selection: JsonValue, env: FormEnv
+    ) -> FormInput[F]:
+        """Prepare a listed option selection without installing or notifying.
+
+        Only this operation runs the field converter. Without a converter,
+        model selections preserve their branch and authored raw input. Scalar
+        selections write the listed value. Unavailable options or failed
+        conversion raise FormConversionError; owner refusal retains path in
+        FormInputRejected. Source failures remain directed. Use the candidate
+        in the same guarded turn/current input/env as prepare_write.
+        """
+        from ._transitions import prepare_selection
+
+        return prepare_selection(self.input, path, selection, env)
+
+    def select(self, path: FormWritePath, selection: JsonValue, env: FormEnv) -> None:
+        """Atomically select a listed option using prepare_selection, notifying once.
+
+        Failure leaves input, base, selections and notifications unchanged.
+        This is ordinary owner-admitted mutation, not restoration or reset.
+        """
+        self._install(self.prepare_selection(path, selection, env))
 
     def install_input(self, candidate: FormInput[F]) -> None:
         """Install a same-model prepared input, preserving base.
 
-        A different model raises TypeError, and a candidate that changes the
-        FixedList element names, count or order raises ValueError. Changed content notifies subscribers
+        A different model raises TypeError. Declaration check_input_change
+        runs on detached copies, raising FormInputRejected on refusal. This
+        rechecks prepared candidates against current input. Changed content notifies subscribers
         once after installation; equal content is a no-op. Hosts guard the whole
         prepare/install turn. This does not repeat validation or source checks.
         """
         if candidate.model is not self._model:
             raise TypeError("Cannot install a different form model class")
+        self._model.check_input_change(self.input.data, candidate.data)
         self._install(candidate)
 
     def describe(self, path: FormWritePath, env: FormEnv) -> FormDescription:
         """Describe one canonical model-field path and its next layer.
 
-        path is a tuple of field names and FixedList element indexes, () for root. env is the host's fixed
+        path is a tuple of field names and model-list indexes, () for root. env is the host's fixed
         capture for choices/options hooks. Return detached named metadata, not
         JSON Schema or evaluated values. Children have full paths and no
         descendants. Each field's can_expand reports structural reachability
@@ -628,7 +644,7 @@ class FormState[F: FormModel]:
         layer without introducing a path alias. Ordinary missing
         models retain declared fields. Disabled nullable models and unmatched
         options expose metadata only, never guessed defaults. Unknown paths,
-        inactive descendants, invalid or out-of-range FixedList indexes and
+        inactive descendants, invalid or out-of-range model-list indexes and
         traversal into whole leaves raise FormPathError with the full requested path. Unsupported declarations and other
         non-path failures keep their original exception types.
         Does not validate, evaluate expressions, call defaults, read sources
@@ -659,12 +675,9 @@ class FormState[F: FormModel]:
         """
         from ._commands import prepare_command
 
-        self.install_input(prepare_command(self.input, path, name, env))
+        self._install(prepare_command(self.input, path, name, env))
 
     def _install(self, candidate: FormInput[F]) -> None:
-        from ._fixed import require_same_identity
-
-        require_same_identity(self._model, self._data, candidate.data)
         if self.input.same_as(candidate):
             return
         self._data = candidate.data

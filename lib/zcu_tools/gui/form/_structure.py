@@ -1,7 +1,7 @@
 """Pydantic field traversal and transactional candidate construction.
 
 Reflection stays here: model fields, union tags and mapping annotations define
-which paths can be edited. Only FixedList sequences expose indexed model paths.
+which paths can be edited. Lists of models expose indexed paths without policy metadata.
 """
 
 from collections.abc import Mapping
@@ -16,14 +16,12 @@ from pydantic_core import PydanticCustomError
 from ._json import copy_json, copy_object, default_json, expr_text
 from .defaults import static_defaults
 from .model import (
-    FixedList,
     FormEnv,
     FormModel,
     FormPath,
     FormWritePath,
     InputConverter,
     InputPolicy,
-    Participants,
 )
 
 
@@ -31,8 +29,8 @@ class StructureError(ValueError):
     """Invalid write structure, distinct from author/provider ValueErrors.
 
     path identifies the canonical batch write that failed, not a position inside
-    its value. build_candidate preserves that full path through nested traversal
-    and partial-object expansion. No candidate is installed on failure.
+    its value. Value-write admission preserves that full path through traversal
+    and structural validation. No candidate is installed on failure.
     """
 
     def __init__(self, message: str, *, path: FormWritePath) -> None:
@@ -114,71 +112,16 @@ def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
     )
 
 
-def fixed_list(info: FieldInfo) -> FixedList | None:
-    """Return the FixedList metadata declared on info, if any."""
-    return next((m for m in info.metadata if isinstance(m, FixedList)), None)
-
-
-def participants(info: FieldInfo) -> Participants | None:
-    """Return the Participants metadata declared on info, if any."""
-    return next((m for m in info.metadata if isinstance(m, Participants)), None)
-
-
-def element_model(info: FieldInfo) -> type[BaseModel]:
-    """Return the element model of a validated FixedList field."""
-    (item,) = get_args(unwrap(info.annotation))
-    return model_types(item)[0]
-
-
-def _check_fixed_declaration(
-    model: type[BaseModel], name: str, info: FieldInfo, path: FormPath
-) -> None:
-    """Reject FixedList/Participants declarations that cannot hold their contract."""
-    dotted = ".".join(str(part) for part in (*path, name))
-    fixed = fixed_list(info)
-    if fixed is not None:
-        annotation = unwrap(info.annotation)
-        args = get_args(annotation)
-        item = unwrap(args[0]) if len(args) == 1 else None
-        if (
-            get_origin(annotation) is not list
-            or not isinstance(item, type)
-            or not issubclass(item, BaseModel)
-        ):
-            raise ValueError(f"{dotted}: FixedList requires a list of one model")
-        key = item.model_fields.get(fixed.name_field)
-        if key is None or unwrap(key.annotation) is not str:
-            raise ValueError(
-                f"{dotted}: FixedList name_field {fixed.name_field!r} "
-                f"must be a str field of {item.__name__}"
-            )
-    participating = participants(info)
-    if participating is not None:
-        target = _field_by_path(model, participating.list_path)
-        if (
-            unwrap(info.annotation) != list[str]
-            or target is None
-            or fixed_list(target) is None
-        ):
-            raise ValueError(
-                f"{dotted}: Participants requires list[str] naming "
-                f"the FixedList at {participating.list_path!r}"
-            )
-
-
-def _field_by_path(model: type[BaseModel], path: tuple[str, ...]) -> FieldInfo | None:
-    """Resolve model-field names through sole-model fields, or None."""
-    info: FieldInfo | None = None
-    for position, name in enumerate(path):
-        info = model.model_fields.get(name)
-        if info is None:
-            return None
-        models = model_types(info.annotation)
-        if position < len(path) - 1:
-            if len(models) != 1:
-                return None
-            model = models[0]
-    return info
+def list_model(info: FieldInfo) -> type[BaseModel] | None:
+    """Return a list's sole model element declaration, or None for other leaves."""
+    annotation = unwrap(info.annotation)
+    if get_origin(annotation) is not list:
+        return None
+    args = get_args(annotation)
+    if len(args) != 1:
+        return None
+    item = unwrap(args[0])
+    return item if isinstance(item, type) and issubclass(item, BaseModel) else None
 
 
 def check_form_shape(model: type[BaseModel]) -> None:
@@ -202,8 +145,7 @@ def check_form_shape(model: type[BaseModel]) -> None:
             if isinstance(member, type) and issubclass(member, BaseModel):
                 if member not in seen:
                     seen.add(member)
-                    for field_name, info in member.model_fields.items():
-                        _check_fixed_declaration(member, field_name, info, path)
+                    for info in member.model_fields.values():
                         if (
                             sum(
                                 isinstance(item, InputConverter)
@@ -391,207 +333,6 @@ def _branch_defaults(model: type[BaseModel], env: FormEnv) -> dict[str, JsonValu
     return static_defaults(model)
 
 
-def _field_at(
-    model: type[BaseModel], data: dict[str, JsonValue], path: FormWritePath
-) -> tuple[dict[str, JsonValue], str, FieldInfo]:
-    """Resolve a writable field path to its containing object, name and metadata."""
-    if not path:
-        raise StructureError(f"Invalid write path: {path!r}", path=path)
-    name, *tail = path
-    if not isinstance(name, str) or (info := model.model_fields.get(name)) is None:
-        raise StructureError(f"Unknown field path: {path!r}", path=path)
-    if not tail:
-        return data, name, info
-    value = data.get(name)
-    if fixed_list(info) is not None:
-        index, *rest = tail
-        if (
-            not isinstance(value, list)
-            or isinstance(index, bool)
-            or not isinstance(index, int)
-            or not 0 <= index < len(value)
-        ):
-            raise StructureError(f"Unknown fixed element path: {path!r}", path=path)
-        element = element_model(info)
-        if not rest:
-            raise StructureError(
-                f"Fixed element is not a leaf path: {path!r}", path=path
-            )
-        item = value[index]
-        if not isinstance(item, dict):
-            raise StructureError(f"Invalid fixed element at path: {path!r}", path=path)
-        return _field_at(element, item, tuple(rest))
-    child = selected(info, value)
-    if child is not None:
-        if name not in data and type(None) not in alternatives(info.annotation):
-            value = static_defaults(child)
-            data[name] = value
-        if not isinstance(value, dict):
-            raise StructureError(
-                f"Inactive, missing or invalid model path: {path!r}", path=path
-            )
-        return _field_at(child, value, tuple(tail))
-    raise StructureError(
-        f"Not a writable child path (mapping, sequence or scalar): {path!r}", path=path
-    )
-
-
-def _switch(
-    model: type[BaseModel],
-    data: dict[str, JsonValue],
-    path: FormWritePath,
-    value: JsonValue,
-    _env: FormEnv,
-) -> bool:
-    if len(path) < 2 or isinstance(path[-2], int):
-        return False
-    parent, key, info = _field_at(model, data, path[:-1])
-    tag_key = discriminator(info)
-    if tag_key is None or path[-1] != tag_key:
-        return False
-    old = parent.get(key)
-    if key in parent and old is None:
-        raise StructureError(
-            f"Activate null section before child write: {path!r}", path=path
-        )
-    if isinstance(old, dict) and old.get(tag_key) == value:
-        return True
-    branch = next(
-        (item for item in model_types(info.annotation) if value in _tag(item, tag_key)),
-        None,
-    )
-    if branch is None:
-        raise StructureError(
-            f"Unknown discriminator at path {path!r}: {value!r}", path=path
-        )
-    new: dict[str, JsonValue] = {tag_key: value}
-    parent[key] = new
-    return True
-
-
-def _select_object(
-    model: type[BaseModel],
-    data: dict[str, JsonValue],
-    path: FormWritePath,
-    value: JsonValue,
-    env: FormEnv,
-) -> bool:
-    """Admit explicitly authored union content without generating defaults.
-
-    Declared option/tag selections are handled by _transitions first. This
-    structural fallback also admits invalid drafts outside dynamic option menus.
-    """
-    if not isinstance(value, dict):
-        return False
-    parent, key, info = _field_at(model, data, path)
-    tag = discriminator(info)
-    if tag is None:
-        return False
-    old = parent.get(key)
-    branch = selected(info, value if tag in value else old)
-    if branch is None:
-        raise StructureError(f"Missing or unknown discriminator at {path!r}", path=path)
-    seed = (
-        copy_object(old)
-        if isinstance(old, dict) and selected(info, old) is branch
-        else {}
-    )
-    parent[key] = _partial_model(branch, seed, value, env)
-    return True
-
-
-def _partial_model(
-    model: type[BaseModel],
-    seed: dict[str, JsonValue],
-    value: dict[str, JsonValue],
-    env: FormEnv,
-) -> dict[str, JsonValue]:
-    """Expand partial model children to one candidate; containers remain leaves."""
-    batch: dict[FormWritePath, JsonValue] = {}
-    for name, item in value.items():
-        info = model.model_fields.get(name)
-        if info is None:
-            raise StructureError(
-                f"Unknown field in partial branch object: {name!r}", path=(name,)
-            )
-        if (
-            isinstance(item, dict)
-            and model_types(info.annotation)
-            and discriminator(info) is None
-        ):
-            child = selected(info, item)
-            if child is None:
-                raise StructureError(
-                    f"Ambiguous partial model field: {name!r}", path=(name,)
-                )
-            prior = seed.get(name)
-            seed[name] = _partial_model(
-                child,
-                copy_object(prior) if isinstance(prior, dict) else {},
-                item,
-                env,
-            )
-        else:
-            batch[(name,)] = item
-    return build_candidate(model, seed, batch, env)
-
-
-def build_candidate(
-    model: type[BaseModel],
-    data: dict[str, JsonValue],
-    batch: Mapping[FormWritePath, JsonValue],
-    env: FormEnv,
-) -> dict[str, JsonValue]:
-    """Build a detached discriminator-first batch; structural/source errors raise."""
-    paths = tuple(batch)
-    for path in paths:
-        if not path:
-            raise StructureError(f"Invalid write path: {path!r}", path=path)
-        if any(path != other and other[: len(path)] == path for other in paths):
-            raise StructureError(f"Overlapping paths: {path!r}", path=path)
-    copied = {path: copy_json(value) for path, value in batch.items()}
-    result = copy_object(data)
-    pending: dict[FormWritePath, JsonValue] = {}
-    for path in sorted(copied, key=len):
-        value = copied[path]
-        try:
-            if not (
-                _switch(model, result, path, value, env)
-                or _select_object(model, result, path, value, env)
-            ):
-                pending[path] = value
-        except StructureError as exc:
-            # Nested traversal/partial objects report local paths; retain the
-            # original batch key so callers can identify the consuming write.
-            exc.path = path
-            raise
-    for path, value in pending.items():
-        try:
-            parent, key, info = _field_at(model, result, path)
-            _require_leaf(info, value, path)
-            parent[key] = value
-        except StructureError as exc:
-            exc.path = path
-            raise
-    return result
-
-
-def _require_leaf(info: FieldInfo, value: JsonValue, path: FormWritePath) -> None:
-    types = alternatives(info.annotation)
-    if model_types(info.annotation):
-        if type(None) in types and (value is None or isinstance(value, dict)):
-            return
-        # Other mixed scalar/model annotations retain ordinary scalar leaves.
-        if not isinstance(value, dict) and any(
-            t is str or t is int or t is float or t is bool or t is complex
-            for t in types
-        ):
-            return
-        raise StructureError(
-            f"Whole model replacement is not a leaf path: {path!r}", path=path
-        )
-
-
 def _field_leaves(
     info: FieldInfo, value: JsonValue, path: FormWritePath
 ) -> dict[FormWritePath, JsonValue]:
@@ -599,12 +340,11 @@ def _field_leaves(
     if child is not None and isinstance(value, dict):
         return leaves(child, value, path)
     if (
-        fixed_list(info) is not None
+        (element := list_model(info)) is not None
         and isinstance(value, list)
         and value
         and all(isinstance(item, dict) for item in value)
     ):
-        element = element_model(info)
         result: dict[FormWritePath, JsonValue] = {}
         for index, item in enumerate(value):
             if isinstance(item, dict):

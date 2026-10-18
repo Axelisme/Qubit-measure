@@ -306,13 +306,19 @@ def test_complete_set_sweep_replaces_invalid_step_draft(tmp_path: Path) -> None:
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        target = gui.owner.describe(("range", "n")).target
+        target = gui.owner.describe(("range",)).target
         commands = getattr(target, "commands", ())
-        assert commands, "Owner must expose sampling conversion"
-        gui.owner.run_command(("range", "n"), commands[0].name)
-        coords = getattr(gui.owner.describe(("range", "start")).target, "commands", ())
-        assert coords, "Step endpoints must expose coordinate conversion"
-        gui.owner.run_command(("range", "start"), coords[0].name)
+        assert commands, "Sweep row must expose sampling conversion"
+        gui.owner.run_command(
+            ("range",),
+            next(command.name for command in commands if command.name == "to_step"),
+        )
+        coords = getattr(gui.owner.describe(("range",)).target, "commands", ())
+        assert coords, "Step row must expose coordinate conversion"
+        gui.owner.run_command(
+            ("range",),
+            next(command.name for command in coords if command.name == "to_center"),
+        )
         gui.owner.write({("range", "step"): {"expr": "1 / 0"}})
         tab.set_sweep("range", start=10.0, stop=4.0, expts=4)
         assert gui.owner.input.data["range"] == {
@@ -328,10 +334,13 @@ def test_complete_set_sweep_replaces_invalid_center_draft(tmp_path: Path) -> Non
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        target = gui.owner.describe(("range", "start")).target
+        target = gui.owner.describe(("range",)).target
         commands = getattr(target, "commands", ())
-        assert commands, "Owner must expose coordinate conversion"
-        gui.owner.run_command(("range", "start"), commands[0].name)
+        assert commands, "Sweep row must expose coordinate conversion"
+        gui.owner.run_command(
+            ("range",),
+            next(command.name for command in commands if command.name == "to_center"),
+        )
         gui.owner.write({("range", "center"): {"expr": "1 / 0"}})
         tab.set_sweep("range", start=10.0, stop=4.0, expts=4)
         assert gui.owner.input.data["range"] == {

@@ -25,6 +25,14 @@ Command 掛在欄位上，只能替換這個欄位及 descendants。它可以回
 
 使用者於 2026-10-18 裁定：「我認為沒給converter就與new = old一樣」，並確認是選項更新、子表單不變。作用範圍裁定為「command應該只能改自己以及子欄位」。
 
+### 值寫入與選項切換
+
+`FormState.write(batch, env)` 一律覆寫每個 typed path 上的完整 raw 子樹，清除該 path 及其下的 selection overrides，由新值決定 branch。它不合併、不補 defaults、不執行 converter。單欄修改使用完整欄位 path。Model result 可以依預設補值，但不回填 raw。
+
+`select(path, selection, env)` 是明確的選項切換，只有這條路徑執行 converter。`prepare_write` 與 `prepare_selection` 分別提供未安裝的候選，host 必須在同一 guard 與 current input 下使用。寫入仍遵守 annotation、來源與 owner admission、initial-active path 解析及批次原子性。Generated selectors 保留專用操作。
+
+使用者於 2026-10-19 問「為什麼不是總是覆寫path位置的值？」，並對統一覆寫、converter 僅用於選項切換的方案回答「同意」。因此不另提供 replacement operation 或 operation 欄位。
+
 ### 原始草稿、求值與失敗
 
 Callable 接收具名唯讀 old snapshot，包含 selection、子表單結構與原始 input。它不要求整份 Form 有效。具名 context 提供 `evaluate(path)`，只求值 callable 所需欄位。宣告者在宣告時綁定來源讀取能力，宿主管理其生命週期，Core 不接管 library 或 group。
@@ -57,13 +65,17 @@ Gauss length=0.8、sigma=0.2 切 Drag 時保留 length／sigma，delta／alpha �
 
 保存內容包括每個欄位的 selection／branch 與原始 input，含 expression 和未完成草稿。還原從可信型別註釋與宣告重建結構，再填回原稿。不執行 converter，不序列化 callable 或動態 class，不另造 schema 語言。
 
-型別或來源 identity 不相容時明確報錯，不靜默丟葉或把資料配給另一個元素。Library 內容版本變動不等於元素 identity 改變。Ref→inline 後保存的草稿，還原時保留當時 inline branch 與原稿，不從已修改的 library 重新複製。
+還原依現行 annotation 與存檔的名稱、形狀遞迴；list 長度與位置沿存檔，不比固定 identity。不相符欄位列入 dropped。使用者於 2026-10-18 要求「還有版本？太複雜了。我需要更簡單的機制」，看過遞迴規則後確認「好，可以」。Ref→inline 後保存的草稿，還原時保留當時 inline branch 與原稿，不從已修改的 library 重新複製。
 
 ### 固定具名元素與參與清單
 
-Form 提供固定 model list 的共用描述、picker 與 indexed editing。元素共用欄位規則，初值及 label 可以不同。元素名稱、數量與順序由宣告和來源 capture 決定，不提供增刪、重排或改名。Participants 是獨立的名稱清單輸入，不是元素的 active checkbox，也不控制元素是否驗證。
+Core 對普通 `list[Model]` 提供中性描述、picker 與 indexed editing，不辨識固定元素或 participants。`Display` 只提供元素 label 與 readonly 呈現提示。固定政策集中在 `gui.form_adapter`，宣告 owner 列出 list path、名稱欄位及 participants path。新建與 Reset 從 capture 建表，重開及還原沿存檔的長度、位置與名稱，不與新 capture 比 identity。
 
-需要名稱定位的表單在建立時拒絕重複元素名，錯誤指名重複名稱與原始 indices。Framework 只檢查宣告名稱的唯一性，不解讀 resonator，不改 [[0072]] 的 group schema。元素名取法歸實驗定義者；若實驗需要重複 resonator，可以宣告 R1#0、R1#1 等不同名稱，framework 不自行加後綴。這項限制由顧問於 2026-10-18 確認，避免 participants 與 recipe overrides 無法唯一定位。
+`FormModel.check_input_change(before, after)` 在普通 mutation 的完整候選安裝前執行宣告檢查，兩棵輸入都是複本。改名、增刪或重排以具名、帶原 typed path 的拒絕原子失敗，input、base、selections 與通知都不變。Widget 與 RPC 顯示可恢復錯誤。還原及 Reset 不經此檢查。Participants 非法值仍存成 invalid draft，由一般驗證報錯並擋 Run。
+
+使用者於 2026-10-18 看過傳複本與宣告檢查方案後裁定：「可以」。這個檢查集中普通 mutation 的 admission，不把固定 identity 政策放回 Core。
+
+需要名稱定位的表單在建立時拒絕重複元素名，錯誤指名重複名稱與原始 indices。宣告 owner 只檢查名稱的唯一性，不解讀 resonator，不改 [[0072]] 的 group schema。元素名取法歸實驗定義者；若實驗需要重複 resonator，可以宣告 R1#0、R1#1 等不同名稱，framework 不自行加後綴。這項限制由顧問於 2026-10-18 確認，避免 participants 與 recipe overrides 無法唯一定位。
 
 Workflow 的 Apply 以宣告的 Form.to_cfg() 轉成完整 native tunables model，再由 Engine 依 workflow 型別驗證、整體替換並增加 revision。List 與固定 list 隨完整 model 提交，不攤平 preview leaves，也不建立 native index path grammar。每次 Apply 的 journal 記 actor、revision_before／after 與完整新 tunables JSON。Append 成功後才發布值與 revision，宿主才接受 input／base。使用者於 2026-10-18 確認完整 model 直接套用、不比對差異，並在日誌寫法中確認「甲乙都可以」。採完整快照，不維護逐葉差異或舊格式相容層。當前 step capture 與 iteration record.json 格式不變，見 [[0062]]。
 
