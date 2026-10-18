@@ -97,6 +97,9 @@ class Dispatch:
     diagnostics: counts for decisions resolved so far, refreshed after workers join.
     costs: nonnegative scheduling estimates, including provisional deferred costs.
     preparations: accepted caller guard products, grouped by family.
+    rejected_preparations: model-only handoffs with no accepted rows, never apply
+        bindings. Caller shared guards cap these by spare resident capacity and
+        per-key quotas; Schedule offers them below all actual consumers.
     deferred: worker-owned row mask, or None when no rows need worker classification.
     shaped: fixed acquire-wide cost plan, or None when no shaped work exists.
     rejected: caller guard decisions to skip in worker-local fallback chains.
@@ -124,6 +127,9 @@ class Dispatch:
         default_factory=lambda: np.empty(0, dtype=np.int64)
     )
     cached: Mapping[str, tuple[PreparedPayload, ...]] = field(default_factory=dict)
+    rejected_preparations: Mapping[str, tuple[GuardPreparation, ...]] = field(
+        default_factory=dict
+    )
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -209,6 +215,7 @@ class _Guarded:
     rejected: NDArray[np.int64]
     preparations: tuple[GuardPreparation, ...]
     plan: RowPlan | None = None
+    rejected_preparations: tuple[GuardPreparation, ...] = ()
 
 
 def _guard_key(
@@ -217,7 +224,7 @@ def _guard_key(
     context: KernelContext,
     rows: NDArray[np.int64],
 ) -> _Guarded:
-    """Keep the exact guard product whenever any row accepts this key."""
+    """Separate consumer handoffs from model-only products with no accepted row."""
     result = kernel.guard_prepared(table, rows, context)
     if result is None:
         raise RuntimeError(
@@ -226,7 +233,13 @@ def _guard_key(
     accepted = result.accepted
     selected = rows[accepted]
     preparations = result.preparations if len(selected) else ()
-    return _Guarded(selected, rows[~accepted], preparations, result.plan)
+    return _Guarded(
+        selected,
+        rows[~accepted],
+        preparations,
+        result.plan,
+        result.preparations if not len(selected) else (),
+    )
 
 
 def _guard_cached(
@@ -235,6 +248,7 @@ def _guard_cached(
     context: KernelContext,
     rows: NDArray[np.int64],
     hits: _GuardCacheHits,
+    rejected_limit: int | None = None,
 ) -> tuple[_Guarded, ...]:
     """Admit covered cached rows without building; build only domain misses."""
     remaining = np.ones(len(rows), dtype=bool)
@@ -265,7 +279,21 @@ def _guard_cached(
             )
         )
     if remaining.any():
-        results.append(_guard_key(kernel, table, context, rows[remaining]))
+        built = _guard_key(kernel, table, context, rows[remaining])
+        if rejected_limit is not None and built.rejected_preparations:
+            retained: list[GuardPreparation] = []
+            for preparation in built.rejected_preparations:
+                if preparation.prepared.nbytes <= rejected_limit:
+                    retained.append(preparation)
+                    rejected_limit -= preparation.prepared.nbytes
+            built = _Guarded(
+                built.rows,
+                built.rejected,
+                built.preparations,
+                built.plan,
+                tuple(retained),
+            )
+        results.append(built)
     return tuple(results)
 
 
@@ -329,6 +357,7 @@ class _Classifier:
             selection.two_tone_direct if selection is not None else None
         )
         self.preparations: dict[str, list[GuardPreparation]] = {}
+        self.rejected_preparations: dict[str, list[GuardPreparation]] = {}
         self.rejected: dict[str, NDArray[np.bool_]] = {}
         self.guard_plans: dict[str, list[RowPlan]] = {}
         self.plans: dict[str, RowPlan] = {}
@@ -357,6 +386,14 @@ class _Classifier:
                 )
             )
         hits = self.cached.get(kernel.name, _EMPTY_GUARD_HITS)
+        # Bound rejected handoffs even while pooled shared guards are returning.
+        # Equal per-key quotas deliberately decline large non-revisiting scans.
+        rejected_limit = (
+            max(0, self.cache.limit - self.cache.bytes)
+            // max(1, int(np.count_nonzero(groups.shared)))
+            if self.cache is not None
+            else 0
+        )
         local = rows[~groups.shared[groups.inverse]]
         self.deferred[local] = True
         if len(local):
@@ -366,7 +403,9 @@ class _Classifier:
         )
         if self.pool is not None and np.count_nonzero(groups.shared) >= 8:
             batches = self.pool(
-                delayed(_guard_cached)(kernel, self.table, self.context, selected, hits)
+                delayed(_guard_cached)(
+                    kernel, self.table, self.context, selected, hits, rejected_limit
+                )
                 for selected in selections
             )
             results: list[_Guarded] = []
@@ -379,7 +418,7 @@ class _Classifier:
             result
             for selected in selections
             for result in _guard_cached(
-                kernel, self.table, self.context, selected, hits
+                kernel, self.table, self.context, selected, hits, rejected_limit
             )
         )
 
@@ -407,6 +446,10 @@ class _Classifier:
                 )[result.rejected] = True
             if result.plan is not None:
                 self.guard_plans.setdefault(kernel.name, []).append(result.plan)
+            if result.rejected_preparations:
+                self.rejected_preparations.setdefault(kernel.name, []).extend(
+                    result.rejected_preparations
+                )
             if result.preparations:
                 self.preparations.setdefault(kernel.name, []).extend(
                     result.preparations
@@ -551,6 +594,7 @@ class _Classifier:
             self.plans,
             chain,
             self.cached,
+            {name: tuple(items) for name, items in self.rejected_preparations.items()},
         )
 
 

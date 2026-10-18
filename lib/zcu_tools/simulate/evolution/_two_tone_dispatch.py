@@ -25,7 +25,13 @@ def direct_preferred(
     Coefficients were calibrated on 16-level FTF S9 throughput (16 ns, weak),
     S9 qualitative (514 ns, strong), and 16--512 ns / .02--.5 gain boundary rows
     at .5 and 7.29 GHz. They are estimates outside that calibration, not universal
-    timing predictions. Every candidate still needs its own numerical guard;
+    timing predictions. Cold distinct-port balanced drives were also calibrated
+    on the 16-level half-flux mux model: 128--512 ns, gains .1--.2, carriers
+    .295/.597 GHz, eleven probe points spanning 2 MHz. At 512 ns and gain .2,
+    measured frame/certificate work was 4.32/8.60 CPU-s versus 1.4/2.1 estimated.
+    Their multipliers ramp to 3.1/4.1 with both drive actions and balance; this
+    charges construction, not a prediction that a strong probe must be rejected.
+    Same-port costs are unchanged. Every candidate still needs its own guard;
     rejection tries the other family. Input rows must include the acquire-wide
     candidate set, never a worker subset. Return a bool array aligned with rows.
     """
@@ -49,7 +55,9 @@ def direct_preferred(
             ]
         )
         gains = np.abs(table.tone_amplitude[selected, :2])
-        strength = np.sum(gains * norms[table.tone_port[selected, :2]], axis=1)
+        ports = table.tone_port[selected, :2]
+        drive_strength = gains * norms[ports]
+        strength = np.sum(drive_strength, axis=1)
         stark = np.argmax(gains, axis=1)
         frequency = table.tone_frequency_ghz[selected, :2]
         stark_frequency = np.abs(frequency[np.arange(len(selected)), stark])
@@ -78,8 +86,22 @@ def direct_preferred(
                 np.log2(np.maximum(128, 32 * (width + 2 * strength) / safe_frequency))
             ),
         )
-        frame = 1.4 * samples / 512 * scale**5
-        certificates = 1.05 * bin_count * scale**6 * certificate_fraction
+        # A weak probe does not pay the dual-strong cold surcharge. Balance is
+        # gain-weighted operator strength, not raw DAC gain or port independence.
+        weakest = np.min(drive_strength, axis=1)
+        strongest = np.max(drive_strength, axis=1)
+        balance = np.divide(
+            weakest, strongest, out=np.zeros_like(weakest), where=strongest > 0
+        )
+        dual_work = (
+            (ports[:, 0] != ports[:, 1])
+            * np.minimum(1, 4 * balance)
+            * np.minimum(1, duration * weakest / 0.15)
+        )
+        frame = 1.4 * samples / 512 * scale**5 * (1 + 2.1 * dual_work)
+        certificates = (
+            1.05 * bin_count * scale**6 * certificate_fraction * (1 + 3.1 * dual_work)
+        )
         floquet = 0.07 * scale**6 + (frame + certificates) / len(selected)
         preferred[positions] = direct < floquet
     return preferred
