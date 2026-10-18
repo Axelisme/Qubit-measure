@@ -1,4 +1,4 @@
-"""Numeric cfg, analysis and persistence for zipped mux amplitude Rabi."""
+"""Acquisition, analysis and persistence for zipped mux amplitude Rabi."""
 
 from __future__ import annotations
 
@@ -9,12 +9,14 @@ from pydantic import model_validator
 from qick import QickConfig
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ProgramV2Cfg
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
+from zcu_lab.v2._support.mux_acquisition import acquire_mux_scan
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
@@ -60,7 +62,7 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
     values so the program remains the sole native-conversion owner. Equal point
     counts are zipped by index, never expanded to a product. Invalid cfg raises
     ValueError; hardware conversion errors propagate. No devices, GUI, files or
-    bindings are accessed. End-aligned program construction is not done here.
+    bindings are accessed. Program construction is left to acquire_mux_scan.
     """
     cfg = MuxAmpRabiCfg.model_validate(cfg.model_dump())
     indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
@@ -80,11 +82,11 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
 
 
 class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
-    """Stateless existing undamped Rabi analysis and persistence, without acquisition.
+    """Stateless zipped mux amplitude Rabi with per-original-index results.
 
-    Persistence retains full cfg, original indices, independent actual gains and
-    complex averaged IQ. This core does not register a GUI or produce proposals.
-    Acquisition awaits the program owner's public end-alignment contract.
+    Run uses a common-start Join and host zip scan. Analysis and native
+    persistence retain independent quantized coordinates, complex IQ and full cfg.
+    Core neither registers a GUI nor produces binding-dependent proposals.
     """
 
     AXES_SPEC = mux_sweep_spec(
@@ -96,6 +98,24 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
     )
 
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
+
+    def run(self, config: MuxAmpRabiCfg, *, context: RunContext) -> MuxSweepResult:
+        """Acquire independent zipped drives with common-start mux readout.
+
+        config is copied and validated without mutation. Coordinates and complex
+        average IQ are (K,P), in active original tone order. Gains are normalized.
+        context owns compatible hardware, plots and a fresh cancel signal.
+        Publish measurement_i for each original index; caller finishes/releases
+        plots. Cancellation preserves completed points and the current point's
+        completed-round average, leaving unwritten IQ NaN. Acquisition errors
+        remain on context.cancel_signal: call raise_if_error() before success.
+        Validation/build errors propagate. No saving or GUI access occurs.
+        """
+        cfg = MuxAmpRabiCfg.model_validate(config.model_dump())
+        scan = prepare_amplitude_scan(cfg, soccfg=context.soccfg)
+        return acquire_mux_scan(
+            cfg, cfg.modules, scan, context=context, coordinate_label="Pulse gain"
+        )
 
     def analyze(
         self,
