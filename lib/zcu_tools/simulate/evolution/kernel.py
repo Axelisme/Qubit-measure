@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from ._validation import integers, owned, shape
 from .engine import EnvelopeSpec
 from .secular import FluxWaveform, ModelSource
+from .workplan import WorkPlan
 
 
 @dataclass(frozen=True)
@@ -217,10 +218,31 @@ class RowPlan(Protocol):
 
 
 @dataclass(frozen=True)
+class KernelContext:
+    """Model source, allowance and shared ownership for one evolve call.
+
+    source owns immutable models and the source input, not a worker density.
+    budget is the finite positive absolute per-segment allowance. work_plan
+    belongs to this evolve and is shared by prefix and timeline workers.
+    Standalone callers supply a fresh WorkPlan and close it after use.
+    """
+
+    source: ModelSource
+    budget: float
+    work_plan: WorkPlan
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.budget) or self.budget <= 0:
+            raise ValueError("kernel budget must be finite and positive")
+
+
+@dataclass(frozen=True)
 class ApplyContext:
     """Evolve-level inputs that every apply call of one kernel family shares.
 
     budget: positive absolute per-segment allowance.
+    work_plan: shared evolve ownership. The default is only for standalone
+        calls; Engine always passes the same WorkPlan to every apply.
     plan: this family's RowPlan from dispatch, or None when dispatch made none.
         Kernels that never receive a plan raise ValueError for a non-None plan;
         kernels that need one raise ValueError for None.
@@ -228,6 +250,7 @@ class ApplyContext:
 
     budget: float
     plan: RowPlan | None = None
+    work_plan: WorkPlan = field(default_factory=WorkPlan)
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:
@@ -310,8 +333,7 @@ class Kernel(Protocol):
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Pure validity mask (len(rows),) at positive per-segment error budget.
 
@@ -333,13 +355,12 @@ class Kernel(Protocol):
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> GuardResult | None:
         """Optionally return guard decisions and the preparations they required.
 
         Called instead of guard during classification. None declines the hook,
-        so the engine calls guard unchanged. Floquet supplies GuardResult; all
+        so the engine calls guard unchanged. Builder families supply GuardResult;
         other families return None. Acceptance must obey guard's row locality,
         including empty/reversed subsets. Only known inputs may be read; no density
         is evolved or mutated. Returned preparations remain model-only.
@@ -354,11 +375,29 @@ class Kernel(Protocol):
         """
         ...
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> GuardResult | None:
+        """Admit current rows using an existing immutable model-only payload.
+
+        Return None if the payload's domain does not cover every required row
+        product, so dispatch uses guard_prepared unchanged. Otherwise return
+        current row admissions and RowPlan, without building frames, periods or
+        certificates. Rejection is an accepted=False decision, not a domain miss.
+        Existing payloads never replace row-local numerical admission.
+        """
+        ...
+
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Fixed-width keys (len(rows),), equal keys sharing one preparation.
 
+        context shares immutable workload facts with guard and preparation.
         Keys include the model identity and exclude apply-only parameters;
         the exact algorithm determines which parameters belong in each half.
         """
@@ -373,8 +412,7 @@ class Kernel(Protocol):
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build data for unique keys in their given order; never read density.
 
@@ -395,7 +433,7 @@ class Kernel(Protocol):
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> Prepared | None:
         """Optionally contract a common input into an evolve-local read-only payload.
 
@@ -457,7 +495,7 @@ class EvolveScopedKernel(Protocol):
     """
 
     def evolve_scope(
-        self, table: SegmentTable, source: ModelSource
+        self, table: SegmentTable, context: KernelContext
     ) -> tuple[Kernel, Prepared]:
         """Scope reuse to table's complete scan and source, without reading density."""
         ...

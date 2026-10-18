@@ -5,7 +5,12 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, SecularDrive
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import (
     KernelCase,
@@ -85,14 +90,21 @@ def test_prepare_is_density_independent(kernel_case: KernelCase) -> None:
 def test_shaped_accuracy(kernel_case: KernelCase) -> None:
     case = kernel_case
     rows = np.arange(len(case.states), dtype=np.int64)
-    assert case.kernel.guard(case.table, rows, case.source, 1e-3).all()
+    assert case.kernel.guard(
+        case.table, rows, KernelContext(case.source, 0.001, WorkPlan())
+    ).all()
     keys, representatives, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, 0.001, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
     prepared = case.kernel.prepare(
-        keys, case.table, rows[representatives], case.source, 1e-3
+        keys,
+        case.table,
+        rows[representatives],
+        KernelContext(case.source, 0.001, WorkPlan()),
     )
     assert prepared.nbytes > 0
     actual = case.states.copy()

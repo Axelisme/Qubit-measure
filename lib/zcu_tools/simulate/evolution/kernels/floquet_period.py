@@ -10,8 +10,8 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import ApplyContext, Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularModel
 from . import _period_sambe
 from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._dop853 import Tolerances, integrate_dense
@@ -827,19 +827,19 @@ class FloquetPeriodKernel:
         self._workspace = workspace
 
     def evolve_scope(
-        self, table: SegmentTable, source: ModelSource
+        self, table: SegmentTable, context: KernelContext
     ) -> tuple["FloquetPeriodKernel", _GainWorkspace]:
         """Plan fixed gain anchors in a fresh byte-counted workspace.
 
-        table is the complete segmented scan; source is this evolve's model
-        owner. Numeric tables are independent of worker count, chunking and
+        table is the complete segmented scan; context supplies this evolve's model
+        source, budget and WorkPlan. Numeric tables are independent of worker count, chunking and
         request order for this table/source/budget. No density is read.
         Engine shares the scoped kernel with prefix
         and timeline workers and drops both returned objects when evolve ends.
         Standalone prepare uses the same cost-selected Sambe or independent CF4
         builder, without scope counters or gain-anchor sharing.
         """
-        del source
+        del context
         workspace = _GainWorkspace(table)
         # Preserve injected subclass guards/apply hooks without mutating the
         # registry instance shared by concurrent evolves.
@@ -851,10 +851,10 @@ class FloquetPeriodKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Return row-local constant-tone, carrier and splitting-estimate validity."""
+        source, budget = context.source, context.budget
         _check_budget(budget)
         accepted = np.zeros(len(rows), dtype=np.bool_)
         for index, row in enumerate(rows):
@@ -875,9 +875,10 @@ class FloquetPeriodKernel:
         return accepted
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Encode level/port/frequency/gain, excluding duration, start and theta."""
+        del context
         keys = np.empty(
             len(rows),
             dtype=[
@@ -905,8 +906,7 @@ class FloquetPeriodKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable periods with dispatch-selected builders/work ceilings.
 
@@ -914,12 +914,13 @@ class FloquetPeriodKernel:
         guard. Scoped calls reuse the complete gain plan; standalone calls ask
         dispatch for independent builders without gain-anchor participation.
         """
+        source, budget = context.source, context.budget
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
-            keys, self.prepare_keys(table, rows)
+            keys, self.prepare_keys(table, rows, context)
         ):
             raise ValueError("Floquet period representatives must match keys")
-        if not self.guard(table, rows, source, budget).all():
+        if not self.guard(table, rows, context).all():
             raise ValueError("Floquet period representatives must pass guard")
         from .._dispatch import period_builder
 
@@ -939,14 +940,24 @@ class FloquetPeriodKernel:
             entries.append(entry)
         return _Periods(tuple(entries))
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline handoff: the scalar guard builds no propagator."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -956,9 +967,10 @@ class FloquetPeriodKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding: this channel applies to arbitrary densities."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(

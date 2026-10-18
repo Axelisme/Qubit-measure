@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Cancelled, Engine
 from zcu_tools.simulate.evolution.cache import PrepareCache, PreparedPayload
+from zcu_tools.simulate.evolution.kernel import KernelContext
 
 from ._engine import Payload, RecordingKernel, batch, source
 
@@ -50,7 +51,7 @@ class ContextKernel(RecordingKernel):
         self.handles.append(handle)
         return np.ones(len(rows), dtype=bool)
 
-    def prepare_keys(self, table, rows):
+    def prepare_keys(self, table, rows, context: KernelContext):
         return table.timeline[rows].copy().view("V8")
 
     def apply(self, prepared, key_index, table, rows, states, context):
@@ -149,7 +150,9 @@ def test_declined_cached_admission_keeps_guard_build_handoff():
         def guard_prepared(self, table, rows, context, *legacy):
             self.guard(table, rows, context, *legacy)
             assert self.admit_prepared(Payload(1), table, rows, context) is None
-            keys, first = np.unique(self.prepare_keys(table, rows), return_index=True)
+            keys, first = np.unique(
+                self.prepare_keys(table, rows, context), return_index=True
+            )
             prepared = self.prepare(keys, table, rows[first], context)
             return GuardResult(
                 np.ones(len(rows), dtype=bool), (GuardPreparation(keys, prepared),)

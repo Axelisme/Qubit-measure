@@ -7,8 +7,13 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
 from zcu_tools.simulate.evolution.cache import PrepareCache
-from zcu_tools.simulate.evolution.kernel import ApplyContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import synthetic_model
 
@@ -45,13 +50,20 @@ def source():
 
 
 def scoped(table, source):
-    return FloquetPeriodKernel().evolve_scope(table, source)
+    return FloquetPeriodKernel().evolve_scope(
+        table, KernelContext(source, 0.001, WorkPlan())
+    )
 
 
 def prepare(kernel, table, source, budget=1e-3, *, rows=None):
     if rows is None:
         rows = np.arange(len(table.timeline), dtype=np.int64)
-    return kernel.prepare(kernel.prepare_keys(table, rows), table, rows, source, budget)
+    return kernel.prepare(
+        kernel.prepare_keys(table, rows, KernelContext(source, budget, WorkPlan())),
+        table,
+        rows,
+        KernelContext(source, budget, WorkPlan()),
+    )
 
 
 def playback(kernel, prepared, table, source, budget=1e-3, *, rows=None):
@@ -109,7 +121,10 @@ def test_scoped_preparation_is_bitwise_invariant_to_worker_and_key_order(source,
 
     def prepare_rows(rows):
         prepared = kernel.prepare(
-            kernel.prepare_keys(table, rows), table, rows, source, 1e-3
+            kernel.prepare_keys(table, rows, KernelContext(source, 0.001, WorkPlan())),
+            table,
+            rows,
+            KernelContext(source, 0.001, WorkPlan()),
         )
         states = np.repeat(source.initial_density[None], len(rows), axis=0)
         kernel.apply(

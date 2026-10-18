@@ -8,7 +8,14 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..kernel import ApplyContext, GuardPreparation, GuardResult, Prepared, SegmentTable
+from ..kernel import (
+    ApplyContext,
+    GuardPreparation,
+    GuardResult,
+    KernelContext,
+    Prepared,
+    SegmentTable,
+)
 from ..secular import ModelSource, SecularModel
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
@@ -209,21 +216,21 @@ class ShapedSambeKernel:
         self._workspace = workspace
 
     def evolve_scope(
-        self, table: SegmentTable, source: ModelSource
+        self, table: SegmentTable, context: KernelContext
     ) -> tuple["ShapedSambeKernel", Prepared]:
         """Return a fresh kernel/workspace for this scan, never retaining either.
 
         Engine shares the returned kernel with prefix and timeline workers and
         charges the workspace's current numeric bytes until this evolve ends.
         """
-        workspace = self.carrier_workspace(table, source)
+        workspace = self.carrier_workspace(table, context)
         # Keep injected subclass hooks; only this clone receives the workspace.
         scoped = copy(self)
         scoped._workspace = workspace
         return scoped, workspace
 
     def carrier_workspace(
-        self, table: SegmentTable, source: ModelSource
+        self, table: SegmentTable, context: KernelContext
     ) -> CarrierWorkspace:
         """Plan carrier reuse by fixed physical inputs before any spectral builds.
 
@@ -237,11 +244,11 @@ class ShapedSambeKernel:
         rows = rows[~table.constant_envelopes(rows)]
         if not len(rows):
             return CarrierWorkspace(np.empty(0))
-        keys = self.prepare_keys(table, rows)
-        subdivisions = self._subdivisions(table, rows, source)
+        keys = self.prepare_keys(table, rows, context)
+        subdivisions = self._subdivisions(table, rows, context.source)
         groups = []
         for key, count in zip(keys, subdivisions, strict=True):
-            model = source.model(tuple(int(v) for v in key["level"]))
+            model = context.source.model(tuple(int(v) for v in key["level"]))
             groups.append(
                 (
                     model.identity,
@@ -257,8 +264,10 @@ class ShapedSambeKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
+        context: KernelContext,
     ) -> NDArray[np.void]:
         """Key peak gain, weighted slope and duration to fix subperiod resolution."""
+        del context
         base = band_keys(table, rows)
         keys = np.empty(
             len(rows),
@@ -302,18 +311,17 @@ class ShapedSambeKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Check density-free bandwidth, motion and split bounds before building."""
-        del budget
+        source = context.source
         subdivisions = self._subdivisions(table, rows, source)
         bounded = subdivisions <= 32
         # Strong, unresolved ramps need no keys or remaining eligibility work.
         if not np.any(bounded):
             return bounded
         strength, _ = drive_bounds(table, rows, source)
-        keys = self.prepare_keys(table, rows)
+        keys = self.prepare_keys(table, rows, context)
         frequency = np.abs(keys["frequency"])
         real = np.array([np.all(e.samples.imag == 0) for e in table.envelopes])
         peaks, slopes = envelope_bounds(table)
@@ -335,11 +343,10 @@ class ShapedSambeKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Return the same model-only convergence mask as guard_prepared."""
-        return self.guard_prepared(table, rows, source, budget).accepted
+        return self.guard_prepared(table, rows, context).accepted
 
     def _build(
         self,
@@ -437,20 +444,30 @@ class ShapedSambeKernel:
             PeriodPrepared(tuple(entries)), tuple(models), tuple(ports)
         ), np.asarray(errors)
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> GuardResult:
         """Build eligible keys once, hand accepted model-only periods to Engine."""
-        accepted = self._eligible(table, rows, source, budget)
+        source, budget = context.source, context.budget
+        accepted = self._eligible(table, rows, context)
         selected = rows[accepted]
         preparations = []
         if len(selected):
             keys, representatives, inverse = np.unique(
-                self.prepare_keys(table, selected),
+                self.prepare_keys(table, selected, context),
                 return_index=True,
                 return_inverse=True,
             )
@@ -467,10 +484,10 @@ class ShapedSambeKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable spectral periods from aligned representative rows."""
+        source, budget = context.source, context.budget
         return self._build(keys, table, rows, source, budget)[0]
 
     def cost(
@@ -488,9 +505,10 @@ class ShapedSambeKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; every prepared array is model-only."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(

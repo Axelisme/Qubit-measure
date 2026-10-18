@@ -5,7 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
@@ -95,18 +96,25 @@ class TestDOP853(KernelContract):
 def prepare(case: KernelCase):
     rows = np.arange(len(case.states), dtype=np.int64)
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
     return case.kernel.prepare(
-        keys, case.table, rows[first], case.source, case.budget
+        keys,
+        case.table,
+        rows[first],
+        KernelContext(case.source, case.budget, WorkPlan()),
     ), inverse
 
 
 def test_model_keys_exclude_apply_parameters(kernel_case: KernelCase) -> None:
     case = kernel_case
-    keys = case.kernel.prepare_keys(case.table, np.arange(4))
+    keys = case.kernel.prepare_keys(
+        case.table, np.arange(4), KernelContext(case.source, case.budget, WorkPlan())
+    )
     assert keys[0] == keys[2]
     assert keys[1] == keys[3]
     assert keys[0] != keys[1]

@@ -14,12 +14,34 @@ from ._prepare_keys import group_keys
 from ._shaped_dispatch import preference
 from ._two_tone_dispatch import direct_preferred
 from .engine import PathDiagnostics
-from .kernel import GuardPreparation, Kernel, Prepared, RowPlan, SegmentTable
+from .kernel import (
+    GuardPreparation,
+    Kernel,
+    KernelContext,
+    Prepared,
+    RowPlan,
+    SegmentTable,
+)
 from .kernels._cf4_grid import coarse_count, finer_count, spectral_width
 from .kernels.floquet import FloquetPlan
 from .kernels.floquet_period import PeriodBuilder
 from .kernels.gate_cache import GateCacheKernel
 from .secular import ModelSource, SecularModel
+from .workplan import WorkPlan
+
+
+def create_work_plan(
+    table: SegmentTable, source: ModelSource, budget: float
+) -> WorkPlan:
+    """Create ownership for the complete evolve before prefix/worker planning.
+
+    table is the full immutable geometry, source owns model identity, and budget
+    is the per-segment allowance validated by Engine. Algorithm-specific group
+    planners populate this plan before workers start; no numerical routing or
+    expensive candidate graph is constructed here.
+    """
+    del table, source, budget
+    return WorkPlan()
 
 
 def period_builder(
@@ -210,8 +232,7 @@ def prepare(
     keys: NDArray[np.void],
     table: SegmentTable,
     rows: NDArray[np.int64],
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
 ) -> Prepared:
     """Select a key-level builder and prepare an aligned batch of representatives.
 
@@ -224,10 +245,8 @@ def prepare(
     if isinstance(kernel, GateCacheKernel):
         duration = keys["duration"]
         phase_adaptive = (duration > 0) & (duration <= 30.0)
-        return kernel.prepare(
-            keys, table, rows, source, budget, phase_adaptive=phase_adaptive
-        )
-    return kernel.prepare(keys, table, rows, source, budget)
+        return kernel.prepare(keys, table, rows, context, phase_adaptive=phase_adaptive)
+    return kernel.prepare(keys, table, rows, context)
 
 
 @dataclass(frozen=True)
@@ -241,12 +260,11 @@ class _Guarded:
 def _guard_key(
     kernel: Kernel,
     table: SegmentTable,
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
     rows: NDArray[np.int64],
 ) -> _Guarded:
     """Keep the exact guard product whenever any row accepts this key."""
-    result = kernel.guard_prepared(table, rows, source, budget)
+    result = kernel.guard_prepared(table, rows, context)
     if result is None:
         raise RuntimeError(
             f"kernel {kernel.name} declares guard_builds without a handoff"
@@ -285,18 +303,14 @@ class _Classifier:
         self,
         geometry: Geometry,
         kernels: Mapping[str, Kernel],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
         pool: Executor | None = None,
         selection: Selection | None = None,
     ):
         self.pool, self.selection = pool, selection
-        self.geometry, self.kernels, self.source, self.budget = (
-            geometry,
-            kernels,
-            source,
-            budget,
-        )
+        self.geometry, self.kernels = geometry, kernels
+        self.context = context
+        self.source, self.budget = context.source, context.budget
         self.table = geometry.table
         self.names = np.full(len(self.table.timeline), "", dtype="U16")
         self.costs = np.zeros(len(self.names))
@@ -320,8 +334,8 @@ class _Classifier:
         if self.selection is not None:
             # This worker owns one timeline. A single batch lets the kernel
             # reuse call-local work across distinct prepare keys, then drop it.
-            return (_guard_key(kernel, self.table, self.source, self.budget, rows),)
-        groups = group_keys(kernel, self.table, rows)
+            return (_guard_key(kernel, self.table, self.context, rows),)
+        groups = group_keys(kernel, self.table, rows, self.context)
         local = rows[~groups.shared[groups.inverse]]
         self.deferred[local] = True
         if len(local):
@@ -331,13 +345,11 @@ class _Classifier:
         )
         if self.pool is not None and np.count_nonzero(groups.shared) >= 8:
             return self.pool(
-                delayed(_guard_key)(
-                    kernel, self.table, self.source, self.budget, selected
-                )
+                delayed(_guard_key)(kernel, self.table, self.context, selected)
                 for selected in selections
             )
         return (
-            _guard_key(kernel, self.table, self.source, self.budget, selected)
+            _guard_key(kernel, self.table, self.context, selected)
             for selected in selections
         )
 
@@ -353,7 +365,7 @@ class _Classifier:
         if kernel.guard_builds:
             results = self.guard_keys(kernel, eligible)
         else:
-            accepted = kernel.guard(self.table, eligible, self.source, self.budget)
+            accepted = kernel.guard(self.table, eligible, self.context)
             results = (_Guarded(eligible[accepted], eligible[~accepted], ()),)
         for result in results:
             if result is None:
@@ -385,7 +397,7 @@ class _Classifier:
         if self.shaped is None:
             self.shaped = ShapedPlan(
                 rows,
-                preference(self.table, rows, self.kernels),
+                preference(self.table, rows, self.kernels, self.context),
             )
         plan = self.shaped
         spectral = self.kernels.get("shaped_sambe")
@@ -444,7 +456,7 @@ class _Classifier:
         if self.two_tone_direct is None:
             self.two_tone_direct = np.zeros(len(self.names), dtype=bool)
             self.two_tone_direct[rows] = direct_preferred(
-                self.table, rows, self.source, self.budget
+                self.table, rows, self.context
             )
         selected = rows[self.scope[rows]]
         direct = self.two_tone_direct[selected]
@@ -514,8 +526,7 @@ class _Classifier:
 def classify(
     geometry: Geometry,
     kernels: Mapping[str, Kernel],
-    source: ModelSource,
-    budget: float,
+    context: KernelContext,
     pool: Executor | None = None,
     selection: Selection | None = None,
 ) -> Dispatch:
@@ -526,4 +537,4 @@ def classify(
     deferred rows without a nested pool, retaining guard products for apply.
     Both modes use the same acquire-wide cost plan and numerical guards.
     """
-    return _Classifier(geometry, kernels, source, budget, pool, selection).classify()
+    return _Classifier(geometry, kernels, context, pool, selection).classify()

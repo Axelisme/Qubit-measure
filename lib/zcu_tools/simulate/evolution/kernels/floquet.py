@@ -51,11 +51,12 @@ from ..kernel import (
     ApplyContext,
     GuardPreparation,
     GuardResult,
+    KernelContext,
     Prepared,
     RowPlan,
     SegmentTable,
 )
-from ..secular import ModelSource, SecularModel
+from ..secular import SecularModel
 from . import _floquet_sidebands as sb
 from ._secular import coherence_decay
 
@@ -846,18 +847,26 @@ class FloquetKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Return validity for two constant tones, never reading initial density."""
-        return self.guard_prepared(table, rows, source, budget).accepted
+        return self.guard_prepared(table, rows, context).accepted
+
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
 
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> GuardResult:
         """Return combined k=0/retained-sideband admission and reusable preparations.
 
@@ -866,6 +875,7 @@ class FloquetKernel:
         modal/periodic choice or sideband equation separately from cacheable
         frames. No preparation or decision is retained on this kernel.
         """
+        source, budget = context.source, context.budget
         preparations: list[GuardPreparation] = []
         admissions: dict[int, FloquetAdmission] = {}
         accepted = np.zeros(len(rows), dtype=bool)
@@ -886,7 +896,9 @@ class FloquetKernel:
             return GuardResult(accepted)
         selected = rows[positions]
         keys, representatives, inverse = np.unique(
-            self.prepare_keys(table, selected), return_index=True, return_inverse=True
+            self.prepare_keys(table, selected, context),
+            return_index=True,
+            return_inverse=True,
         )
         params = _parameters(table, selected)
         for key_index, representative in enumerate(representatives):
@@ -898,8 +910,7 @@ class FloquetKernel:
                 keys[key_index : key_index + 1],
                 table,
                 selected[representative : representative + 1],
-                source,
-                budget,
+                context,
             )
             members = np.flatnonzero(inverse == key_index)
             entry = prepared.entries[0]
@@ -950,9 +961,10 @@ class FloquetKernel:
         return GuardResult(accepted, tuple(preparations), FloquetPlan(admissions))
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Encode level, Stark port/frequency/gain; probe and phases are excluded."""
+        del context
         keys = np.empty(
             len(rows),
             dtype=[
@@ -978,11 +990,13 @@ class FloquetKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> _Prepared:
         """Prepare one immutable, density-independent Floquet frame per key."""
-        if budget <= 0 or not np.array_equal(keys, self.prepare_keys(table, rows)):
+        source, budget = context.source, context.budget
+        if budget <= 0 or not np.array_equal(
+            keys, self.prepare_keys(table, rows, context)
+        ):
             raise ValueError(
                 "Floquet requires positive budget and aligned representative rows"
             )
@@ -1009,9 +1023,10 @@ class FloquetKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; apply uses the model-only prepared payload."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(
