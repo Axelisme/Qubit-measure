@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
+**Last updated:** 2026-10-19, source-scoped bounded ADC solver and exact response reuse
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -31,10 +31,17 @@ environment also releases this in-memory state; no disk cache is involved.
 The source retains at most one snapshot's `FTFModelFacts` across acquires.
 The exact key includes full settings, the entire snapshot and backend/numeric
 revisions. Facts own the joint projection, Gibbs/source, DC eigen/bath memo and
-neutral readout model. All templates share these physical inputs. Pulse contents,
-carrier references, receivers, grids, evolved densities and conditional responses
-remain acquire/template data. A changed key drops the previous physical facts;
-no projected operators, rates or readout response cross flux points.
+neutral readout model. All templates share these physical inputs. Evolved densities remain acquire/template data. A source also owns an 8 MiB
+`ReadoutCache` for ADC solvers, ConstantLine facts and exact conditional responses.
+Full numeric model, receiver and solver tolerances select a canonical immutable
+model and solver. Existing pulse/grid keys preserve absolute starts, carrier
+phases, demodulation and opaque callback identity. Different T1 readout starts
+reuse physical facts but compute their own sums. Every round still samples IQ.
+The byte limit counts keys, traces, nested line caches and whole allocations held
+by array views. Oversized solvers are evicted whole after the response returns.
+A changed physical-facts key clears readout residents, including on settings,
+snapshot or numeric revision changes. Close clears them too. No projected
+operators, rates or readout response cross flux points.
 
 ## Startup preparation
 
@@ -77,7 +84,8 @@ real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's density and
 conditional response when the snapshot is equal. Every round draws a new stream.
-Opening another acquire invalidates the old session and drops its preparations.
+Opening another acquire invalidates the old session and drops its densities and
+assembled channel arrays. Bounded ADC solvers and exact contents remain source-owned.
 The binding serializes calls; direct author callers must do the same.
 
 `plan_template` accepts optional matching `FTFModelFacts` for shared physical

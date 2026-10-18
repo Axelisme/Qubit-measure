@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-18, sampled-envelope propagation and tiled integrated sums
+**Last updated:** 2026-10-19, bounded physical solver and exact response ownership
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -96,6 +96,22 @@ eight float64 epsilons times the grid span. Unlike a fixed ns tolerance on
 adjacent differences, this accounts for quantization at large absolute starts.
 Single samples are uniform. Direct sums reuse the exact-content cache across
 contents and batches. Trace requests retain a separate field cache.
+
+`ReadoutCache(max_bytes=8*1024**2)` optionally owns these solvers across caller
+requests. Its key includes the full model, receiver and rtol/atol. Equivalent
+models share one canonical immutable model. Content keys and numeric routes stay
+unchanged. It incrementally measures the retained ADC object graph after each response,
+including the accounting ledger, ConstantLine subcaches, keys, traces and full
+backing allocations of views. Numeric content entries only append, so the ledger
+visits new entries rather than rescanning earlier T1 starts. Opaque callbacks
+receive a full recount because their captures can change. It evicts oldest solvers whole until the byte budget fits. Returned arrays
+and active workspaces are outside that resident budget. Opaque callbacks remain
+identity-keyed and referenced; their attributes, closure cells and defaults count,
+but module globals and external resources do not. A failed response clears all
+residents. `clear()` releases solvers and callback references. `builds`, `hits`
+and `resident_bytes` report physical solver reuse and retained bytes. The owner
+must serialize calls and clear on physical snapshot or numeric revision changes.
+This cache performs no sampling and never retains noisy IQ.
 
 Unsupported direct sums fall back individually, including nonuniform grids
 and defective generators. Single-pulse trace requests retain their original
