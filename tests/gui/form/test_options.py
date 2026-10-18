@@ -99,17 +99,45 @@ def test_hook_options_do_not_restrict_raw_value_without_selection_override() -> 
         source: Ref
 
         @classmethod
-        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
-            return {("source",): (api.Option("Listed", {"kind": "ref", "name": "listed"}),)}
+        def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            return {
+                ("source",): (api.Option("Listed", {"kind": "ref", "name": "listed"}),)
+            }
 
     raw: dict[str, JsonValue] = {"source": {"kind": "ref", "name": "unlisted"}}
     ordinary = FormState(FormInput(RefForm, raw))
     assert isinstance(ordinary.result(FormEnv()), RefForm)
-    explicit = FormState(FormInput(RefForm, raw, selections={("source",): raw["source"]}))
+    explicit = FormState(
+        FormInput(RefForm, raw, selections={("source",): raw["source"]})
+    )
     errors = explicit.result(FormEnv())
     assert isinstance(errors, FormErrors)
     assert ("source",) in errors.messages
     assert explicit.input.data == raw
+
+
+def test_reselecting_scalar_replaces_stale_override_and_tracks_new_choice() -> None:
+    listed = ["A", "B"]
+
+    class ChangingChoices(FormModel):
+        key: str
+
+        @classmethod
+        def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            return {("key",): tuple(api.Option(key, key) for key in listed)}
+
+    env = FormEnv()
+    state = FormState(FormInput(ChangingChoices, {"key": "A"}, selections={("key",): "C"}))
+    assert isinstance(state.result(env), FormErrors)
+    state.write({("key",): "B"}, env)
+    assert isinstance(state.result(env), ChangingChoices)
+    assert state.input.data == {"key": "B"}
+    assert state.input.selections == {("key",): "B"}
+    listed.remove("B")
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("key",) in errors.messages
+    assert state.input.data == {"key": "B"}
 
 
 def obj(value: JsonValue) -> dict[str, JsonValue]:
