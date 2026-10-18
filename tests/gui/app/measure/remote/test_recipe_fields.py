@@ -190,6 +190,24 @@ def container_recipe_rpc(nested_recipe_rpc):
         fixture.ctrl.tab_control.close_tab(tab)
 
 
+@pytest.mark.parametrize("method", ["tab.read_recipe_field", "tab.edit_recipe_fields", "tab.select_recipe_module"])
+def test_typed_recipe_rpc_passes_original_index_to_owner_errors(form_rpc, method):
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    before = owner.input.data
+    path = ["tones", 1, "drive", "gain"]
+    params = {"tab_id": tab, "path": path}
+    if method == "tab.edit_recipe_fields":
+        params = {"tab_id": tab, "edits": [{"path": path, "value": 0.3}]}
+    elif method == "tab.select_recipe_module":
+        params["action"] = "use_inline"
+    rejected = rpc.call(method, params)
+    assert not rejected["ok"]
+    assert rejected["error"]["reason"] == "form_path"
+    assert rejected["error"]["data"]["form_path"] == path
+    assert owner.input.data == before
+
+
 @pytest.mark.parametrize("value", [{}, 4])
 def test_recipe_rpc_structure_rejection_identifies_first_edit_atomically(
     container_recipe_rpc, value
