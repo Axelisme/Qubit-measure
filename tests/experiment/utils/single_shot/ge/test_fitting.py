@@ -107,7 +107,9 @@ def test_ge_analysis_degenerate_iq_has_named_numerical_error_with_cause(selectio
     signals = np.ones((2, 32), dtype=np.complex128)
     plots = Plots(NonPresentingHost())
     try:
-        with pytest.raises(Exception) as raised:
+        with pytest.raises(
+            (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError)
+        ) as raised:
             singleshot_ge_analysis(signals, plots=plots, length_ratio=0.0, **selection)
         assert hasattr(ge, "GENumericalError"), "GE must expose its numerical failure"
         assert isinstance(raised.value, ge.GENumericalError)
