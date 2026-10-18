@@ -705,7 +705,8 @@ class MainWindow(QMainWindow):
             message += f"\n\nDiscard {preview.skipped_count} previously skipped tab configurations from RAM?"
         self._reload_prompt_open = True
 
-        def on_decision(confirmed: bool) -> None:
+        # tolerated: Reload presenter invokes Callable[[bool], None] positionally.
+        def on_decision(confirmed: bool) -> None:  # noqa: FBT001
             self._reload_prompt_open = False
             if not confirmed or self._shutdown_requested or self._closing:
                 return
@@ -785,7 +786,8 @@ class MainWindow(QMainWindow):
 
         self._pending_tab_closes.add(tab_id)
 
-        def _on_decision(confirmed: bool) -> None:
+        # tolerated: Tab-close presenter invokes Callable[[bool], None] positionally.
+        def _on_decision(confirmed: bool) -> None:  # noqa: FBT001
             self._pending_tab_closes.discard(tab_id)
             if not confirmed or self._shutdown_requested or self._closing:
                 return
@@ -1179,7 +1181,8 @@ class MainWindow(QMainWindow):
         self._close_prompt_open = True
         self._post_shutdown_prompt_open = True
 
-        def _on_decision(confirmed: bool) -> None:
+        # tolerated: Final-unsaved callback implements positional Callable[[bool], None].
+        def _on_decision(confirmed: bool) -> None:  # noqa: FBT001
             self._close_prompt_open = False
             self._post_shutdown_prompt_open = False
             if self._programmatic_shutdown_requested or self._closing:
@@ -1205,7 +1208,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         self._close_prompt_open = True
 
-        def _on_decision(confirmed: bool) -> None:
+        # tolerated: Both app-close presenters call Callable[[bool], None] positionally.
+        def _on_decision(confirmed: bool) -> None:  # noqa: FBT001
             if not confirmed or self._shutdown_requested or self._closing:
                 self._close_prompt_open = False
                 return

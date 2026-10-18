@@ -164,7 +164,8 @@ class LoadDataDialog(QDialog):
         self._raw = self._read_best_effort(filepath)
         self._render_preview()
 
-    def _on_transpose_toggled(self, checked: bool) -> None:
+    # tolerated: QPushButton.toggled emits its checked bool positionally.
+    def _on_transpose_toggled(self, checked: bool) -> None:  # noqa: FBT001
         self._transpose = checked
         self._render_preview()
 
