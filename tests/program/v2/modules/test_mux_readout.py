@@ -266,6 +266,104 @@ def test_collect_iq_rejects_float32_at_runtime():
         collect(prog, raw)
 
 
+class RawBufferProgram(ModularProgramV2):
+    """Supply synthetic acquisition buffers through the public getter boundary."""
+
+    raw: list[NDArray[np.int64]] | None = None
+
+    def get_raw(self) -> list[NDArray[np.int64]] | None:
+        return self.raw
+
+
+def raw_buffer_program(preparations=4):
+    module = native_mux().build("mux")
+    repeated = Repeat("reads", 2).add_content(module)
+    prog = RawBufferProgram(
+        mux_soccfg(),
+        ProgramV2Cfg(reps=3),
+        [UnrelatedReadout(), repeated],
+        sweep=[("preparation", preparations), ("point", 2)],
+    )
+    # QICK counts a trigger macro once even when Repeat executes it twice.
+    prog.set_reads_per_shot(2)
+    # Each loop/read has a distinct sentinel. The unrelated channel deliberately
+    # has an irrelevant shape; it must not constrain the selected tones.
+    sentinels = np.arange(3 * preparations * 2 * 2 * 2, dtype=np.int64).reshape(
+        3, preparations, 2, 2, 2
+    )
+    by_channel = {
+        8: np.zeros((1, 2), dtype=np.int64),
+        4: sentinels * prog.ro_chs[4]["length"],
+        1: (1000 + sentinels) * prog.ro_chs[1]["length"],
+    }
+    prog.raw = [by_channel[ch] for ch in prog.ro_chs]
+    return module, prog, sentinels
+
+
+@pytest.mark.parametrize("preparations", [2, 4])
+def test_collect_raw_iq_preserves_loops_reads_and_tone_shot_pairing(preparations):
+    module, prog, sentinels = raw_buffer_program(preparations)
+    before = deepcopy(prog.raw)
+    iq = module.collect_raw_iq(prog)
+    assert iq.dtype == np.float64
+    assert iq.shape == (3, preparations, 2, 2, 2, 2)
+    np.testing.assert_array_equal(iq[..., 0, :], sentinels)
+    np.testing.assert_array_equal(iq[..., 1, :], 1000 + sentinels)
+    selected = module.collect_raw_iq(prog, read_index=1)
+    np.testing.assert_array_equal(selected, iq[..., 1, :, :])
+    np.testing.assert_array_equal(module.collect_raw_iq(prog), iq)
+    assert prog.raw is not None and before is not None
+    for actual, expected in zip(prog.raw, before, strict=True):
+        np.testing.assert_array_equal(actual, expected)
+    iq[...] = -100
+    np.testing.assert_array_equal(module.collect_raw_iq(prog, read_index=1), selected)
+
+
+@pytest.mark.parametrize("read_index", [-1, True, 2, 0.5])
+def test_collect_raw_iq_rejects_invalid_read_index(read_index):
+    module, prog, _ = raw_buffer_program()
+    # Include runtime-invalid index types without weakening the public signature.
+    public_method = "collect_raw_iq"
+    collect = getattr(module, public_method)
+    with pytest.raises(ValueError, match="mux.*read_index"):
+        collect(prog, read_index=read_index)
+
+
+@pytest.mark.parametrize("fault", ["missing", "count", "loop", "read", "iq", "dtype"])
+def test_collect_raw_iq_rejects_invalid_buffers(fault, monkeypatch):
+    module, prog, _ = raw_buffer_program()
+    assert prog.raw is not None
+    if fault == "missing":
+        prog.raw = None
+    elif fault == "count":
+        prog.raw.pop()
+    elif fault == "loop":
+        prog.raw[-1] = np.zeros((3, 3, 2, 2, 2), dtype=np.int64)
+    elif fault == "read":
+        prog.raw[-1] = np.zeros((3, 4, 2, 1, 2), dtype=np.int64)
+    elif fault == "iq":
+        prog.raw[-1] = np.zeros((3, 4, 2, 2, 3), dtype=np.int64)
+    elif fault == "dtype":
+        # Only the external getter is replaced, not raw conversion/validation.
+        bad_raw = [array.astype(np.float64) for array in prog.raw]
+        monkeypatch.setattr(prog, "get_raw", lambda: bad_raw)
+    with pytest.raises(ValueError, match="mux"):
+        module.collect_raw_iq(prog)
+
+
+@pytest.mark.parametrize("fault", ["uninitialized", "other_program", "missing_channel"])
+def test_collect_raw_iq_requires_initializing_program_and_channels(fault):
+    module, prog, _ = raw_buffer_program()
+    if fault == "uninitialized":
+        module = native_mux().build("mux")
+    elif fault == "other_program":
+        _, prog, _ = raw_buffer_program()
+    elif fault == "missing_channel":
+        del prog.ro_chs[4]
+    with pytest.raises(ValueError, match="mux"):
+        module.collect_raw_iq(prog)
+
+
 class RouteReuse(Module):
     name = "other"
 
