@@ -88,7 +88,7 @@ def resident_inventory(
             (plateau, ("dyson", "floquet_period", "t6")),
             (shaped, ("shaped_sambe", "gate_cache", "period_table", "dop853")),
             (two, ("floquet", "dop853")),
-            (multiple, ("multitone_rwa", "dop853")),
+            (multiple, ("multitone_gate", "multitone_rwa", "dop853")),
         )
         for mask, families in domains:
             rows = np.flatnonzero(mask)
