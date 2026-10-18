@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Generator, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic import BaseModel, Field
 from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
@@ -35,7 +32,6 @@ from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.library_entry import open_library_entry
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -43,12 +39,11 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
-from zcu_tools.resources.context.library import LibrarySnapshot
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui._user_input import ComponentDriver, key_click
+from tests.gui._user_input import key_click
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 
 PULSE = "Q1.pulses.pi"
@@ -102,7 +97,6 @@ class _Session:
     entry: ResultEntry
     control: ContextControlFacet
     bus: BaseEventBus
-    service: ContextService
     dialogs: list[QDialog] = field(default_factory=list)
     arb_opened: list[bool] = field(default_factory=list)
 
@@ -128,7 +122,7 @@ def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service.install_entry(entry)
     control = ContextControlFacet(context=service)
     control.use_point(PointUseRequest("point"))
-    session = _Session(entry, control, bus, service)
+    session = _Session(entry, control, bus)
     try:
         yield session
     finally:
@@ -208,89 +202,6 @@ def _group_fold(parent: QWidget, name: str) -> QLabel:
 
 def _library(session: _Session):
     return session.entry.module_library("point").snapshot()
-
-
-class _FirstChoice(BaseModel):
-    kind: Literal["first"] = "first"
-    amount: float = 2
-
-
-class _SecondChoice(BaseModel):
-    kind: Literal["second"] = "second"
-    required: float
-
-
-class _SelectionPulse(PulseSpec):
-    variant: _FirstChoice | _SecondChoice = Field(
-        default_factory=_FirstChoice, discriminator="kind"
-    )
-
-
-class _SelectionControl(ContextControlFacet):
-    """Supply a synthetic ordinary selector at the public capture boundary."""
-
-    def read_context(
-        self, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext:
-        original = super().read_context(aliases=aliases)
-        document = original.library.document()
-        spec = original.library.module_spec(PULSE)
-        document.components["Q1"].pulses["pi"] = _SelectionPulse.model_validate(
-            spec.model_dump()
-        )
-        return ParameterContext(
-            point=original.document(),
-            library=LibrarySnapshot(document),
-            target=original.target,
-            roles=original.roles,
-        )
-
-
-def test_selection_only_is_unsaved_through_apply_revert_and_close(
-    session: _Session, tmp_path: Path
-) -> None:
-    session.control = _SelectionControl(context=session.service)
-    presenter = RecordingDialogPresenter()
-    dialog = _open(session, presenter)
-    driver = ComponentDriver(dialog)
-    driver.select_tab("Modules")
-    driver.expand_tree(("modules", PULSE), object_name="inspect.library")
-
-    def snapshot(name: str) -> None:
-        driver.screenshot(tmp_path / f"{name}.png")
-        (tmp_path / f"{name}.json").write_text(
-            json.dumps(asdict(driver.visible()), indent=2), encoding="utf-8"
-        )
-
-    snapshot("01-saved")
-    assert driver.observe("Saved").visible
-    driver.choose_option(object_name="form.input.variant", value="second")
-    snapshot("02-selection-only-unsaved")
-    assert driver.observe("Unsaved").visible
-    assert driver.observe(object_name="inspect.entry.apply").enabled
-    assert driver.observe(object_name="form.input.variant.amount").text == "2"
-    driver.click(object_name="inspect.entry.revert")
-    snapshot("03-reverted")
-    assert driver.observe("Saved").visible
-    assert driver.observe(object_name="form.input.variant").text == "first"
-    assert not driver.observe(object_name="inspect.entry.apply").enabled
-    driver.choose_option(object_name="form.input.variant", value="second")
-    snapshot("04-before-apply")
-    driver.click(object_name="inspect.entry.apply")
-    snapshot("05-applied")
-    assert driver.observe("Saved").visible
-    assert not driver.observe(object_name="inspect.entry.apply").enabled
-    assert driver.observe(object_name="form.input.variant.amount").text == "2"
-    driver.choose_option(object_name="form.input.variant", value="second")
-    presenter.queue_save_discard_cancel("cancel")
-    driver.click("Close")
-    snapshot("06-close-cancelled")
-    assert driver.observe("Unsaved").visible
-    presenter.queue_save_discard_cancel("discard")
-    driver.click("Close")
-    assert not any(widget.visible for widget in driver.visible().widgets)
-    assert len(presenter.messages("save_discard_cancel")) == 2
-    presenter.assert_no_unexpected_messages()
 
 
 def test_entry_edit_is_unsaved_until_revert_or_apply(session: _Session) -> None:

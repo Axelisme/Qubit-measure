@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field, JsonValue, create_model
-from qtpy.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 from zcu_tools.gui import form as api
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
@@ -59,6 +59,61 @@ def test_selection_only_keeps_visible_child_and_local_parse_error(
         assert driver.observe(object_name="form.input.branch.amount").text == "broken"
     finally:
         editor.close()
+
+
+def test_selection_only_synthetic_host_accepts_and_discards_authored_identity(
+    qapp: QApplication, tmp_path: Path
+):
+    state = FormState(
+        FormInput(SelectionForm, {"branch": {"kind": "first", "amount": 2}})
+    )
+    assert hasattr(state, "is_dirty"), "Hosts need selection-aware dirty observation"
+    host = QWidget()
+    host.resize(620, 320)
+    layout = QVBoxLayout(host)
+    status = QLabel("Saved")
+    status.setObjectName("synthetic.status")
+    layout.addWidget(status)
+    layout.addWidget(FormEditor(state, FormEnv(), host))
+    accept = QPushButton("Accept base")
+    discard = QPushButton("Discard")
+    layout.addWidget(accept)
+    layout.addWidget(discard)
+    accept.clicked.connect(lambda: state.reset(state.input))
+    discard.clicked.connect(lambda: state.reset(state.base))
+    state.subscribe(lambda: status.setText("Unsaved" if state.is_dirty else "Saved"))
+    host.show()
+    qapp.processEvents()
+    driver = ComponentDriver(host)
+
+    def snapshot(name: str) -> None:
+        driver.screenshot(tmp_path / f"{name}.png")
+        (tmp_path / f"{name}.json").write_text(
+            json.dumps(asdict(driver.visible()), indent=2), encoding="utf-8"
+        )
+
+    try:
+        snapshot("01-saved")
+        driver.choose_option(object_name="form.input.branch", value="second")
+        snapshot("02-selection-only-dirty")
+        assert driver.observe(object_name="synthetic.status").text == "Unsaved"
+        assert driver.observe(object_name="form.input.branch.amount").text == "2"
+        driver.click("Accept base")
+        snapshot("03-accepted-base")
+        assert driver.observe(object_name="synthetic.status").text == "Saved"
+        assert driver.observe(object_name="form.input.branch").text == "second"
+        driver.choose_option(object_name="form.input.branch", value="first")
+        snapshot("04-dirty-again")
+        assert driver.observe(object_name="synthetic.status").text == "Unsaved"
+        driver.click("Discard")
+        snapshot("05-discarded")
+        assert driver.observe(object_name="synthetic.status").text == "Saved"
+        assert driver.observe(object_name="form.input.branch").text == "second"
+        assert driver.observe(object_name="form.input.branch.amount").text == "2"
+        driver.choose_option(object_name="form.input.branch", value="second")
+        assert driver.observe(object_name="synthetic.status").text == "Saved"
+    finally:
+        host.close()
 
 
 @pytest.mark.parametrize("guarded", [False, True], ids=["direct", "guarded"])
