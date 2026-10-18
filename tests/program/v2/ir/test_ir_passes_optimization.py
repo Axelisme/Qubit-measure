@@ -1045,6 +1045,26 @@ def test_pipeline_tree_pass_missing_disable_opt_block_raises():
         IRPipeLine(ctx.config, [], [], [DroppingTreePass()])(_flatten_root(root))
 
 
+def test_pipeline_lowers_basic_block_root_replacement():
+    class ReplacingRootPass(AbsIRTreePass):
+        def transform(self, node: IRNode, ctx: PipeLineContext) -> IRNode | None:
+            if isinstance(node, BlockNode):
+                return BasicBlockNode(insts=[NopInst(), NopInst()])
+            return None
+
+    pipeline = IRPipeLine(PipeLineConfig(), [], [], [ReplacingRootPass()])
+    try:
+        out, _ = pipeline([NopInst()])
+    except TypeError as exc:
+        if str(exc) != "IRParser._unparse_node: unexpected node type NopInst":
+            raise
+        raise AssertionError(
+            "The pipeline must lower a legal BasicBlockNode root replacement"
+        ) from exc
+
+    assert out == [NopInst(), NopInst()]
+
+
 def test_pipeline_rejects_non_block_loop_body_replacement():
     class ReplacingLoopBodyPass(AbsIRTreePass):
         def transform(self, node: IRNode, ctx: PipeLineContext):
