@@ -10,7 +10,13 @@ from ._evaluate import result, value_at
 from ._json import copy_json
 from ._selection import Field, resolve
 from ._sources import check_sources
-from ._structure import discriminator, intrinsic_tags, model_types, selected
+from ._structure import (
+    alternatives,
+    discriminator,
+    intrinsic_tags,
+    model_types,
+    selected,
+)
 from .commands import (
     FormCommandContext,
     FormCommandResult,
@@ -71,7 +77,10 @@ def _check_field(info: FieldInfo, value: JsonValue) -> None:
     models = model_types(info.annotation)
     if models:
         if value is None:
-            # Nullability is a value constraint, not permission for a new schema.
+            if type(None) not in alternatives(info.annotation):
+                raise FormCommandError(
+                    "Command cannot remove a nonnullable model structure"
+                )
             return
         branch = selected(info, value)
         if not isinstance(value, dict) or branch is None:
