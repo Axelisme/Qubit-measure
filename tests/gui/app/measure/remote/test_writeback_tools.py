@@ -563,7 +563,8 @@ def test_preview_serializes_complex_as_tag():
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    item = list(res["items"])[0]  # type: ignore[call-overload]
+    # tolerated: The handler returns a list of wire items; the response annotation erases container types to object.
+    item = list(res["items"])[0]  # pyright: ignore[reportArgumentType]
     assert item["proposed_value"] == {"__complex__": [1.5, -2.25]}
     assert item["proposed"] == {"__complex__": [1.5, -2.25]}
 
@@ -594,7 +595,8 @@ def test_complex_preview_set_round_trip_is_lossless():
     preview = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
+    # tolerated: The handler returns a list of wire items; the response annotation erases container types to object.
+    wire_value = list(preview["items"])[0]["proposed_value"]  # pyright: ignore[reportArgumentType]
 
     _dispatch(
         ctrl,
@@ -643,7 +645,8 @@ def test_preview_serializes_nested_list_verbatim():
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    item = list(res["items"])[0]  # type: ignore[call-overload]
+    # tolerated: The handler returns a list of wire items; the response annotation erases container types to object.
+    item = list(res["items"])[0]  # pyright: ignore[reportArgumentType]
     assert item["proposed_value"] == _CONFUSION
     assert item["proposed"] == _CONFUSION
 
@@ -673,7 +676,8 @@ def test_nested_list_preview_set_round_trip_is_lossless():
     preview = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
+    # tolerated: The handler returns a list of wire items; the response annotation erases container types to object.
+    wire_value = list(preview["items"])[0]["proposed_value"]  # pyright: ignore[reportArgumentType]
 
     _dispatch(
         ctrl,

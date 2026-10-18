@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QEvent, Qt
+from qtpy.QtGui import QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -597,12 +598,12 @@ class WritebackWidget(QWidget):
         placeholder.setStyleSheet("background: transparent;")
         return placeholder
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
         self._update_responsive()
 
-    def showEvent(self, event) -> None:  # type: ignore[override]
-        super().showEvent(event)
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
         self._update_responsive()
 
     def _update_responsive(self) -> None:

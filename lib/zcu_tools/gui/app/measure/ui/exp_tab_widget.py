@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import (
     QColor,
+    QMouseEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -111,7 +112,8 @@ class _PanelEdgeHandle(QToolButton):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(16, 42)
-        self.setCursor(Qt.PointingHandCursor)  # type: ignore[attr-defined]
+        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
+        self.setCursor(Qt.PointingHandCursor)  # pyright: ignore[reportAttributeAccessIssue]
         self.setAutoRaise(True)
         self._collapsed = False
 
@@ -179,7 +181,8 @@ class _LedgerSection(QWidget):
 
         # Header — whole row is clickable (S1/A2).
         self._header = QWidget()
-        self._header.setCursor(Qt.PointingHandCursor)  # type: ignore[attr-defined]
+        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
+        self._header.setCursor(Qt.PointingHandCursor)  # pyright: ignore[reportAttributeAccessIssue]
         self._header.setObjectName("ledgerHeader")
         header_row = QHBoxLayout(self._header)
         header_row.setContentsMargins(4, 4, 4, 4)
@@ -214,18 +217,22 @@ class _LedgerSection(QWidget):
         # click on button goes to button widget, not header).
         self._toggle_btn.clicked.connect(self._toggle)
         # Install header click handler via event filter on header.
-        self._header.mouseReleaseEvent = self._on_header_mouse_release  # type: ignore[method-assign]
+        self._header.mouseReleaseEvent = self._on_header_mouse_release
 
-    def _on_header_mouse_release(self, event) -> None:
+    def _on_header_mouse_release(self, a0: QMouseEvent | None) -> None:
+        if a0 is None:
+            QWidget.mouseReleaseEvent(self._header, a0)
+            return
         try:
-            if event.button() == Qt.LeftButton:  # type: ignore[attr-defined]
+            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
+            if a0.button() == Qt.LeftButton:  # pyright: ignore[reportAttributeAccessIssue]
                 self._toggle()
-                event.accept()
+                a0.accept()
                 return
         except Exception:
             pass
         # Fallback to default
-        QWidget.mouseReleaseEvent(self._header, event)
+        QWidget.mouseReleaseEvent(self._header, a0)
 
     def _toggle(self, *_: object) -> None:
         self._collapsed = not self._collapsed
@@ -329,7 +336,8 @@ class ExpTabWidget(QWidget):
         )
 
         # splitter holds two panes: left (tab panel) | right (plot)
-        splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
+        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
+        splitter = QSplitter(Qt.Horizontal)  # pyright: ignore[reportAttributeAccessIssue]
 
         content_row.addWidget(splitter, stretch=1)
 
@@ -506,7 +514,8 @@ class ExpTabWidget(QWidget):
         if self._has_analysis:
             self._analysis_stack = QStackedWidget()
             self._analysis_placeholder = QLabel("(no plot yet)")
-            self._analysis_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
+            self._analysis_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
             self._analysis_stack.addWidget(self._analysis_placeholder)
             self._analysis_container = FigureContainer(
                 self._analysis_stack, self._analysis_placeholder
@@ -529,7 +538,8 @@ class ExpTabWidget(QWidget):
         if self._has_post:
             self._post_stack = QStackedWidget()
             self._post_placeholder = QLabel("(no plot yet)")
-            self._post_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
+            self._post_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
             self._post_stack.addWidget(self._post_placeholder)
             self._post_container = FigureContainer(
                 self._post_stack, self._post_placeholder
@@ -557,7 +567,8 @@ class ExpTabWidget(QWidget):
         # Run figure pane (always)
         self._run_stack = QStackedWidget()
         self._run_placeholder = QLabel("(no plot yet)")
-        self._run_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
+        self._run_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
         self._run_stack.addWidget(self._run_placeholder)
         self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
 
@@ -572,7 +583,8 @@ class ExpTabWidget(QWidget):
 
         # Placeholder for Guide (no figure) — Data now shows gallery (S4)
         self._right_placeholder = QLabel("(no plot yet)")
-        self._right_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
+        self._right_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
 
         self._right_stack.addWidget(self._run_stack)
         if self._has_analysis:
@@ -1134,7 +1146,7 @@ class ExpTabWidget(QWidget):
             # QStackedWidget hides inactive pages so width changes while hidden
             # would otherwise defer resize/show until next event.
             try:
-                self._data_gallery._arrange_cards()  # type: ignore[attr-defined]
+                self._data_gallery.refresh_layout()
             except Exception:
                 pass
             return
@@ -1198,8 +1210,10 @@ class ExpTabWidget(QWidget):
             # Apply explicit blue primary style (idle/disabled) — objectName alone has no global stylesheet
             self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
             # Force style refresh for objectName/stylesheet change
-            self.run_btn.style().unpolish(self.run_btn)  # type: ignore[attr-defined]
-            self.run_btn.style().polish(self.run_btn)  # type: ignore[attr-defined]
+            # tolerated: The initialized button has a live widget/application style after setStyleSheet.
+            self.run_btn.style().unpolish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]
+            # tolerated: The initialized button has a live widget/application style after setStyleSheet.
+            self.run_btn.style().polish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]
             self.run_btn.update()
 
         idle = writable and not local_busy

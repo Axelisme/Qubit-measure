@@ -41,8 +41,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QEvent, QSize, Qt
-from qtpy.QtGui import QPixmap
+from qtpy.QtCore import QEvent, QObject, QSize, Qt
+from qtpy.QtGui import QPixmap, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -196,11 +196,15 @@ class _PreviewCard(QWidget):
     def show_image(self, pixmap: QPixmap) -> None:
         # Cache original pixmap (presentation cache, S3).
         self._orig_pixmap = pixmap
-        self._apply_scaled()
+        self.rescale_image_to_viewport()
         self._stack.setCurrentWidget(self._image_page)
 
-    def _apply_scaled(self) -> None:
-        """Scale original pixmap to image viewport with KeepAspectRatio (S3)."""
+    def rescale_image_to_viewport(self) -> None:
+        """Fit the cached pixmap to the image viewport without cropping.
+
+        Call after a gallery reflow or card resize. Empty/null images are a no-op;
+        a not-yet-laid-out label uses the card width as a provisional viewport.
+        """
         if self._orig_pixmap is None or self._orig_pixmap.isNull():
             return
         # Viewport is the image label's available size.
@@ -223,23 +227,25 @@ class _PreviewCard(QWidget):
         )
         self._image_label.setPixmap(scaled)
 
-    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 is None or a1 is None:
+            return super().eventFilter(a0, a1)
         if (
-            obj is self._image_label
-            and event.type() == QEvent.Type.Resize
+            a0 is self._image_label
+            and a1.type() == QEvent.Type.Resize
             and self._orig_pixmap is not None
             and self._stack.currentWidget() is self._image_page
         ):
-            self._apply_scaled()
-        return super().eventFilter(obj, event)
+            self.rescale_image_to_viewport()
+        return super().eventFilter(a0, a1)
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
         if (
             self._orig_pixmap is not None
             and self._stack.currentWidget() is self._image_page
         ):
-            self._apply_scaled()
+            self.rescale_image_to_viewport()
 
     def current_state(self) -> str:
         """Return 'available' | 'empty' | 'unavailable' for test inspection."""
@@ -369,7 +375,7 @@ class DataFigurePreviewGallery(QWidget):
             pass
 
         # Initial layout arrangement
-        self._arrange_cards()
+        self.refresh_layout()
 
         # Initial empty state for all present cards
         for card in self._cards.values():
@@ -449,8 +455,13 @@ class DataFigurePreviewGallery(QWidget):
         """Public inspector for tests: current responsive mode."""
         return self._is_wide()
 
-    def _arrange_cards(self) -> None:
-        """Reflow cards by viewport width and card count (S1/S4)."""
+    def refresh_layout(self) -> None:
+        """Reflow existing cards for the current viewport width and card count.
+
+        Call on resize/show or after activating the containing Data page, when
+        hidden-page resize events may have been deferred. Available images are
+        rescaled after wide-mode reflow. An empty gallery is a no-op.
+        """
         # Clear grid without deleting widgets.
         while self._inner_layout.count():
             item = self._inner_layout.takeAt(0)
@@ -505,23 +516,25 @@ class DataFigurePreviewGallery(QWidget):
                 card.original_pixmap() is not None
                 and card.current_state() == "available"
             ):
-                card._apply_scaled()  # type: ignore[attr-defined]
+                card.rescale_image_to_viewport()
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
-        self._arrange_cards()
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
+        self.refresh_layout()
 
-    def showEvent(self, event) -> None:  # type: ignore[override]
-        super().showEvent(event)
-        self._arrange_cards()
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
+        self.refresh_layout()
 
-    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 is None or a1 is None:
+            return super().eventFilter(a0, a1)
         try:
-            if obj is self._scroll.viewport() and event.type() == QEvent.Type.Resize:
-                self._arrange_cards()
+            if a0 is self._scroll.viewport() and a1.type() == QEvent.Type.Resize:
+                self.refresh_layout()
         except Exception:
             pass
-        return super().eventFilter(obj, event)
+        return super().eventFilter(a0, a1)
 
     # -- capability queries -----------------------------------------
 

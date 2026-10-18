@@ -574,8 +574,10 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     window = MainWindow(ctrl, templates=lambda: {})
     tab_a = _TabStub()
     tab_b = _TabStub()
-    window._tab_widgets["tab-a"] = tab_a  # type: ignore[assignment]
-    window._tab_widgets["tab-b"] = tab_b  # type: ignore[assignment]
+    # tolerated: The injected tab fixture supplies only the run-marker interaction surface exercised here.
+    window._tab_widgets["tab-a"] = tab_a  # pyright: ignore[reportArgumentType, reportPrivateUsage]
+    # tolerated: The injected tab fixture supplies only the run-marker interaction surface exercised here.
+    window._tab_widgets["tab-b"] = tab_b  # pyright: ignore[reportArgumentType, reportPrivateUsage]
     tabs = window.findChild(QTabWidget)
     assert tabs is not None
     tabs.addTab(tab_a, "A")

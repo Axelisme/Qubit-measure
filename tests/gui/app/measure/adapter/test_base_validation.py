@@ -94,7 +94,8 @@ def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> 
             return NoAnalysisResult()
 
     assert _OkAdapter.analyze_params_cls() is _RealParams
-    params = _OkAdapter().get_analyze_params(object(), object())  # type: ignore[arg-type]
+    # tolerated: Minimal contexts exercise the default params hook, which does not inspect either context.
+    params = _OkAdapter().get_analyze_params(object(), object())  # pyright: ignore[reportArgumentType]
     assert isinstance(params, _RealParams)
     assert params.flag is False
 
@@ -163,8 +164,8 @@ def test_interactive_requires_frontend() -> None:
     with pytest.raises(
         TypeError, match="analysis=INTERACTIVE.*make_interactive_frontend"
     ):
-
-        class _BadAdapter(_MinimalNoAnalysisAdapter):  # type: ignore[reportUnusedClass]
+        # tolerated: Class creation itself must raise for this invalid adapter; the class is never instantiated.
+        class _BadAdapter(_MinimalNoAnalysisAdapter):  # pyright: ignore[reportUnusedClass]
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.INTERACTIVE
             )

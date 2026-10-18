@@ -162,9 +162,11 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
         from qtpy.QtWidgets import QWidget
 
         w = QWidget()
-        w.figure = fig  # type: ignore[attr-defined]
+        # tolerated: The minimal QWidget canvas fixture supplies the figure/draw surface consumed by this tab.
+        w.figure = fig  # pyright: ignore[reportAttributeAccessIssue]
         container.attach_canvas(w)
-        w.draw = lambda: None  # type: ignore[attr-defined]
+        # tolerated: The minimal QWidget canvas fixture supplies the figure/draw surface consumed by this tab.
+        w.draw = lambda: None  # pyright: ignore[reportAttributeAccessIssue]
         return w
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)

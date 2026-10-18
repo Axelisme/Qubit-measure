@@ -4,7 +4,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, get_type_hints
 
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+# tolerated: QtPy exports the selected binding Signal dynamically.
+from qtpy.QtCore import Signal  # pyright: ignore[reportPrivateImportUsage]
 from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,

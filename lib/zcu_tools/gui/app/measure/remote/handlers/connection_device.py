@@ -158,7 +158,8 @@ def _field_type_and_choices(annotation: object) -> tuple[str, list[object] | Non
         if len(non_none) == 1:
             return _field_type_and_choices(non_none[0])
     _SCALAR = {float: "float", int: "int", str: "str", bool: "bool"}
-    return _SCALAR.get(annotation, "str"), None  # type: ignore[arg-type]
+    # tolerated: Device annotations may be arbitrary objects; unknown scalar types keep the string fallback.
+    return _SCALAR.get(annotation, "str"), None  # pyright: ignore[reportArgumentType, reportCallIssue]
 
 
 def _device_fields(info: BaseDeviceInfo) -> list[dict[str, object]]:

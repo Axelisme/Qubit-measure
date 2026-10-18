@@ -211,7 +211,8 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
-        return self._writeback.get_all_summaries(draft)  # type: ignore[arg-type]
+        # tolerated: The active pane draft was created by WritebackService; the pane annotation erases its concrete type.
+        return self._writeback.get_all_summaries(draft)  # pyright: ignore[reportArgumentType]
 
     def get_writeback_applied_for_pane(
         self, tab_id: str, pane: WritebackPane
@@ -220,7 +221,8 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
-        return self._writeback.get_all_applied(draft)  # type: ignore[arg-type]
+        # tolerated: The active pane draft was created by WritebackService; the pane annotation erases its concrete type.
+        return self._writeback.get_all_applied(draft)  # pyright: ignore[reportArgumentType]
 
     def _emit_draft_changed(self, tab_id: str) -> None:
         self._bus.emit(

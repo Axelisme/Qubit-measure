@@ -42,7 +42,8 @@ def _render_with_fixed_size(
     orig_w, orig_h = (float(v) for v in fig.get_size_inches())
     try:
         fig.set_size_inches(*figsize)
-        fig.savefig(sink, dpi=dpi, **savefig_kwargs)  # type: ignore[arg-type]
+        # tolerated: Matplotlib accepts the forwarded sink and savefig kwargs; this export boundary erases their types.
+        fig.savefig(sink, dpi=dpi, **savefig_kwargs)  # pyright: ignore[reportArgumentType]
     finally:
         fig.set_size_inches(orig_w, orig_h)
 

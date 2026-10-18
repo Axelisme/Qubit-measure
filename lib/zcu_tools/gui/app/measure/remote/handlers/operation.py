@@ -71,8 +71,10 @@ def h_operation_await(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Off-main: only the thread-safe handle channel, never owner-thread state.
-    operation_id = int(params["operation_id"])  # type: ignore[arg-type]
-    timeout = float(params["timeout"])  # type: ignore[arg-type]
+    # tolerated: The required_integer method parameter validates operation_id before dispatch.
+    operation_id = int(params["operation_id"])  # pyright: ignore[reportArgumentType]
+    # tolerated: The default_number method parameter validates timeout before dispatch.
+    timeout = float(params["timeout"])  # pyright: ignore[reportArgumentType]
     if not 0 <= timeout <= 300:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
@@ -117,7 +119,8 @@ def h_operation_progress(
     # Live (token, ProgressBarModel) pairs for one operation (run or device
     # setup alike, keyed by operation_id — the SSOT); _progress_bars_wire reads
     # their methods at this point. The mcp poll folds this into its reply.
-    operation_id = int(params["operation_id"])  # type: ignore[arg-type]
+    # tolerated: The required_integer method parameter validates operation_id before dispatch.
+    operation_id = int(params["operation_id"])  # pyright: ignore[reportArgumentType]
     result = dict(
         _progress_bars_wire(
             adapter.operation_control.get_operation_progress(operation_id)

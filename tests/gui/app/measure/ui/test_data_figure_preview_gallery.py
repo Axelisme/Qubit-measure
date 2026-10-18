@@ -69,10 +69,12 @@ def _make_png_bytes(width: int, height: int, color: str = "#286ac7") -> bytes:
     pix.fill(QColor(color))
     ba = QByteArray()
     buf = QBuffer(ba)
-    buf.open(QIODevice.WriteOnly)  # type: ignore[attr-defined]
+    # tolerated: QtPy promotes the binding OpenModeFlag members onto QIODevice at runtime.
+    buf.open(QIODevice.WriteOnly)  # pyright: ignore[reportAttributeAccessIssue]
     pix.save(buf, "PNG")
     buf.close()
-    return bytes(ba)  # type: ignore[arg-type]
+    # tolerated: SIP supports QByteArray buffer conversion to bytes, which the binding stub omits.
+    return bytes(ba)  # pyright: ignore[reportArgumentType]
 
 
 _640x480_PNG = None  # lazy
@@ -211,9 +213,11 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
         from qtpy.QtWidgets import QWidget
 
         w = QWidget()
-        w.figure = fig  # type: ignore[attr-defined]
+        # tolerated: The minimal QWidget canvas fixture supplies the figure/draw surface consumed by this tab.
+        w.figure = fig  # pyright: ignore[reportAttributeAccessIssue]
         container.attach_canvas(w)
-        w.draw = lambda: None  # type: ignore[attr-defined]
+        # tolerated: The minimal QWidget canvas fixture supplies the figure/draw surface consumed by this tab.
+        w.draw = lambda: None  # pyright: ignore[reportAttributeAccessIssue]
         return w
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
@@ -725,7 +729,8 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
     assert disp2.size() == expected, f"disp2 {disp2.size()} != fit {expected}"
     _assert_aspect_fit(vp2, disp2.size(), orig.size())
     # Original cache must stay 640x480 across resizes
-    assert card.original_pixmap().size() == orig.size()  # type: ignore[union-attr]
+    # tolerated: The successfully rendered card retains its original pixmap across viewport resizes.
+    assert card.original_pixmap().size() == orig.size()  # pyright: ignore[reportOptionalMemberAccess]
     g.hide()
 
 
@@ -878,14 +883,16 @@ def test_gallery_wide_single_full_width(qapp):
     QApplication.processEvents()
     QApplication.processEvents()
     assert not g_n.is_wide_mode()
-    r_n: QRect = g_n.find_card("run").geometry()  # type: ignore[union-attr]
+    # tolerated: Run-only capabilities always create the run card queried here.
+    r_n: QRect = g_n.find_card("run").geometry()  # pyright: ignore[reportOptionalMemberAccess]
     # Wide
     g_w = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g_w.setFixedSize(750, 400)
     g_w.show()
     QApplication.processEvents()
     QApplication.processEvents()
-    r_w: QRect = g_w.find_card("run").geometry()  # type: ignore[union-attr]
+    # tolerated: Run-only capabilities always create the run card queried here.
+    r_w: QRect = g_w.find_card("run").geometry()  # pyright: ignore[reportOptionalMemberAccess]
     # Both should span full inner width — wide width larger than narrow
     assert r_w.width() > r_n.width() + 20
     # In single-card case, card x is near left margin for both
