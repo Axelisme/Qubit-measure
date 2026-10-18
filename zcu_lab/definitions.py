@@ -5,6 +5,7 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
+from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
 from zcu_lab.v2.ftf.conditional_spectroscopy.gui import SpectroscopyAdapter
 from zcu_lab.v2.ftf.cz_amplitude.gui import CZAmplitudeAdapter
 from zcu_lab.v2.ftf.idle_zz.gui import IdleZZAdapter
@@ -72,6 +73,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/idle_zz": IdleZZAdapter,
     "ftf/conditional_spectroscopy": SpectroscopyAdapter,
     "ftf/cz_amplitude": CZAmplitudeAdapter,
+    "ftf/conditional_phase": ConditionalPhaseAdapter,
     "lookback": LookbackAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
