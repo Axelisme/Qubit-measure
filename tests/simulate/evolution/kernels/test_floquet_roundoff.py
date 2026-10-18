@@ -46,13 +46,16 @@ def test_long_periodic_frame_preserves_analytic_coherence(duration: float) -> No
     )
     floquet = FloquetKernel()
     rows = np.array([0])
-    assert floquet.guard(table, rows, source, 1e-3).all()
+    guarded = floquet.guard_prepared(table, rows, source, 1e-3)
+    assert guarded.accepted.all()
     prepared = floquet.prepare(
         floquet.prepare_keys(table, rows), table, rows, source, 1e-3
     )
     actual = initial[None].copy()
     try:
-        floquet.apply(prepared, rows, table, rows, actual, ApplyContext(1e-3))
+        floquet.apply(
+            prepared, rows, table, rows, actual, ApplyContext(1e-3, guarded.plan)
+        )
     except RuntimeError as error:
         raise AssertionError(
             "Accepted long frame must integrate above roundoff"

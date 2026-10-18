@@ -61,6 +61,13 @@ class KernelCase:
     states: NDArray[np.complex128]
     budget: float = 1e-3
 
+    def context(self, rows: NDArray[np.int64]) -> ApplyContext:
+        """Guard rows once and retain any family plan for repeated apply calls."""
+        result = self.kernel.guard_prepared(self.table, rows, self.source, self.budget)
+        if result is not None:
+            assert result.accepted.all()
+        return ApplyContext(self.budget, None if result is None else result.plan)
+
 
 def _reference_hamiltonian(
     case: KernelCase,
@@ -225,7 +232,7 @@ class KernelContract:
         assert prepared.nbytes >= 0
         actual = case.states.copy()
         case.kernel.apply(
-            prepared, inverse, case.table, rows, actual, ApplyContext(case.budget)
+            prepared, inverse, case.table, rows, actual, case.context(rows)
         )
         expected = np.stack(
             [reference(case, row, state) for row, state in enumerate(case.states)]
@@ -286,7 +293,7 @@ class KernelContract:
                     case.table,
                     chosen,
                     actual,
-                    ApplyContext(case.budget),
+                    ApplyContext(case.budget, result.plan),
                 )
                 fresh_keys, first, inverse = np.unique(
                     keys[selected], return_index=True, return_inverse=True
@@ -301,7 +308,7 @@ class KernelContract:
                     case.table,
                     chosen,
                     expected,
-                    ApplyContext(case.budget),
+                    ApplyContext(case.budget, result.plan),
                 )
                 np.testing.assert_array_equal(actual, expected)
 
@@ -316,9 +323,10 @@ class KernelContract:
         prepared = case.kernel.prepare(
             keys, case.table, rows[first], case.source, case.budget
         )
+        context = case.context(rows)
         whole = case.states.copy()
         whole_mask = case.kernel.apply(
-            prepared, inverse, case.table, rows, whole, ApplyContext(case.budget)
+            prepared, inverse, case.table, rows, whole, context
         )
         assert isinstance(whole_mask, np.ndarray), "apply must return an exceeded mask"
         assert whole_mask.shape == (len(rows),)
@@ -336,7 +344,7 @@ class KernelContract:
                 case.table,
                 subset,
                 chunk,
-                ApplyContext(case.budget),
+                context,
             )
             assert isinstance(mask, np.ndarray), "apply must return an exceeded mask"
             assert mask.shape == (len(subset),)
@@ -371,6 +379,7 @@ class KernelContract:
         prepared = case.kernel.prepare(
             keys, case.table, rows[first], no_density_source(), case.budget
         )
+        context = case.context(rows)
         for states in (
             case.states,
             np.repeat(
@@ -382,9 +391,7 @@ class KernelContract:
             ),
         ):
             actual = states.copy()
-            case.kernel.apply(
-                prepared, inverse, case.table, rows, actual, ApplyContext(case.budget)
-            )
+            case.kernel.apply(prepared, inverse, case.table, rows, actual, context)
             expected = np.stack(
                 [reference(case, row, state) for row, state in enumerate(states)]
             )
@@ -412,6 +419,7 @@ class KernelContract:
         prepared = case.kernel.prepare(
             keys, table, rows[first], case.source, case.budget
         )
+        context = replace(case, table=table).context(rows)
         initial = case.states[0].copy()
         if prefix_input:
             # Independently evolve a no-drive prefix. The hook accepts this
@@ -455,7 +463,7 @@ class KernelContract:
                     table,
                     selected,
                     expected,
-                    ApplyContext(case.budget),
+                    context,
                 )
                 # Repeated reversed/non-contiguous applies may not consume or mutate
                 # the payload. Empty batches must also be harmless.
@@ -471,7 +479,7 @@ class KernelContract:
                         table,
                         selected[subset],
                         actual,
-                        ApplyContext(case.budget),
+                        context,
                     )
                     if len(subset):
                         allowance = (

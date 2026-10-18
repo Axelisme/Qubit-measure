@@ -87,7 +87,13 @@ evolution does not import ADC.
 for checked replay.
 
 The internal `kernel` module defines `SegmentTable`, `Kernel` and the opaque
-`Prepared.nbytes` contract. Every kernel declares `guard_builds`. False means
+`Prepared.nbytes` contract. `ApplyContext` carries the budget and any read-only
+per-row decisions for one family in one evolve. Dispatch merges Floquet guard
+admissions into one global-row plan, including the retained-sideband equations.
+Apply consumes those decisions without repeating admission or sparse planning.
+Scheduler passes each dispatch's plan unchanged through its bindings, including
+timeline-local deferred dispatches. These plans never enter the prepare LRU or
+kernel state. Every kernel declares `guard_builds`. False means
 `guard_prepared` returns None and the engine calls its ordinary batched guard.
 True means `guard_prepared` builds the model payload it validates and returns a
 `GuardResult` with its ordinary row-local acceptance mask and model-only
