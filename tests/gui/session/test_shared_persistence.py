@@ -79,6 +79,30 @@ def test_read_or_decode_failure_restores_default_with_error(
     assert isinstance(outcome.load_error, PersistenceError)
 
 
+@pytest.mark.parametrize("payload", [b"{", b'{"value": "bad"}', b"\xff"])
+def test_incompatible_snapshot_is_backed_up_before_defaults_and_normal_save(
+    tmp_path: Path, payload: bytes
+) -> None:
+    originator = _Originator(_State(7))
+    caretaker = _caretaker(originator, tmp_path)
+    caretaker.state_path.write_bytes(payload)
+
+    outcome = caretaker.restore_all()
+
+    backups = list(tmp_path.glob("state.json.incompatible-*"))
+    assert len(backups) == 1
+    backup = backups[0]
+    assert backup.read_bytes() == payload
+    assert not caretaker.state_path.exists()
+    assert str(backup) in str(outcome.load_error)
+    assert "using defaults" in str(outcome.load_error)
+    assert outcome.report == "restored:0"
+    assert originator.restored == _State()
+    caretaker.flush()
+    assert json.loads(caretaker.state_path.read_text()) == {"value": 7}
+    assert backup.read_bytes() == payload
+
+
 def test_missing_file_restores_default_without_error(tmp_path: Path) -> None:
     originator = _Originator(_State(9))
 
