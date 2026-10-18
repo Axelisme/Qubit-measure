@@ -56,6 +56,7 @@ class PrepareCache:
         self.limit = _nonnegative_integer(limit)
         self._bytes = 0
         self._resident: OrderedDict[int, _Allocation] = OrderedDict()
+        self._rejected: OrderedDict[int, None] = OrderedDict()
 
     @property
     def bytes(self) -> int:
@@ -79,11 +80,26 @@ class PrepareCache:
             ):
                 found.append(allocation.payload)
                 self._resident.move_to_end(identity)
+                if identity in self._rejected:
+                    self._rejected.move_to_end(identity)
         return found
 
-    def add(self, namespace: CacheNamespace, payload: PreparedPayload) -> None:
-        """Admit/touch a whole model-only batch, evicting oldest residents first.
+    def is_rejected(self, payload: PreparedPayload) -> bool:
+        """Whether this resident allocation has no accepted consumer yet."""
+        return id(payload.prepared) in self._rejected
 
+    def add(
+        self,
+        namespace: CacheNamespace,
+        payload: PreparedPayload,
+        *,
+        rejected: bool = False,
+    ) -> None:
+        """Admit a whole batch, evicting rejected products before ordinary LRU.
+
+        rejected=True only fills idle capacity; it never evicts any resident.
+        Such a hit stays low priority until an accepted consumer adds it with
+        rejected=False. Adding a rejected wrapper never demotes a normal batch.
         Oversize and disabled admission do not evict existing residents. The same
         prepared object is charged once, even through another wrapper. Negative
         or noninteger (including bool) nbytes, evolve lifetime and conflicting
@@ -102,19 +118,33 @@ class PrepareCache:
                 or existing.nbytes != size
             ):
                 raise ValueError("conflicting allocation metadata")
+            if not rejected:
+                self._rejected.pop(identity, None)
+            elif identity in self._rejected:
+                self._rejected.move_to_end(identity)
             self._resident.move_to_end(identity)
             return
         if size > self.limit or self.limit == 0:
             return
+        if rejected and self._bytes + size > self.limit:
+            return
+        # Separate priority index avoids scanning ordinary residents on eviction.
         while self._bytes + size > self.limit:
-            _, evicted = self._resident.popitem(last=False)
+            if self._rejected:
+                victim, _ = self._rejected.popitem(last=False)
+                evicted = self._resident.pop(victim)
+            else:
+                _, evicted = self._resident.popitem(last=False)
             self._bytes -= evicted.nbytes
         self._resident[identity] = _Allocation(namespace, payload, size)
+        if rejected:
+            self._rejected[identity] = None
         self._bytes += size
 
     def clear(self) -> None:
         """Release all residents without invalidating caller-held references."""
         self._resident.clear()
+        self._rejected.clear()
         self._bytes = 0
 
 

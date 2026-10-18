@@ -203,7 +203,16 @@ allocation sizes. Workers submit model-only local products to a thread-safe
 collector bounded by the remaining resident budget. After workers join, the
 caller admits these products through the LRU. This can evict old workloads, but
 streaming singletons cannot displace this evolve's protected allocations.
-Oversize products stream without admission. Pending products and old residents
+Oversize products stream without admission. Fully rejected guard handoffs stay
+separate from apply bindings. Shared guards cap their retained handoffs by spare
+resident capacity divided across candidate keys, declining large scans. Workers
+offer rejected products below accepted local work. Caller admission commits
+accepted work first, then fills only unused resident bytes with rejected products.
+Rejected admission never evicts any resident. A rejected hit keeps its low priority
+until a current guard accepts it; ordinary admission evicts rejected residents
+before the normal LRU, even when the rejected item was recently hit. Current row,
+probe-bin, domain and budget checks still run on every evolve.
+Pending products and old residents
 can coexist until the join; the resident limit is not a bound on that peak.
 
 [PrepareCache](cache.py) namespaces whole model-only payload batches by family,
