@@ -17,6 +17,7 @@ def analysis_snapshot():
         "execution": "a", "stage": "primary", "tab": "t", "op": 1,
         "status": "finished", "phase": "finished", "cancel_requested": False,
         "writeback": None, "error": None,
+        "operation_outcome": {"status": "finished"}, "save_status": "not_started",
         "result": {
             "summary": {"tones": [{"fit": 1.0}, {"fit": 2.5, "err": None}], "0": {"fit": 7}},
             "invalid": [{"path": ["tones", 1, "err"], "reason": "non_finite"}],
