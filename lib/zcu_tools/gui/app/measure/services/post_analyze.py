@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.measure.adapter import PostAnalyzeRequest, PostWritebackRequest
 from zcu_tools.gui.app.measure.events.tab import TabInteractionFact
@@ -188,7 +188,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
                 adapter.get_post_writeback_items(
                     PostWritebackRequest(
                         run_result=run_result,
-                        analyze_result=cast(Any, analyze_result),
+                        analyze_result=analyze_result,
                         post_analyze_result=post_result,
                         ctx=ctx,
                     )
