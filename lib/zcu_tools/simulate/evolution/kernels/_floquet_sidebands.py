@@ -181,19 +181,24 @@ def build(
 def _certify(
     frame: Frame,
     lam: Complex,
-    basis: tuple[Complex, Complex],
+    basis: tuple[Complex, Complex, float],
     center: float,
     port: int,
 ) -> Certificate:
-    modes, inverse = basis
+    """Certify bath only for port=-1, otherwise one unit-gain probe port.
+
+    basis contains right modes, inverse modes and their spectral-norm product.
+    The bath has zero probe sign and bin width, so its divisors, retained edges
+    and q/r/e contributions are identical for every probe bin and port.
+    """
+    modes, inverse, condition = basis
     size = int(round(np.sqrt(len(lam))))
-    condition = np.linalg.norm(modes, 2) * np.linalg.norm(inverse, 2)
     q, r, e = np.zeros(2), np.zeros(2), np.zeros(2)
     rows, columns, values, frequencies, signs = [], [], [], [], []
     for nu, coefficient, term_port, sign in zip(
         frame.frequencies, frame.coefficients, frame.ports, frame.signs, strict=True
     ):
-        if term_port >= 0 and term_port != port:
+        if term_port != port:
             continue
         slot = int(term_port >= 0)
         width = 2 * np.pi * 0.001 if slot else 0.0
@@ -218,7 +223,8 @@ def _certify(
         values.extend(retained[ri, ci])
         frequencies.extend(np.full(len(ri), nu))
         signs.extend(np.full(len(ri), sign))
-    tail = np.sqrt(size) * frame.tail[[0, port + 1]]
+    tail = np.zeros(2)
+    tail[int(port >= 0)] = np.sqrt(size) * frame.tail[port + 1]
     arrays = (
         np.asarray(rows, dtype=np.int64),
         np.asarray(columns, dtype=np.int64),
@@ -233,6 +239,24 @@ def _certify(
     for array in arrays:
         array.flags.writeable = False
     return Certificate(center, *arrays)
+
+
+def _with_bath(bath: Certificate, probe: Certificate) -> Certificate:
+    """Combine disjoint bath/probe slots without recomputing any norm."""
+    arrays = (
+        np.concatenate((bath.rows, probe.rows)),
+        np.concatenate((bath.columns, probe.columns)),
+        np.concatenate((bath.values, probe.values)),
+        np.concatenate((bath.frequencies, probe.frequencies)),
+        np.concatenate((bath.signs, probe.signs)),
+        bath.q + probe.q,
+        bath.r + probe.r,
+        bath.e + probe.e,
+        bath.tail + probe.tail,
+    )
+    for array in arrays:
+        array.flags.writeable = False
+    return Certificate(probe.center, *arrays)
 
 
 def _bound(certificate: Certificate, lam: Complex, parameters: Real) -> float:
@@ -261,15 +285,24 @@ def prepare(
     (duration_ns, Stark start phase, Stark end phase, probe_GHz, probe gain,
     probe phase, probe port); phases are in radians. Only probe frequency/port
     determine the certificate. The sole retention window is 0.1/ns plus the
-    bin half-width for probes. Return a new Frame; never mutate the input.
+    bin half-width for probes. The modal basis condition and bath-only retained,
+    omitted, resolvent and tail contributions are computed once per call. Bath
+    divisors have zero probe sign and bin width, so combining those contributions
+    with each bin's probe terms gives the same bounds as per-bin recomputation.
+    Return a new Frame; never mutate the input.
     """
+    if not len(parameters):
+        return replace(frame, certificates=())
+    condition = float(np.linalg.norm(modes, 2) * np.linalg.norm(inverse, 2))
+    basis = (modes, inverse, condition)
+    bath = _certify(frame, lam, basis, 0.0, -1)
     certificates = []
     centers = np.round(parameters[:, 3] / 0.002) * 0.002
     for port_value in np.unique(parameters[:, -1]):
         port = int(port_value)
         for center in np.unique(centers[parameters[:, -1] == port]):
-            certificate = _certify(frame, lam, (modes, inverse), float(center), port)
-            certificates.append((port, certificate))
+            probe = _certify(frame, lam, basis, float(center), port)
+            certificates.append((port, _with_bath(bath, probe)))
     return replace(frame, certificates=tuple(certificates))
 
 

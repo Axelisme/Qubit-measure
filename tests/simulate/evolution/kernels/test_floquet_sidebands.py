@@ -1,6 +1,9 @@
 """Retained resonant bath harmonics through the public Floquet kernel seam."""
 
+from dataclasses import replace
+
 import numpy as np
+import pytest
 from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
     ModelSource,
@@ -8,9 +11,92 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     kernel,
 )
+from zcu_tools.simulate.evolution.kernels import _floquet_sidebands as sidebands
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
 
 from ..contract.kernel_suite import KernelCase, reference
+
+
+def test_certificate_bins_preserve_omission_data_and_plans() -> None:
+    # Characterize the existing per-bin calculation before factoring common work.
+    indices = np.arange(96).reshape(6, 4, 4)
+    frame = sidebands.Frame(
+        np.array([0.0, 0.12, -0.12, 0.1, 0.0, 0.12]),
+        (np.sin(indices) + 1j * np.cos(indices)) * 1e-4,
+        np.array([-1, 0, -1, 1, 0, 1]),
+        np.array([0, -1, 0, 1, 1, -1]),
+        np.array([1e-8, 2e-8, 3e-8]),
+        0.13,
+    )
+    lam = np.array([0.0, -0.004, -0.002 + 0.13j, -0.002 - 0.13j])
+    modes = np.eye(4, dtype=complex) + np.triu(np.full((4, 4), 0.1 + 0.02j), 1)
+    inverse = np.linalg.inv(modes).astype(np.complex128)
+    parameters = np.array(
+        [
+            [1.0, 0.2, 0.4, 0.019, 0.01, 0.3, 0],
+            [16.0, 0.2, 0.4, 0.023, -0.02, 0.3, 0],
+            [1.0, 0.2, 0.4, 0.019, 0.01, 0.3, 1],
+            [16.0, 0.2, 0.4, 0.023, -0.02, 0.3, 1],
+        ]
+    )
+    prepared = sidebands.prepare(frame, lam, modes, inverse, parameters)
+    # q, r, e from independent per-bin certificates, including a nonnormal basis.
+    expected = np.array(
+        [
+            [
+                0.00518860504833984,
+                0.00553678024903929,
+                0.0004925929876322,
+                0.000489682683096,
+                0.0008016742980128,
+                0.0008106471415903,
+            ],
+            [
+                0.00518860504833984,
+                0.00406443670493019,
+                0.0004925929876322,
+                0.0006143988282523,
+                0.0008016742980128,
+                0.00073826966370096,
+            ],
+            [
+                0.00518860504833984,
+                0.00435706592716922,
+                0.0004925929876322,
+                0.00056063665073664,
+                0.0008016742980128,
+                0.00080342962912296,
+            ],
+            [
+                0.00518860504833984,
+                0.00431179335500431,
+                0.0004925929876322,
+                0.00054252721212667,
+                0.0008016742980128,
+                0.00081825961355971,
+            ],
+        ]
+    )
+    actual = [np.concatenate((c.q, c.r, c.e)) for _, c in prepared.certificates]
+    np.testing.assert_allclose(actual, expected, rtol=5e-14, atol=1e-17)
+    expected_bounds = [
+        0.0105000361470822,
+        0.01073737403872176,
+        0.01047642560257535,
+        0.01074722600596878,
+    ]
+    for row, expected_bound in zip(parameters, expected_bounds, strict=True):
+        cached = sidebands.plan(prepared, lam, modes, inverse, row)
+        independent = sidebands.plan(frame, lam, modes, inverse, row)
+        np.testing.assert_allclose(cached.bound, expected_bound, rtol=5e-14)
+        np.testing.assert_array_equal(cached.rows, independent.rows)
+        np.testing.assert_array_equal(cached.columns, independent.columns)
+        np.testing.assert_allclose(cached.values, independent.values, rtol=5e-14)
+        np.testing.assert_allclose(cached.exponents, independent.exponents, rtol=5e-14)
+    assert not frame.certificates
+    for _, certificate in prepared.certificates:
+        assert not certificate.q.flags.writeable
+        assert not certificate.values.flags.writeable
 
 
 def test_resonant_bath_sidebands_are_evolved_instead_of_averaged() -> None:
@@ -95,6 +181,44 @@ def _adversarial_case(name: str) -> KernelCase:
     return KernelCase(
         FloquetKernel(), ModelSource(states[0], lambda level: model), table, states
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "accepted"),
+    [
+        ("ill-conditioned", [False, False, False]),
+        ("long-duration", [False, False, False]),
+        ("exact-resonance", [True, True, False]),
+    ],
+)
+def test_multiple_probe_bins_preserve_row_admission(
+    name: str, accepted: list[bool]
+) -> None:
+    case = _adversarial_case(name)
+    table = case.table
+    repeated = replace(
+        table,
+        timeline=np.arange(3),
+        start_ns=np.repeat(table.start_ns, 3, axis=0),
+        duration_ns=np.repeat(table.duration_ns, 3, axis=0),
+        level=np.repeat(table.level, 3, axis=0),
+        tones=np.repeat(table.tones, 3, axis=0),
+        tone_port=np.repeat(table.tone_port, 3, axis=0),
+        tone_frequency_ghz=np.column_stack(
+            (np.repeat(table.tone_frequency_ghz[0, 0], 3), [0.0, 0.019, 0.023])
+        ),
+        tone_amplitude=np.repeat(table.tone_amplitude, 3, axis=0),
+        tone_theta_rad=np.repeat(table.tone_theta_rad, 3, axis=0),
+        tone_envelope=np.repeat(table.tone_envelope, 3, axis=0),
+        tone_envelope_offset_ns=np.repeat(table.tone_envelope_offset_ns, 3, axis=0),
+    )
+    batch = case.kernel.guard(repeated, np.arange(3), case.source, case.budget)
+    independent = [
+        case.kernel.guard(repeated, np.array([row]), case.source, case.budget)[0]
+        for row in range(3)
+    ]
+    np.testing.assert_array_equal(batch, independent)
+    np.testing.assert_array_equal(batch, accepted)
 
 
 def test_ill_conditioned_floquet_frame_is_rejected() -> None:

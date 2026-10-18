@@ -1,6 +1,6 @@
 # Segment evolution and prepared-data reuse
 
-**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation, interaction-picture independent densities and deterministic evolve-local period gain anchors
+**Last updated:** 2026-10-18, constant evidence admission, developer acquire evaluation, DOP853 compilation reuse, phase-adaptive gate-cache preparation, driven-input plateau routing, Hilbert endpoints, Padé period exponentials, Floquet frame build bound, Floquet roundoff step floor, timeline-owned waves, spectral-family reuse, reuse-independent Sambe admission, calibrated physical-block carrier interpolation, interaction-picture independent densities, deterministic evolve-local period gain anchors and shared sideband certificate contributions
 
 ## Segment engine contracts
 
@@ -457,7 +457,12 @@ divisor |i*nu-lambda_i+lambda_j| <= 0.1/ns, including exactly resonant edges.
 There is no larger retention window. The remaining candidates use an averaging
 bound; every sampled |k| > 4 coefficient contributes to the direct tail bound.
 A resolvent bound covers each complete 2 MHz probe bin, expanding the retained
-probe window by the bin half-width. Retained-channel norm growth is charged.
+probe window by the bin half-width. Each certificate group computes the modal
+basis condition and bath-only retained, omitted, resolvent and tail contributions
+once, then combines them with each bin's unit-gain probe contributions. Bath
+terms have zero probe sign and bin width, so their divisors and norms do not
+change with probe frequency or port. This preserves the per-bin omission bound
+and all admission thresholds. Retained-channel norm growth is charged.
 Omission uses 95% of the budget, frame/convergence estimates use 2.5%, and the
 remaining 2.5% is a numerical allowance, not a certified global ODE bound.
 
