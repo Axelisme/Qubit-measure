@@ -14,8 +14,10 @@ class MuxSweepResult:
 
     tone_indices is int64 (K,), in original full-readout index order selected by
     the caller, not ADC order. coordinates is float64 (K,P), in MHz for frequency
-    scans or normalized gain for Amp Rabi. signals is complex128 (K,P), averaged
-    I+jQ in the program's ADC-length-normalized a.u. Unwritten points are NaN;
+    scans, normalized gain for Amp Rabi, or quantized requested total pulse
+    lengths in us for Len Rabi. Length coordinates use the time-grid owner, not
+    a compiled waveform duration or hardware trace. signals is complex128 (K,P),
+    averaged I+jQ in the program's ADC-length-normalized a.u. Unwritten points are NaN;
     completed columns survive cancellation. Check the RunContext stop signal to
     distinguish acquisition errors from stopped or complete results.
     """

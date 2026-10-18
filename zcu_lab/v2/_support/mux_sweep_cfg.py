@@ -30,7 +30,10 @@ class MuxToneCfg(ConfigBase):
     """One original tone's enabled flag, optional drive and independent sweep.
 
     active is a strict bool. Only active tones require drive. sweep is SweepCfg
-    in the leaf's units, MHz or normalized gain; finite bounds/step are required.
+    in the leaf's units: MHz, normalized gain, or requested total pulse length
+    in us for Len Rabi. Len Rabi's prepared coordinates use the time-grid owner's
+    quantized requested lengths, not compiled durations or hardware traces.
+    Finite sweep bounds/step are required.
     Active drives must have fixed finite numeric frequency/gain/phase/delays and
     nonnegative delays. Waveform durations must be fixed, not hardware sweeps.
     Native pulse/waveform schemas own their shape and conversion rules.
