@@ -30,7 +30,12 @@ def model_source() -> ModelSource:
         "joint-three",
         np.array([0.0, 0.3, 0.9]),
         np.eye(3, dtype=complex),
-        (SecularDrive("a", x, x * 0.2), SecularDrive("b", x * 0.7, -x * 0.3)),
+        (
+            SecularDrive("a", x, (x * 0.2).astype(np.complex128)),
+            SecularDrive(
+                "b", (x * 0.7).astype(np.complex128), (-x * 0.3).astype(np.complex128)
+            ),
+        ),
         np.array([[0, 0.0002, 0], [0, 0, 0.0001], [0, 0, 0]]),
         np.ones((3, 3)) * 0.0001 - np.eye(3) * 0.0001,
     )
@@ -165,3 +170,45 @@ def test_tight_budget_declines_approximation(kernel_case: KernelCase):
     assert not case.kernel.guard(
         case.table, np.arange(3), KernelContext(case.source, 1e-8, WorkPlan())
     ).any()
+
+
+def test_third_carrier_changes_joint_density_within_lab_budget(kernel_case: KernelCase):
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+
+    from tests.simulate.evolution.contract.kernel_suite import assert_budget, reference
+
+    case = kernel_case
+    model = case.source.model((0,))
+    coupling = model.drives[1].in_phase_ghz.copy()
+    coupling[0, 2] = coupling[2, 0] = 0.004
+    model = replace(
+        model, drives=(model.drives[0], replace(model.drives[1], in_phase_ghz=coupling))
+    )
+    initial = np.diag([1.0, 0.0, 0.0]).astype(complex)
+    source = ModelSource(initial, lambda level: replace(model, level=level))
+    table = replace(
+        case.table,
+        tones=np.full(3, 3),
+        tone_port=np.tile([0, 1, 1], (3, 1)),
+        tone_envelope=np.zeros((3, 3), dtype=np.int64),
+        duration_ns=np.full(3, 128.0),
+        tone_envelope_offset_ns=np.zeros((3, 3)),
+    )
+    states = []
+    rows = np.array([1])
+    for enabled in (False, True):
+        amplitude = table.tone_amplitude.copy()
+        amplitude[1, 2] = 0.2 if enabled else 0.0
+        selected = replace(table, tone_amplitude=amplitude)
+        context = KernelContext(source, case.budget, WorkPlan())
+        assert case.kernel.guard(selected, rows, context).all()
+        keys = case.kernel.prepare_keys(selected, rows, context)
+        prepared = case.kernel.prepare(keys, selected, rows, context)
+        actual = initial[None].copy()
+        case.kernel.apply(
+            prepared, np.array([0]), selected, rows, actual, ApplyContext(case.budget)
+        )
+        expected = reference(replace(case, source=source, table=selected), 1, initial)
+        assert_budget(actual[0], expected, case.budget)
+        states.append(actual[0])
+    assert np.max(np.abs(states[1] - states[0])) > 0.01
