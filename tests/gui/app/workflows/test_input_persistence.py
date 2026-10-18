@@ -104,6 +104,23 @@ def test_original_expressions_roundtrip_and_restore_base(
     assert window.tunables_panel.state.base.data == draft_data(saved.knobs)
 
 
+def test_window_restore_uses_current_defaults_and_reports_removed_raw(window) -> None:
+    saved = WorkflowInputSnapshot.capture(
+        FormInput(FormModel, {"scale": {"expr": "1 / 4"}, "retired": 9}),
+        FormInput(FormModel, {"retired_knob": 7}),
+    )
+    defaults = TunablesForm.default_input(window.tunables_panel.env).data
+
+    report = window.restore_persisted_state(saved)
+
+    assert report.plan_dropped == (("retired",),)
+    assert report.knobs_dropped == (("retired_knob",),)
+    assert window.plan_panel.state.input.data["scale"] == {"expr": "1 / 4"}
+    assert window.tunables_panel.state.input.data == defaults
+    assert window.plan_panel.state.base.same_as(window.plan_panel.state.input)
+    assert window.tunables_panel.state.base.same_as(window.tunables_panel.state.input)
+
+
 class PersistedSweepForm(FormModel):
     sweep: SweepInput = Field(default_factory=LinRange)
 
