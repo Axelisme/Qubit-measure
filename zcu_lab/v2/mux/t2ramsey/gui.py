@@ -55,7 +55,10 @@ class MuxT2RamseyAnalyzeResult(AnalyzeResultBase):
                     "detune": outcome.detune,
                     "detune_err": outcome.detune_err,
                     "fit_fringe": outcome.fit_fringe,
-                    "fit_quality": fit_quality_summary({"fit": outcome.quality}),
+                    "fit_quality": fit_quality_summary(
+                        {"fit": outcome.quality},
+                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
+                    ),
                 }
             summaries.append(indexed_summary(self.names, outcome.index, values))
         return {"tones": summaries}

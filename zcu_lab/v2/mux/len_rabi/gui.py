@@ -55,7 +55,10 @@ class MuxLenRabiAnalyzeResult(AnalyzeResultBase):
                     "pi2_len_err": outcome.pi2_len_err,
                     "rabi_f": outcome.rabi_f,
                     "rabi_f_err": outcome.rabi_f_err,
-                    "fit_quality": fit_quality_summary({"fit": outcome.quality}),
+                    "fit_quality": fit_quality_summary(
+                        {"fit": outcome.quality},
+                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
+                    ),
                 }
             summaries.append(indexed_summary(self.names, outcome.index, values))
         return {"tones": summaries}

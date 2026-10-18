@@ -67,7 +67,10 @@ class MuxGEAnalyzeResult(AnalyzeResultBase):
                     "threshold": primary.threshold,
                     "ge_s": primary.ge_s,
                     "init_pops": primary.init_pops.tolist(),
-                    "fit_quality": fit_quality_summary(primary.fit_quality),
+                    "fit_quality": fit_quality_summary(
+                        primary.fit_quality,
+                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
+                    ),
                 }
             summaries.append(indexed_summary(self.names, outcome.index, values))
         return {"tones": summaries}

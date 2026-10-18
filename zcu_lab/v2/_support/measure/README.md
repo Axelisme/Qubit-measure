@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-18，共用 mux 固定來源綁定驗證
+**Last updated:** 2026-10-19，mux captured identity 與 indexed quality summaries
 
 # Measure domain support
 
@@ -7,7 +7,9 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
 
-`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
+`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。Mux caller 指定 `summary.tones[row].fit_quality`，單 qubit 預設維持 `summary.fit_quality`。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
+
+`mux_results.py` 集中七個 mux qubit adapters 的固定來源身分核對與 position/name summary。目的地只來自同次 Run／Load capture；缺 capture 不產生 proposal。來源 cfg 有完整名稱時，必須與捕捉的完整 qubits 相同。Summary 的名稱只取來源 cfg，缺 cfg 時保留 None，不讀目前 Form 或 library。
 
 Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitions` 組合 adapters。
 本 package 不 import concrete adapter 或 `zcu_lab.definitions`，也不宣告 experiment order。只屬於

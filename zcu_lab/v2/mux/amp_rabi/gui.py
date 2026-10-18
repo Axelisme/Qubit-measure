@@ -53,7 +53,10 @@ class MuxAmpRabiAnalyzeResult(AnalyzeResultBase):
                     "pi_gain_err": outcome.pi_gain_err,
                     "pi2_gain": outcome.pi2_gain,
                     "pi2_gain_err": outcome.pi2_gain_err,
-                    "fit_quality": fit_quality_summary({"fit": outcome.quality}),
+                    "fit_quality": fit_quality_summary(
+                        {"fit": outcome.quality},
+                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
+                    ),
                 }
             summaries.append(indexed_summary(self.names, outcome.index, values))
         return {"tones": summaries}

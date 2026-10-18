@@ -53,7 +53,10 @@ class MuxT1AnalyzeResult(AnalyzeResultBase):
                     "t1_err": outcome.fit.t1_err,
                     "t1b": outcome.fit.t1b,
                     "t1b_err": outcome.fit.t1b_err,
-                    "fit_quality": fit_quality_summary(outcome.fit.fit_quality),
+                    "fit_quality": fit_quality_summary(
+                        outcome.fit.fit_quality,
+                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
+                    ),
                 }
             summaries.append(indexed_summary(self.names, outcome.index, values))
         return {"tones": summaries}

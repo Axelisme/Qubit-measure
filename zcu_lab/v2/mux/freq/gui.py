@@ -53,7 +53,10 @@ class MuxFreqAnalyzeResult(AnalyzeResultBase):
                     "freq_err": outcome.freq_err,
                     "fwhm": outcome.fwhm,
                     "fwhm_err": outcome.fwhm_err,
-                    "fit_quality": fit_quality_summary({"fit": outcome.quality}),
+                    "fit_quality": fit_quality_summary(
+                        {"fit": outcome.quality},
+                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
+                    ),
                 }
             summaries.append(indexed_summary(self.names, outcome.index, values))
         return {"tones": summaries}
