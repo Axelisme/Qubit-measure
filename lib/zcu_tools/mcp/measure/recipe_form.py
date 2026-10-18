@@ -19,6 +19,29 @@ from zcu_tools.gui.app.measure.remote.form_description import (
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 
+type RecipeFieldPath = tuple[str | int, ...]
+"""Logical field names and original list indexes; numeric strings stay names."""
+
+
+def field_path(path: RecipeFieldPath) -> RecipeFieldPath:
+    """Validate a nonempty typed path carrier, without resolving owner fields.
+
+    Strings are field names and nonnegative integers are original list indexes.
+    Booleans, blank names and dotted-string carriers raise ValueError. Names
+    containing dots are literal names; no splitting or name/index lookup occurs.
+    """
+    if isinstance(path, str) or not path:
+        raise ValueError("field must be a nonempty typed path")
+    if any(
+        (isinstance(part, str) and (not part or part != part.strip()))
+        or (type(part) is int and part < 0)
+        or (not isinstance(part, str) and type(part) is not int)
+        for part in path
+    ):
+        raise ValueError("field requires nonblank names or nonnegative int indexes")
+    return tuple(path)
+
+
 @dataclass(frozen=True)
 class RecipeFormError:
     """One Form validation failure from the current atomic observation.
@@ -135,7 +158,7 @@ def field_observation(reply: Mapping[str, object]) -> RecipeFieldObservation:
 
 
 def directed_errors(
-    publication: Mapping[str, object], path: tuple[str, ...]
+    publication: Mapping[str, object], path: RecipeFieldPath
 ) -> tuple[RecipeFormError, ...]:
     """Decode errors at root, consuming ancestors, target or descendants.
 
@@ -170,7 +193,7 @@ def directed_errors(
 
 
 def read_form_field(
-    observation: RecipeFieldObservation, path: tuple[str, ...]
+    observation: RecipeFieldObservation, path: RecipeFieldPath
 ) -> RecipeFormField:
     """Project one decoded atomic field read into the author's detached view.
 
@@ -181,7 +204,7 @@ def read_form_field(
     description = observation["description"]
     target = description["target"]
     if target is None or (target["hidden"] and target["fixed"]):
-        raise ValueError(f"Unknown cfg field: {'.'.join(path)}")
+        raise ValueError(f"Unknown cfg field: {path!r}")
     raw = observation["input"]
     mode: Literal["key", "inline"] | None = None
     selector = observation["selector"]

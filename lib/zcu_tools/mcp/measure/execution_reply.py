@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
+from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe import RecipeDefinition
@@ -19,13 +20,14 @@ ReplyDetail = Literal["summary", "full"]
 class SummaryParameter:
     """One recipe-owned cfg fact selected for fixed Run capture and public summary.
 
-    name is the public actual mapping key. field is the dotted cfg field captured
-    when the recipe prepared it. unit is its native unit label, or None for no
+    name is the public actual mapping key, not a position. field is a nonempty
+    tuple of str field names and int original list indexes captured at Run.
+    Numeric strings remain literal names. unit is its native unit label, or None for no
     declared label. It never requests a value conversion.
     """
 
     name: str
-    field: str
+    field: RecipeFieldPath
     unit: str | None = None
 
 
@@ -88,7 +90,7 @@ def _actual(
     fields = captured["fields"] if captured is not None else {}
     parameters: dict[str, ParameterReply] = {}
     for parameter in definition.summary_parameters if definition else ():
-        fact = fields.get(parameter.field)
+        fact = fields.get(parameter.name)
         if fact is None:
             continue
         source = fact.get("source")
