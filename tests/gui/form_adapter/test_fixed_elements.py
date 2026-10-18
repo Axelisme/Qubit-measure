@@ -117,17 +117,17 @@ def test_restored_identity_becomes_the_boundary_until_reset():
 
 def test_resource_uses_declaring_owner_for_whole_list_and_recipe_edits():
     model = owner_model()
+    initial = model.default_input(core.FormEnv()).data
     cfg = create_model(
         "Config",
         __base__=ConfigBase,
-        tones=(list[Element], ...),
-        participants=(list[str], ...),
+        tones=(list[Element], initial["tones"]),
+        participants=(list[str], initial["participants"]),
     )
-    initial = model.default_input(core.FormEnv()).data
     resource = TabFormResource(
         lambda _ctx: adapter.Form(
             cfg,
-            initial,
+            {},
             fixed_elements=(
                 adapter.FixedElements(("tones",), "label", ("participants",)),
             ),
