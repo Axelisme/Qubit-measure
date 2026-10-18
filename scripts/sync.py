@@ -211,10 +211,12 @@ def sync_files(
                         on_disk_clean = _normalize_notebook(on_disk_nb)
 
                         are_synced = generated_clean == on_disk_clean
-                    except Exception:
+                    # tolerated: Jupytext codec/deepcopy failures fall back to raw-text comparison.
+                    except Exception:  # noqa: BLE001
                         are_synced = generated_dest_content == on_disk_dest_content
 
-            except Exception:
+            # tolerated: Any read/codec/comparison failure must mark this pair out of sync.
+            except Exception:  # noqa: BLE001
                 # If any error occurs during parsing or comparison, assume not synced
                 are_synced = False
 

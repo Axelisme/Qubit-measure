@@ -609,7 +609,8 @@ def _estimate_stderr(
         log_stderr = np.sqrt(np.maximum(np.diag(cov_log), 0.0))
         for name, value in zip(free_names, log_stderr, strict=True):
             stderr_values[name] = fit_values[name] * float(value)
-    except Exception:
+    # tolerated: Covariance backend/conversion failures keep the fit with infinite free stderr.
+    except Exception:  # noqa: BLE001
         for name in free_names:
             stderr_values[name] = np.inf
 

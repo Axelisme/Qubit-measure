@@ -140,7 +140,7 @@ def _git_sha() -> str:
             ["git", "rev-parse", "--short", "HEAD"], cwd=_REPO_ROOT
         )
         return out.decode().strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         return "unknown"
 
 

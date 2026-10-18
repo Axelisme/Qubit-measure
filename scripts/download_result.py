@@ -79,7 +79,8 @@ def authenticate_drive():
         service = build("drive", "v3", credentials=creds)
         print("Successfully built Google Drive API service.")
         return service, creds
-    except Exception as e:
+    # tolerated: Drive discovery/auth/HTTP failures must report service-build failure and exit.
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to build Google Drive API service: {e}")
         sys.exit(1)
 
