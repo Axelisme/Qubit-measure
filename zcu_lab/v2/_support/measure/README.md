@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-17，共用初值 owner 邊界與 arb Rabi 來源
+**Last updated:** 2026-10-18，共用 mux 固定來源綁定驗證
 
 # Measure domain support
 
@@ -35,6 +35,37 @@ pi_len 須為有限正數，pi_gain 須為有限數且在 (0, 1]。無效來源�
 來源 gain 若為 NaN 或 ±Inf，額外設 gain=None，避免非有限數留在 JSON input。兩個必填欄位都補齊才可提交。
 有限的無效 gain 保留原值。沒有 x180 時使用 qub_probe Template，明確設定 gain=1 與 length=1 µs。
 Nested waveform key 的複製由 Form adapter 負責。來源與其他欄位不變，不寫回校準。
+
+## Mux 綁定驗證
+
+`mux_bindings.validate_mux_bindings(parameters: ParameterContext | None) -> None`
+集中 onetone、mux qubit 與 FTF two-qubit Forms 共用的跨 component 驗證。
+它只讀借用的固定 capture，不刷新來源、不讀 live 檔案或裝置，也不 materialize library assets。
+有 qubits 時，它驗證完整有序清單的 component 存在、kind 與逐項 qubit.resonator 對應。
+錯誤保留欄位、原始 index 及實際值。MuxGroup model 仍擁有名稱、等長及重複 qubit 的結構驗證。
+
+None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不增加 bring-up 門檻。
+其他 alias 錯誤與來源故障照常傳遞。FTF caller 自行要求 group、qubits 及 F1/F2；
+新 mux qubit caller 自行要求完整 tone 數對齊與 active drive。共用函式不選 tone、不猜角色、不寫回。
+
+在 concrete `form.py` 使用下列 import，並在自己的 `make_form(ctx)` 建立 Form 前呼叫。
+`TwoQubitCfg` 是該 caller 的既有 core cfg；範例省略 caller 自己的角色要求與 tree 內容。
+
+```python
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
+
+from .core import TwoQubitCfg
+
+
+def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
+    validate_mux_bindings(ctx.parameters)
+    # Enforce this caller's required group, qubits and F1/F2 here.
+    return Form(TwoQubitCfg, tree={})
+```
+
+## 其他 measure helpers
 
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa
 與可選分析校準。缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。

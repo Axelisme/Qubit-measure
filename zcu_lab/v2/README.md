@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-18，mux qubit 綁定與 FTF bring-up 指南入口
+**Last updated:** 2026-10-18，mux 共用綁定驗證與 FTF bring-up 指南
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -20,7 +20,12 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。FIT 共用 onetone/freq 的模型與 delay 選項，逐 tone 隔離數值失敗。沒有歷史 cfg 時拒絕 FIT。
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時只提 module，summary 顯示原因。
-MuxGroup 可不填 qubits 做 resonator bring-up。填了則由 model 檢查等長與重複 qubit，Form 在 Open／Reset 以固定 capture 檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。沒有 qubits 時保留手填 readout，不增加完整綁定門檻。
+MuxGroup 可不填 qubits 做 resonator bring-up，保留手填 readout，不增加完整綁定門檻。
+填了則由 model 檢查等長與重複 qubit。Form 在 Open／Reset 呼叫
+`_support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
+檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。
+其他 mux／FTF Forms 共用此入口，精確 import 與呼叫例見
+[Measure support](_support/measure/README.md#mux-綁定驗證)。
 Module 可整組引用或 inline 編輯，tones 使用單行 JSON。
 Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 tones 並確認接線；範本不是硬體安全預設。
 
