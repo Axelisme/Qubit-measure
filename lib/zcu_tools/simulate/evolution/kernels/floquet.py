@@ -36,6 +36,7 @@ another kernel.
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
+from functools import partial
 from types import MappingProxyType
 from typing import Literal
 
@@ -58,6 +59,7 @@ from ..kernel import (
     prepared_key_indices,
 )
 from ..secular import SecularModel
+from ..workplan import FactKey
 from . import _floquet_sidebands as sb
 from ._secular import coherence_decay
 
@@ -81,7 +83,6 @@ class _Entry:
     inverse: NDArray[np.complex128]
     couplings: NDArray[np.complex128]
     valid: bool
-    model: SecularModel
     sidebands: sb.Frame | None = None
 
     @property
@@ -320,7 +321,12 @@ def _sampling_ratio(model: SecularModel, key: np.void) -> float:
 
 
 def _build(
-    model: SecularModel, port: int, frequency: float, amplitude: float
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    parameters: NDArray[np.float64],
+    budget: float,
 ) -> _Entry:
     if frequency <= 0:
         raise ValueError("Floquet Stark frequency must be positive")
@@ -376,8 +382,8 @@ def _build(
     harmonic = np.asarray(np.fft.fftfreq(count) * count, dtype=np.float64)
     edge = np.abs(harmonic) >= count / 4
     frame_error = float(4 * sum(np.linalg.norm(c, 2) for c in coefficients[edge]))
-    # Keep only owned k=0 arrays. Rejected rows reconstruct Fourier samples from
-    # rotations and the immutable model; legacy accepts pay no sideband build.
+    # Full harmonics are construction scratch, never resident or evolve facts.
+    # Keep owned zero modes so returning the entry releases the large arrays.
     bath_zero, x_zero, y_zero = bath[0].copy(), x[0].copy(), y[0].copy()
     arrays = (
         energies,
@@ -395,7 +401,7 @@ def _build(
     )
     for array in arrays:
         array.flags.writeable = False
-    return _Entry(
+    entry = _Entry(
         frequency,
         energies,
         coefficients,
@@ -413,8 +419,16 @@ def _build(
         inverse,
         couplings,
         bool(valid),
-        model,
     )
+    _, eligible = _admission(entry, parameters, budget)
+    if eligible.any():
+        # Use the original samples, without the former FFT/ifft roundtrip and
+        # second full bath transform. Only compact candidates survive the build.
+        entry = replace(
+            entry,
+            sidebands=sb.build(bath, x, y, frequency, (modes, inverse), _comm),
+        )
+    return entry
 
 
 @njit(nogil=True, cache=True)
@@ -607,20 +621,6 @@ def _mask(data, bounds, parameters, budget):
             omitted <= budget / 3 and convergence * duration + frame_error <= budget / 3
         )
     return result
-
-
-def _with_sidebands(entry: _Entry) -> _Entry:
-    """Reconstruct candidates only for rejected k=0 rows, without redoing the frame."""
-    if entry.sidebands is not None:
-        return entry
-    samples = np.fft.ifft(entry.rotations, axis=0) * len(entry.rotations)
-    bath, x, y, _ = _averages(entry.model, samples)
-    return replace(
-        entry,
-        sidebands=sb.build(
-            bath, x, y, entry.frequency, (entry.modes, entry.inverse), _comm
-        ),
-    )
 
 
 def _sideband_plan(entry: _Entry, parameters: NDArray[np.float64]) -> sb.Plan:
@@ -1002,7 +1002,6 @@ class FloquetKernel:
             entry = prepared.entries[0]
             _, eligible = _admission(entry, params[members], budget)
             if eligible.any():
-                entry = _with_sidebands(entry)
                 if entry.sidebands is None:
                     raise RuntimeError("Floquet sideband preparation failed")
                 frame = sb.prepare(
@@ -1055,7 +1054,13 @@ class FloquetKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> _Prepared:
-        """Prepare one immutable, density-independent Floquet frame per key."""
+        """Resolve one evolve-local frame per key, independent of density.
+
+        The complete table's same-key candidates decide whether construction
+        needs sidebands. Full Fourier averages are consumed inside that build;
+        only the compact immutable entry is published in WorkPlan and resident
+        preparations. Probe-bin certificates remain guard-call products.
+        """
         source, budget = context.source, context.budget
         if budget <= 0 or not np.array_equal(
             keys, self.prepare_keys(table, rows, context)
@@ -1064,15 +1069,36 @@ class FloquetKernel:
                 "Floquet requires positive budget and aligned representative rows"
             )
         entries = []
+        candidates = np.arange(len(table.timeline), dtype=np.int64)
+        candidates = candidates[_candidate_positions(table, candidates)]
+        candidate_keys = self.prepare_keys(table, candidates, context)
         for key in keys:
             model = source.model(tuple(int(v) for v in key["level"]))
+            parameters = _parameters(table, candidates[candidate_keys == key])
+            fact = FactKey(
+                (
+                    "floquet-frame",
+                    parameters.tobytes(),
+                    model.identity,
+                    model.level,
+                    key.tobytes(),
+                    budget,
+                ),
+                _Entry,
+            )
             try:
                 entries.append(
-                    _build(
-                        model,
-                        int(key["port"]),
-                        float(key["frequency"]),
-                        float(key["gain"]),
+                    context.work_plan.fact(
+                        fact,
+                        partial(
+                            _build,
+                            model,
+                            int(key["port"]),
+                            float(key["frequency"]),
+                            float(key["gain"]),
+                            parameters,
+                            budget,
+                        ),
                     )
                 )
             except np.linalg.LinAlgError as error:
