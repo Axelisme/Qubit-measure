@@ -38,7 +38,8 @@ def analyze_amplitude(
     leading zip points before finite-IQ filtering. Negative/noninteger skip or
     invalid result shapes raise. Numeric failures return MuxFitFailure, not
     fabricated calibrations. plots receives fit_i for each original index.
-    Does not read cfg, components, current forms or hardware.
+    Plotting errors propagate unchanged. Does not read cfg, components, current
+    forms or hardware.
     """
     validate_mux_result(result)
     if type(options.skip) is not int or options.skip < 0:
@@ -71,12 +72,7 @@ def analyze_amplitude(
                 {name: float(value) for name, value in zip(names, params, strict=True)},
                 covariance,
             )
-            ax.plot(xs, real, "o", label="measured")
-            ax.plot(xs, fitted, label="fit")
-            for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
-                ax.axvline(value, ls="--", label=f"{label}={value:.4g} ± {error:.2g}")
-                ax.axvspan(value - error, value + error, alpha=0.2, color="red")
-            outcomes.append(MuxAmpRabiFit(index, pi, pierr, pi2, pi2err, quality))
+            outcome = MuxAmpRabiFit(index, pi, pierr, pi2, pi2err, quality)
         except (
             ValueError,
             RuntimeError,
@@ -86,6 +82,13 @@ def analyze_amplitude(
             ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
             ax.text(0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True)
             outcomes.append(MuxFitFailure(index, str(exc)))
+        else:
+            ax.plot(xs, real, "o", label="measured")
+            ax.plot(xs, fitted, label="fit")
+            for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
+                ax.axvline(value, ls="--", label=f"{label}={value:.4g} ± {error:.2g}")
+                ax.axvspan(value - error, value + error, alpha=0.2, color="red")
+            outcomes.append(outcome)
         ax.legend()
         ax.grid(True)
         fig.tight_layout()
