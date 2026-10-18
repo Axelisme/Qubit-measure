@@ -135,8 +135,10 @@ def _facet() -> tuple[
     return (
         DeviceControlFacet(
             bus=bus,
+            # DeviceService needs state/operation owners and a device registry.
+            # tolerated(cast): Isolate forwarding logs/results from service mechanisms.
             device=cast(Any, device),
-            progress=cast(Any, progress),
+            progress=progress,
         ),
         log,
         device,
