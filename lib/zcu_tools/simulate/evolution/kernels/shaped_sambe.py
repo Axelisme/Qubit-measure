@@ -1,5 +1,6 @@
 """Real-envelope periods from shared finite Hilbert Fourier matrices."""
 
+from copy import copy
 from dataclasses import dataclass
 
 import numpy as np
@@ -237,7 +238,10 @@ class ShapedSambeKernel:
         charges the workspace's current numeric bytes until this evolve ends.
         """
         workspace = self.carrier_workspace(table, source)
-        return ShapedSambeKernel(workspace), workspace
+        # Keep injected subclass hooks; only this clone receives the workspace.
+        scoped = copy(self)
+        scoped._workspace = workspace
+        return scoped, workspace
 
     def carrier_workspace(
         self, table: SegmentTable, source: ModelSource

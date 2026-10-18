@@ -1,5 +1,6 @@
 """Constant-tone Hilbert propagators with compact secular Strang stepping."""
 
+from copy import copy
 from dataclasses import dataclass
 from threading import RLock, get_ident
 from typing import NamedTuple
@@ -743,7 +744,11 @@ class FloquetPeriodKernel:
         """
         del source
         workspace = _GainWorkspace(table)
-        return FloquetPeriodKernel(workspace), workspace
+        # Preserve injected subclass guards/apply hooks without mutating the
+        # registry instance shared by concurrent evolves.
+        scoped = copy(self)
+        scoped._workspace = workspace
+        return scoped, workspace
 
     def guard(
         self,
