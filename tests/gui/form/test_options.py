@@ -17,6 +17,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
+    FormWritePath,
 )
 
 from tests.gui._form_converters import RebuildingForm
@@ -100,7 +101,7 @@ def test_option_matches_typed_leaves_first_match_and_missing_without_mutation() 
     "batch", [{("branch",): {"kind": "second"}}, {("branch", "kind"): "second"}]
 )
 def test_branch_selection_starts_from_fresh_defaults_and_commits_once(
-    batch: Mapping[tuple[str, ...], JsonValue],
+    batch: Mapping[FormWritePath, JsonValue],
 ) -> None:
     env = FormEnv()
     state = FormState(
