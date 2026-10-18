@@ -15,7 +15,11 @@ from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
 from ._resident import ResidentAdmission
-from ._shaped_dispatch import preference
+from ._shaped_dispatch import (
+    populate_single_gate_plan,
+    preference,
+    single_gate_preferred,
+)
 from ._two_tone_dispatch import direct_preferred
 from .cache import PrepareCache, PreparedPayload
 from .engine import PathDiagnostics
@@ -45,6 +49,7 @@ def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)
+    populate_single_gate_plan(table, source, plan)
     return plan
 
 
@@ -86,7 +91,16 @@ def resident_inventory(
             (table.tones == 0, ("t4",)),
             (flux, ("flux_dop853",)),
             (plateau, ("dyson", "floquet_period", "t6")),
-            (shaped, ("shaped_sambe", "gate_cache", "period_table", "dop853")),
+            (
+                shaped,
+                (
+                    "single_tone_gate",
+                    "shaped_sambe",
+                    "gate_cache",
+                    "period_table",
+                    "dop853",
+                ),
+            ),
             (two, ("multitone_rwa", "floquet", "dop853")),
             (multiple, ("multitone_gate", "multitone_rwa", "dop853")),
         )
@@ -563,9 +577,19 @@ class _Classifier:
                 preference(self.table, rows, self.kernels, self.context),
             )
         plan = self.shaped
+        covariant = self.kernels.get("single_tone_gate")
+        if covariant is not None:
+            selected = plan.rows[self.scope[plan.rows]]
+            preferred = single_gate_preferred(self.table, selected, self.context)
+            if np.any(preferred):
+                self.try_kernel(covariant, selected[preferred])
         spectral = self.kernels.get("shaped_sambe")
         if spectral is not None:
-            selected = plan.rows[self.scope[plan.rows]]
+            selected = plan.rows[
+                self.scope[plan.rows]
+                & (self.names[plan.rows] == "")
+                & ~self.deferred[plan.rows]
+            ]
             if len(selected):
                 self.try_kernel(spectral, selected)
         pending = (

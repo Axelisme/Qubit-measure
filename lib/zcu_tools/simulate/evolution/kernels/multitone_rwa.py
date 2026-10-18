@@ -364,11 +364,32 @@ def _retained_norm(
 def admit_rows(
     table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
 ) -> NDArray[np.bool_]:
-    """Admit joint RWA rows under the single shared calibrated policy.
+    """Admit simultaneous rows under the shared calibrated joint RWA policy.
 
-    Reads model-only facts, never density; splitting rows preserves decisions.
-    Invalid budgets raise ValueError through the common solver controls.
+    Requires at least two tones. Reads model-only facts, never density;
+    splitting rows preserves decisions. Invalid budgets raise ValueError.
     """
+    return _admit_rows(table, rows, context, single_tone=False)
+
+
+def admit_single_rows(
+    table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+) -> NDArray[np.bool_]:
+    """Admit exactly one shaped tone for covariant gates, not row RWA routing.
+
+    Uses the same smoothness, fixed-flux, strength, phase-proxy and budget
+    policy as simultaneous RWA without relaxing its public multi-tone domain.
+    """
+    return _admit_rows(table, rows, context, single_tone=True)
+
+
+def _admit_rows(
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    context: KernelContext,
+    *,
+    single_tone: bool,
+) -> NDArray[np.bool_]:
     tolerances(context.budget)
     bounds = envelope_bounds(table, context.work_plan)
     accepted = np.zeros(len(rows), dtype=np.bool_)
@@ -376,7 +397,7 @@ def admit_rows(
         count = table.tones[row]
         if (
             context.budget < _MIN_BUDGET
-            or count < 2
+            or (count != 1 if single_tone else count < 2)
             or not _fixed_flux(table, int(row))
         ):
             continue
