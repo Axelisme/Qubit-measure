@@ -615,13 +615,19 @@ class _BoundInput:
 
 
 @njit(nogil=True, cache=True)
-def _restore_bound_modes(
-    modes: NDArray[np.complex128], vectors: NDArray[np.complex128]
+def _transform_modes(
+    modes: NDArray[np.complex128],
+    transform: NDArray[np.complex128],
+    size: int,
 ) -> NDArray[np.complex128]:
-    """Use fixed-size matrix-vector products independent of worker batch size."""
-    result = np.empty_like(modes)
+    """Transform populations rowwise; secular coherence coordinates are unchanged."""
+    stride = size + 1
+    population_block = np.ascontiguousarray(transform[::stride, ::stride])
+    result = modes.copy()
     for row in range(len(modes)):
-        result[row] = vectors @ modes[row]
+        populations = np.ascontiguousarray(modes[row, ::stride])
+        # Fixed-size products keep rounding independent of worker batch size.
+        result[row, ::stride] = population_block @ populations
     return result
 
 
@@ -644,7 +650,7 @@ def _advance_bound(
             shared=True,
         ),
     )
-    return _restore_bound_modes(modes, entry.vectors).reshape(shape)
+    return _transform_modes(modes, entry.vectors, shape[-1]).reshape(shape)
 
 
 def _prepare_model(model: SecularModel) -> _Entry:
@@ -700,12 +706,16 @@ def _advance(
     states: NDArray[np.complex128],
     budget: float,
 ) -> NDArray[np.complex128]:
-    modes = states.reshape(len(states), -1) @ entry.inverse.T
+    modes = _transform_modes(
+        states.reshape(len(states), -1), entry.inverse, states.shape[-1]
+    )
     pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
     evolved = evaluate_dyson(
         params, entry.values, modes, entry.couplings[port], pruning
     )
-    return (evolved @ entry.vectors.T).reshape(states.shape)
+    return _transform_modes(evolved, entry.vectors, states.shape[-1]).reshape(
+        states.shape
+    )
 
 
 def _free_populations(
