@@ -47,6 +47,70 @@ def host(tmp_path: Path) -> tuple[TunablesHost[ValueForm, int], Rig]:
     return binding, rig
 
 
+def test_indexed_apply_returns_directed_errors_without_changing_native_or_draft(
+    tmp_path: Path,
+) -> None:
+    from tests.gui.form._fixed_models import named_form, named_input
+
+    rig = Rig(tmp_path)
+    model = named_form()
+
+    @workflow("indexed", plan=Plan, tunables=model, init=rig.init)
+    def indexed(
+        _env: WorkflowEnv[int], _plan: Plan, _tun: FormModel, _state: State
+    ) -> Step[State, int]:
+        yield from ()
+        return Done()
+
+    rig.engine.start(
+        indexed,
+        plan=Plan(),
+        tunables=model.model_validate(named_input(model).data),
+        paths=rig.paths,
+        identity=RunIdentity(
+            "indexed",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
+    )
+    env = FormEnv()
+    state = FormState(named_input(model))
+    binding: TunablesHost[FormModel, int] = TunablesHost(state, env, "indexed")
+    binding.accept(rig.engine)
+    state.write({("tones", 1, "gain"): {"expr": "3 * 2"}}, env)
+    before_native = rig.engine.tunables("indexed")
+    before_draft, before_base, before_accepted = (
+        state.input,
+        state.base,
+        binding.accepted_input,
+    )
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+    try:
+        result = binding.apply(actor=Actor("user", "gui"))
+    except TypeError as exc:
+        # Observe the old boundary failure as an outcome, not a setup error.
+        result = exc
+    assert isinstance(result, FormErrors), (
+        "Indexed apply must return path-directed FormErrors"
+    )
+    path = ("tones", 1, "gain")
+    assert path in result.messages
+    assert "native" in result.messages[path].lower()
+    assert "list" in result.messages[path].lower()
+    assert rig.engine.tunables("indexed") == before_native
+    assert state.input.same_as(before_draft)
+    assert state.base.same_as(before_base)
+    assert binding.accepted_input.same_as(before_accepted)
+    assert notifications == []
+
+
 def test_apply_publishes_numeric_value_but_retains_expression_input(
     host: tuple[TunablesHost[ValueForm, int], Rig],
 ) -> None:
