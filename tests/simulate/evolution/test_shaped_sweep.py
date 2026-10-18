@@ -146,3 +146,70 @@ def test_different_duration_ramps_match_independent_preparations(
         independent.append(result.densities[0])
     assert joint.paths.segments_by_kernel == {"shaped_sambe": 2}
     np.testing.assert_allclose(joint.densities, independent, atol=1e-12, rtol=0)
+
+
+@pytest.mark.parametrize("frequency", [0.05, -0.05, 0.3, -0.3, 1.7])
+@pytest.mark.parametrize("shape", ["drag", "zero-crossing"])
+def test_smooth_complex_envelopes_use_sambe_and_match_dop(
+    frequency: float, shape: str
+) -> None:
+    """Complex phase follows the envelope, carrier substeps and fractional tail."""
+    x = np.array([[0, 0.04], [0.04, 0]], dtype=complex)
+    y = np.array([[0, -0.02j], [0.02j, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "complex-shaped-sweep",
+        np.array([0.0, abs(frequency)]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, y),),
+        np.array([[0.0, 1e-5], [0.0, 0.0]]),
+        np.zeros((2, 2)),
+    )
+    source = ModelSource(np.array([[0.6, 0.2j], [-0.2j, 0.4]]), lambda _: model)
+    duration = 64.7
+    times = np.linspace(0, duration, 65)
+    coordinate = (times - duration / 2) / (duration / 4)
+    gaussian = np.exp(-(coordinate**2) / 2)
+    if shape == "drag":
+        values = gaussian * (1 - 0.5j * coordinate)
+    else:
+        # A continuous signed complex envelope passes exactly through zero.
+        # Tiny transverse offsets must not turn its phase jump into a drive.
+        values = coordinate * (0.5 + 0.4j)
+    smooth = EnvelopeSpec("sampled", values, times)
+    near_zero = EnvelopeSpec("sampled", values + 1e-14j, times)
+    sharp = EnvelopeSpec(
+        "sampled",
+        np.array([0.0, 1.0j, -1.0, 0.01j]),
+        np.array([0.0, 0.01, 0.02, duration]),
+    )
+    track = DriveTrack(
+        "drive",
+        np.zeros(3),
+        np.full(3, duration),
+        np.full(3, frequency),
+        np.full(3, 0.73),
+        np.full(3, -0.3),
+        (smooth, near_zero, sharp),
+        np.arange(3),
+        np.ones(3, dtype=bool),
+    )
+    batch = TimelineBatch(
+        np.arange(3),
+        (track,),
+        FluxSchedule(np.arange(4), np.zeros(3), np.zeros((3, 1), dtype=np.int64)),
+        np.full(3, duration),
+    )
+    engine = Engine(1, 0)
+    direct = Engine(1, 0, kernels=(DOP853Kernel(),))
+    try:
+        actual = engine.evolve(source, (batch,), cancel=Event())
+        expected = direct.evolve(source, (batch,), budget=1e-7, cancel=Event())
+    finally:
+        engine.close()
+        direct.close()
+    assert actual.paths.segments_by_kernel == {"shaped_sambe": 2, "dop853": 1}
+    np.testing.assert_allclose(actual.densities, expected.densities, atol=1e-2, rtol=0)
+    np.testing.assert_allclose(actual.densities[0], actual.densities[1], atol=1e-10)
+    assert np.isfinite(actual.densities).all()
+    assert actual.paths.max_trace_error < 1e-6
