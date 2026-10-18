@@ -176,8 +176,10 @@ def test_smooth_complex_envelopes_use_sambe_and_match_dop(
         # A continuous signed complex envelope passes exactly through zero.
         # Tiny transverse offsets must not turn its phase jump into a drive.
         values = coordinate * (0.5 + 0.4j)
-    smooth = EnvelopeSpec("sampled", values, times)
-    near_zero = EnvelopeSpec("sampled", values + 1e-14j, times)
+    smooth = EnvelopeSpec("sampled", np.asarray(values, dtype=np.complex128), times)
+    near_zero = EnvelopeSpec(
+        "sampled", np.asarray(values + 1e-14j, dtype=np.complex128), times
+    )
     sharp = EnvelopeSpec(
         "sampled",
         np.array([0.0, 1.0j, -1.0, 0.01j]),
@@ -260,3 +262,57 @@ def test_complex_fractional_tail_preserves_quadrature(frequency: float) -> None:
         direct.close()
     assert actual.paths.segments_by_kernel == {"shaped_sambe": 1}
     np.testing.assert_allclose(actual.densities, expected.densities, atol=1e-3, rtol=0)
+
+
+def test_real_and_complex_ramps_keep_their_resolution_across_cache_hits() -> None:
+    """A rotated envelope cannot borrow the real ramp's coarser preparation."""
+    x = np.array([[0, 0.04], [0.04, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "rotated-ramp-cache",
+        np.array([0.0, 0.3]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    source = ModelSource(np.array([[0.6, 0.2j], [-0.2j, 0.4]]), lambda _: model)
+    duration = 64.7
+
+    def batch(rotation: complex) -> TimelineBatch:
+        envelope = EnvelopeSpec(
+            "sampled",
+            np.array([-1.0, 1.0], dtype=np.complex128) * rotation,
+            np.array([0.0, duration]),
+        )
+        track = DriveTrack(
+            "drive",
+            np.zeros(1),
+            np.full(1, duration),
+            np.full(1, 0.3),
+            np.full(1, 0.73),
+            np.full(1, 0.3),
+            (envelope,),
+            np.zeros(1, dtype=np.int64),
+            np.ones(1, dtype=bool),
+        )
+        return TimelineBatch(
+            np.arange(1),
+            (track,),
+            FluxSchedule(np.arange(2), np.zeros(1), np.zeros((1, 1), dtype=np.int64)),
+            np.full(1, duration),
+        )
+
+    engine = Engine(1, 64 * 1024**2)
+    uncached = Engine(1, 0)
+    try:
+        for rotation in (1.0, 1.0j, 1.0, 1.0j):
+            actual = engine.evolve(source, (batch(rotation),), cancel=Event())
+            expected = uncached.evolve(source, (batch(rotation),), cancel=Event())
+            assert actual.paths.segments_by_kernel == {"shaped_sambe": 1}
+            np.testing.assert_allclose(
+                actual.densities, expected.densities, atol=1e-12, rtol=0
+            )
+    finally:
+        engine.close()
+        uncached.close()
