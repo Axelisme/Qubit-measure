@@ -446,6 +446,35 @@ def constant_pair(offsets=(0.0, 0.0)):
     return source, batch
 
 
+@pytest.mark.parametrize("port", ["a", "b"])
+def test_same_port_constant_pair_retains_original_two_tone_routing(port):
+    source = model_source()
+    batch = timeline()
+    batch = replace(
+        batch,
+        tracks=tuple(
+            replace(track, port=port, envelopes=(EnvelopeSpec("constant"),))
+            for track in batch.tracks
+        ),
+    )
+    original_kernels = tuple(k for k in REGISTRY if k.name != "multitone_rwa")
+    with closing(Engine(1, 1000000, kernels=original_kernels)) as engine:
+        original = engine.evolve(source, (batch,), cancel=Event())
+    with closing(Engine(1, 1000000)) as engine:
+        result = engine.evolve(source, (batch,), cancel=Event())
+    assert set(original.paths.segments_by_kernel) & {"floquet", "dop853"}
+    assert result.paths.segments_by_kernel == original.paths.segments_by_kernel
+    np.testing.assert_array_equal(result.densities, original.densities)
+
+
+def test_same_port_sampled_pair_keeps_joint_rwa():
+    batch = timeline()
+    batch = replace(batch, tracks=tuple(replace(t, port="a") for t in batch.tracks))
+    with closing(Engine(1, 1000000)) as engine:
+        result = engine.evolve(model_source(), (batch,), cancel=Event())
+    assert result.paths.segments_by_kernel == {"t4": 1, "multitone_rwa": 1}
+
+
 def test_constant_pair_uses_joint_rwa_and_preserves_coherent_joint_input():
     source, batch = constant_pair()
     with closing(Engine(1, 1000000)) as engine:
