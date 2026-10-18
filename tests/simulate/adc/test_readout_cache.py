@@ -111,6 +111,23 @@ def test_byte_limit_evicts_growing_traces_and_line_facts():
     assert holder.resident_bytes == 0
 
 
+def test_callback_view_charges_its_entire_backing_allocation():
+    class Envelope:
+        __slots__ = ("payload",)
+
+        def __init__(self):
+            self.payload = np.zeros(128 * 1024, dtype=float)[:: 128 * 1024]
+
+        def __call__(self, time_ns):
+            return 1.0
+
+    holder = cache(128 * 1024)
+    holder.responses(batch(envelope=Envelope()))
+    assert holder.resident_bytes == 0, "a tiny view must not hide its 1 MiB owner"
+    holder.responses(batch())
+    assert holder.builds == 2
+
+
 def test_opaque_callbacks_stay_alive_and_are_isolated_by_identity():
     class Envelope:
         def __init__(self, value):
