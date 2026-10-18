@@ -110,8 +110,12 @@ def test_owner_rejects_duplicate_capture_names_with_original_indices():
 def test_restored_identity_becomes_the_boundary_until_reset():
     state = owner_state()
     env = core.FormEnv()
-    state.write_compatible(
-        {"tones": [{"label": "saved", "gain": 5}], "participants": ["saved"]}, env
+    state.restore_input(
+        core.FormInput(
+            state.input.model,
+            {"tones": [{"label": "saved", "gain": 5}], "participants": ["saved"]},
+        ),
+        env,
     )
     state.write({("tones", 0, "gain"): 7}, env)
     assert state.input.data["tones"] == [{"label": "saved", "gain": 7}]
