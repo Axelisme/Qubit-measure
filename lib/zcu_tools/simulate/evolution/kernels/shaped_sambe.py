@@ -182,11 +182,13 @@ class _Data:
     periods: PeriodPrepared
     models: tuple[SecularModel, ...]
     ports: tuple[int, ...]
+    keys: NDArray[np.void]
+    errors: NDArray[np.float64]
 
     @property
     def nbytes(self) -> int:
         # Models belong to ModelSource; only newly owned arrays are charged.
-        return self.periods.nbytes
+        return self.periods.nbytes + self.keys.nbytes + self.errors.nbytes
 
 
 class ShapedSambeKernel:
@@ -443,9 +445,17 @@ class ShapedSambeKernel:
             )
             models.append(model)
             ports.append(port)
+        owned_keys = keys.copy()
+        convergence = np.asarray(errors)
+        owned_keys.setflags(write=False)
+        convergence.setflags(write=False)
         return _Data(
-            PeriodPrepared(tuple(entries)), tuple(models), tuple(ports)
-        ), np.asarray(errors)
+            PeriodPrepared(tuple(entries)),
+            tuple(models),
+            tuple(ports),
+            owned_keys,
+            convergence,
+        ), convergence
 
     def admit_prepared(
         self,
@@ -453,9 +463,23 @@ class ShapedSambeKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         context: KernelContext,
-    ) -> None:
-        """Decline cached-domain admission; use the ordinary guard build path."""
-        del prepared, table, rows, context
+    ) -> GuardResult | None:
+        """Reuse key-covered convergence data and recheck current row eligibility.
+
+        Keys include duration, envelope bound and slope, so their stored errors
+        cover the complete spectral domain. Missing keys return None; eligibility
+        rejection returns a decision without rebuilding periods.
+        """
+        if not isinstance(prepared, _Data):
+            raise TypeError("shaped_sambe requires its own prepared payload")
+        keys = self.prepare_keys(table, rows, context)
+        indices = {key.tobytes(): i for i, key in enumerate(prepared.keys)}
+        if any(key.tobytes() not in indices for key in keys):
+            return None
+        inverse = np.array([indices[key.tobytes()] for key in keys], dtype=np.int64)
+        accepted = self._eligible(table, rows, context)
+        accepted &= prepared.errors[inverse] <= context.budget / 2
+        return GuardResult(accepted, (GuardPreparation(prepared.keys, prepared),))
 
     def guard_prepared(
         self,
