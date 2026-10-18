@@ -5,12 +5,17 @@ requested concurrently; builders run outside inventory locks. Engine closes the
 plan only after its worker pool drains. Nothing here changes numerical routing.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable, Hashable
 from concurrent.futures import Future
 from copy import deepcopy
 from dataclasses import dataclass, fields, is_dataclass
 from threading import RLock
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from .kernels._carrier_reuse import CarrierWorkspace
 
 import numpy as np
 
@@ -275,6 +280,7 @@ class WorkPlan:
     def __init__(self) -> None:
         self._facts: dict[Hashable, _Resource] = {}
         self._resources: dict[Hashable, _Resource] = {}
+        self._carrier_workspace: CarrierWorkspace | None = None
         self._published: set[str] = set()
         self._gain_groups: tuple[GainGroupPlan, ...] = ()
         self._carrier_families: tuple[CarrierFamilyPlan, ...] = ()
@@ -296,6 +302,22 @@ class WorkPlan:
     def ramp_families(self) -> tuple[RampFamilyPlan, ...]:
         """Caller-published rise/fall family inventories."""
         return self._ramp_families
+
+    def carrier_workspace(self) -> CarrierWorkspace:
+        """Return mutable physical-block reuse shared within this evolve only.
+
+        The first request builds carrier grids from published carrier_families
+        under the inventory lock. Prefix and timeline consumers share the same
+        workspace until close drops ownership after workers drain. Requests
+        after close raise RuntimeError. Numerical tile builds use its own lock.
+        """
+        from .kernels._carrier_reuse import CarrierWorkspace
+
+        with self._lock:
+            self._require_open()
+            if self._carrier_workspace is None:
+                self._carrier_workspace = CarrierWorkspace(self._carrier_families)
+            return self._carrier_workspace
 
     def fact[T](self, key: FactKey[T], build: Callable[[], T]) -> T:
         """Return this key's single immutable publication until evolve exit.
@@ -363,6 +385,7 @@ class WorkPlan:
                 state.close()
             self._facts.clear()
             self._resources.clear()
+            self._carrier_workspace = None
             self._published.clear()
             self._gain_groups = ()
             self._carrier_families = ()
