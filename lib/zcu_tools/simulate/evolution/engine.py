@@ -283,7 +283,9 @@ class Engine:
     """Segment engine with inline or threaded execution and persistent prepare LRU.
 
     workers: positive sole parallel width; kernels remain single-threaded.
-    cache_bytes: nonnegative resident-array byte limit, not a process RAM cap.
+    cache_bytes: nonnegative prepare-resident byte limit, not a process RAM cap.
+        Exact final results use a separate LRU capped at min(64 MiB, cache_bytes),
+        including metadata. Zero disables both caches. No ADC/sampling is cached.
     kernels: optional algorithm collection replacing the production registry;
         each stateless collaborator implements the internal Kernel contract and
         has a unique name. Missing required names raise, never silently reroute.
@@ -305,6 +307,11 @@ class Engine:
     Empty work, a single timeline, and workers=1 run inline without a pool.
     Native BLAS uses one thread throughout evolve, coordinated across engines.
     The last overlapping evolve restores the original process-wide BLAS limits.
+    Kernels must be deterministic and pure for identical numerical inputs, both
+    for prepare reuse and exact-result memoization. The kernel collection and
+    numerical implementation are fixed for this Engine's process-local lifetime;
+    memo entries are never shared across Engines or persisted. Exact-input hits
+    bypass planning and all kernel calls, returning independent owned copies.
     """
 
     def __init__(
@@ -316,6 +323,7 @@ class Engine:
         chunks_per_worker: int = 6,
     ) -> None:
         """Create the prepare cache; reject invalid sizes or duplicate kernel names."""
+        from ._result_memo import RESULT_MEMO_BYTES, ResultMemo
         from .cache import PrepareCache
         from .kernels import REGISTRY
 
@@ -328,6 +336,8 @@ class Engine:
         if len(self._kernels) != len(collection):
             raise ValueError("kernel names must be unique")
         self._cache: PrepareCache = PrepareCache(cache_bytes)
+        self._memo = ResultMemo(min(RESULT_MEMO_BYTES, cache_bytes))
+        self._memo_enabled = cache_bytes > 0
         self._chunks = workers * chunks_per_worker
         self._lock = Lock()
         self._closed = False
@@ -360,6 +370,7 @@ class Engine:
         from ._dispatch import classify, create_work_plan
         from ._planning import plan
         from ._prefix import PrefixResolver
+        from ._result_memo import input_key
         from ._schedule import Schedule
         from .kernel import KernelContext
 
@@ -377,6 +388,14 @@ class Engine:
                     np.empty((0, size, size), dtype=np.complex128),
                     PathDiagnostics(),
                 )
+            key = input_key(source, batches, budget) if self._memo_enabled else None
+            if key is not None:
+                cached = self._memo.find(key)
+                if cached is not None:
+                    if cancel.is_set():
+                        raise Cancelled()
+                    _warn_exceeded(cached)
+                    return cached
             geometry = plan(source, batches)
             workers = (
                 self._workers
@@ -400,17 +419,9 @@ class Engine:
                 result = schedule.run(kernels, self._cache, pool, self._chunks)
             if cancel.is_set():
                 raise Cancelled()
-            exceeded = result.paths.exceeded_by_kernel
-            if exceeded:
-                details = ", ".join(
-                    f"{name}: {count}" for name, count in sorted(exceeded.items())
-                )
-                warnings.warn(
-                    f"segment accuracy check exceeded in {sum(exceeded.values())} segments "
-                    f"({details}); results use the uncorrected approximation",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
+            _warn_exceeded(result)
+            if key is not None:
+                self._memo.add(key, result)
             return result
 
     def close(self) -> None:
@@ -419,3 +430,18 @@ class Engine:
             if not self._closed:
                 self._closed = True
                 self._cache.clear()
+                self._memo.clear()
+
+
+def _warn_exceeded(result: EvolutionResult) -> None:
+    exceeded = result.paths.exceeded_by_kernel
+    if exceeded:
+        details = ", ".join(
+            f"{name}: {count}" for name, count in sorted(exceeded.items())
+        )
+        warnings.warn(
+            f"segment accuracy check exceeded in {sum(exceeded.values())} segments "
+            f"({details}); results use the uncorrected approximation",
+            RuntimeWarning,
+            stacklevel=3,
+        )

@@ -22,7 +22,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 
 `Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=6)` owns a
-prepare cache. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
+prepare cache and a separate exact-result memo. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
@@ -212,8 +212,20 @@ entire source, including absolute DC flux and model parameters; row keys also
 include quantized levels. A cache hit never replaces the row's guard. Eviction
 releases cache ownership, not references already held by active work.
 
-FTF production uses a 1.5 GiB resident budget. The resident-byte limit is not a
-process RAM cap. Models, output densities, solver scratch, WorkPlan products,
+Exact-input repeats bypass geometry, planning and every kernel call. The
+Engine-local result LRU retains owned densities, points and diagnostics, not
+ADC or random samples. Its key covers the whole-source DC model identity,
+initial density, optional flux expansion, budget and complete batch content,
+including envelopes and continuous flux samples. Kernel collections and numerical
+implementations stay fixed for the Engine's process-local lifetime. Custom and
+production kernels must be deterministic and pure for identical inputs, as with
+prepare reuse. Returned copies cannot mutate memo entries. Cancellation still
+raises without a partial result, and cached exceedances still warn per call.
+
+The result LRU charges arrays and metadata up to `min(64 MiB, cache_bytes)` in
+addition to the prepare budget; zero disables both caches. `close()` clears both.
+FTF production uses a 1.5 GiB prepare-resident budget, plus at most 64 MiB for
+results. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
 active payload references and ADC preparations are separate allocations. The
 process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
 4 GB ceiling. Numba's compilation cache is independent of the prepare LRU.
@@ -269,7 +281,8 @@ external threadpoolctl users must not change them during active evolves.
 
 `SEGMENT_NUMERIC_VERSION` is `segment-engine-v3`. `experiment.ftf` owns private
 replay and checks backend, model, numerical, RNG and dependency versions before
-recomputing a round. Evolution does not persist densities or offline tables.
+recomputing a round. Evolution does not persist densities or offline tables
+across processes or Engine lifetimes.
 
 ## Research records
 

@@ -48,20 +48,33 @@ def test_resident_guard_payload_skips_build_but_rechecks_rows_and_domain(timelin
     with closing(Engine(1, 4096, kernels=(kernel,))) as engine:
         engine.evolve(src, (batch(2),), cancel=Event())
         cold_builds = kernel.builds
-        result = engine.evolve(src, (batch(timelines),), cancel=Event())
+        # Distinct point IDs bypass exact-result memo while preserving prepare keys.
+        result = engine.evolve(
+            src,
+            (replace(batch(timelines), points=np.arange(timelines) + 10),),
+            cancel=Event(),
+        )
         assert result.paths.segments_by_kernel == {"t4": timelines}
         assert kernel.builds == cold_builds, "resident domain hit must not build"
         assert kernel.admissions > 0
 
         kernel.domain_covers = False
-        engine.evolve(src, (batch(timelines),), cancel=Event())
+        engine.evolve(
+            src,
+            (replace(batch(timelines), points=np.arange(timelines) + 20),),
+            cancel=Event(),
+        )
         assert kernel.builds > cold_builds, "domain miss must retain ordinary build"
         rebuilt = kernel.builds
 
         kernel.domain_covers = True
         kernel.accepts = False
         with pytest.raises(RuntimeError, match="no valid kernel"):
-            engine.evolve(src, (batch(timelines),), cancel=Event())
+            engine.evolve(
+                src,
+                (replace(batch(timelines), points=np.arange(timelines) + 30),),
+                cancel=Event(),
+            )
         assert kernel.builds == rebuilt, "row rejection is not a domain miss"
 
 
