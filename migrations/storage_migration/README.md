@@ -1,11 +1,16 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-20，外部完整備份與可續跑來源清理
+**Last updated:** 2026-10-20，exps points、entry predictors 與來源清理
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
 - 組合根提供 mapping、entry 的共用 kind 註冊、planning 前的 concrete cfg validation 與發布後的 native validation callback。本 package 不 import `zcu_lab`、experiment 或舊資源容器。`lib` 不 import `migrations`。
 - Native schema 與兩個 callbacks 以 `(source tag, cfg_type)` 的明確歷史身分配對。缺 cfg identity、無對應 schema 或 typed-invalid cfg 時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
+- `exps/<sub>/` 與舊直屬 child 都轉成同名 point，沿用 parameters mapping 與 pending 規則。兩種來源同名就拒絕，報告列出兩個來源，不合併或覆寫。
+- `exps/<sub>/image/*.png` 經 copy、hash、manifest 與 resume 發布到 `result/<entry>/points/<sub>/figures/<原檔名>`。Data-only 不建立缺少的 point，而將圖片列為 located pending；parameters 建 point 後可 resume data 完成發布。`exps` 外的 image、samples 與 autofluxdep 資產維持 preserved 行為。
+- `params.json` 以本次建立的唯一 qubit component 為對象，找不到唯一對應就整份 pending。Converter 先將原文區塊與 metadata 存入 setup 的 `component.ext.legacy_params`，再建 points，讓 points 繼承完整 YAML。根層與各 point 的 meta_info 值優先，params 只補缺；衝突保留 meta_info 值，並報告兩來源與 pending。
+- `fluxdep_fit` 寫入 entry 的 `predictors/<component名>.json`，不寫 component fit 欄位，也不複製到 points。Predictor 格式 owner 是 `resources.predictor_file`。此 converter 在該 owner API 可用前直接寫契約規定的 JSON。檔案使用 `format=zcu.predictor`、整數 `version=1`，params 的欄名與有限數值遵循 simulate Params.from_mapping，完整性與物理限制交給 build_predictor。
+- 舊 EJ/EC/EL fit 寫 `model=fluxonium`、`flux_bias=0.0`，`flux_int` 只作 alignment，不寫 predictor。舊 owner 未定義的 transmon 或明示 model fit 保持 pending。單位只讀根層或 fit 的明示 `flux_unit`；缺少或衝突就寫 null 並列 pending，不猜測或換算。`source.run_id` 固定 null；`source.created_at` 只接受可證實且含時區的 ISO 8601，否則 null 並列 pending。這三個 nullable 欄位仍必須存在；報告保留備份內原文定位。
 - Parameters 與 data 可分開執行。第二部分明確 resume 同一 manifest，不合併任意既有條目。完成的 setup／point 仍可編輯；resume 驗證當前文件，不恢復舊值。
 - Legacy evidence 1.x 的 params 與來源稽核使用本 package 的 `LegacyParameterSnapshot`、
   `LegacyParameterSource`、`LegacyCloneOrigin`。Wire shape 不變，完整 raw evidence 留在 manifest。
