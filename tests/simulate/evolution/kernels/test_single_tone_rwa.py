@@ -151,6 +151,74 @@ def test_blocks_preserve_cross_component_coherences_and_complex_residuals(
     np.testing.assert_allclose(states[0], expected, atol=2e-12, rtol=0)
 
 
+def dense_rwa_reference(src, rho, frequency, theta, duration, charges):
+    """Independent full Liouvillian, without component or Hermitian splitting."""
+    model = src.model((0,))
+    coeff = rwa_coefficients(model, (0,), (frequency,))
+    h = np.diag(
+        model.energies_ghz + charges * frequency + coeff.diagonal[0] * 0.5**2
+    ).astype(complex)
+    h += 0.5 * (coeff.positive[0] + coeff.negative[0])
+    outgoing = model.rates_per_ns.sum(axis=0)
+    decay = (outgoing[:, None] + outgoing[None, :]) / 2
+    size = len(charges)
+
+    def rhs(v):
+        r = v.reshape(size, size)
+        d = -2j * np.pi * (h @ r - r @ h) - decay * r
+        d[np.diag_indices(size)] += model.rates_per_ns @ np.diag(r)
+        return d.ravel()
+
+    generator = np.column_stack([rhs(v) for v in np.eye(size**2, dtype=complex)])
+    start = np.exp(1j * charges * theta)
+    rotated = rho * start.conj()[:, None] * start[None, :]
+    expected = (expm(generator * duration) @ rotated.ravel()).reshape(size, size)
+    end = np.exp(1j * charges * (theta + 2 * np.pi * frequency * duration))
+    return expected * end[:, None] * end.conj()[None, :]
+
+
+@pytest.mark.parametrize("frequency", [0.3, -0.3])
+@pytest.mark.parametrize("duration", [0.0, 17.3, 200.0])
+@pytest.mark.parametrize("coupled", [False, True])
+def test_complex_playback_matches_dense_reference_across_components(
+    frequency, duration, coupled
+):
+    # Two dimers and two singletons, or an entirely scalar graph. The bath
+    # transfers population across components, independently of their topology.
+    x = np.zeros((6, 6), dtype=complex)
+    if coupled:
+        x[0, 1] = x[1, 0] = 0.003
+        x[2, 3] = x[3, 2] = 0.004
+    src = source_for([0.0, 0.3, 0.9, 1.2, 1.8, 2.4], x)
+    table = table_for(frequency=frequency, duration=duration, theta=-0.83)
+    kernel = family()
+    rows = np.array([0])
+    context = KernelContext(src, 0.001, WorkPlan())
+    assert kernel.guard(table, rows, context).tolist() == [True]
+    prepared = kernel.prepare(
+        kernel.prepare_keys(table, rows, context), table, rows, context
+    )
+    charges = np.zeros(6, dtype=np.int64)
+    if coupled:
+        charges[[0, 2] if frequency > 0 else [1, 3]] = 1
+    rng = np.random.default_rng(41)
+    dense = rng.normal(size=(6, 6)) + 1j * rng.normal(size=(6, 6))
+    reverse_only = np.zeros((6, 6), dtype=complex)
+    # Below any useful tolerance, but not zero. The nonzero block is only in
+    # the reverse direction, so scanning forward RHS alone loses this signal.
+    reverse_only[3, 0] = 1e-90 * (1 + 2j)
+    reverse_only[5, 4] = 1e-90j
+    for rho in (dense, reverse_only, src.initial_density):
+        states = rho[None].copy()
+        exceeded = kernel.apply(
+            prepared, rows, table, rows, states, ApplyContext(0.001)
+        )
+        assert not np.any(exceeded)
+        expected = dense_rwa_reference(src, rho, frequency, -0.83, duration, charges)
+        scale = float(np.max(np.abs(rho)))
+        np.testing.assert_allclose(states[0], expected, atol=2e-12 * scale, rtol=0)
+
+
 @pytest.mark.parametrize("kind", ["outside-one-photon", "same-tone-two-photon"])
 def test_omitted_resonances_decline_and_retain_original_route(kind):
     if kind == "outside-one-photon":
