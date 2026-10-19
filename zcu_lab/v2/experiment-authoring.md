@@ -321,7 +321,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 只有兩類「副本外操作」是有意保留的：
 
 - **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.cancel_signal)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
-- **singleshot 強制 reps/rounds**：singleshot 家族（`ge` / `check` / ...）的 `run()` 開頭以 `cfg = deepcopy(cfg)` 重綁本地副本後才改 `cfg.rounds = 1` / `cfg.reps = cfg.shots`，並在覆寫前 `warnings.warn(...)`。重綁後的 mutation 作用在本地副本，非副本外。
+- **raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 另建 `ProgramV2Cfg(reps=cfg.shots, rounds=1, ...)`，保留原始 initial／relax delay，再交給 builder。Lookback 同樣另建 program cfg，固定 reps=1，rounds 沿用可編輯的實驗欄位。這些 runtime 固定值不出現在 Form。
 
 ---
 

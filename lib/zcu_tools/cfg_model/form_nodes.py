@@ -67,17 +67,6 @@ class AliasName:
 
 
 @dataclass(frozen=True, slots=True)
-class Locked:
-    """A scalar value validated as a single-value Literal in the generated model.
-
-    value is an ordinary scalar, never an expression. It remains visible in
-    input/schema; changing it causes validation failure, not silent overriding.
-    """
-
-    value: str | int | float | bool | None
-
-
-@dataclass(frozen=True, slots=True)
 class Hidden:
     """Omit a core field from input; cfg validation restores its declared default.
 
@@ -91,7 +80,6 @@ type FormNode = (
     | Template
     | Range
     | AliasName
-    | Locked
     | Hidden
     | Mapping[str, FormNode]
     | list[FormNode]

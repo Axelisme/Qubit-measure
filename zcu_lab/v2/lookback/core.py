@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
@@ -58,7 +57,26 @@ class LookbackModuleCfg(ConfigBase):
     readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
-class LookbackCfg(ProgramV2Cfg, ExpCfgModel):
+class LookbackCfg(ExpCfgModel):
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay", unit="us", description="Delay before the first shot."
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Delay after each shot.",
+        ),
+    ] = 1.0
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
     modules: LookbackModuleCfg
 
 
@@ -75,7 +93,7 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=LookbackResult,
         cfg_type=LookbackCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="lookback",
     )
 
@@ -84,16 +102,17 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
 
         Apply optional reset, optional initialization pulse, then readout.
         Return sample times in us, including trig_offset, and complex ADC
-        samples rather than integrated IQ. The acquisition copy forces reps=1
-        (warning otherwise) without changing config; rounds follow that copy.
+        samples rather than integrated IQ. The program uses reps=1 and config's
+        software rounds without changing config.
         """
         # Decimated acquisition uses one repetition per round, not an IQ-shot loop.
         run_cfg = deepcopy(config)
-        if run_cfg.reps != 1:
-            warnings.warn(
-                "reps is not 1 in config, this will be ignored.", stacklevel=1
-            )
-            run_cfg.reps = 1
+        program_cfg = ProgramV2Cfg(
+            reps=1,
+            rounds=run_cfg.rounds,
+            initial_delay=run_cfg.initial_delay,
+            relax_delay=run_cfg.relax_delay,
+        )
 
         viewer = context.plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
         # Compile reset→optional preparation→readout before acquisition so an
@@ -101,7 +120,7 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
         modules = deepcopy(run_cfg.modules)
         program = ModularProgramV2(
             context.soccfg,
-            deepcopy(run_cfg),
+            program_cfg,
             modules=[
                 Reset("reset", cfg=modules.reset),
                 Pulse("init_pulse", cfg=modules.init_pulse),

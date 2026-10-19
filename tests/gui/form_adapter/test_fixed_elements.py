@@ -5,7 +5,7 @@ from typing import Annotated
 
 import pytest
 from pydantic import Field, JsonValue, create_model
-from zcu_tools.cfg_model import ConfigBase, Hidden, Locked, Slot, Template
+from zcu_tools.cfg_model import ConfigBase, Hidden
 from zcu_tools.gui import form as core
 from zcu_tools.gui import form_adapter as adapter
 from zcu_tools.gui.app.measure.services.form_contracts import (
@@ -93,13 +93,42 @@ def test_native_field_meta_exposes_readonly_names_and_picker_labels():
     assert name is not None and name.readonly
 
 
+def test_readonly_list_positions_keep_individual_values_and_restore_saved_values():
+    from zcu_tools.cfg_model import FieldMeta
+
+    class Tone(ConfigBase):
+        name: Annotated[str, FieldMeta(readonly=True)]
+
+    class Group(ConfigBase):
+        tones: list[Tone]
+
+    env = core.FormEnv()
+    definition = adapter.Form(Group, {"tones": [{"name": "A"}, {"name": "B"}]})
+    state = core.FormState(definition.default_input(env))
+    state.write({("tones", 0, "name"): "A", ("tones", 1, "name"): "B"}, env)
+    before = state.input
+    with pytest.raises(core.FormInputRejected) as caught:
+        state.write({("tones", 1, "name"): "A"}, env)
+    assert caught.value.reason == "readonly"
+    assert caught.value.current == "B"
+    assert state.input.same_as(before)
+    saved = before.data
+    tones = saved["tones"]
+    assert isinstance(tones, list) and isinstance(tones[0], dict)
+    tones[0]["name"] = "stored-A"
+    state.restore_input(core.FormInput(definition.model, saved), env)
+    assert state.input.data["tones"] == tones
+    result = state.result(env)
+    assert not isinstance(result, core.FormErrors), result
+    cfg = definition.to_cfg(result, env)
+    assert not isinstance(cfg, core.FormErrors), cfg
+    assert [tone.name for tone in cfg.tones] == ["stored-A", "B"]
+
+
 @pytest.mark.parametrize(
     "node",
     [
-        Locked(1),
         Hidden(),
-        Slot("Q.pulses.drive", lock={"ch": 0}),
-        Template("pulse", lock={"ch": 0}),
     ],
 )
 def test_native_position_seeds_reject_declaration_changes_at_typed_position(node):
