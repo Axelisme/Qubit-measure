@@ -100,8 +100,9 @@ class ZigZagCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 def build_zigzag_modules(cfg: ZigZagCfg) -> list[Module]:
-    """Build the acquisition sequence without hardware access or mutating cfg.
+    """Build reset → X90 → repeated gates → readout for offline compilation.
 
+    This does not access hardware or mutate cfg.
     The caller must declare the ``times`` loop with ``cfg.n_times + 1`` points.
     X90 repetition counts correspond to pairs of pulses.
     Reset phase cycling changes only the final reset pulse's phase by 180 degrees
@@ -154,6 +155,17 @@ class ZigZagExp(PersistableExperiment[ZigZagResult, ZigZagCfg]):
     )
 
     def run(self, cfg: ZigZagCfg, *, context: RunContext) -> ZigZagResult:
+        """Measure accumulated rotation errors versus the repeated gate count.
+
+        Reset, apply X90, repeat the selected gate, then read out mean complex IQ.
+        Return integer counts from zero through n_times and the corresponding IQ;
+        each count adds two X90 pulses or one X180 pulse. Optional reset phase
+        cycling averages coherent preparation errors, not repeated-gate errors.
+        The selected repeat pulse must exist. Phase cycling requires a two-pulse
+        or bath reset with scalar final qubit phase and even reps of at least two.
+        Cancelled acquisition preserves completed-round averages or NaN if empty.
+        """
+        # 1. Prepare the count axis and live view without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -168,11 +180,50 @@ class ZigZagExp(PersistableExperiment[ZigZagResult, ZigZagCfg]):
             ),
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
-            _ = (
+            # 2. Count X90 gates in pairs so each step adds a nominal pi rotation.
+            modules = sched.cfg.modules
+            repeat_pulse = getattr(modules, sched.cfg.repeat_on)
+            if repeat_pulse is None:
+                raise ValueError(f"Repeat on pulse {sched.cfg.repeat_on} not found")
+            counts = [
+                n * (2 if sched.cfg.repeat_on == "X90_pulse" else 1)
+                for n in range(sched.cfg.n_times + 1)
+            ]
+
+            # Balance reset phases on outer reps; add no pulses or waiting time.
+            reset_cfg = modules.reset
+            if sched.cfg.reset_phase_cycle:
+                reset_cfg = deepcopy(reset_cfg)
+                pulse = _reset_pi(reset_cfg)
+                if isinstance(pulse.phase, QickParam):
+                    raise ValueError(
+                        "reset phase cycling requires a scalar reset phase"
+                    )
+                pulse.phase = QickSweep1D(
+                    "reps", pulse.phase, pulse.phase + 180.0 * (sched.cfg.reps - 1)
+                )
+
+            # 3. Load the count, prepare with X90, repeat gates, then read out.
+            builder = (
                 sched.prog_builder(soc, soccfg)
-                .add(build_zigzag_modules(sched.cfg))
+                .add(
+                    LoadValue(
+                        "load_repeat_count",
+                        values=counts,
+                        idx_reg="times",
+                        val_reg="repeat_count",
+                    ),
+                    Reset("reset", reset_cfg),
+                    Pulse("X90_pulse", modules.X90_pulse),
+                    Repeat(
+                        "zigzag_loop", n="repeat_count", range_hint=(0, max(counts))
+                    ).add_content(Pulse(f"loop_{sched.cfg.repeat_on}", repeat_pulse)),
+                    Readout("readout", modules.readout),
+                )
                 .declare_sweep("times", len(times))
-                .build_and_acquire()
             )
+
+            # 4. Average acquisition rounds and keep partial data on cancellation.
+            _ = builder.build_and_acquire()
 
         return ZigZagResult(times=times, signals=signals_buffer.array)
