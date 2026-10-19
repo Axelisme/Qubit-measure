@@ -38,6 +38,8 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class AllXY_Result:
+    """AllXY gate-pair indices and mean complex IQ, both shaped (21,)."""
+
     gate_idxs: NDArray[np.int64]
     signals: NDArray[np.complex128]
 
@@ -201,6 +203,15 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
     )
 
     def run(self, cfg: AllXYCfg, *, context: RunContext) -> AllXY_Result:
+        """Measure the 21 AllXY gate pairs to diagnose rotation and detuning errors.
+
+        Reset, play the pair's two register-selected gates in order, then
+        read out. Y gates use the corresponding X pulse shifted by 90 degrees;
+        absent I uses a zero-gain X90 pulse. Return gate-pair indices and mean
+        complex IQ, not per-gate fidelities. Gate pulses must satisfy
+        ComputedPulse's common-channel, pre-delay and waveform-style rules.
+        """
+        # Keep the acquisition axis in the same order as the displayed gate pairs.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -216,6 +227,8 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
+
+            # Derive Y rotations from X calibrations and retain an identity time slot.
             I_pulse = modules.I_pulse
             X180_pulse = modules.X180_pulse
             X90_pulse = modules.X90_pulse
@@ -228,6 +241,7 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
             # Order must match GATE_LIST = ["I", "X90", "Y90", "X180", "Y180"]
             gate_pulses = [I_pulse, X90_pulse, Y90_pulse, X180_pulse, Y180_pulse]
 
+            # Load each gate pair, reset, then play gate 1 -> gate 2 -> readout.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -264,6 +278,13 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         *,
         plots: Plots,
     ) -> AllXYAnalysis:
+        """Fit AllXY contrast to the low-order rotation/detuning error model.
+
+        ``fit_ge`` also fits the IQ center and contrast; otherwise use their
+        measured estimates. Return relative amplitude error, dimensionless
+        detuning and Bloch-z deviations/residuals as defined in AllXYAnalysis,
+        not gate infidelities. Publish ``fit``; source cfg may be None.
+        """
         result = source.result
         fit_ge = options.fit_ge
 
@@ -274,9 +295,7 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         sequence = ALLXY_SEQUENCE
         real_signals = allxy_signal2real(signals)
 
-        # ------------------------------------------------------------------
-        # fitting the signal with error
-        # ------------------------------------------------------------------
+        # Fit coherent-error parameters against the 21 pair responses.
 
         g_signal = real_signals[sequence.index(("I", "I"))]
         init_center = 0.5 * (np.max(real_signals) + np.min(real_signals))
@@ -325,9 +344,7 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
             np.mean((real_signals - np.asarray(predict_signals)) ** 2)
         ) / (0.5 * np.abs(contrast))
 
-        # ------------------------------------------------------------------
-        # calculate the error
-        # ------------------------------------------------------------------
+        # Separate the Bloch-z deviations due to amplitude and detuning errors.
         perfect_states = [predict_state_with_error(seq, 0.0, 0.0) for seq in sequence]
         power_err = np.mean(
             [
@@ -342,9 +359,7 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
             ]
         )
 
-        # ------------------------------------------------------------------
-        # 3. Plotting
-        # ------------------------------------------------------------------
+        # Compare the measured staircase with the fitted low-order model.
 
         fig, ax = plots.subplots("fit", figsize=config.figsize)
         ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
