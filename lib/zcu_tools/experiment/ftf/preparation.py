@@ -15,6 +15,15 @@ from .readout import FTFReadoutConfig
 
 T = TypeVar("T")
 
+_ENVELOPE_FIELDS = fields(PulseEnvelope)
+_BUILTIN_ENVELOPE_LAYOUT = tuple(field.name for field in _ENVELOPE_FIELDS) == (
+    "sample_us",
+    "values",
+)
+_ENVELOPE_FIELD_BYTES = sum(getsizeof(field.name) for field in _ENVELOPE_FIELDS)
+_FLOAT_BYTES = getsizeof(0.0)
+_COMPLEX_BYTES = getsizeof(0j)
+
 
 class EnvelopeEncoder:
     """Source-scoped byte-bounded LRU of immutable envelope SHA256 fingerprints.
@@ -24,8 +33,12 @@ class EnvelopeEncoder:
     or borrowed ndarray is retained. max_bytes is adjustable between serialized
     calls; zero disables residency. resident_bytes includes full envelope tuples,
     numeric objects, fingerprint bytes, entry metadata and the Python LRU container.
-    Shared objects across entries are conservatively charged again. builds/hits
-    count full-content hashes/reuses cumulatively, including across clear().
+    Shared objects across entries are conservatively charged again. Exact builtin
+    PulseEnvelope records with builtin float/complex tuples use arithmetic charges
+    per scalar and tuple occurrence, including shared scalars and empty tuples.
+    This can overestimate ownership and evict earlier, but never underestimates
+    the generic object walk. Other layouts/types retain generic accounting.
+    builds/hits count full-content hashes/reuses cumulatively, even across clear().
     """
 
     def __init__(self, max_bytes: int = 32 * 1024**2) -> None:
@@ -85,7 +98,7 @@ class EnvelopeEncoder:
         if self.max_bytes == 0:
             return encoded
         size = (
-            _owned_bytes(envelope)
+            _envelope_bytes(envelope)
             + getsizeof(encoded)
             + getsizeof(identity)
             + getsizeof((envelope, encoded, 0))
@@ -220,6 +233,31 @@ class PreparationCache(Generic[T]):
             )
         if not self._entries:
             self.resident_bytes = 0
+
+
+def _envelope_bytes(envelope: PulseEnvelope) -> int:
+    """Charge admitted builtin tuples arithmetically, otherwise walk ownership."""
+    if (
+        not _BUILTIN_ENVELOPE_LAYOUT
+        or type(envelope) is not PulseEnvelope
+        or type(envelope.sample_us) is not tuple
+        or type(envelope.values) is not tuple
+        or not all(type(value) is float for value in envelope.sample_us)
+        or not all(type(value) is complex for value in envelope.values)
+    ):
+        return _owned_bytes(envelope)
+    # Tuple sizes include item pointers. Repeated scalar identities and a shared
+    # empty tuple are charged per occurrence rather than deduplicated, so this
+    # remains an upper bound without a recursive walk or per-scalar getsizeof.
+    return (
+        getsizeof(envelope)
+        + (getsizeof(vars(envelope)) if hasattr(envelope, "__dict__") else 0)
+        + _ENVELOPE_FIELD_BYTES
+        + getsizeof(envelope.sample_us)
+        + len(envelope.sample_us) * _FLOAT_BYTES
+        + getsizeof(envelope.values)
+        + len(envelope.values) * _COMPLEX_BYTES
+    )
 
 
 def _owned_bytes(root: object) -> int:
