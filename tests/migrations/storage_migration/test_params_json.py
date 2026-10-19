@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, TypeAdapter
 from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.document_store import YamlMap
 from zcu_tools.resources.entry import (
@@ -36,23 +36,10 @@ from tests.resources.entry.fakes import registry_state
 
 
 class AnalysisQubit(ComponentSchema):
-    """Synthetic qubit with nullable analysis fields and no lab dependencies."""
+    """Synthetic qubit with a meta-mapped energy and independent extension data."""
 
     model_config = ConfigDict(extra="forbid")
     EJ: float | None = None
-    EC: float | None = None
-    EL: float | None = None
-    flux_half: float | None = None
-    flux_int: float | None = None
-    flux_period: float | None = None
-    ext: YamlMap = Field(default_factory=dict)
-
-
-class ChargeOnlyQubit(ComponentSchema):
-    """Synthetic qubit kind without formal Josephson or inductive energy fields."""
-
-    model_config = ConfigDict(extra="forbid")
-    EC: float | None = None
     ext: YamlMap = Field(default_factory=dict)
 
 
@@ -60,11 +47,9 @@ class ChargeOnlyQubit(ComponentSchema):
 def analysis_kind() -> Generator[None]:
     before = registry_state()
     component_registry.register("qubit/migration_analysis", AnalysisQubit)
-    component_registry.register("qubit/migration_charge_only", ChargeOnlyQubit)
     try:
         yield
     finally:
-        component_registry.unregister("qubit/migration_charge_only")
         component_registry.unregister("qubit/migration_analysis")
         assert registry_state() == before
 
@@ -121,35 +106,59 @@ def open_entry(request: MigrationRequest) -> ResultEntry:
     )
 
 
-def test_fit_fields_and_lossless_sections_reach_named_qubit(
+@pytest.fixture
+def legacy_fit() -> JsonObject:
+    return {
+        "params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8},
+        "flux_half": 0.2,
+        "flux_int": -0.3,
+        "flux_period": 1.0,
+        "timestamp": "2020-07-07T16:30:00+08:00",
+        "plot_transitions": {"0.1": [1, 2]},
+    }
+
+
+def read_predictor(request: MigrationRequest) -> JsonObject:
+    """Read the published predictor at the migration's public file boundary."""
+    path = request.results_root / request.name / "predictors" / "Qlegacy.json"
+    assert path.is_file(), "migrate_storage must publish the entry predictor"
+    return TypeAdapter(JsonObject).validate_json(path.read_text(encoding="utf-8"))
+
+
+def backup_path(request: MigrationRequest) -> Path:
+    """Locate the explicit synthetic backup; never use production defaults."""
+    if request.backup_parent is None:
+        raise ValueError("Tests must supply a synthetic backup_parent")
+    return request.backup_parent / f"{request.name}-backup"
+
+
+def predictor_params(request: MigrationRequest) -> JsonObject:
+    """Return the public predictor parameters as a typed JSON object."""
+    return TypeAdapter(JsonObject).validate_python(read_predictor(request)["params"])
+
+
+def test_lossless_sections_are_inherited_before_point_meta_overrides(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
 ) -> None:
-    fit: JsonObject = {
-        "params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8},
-        "flux_half": 0.2,
-        "timestamp": "historical",
-        "plot_transitions": {"0.1": [1, 2]},
-    }
+    write_meta(request_data, "", {"energy": 9.0})
+    write_meta(request_data, "bias", {"energy": 11.0})
     dispersive: JsonObject = {"g": 0.03, "timestamp": "original", "future": {"x": True}}
     source = write_params(
         request_data,
-        {"fluxdep_fit": fit, "dispersive": dispersive, "project": {"chip": "old"}},
+        {"dispersive": dispersive, "project": {"chip": "old"}},
     )
     before = source.read_bytes()
     report = migrate(request_data, analysis_mapping)
-    doc = snapshot(open_entry(request_data).setup)
-    assert doc.components["Qlegacy"].model_dump()["EJ"] == 6.27
-    assert document_value(doc, "Qlegacy.EC") == 1.41
-    assert document_value(doc, "Qlegacy.EL") == 0.8
-    assert document_value(doc, "Qlegacy.ext.keep") == 7
-    assert document_value(doc, "Qlegacy.ext.legacy_params.dispersive") == dispersive
-    assert document_value(doc, "Qlegacy.ext.legacy_params.fluxdep_fit") == fit
-    assert doc.components["Qlegacy"].model_dump()["flux_half"] is None
-    assert any(
-        item.source == source and item.location == "fluxdep_fit.flux_half"
-        for item in report.pending
-    )
+    entry = open_entry(request_data)
+    for view, energy in ((entry.setup, 9.0), (entry.use_point("bias"), 11.0)):
+        doc = snapshot(view)
+        assert document_value(doc, "Qlegacy.EJ") == energy
+        assert document_value(doc, "Qlegacy.ext.keep") == 7
+        assert document_value(doc, "Qlegacy.ext.legacy_params.dispersive") == dispersive
+        assert document_value(doc, "Qlegacy.ext.legacy_params.project") == {
+            "chip": "old"
+        }
     assert any(
         item.old_key == "dispersive"
         and item.new_path == "Qlegacy.ext.legacy_params.dispersive"
@@ -157,32 +166,6 @@ def test_fit_fields_and_lossless_sections_reach_named_qubit(
         for item in report.key_mappings
     )
     assert source.read_bytes() == before
-
-
-def test_meta_values_win_per_context_and_params_fill_other_fields(
-    request_data: MigrationRequest,
-    analysis_mapping: MigrationMapping,
-) -> None:
-    root = write_meta(request_data, "", {"energy": 9.0})
-    point = write_meta(request_data, "bias", {"energy": 11.0})
-    source = write_params(
-        request_data, {"fluxdep_fit": {"params": {"EJ": 6.27, "EC": 1.41}}}
-    )
-    report = migrate(request_data, analysis_mapping)
-    entry = open_entry(request_data)
-    assert snapshot(entry.setup).components["Qlegacy"].model_dump()["EC"] == 1.41
-    assert document_value(snapshot(entry.setup), "Qlegacy.EJ") == 9.0
-    assert document_value(snapshot(entry.use_point("bias")), "Qlegacy.EJ") == 11.0
-    assert document_value(snapshot(entry.use_point("bias")), "Qlegacy.EC") == 1.41
-    conflicts = [
-        item
-        for item in report.pending
-        if item.source == source and item.location == "fluxdep_fit.params.EJ"
-    ]
-    assert conflicts
-    reasons = " ".join(item.reason for item in conflicts)
-    assert str(root) in reasons and str(point) in reasons
-    assert "9.0" in reasons and "11.0" in reasons and "6.27" in reasons
 
 
 @pytest.mark.parametrize(
@@ -211,62 +194,6 @@ def test_no_unique_qubit_keeps_whole_handoff_pending(
         and "unique" in item.reason
         for item in report.pending
     )
-    assert all(
-        snapshot(open_entry(request_data).setup).components[name].model_dump()["EJ"]
-        is None
-        for name in components
-    )
-
-
-@pytest.mark.parametrize("root_unit,fit_unit", [("A", None), (None, "mA"), ("V", "V")])
-def test_explicit_flux_unit_is_kept_in_each_context(
-    request_data: MigrationRequest,
-    analysis_mapping: MigrationMapping,
-    root_unit: str | None,
-    fit_unit: str | None,
-) -> None:
-    write_meta(request_data, "bias", {})
-    fit: JsonObject = {
-        "params": {"EJ": 6.27},
-        "flux_half": 0.2,
-        "flux_int": -0.3,
-        "flux_period": 1.0,
-    }
-    values: JsonObject = {"fluxdep_fit": fit}
-    if root_unit is not None:
-        values["flux_unit"] = root_unit
-    if fit_unit is not None:
-        fit["flux_unit"] = fit_unit
-    write_params(request_data, values)
-    migrate(request_data, analysis_mapping)
-    entry = open_entry(request_data)
-    for view in (entry.setup, entry.use_point("bias")):
-        doc = snapshot(view)
-        assert doc.components["Qlegacy"].model_dump()["flux_half"] == 0.2
-        assert document_value(doc, "Qlegacy.flux_int") == -0.3
-        assert document_value(doc, "Qlegacy.flux_period") == 1.0
-        assert document_value(doc, "general.ext.flux_unit") == (root_unit or fit_unit)
-
-
-def test_disagreeing_source_units_leave_flux_pending(
-    request_data: MigrationRequest,
-    analysis_mapping: MigrationMapping,
-) -> None:
-    source = write_params(
-        request_data,
-        {"flux_unit": "A", "fluxdep_fit": {"flux_unit": "V", "flux_half": 0.2}},
-    )
-    report = migrate(request_data, analysis_mapping)
-    assert any(
-        item.source == source and item.location == "fluxdep_fit.flux_half"
-        for item in report.pending
-    )
-    assert (
-        snapshot(open_entry(request_data).setup)
-        .components["Qlegacy"]
-        .model_dump()["flux_half"]
-        is None
-    )
 
 
 def test_completed_resume_preserves_user_edits(
@@ -274,10 +201,9 @@ def test_completed_resume_preserves_user_edits(
     analysis_mapping: MigrationMapping,
 ) -> None:
     write_meta(request_data, "bias", {})
-    write_params(request_data, {"fluxdep_fit": {"params": {"EJ": 6.27}}})
+    write_params(request_data, {"dispersive": {"g": 0.03}})
     migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
-    assert snapshot(entry.setup).components["Qlegacy"].model_dump()["EJ"] == 6.27
     entry.setup.Qlegacy.EJ = 12.0
     entry.use_point("bias").Qlegacy.EJ = 13.0
     paths = [
@@ -289,22 +215,16 @@ def test_completed_resume_preserves_user_edits(
     assert [path.read_bytes() for path in paths] == before
 
 
-def test_dry_run_reports_conversion_without_destination_writes(
+def test_dry_run_reports_preservation_without_destination_writes(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
 ) -> None:
-    source = write_params(
-        request_data,
-        {
-            "fluxdep_fit": {"params": {"EJ": 6.27}},
-            "t1_curve_fit": {"params": {"Q_cap": 1}},
-        },
-    )
+    source = write_params(request_data, {"t1_curve_fit": {"params": {"Q_cap": 1}}})
     dry = migrate(replace(request_data, dry_run=True), analysis_mapping)
     assert any(
         item.old_file == source
-        and item.old_key == "fluxdep_fit.params.EJ"
-        and item.action == "value"
+        and item.old_key == "t1_curve_fit"
+        and item.new_path == "Qlegacy.ext.legacy_params.t1_curve_fit"
         for item in dry.key_mappings
     )
     assert not (request_data.results_root / request_data.name).exists()
@@ -313,62 +233,187 @@ def test_dry_run_reports_conversion_without_destination_writes(
     assert actual.pending == dry.pending
 
 
-def test_point_unit_conflict_does_not_reinterpret_params_flux(
+@pytest.mark.parametrize("root_unit,fit_unit", [("A", None), (None, "mA"), ("V", "V")])
+def test_legacy_fit_publishes_named_entry_predictor_with_native_values(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    root_unit: str | None,
+    fit_unit: str | None,
 ) -> None:
-    meta = write_meta(request_data, "bias", {"unit": "V"})
-    source = write_params(
-        request_data, {"flux_unit": "A", "fluxdep_fit": {"flux_half": 0.2}}
-    )
+    write_meta(request_data, "bias", {"energy": 11.0, "unit": "mV"})
+    values: JsonObject = {"fluxdep_fit": legacy_fit}
+    if root_unit is not None:
+        values["flux_unit"] = root_unit
+    if fit_unit is not None:
+        legacy_fit["flux_unit"] = fit_unit
+    write_params(request_data, values)
+    migrate(request_data, analysis_mapping)
+    assert read_predictor(request_data) == {
+        "format": "zcu.predictor",
+        "version": 1,
+        "model": "fluxonium",
+        "params": {
+            "EJ": 6.27,
+            "EC": 1.41,
+            "EL": 0.8,
+            "flux_half": 0.2,
+            "flux_period": 1.0,
+            "flux_bias": 0.0,
+        },
+        "flux_unit": root_unit or fit_unit,
+        "source": {"run_id": None, "created_at": "2020-07-07T16:30:00+08:00"},
+    }
+    point = snapshot(open_entry(request_data).use_point("bias"))
+    assert document_value(point, "Qlegacy.EJ") == 11.0
+    assert document_value(point, "general.ext.flux_unit") == "mV"
+    assert document_value(point, "Qlegacy.ext.legacy_params.fluxdep_fit") == legacy_fit
+
+
+@pytest.mark.parametrize(
+    "units", [{}, {"flux_unit": "A", "fit_unit": "V"}, {"flux_unit": "unknown"}]
+)
+def test_unknown_or_conflicting_units_publish_null_and_located_pending(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    units: dict[str, str],
+) -> None:
+    values: JsonObject = {"fluxdep_fit": legacy_fit}
+    if "flux_unit" in units:
+        values["flux_unit"] = units["flux_unit"]
+    if "fit_unit" in units:
+        legacy_fit["flux_unit"] = units["fit_unit"]
+    source = write_params(request_data, values)
     report = migrate(request_data, analysis_mapping)
-    entry = open_entry(request_data)
-    assert snapshot(entry.setup).components["Qlegacy"].model_dump()["flux_half"] == 0.2
-    point = snapshot(entry.use_point("bias"))
-    assert document_value(point, "general.ext.flux_unit") == "V"
-    assert point.components["Qlegacy"].model_dump()["flux_half"] is None
+    assert read_predictor(request_data)["flux_unit"] is None
+    assert predictor_params(request_data)["flux_half"] == 0.2
     assert any(
-        item.source == source
-        and str(meta) in item.reason
-        and "A" in item.reason
-        and "V" in item.reason
+        item.source == source and item.location == "fluxdep_fit.flux_unit"
         for item in report.pending
     )
 
 
-@pytest.mark.parametrize("value", ["${md.energy}", True, "6.27", None])
-def test_non_numeric_fit_fields_remain_located_pending(
+@pytest.mark.parametrize("timestamp", [None, "historical", "2020-07-07T16:30:00"])
+def test_unproven_time_is_null_with_pending_at_verified_backup_original(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
-    value: str | bool | None,
+    legacy_fit: JsonObject,
+    timestamp: str | None,
 ) -> None:
-    source = write_params(request_data, {"fluxdep_fit": {"params": {"EJ": value}}})
+    legacy_fit["timestamp"] = timestamp
+    source = write_params(request_data, {"flux_unit": "A", "fluxdep_fit": legacy_fit})
     report = migrate(request_data, analysis_mapping)
+    assert read_predictor(request_data)["source"] == {
+        "run_id": None,
+        "created_at": None,
+    }
+    backup_source = backup_path(request_data) / "result/chip/qubit/params.json"
+    pending = [
+        item
+        for item in report.pending
+        if item.source == source and item.location == "fluxdep_fit.timestamp"
+    ]
+    assert pending
+    assert str(backup_source) in pending[0].reason
+    assert (
+        TypeAdapter(JsonObject).validate_json(backup_source.read_text())["fluxdep_fit"]
+        == legacy_fit
+    )
+
+
+@pytest.mark.parametrize("value", ["${md.energy}", True, "6.27", float("inf")])
+def test_invalid_model_values_stay_pending_without_blocking_known_parameters(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    value: str | bool | float,
+) -> None:
+    legacy_fit["params"] = {"EJ": value, "EC": 1.41, "EL": None}
+    source = write_params(request_data, {"flux_unit": "A", "fluxdep_fit": legacy_fit})
+    report = migrate(request_data, analysis_mapping)
+    params = predictor_params(request_data)
+    assert params.get("EJ") is None
+    assert params["EC"] == 1.41
+    assert params.get("EL") is None
     assert any(
         item.source == source and item.location == "fluxdep_fit.params.EJ"
         for item in report.pending
     )
-    assert (
-        snapshot(open_entry(request_data).setup)
-        .components["Qlegacy"]
-        .model_dump()["EJ"]
-        is None
-    )
 
 
-def test_unsupported_energy_fields_are_preserved_without_extending_schema(
+def test_partial_fit_keeps_unknowns_without_enforcing_physical_constraints(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
 ) -> None:
-    fit: JsonObject = {"params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8}}
-    source = write_params(request_data, {"fluxdep_fit": fit})
-    mapping = replace(
-        analysis_mapping,
-        components={"Qlegacy": {"kind": "qubit/migration_charge_only"}},
+    write_params(
+        request_data,
+        {
+            "flux_unit": "A",
+            "fluxdep_fit": {"params": {"EC": -1.0, "EL": None}, "flux_period": 0.0},
+        },
     )
-    report = migrate(request_data, mapping)
-    doc = snapshot(open_entry(request_data).setup)
-    assert document_value(doc, "Qlegacy.EC") == 1.41
-    assert document_value(doc, "Qlegacy.ext.legacy_params.fluxdep_fit") == fit
-    pending = {item.location for item in report.pending if item.source == source}
-    assert {"fluxdep_fit.params.EJ", "fluxdep_fit.params.EL"} <= pending
+    migrate(request_data, analysis_mapping)
+    params = predictor_params(request_data)
+    assert params.get("EJ") is None
+    assert params["EC"] == -1.0
+    assert params.get("EL") is None
+    assert params.get("flux_half") is None
+    assert params["flux_period"] == 0.0
+    assert params["flux_bias"] == 0.0
+
+
+@pytest.mark.parametrize("model", ["fluxonium", "transmon", "unrecognized"])
+def test_undefined_explicit_model_contract_remains_located_pending(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    model: str,
+) -> None:
+    legacy_fit["model"] = model
+    source = write_params(request_data, {"fluxdep_fit": legacy_fit})
+    report = migrate(request_data, analysis_mapping)
+    assert any(
+        item.source == source
+        and item.location == "fluxdep_fit.model"
+        and "legacy" in item.reason.lower()
+        for item in report.pending
+    )
+    assert (
+        document_value(
+            snapshot(open_entry(request_data).setup),
+            "Qlegacy.ext.legacy_params.fluxdep_fit",
+        )
+        == legacy_fit
+    )
+
+
+def test_dry_run_predictor_plan_matches_apply_and_completed_resume_keeps_edits(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+) -> None:
+    source = write_params(request_data, {"flux_unit": "mV", "fluxdep_fit": legacy_fit})
+    dry = migrate(replace(request_data, dry_run=True), analysis_mapping)
+    predictor_path = (
+        request_data.results_root / request_data.name / "predictors/Qlegacy.json"
+    )
+    assert any(
+        item.old_file == source
+        and item.old_key == "fluxdep_fit.params.EJ"
+        and item.new_file == predictor_path
+        and item.new_path == "params.EJ"
+        and item.action == "value"
+        for item in dry.key_mappings
+    )
+    assert not (request_data.results_root / request_data.name).exists()
+    assert not backup_path(request_data).exists()
+    actual = migrate(request_data, analysis_mapping)
+    assert actual.key_mappings == dry.key_mappings
+    assert actual.pending == dry.pending
+    edited = read_predictor(request_data)
+    edited["flux_unit"] = "V"
+    predictor_path.write_text(json.dumps(edited), encoding="utf-8")
+    before = predictor_path.read_bytes()
+    migrate(replace(request_data, resume=True), analysis_mapping)
+    assert predictor_path.read_bytes() == before
