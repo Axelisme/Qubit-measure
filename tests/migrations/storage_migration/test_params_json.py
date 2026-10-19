@@ -4,6 +4,7 @@ Remove with the offline migrations package once legacy entries are converted.
 """
 
 import json
+import os
 import shutil
 from collections.abc import Generator
 from dataclasses import replace
@@ -235,6 +236,64 @@ def test_sample_declarations_publish_runtime_rows_and_resume_once(
     before = table.path.read_bytes()
     migrate(replace(request, resume=True), analysis_mapping)
     assert table.path.read_bytes() == before
+
+
+def test_sample_prepared_publication_resumes_without_duplicate_rows(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {
+            **adapter.dump_python(request_data),
+            "sample_value_column": "calibrated mA",
+            "sample_source_unit": "mA",
+        }
+    )
+    source = request.result_root / "chip/qubit/samples.csv"
+    source.write_text("calibrated mA,T1 (us)\n2,50\n", encoding="utf-8")
+    output = request.results_root / request.name / "samples/Qlegacy.jsonl"
+    link = os.link
+
+    def fail_sample_publish(src: Path, dst: Path) -> None:
+        if dst == output:
+            raise OSError("sample publish interrupted")
+        link(src, dst)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", fail_sample_publish)
+        with pytest.raises(OSError, match="sample publish interrupted"):
+            migrate(request, analysis_mapping)
+    migrate(replace(request, resume=True), analysis_mapping)
+    table = open_entry(request).samples("Qlegacy")
+    assert len(table.read()) == 1
+    assert len(output.read_text().splitlines()) == 1
+
+
+def test_resume_refuses_changed_sample_declarations_before_writes(
+    request_data: MigrationRequest, analysis_mapping: MigrationMapping
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {
+            **adapter.dump_python(request_data),
+            "sample_value_column": "calibrated mA",
+            "sample_source_unit": "mA",
+        }
+    )
+    source = request.result_root / "chip/qubit/samples.csv"
+    source.write_text("calibrated mA,T1 (us)\n2,50\n", encoding="utf-8")
+    migrate(request, analysis_mapping)
+    changed = adapter.validate_python(
+        {
+            **adapter.dump_python(request),
+            "sample_source_unit": "A",
+            "resume": True,
+        }
+    )
+    with pytest.raises(MigrationInputError, match="declarations"):
+        migrate(changed, analysis_mapping)
 
 
 def test_sample_missing_declarations_are_located_without_using_flux_assumption(
