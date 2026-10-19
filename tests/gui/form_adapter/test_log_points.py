@@ -1,7 +1,7 @@
 """Opt-in logarithmic integer lists through the generated Form boundary."""
 
 import pytest
-from pydantic import JsonValue
+from pydantic import Field, JsonValue
 from zcu_tools import cfg_model
 from zcu_tools.gui.form import FormConversionError, FormEnv, FormErrors, FormState
 from zcu_tools.gui.form_adapter import Form
@@ -14,7 +14,9 @@ class IntegerPlan(cfg_model.ConfigBase):
 
 def make_state(maximum: int = 128, points: int = 9):
     env = FormEnv()
-    form = Form(IntegerPlan, {"depths": cfg_model.LogPoints(max=maximum, points=points)})
+    form = Form(
+        IntegerPlan, {"depths": cfg_model.LogPoints(max=maximum, points=points)}
+    )
     return form, FormState(form.default_input(env)), env
 
 
@@ -28,8 +30,13 @@ def cfg_result(form, state, env):
 
 @pytest.mark.parametrize(
     ("maximum", "points", "expected"),
-    [(128, 9, [0, 1, 2, 4, 8, 16, 32, 64, 128]), (3, 9, [0, 1, 2, 3]),
-     (0, 9, [0]), (1, 9, [0, 1]), (9, 5, [0, 1, 2, 4, 9])],
+    [
+        (128, 9, [0, 1, 2, 4, 8, 16, 32, 64, 128]),
+        (3, 9, [0, 1, 2, 3]),
+        (0, 9, [0]),
+        (1, 9, [0, 1]),
+        (9, 5, [0, 1, 2, 4, 9]),
+    ],
 )
 def test_log_points_lower_to_rounded_unique_integer_list(maximum, points, expected):
     form, state, env = make_state(maximum, points)
@@ -68,9 +75,22 @@ def test_invalid_explicit_lists_remain_invalid(values: JsonValue):
     assert isinstance(state.result(env), FormErrors)
 
 
+class ConstrainedIntegerPlan(cfg_model.ConfigBase):
+    depths: list[int] = Field(min_length=1)
+
+
+def test_native_list_constraints_apply_after_lowering_not_to_input_model():
+    env = FormEnv()
+    form = Form(ConstrainedIntegerPlan, {"depths": cfg_model.LogPoints(max=3, points=9)})
+    state = FormState(form.default_input(env))
+    assert cfg_result(form, state, env).depths == [0, 1, 2, 3]
+
+
 def test_plain_integer_list_remains_a_whole_leaf():
     form = Form(IntegerPlan, {"depths": [0, 3, 7]})
     env = FormEnv()
     state = FormState(form.default_input(env))
-    assert state.describe(("depths",), env).target.options is None
+    target = state.describe(("depths",), env).target
+    assert target is not None
+    assert target.options is None
     assert cfg_result(form, state, env).depths == [0, 3, 7]
