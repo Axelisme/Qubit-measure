@@ -76,7 +76,7 @@ def test_persistent_windows_lock_preserves_error_and_stops_near_half_a_second(
         attempts.append(clock.elapsed)
         raise expected
 
-    with pytest.raises(OSError) as raised:
+    with pytest.raises(OSError, match="synthetic Windows file error") as raised:
         utils.atomic_replace(source, destination, replace_fn=replace_file)
 
     assert raised.value is expected
@@ -143,7 +143,7 @@ def test_replace_time_counts_towards_the_retry_deadline(
         clock.elapsed += 0.6
         raise expected
 
-    with pytest.raises(OSError) as raised:
+    with pytest.raises(OSError, match="synthetic Windows file error") as raised:
         utils.atomic_replace(
             tmp_path / "pending", tmp_path / "saved", replace_fn=replace_file
         )
@@ -169,7 +169,7 @@ def test_late_wakeup_does_not_start_another_replace(
         raise expected
 
     monkeypatch.setattr(time, "sleep", late_wakeup)
-    with pytest.raises(OSError) as raised:
+    with pytest.raises(OSError, match="synthetic Windows file error") as raised:
         utils.atomic_replace(
             tmp_path / "pending", tmp_path / "saved", replace_fn=replace_file
         )
@@ -192,7 +192,7 @@ def test_non_lock_failure_after_a_lock_is_not_retried(
             raise _WindowsError(32)
         raise expected
 
-    with pytest.raises(OSError) as raised:
+    with pytest.raises(OSError, match="synthetic Windows file error") as raised:
         utils.atomic_replace(
             tmp_path / "pending", tmp_path / "saved", replace_fn=replace_file
         )
