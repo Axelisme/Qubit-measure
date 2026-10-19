@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 from pydantic import model_validator
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -24,30 +25,35 @@ from zcu_lab.v2._support.mux_coherence_analysis import (
     analyze_coherence,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
 
 class MuxT2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
-    """Full ordered tones, common delay (us), acquisition controls and mux modules.
+    """Complete named tones, ordered participants and shared acquisition controls.
 
-    tones has one MuxCoherenceToneCfg per full readout tone. drive is each x90
-    source; only active drives are required, with independent generator channels
-    distinct from readout. detune is MHz, independently ramping final x90 phase.
-    delay is a finite nonnegative common requested free-evolution SweepCfg in us.
-    modules supplies optional reset/full mux readout; inherited reps/rounds must
-    be positive and initial_delay/relax_delay finite nonnegative us. No binding,
-    GUI state or per-tone acquisition overrides are stored.
+    modules holds optional reset and complete mux readout. tones contains one
+    MuxCoherenceToneCfg per original readout position, with unique nonempty names.
+    participants is a nonempty, duplicate-free list of those names; its order
+    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
+    Every drive is required/validated, including nonparticipants, on independent
+    generators distinct from readout. delay is one common finite nonnegative requested-us SweepCfg. Each tone
+    has an independent MHz detune controlling the final x90 phase ramp.
+    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxCoherenceToneCfg]
+    tones: Annotated[list[MuxCoherenceToneCfg], FieldMeta(element_label="name")]
+    participants: list[str]
     delay: SweepCfg
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2RamseyCfg:
         """Reject invalid full tones, fixed drives, channels and delay bounds."""
-        validate_coherence_scan(self, self.modules, self.tones, self.delay)
+        validate_coherence_scan(
+            self, self.modules, self.tones, self.delay, self.participants
+        )
         return self
 
 
@@ -71,7 +77,16 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         """
         cfg = MuxT2RamseyCfg.model_validate(config.model_dump())
         return acquire_coherence(
-            cfg, cfg.modules, cfg.tones, cfg.delay, context=context
+            cfg,
+            cfg.modules,
+            [
+                (i, cfg.tones[i])
+                for i in participant_indices(
+                    [tone.name for tone in cfg.tones], cfg.participants
+                )
+            ],
+            cfg.delay,
+            context=context,
         )
 
     def analyze(

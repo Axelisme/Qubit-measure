@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-18，元件子模組與共用模擬環境
+**Last updated:** 2026-10-19，mux recipes 與逐元素來源摘要
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
 
@@ -33,7 +33,7 @@ Alias 變更不更新既有 input；Open／Reset 才讀新名稱。缺列、未�
 Framework 的 `RecipeTab` 只提供通用 cfg 操作、expression／library／field 讀取與 cached device snapshot。
 `recipes.helpers` 使用這些公開介面，擁有 frequency／flux 的來源順序、校準範圍與 device unit policy。明填 frequency 優先，其次是有效 library leaf，再讀 caller 指定的 calibration。`FrequencySweepCalibration` 明列 frequency／linewidth 路徑與 full-span 倍率。三個 resonator spectrum 的預設倍率為 freq 3、power 3、flux 2，點數沿 GUI 的 301／201／101。Helper 讀目前數值，集中算 span 與 numeric start／stop。無效 linewidth 在 sweep edit／Run 前拒絕，不從 raw expression 抽倍率。Twotone 的 center_mhz／span_mhz／points 與 flux survey 的 flux_range／flux_points 必填且不能為 null。Flux helper 只比 snapshot unit，成功後寫 cfg 的 device identity 與獨立 flux_unit。它不換算 native 座標，也不連裝置。
 
-Recipe 宣告摘要欄位，框架只捕捉其 value／source／unit。回覆 actual 用摘要名稱作平面 key，只列 recipe 代填值。整項 sweep 的來源全為 explicit 才省略，mixed sweep 保留完整值。全部明填時回 {}。Run 使用當前 cfg acceptance，不保存 cfg_ref 或 publication／input 副本。
+Recipe 宣告摘要欄位，框架捕捉其 value／source／unit。Static 摘要的 actual 只列 recipe 代填值，整項 sweep 全為 explicit 時省略，mixed sweep 保留完整值。七個 mux recipes 另用 SummaryElements 單次捕捉完整元素，未記錄來源的 tone leaf 以 default 標示，已記錄來源優先。Actual、native estimates 與候選附作者提供的原始位置／名稱，不從 participants row 推測。操作與來源界線見 [mux recipe guide](recipes/mux-guide.md)。Run 使用當前 cfg acceptance，不保存 cfg_ref 或 publication／input 副本。
 
 [`v2`](v2/README.md) 是實驗的使用者 namespace。每個實驗的 core 與可選 GUI、notebook 附件放在同一資料夾。Core 不依賴 GUI。
 

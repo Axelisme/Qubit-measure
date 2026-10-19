@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from pydantic import model_validator
 from qick import QickConfig
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import US_TO_S, PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -23,6 +24,7 @@ from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
+    participant_indices,
     validate_mux_scan,
 )
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
@@ -31,34 +33,29 @@ from .analysis import MuxLenRabiFit, analyze_length
 
 
 class MuxLenRabiCfg(ProgramV2Cfg, ExpCfgModel):
-    """Full ordered tones with shared acquisition controls and length sweeps.
+    """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules contains optional reset and complete mux readout. tones has one
-    MuxToneCfg per original readout tone. Its active flag selects acquisition;
-    only active tones require a drive. Active sweeps are finite positive total
-    pulse lengths in us, with equal point counts but independent ranges. Drives
-    use independent generators, distinct from the readout generator. Only const
-    and flat_top length sweeps are supported; arb length is asset-derived and
-    has no public sweep operation. Inactive waveforms are not restricted here.
-    Native waveform and compiler owners impose ramp and minimum-cycle limits.
-
-    Inherited reps/rounds must be positive; initial_delay/relax_delay are shared
-    finite nonnegative us. Numeric cfg has no bindings or writeback destinations.
+    modules holds optional reset and complete mux readout. tones contains one
+    MuxToneCfg per original readout position, with unique nonempty names.
+    participants is a nonempty, duplicate-free list of those names; its order
+    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
+    Every drive is required/validated, including nonparticipants, on independent
+    generators distinct from readout. Independent positive us length sweeps have equal point counts. Every waveform
+    must be const or flat_top; arb duration belongs to its asset, not this sweep.
+    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxToneCfg]
+    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
+    participants: list[str]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxLenRabiCfg:
         """Reject invalid full tones, active generators, counts or length policy."""
-        validate_mux_scan(self, self.modules, self.tones)
+        validate_mux_scan(self, self.modules, self.tones, self.participants)
         for index, tone in enumerate(self.tones):
-            if not tone.active:
-                continue
             drive = tone.drive
-            if drive is None:
-                raise ValueError(f"tones[{index}].drive is required")
             if not isinstance(drive.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)):
                 raise ValueError(
                     f"tones[{index}].drive.waveform: length sweep requires const or "
@@ -85,14 +82,12 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxPulseSc
     unchanged. This function acquires no devices, files or plotting resources.
     """
     cfg = MuxLenRabiCfg.model_validate(cfg.model_dump())
-    indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
+    indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     coordinates = []
     points = [[] for _ in range(cfg.tones[indices[0]].sweep.expts)]
     for index in indices:
         tone = cfg.tones[index]
         drive = tone.drive
-        if drive is None:
-            raise ValueError(f"tones[{index}].drive is required")
         lengths = sweep2array(
             tone.sweep, "time", {"soccfg": soccfg, "gen_ch": drive.ch}
         )
@@ -151,6 +146,7 @@ class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
             scan,
             context=context,
             coordinate_label="Pulse length (us)",
+            tone_names=[tone.name for tone in cfg.tones],
         )
 
     def analyze(

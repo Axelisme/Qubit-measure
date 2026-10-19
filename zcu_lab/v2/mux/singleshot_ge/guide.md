@@ -1,6 +1,75 @@
 # Mux singleshot GE
 
+## GUI setup
+
+Open `mux/singleshot_ge` from **New Tab** after binding `$mux` to a MuxGroup.
+The capture must contain every qubit and its matching resonator in readout order.
+An existing readout slot must use the mux family with that full tone count.
+If no readout is stored, fill the blank mux readout before running.
+
+The Tones picker chooses which element to edit, not which qubit runs.
+Name is read-only. Ordinary edits cannot add, remove, rename or reorder tones.
+Set Participants to a JSON name list, for example `["Q3", "Q1"]`.
+That order becomes execution/data rows for original positions 2/0.
+The picker can show Q2 while Q3/Q1 run.
+Empty, duplicate and unknown participants remain editable invalid drafts and block Run.
+
+Every tone needs a valid drive, including nonparticipants.
+Errors in another picker element remain visible on the Tones row.
+Select that element to fix them; hiding it or removing its name from Participants
+does not bypass validation. Reps, rounds and recovery delay are common controls.
+Recovery initially uses five times the largest captured T1, with the existing
+missing-T1 default. A stored invalid T1 leaves recovery blank for correction.
+
+Reps and rounds are fixed at one in the Form.
+Shots controls the number of raw acquisitions in each probe-off/on preparation.
+Init pulse is optional and runs in both preparations.
+
+## GUI results and saved sources
+
+Run draws a combined `measurement` figure.
+Each original tone has probe off/on lines on the shot-index axis.
+The legend uses original index and source cfg name in participants order.
+Per-tone native `measurement_i` figures remain available.
+Analyze reads the selected Run/Load source, not the current Form.
+Use the Analysis figure picker to inspect `fit_i` and the Post figure picker for `post_i`.
+Here `i` is an original tone position, never a participants row number.
+
+Use Data to save measurement data and analysis artifacts.
+Load Data selects a native file or a saved run.
+Loading replaces the analysis source without changing current Form inputs.
+A later Form edit does not alter the historical pulse, binding or destination.
+Failed or partial rows do not produce calibration candidates.
+Read each Writeback preview destination, value and fit diagnostics.
+Deselect unwanted items before **Apply Selected**.
+Preview and Analyze do not write; applying one item does not apply other candidates.
+
+## Form drafts
+
+Form persistence contains exactly `data` and `selections`.
+Selections use typed paths with integer list positions.
+Invalid leaf text and participants drafts survive save/restore.
+Restoration reports dropped fields and does not run converters or refresh capture.
+If the saved input cannot be read, the host reports it and uses fresh defaults.
+Reset explicitly captures current parameters and rebuilds initial values.
+
+A raw `FormState.write` replaces the complete value at its path and clears selections
+at or below it. To change one leaf, use its complete path, for example
+`("tones", 0, "drive", "module", "gain")` for an inline drive.
+Do not send a partial tone or pulse dictionary expecting a merge.
+Writing does not run a converter; selecting another module kind does.
+Recipe/MCP logical field paths omit the inline wrapper, for example
+`("tones", 0, "drive", "gain")`. The integer is the full original tone position,
+not a row in Participants and not a name key.
+
+## Core reference
+
 ## Acquisition
+
+The complete `tones` list retains capture-generated `name` values and original
+readout positions. `participants` is a nonempty, unique list of existing names.
+Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
+Every element requires valid drives, including nonparticipants.
 
 `MuxGEExp.run(config, *, context)` acquires probe-off and probe-on raw IQ for
 all active qubits in the same two programs. It does not simulate each qubit
@@ -9,10 +78,10 @@ recipe or calibration proposals.
 
 `MuxGECfg.modules` contains the common optional reset and the complete ordered
 mux readout. `tones: list[MuxGEToneCfg]` has one element per full readout tone.
-Each element contains `active`, the probe `drive`, and optional `init_pulse`.
-Only active elements require a drive. Active generators must be independent and
+Each element contains fixed `name`, required probe `drive`, and optional `init_pulse`.
+All drives must be valid. All generators must be independent and
 must differ from the readout generator. An initial pulse uses its tone's drive
-generator. Inactive settings stay in cfg but do not run.
+generator. Nonparticipant settings stay validated in cfg but do not run.
 
 Each preparation runs common reset, then an existing `Join` of the active
 branches, then one mux readout. A branch contains its optional initial pulse
@@ -159,3 +228,30 @@ Small truncations and short smoke programs do not establish model convergence,
 calibrated probe pulses or reliable readout fits. A poor or failed fit remains
 visible as quality evidence or a per-tone failure, not a reason to change the
 fitter or splice separately simulated shots.
+
+## Adapter source and proposals
+
+`MuxGEAdapter` in `gui.py` uses explicit Run/Load sources. Its primary and post
+operations publish `fit_i` and `post_i` through the existing GE plot owner,
+where i is the original tone index. Its native generated Form is registered as
+`mux/singleshot_ge`. The registered MCP recipe is `mux_singleshot_ge`. See the
+[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
+source-bound reporting and explicit writeback decisions.
+
+Both summaries retain original `position`, source `name` and per-tone results or
+failure reasons. Q3/Q1 gives indices 2/0 in that row order. Quality diagnostics
+identify the corresponding summary row. Missing source cfg leaves the name
+unavailable; the current Form does not supply it. Post-analysis must use the
+primary from the same Run/Load source, not a later Run's primary.
+
+A successful, fully finite primary row passes the GE calibration validity check
+before proposing `ext.readout_cal.fidelity`, `sigma`, `g_center` and
+`e_center` on the captured qubit. Post proposals contain `radius` and the
+existing 3x3 `confusion_matrix`, including the isolated-other diagnostic.
+These are per-qubit GE calibrations, not a four-state joint assignment matrix.
+
+Destinations come only from the same Run/Load capture's full binding. Missing
+capture yields no proposals; inconsistent captured bindings raise. Failed or
+partial rows yield none. Review cluster separation, quality, confusion diagnostics
+and destination before explicitly applying individual items. Analysis, post and
+proposal creation do not write or apply candidates.

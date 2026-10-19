@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from pydantic import model_validator
 from qick import QickConfig
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -21,6 +22,7 @@ from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
+    participant_indices,
     validate_mux_scan,
 )
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
@@ -29,26 +31,28 @@ from .analysis import MuxAmpRabiFit, analyze_amplitude
 
 
 class MuxAmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
-    """Full ordered tones and shared reps/rounds/reset/readout/delays.
+    """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules holds optional reset and complete mux readout. tones has exactly one
-    active/drive/sweep element per full tone; at least one active. Active drives
-    use independent generators distinct from readout. Active sweeps are finite
-    normalized gains in [-1,1], with equal point counts. Inactive drives may be
-    None and their sweeps do not constrain the active zip count. Counts must be
-    positive and inherited initial_delay/relax_delay finite nonnegative us.
-    Numeric cfg contains no capture, component names or writeback destinations.
+    modules holds optional reset and complete mux readout. tones contains one
+    MuxToneCfg per original readout position, with unique nonempty names.
+    participants is a nonempty, duplicate-free list of those names; its order
+    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
+    Every drive is required/validated, including nonparticipants, on independent
+    generators distinct from readout. Independent normalized-gain sweeps stay in [-1,1], with equal point counts.
+    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxToneCfg]
+    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
+    participants: list[str]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxAmpRabiCfg:
         """Reject invalid full length, drive channels, counts or gain ranges."""
-        validate_mux_scan(self, self.modules, self.tones)
+        validate_mux_scan(self, self.modules, self.tones, self.participants)
         for index, tone in enumerate(self.tones):
-            if tone.active and max(abs(tone.sweep.start), abs(tone.sweep.stop)) > 1:
+            if max(abs(tone.sweep.start), abs(tone.sweep.stop)) > 1:
                 raise ValueError(f"tones[{index}].sweep gains must be in [-1,1]")
         return self
 
@@ -65,14 +69,12 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
     bindings are accessed. Program construction is left to acquire_mux_scan.
     """
     cfg = MuxAmpRabiCfg.model_validate(cfg.model_dump())
-    indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
+    indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     coordinates = []
     points = [[] for _ in range(cfg.tones[indices[0]].sweep.expts)]
     for index in indices:
         tone = cfg.tones[index]
         drive = tone.drive
-        if drive is None:
-            raise ValueError(f"tones[{index}].drive is required")
         nominal = sweep2array(tone.sweep, "none")
         actual = round_zcu_gain(nominal, soccfg, drive.ch)
         coordinates.append(actual)
@@ -114,7 +116,12 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
         cfg = MuxAmpRabiCfg.model_validate(config.model_dump())
         scan = prepare_amplitude_scan(cfg, soccfg=context.soccfg)
         return acquire_mux_scan(
-            cfg, cfg.modules, scan, context=context, coordinate_label="Pulse gain"
+            cfg,
+            cfg.modules,
+            scan,
+            context=context,
+            coordinate_label="Pulse gain",
+            tone_names=[tone.name for tone in cfg.tones],
         )
 
     def analyze(

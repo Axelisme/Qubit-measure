@@ -14,7 +14,14 @@ from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
 from zcu_lab.v2.lookback.gui import LookbackAdapter
+from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
+from zcu_lab.v2.mux.freq.gui import MuxFreqAdapter
+from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
 from zcu_lab.v2.mux.onetone.gui import MuxOnetoneAdapter
+from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEAdapter
+from zcu_lab.v2.mux.t1.gui import MuxT1Adapter
+from zcu_lab.v2.mux.t2echo.gui import MuxT2EchoAdapter
+from zcu_lab.v2.mux.t2ramsey.gui import MuxT2RamseyAdapter
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
@@ -73,6 +80,13 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,
     "mux/onetone": MuxOnetoneAdapter,
+    "mux/freq": MuxFreqAdapter,
+    "mux/amp_rabi": MuxAmpRabiAdapter,
+    "mux/len_rabi": MuxLenRabiAdapter,
+    "mux/t1": MuxT1Adapter,
+    "mux/t2ramsey": MuxT2RamseyAdapter,
+    "mux/t2echo": MuxT2EchoAdapter,
+    "mux/singleshot_ge": MuxGEAdapter,
     "twotone/freq": FreqAdapter,
     "twotone/ckp": CKPAdapter,
     "twotone/power_dep": PowerDepAdapter,
