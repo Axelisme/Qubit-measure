@@ -981,6 +981,9 @@ class DeviceDialog(QDialog):
         elif snapshot.status is DeviceStatus.CONNECTED:
             set_foreground(self._add_status, success_colour(self))
             self._add_status.setText(f"Connected {name}.")
+        elif snapshot.status is DeviceStatus.MEMORY_ONLY:
+            set_foreground(self._add_status, secondary_colour(self))
+            self._add_status.setText(f"Disconnected {name}.")
         elif snapshot.status in {
             DeviceStatus.CONNECTING,
             DeviceStatus.DISCONNECTING,
