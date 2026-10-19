@@ -106,22 +106,27 @@ def input_key(
     return digest.value.digest()
 
 
-def single_gate_key(key: bytes, table: SegmentTable, context: KernelContext) -> bytes:
-    """Bind an exact-input digest to the current source-amortized gate route.
+def route_key(key: bytes, table: SegmentTable, context: KernelContext) -> bytes:
+    """Bind an exact-input digest to source-amortized gate and multitone routes.
 
     Complete inventory counting precedes this call, including memo hits. Growing
-    counters alone do not change output; selected canonical keys do. Only plans
-    without cumulative candidates retain the raw key for safe early lookup.
+    counters alone do not change output; selected keys and direct rows do.
+    Only plans without cumulative candidates retain the raw key for safe early lookup.
     """
+    from ._multitone_dispatch import populate_multitone_plan
     from ._shaped_dispatch import populate_single_gate_plan
 
+    direct = populate_multitone_plan(
+        table, context.source, context.work_plan, context.budget
+    )
     choices = populate_single_gate_plan(
         table, context.source, context.work_plan, context.budget
     )
-    if not choices:
+    if not choices and not np.any(table.tones >= 2):
         return key
     selected = sorted({k for choice in choices for k in choice.keys})
-    return sha256(key + b"".join(selected)).digest()
+    rows = np.array(sorted(direct), dtype="<i8")
+    return sha256(key + b"".join(selected) + b"multitone" + rows.tobytes()).digest()
 
 
 class ResultMemo:

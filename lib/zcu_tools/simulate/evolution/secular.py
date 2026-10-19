@@ -262,7 +262,7 @@ class ModelSource:
 
     @property
     def gate_usage(self) -> dict[bytes, int]:
-        """Snapshot of cumulative canonical single-tone gate-key row counts.
+        """Snapshot of cumulative canonical gate and multitone prepare-key row counts.
 
         Counts include complete inventories, even rejected or nonresident keys.
         They persist across Engine replacement and reset only at source close.
@@ -273,7 +273,7 @@ class ModelSource:
     def record_gate_usage(self, inventory: Mapping[bytes, int]) -> dict[bytes, int]:
         """Add one complete acquire inventory and return its keys' new totals.
 
-        Keys are canonical gate physics digests; counts are nonnegative row
+        Keys are namespaced algorithm physics digests; counts are nonnegative row
         multiplicities. Cache hits replay the same increment as fresh planning.
         Invalid counts raise ValueError without changing any totals. Callers
         serialize acquires sharing a source, including across different Engines.
