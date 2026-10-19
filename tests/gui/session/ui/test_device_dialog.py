@@ -104,6 +104,9 @@ def test_failed_address_shows_reason_and_allows_corrected_retry(qapp, tmp_path: 
             ),
             label="failed address delivery",
         )
+        # Failure is already delivered. Flush its word-wrap layout before capture;
+        # no form edit should be needed to make the second error line readable.
+        qapp.processEvents()
         ui.screenshot(tmp_path / "02-failed-address.png")
         assert any(
             "Invalid VISA resource" in widget.text for widget in ui.visible().widgets
