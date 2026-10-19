@@ -1,10 +1,12 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-19，Labber 檔名使用實驗啟動名稱與 id6
+**Last updated:** 2026-10-20，predictors 目錄唯讀 binding
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
 `create` 建立 setup、points、records 與同名 Database 條目目錄。任一目的地已存在就拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 要求完整的新格式條目，不猜測 legacy 格式。
+
+`predictors_path` 是 Result 條目下 `predictors/` 的唯讀路徑。讀取 property 不建立目錄，也不列檔或驗證內容。`resources.predictor_file` 擁有其中 predictor JSON 的格式與讀寫。
 
 ## 條目 alias 表
 

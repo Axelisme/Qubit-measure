@@ -191,12 +191,11 @@ ResultScopeManager、project CLI 與 RPC 投影，保留既有 chip／qubit 資�
 | 債務 | 移除方式 | 記帳位置 |
 |---|---|---|
 | `program → resources` | `program` 改依賴 `cfg_model` 的 Protocol | C10 `ignore_imports`：`program.v2.modules*` → `resources.context` |
-| `simulate → resources` | `predict` 改由呼叫端傳入數值 | C10、C12 `ignore_imports`：`simulate.fluxonium.predict` → `resources.qubit_params` |
 | `notebook/analysis` | 通用分析移到 `analysis`；實驗專屬 helpers 已由 `zcu_lab` 附件擁有 | 尚未搬移 |
 | `utils` 的 `shot_classification`、`tomography` | 移到 `analysis` | 尚未搬移 |
 | `analysis/fluxdep/io.py` 直接用 h5py | 檔案讀寫移到 `datafile` | 尚未搬移 |
 
-已清除的債務不再列出：`resources → program`、`experiment/base.py` 的 Labber 格式處理（已改用 `datafile`）、`utils/datasaver/`、`mcp → gui.logging_setup`。
+已清除的債務不再列出：`simulate → resources`、`resources → program`、`experiment/base.py` 的 Labber 格式處理（已改用 `datafile`）、`utils/datasaver/`、`mcp → gui.logging_setup`。
 
 ## 後果
 
