@@ -245,7 +245,7 @@ def test_inline_copy_memento_keeps_original_input_after_library_content_changes(
 
 
 def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> None:
-    path = tmp_path / "t1_workflow_state_v1.json"
+    path = tmp_path / "workflow_state_v1.json"
     path.write_text(
         json.dumps(
             WorkflowInputCodec().encode(
@@ -297,7 +297,7 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
 def test_unreadable_snapshot_reports_and_uses_defaults(
     qapp: QApplication, tmp_path: Path, payload: str
 ) -> None:
-    (tmp_path / "t1_workflow_state_v1.json").write_text(payload)
+    (tmp_path / "workflow_state_v1.json").write_text(payload)
     app = WorkflowsGuiBehavior(
         templates={},
         registrations=build_registry(),
@@ -329,7 +329,7 @@ def test_unreadable_snapshot_reports_and_uses_defaults(
 def test_startup_restore_diagnostics_are_visible_to_the_user(
     qapp: QApplication, tmp_path: Path, broken: bool
 ) -> None:
-    path = tmp_path / "t1_workflow_state_v1.json"
+    path = tmp_path / "workflow_state_v1.json"
     payload = (
         "not JSON"
         if broken
@@ -372,7 +372,7 @@ def test_startup_restore_diagnostics_are_visible_to_the_user(
 def test_clean_skips_read_but_close_replaces_snapshot(
     qapp: QApplication, tmp_path: Path
 ) -> None:
-    path = tmp_path / "t1_workflow_state_v1.json"
+    path = tmp_path / "workflow_state_v1.json"
     path.write_text("deliberately invalid JSON")
     app = WorkflowsGuiBehavior(
         templates={},

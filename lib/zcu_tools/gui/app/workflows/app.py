@@ -163,7 +163,7 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         self._caretaker = SingleFileCaretaker(
             self.window,
             codec=WorkflowInputCodec(),
-            filename="t1_workflow_state_v1.json",
+            filename="workflow_state_v1.json",
             cache_dir=self._cache_dir,
         )
         outcome = self._caretaker.restore_all(load=not self._clean)
