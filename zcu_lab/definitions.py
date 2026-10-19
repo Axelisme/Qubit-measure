@@ -10,6 +10,7 @@ from zcu_lab.v2.fastflux.distortion.freq.gui import FastFluxFreqAdapter
 from zcu_lab.v2.fastflux.distortion.phase.gui import PhaseAdapter
 from zcu_lab.v2.fastflux.mist.gui import MistAdapter
 from zcu_lab.v2.fastflux.t1.gui import T1Adapter as FastFluxT1Adapter
+from zcu_lab.v2.fastflux.twotone.gui import TwoToneAdapter
 from zcu_lab.v2.ftf.chevron.gui import ChevronAdapter
 from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
 from zcu_lab.v2.ftf.conditional_spectroscopy.gui import SpectroscopyAdapter
@@ -98,6 +99,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/conditional_phase": ConditionalPhaseAdapter,
     "ftf/local_z": LocalZAdapter,
     "ftf/rb": TwoQubitRBAdapter,
+    "fastflux/twotone": TwoToneAdapter,
     "fastflux/distortion/phase": PhaseAdapter,
     "lookback": LookbackAdapter,
     "onetone/freq": OneToneFreqAdapter,
