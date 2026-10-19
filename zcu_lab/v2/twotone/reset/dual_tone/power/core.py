@@ -38,6 +38,8 @@ from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
 
 @dataclass(frozen=True)
 class PowerResult:
+    """Normalized gain axes and mean complex IQ (gain1, gain2)."""
+
     gains1: NDArray[np.float64]
     gains2: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -93,10 +95,18 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
     )
 
     def run(self, cfg: PowerCfg, *, context: RunContext) -> PowerResult:
+        """Measure the dual-tone reset response across both pulse gains.
+
+        Apply optional reset and initialization, start the two gain-swept
+        reset pulses together, then read out after the longer pulse finishes.
+        Return normalized gains and mean complex IQ shaped (Ngain1, Ngain2).
+        The display uses the minimum-gain corner as background; this contrast
+        is not a calibrated reset fidelity.
+        """
+        # Prepare each reset pulse's gain grid on its own generator channel.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        # Check that reset pulse is dual pulse type
         modules = cfg.modules
 
         reset_cfg = modules.tested_reset
@@ -119,6 +129,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             ref_j = 0 if gains2[0] < gains2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
+        # Display contrast relative to the minimum-gain corner in either scan direction.
         viewer = context.plots.liveplot_2d(
             "measurement", "Gain1 (a.u.)", "Gain2 (a.u.)"
         )
@@ -128,6 +139,8 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
                 gains1, gains2, dual_reset_gain_signal2real(data)
             ),
         )
+
+        # Sweep both reset gains in hardware and collect mean IQ.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
@@ -158,6 +171,13 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         *,
         plots: Plots,
     ) -> PowerAnalysis:
+        """Select reset gains from the smoothed, background-subtracted IQ map.
+
+        options controls smoothing and optional axis names. Use the
+        minimum-gain corner as background, then choose a peak or dip per axis
+        according to the first corner's contrast relative to the map mean.
+        Return normalized gain1/gain2 and publish fit; source.cfg may be None.
+        """
         result = source.result
 
         gains1, gains2, signals = result.gains1, result.gains2, result.signals
