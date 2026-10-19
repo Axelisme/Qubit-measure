@@ -297,7 +297,10 @@ class Engine:
         "no valid kernel". Shaped rows try gate_cache, period_table and dop853
         in amortized-cost order; a guard rejection tries the next candidate.
         Preparation and apply failures propagate without reclassification.
-    chunks_per_worker: positive chunk multiplier; only scheduling, not physics.
+    chunks_per_worker: optional positive fixed chunk multiplier. None selects
+        timeline batching from the complete acquire inventory and keeps six
+        prepare chunks per worker. Explicit values fix both stages. Scheduling
+        never changes numerical admission or physics.
 
     The zero-level model identity names the entire ModelSource: all physical
     parameters and absolute DC flux. Kernel keys include row flux levels.
@@ -322,14 +325,18 @@ class Engine:
         cache_bytes: int,
         *,
         kernels: Sequence[Kernel] | None = None,
-        chunks_per_worker: int = 6,
+        chunks_per_worker: int | None = None,
     ) -> None:
         """Create the prepare cache; reject invalid sizes or duplicate kernel names."""
         from ._result_memo import RESULT_MEMO_BYTES, ResultMemo
         from .cache import PrepareCache
         from .kernels import REGISTRY
 
-        if workers < 1 or cache_bytes < 0 or chunks_per_worker < 1:
+        if (
+            workers < 1
+            or cache_bytes < 0
+            or (chunks_per_worker is not None and chunks_per_worker < 1)
+        ):
             raise ValueError(
                 "workers/chunks must be positive and cache_bytes nonnegative"
             )
@@ -340,7 +347,8 @@ class Engine:
         self._cache: PrepareCache = PrepareCache(cache_bytes)
         self._memo = ResultMemo(min(RESULT_MEMO_BYTES, cache_bytes))
         self._memo_enabled = cache_bytes > 0
-        self._chunks = workers * chunks_per_worker
+        self._chunks = workers * (6 if chunks_per_worker is None else chunks_per_worker)
+        self._inventory_chunks = chunks_per_worker is None
         self._lock = Lock()
         self._closed = False
         self._workers = workers
@@ -425,7 +433,13 @@ class Engine:
                         admission=resident,
                     )
                     schedule = Schedule(geometry, dispatch, context, cancel, resident)
-                    result = schedule.run(kernels, self._cache, pool, self._chunks)
+                    result = schedule.run(
+                        kernels,
+                        self._cache,
+                        pool,
+                        self._chunks,
+                        timeline_workers=workers if self._inventory_chunks else None,
+                    )
             if cancel.is_set():
                 raise Cancelled()
             _warn_exceeded(result)

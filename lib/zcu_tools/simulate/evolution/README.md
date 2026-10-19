@@ -21,7 +21,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Fixed-coordinate model records | `NumericModel`, `DriveSource` |
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 
-`Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=6)` owns a
+`Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=None)` owns a
 prepare cache and a separate exact-result memo. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
@@ -498,7 +498,12 @@ partial results.
 Calls on one Engine serialize. Joblib threading is the only parallel layer;
 kernels are single-threaded and do not open pools. Multi-timeline calls with
 multiple workers create and close a pool per evolve; empty work, one timeline
-and one worker run inline. Cancellation is checked at chunk boundaries.
+and one worker run inline. By default, complete-acquire row density and the
+fraction of cheap gate/no-drive rows select one or six timeline chunks per
+worker. Prepare retains six chunks per worker to spread cold key builds.
+An explicit `chunks_per_worker` fixes both stages. This choice occurs after
+classification and does not change admission, WorkPlan facts or RNG.
+Cancellation is checked at chunk and preparation boundaries, and before return.
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
