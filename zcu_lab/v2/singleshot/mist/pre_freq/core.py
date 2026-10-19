@@ -108,6 +108,19 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
     )
 
     def run(self, cfg: PreFreqCfg, *, context: RunContext) -> PreFreqResult:
+        """Measure MIST populations versus the preparation-pulse frequency.
+
+        After optional reset, sweep init_pulse frequency on the board, apply
+        the optional pi pulse, then the fixed probe pulse and readout.
+        Return rounded preparation frequencies (MHz) and classified G/E
+        fractions shaped (Nfreq, 2), averaged over shots and rounds.
+
+        cfg supplies distinct finite IQ centers and a positive finite radius.
+        Other is 1-G-E, not calibrated leakage; optional confusion correction
+        belongs to subsequent analysis.
+        """
+
+        # Sweep the preparation tone, not the later MIST probe.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -118,6 +131,7 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules.init_pulse.ch},
         )
 
+        # Show G/E and the unclassified remainder without altering saved fractions.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
             for line, label in zip(
@@ -143,6 +157,8 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
             modules = run_cfg.modules
             freq_sweep = run_cfg.sweep.freq
             modules.init_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+
+            # Vary initialization before the optional pi pulse and fixed probe.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add_reset("reset", modules.reset)
@@ -152,12 +168,15 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
                 .add_readout("readout", modules.readout)
                 .declare_sweep("freq", freq_sweep)
                 .build_and_acquire(
+                    # Classify individual shots, then average their G/E fractions.
                     raw2signal_fn=raw_population_signal,
                     g_center=cfg.g_center,
                     e_center=cfg.e_center,
                     ge_radius=cfg.radius,
                 )
             )
+
+        # Store G/E only; the Other curve is derived as 1-G-E.
         signals = buffer.array
 
         return PreFreqResult(freqs=freqs, signals=signals)
