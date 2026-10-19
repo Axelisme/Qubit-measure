@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment.v2.runtime.schedule import ProgramBuilder
+from zcu_tools.experiment.v2.runtime.program_builder import ProgramBuilder
 from zcu_tools.program.v2 import (
     ComputedPulse,
     LoadValue,

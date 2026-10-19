@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
-    AcquireOptions,
     Schedule,
     SignalBuffer,
 )

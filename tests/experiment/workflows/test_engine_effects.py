@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from pydantic import BaseModel
 from zcu_tools.device import FakeDeviceInfo, YOKOGS200Info
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
-from zcu_tools.experiment.v2.runtime.schedule import AcquireOptions
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.workflows import (
     Aborted,
     Actor,

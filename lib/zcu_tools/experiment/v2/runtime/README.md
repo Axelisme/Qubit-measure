@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-19，shared acquisition options
+**Last updated:** 2026-10-19，program builder owner
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -105,7 +105,9 @@ with Schedule(cfg, signals_buffer) as sched:
 
 ### `ProgramBuilder`
 
-`ProgramBuilder` 是 QICK program 的 builder 與 acquire adapter。`acquire_cancel.py` 擁有 acquire-local stop 與借用 run stop 的合成旗標，讓 data-driven early stop 不會改變 run outcome。
+`program_builder.py` 擁有完整的 QICK program 組裝與同步 acquire：`ProgramBuilder`、`ModuleFacade`、`AcquireOptions`、producer 型別契約與 raw conversion。`schedule.py` 保留 Schedule／Step、buffer／slot 與 run lifecycle。Builder 透過 Schedule 的公開合作方法選擇 slot、記錄 outcome 與處理 retry reset。Runtime package 入口仍匯出既有公開名稱。
+
+`acquire_cancel.py` 擁有 acquire-local stop 與借用 run stop 的合成旗標，讓 data-driven early stop 不會改變 run outcome。
 
 - `build()` 建立並回傳 program。
 - `run_program(program)` 執行 caller 傳入的 integrated-acquire program。

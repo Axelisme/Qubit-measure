@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from abc import ABC, abstractmethod
 from collections.abc import (
     Callable,
     Hashable,
@@ -14,7 +13,7 @@ from collections.abc import (
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from types import TracebackType
-from typing import Any, Generic, Protocol, Self, TypeAlias, cast, overload
+from typing import Any, Generic, Protocol, cast, overload
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -22,7 +21,6 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
-from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
 from zcu_tools.experiment.v2.runtime.outcome import (
     RunStatus as RunStatus,
 )
@@ -32,63 +30,22 @@ from zcu_tools.experiment.v2.runtime.outcome import (
 from zcu_tools.experiment.v2.runtime.outcome import (
     exception_reason,
 )
-from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Module,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
+from zcu_tools.experiment.v2.runtime.program_builder import (
+    ProgramBuilder,
+    ProgramFactory,
+    ProgramT,
 )
-from zcu_tools.progress_bar import BaseProgressBar, make_pbar
+from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc, min_interval
 
 T_Cfg = TypeVar("T_Cfg")
 T_ChildCfg = TypeVar("T_ChildCfg")
 T_Env = TypeVar("T_Env", default=dict[str, Any])
 
-T_Raw = TypeVar("T_Raw")
 T_Value = TypeVar("T_Value")
 T_NestedValue = TypeVar("T_NestedValue")
 T_BatchResult = TypeVar("T_BatchResult")
-T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
-T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
-SignalArray: TypeAlias = NDArray[Any]
-StopCondition: TypeAlias = Callable[[], bool]
-
-
-class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
-    @property
-    def cfg_model(self) -> ProgramV2Cfg: ...
-
-    def acquire(
-        self,
-        soc: object,
-        *,
-        progress: bool,
-        round_hook: Callable[[int, T_AcquireRaw_co, CancelFlagProtocol], object],
-        cancel_flag: CancelFlagProtocol,
-        **kwargs: object,
-    ) -> T_AcquireRaw_co: ...
-
-    def acquire_decimated(
-        self,
-        soc: object,
-        *,
-        progress: bool,
-        round_hook: Callable[[int, T_DecimatedRaw_co, CancelFlagProtocol], object],
-        cancel_flag: CancelFlagProtocol,
-        **kwargs: object,
-    ) -> T_DecimatedRaw_co: ...
-
-
-T_Program = TypeVar("T_Program", bound=ProgramProtocol[Any, Any])
-ProgramFactory: TypeAlias = Callable[..., T_Program]
 
 
 class BufferProtocol(Protocol):
@@ -100,16 +57,6 @@ class BufferProtocol(Protocol):
     def trigger_update(
         self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
     ) -> None: ...
-
-
-def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
-    return raw[0][0].dot([1, 1j])
-
-
-def default_decimated_raw2signal_fn(
-    raw: Sequence[NDArray[np.float64]],
-) -> NDArray[np.complex128]:
-    return raw[0].dot([1, 1j])
 
 
 class SignalBuffer:
@@ -309,9 +256,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         soccfg: object,
         *,
         cfg: object | None = None,
-        program_cls: ProgramFactory[T_Program],
+        program_cls: ProgramFactory[ProgramT],
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Program]: ...
+    ) -> ProgramBuilder[ProgramT]: ...
 
     def prog_builder(
         self,
@@ -319,9 +266,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         soccfg: object,
         *,
         cfg: object | None = None,
-        program_cls: ProgramFactory[T_Program] | None = None,
+        program_cls: ProgramFactory[ProgramT] | None = None,
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Program] | ProgramBuilder[ModularProgramV2]:
+    ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
         self.ensure_active()
         if program_cls is None:
             return ProgramBuilder(
@@ -841,9 +788,9 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         soccfg: object,
         *,
         cfg: object | None = None,
-        program_cls: ProgramFactory[T_Program],
+        program_cls: ProgramFactory[ProgramT],
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Program]: ...
+    ) -> ProgramBuilder[ProgramT]: ...
 
     def prog_builder(
         self,
@@ -851,9 +798,9 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         soccfg: object,
         *,
         cfg: object | None = None,
-        program_cls: ProgramFactory[T_Program] | None = None,
+        program_cls: ProgramFactory[ProgramT] | None = None,
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Program] | ProgramBuilder[ModularProgramV2]:
+    ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
         self.schedule.ensure_active()
         if program_cls is None:
             return ProgramBuilder(
@@ -872,348 +819,6 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
             program_cls=program_cls,
             program_kwargs=program_kwargs,
         )
-
-
-class ModuleFacade(ABC):
-    @abstractmethod
-    def add(self, *modules: Module | Sequence[Module]) -> Self: ...
-
-    def add_reset(self, name: str, cfg: ResetCfg | None) -> Self:
-        return self.add(Reset(name, cfg))
-
-    def add_pulse(self, name: str, cfg: PulseCfg | None, **kwargs: Any) -> Self:
-        return self.add(Pulse(name, cfg, **kwargs))
-
-    def add_readout(self, name: str, cfg: ReadoutCfg) -> Self:
-        return self.add(Readout(name, cfg))
-
-
-@dataclass(frozen=True)
-class AcquireOptions:
-    """Policy shared by integrated and decimated program acquisition.
-
-    retry defaults to zero extra attempts. progress defaults to hiding native
-    acquisition progress. progress_label names the rounds bar (default "rounds");
-    progress_leave=None retains it at the root and closes it for a host step.
-    stop_condition=None disables data-driven early stop; otherwise the callback
-    runs after each completed round is converted and written to the buffer.
-    """
-
-    retry: int = 0
-    progress: bool = False
-    progress_label: str = "rounds"
-    progress_leave: bool | None = None
-    stop_condition: StopCondition | None = None
-
-
-class ProgramBuilder(ModuleFacade, Generic[T_Program]):
-    """Build and acquire a single QICK program within a Schedule scope."""
-
-    def __init__(
-        self,
-        *,
-        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
-        soc: object,
-        soccfg: object,
-        cfg: object,
-        program_cls: ProgramFactory[T_Program],
-        program_kwargs: dict[str, object],
-    ) -> None:
-        self._owner = owner
-        self._schedule = owner if isinstance(owner, Schedule) else owner.schedule
-        self._soc = soc
-        self._soccfg = soccfg
-        self._cfg = cfg
-        self._program_cls = program_cls
-        self._program_kwargs = dict(program_kwargs)
-        self._modules: list[Module] = []
-        self._sweeps: list[tuple[str, SweepCfg | int]] = []
-        self._raw2signal_fn: Callable[[Any], SignalArray] | None = None
-
-    def add(self, *modules: Module | Sequence[Module]) -> Self:
-        for module_or_group in modules:
-            if isinstance(module_or_group, Module):
-                self._modules.append(module_or_group)
-            else:
-                self._modules.extend(module_or_group)
-        return self
-
-    def declare_sweep(self, name: str, spec: SweepCfg | int) -> Self:
-        self._sweeps.append((name, spec))
-        return self
-
-    def set_raw2signal_fn(self, fn: Callable[[T_Raw], SignalArray]) -> Self:
-        self._raw2signal_fn = fn
-        return self
-
-    def build(self) -> T_Program:
-        self._schedule.ensure_active()
-        self._ensure_modules()
-        return self._build_program(self._isolated_cfg())
-
-    def build_and_acquire(
-        self,
-        *,
-        raw2signal_fn: Callable[[Any], SignalArray] | None = None,
-        options: AcquireOptions | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        self._schedule.ensure_active()
-        self._ensure_modules()
-        return self._build_and_run(
-            runner=self.run_program,
-            raw2signal_fn=raw2signal_fn,
-            options=AcquireOptions() if options is None else options,
-            acquire_kwargs=acquire_kwargs,
-        )
-
-    def build_and_acquire_decimated(
-        self,
-        *,
-        raw2signal_fn: Callable[[Any], SignalArray] | None = None,
-        options: AcquireOptions | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        self._schedule.ensure_active()
-        self._ensure_modules()
-        return self._build_and_run(
-            runner=self.run_program_decimated,
-            raw2signal_fn=raw2signal_fn,
-            options=AcquireOptions() if options is None else options,
-            acquire_kwargs=acquire_kwargs,
-        )
-
-    def run_program(
-        self,
-        program: ProgramProtocol[T_Raw, object],
-        *,
-        raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
-        options: AcquireOptions | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        return self._run_program(
-            acquire=program.acquire,
-            rounds=self._rounds_from(program),
-            raw2signal_fn=raw2signal_fn,
-            default_raw2signal_fn=default_raw2signal_fn,
-            options=AcquireOptions() if options is None else options,
-            acquire_kwargs=acquire_kwargs,
-        )
-
-    def run_program_decimated(
-        self,
-        program: ProgramProtocol[object, T_Raw],
-        *,
-        raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
-        options: AcquireOptions | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        return self._run_program(
-            acquire=program.acquire_decimated,
-            rounds=self._rounds_from(program),
-            raw2signal_fn=raw2signal_fn,
-            default_raw2signal_fn=default_decimated_raw2signal_fn,
-            options=AcquireOptions() if options is None else options,
-            acquire_kwargs=acquire_kwargs,
-        )
-
-    def _build_and_run(
-        self,
-        *,
-        runner: Callable[..., SignalArray],
-        raw2signal_fn: Callable[[Any], SignalArray] | None,
-        options: AcquireOptions,
-        acquire_kwargs: dict[str, object],
-    ) -> SignalArray:
-        retry = options.retry
-        if retry < 0:
-            raise ValueError("retry must be non-negative")
-
-        slot = self._default_slot()
-        for attempt in range(retry + 1):
-            if self._schedule.check_stop_requested():
-                return slot.view
-            try:
-                program = self._build_program(self._isolated_cfg())
-            except KeyboardInterrupt as exc:
-                self._schedule.mark_interrupted(exc)
-                return slot.view
-            # tolerated: Program factories may fail arbitrarily; preserve stop, retry and partial data.
-            except Exception as exc:  # noqa: BLE001
-                if self._schedule.check_stop_requested(exception=exc):
-                    return slot.view
-                if attempt == retry:
-                    self._schedule.mark_failed(exc)
-                    return slot.view
-                continue
-
-            result = runner(
-                program,
-                raw2signal_fn=raw2signal_fn,
-                options=replace(options, retry=0),
-                **acquire_kwargs,
-            )
-            if self._schedule.prepare_retry_after_failed_attempt(attempt, retry):
-                continue
-            return result
-
-        return self._default_slot().view
-
-    def _run_program(
-        self,
-        *,
-        acquire: Callable[..., T_Raw],
-        rounds: int,
-        raw2signal_fn: Callable[[T_Raw], SignalArray] | None,
-        default_raw2signal_fn: Callable[[Any], SignalArray],
-        options: AcquireOptions,
-        acquire_kwargs: dict[str, object],
-    ) -> SignalArray:
-        retry = options.retry
-        if retry < 0:
-            raise ValueError("retry must be non-negative")
-        self._schedule.ensure_active()
-
-        slot = self._default_slot()
-        signal_fn = self._resolve_raw2signal_fn(raw2signal_fn, default_raw2signal_fn)
-
-        pbar = make_pbar(
-            total=rounds,
-            smoothing=0,
-            desc=options.progress_label,
-            leave=self._resolve_progress_leave(progress_leave=options.progress_leave),
-            disable=rounds == 1,
-        )
-        try:
-            for attempt in range(retry + 1):
-                if self._schedule.check_stop_requested():
-                    break
-                pbar.reset()
-                try:
-                    raw = self._acquire_once(
-                        acquire=acquire,
-                        options=options,
-                        acquire_kwargs=acquire_kwargs,
-                        signal_fn=signal_fn,
-                        slot=slot,
-                        pbar=pbar,
-                    )
-                except KeyboardInterrupt as exc:
-                    self._schedule.mark_interrupted(exc)
-                    break
-                # tolerated: Acquire and round hooks may fail arbitrarily; preserve stop/retry and data.
-                except Exception as exc:  # noqa: BLE001
-                    # The producer reports first-round cancellation with an exception.
-                    cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
-                    if self._schedule.check_stop_requested(exception=cause):
-                        break
-                    if attempt == retry:
-                        self._schedule.mark_failed(exc)
-                        break
-                    continue
-
-                if self._schedule.check_stop_requested():
-                    break
-
-                try:
-                    pbar.set_progress(rounds)
-                    slot.set(signal_fn(raw))
-                except KeyboardInterrupt as exc:
-                    self._schedule.mark_interrupted(exc)
-                # tolerated: Conversion/update callbacks may fail arbitrarily; retain data and the cause.
-                except Exception as exc:  # noqa: BLE001
-                    self._schedule.mark_failed(exc)
-                break
-        except KeyboardInterrupt as exc:
-            self._schedule.mark_interrupted(exc)
-        finally:
-            pbar.close()
-
-        return slot.view
-
-    def _resolve_raw2signal_fn(
-        self,
-        raw2signal_fn: Callable[[T_Raw], SignalArray] | None,
-        default_fn: Callable[[Any], SignalArray],
-    ) -> Callable[[Any], SignalArray]:
-        signal_fn = raw2signal_fn if raw2signal_fn is not None else self._raw2signal_fn
-        if signal_fn is None:
-            return default_fn
-        return signal_fn
-
-    def _ensure_modules(self) -> None:
-        if not self._modules:
-            raise ValueError("ProgramBuilder requires explicit modules")
-
-    def _isolated_cfg(self) -> ProgramV2Cfg:
-        return deepcopy(_program_cfg_from(self._cfg))
-
-    def _build_program(self, cfg: ProgramV2Cfg) -> T_Program:
-        program_kwargs = dict(self._program_kwargs)
-        program_kwargs["modules"] = deepcopy(self._modules)
-        return self._program_cls(
-            self._soccfg,
-            cfg,
-            sweep=deepcopy(self._sweeps) or None,
-            **program_kwargs,
-        )
-
-    def _acquire_once(
-        self,
-        *,
-        acquire: Callable[..., T_Raw],
-        options: AcquireOptions,
-        acquire_kwargs: dict[str, object],
-        signal_fn: Callable[[T_Raw], SignalArray],
-        slot: SignalSlot,
-        pbar: BaseProgressBar,
-    ) -> T_Raw:
-        acquire_cancel_flag = AcquireCancelFlag(self._schedule.stop)
-
-        def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
-            pbar.set_progress(ir)
-            slot.set(signal_fn(raw))
-            if options.stop_condition is not None and options.stop_condition():
-                cancel_flag.set()
-
-        return acquire(
-            self._soc,
-            progress=options.progress,
-            round_hook=update_hook,
-            cancel_flag=acquire_cancel_flag,
-            **dict(acquire_kwargs),
-        )
-
-    def _rounds_from(self, program: ProgramProtocol[Any, Any]) -> int:
-        rounds = program.cfg_model.rounds
-        if rounds < 1:
-            raise ValueError("Program cfg.rounds must be positive")
-        return rounds
-
-    def _resolve_progress_leave(self, *, progress_leave: bool | None) -> bool:
-        if progress_leave is not None:
-            return progress_leave
-        return not isinstance(self._owner, ScheduleStep)
-
-    def _default_slot(self) -> SignalSlot:
-        return self._schedule.default_slot_for(self._owner)
-
-
-def _program_cfg_from(cfg: object) -> ProgramV2Cfg:
-    if isinstance(cfg, ProgramV2Cfg):
-        return cfg
-    program_fields = ProgramV2Cfg.model_fields
-    if isinstance(cfg, Mapping):
-        data = {key: cfg[key] for key in program_fields if key in cfg}
-    else:
-        data = {key: getattr(cfg, key) for key in program_fields if hasattr(cfg, key)}
-    if not data:
-        raise TypeError(
-            "ProgramBuilder cfg must be ProgramV2Cfg or provide at least one "
-            "ProgramV2Cfg field; pass ProgramV2Cfg() for default program runtime "
-            "settings"
-        )
-    return ProgramV2Cfg.model_validate(data)
 
 
 def _make_nan_array(shape: int | Sequence[int], dtype: DTypeLike) -> NDArray[Any]:

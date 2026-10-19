@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
-    AcquireOptions,
     Schedule,
     SignalBuffer,
 )
