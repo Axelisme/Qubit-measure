@@ -144,7 +144,12 @@ def predictor_params(request: MigrationRequest) -> JsonObject:
 @pytest.fixture
 def analysis_sections() -> JsonObject:
     return {
-        "dispersive": {"g": None, "bare_rf": 5.1, "timestamp": "unproven", "future": [1, None]},
+        "dispersive": {
+            "g": None,
+            "bare_rf": 5.1,
+            "timestamp": "unproven",
+            "future": [1, None],
+        },
         "fluxdep_fit": {"plot_transitions": {"r_f": 5.2, "0.1": [1, 2]}},
         "t1_curve_fit": {
             "params": {"Q_cap": None, "Temp": 0.04},
@@ -172,7 +177,10 @@ def test_analysis_files_publish_typed_unknowns_and_keep_original_sections(
         owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
         loaded = getattr(owner, f"load_{kind}_file")(file)
         assert loaded.source.run_id is None
-        assert any(row.new_file == file and row.action == "value" for row in report.key_mappings)
+        assert any(
+            row.new_file == file and row.action == "value"
+            for row in report.key_mappings
+        )
         if kind == "dispersive":
             assert entry.dispersive_path == file.parent
             assert loaded.params.g is None
@@ -180,7 +188,9 @@ def test_analysis_files_publish_typed_unknowns_and_keep_original_sections(
             assert loaded.params.plot_transitions.r_f == 5.2
             assert loaded.params.plot_transitions.model_extra == {"0.1": [1, 2]}
             assert loaded.source.created_at is None
-            assert any(item.location == "dispersive.timestamp" for item in report.pending)
+            assert any(
+                item.location == "dispersive.timestamp" for item in report.pending
+            )
         else:
             assert entry.t1_curve_path == file.parent
             assert loaded.params.params.Q_cap is None
@@ -207,28 +217,48 @@ def test_transition_only_fit_publishes_dispersive_without_inventing_fit_values(
     assert loaded.params.plot_transitions.r_f == 5.2
 
 
-@pytest.mark.parametrize(("section", "value", "kind"), [
-    ("dispersive", {"g": True}, "dispersive"),
-    ("t1_curve_fit", {"params": {"Temp": None}, "free": ["Q_cap"]}, "t1_curve"),
-])
+@pytest.mark.parametrize(
+    ("section", "value", "kind"),
+    [
+        ("dispersive", {"g": True}, "dispersive"),
+        ("t1_curve_fit", {"params": {"Temp": None}, "free": ["Q_cap"]}, "t1_curve"),
+    ],
+)
 def test_invalid_analysis_content_stays_located_pending(
-    request_data: MigrationRequest, analysis_mapping: MigrationMapping,
-    section: str, value: JsonObject, kind: str,
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    section: str,
+    value: JsonObject,
+    kind: str,
 ) -> None:
     write_params(request_data, {section: value})
     report = migrate(request_data, analysis_mapping)
     file = open_entry(request_data).result_path / kind / "Qlegacy.json"
-    assert any(row.old_key == section and row.new_file == file and row.action == "pending"
-               and "validation" in row.reason.lower() for row in report.key_mappings)
-    assert document_value(snapshot(open_entry(request_data).setup), f"Qlegacy.ext.legacy_params.{section}") == value
+    assert any(
+        row.old_key == section
+        and row.new_file == file
+        and row.action == "pending"
+        and "validation" in row.reason.lower()
+        for row in report.key_mappings
+    )
+    assert (
+        document_value(
+            snapshot(open_entry(request_data).setup),
+            f"Qlegacy.ext.legacy_params.{section}",
+        )
+        == value
+    )
 
 
 @pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
 @pytest.mark.parametrize("conflict", [False, True])
 def test_analysis_file_resume_validates_unfinished_and_preserves_completed_edits(
-    request_data: MigrationRequest, analysis_mapping: MigrationMapping,
-    analysis_sections: JsonObject, monkeypatch: pytest.MonkeyPatch,
-    kind: str, conflict: bool,
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    analysis_sections: JsonObject,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    conflict: bool,
 ) -> None:
     source = write_params(request_data, analysis_sections)
     destination = request_data.results_root / request_data.name
@@ -264,15 +294,19 @@ def test_analysis_file_resume_validates_unfinished_and_preserves_completed_edits
 
 
 def test_analysis_dry_run_reports_the_same_files_without_writes(
-    request_data: MigrationRequest, analysis_mapping: MigrationMapping,
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
     analysis_sections: JsonObject,
 ) -> None:
     write_params(request_data, analysis_sections)
     dry = migrate(replace(request_data, dry_run=True), analysis_mapping)
     destination = request_data.results_root / request_data.name
     for kind in ("dispersive", "t1_curve"):
-        assert any(row.new_file == destination / kind / "Qlegacy.json" and row.action == "value"
-                   for row in dry.key_mappings)
+        assert any(
+            row.new_file == destination / kind / "Qlegacy.json"
+            and row.action == "value"
+            for row in dry.key_mappings
+        )
     assert not destination.exists()
     assert not backup_path(request_data).exists()
 

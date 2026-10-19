@@ -54,7 +54,8 @@ def test_owner_roundtrip_retains_unknowns_without_creating_provenance(
         assert loaded.params.g is None
         assert loaded.params.plot_transitions.r_f is None
         assert loaded.params.plot_transitions.model_extra == {
-            "0.1": [1, 2], "future": {"x": True}
+            "0.1": [1, 2],
+            "future": {"x": True},
         }
     else:
         assert loaded.params.params.Q_cap is None
@@ -90,7 +91,7 @@ def test_owner_rejects_invalid_envelope(
         raw["source"] = {**source, path[1]: bad}
     file = tmp_path / "bad.json"
     file.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=path[0]):
         getattr(owner, f"load_{kind}_file")(file)
 
 
@@ -116,7 +117,7 @@ def test_owner_rejects_bad_content(
     raw["params"] = params
     file = tmp_path / "bad.json"
     file.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="params"):
         getattr(owner, f"load_{kind}_file")(file)
 
 
@@ -130,7 +131,7 @@ def test_save_revalidates_and_retains_existing_file_on_invalid_input(
     loaded = getattr(owner, f"load_{kind}_file")(file)
     invalid = loaded.model_copy(update={"version": True})
     before = file.read_bytes()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="version"):
         getattr(owner, f"save_{kind}_file")(file, invalid)
     assert file.read_bytes() == before
 
@@ -139,7 +140,10 @@ def test_save_revalidates_and_retains_existing_file_on_invalid_input(
 def test_owner_preserves_proven_source_text(tmp_path: Path, kind: str) -> None:
     owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
     raw = document(kind)
-    raw["source"] = {"run_id": "historical-run", "created_at": "2020-07-07T16:30:00+08:00"}
+    raw["source"] = {
+        "run_id": "historical-run",
+        "created_at": "2020-07-07T16:30:00+08:00",
+    }
     file = tmp_path / "fit.json"
     file.write_text(json.dumps(raw), encoding="utf-8")
     loaded = getattr(owner, f"load_{kind}_file")(file)
