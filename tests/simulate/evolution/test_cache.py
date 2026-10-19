@@ -3,7 +3,11 @@
 from dataclasses import dataclass
 
 import pytest
-from zcu_tools.simulate.evolution.cache import PrepareCache, PreparedPayload
+from zcu_tools.simulate.evolution.cache import (
+    RESIDENT_METADATA_BYTES,
+    PrepareCache,
+    PreparedPayload,
+)
 
 from ._engine import Payload
 
@@ -36,7 +40,8 @@ def payload(counts: AllocationCounts, size: int, *keys: bytes) -> PreparedPayloa
 
 
 def test_repeated_admission_and_oversize_preserve_resident_budget():
-    cache = PrepareCache(10)
+    # Include metadata for the intended resident working set.
+    cache = PrepareCache(10 + RESIDENT_METADATA_BYTES)
     counts = AllocationCounts()
     shared = payload(counts, 10, b"a", b"b")
     cache.add(SPACE, shared)
@@ -57,7 +62,8 @@ def test_repeated_admission_and_oversize_preserve_resident_budget():
 
 
 def test_rejected_priority_and_whole_batch_lru_keep_exact_array_charges():
-    cache = PrepareCache(30)
+    # Include metadata for the intended resident working set.
+    cache = PrepareCache(30 + 3 * RESIDENT_METADATA_BYTES)
     counts = AllocationCounts()
     first = payload(counts, 10, b"a", b"shared")
     failed = payload(counts, 5, b"failed")
@@ -77,7 +83,8 @@ def test_rejected_priority_and_whole_batch_lru_keep_exact_array_charges():
 
 
 def test_model_only_payloads_persist_in_matching_namespace():
-    cache = PrepareCache(10)
+    # Include metadata for the intended resident working set.
+    cache = PrepareCache(10 + RESIDENT_METADATA_BYTES)
     counts = AllocationCounts()
     prepared = payload(counts, 10, b"a")
     cache.add(SPACE, prepared)
@@ -98,7 +105,8 @@ def test_cache_constructor_rejects_noninteger_or_negative_limits(value):
 
 @pytest.mark.parametrize("value", [False, True, -1, 1.5])
 def test_invalid_byte_charges_preserve_resident_ownership(value):
-    cache = PrepareCache(10)
+    # Include metadata for the intended resident working set.
+    cache = PrepareCache(10 + RESIDENT_METADATA_BYTES)
     counts = AllocationCounts()
     cache.add(SPACE, payload(counts, 10, b"resident"))
     before = cache.find(SPACE, {b"resident"})
@@ -110,7 +118,8 @@ def test_invalid_byte_charges_preserve_resident_ownership(value):
 
 
 def test_invalid_charges_and_conflicting_allocation_metadata_fail_before_eviction():
-    cache = PrepareCache(10)
+    # Include metadata for the intended resident working set.
+    cache = PrepareCache(10 + RESIDENT_METADATA_BYTES)
     counts = AllocationCounts()
     whole = payload(counts, 10, b"a")
     cache.add(SPACE, whole)
@@ -126,7 +135,8 @@ def test_invalid_charges_and_conflicting_allocation_metadata_fail_before_evictio
 
 
 def test_cache_admits_singleton_whole_allocation_and_preserves_active_reference():
-    cache = PrepareCache(32)
+    # Include metadata for the intended resident working set.
+    cache = PrepareCache(32 + RESIDENT_METADATA_BYTES)
     namespace = ("synthetic", "source", 0.001)
     singleton = PreparedPayload(Payload(2), (b"one",))
     cache.add(namespace, singleton)
@@ -142,7 +152,8 @@ def test_cache_admits_singleton_whole_allocation_and_preserves_active_reference(
 
 
 def test_exact_extension_replaces_whole_charge_without_invalidating_borrowers():
-    cache = PrepareCache(22)
+    # Include metadata for the intended resident working set.
+    cache = PrepareCache(22 + 2 * RESIDENT_METADATA_BYTES)
     counts = AllocationCounts()
     old = payload(counts, 10, b"a")
     other = payload(counts, 10, b"b")
@@ -163,13 +174,16 @@ def test_exact_extension_replaces_whole_charge_without_invalidating_borrowers():
         replace_allocation(OTHER_SPACE, extended, payload(counts, 12, b"a"))
     with pytest.raises(ValueError, match="nonnegative"):
         replace_allocation(SPACE, extended, payload(counts, -1, b"a"))
-    replace_allocation(SPACE, extended, payload(counts, 23, b"a"))
+    replace_allocation(
+        SPACE, extended, payload(counts, 23 + RESIDENT_METADATA_BYTES, b"a")
+    )
     assert cache.find(SPACE, {b"a"}) == [extended]
     assert cache.bytes == 22
 
 
 def test_rejected_extension_grows_only_into_spare_capacity():
-    cache = PrepareCache(22)
+    # Include metadata for the intended resident working set.
+    cache = PrepareCache(22 + 2 * RESIDENT_METADATA_BYTES)
     counts = AllocationCounts()
     old = payload(counts, 10, b"a")
     other = payload(counts, 10, b"b")
