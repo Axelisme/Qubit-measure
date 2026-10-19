@@ -30,7 +30,7 @@ Setup 工具只編排既有 GUI owners。`simulation_initialize` 走現行 coord
 
 RPC `device.setup(name, cfg)` 只收完整 Info constructor cfg，不合併 cached 舊值。RPC 以既有 Info 的 model class 驗 required、extra、validator 和 limits；connected admission 由 DeviceService 擁有。YOKO mode 必填，value_unit 可省略，由 Info 依 mode 產生並保存，顯式矛盾拒絕。RPC 保非同步 operation handle。Raw caller 明確讀 snapshot、改完整 cfg、setup、wait，再讀 snapshot，不新增 `device.set_value` RPC。
 
-固定 MCP `device_setup(name, cfg)` 接 partial patch。它讀 before Info，合併完整候選後送一次 RPC。YOKO patch 含 value 時，caller 必須同時明填 value_unit，不借 before unit 或 constructor 推導代替意圖。只改 output／rampstep 不需 unit。其他 model 規則仍由 RPC 驗證，不在 MCP 建第二份 validator。
+固定 MCP `device_setup(name, cfg)` 接 partial patch。它讀 before Info，合併完整候選後送一次 RPC。Before Info 有 value_unit 欄位且 patch 含 value 時，caller 必須同時明填 value_unit，不借 before unit 或 constructor 推導代替意圖。這項規則依 Info 欄位判斷，不比對儀器名稱，FakeDevice 同樣適用。只改 output／rampstep 不需 unit。其他 model 規則仍由 RPC 驗證，不在 MCP 建第二份 validator。
 
 工具沒有 timeout 參數，最多等待 300 秒，逾時回 running 與已知 handle，不取消，caller 用 `wait(op)` 續等。回覆保留 pre_read、start、wait、post_read、native operation 和 before／after。Requested.cfg 在 before 讀取並完成合併前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時 pre_read failed；有 Info 但 disconnected 時沿 service 回 start failed，保完整候選與 before，after 為 null。工具不做 verification、單位換算、重連、retry 或 rollback。
 

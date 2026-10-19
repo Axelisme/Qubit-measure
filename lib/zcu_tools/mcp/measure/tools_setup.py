@@ -202,8 +202,9 @@ def device_setup(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
     """Apply a partial Info cfg once to name on ctx's already connected GUI.
 
     arguments requires a nonempty name and cfg object, with no timeout argument.
-    Before Info is read and merged with cfg. A YOKO patch containing value must
-    explicitly contain value_unit; a before unit never supplies caller intent.
+    Before Info is read and merged with cfg. If Info stores value_unit, a patch
+    containing value must explicitly contain value_unit; the before unit never
+    supplies caller intent.
     All model-required, extra, mode/unit and limit validation belongs to the RPC
     Info model. Connected admission belongs to the GUI device service.
 
@@ -402,12 +403,8 @@ def _read_device(
     info = snapshot.get("info")
     if info is None:
         raise GuiRpcError("before snapshot has no Info to merge")
-    if (
-        snapshot.get("type_name") == "YOKOGS200"
-        and "value" in patch
-        and "value_unit" not in patch
-    ):
-        raise GuiRpcError("YOKO value patch requires explicit value_unit")
+    if "value_unit" in info and "value" in patch and "value_unit" not in patch:
+        raise GuiRpcError("value patch requires explicit value_unit")
     requested["cfg"] = {**deepcopy(info), **deepcopy(patch)}
 
 
@@ -422,7 +419,8 @@ def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
         "device_setup": {
             "handler": partial(device_setup, ctx),
             "description": "Merge partial cfg with before Info and submit complete cfg once. "
-            "YOKO value patches require explicit value_unit. RPC Info owns model validation; "
+            "When Info stores value_unit, value patches require explicit value_unit. "
+            "RPC Info owns model validation; "
             "GUI service owns connected admission. Wait up to 300 seconds, without cancellation, "
             "conversion, retry or rollback. Inspect stages, native operation and cached snapshots.",
             "inputSchema": {

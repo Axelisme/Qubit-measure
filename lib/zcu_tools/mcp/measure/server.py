@@ -101,8 +101,9 @@ data root. Open a prebuilt isolated entry with entry.open(name=...), then select
 a point explicitly. Entry names remain single path segments.
 device_setup(name, cfg) accepts a partial Info patch, reads before, merges full
 cfg, submits once and waits at most 300 seconds. It has no timeout argument.
-YOKO value patches require caller-supplied value_unit; output/rampstep-only
-patches do not. RPC Info validators own field/limit/mode-unit validation.
+When before Info stores value_unit, value patches require caller-supplied
+value_unit; output/rampstep-only patches do not. RPC Info validators own
+field/limit/mode-unit validation.
 For asynchronous setup or a shorter wait, read device.snapshot, build complete
 Info cfg, call device.setup(name, cfg), wait(op), then read device.snapshot.
 Raw RPC requires every Info model-required field and never merges cached values.

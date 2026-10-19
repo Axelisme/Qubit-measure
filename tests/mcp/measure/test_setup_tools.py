@@ -606,9 +606,7 @@ def setup_calls(client: MeasureClient) -> list[dict[str, Any]]:
 
 
 @pytest.mark.parametrize("kind", ["current", "voltage", "fake"])
-def test_device_setup_value_requires_patch_unit_before_rpc(
-    complete_setup_client, kind
-):
+def test_device_setup_value_requires_patch_unit_before_rpc(complete_setup_client, kind):
     client, gui = complete_setup_client
     if kind != "fake":
         set_yoko(gui, kind)
@@ -718,15 +716,16 @@ def test_device_setup_retains_native_validation_rejection(
 
 def test_device_setup_unitless_info_allows_value_patch(complete_setup_client):
     client, gui = complete_setup_client
+    info = {"type": "SyntheticScalar", "address": "", "value": 0.25}
     gui.device = {
         "name": "fake_flux",
         "type_name": "SyntheticScalar",
         "status": "connected",
         "unit": "none",
-        "info": {"type": "SyntheticScalar", "address": "", "value": 0.25},
+        "info": info,
         "fields": [{"name": "value", "settable": True, "type": "float"}],
     }
-    candidate = {**gui.device["info"], "value": 1}
+    candidate = {**info, "value": 1}
     result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 1}})
     assert not result.is_error
     assert result.data["after"]["device"]["info"] == candidate
