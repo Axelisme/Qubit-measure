@@ -28,23 +28,14 @@ from pydantic import BaseModel, JsonValue
 
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
-    BathResetSpec,
     ConfigBase,
-    ConstWaveformCfg,
-    CosineWaveformCfg,
-    DragWaveformCfg,
-    FlatTopWaveformSpec,
-    GaussWaveformCfg,
     ModuleSpec,
-    MuxReadoutSpec,
-    NoneResetCfg,
-    PulseReadoutSpec,
-    PulseResetSpec,
-    PulseSpec,
     Template,
     TemplateDef,
-    TwoPulseResetSpec,
     WaveformSpec,
+    concrete_spec_types,
+    is_module_spec_type,
+    is_waveform_spec_type,
 )
 from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
 from zcu_tools.gui.form import (
@@ -66,24 +57,6 @@ type LibraryKind = Literal["module", "waveform"]
 # KeyError/ValueError for a missing, taken or malformed root, OSError for
 # storage. A dialog that reports a rejected write catches exactly these.
 LIBRARY_WRITE_ERRORS = (ExpectedError, KeyError, ValueError, OSError)
-
-_MODULE_SPECS = (
-    PulseSpec,
-    PulseReadoutSpec,
-    MuxReadoutSpec,
-    NoneResetCfg,
-    PulseResetSpec,
-    TwoPulseResetSpec,
-    BathResetSpec,
-)
-_WAVEFORM_SPECS = (
-    ConstWaveformCfg,
-    CosineWaveformCfg,
-    GaussWaveformCfg,
-    DragWaveformCfg,
-    ArbWaveformCfg,
-    FlatTopWaveformSpec,
-)
 
 
 class LibraryEntryInvalid(InvalidInputError):
@@ -257,9 +230,9 @@ def library_entry_kind(spec_type: type[ConfigBase]) -> LibraryKind:
     or waveform Spec, such as a TemplateDef's module. Any other class raises
     TypeError.
     """
-    if issubclass(spec_type, _MODULE_SPECS):
+    if is_module_spec_type(spec_type):
         return "module"
-    if issubclass(spec_type, _WAVEFORM_SPECS):
+    if is_waveform_spec_type(spec_type):
         return "waveform"
     raise TypeError(
         "Template must define a concrete persistent module or waveform Spec"
@@ -282,11 +255,11 @@ def new_library_entry(
     as an opened entry. The caller owns its state and commits explicitly.
     """
     spec_type = catalog[template.id].module
-    if issubclass(spec_type, _MODULE_SPECS):
+    if is_module_spec_type(spec_type):
         return ModuleEntryForm.from_template(
             spec_type, template, catalog, parameters, arb_names=arb_names
         )
-    if issubclass(spec_type, _WAVEFORM_SPECS):
+    if is_waveform_spec_type(spec_type):
         return WaveformEntryForm.from_template(
             spec_type, template, catalog, parameters, arb_names=arb_names
         )
@@ -365,7 +338,10 @@ def _arb_data_paths(
     for name, info in model.model_fields.items():
         for child in _model_members(info.annotation):
             child_path = (*prefix, name)
-            if child in _MODULE_SPECS or child in _WAVEFORM_SPECS:
+            if child in (
+                *concrete_spec_types(ModuleSpec),
+                *concrete_spec_types(WaveformSpec),
+            ):
                 # Generated inline Spec children live under a module wrapper.
                 child_path = (*child_path, "module")
             paths.extend(_arb_data_paths(child, child_path))

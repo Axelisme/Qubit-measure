@@ -1,6 +1,6 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-19，初值與 Form 唯讀宣告
+**Last updated:** 2026-10-20，持久 Spec family 型別判定
 
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
@@ -12,6 +12,7 @@ Caller 從 package root import 公開名稱。
 - `Range.start`／`stop` 與 `Range.between` 的端點接受 `None`。它表示 Form 中可見空白且必填的端點，不是 0／1 或可執行預設。即使對應 input key 缺席，生成 model 仍要求操作員填入數字才能提交。另一端點與 `expts` 不受影響。Literal 與 `Expr` 端點沿用既有語意。
 - `WaveformSamples` 由 core.waveform_format 擁有。它攜帶一次 asset 讀取的 reference time axis 與 normalized I/Q samples，不從 cfg_model re-export。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。
+- `spec_types` 集中持久 Spec union 的展開。`concrete_spec_types` 供 TemplateDef 檢查宣告中的具體型別；`is_module_spec_type`／`is_waveform_spec_type` 供 library consumer 判定 family，接受已宣告型別及其 subclass。
 - `ModuleCfg`／`WaveformCfg` 表示已展開的執行參數。它們只提供欄位驗證與 `set_param`，不建立 program runtime 物件。
 - `readout/pulse` 獨立持有平鋪的 generator／ADC 欄位與 waveform。唯一 `freq` 同時供 generator／ADC 使用，waveform 仍可引用 key。Readout 不引用 Pulse，也沒有 DirectReadout；Reset 的 Pulse 引用保持不變。Pulse cfg 不保存 `ro_ch`，ADC matching 由 program runtime 提供。
 - `readout/mux` 的持久 Spec 與數字 cfg 共用驗證。Module 明填 generator、Nyquist zone 與 mixer；有序的 1 至 8 筆 tones 各自保存頻率、gain、phase 與 logical ADC channel。每筆 tone 的選填 label 預設空字串，隨 Spec、cfg 與 library 保存，只作顯示且可重複。Tone 序號定義資料軸，program 不解讀 label。時間使用共用 const duration 與 ADC window，不含 waveform、逐 tone 引用或 sweep。整個 module 可透過固定 snapshot 的 key materialize；`set_param` 拒絕更新，caller 必須重建數字 cfg 與 program。

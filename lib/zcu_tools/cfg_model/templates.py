@@ -4,10 +4,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from string import Formatter
 from types import MappingProxyType
-from typing import get_args
 
 from .base import ConfigBase
 from .module import ModuleSpec
+from .spec_types import concrete_spec_types
 from .template_nodes import Expr, Slot, TemplateSeed
 from .waveform import WaveformSpec
 
@@ -29,18 +29,6 @@ def expand_path(
         return path.format(qubit=qubit, resonator=resonator)
     except (KeyError, IndexError, ValueError) as exc:
         raise ValueError(f"Invalid template placeholder in {path!r}: {exc}") from exc
-
-
-def _spec_members(annotation: object) -> tuple[type[ConfigBase], ...]:
-    # Type aliases may resolve to a concrete Spec rather than a union.
-    alias_value: object = getattr(annotation, "__value__", annotation)
-    if isinstance(alias_value, type) and issubclass(alias_value, ConfigBase):
-        return (alias_value,)
-    return tuple(
-        member
-        for argument in get_args(alias_value)
-        for member in _spec_members(argument)
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +56,8 @@ class TemplateDef:
 
     def __post_init__(self) -> None:
         if self.module not in (
-            *_spec_members(ModuleSpec),
-            *_spec_members(WaveformSpec),
+            *concrete_spec_types(ModuleSpec),
+            *concrete_spec_types(WaveformSpec),
         ):
             raise TypeError("Template module must be a concrete persistent Spec type")
         object.__setattr__(self, "seeds", MappingProxyType(dict(self.seeds)))

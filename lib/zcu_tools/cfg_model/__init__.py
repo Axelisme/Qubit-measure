@@ -41,6 +41,11 @@ from .module import (
     TwoPulseResetSpec,
 )
 from .references import remap_module_references, remap_waveform_references
+from .spec_types import (
+    concrete_spec_types,
+    is_module_spec_type,
+    is_waveform_spec_type,
+)
 from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
 from .templates import TemplateDef, expand_path
 from .waveform import (
@@ -71,6 +76,9 @@ __all__ = [
     "TemplateLiteral",
     "TemplateDef",
     "TemplateSeed",
+    "concrete_spec_types",
+    "is_module_spec_type",
+    "is_waveform_spec_type",
     "expand_path",
     "FieldMeta",
     "get_field_meta",
