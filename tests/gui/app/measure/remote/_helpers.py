@@ -314,6 +314,8 @@ def _read_matching_frame(
             if not line:
                 continue
             msg = json.loads(line.decode("utf-8"))
+            if not isinstance(msg, dict):
+                raise ValueError("NDJSON frame must be a JSON object")
             if accept(msg):
                 return msg
             inbox.append(msg)
@@ -332,9 +334,10 @@ def recv_until(
     accept: Callable[[dict[str, object]], bool],
     timeout_s: float = 30.0,
 ) -> dict[str, Any]:
-    """Wait for the first NDJSON line where ``accept(msg)`` is True.
+    """Wait for the first NDJSON object where ``accept(msg)`` is True.
 
-    Lines that ``accept`` rejects are **parked** in a per-socket inbox so a
+    Non-object frames raise ValueError before reaching the matcher or inbox.
+    Objects that ``accept`` rejects are **parked** in a per-socket inbox so a
     later ``recv_*`` call can still observe them — this is important when
     a test waits for a reply that may arrive interleaved with event pushes,
     or vice versa. Runs the Qt owner loop while waiting for socket readiness so
@@ -397,10 +400,13 @@ def reset_inbox(sock: socket.socket) -> None:
 def recv_response(
     sock: socket.socket, rid: str, timeout_s: float = 30.0
 ) -> dict[str, Any]:
-    """Wait for a NDJSON response with ``id == rid``; drops pushes."""
+    """Wait for ``id == rid``; park nonmatches for later ``recv_*`` calls.
+
+    Non-object frames raise ValueError.
+    """
     return recv_until(
         sock,
-        lambda msg: isinstance(msg, dict) and msg.get("id") == rid,
+        lambda msg: msg.get("id") == rid,
         timeout_s,
     )
 
@@ -408,10 +414,13 @@ def recv_response(
 def recv_push(
     sock: socket.socket, event: str, timeout_s: float = 30.0
 ) -> dict[str, Any]:
-    """Wait for a push line whose ``event`` matches; drops replies."""
+    """Wait for the matching ``event``; park nonmatches for later ``recv_*`` calls.
+
+    Non-object frames raise ValueError.
+    """
     return recv_until(
         sock,
-        lambda msg: isinstance(msg, dict) and msg.get("event") == event,
+        lambda msg: msg.get("event") == event,
         timeout_s,
     )
 
