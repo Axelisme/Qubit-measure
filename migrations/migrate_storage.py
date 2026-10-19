@@ -58,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backup-parent",
         type=Path,
-        help="External parent for <name>-backup (default: checkout parent)",
+        help="External parent for <repo-name>-backup (default: checkout parent)",
     )
     parser.add_argument("--run-evidence", type=Path)
     return parser

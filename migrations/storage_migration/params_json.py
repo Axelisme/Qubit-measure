@@ -16,6 +16,7 @@ from zcu_tools.resources.entry import (
 )
 
 from .analysis_files import convert_analysis_files, proven_created_at
+from .backup import backup_source_path
 from .errors import MigrationInputError
 from .models import KeyMappingItem, MigrationMapping
 from .paths import contained_path
@@ -164,9 +165,7 @@ def _project_fit(
     created_at = proven_created_at(fit.get("timestamp"))
     backup = session.manifest.report.backup_path
     original = (
-        backup
-        / "result"
-        / source.relative_to(session.manifest.report.source.result_path)
+        backup_source_path(backup, session.manifest.report.source, source)
         if backup is not None
         else source
     )

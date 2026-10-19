@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-20，exps points、entry predictors 與來源清理
+**Last updated:** 2026-10-20，repo 平行備份與完成報告
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
@@ -19,8 +19,9 @@
 - Native 的 `labber_path` 保存相對 entry Database 根的原檔保存路徑，例如 `Labber/2025/10/scan.hdf5`。`Instrument config` 透過 datafile owner 的唯讀 codec 轉為 device_snapshot，只用舊檔中的值。不能表示的 snapshot 列 `device snapshot pending`，該 run snapshot 為 None，但量測資料仍轉 native，原設定留在保存的 Labber。
 - Native publication 與驗證完成後才搬移對應 Labber。搬移先複製、驗證雜湊，再刪來源。Source_removed 只驗證目的 hash，舊位置重用不改既有 run，也不刪新檔。缺歷史證據時不產生 native 或逐檔搬移，只列 pending，不猜名稱或補量測時間。兩部分都完成後，這些舊檔隨來源清理，只保留在外部備份。
 - 新 entry 可與舊資料共用 result／Database root，只要目的與本次兩個舊來源樹互不包含。目的已存在就拒絕，不覆寫其他 entry；report 也不得寫入本次來源樹。
-- 正式執行在建立 entry 前完整複製本次舊 result 與 Database 到 repo 外的 `<name>-backup`。`backup_parent`／CLI `--backup-parent` 指定外部上層，預設為工具 checkout 的上層。`repo_root`／`--repo-root` 可明示被保護的 checkout。備份內 `result/` 與 `Database/` 保留原相對路徑與空目錄，`sha256.json` 列出每檔 SHA256。既有備份目錄、repo 內或與來源／目的重疊的路徑一律拒絕。Symlink 與非一般檔案不支援，拒絕後不進入遷移。
-- `backup.py` 擁有完整複製、清單驗證與清理。Manifest 綁定清單 SHA256 及來源完整 hashes；每次 resume 驗證既有備份，不重做。已搬移或已清理的來源不必存在。未完成的備份不授權任何遷移；首次備份之後、entry 建立之前若中斷，須人工核對並移走該備份才可重新開始，工具不認領既有目錄。
+- 正式執行在建立 entry 前完整備份兩棵來源樹。預設根為 `<repo_root.parent>/<repo_root.name>-backup/`，多個 entry 共用這個 repo 外目錄。`backup_parent`／CLI `--backup-parent` 可指定其他外部上層。`repo_root`／`--repo-root` 指定被保護的 checkout，省略時採工具 checkout。來源固定鏡像到 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`，包括空目錄。自訂來源根也使用這兩個邏輯鏡像，manifest 保留實際根路徑。允許共用備份根及其他 chip/qubit 資料已存在，但本次任一鏡像或 records 目錄已存在就拒絕，不採納、不覆寫。備份不得在 repo 內、包住來源或與目的重疊。備份路徑的 symlink、來源內 symlink 與非一般檔案都會阻擋遷移。
+- 本次 hash 清單位於 `migration-records/<chip>/<qubit>/result.sha256` 與 `Database.sha256`。每份為 typed JSON，記錄完整邏輯鏡像相對路徑、逐檔 SHA256 與目錄。自動報告在同目錄的 `migration-report-<UTC-date>.json`，日期在首次執行固定，resume 沿用 manifest 記錄的路徑。明填 `report_path`／`--report` 可選獨立外部檔，但不能寫入備份的 result／Database 鏡像。完成清理後另存一份 `result/<entry>/records/migration-report-<date>.json`，manifest 仍在該 entry 的 `records/migration-state.json`。
+- `backup.py` 擁有鏡像位置、完整複製、清單驗證與清理。Manifest 綁定兩份清單的 SHA256 及來源完整 hashes。每次 resume 只驗證本次鏡像，不重做備份，也不要求其他 chip/qubit 的內容固定。已搬移或已清理的來源不必存在。未完成的備份不授權遷移。首次備份之後、entry 建立之前若中斷，須人工核對本次鏡像與 records 才可重新開始。工具不認領既有目錄，也不刪共用根或其他備份。舊每-entry 備份不提供相容讀取或自動搬移。
 - Parameters 與 data 都完成、無未完成 publication、無 `point figures` 暫待項且無 failure 後才清理。本次舊 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/` 會刪除。永久 pending 可留下，但報告位置改指向備份。未知樣品、圖片與 workflow 資產副本不是正常 runtime 資料。
 - 清理前重驗備份與完整來源清單。來源新增、變更或非工具搬移造成的缺檔會拒絕清理。先持久化 `cleaning`，再逐檔核對 hash、刪檔並移除空目錄。中斷後 resume 只收尾清理，允許已刪的備份檔缺席，不重跑轉換。不承諾並行 writer 或掉電交易；來源有其他 writer 時不得執行。Dry-run 只規劃，連備份目錄與清單都不建立。
 - Parameters 將 child point 的 module／waveform 轉成 `cfg_model` 的正式 Spec，透過 `ResultEntry.module_library` 提交 point-local library。Mapping 明示來源 family 與 canonical key，typed reference remap 由 `cfg_model` 擁有。Root library 沒有 point 歸屬，保留 located pending。
