@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-14 — retired fake attachment test notes
+**Last updated:** 2026-10-19，清除過時測試位置
 
 # measure adapter tests
 
@@ -14,4 +14,3 @@ tests只覆蓋至少兩個 adapters 共用的 parameterized mechanics。
 
 `test_lookback.py` 擁有 captured context／formal cfg、complex smoothing 到 predict_offset 的 GUI 投影、具名 fit 與 timeFly writeback。
 `onetone/` 擁有 Freq delay／writeback 與 PowerDep typed SNR 的 GUI 投影。
-Gaussian Fake core 的 canonical／plots observations 在 `tests/experiment/v2/test_fake.py`。
