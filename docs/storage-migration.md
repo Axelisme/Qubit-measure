@@ -2,8 +2,9 @@
 
 本指南把舊 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/` 整理成新 entry。
 範例直接建立同根下的 `result/<name>/` 與 `Database/<name>/`，不必先放另一個 root 再搬回。
-目前 [GUI runtime](../lib/zcu_tools/gui/session/services/build.py) 使用 `result/`，部分 owner／ADR 舊例使用 `results/`，兩者尚待裁決。
-本文維持 `result/` 範例；實際 root 以裁決結果為準。`result_root` 可明確指定其他目錄，名稱本身不決定格式。
+新格式根目錄統一為 `result/`，與 [GUI runtime](../lib/zcu_tools/gui/session/services/build.py) 一致。
+他機已寫入 `results/<name>/` 時，依[根目錄搬移](#將他機已寫入的-results-搬到-result)處理，不必重做遷移。
+`result_root` 可明確指定其他目錄，名稱本身不決定格式。
 也適用於他機應急工具只遷一半的資料，見[部分遷移接手](#從部分遷移的狀態手動接手)。
 本文不要求執行 `migrate_storage`，也不宣稱自動備份、exps discovery 或 cleanup 已可用。
 腳本操作另行補充。舊腳本可能仍限制在整個舊 result root 內寫入，本文不保證其 CLI 已支援同根目的地。
@@ -474,6 +475,98 @@ HDF5 階層與序列化交給 [datafile owner](../lib/zcu_tools/datafile/README.
 無法證明原始日期結構時，改存 preservation，不偽裝 SaveLayout 產物。
 遷移 native 的 `labber_path` 可明示 None，原檔關係由報告保存。
 本流程不手造 acquired/saved/accepted ledger 事件。沒有事件不代表檔案失效，也不能聲稱 GUI ledger 清單會自動出現它。
+
+## 將他機已寫入的 results 搬到 result
+
+已在他機寫入 `results/<name>/` 的完整或部分 entry，只需搬到 `result/<name>/`，不需重遷。
+這是實體目錄搬移，不是 native 格式轉換。不改 entry UUID、point label、metadata 或任何檔案內容，
+也不搬動或修改 `Database/<name>/`。未完成的骨架、隱藏檔、暫存檔、報告與未知檔都一起保全。
+搬完不代表遷移完成，原有 pending 與清理限制仍適用。
+
+先停止 GUI、Notebook、同步程式與其他 writers，取得本次備份與搬移授權。
+以下範例在同一個 Bash shell 依序操作，使用 GNU 工具。換成已確認的絕對路徑與單一路徑段 NAME，
+不含 `/`、`.` 或 `..` 路徑段。WORK 使用 repo 外尚不存在的獨立目錄。
+
+```bash
+set -euo pipefail
+export REPO=/absolute/path/to/Qubit-measure-gui
+export NAME=migrated-Q0
+export WORK=/absolute/path/outside/repo/root-move-review
+export FROM_ROOT="$REPO/results" TO_ROOT="$REPO/result"
+export FROM="$FROM_ROOT/$NAME" TO="$TO_ROOT/$NAME"
+
+# Reject symlinks in both roots, entries, WORK and all parent directories.
+no_symlink_parents() {
+  local path=$1
+  while test "$path" != /; do
+    test ! -L "$path" || return 1
+    path=$(dirname -- "$path")
+  done
+}
+for path in "$FROM" "$TO" "$WORK"; do
+  no_symlink_parents "$path"
+done
+realpath -m -- "$FROM_ROOT" "$TO_ROOT" "$FROM" "$TO" "$WORK"
+test -d "$FROM"
+test ! -e "$TO"
+test ! -L "$TO"
+test ! -e "$WORK"
+test ! -L "$WORK"
+find "$FROM" ! -type d ! -type f -print
+```
+
+預期 realpath 列出已確認的絕對路徑，所有 test exit 0，find 無輸出。
+人工核對兩 root 不相同、不互相包含，來源與目的不重疊。WORK 不在 repo 內，與兩 root 也不互相包含。
+若發現 symlink 或特殊檔，停止並確認保全方式，不跟隨連結搬移。
+**目的已存在就不執行下方命令。** 即使看似空目錄，也先保存兩端完整副本與清單，
+按[部分遷移接手](#從部分遷移的狀態手動接手)逐項比對，只補缺項，不覆蓋或混合整棵目錄。
+來源中若記錄了絕對路徑或工具續跑狀態，另記新舊位置供 owner 確認，不為了搬移改寫原內容。
+
+確認以上條件後，先保存完整副本與相對路徑清單。inventory 包含空目錄、檔案類型與權限，
+hash 清單包含所有普通檔，包括未完成內容。
+
+```bash
+hash_tree() {
+  (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z |
+    xargs -0 -r sha256sum)
+}
+inventory_tree() {
+  (cd "$1" && find . -printf '%y %m %P\0' | LC_ALL=C sort -z)
+}
+mkdir -- "$WORK"
+hash_tree "$FROM" > "$WORK/before.sha256"
+inventory_tree "$FROM" > "$WORK/before.inventory"
+cp -a -- "$FROM" "$WORK/entry-before-move"
+hash_tree "$WORK/entry-before-move" > "$WORK/backup.sha256"
+inventory_tree "$WORK/entry-before-move" > "$WORK/backup.inventory"
+cmp "$WORK/before.sha256" "$WORK/backup.sha256"
+cmp "$WORK/before.inventory" "$WORK/backup.inventory"
+hash_tree "$FROM" > "$WORK/recheck.sha256"
+inventory_tree "$FROM" > "$WORK/recheck.inventory"
+cmp "$WORK/before.sha256" "$WORK/recheck.sha256"
+cmp "$WORK/before.inventory" "$WORK/recheck.inventory"
+
+# Recheck the destination. Keep writers stopped during verification and move.
+no_symlink_parents "$TO"
+mkdir -p -- "$TO_ROOT"
+test ! -e "$TO"
+test ! -L "$TO"
+mv -T --no-clobber -- "$FROM" "$TO"
+test ! -e "$FROM"
+test ! -L "$FROM"
+hash_tree "$TO" > "$WORK/after.sha256"
+inventory_tree "$TO" > "$WORK/after.inventory"
+cmp "$WORK/before.sha256" "$WORK/after.sha256"
+cmp "$WORK/before.inventory" "$WORK/after.inventory"
+printf 'Root move verified: %s\n' "$TO"
+```
+
+預期所有 cmp 無輸出且 exit 0，最後印出 `Root move verified: .../result/<name>`。
+完成判斷是來源 entry 已不存在，目的與搬前的完整 hash、inventory 一致，完整副本仍保留在 WORK。
+記錄搬前後位置、驗證結果與日期，再用明確的 result/Database 根目錄重新開啟 entry，核對原 UUID 與 points。
+不要沿用搬移前已開啟、仍綁舊路徑的物件。原有工具能否 resume 由 owner 確認，不改 manifest 強迫通過。
+任何中斷或核對失敗都停止，不刪來源殘留、目的半份內容或備份，也不自動重跑 mv。
+先保全現況，再走部分接手。不要刪整棵 results root，裡面可能還有其他 entry。
 
 ## 從部分遷移的狀態手動接手
 
