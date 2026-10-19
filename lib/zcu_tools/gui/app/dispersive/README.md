@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12, shared project data-root naming
+**Last updated:** 2026-10-20，分析 project owner 移至 app 層
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -32,7 +32,7 @@ state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Im
 ### 領域各 app 自有（共用機制之上）
 - `event_bus.py`：dispersive 的 payload 型別 + `EventBus`（建在共用 `BaseEventBus` 上）。
 - `remote/service.py`（RemoteControlAdapter）：**subclass 共用 `RemoteControlServiceBase`**（`gui/remote/control_service`），router scaffolding（route / events.* / `_dispatch_on_owner` bare marshal / EventBus subscribe/serialize/broadcast，底層委 `NdjsonRpcEndpoint`）全在 base。dispersive read-only → **零 policy 覆寫**（`_get_bus` 用 base 預設 `ctrl.bus`、serializers 以 payload `type` 為 key），本檔只剩 domain 注入（method registry / serializers / 版本 / `server_name="DispersiveRemoteServer"`）。
-- `ui/error_messages.py`：用共用 `gui/error_messages` framework（`normalize_raw`/`details_tail`/`friendly_from_rules`/`fit_io_redirect`），domain rule（`friendly_io_message` + `_FIT_RULES`）各 app。其餘領域自有。`ProjectDialog` 來自共用 `gui/widgets/project_dialog.py`（`db_label="One-tone dir"`），可用 project root 掃描到的 `result/**/params.json` result scope 選既有 chip/qubit；`ProjectInfo`/`default_*`/`nearest_existing` 在共用 `gui/project.py`（Qt-free）。本目錄不含 app-local project dialog。
+- `ui/error_messages.py`：用共用 `gui/error_messages` framework（`normalize_raw`/`details_tail`/`friendly_from_rules`/`fit_io_redirect`），domain rule（`friendly_io_message` + `_FIT_RULES`）各 app。其餘領域自有。`ProjectDialog`、`ProjectInfo`、`default_*`、result scope discovery 與 project CLI 來自 [`gui.app.analysis_project`](../analysis_project/README.md) 過渡 owner（`db_label="One-tone dir"`），保留既有 chip/qubit 資料流。中立的 `nearest_existing` 直接從 `gui.widgets.file_dialog` 匯入。
 
 ## 計算全走 worker（避免 GUI 卡頓）
 **重計算都經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner.submit`（per-panel，`enter=None`——無 routing/pbar scope）** off-main：preprocess（shared edelay branch + numba local refinement）、predict（tune圖，scqubits）、auto_tune。模式統一：提交的 `work` 純呼 `compute_*`/`predict_*`（讀 State 不寫）並回**純資料 dataclass**（`_TuneData`/PreprocessResult）；`on_done`（主執行緒）唯一 `record_*`（State 寫）+ **畫圖**（worker 從不碰 Qt widget / pyplot，守 ADR-0067 + main-thread State 不變式）。一次只跑一個用按鈕 disable guard（不需 generation 戳記）。
@@ -57,7 +57,7 @@ Worker 只回資料，主執行緒擁有 Figure 與 canvas。Shared runtime 初�
 **State / wire 全程 GHz**（g, bare_rf, bare_rf_seed, freqs）；slider UI 顯示 MHz（×1e3 進 / ×1e-3 出）。onetone load 經 `analysis.spectrum.format_rawdata` Hz→GHz（**不走 experiment 層**：`FluxDepExp.load` 回 dataclass、MHz）。
 
 ## Remote / MCP（read-only，fluxdep 模式）
-agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / project.info / fit_inputs.info / preprocess.status / fit.result{has_result,g,bare_rf,res_dim} / resources.versions），**無 mutating RPC**。`mcp/dispersive/server.py` 是 **thin entrypoint**：填 config + instructions，body（`send_gui_rpc` / 3 lifecycle tools launch/connect/disconnect（**無 stop 曝露**）/ cleanup / `run_stdio_loop`）全交 `mcp/core/readonly_server.build_readonly_server`；read-only tools 從 METHOD_SPECS 自動生成。**event-push 丟棄**（read-only 無診斷流，bridge on_event 不接）。預設 control port **8767**（避開 fluxdep 8766）。當 script 跑：絕對 import（無 parent package）+ lib path inject。**WIRE=5/GUI=7**（project.info 使用 data_root；EventBus push 含 seq/origin；fit.result 維持無 step）。`project.info` / `resources.versions` 直接註冊 `gui/remote/readonly_handlers.py` 的共用 `h_project_info` / `h_resources_versions`（與 fluxdep 共用，兩 app wire 形態永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project`）。
+agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / project.info / fit_inputs.info / preprocess.status / fit.result{has_result,g,bare_rf,res_dim} / resources.versions），**無 mutating RPC**。`mcp/dispersive/server.py` 是 **thin entrypoint**：填 config + instructions，body（`send_gui_rpc` / 3 lifecycle tools launch/connect/disconnect（**無 stop 曝露**）/ cleanup / `run_stdio_loop`）全交 `mcp/core/readonly_server.build_readonly_server`；read-only tools 從 METHOD_SPECS 自動生成。**event-push 丟棄**（read-only 無診斷流，bridge on_event 不接）。預設 control port **8767**（避開 fluxdep 8766）。當 script 跑：絕對 import（無 parent package）+ lib path inject。**WIRE=5/GUI=7**（project.info 使用 data_root；EventBus push 含 seq/origin；fit.result 維持無 step）。`project.info` 註冊 `gui.app.analysis_project.readonly_handlers.h_project_info`，與 fluxdep 共用相同投影。`resources.versions` 繼續使用 `gui.remote.readonly_handlers.h_resources_versions`；`_h_state_check` 仍 app-local，使用 `analysis_project.project.is_real_project`。
 
 ## 已知坑 / 設計決策
 - **preprocess 數值核心**：使用 [analysis/dispersive](../../../analysis/dispersive/README.md) 的 branch discovery、local refinement 與前處理。GUI 保留 worker 啟動、結果記錄與 busy/indeterminate 進度條。

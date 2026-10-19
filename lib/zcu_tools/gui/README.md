@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-18，Measure non-modal 觀察窗與宿主同步唯讀
+**Last updated:** 2026-10-20，分析 project owner 移至 app 層
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -128,8 +128,9 @@ close still saves current input. Launch does not restore native runs or connect
 hardware.
 
 `gui.launcher` is the import-light CLI edge companion for runtime launchers. It
-declares shared logging/control/project flags and converts parser output into
-`GuiLaunchOptions` / `ProjectInfo`. It deliberately avoids importing Qt or
+declares shared logging/control flags and converts parser output into
+`GuiLaunchOptions`. Analysis project flags and `ProjectInfo` conversion belong to
+`app.analysis_project.launcher`. The shared `gui.launcher` avoids importing Qt,
 matplotlib or app modules at module import time. Runtime initializes the explicit
 plot host, shutdown callback and mathtext support after QApplication exists;
 it does not select a process-wide Matplotlib backend.
@@ -154,9 +155,10 @@ Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 R
 列出含 setup.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
 不自選 point，不連硬體，也不從 chip／qubit／resonator 名稱推導路徑。
 
-`ResultScopeManager` 仍供 `widgets.ProjectDialog` 的 analysis path picker 使用。
-它掃描 project root 下的 `result/**/params.json`，提供 result scope 候選；
-fluxdep／dispersive 保留 typed path 和 Browse。這不是 Measure 的 entry binding。
+Fluxdep／dispersive 的 `ProjectInfo`、`ProjectDialog`、`ResultScopeManager`、
+project CLI 與 RPC 投影由 [`app.analysis_project`](app/analysis_project/README.md)
+共用過渡 owner 擁有。它保留 chip／qubit 與 `result/**/params.json` 的資料流，
+不是 Measure 的 entry binding。共用 GUI 不依賴此分析 owner。
 
 ## Shared session dialogs (`session/ui/`)
 
