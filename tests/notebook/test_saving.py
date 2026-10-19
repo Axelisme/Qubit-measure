@@ -298,6 +298,7 @@ def test_real_caller_writes_all_formats_and_retains_acquisition(
         if item.output.format == "labber"
     )
     loaded = load_run_data(native)
+    assert loaded.metadata.started_at is not None
     assert datetime.fromisoformat(loaded.metadata.started_at) == acquisition.started_at
     assert loaded.metadata.finished_at is not None
     assert (
@@ -438,6 +439,7 @@ def test_save_and_resave_use_host_local_labber_date(
     assert labber_paths[0] != labber_paths[1]
     assert native_paths[0] == native_paths[1]
     loaded = load_run_data(native_paths[1])
+    assert loaded.metadata.started_at is not None
     assert datetime.fromisoformat(loaded.metadata.started_at) == acquisition.started_at
     assert loaded.metadata.finished_at is not None
     assert (

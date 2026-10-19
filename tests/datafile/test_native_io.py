@@ -111,7 +111,7 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
 
     with h5.File(destination, "r") as file:
         assert file.attrs["format"] == "zcu.experiment-data"
-        assert file.attrs["format_version"] == "2.0"
+        assert file.attrs["format_version"] == "2.1"
         signal = hdf_dataset(file, "data/readout/signal")
         assert signal.attrs["units"] == "V"
         assert signal.id.get_type().get_member_name(0) == b"r"
@@ -134,6 +134,97 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
             dataset.coords["frequency"].values, recovered.axes[0].values
         )
         assert dataset["signal"].attrs["units"] == "V"
+
+
+@pytest.mark.parametrize("started_at", [None, "2026-10-06T01:00:00Z"])
+@pytest.mark.parametrize("completion", ["complete", "partial", "stopped", "unknown"])
+def test_native_unknown_evidence_round_trips(
+    tmp_path: Path, started_at: str | None, completion: str
+) -> None:
+    metadata = replace(native_metadata(), started_at=started_at, completion=completion)
+    path = tmp_path / "unknown.h5"
+    try:
+        save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+        restored = load_run_data(path)
+    except ValueError as error:
+        pytest.fail(f"Legal historical evidence must round-trip: {error}")
+    assert restored.metadata == metadata
+    with h5.File(path, "r") as file:
+        assert file.attrs["format_version"] == "2.1"
+        assert file.attrs["started_at"] == (started_at or "")
+        assert file.attrs["completion"] == completion
+
+
+@pytest.mark.parametrize("version", ["2.0", "2.1", "2.7"])
+def test_native_reader_preserves_known_evidence_from_supported_minors(
+    tmp_path: Path, version: str
+) -> None:
+    path = tmp_path / "historical.h5"
+    metadata = native_metadata()
+    save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        file.attrs["format_version"] = version
+    assert load_run_data(path).metadata == metadata
+
+
+@pytest.mark.parametrize(
+    "attribute,value", [("started_at", ""), ("completion", "unknown")]
+)
+@pytest.mark.parametrize("version", ["2.0", "2.1", "2.7"])
+def test_native_reader_only_accepts_unknown_evidence_since_2_1(
+    tmp_path: Path, attribute: str, value: str, version: str
+) -> None:
+    path = tmp_path / "historical.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        file.attrs["format_version"] = version
+        file.attrs[attribute] = value
+    if version == "2.0":
+        with pytest.raises(ValueError, match=attribute) as caught:
+            load_run_data(path)
+        assert str(path) in str(caught.value)
+        assert "/" in str(caught.value)
+    else:
+        try:
+            restored = load_run_data(path).metadata
+        except ValueError as error:
+            pytest.fail(f"Native {version} must accept unknown {attribute}: {error}")
+        assert getattr(restored, attribute) == (
+            None if attribute == "started_at" else "unknown"
+        )
+
+
+@pytest.mark.parametrize("attribute", ["started_at", "completion"])
+def test_native_unknown_evidence_does_not_make_attributes_optional(
+    tmp_path: Path, attribute: str
+) -> None:
+    path = tmp_path / "missing.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        del file.attrs[attribute]
+    with pytest.raises(ValueError, match=attribute):
+        load_run_data(path)
+
+
+@pytest.mark.parametrize(
+    "attribute,value",
+    [
+        ("started_at", "unknown"),
+        ("started_at", ""),
+        ("started_at", "2026-10-06T01:00:00"),
+        ("started_at", "2026-10-06T01:00:00+08:00"),
+        ("completion", "finished"),
+        ("completion", None),
+    ],
+)
+def test_native_writer_rejects_invalid_evidence_before_publication(
+    tmp_path: Path, attribute: str, value: str | None
+) -> None:
+    metadata = replace(native_metadata(), **{attribute: value})
+    path = tmp_path / "invalid.h5"
+    with pytest.raises(ValueError, match=attribute):
+        save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_readonly_metadata_mappings_round_trip_through_native_io(

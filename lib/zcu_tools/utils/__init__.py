@@ -55,7 +55,9 @@ def format_obj(obj: Any) -> Any:
 
     Conversion order is intentional for objects that provide multiple protocols:
     explicit model exporters first, then array/list conversion, then scalar item
-    extraction. QICK is loaded only when this serialization helper is used.
+    extraction. Lists and tuples become recursively converted lists; dictionaries
+    become recursively converted dictionaries. The input is not mutated.
+    QICK is loaded only when this serialization helper is used.
     """
     from qick.asm_v2 import QickParam
 
@@ -70,7 +72,7 @@ def format_obj(obj: Any) -> Any:
 
     if isinstance(obj, dict):
         obj = {k: format_obj(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         obj = [format_obj(v) for v in obj]
     if isinstance(obj, QickParam):
         obj = str(obj)

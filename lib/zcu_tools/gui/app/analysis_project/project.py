@@ -1,10 +1,10 @@
-"""Shared project identity + default output-path derivation for the GUI apps.
+"""Project identity + default output paths shared by the two analysis apps.
 
 Qt-free pure data: a ``ProjectInfo`` dataclass (where to read raw measurement
 data from and where to write processed results) plus the ``default_*`` helpers
 that derive the notebook-layout paths from a chip/qubit pair. Both fluxdep-gui
 and dispersive-gui share this exact shape — they only ever differ in a UI label
-string, which lives in the dialog, not here. App-agnostic and import-clean
+string, which lives in the dialog, not here. Analysis-local and import-clean
 (stdlib only): importing this module pulls in neither Qt nor matplotlib.
 """
 
@@ -19,21 +19,6 @@ from typing import TypedDict
 # defaults share one source.
 DEFAULT_CHIP = "unknown_chip"
 DEFAULT_QUBIT = "unknown_qubit"
-
-
-def nearest_existing(path: str) -> str:
-    """The deepest existing ancestor of ``path`` (``path`` itself if it exists).
-
-    Lets a dialog open near a not-yet-created target instead of at the cwd/root.
-    Returns "" if nothing in the chain exists (then Qt opens the cwd).
-    """
-    path = os.path.abspath(path) if path else ""
-    while path and not os.path.isdir(path):
-        parent = os.path.dirname(path)
-        if parent == path:  # reached the filesystem root
-            return ""
-        path = parent
-    return path
 
 
 def default_result_dir(chip_name: str, qub_name: str, root: str = "") -> str:

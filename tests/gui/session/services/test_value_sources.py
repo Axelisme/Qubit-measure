@@ -25,9 +25,6 @@ def _state() -> State:
             parameters=make_ctx().parameters,
             soc=None,
             soccfg=None,
-            chip_name="chip",
-            qub_name="q1",
-            res_name="r1",
             result_dir="/result",
             database_path="/db",
             active_label="flux_0.0_A",
@@ -47,15 +44,13 @@ def test_context_sources_read_live_context_values() -> None:
     state = _state()
     registry, bus, _ = _binder(state)
 
-    assert registry.get_as("context.chip_name", str) == "chip"
-    assert registry.get_as("context.qub_name", str) == "q1"
     assert registry.get_as("context.active_label", str) == "flux_0.0_A"
     assert registry.get_as("project.result_dir", str) == "/result"
 
-    state.set_context(dataclasses.replace(state.session_env, chip_name="chip2"))
+    state.set_context(dataclasses.replace(state.session_env, active_label="next_point"))
     bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
 
-    assert registry.get_as("context.chip_name", str) == "chip2"
+    assert registry.get_as("context.active_label", str) == "next_point"
 
 
 def test_device_sources_read_cached_state_without_polling() -> None:

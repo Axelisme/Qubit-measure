@@ -1,16 +1,25 @@
 """Saved workflow writers consume synthetic science payloads without experiments."""
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import h5py as h5
 import numpy as np
 import pytest
-from zcu_tools.datafile import RunSnapshot, load_grouped_labber_data, load_run_data
+from zcu_tools.datafile import (
+    DataVariable,
+    RunSnapshot,
+    load_grouped_labber_data,
+    load_run_data,
+    save_run_data,
+)
+from zcu_tools.experiment import AxesSpec, Axis, ExpCfgModel, ZSpec
 from zcu_tools.experiment.workflows import RunIdentity, RunPaths
 from zcu_tools.experiment.workflows.export import (
     PreparedFluxdepExport,
+    load_trace,
     validate_destinations,
     write_outputs,
 )
@@ -18,6 +27,45 @@ from zcu_tools.experiment.workflows.saved_run import SavedManifest
 
 from tests._filesystem import symlink_or_skip
 from tests._native_support import native_cfg, native_metadata, native_payload
+
+
+@pytest.mark.parametrize("completion", ["complete", "unknown"])
+def test_trace_requires_known_completion_but_not_known_start_time(
+    tmp_path: Path, completion: str
+) -> None:
+    @dataclass
+    class TraceResult:
+        frequency: np.ndarray
+        signal: np.ndarray
+
+    spec = AxesSpec(
+        axes=(Axis("frequency", "frequency", "Hz"),),
+        z=ZSpec("signal", "signal", "V"),
+        result_type=TraceResult,
+        cfg_type=ExpCfgModel,
+        tag="test/native",
+        data_variable=DataVariable("readout"),
+    )
+    path = tmp_path / "trace.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        file.attrs["format_version"] = "2.1"
+        file.attrs["started_at"] = ""
+        file.attrs["completion"] = completion
+    if completion == "unknown":
+        with pytest.raises(
+            ValueError, match="Expected complete test/native acquisition"
+        ):
+            load_trace(tmp_path, path.name, spec)
+    else:
+        try:
+            trace = load_trace(tmp_path, path.name, spec)
+        except ValueError as error:
+            pytest.fail(
+                f"Complete trace does not require historical start evidence: {error}"
+            )
+        np.testing.assert_array_equal(trace.z, [1 + 2j, 3 - 4j])
+        np.testing.assert_array_equal(trace.axes[0].values, [4e9, 5e9])
 
 
 def inputs(

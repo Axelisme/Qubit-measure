@@ -436,6 +436,42 @@ def test_detached_image_preserves_minor_unknown_nodes_links_and_references(
         )
 
 
+@pytest.mark.parametrize(
+    "version,expected", [("2.0", "2.1"), ("2.1", "2.1"), ("2.7", "2.7")]
+)
+@pytest.mark.parametrize("unknown", [False, True])
+def test_image_rewrite_uses_at_least_2_1_without_downgrading_future_minor(
+    tmp_path: Path, version: str, expected: str, unknown: bool
+) -> None:
+    source = tmp_path / "source.h5"
+    save_run_data(source, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(source, "r+") as file:
+        file.attrs["format_version"] = version
+        file.attrs["future"] = "retained"
+    stored = load_run_data(source, preserve_unknown=True)
+    metadata = (
+        replace(stored.metadata, started_at=None, completion="unknown")
+        if unknown
+        else stored.metadata
+    )
+    destination = tmp_path / "updated.h5"
+    try:
+        save_run_data(
+            destination,
+            stored.payload,
+            metadata,
+            cfg=stored.cfg,
+            extensions=stored.extensions,
+        )
+        restored = load_run_data(destination)
+    except ValueError as error:
+        pytest.fail(f"Image rewrite must support historical unknown evidence: {error}")
+    assert restored.metadata == metadata
+    with h5.File(destination, "r") as file:
+        assert file.attrs["format_version"] == expected
+        assert file.attrs["future"] == "retained"
+
+
 def test_image_rewrite_updates_known_values_without_merging_dynamic_maps(
     tmp_path: Path,
 ) -> None:
