@@ -281,8 +281,10 @@ class GuardPreparation:
 
     keys: read-only unique fixed-width prepare keys, in the payload's entry order.
     prepared: opaque read-only payload equivalent to prepare(keys, ...), with
-        no density access. Keys may include rejected rows, but only accepted
-        rows are reused. No kernel may retain this record in its own state.
+        no density access. Keys may include rejected rows. Only accepted rows
+        receive apply bindings; fully rejected model-only domains may enter
+        low-priority resident storage for fresh guard admission on later calls.
+        No kernel may retain this record in its own state.
     Owns a read-only key copy; a non-vector/non-void key array raises ValueError.
     """
 
@@ -303,8 +305,9 @@ class GuardResult:
 
     accepted: read-only bool (len(rows),) mask identical to guard for the same arguments.
     preparations: disjoint key batches constructed with that call's source and
-        budget. Empty means no handoff. Records live only within this evolve;
-        shared keys may enter PrepareCache under its ordinary admission rules.
+        budget. Empty means no handoff. Accepted products use ordinary resident
+        admission; fully rejected products can only fill unused capacity and
+        yield to ordinary products. The accepted mask never enters the cache.
     plan: optional kernel-defined per-row numerical decisions for this call's
         accepted rows. Dispatch merges them into the family plan for apply.
         They live only within this evolve and never enter PrepareCache.

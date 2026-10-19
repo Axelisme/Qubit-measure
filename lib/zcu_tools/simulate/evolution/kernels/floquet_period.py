@@ -108,6 +108,20 @@ class PeriodData:
 
 
 @dataclass(frozen=True)
+class PeriodAnchor:
+    """Evolve-local anchor product, never stored as a resident payload.
+
+    period is the independently built CF4 trajectory and its playback data.
+    interaction holds exp(+2*pi*i*H0*t) U(t) only for carrier interpolation;
+    gain anchors omit it because their identical H0 phases cancel algebraically.
+    WorkPlan resources own and release this product after consumer handoff.
+    """
+
+    period: PeriodData
+    interaction: NDArray[np.complex128] | None = None
+
+
+@dataclass(frozen=True)
 class _Periods:
     entries: tuple[PeriodData, ...]
 
@@ -144,7 +158,7 @@ def _integrate_dense(context, state, duration, controls):
 @njit(nogil=True, cache=True)
 def _unitary(matrix: NDArray[np.complex128]) -> NDArray[np.complex128]:
     """Retract a near-unitary Hilbert endpoint with one Newton polar step."""
-    # DOP853's <= 1e-10 controls and CF4's Hermitian exponentials keep the
+    # DOP853's <= 1e-8 controls and CF4's Hermitian exponentials keep the
     # singular values near one. Newton squares that norm defect without an SVD.
     return 0.5 * (3 * matrix - matrix @ (matrix.conj().T @ matrix))
 
@@ -164,8 +178,9 @@ class _Hamiltonian(NamedTuple):
 
 @dataclass(frozen=True)
 class _Neighbour:
-    gain: float
+    coordinate: float
     period: PeriodData
+    interaction: NDArray[np.complex128] | None = None
 
 
 def _continued_prefixes(
@@ -174,7 +189,7 @@ def _continued_prefixes(
     gain: float,
     tolerance: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.complex128]] | None:
-    # Interpolate only gain between fixed anchors in the interaction picture, then
+    # Interpolate gain or carrier between fixed anchors in the interaction picture, then
     # independently check the new key with the original coarse-grid probes.
     h0, x, y, frequency = context
     count = len(neighbours[-1].period.times) - 1
@@ -182,8 +197,9 @@ def _continued_prefixes(
         n.period.magnus is None or len(n.period.times) != count + 1 for n in neighbours
     ):
         return None
-    coordinates = [n.gain for n in neighbours]
-    target = gain
+    coordinates = [n.coordinate for n in neighbours]
+    carrier_axis = neighbours[0].interaction is not None
+    target = frequency if carrier_axis else gain
     if len(set(coordinates)) != len(coordinates):
         return None
     period = 1 / abs(frequency)
@@ -192,10 +208,9 @@ def _continued_prefixes(
     if count < finer_count(coarse_size):
         return None
     times = np.linspace(0.0, period, count + 1)
-    # Identical model, carrier and uniform grid give every predecessor the
-    # same analytic H0 phase. The interaction-picture transform and inverse
-    # cancel algebraically in this linear combination; avoid repeated complex
-    # exponentials and their roundoff without changing the predictor.
+    # Gain anchors have identical model, carrier and uniform grid. Their H0
+    # phases cancel algebraically, avoiding repeated exponentials and roundoff.
+    # Carrier anchors instead require the explicit IP transform below.
     weights = []
     for index in range(len(neighbours)):
         weight = 1.0
@@ -203,9 +218,22 @@ def _continued_prefixes(
             if other != index:
                 weight *= (target - coordinate) / (coordinates[index] - coordinate)
         weights.append(weight)
-    candidate = _interpolate_prefixes(
-        tuple(n.period.coefficients for n in neighbours), tuple(weights)
-    )
+    if carrier_axis:
+        interactions = tuple(
+            n.interaction for n in neighbours if n.interaction is not None
+        )
+        if len(interactions) != len(neighbours):
+            return None
+        candidate = _interpolate_prefixes(interactions, tuple(weights))
+        # Equal phase q means different physical times at different carriers.
+        # Restore this key's lab frame only after interpolating IP trajectories.
+        candidate *= np.exp(
+            -2j * np.pi * times[:, None, None] * np.diag(h0)[None, :, None]
+        )
+    else:
+        candidate = _interpolate_prefixes(
+            tuple(n.period.coefficients for n in neighbours), tuple(weights)
+        )
     _, coarse = _magnus_prefixes(h0, x, y, frequency, coarse_size)
     error = float(
         np.max(
@@ -269,7 +297,10 @@ def _build(
         tolerance = min(1e-4, budget * 0.1)
         continued = (
             _continued_prefixes(
-                neighbours, _Hamiltonian(h0, x, y, frequency), gain, tolerance
+                neighbours,
+                _Hamiltonian(h0, x, y, frequency),
+                gain,
+                tolerance,
             )
             if neighbours is not None
             else None
@@ -283,7 +314,9 @@ def _build(
         for array in (h0, x, y):
             array.setflags(write=False)
     else:
-        tolerance = min(1e-10, budget * 1e-4)
+        # Keep budget scaling for tighter requests. The cap is calibrated for
+        # population and coherent-projection playback through 10 us.
+        tolerance = min(1e-8, budget * 1e-4)
         times, coefficients, final = _integrate_dense(
             (h0, x, y, frequency),
             np.eye(size, dtype=complex).ravel(),
@@ -308,6 +341,107 @@ def _build(
     return PeriodData(
         *arrays, split_rate(model, port, frequency, gain, work_plan), magnus, spectrum
     )
+
+
+def _build_anchor(
+    model: SecularModel, tone: _Tone, context: KernelContext, *, carrier_axis: bool
+) -> PeriodAnchor:
+    period = _build(
+        model, tone, context.budget, PeriodBuilder("cf4"), work_plan=context.work_plan
+    )
+    if not carrier_axis:
+        return PeriodAnchor(period)
+    energies = model.energies_ghz - model.energies_ghz[0]
+    interaction = (
+        np.exp(2j * np.pi * period.times[:, None, None] * energies[None, :, None])
+        * period.coefficients
+    )
+    return PeriodAnchor(period, interaction)
+
+
+def _prepare_entry(
+    model: SecularModel, tone: _Tone, context: KernelContext
+) -> PeriodData:
+    # Both interpolation axes share admission, single-flight construction and
+    # release. Only their physical coordinates and IP transform differ.
+    from .._gain_plan import (
+        build_plan,
+        carrier_anchor_resource,
+        carrier_build_plan,
+        gain_anchor_resource,
+        period_builder,
+    )
+
+    port, frequency, gain = tone
+    planned = build_plan(context, model, port, frequency, gain)
+    carrier = (
+        carrier_build_plan(context, model, port, frequency, gain)
+        if planned is None
+        else None
+    )
+    builder = (
+        period_builder(model, port, frequency, gain) if planned is None else planned[1]
+    )
+    consumer = frequency if carrier is not None else gain
+    if carrier is not None:
+        coordinates = (
+            (frequency,) if frequency in carrier.anchors_ghz else carrier.anchors_ghz
+        )
+        dependencies = [
+            (a, carrier_anchor_resource(context, carrier, a)) for a in coordinates
+        ]
+    elif planned is not None:
+        dependencies = [
+            (a, gain_anchor_resource(context, planned[0], a)) for a in builder.anchors
+        ]
+    else:
+        dependencies = []
+    # Repeated keys never reopen a handed-off or released dependency.
+    reusable = dependencies and all(
+        not handle.released
+        and (
+            consumer in handle.remaining_consumers
+            or (not handle.sealed and consumer not in handle.actual_consumers)
+        )
+        for _, handle in dependencies
+    )
+    if not reusable:
+        return _build(model, tone, context.budget, builder, work_plan=context.work_plan)
+    for _, handle in dependencies:
+        if not handle.sealed:
+            handle.admit(consumer)
+    neighbours = []
+    for coordinate, handle in dependencies:
+        anchor_tone = (
+            _Tone(port, coordinate, gain)
+            if carrier is not None
+            else _Tone(port, frequency, coordinate)
+        )
+        anchor = handle.get(
+            partial(
+                _build_anchor,
+                model,
+                anchor_tone,
+                context,
+                carrier_axis=carrier is not None,
+            )
+        )
+        neighbours.append(_Neighbour(coordinate, anchor.period, anchor.interaction))
+    entry = (
+        neighbours[0].period
+        if len(dependencies) == 1 and dependencies[0][0] == consumer
+        else _build(
+            model,
+            tone,
+            context.budget,
+            builder,
+            work_plan=context.work_plan,
+            neighbours=neighbours,
+        )
+    )
+    for _, handle in dependencies:
+        handle.handoff(consumer)
+    return entry
 
 
 @njit(nogil=True, cache=True)
@@ -408,23 +542,124 @@ def _dense(times, coefficients, time):
 
 
 @njit(nogil=True, cache=True)
-def _dissipate(rho, population, coherence):
-    diagonal = np.diag(rho).copy()
-    result = rho * coherence
-    updated = population @ diagonal
-    for index in range(len(updated)):
-        result[index, index] = updated[index]
+def _dissipate_into(rho, population, coherence, result, diagonal, updated):
+    for i in range(len(rho)):
+        diagonal[i] = rho[i, i]
+        for j in range(len(rho)):
+            result[i, j] = rho[i, j] * coherence[i, j]
+    np.dot(population, diagonal, out=updated)
+    for i in range(len(rho)):
+        result[i, i] = updated[i]
+
+
+@njit(nogil=True, cache=True)
+def _advance_loop(rho, unitary, population, coherence, count):
+    # Preserve each GEMM and half-bath rounding while reusing worker-local buffers.
+    adjoint = unitary.conj().T.copy()
+    state = rho.copy()
+    first = np.empty(rho.shape, dtype=np.complex128)
+    second = np.empty(rho.shape, dtype=np.complex128)
+    diagonal = np.empty(len(rho), dtype=np.complex128)
+    updated = np.empty(len(rho), dtype=np.complex128)
+    for _ in range(count):
+        _dissipate_into(state, population, coherence, first, diagonal, updated)
+        np.dot(unitary, first, out=second)
+        np.dot(second, adjoint, out=state)
+        _dissipate_into(state, population, coherence, first, diagonal, updated)
+        state, first = first, state
+    return state
+
+
+@njit(nogil=True, cache=True)
+def _hermitian_coordinates(size):
+    # Diagonal entries, then real/imaginary off-diagonal basis pairs.
+    a = np.empty(size * size, dtype=np.int64)
+    b = np.empty(size * size, dtype=np.int64)
+    kind = np.zeros(size * size, dtype=np.int64)
+    for i in range(size):
+        a[i] = b[i] = i
+    index = size
+    for i in range(size):
+        for j in range(i + 1, size):
+            a[index] = a[index + 1] = i
+            b[index] = b[index + 1] = j
+            kind[index] = 1
+            kind[index + 1] = 2
+            index += 2
+    return a, b, kind
+
+
+@njit(nogil=True, cache=True)
+def _real_channel(unitary, population, coherence, coordinates):
+    # U(.)U† in a Hermitian basis is real. Apply both secular half maps to
+    # its input/output coordinates, without commuting dissipation through U.
+    a, b, kind = coordinates
+    size = len(unitary)
+    matrix = np.empty((size * size, size * size), dtype=np.float64)
+    for r in range(len(a)):
+        for c in range(len(a)):
+            z = unitary[a[r], a[c]] * unitary[b[r], b[c]].conjugate()
+            if kind[c] == 1:
+                z += unitary[a[r], b[c]] * unitary[b[r], a[c]].conjugate()
+            elif kind[c] == 2:
+                z = 1j * (z - unitary[a[r], b[c]] * unitary[b[r], a[c]].conjugate())
+            matrix[r, c] = z.imag if kind[r] == 2 else z.real
+    p = population.real.copy()
+    matrix[:size, :] = p @ matrix[:size, :].copy()
+    matrix[:, :size] = matrix[:, :size].copy() @ p
+    for r in range(size, len(a)):
+        for c in range(len(a)):
+            matrix[r, c] *= coherence[a[r], b[r]]
+    for c in range(size, len(a)):
+        for r in range(len(a)):
+            matrix[r, c] *= coherence[a[c], b[c]]
+    return matrix
+
+
+@njit(nogil=True, cache=True)
+def _advance_power(rho, unitary, population, coherence, count):
+    coordinates = _hermitian_coordinates(len(rho))
+    a, b, kind = coordinates
+    matrix = _real_channel(unitary, population, coherence, coordinates)
+    state = np.empty(len(a), dtype=np.float64)
+    residual = np.empty(len(a), dtype=np.float64)
+    for i in range(len(a)):
+        if kind[i] == 0:
+            z = rho[a[i], b[i]]
+        elif kind[i] == 1:
+            z = (rho[a[i], b[i]] + rho[b[i], a[i]]) / 2
+        else:
+            z = (rho[a[i], b[i]] - rho[b[i], a[i]]) / (2j)
+        # Complex coordinates span arbitrary matrices, not just Hermitian
+        # density. Keep their imaginary part as a second real right-hand side.
+        state[i] = z.real
+        residual[i] = z.imag
+    while count:
+        if count & 1:
+            state = matrix @ state
+            residual = matrix @ residual
+        count //= 2
+        if count:
+            matrix = matrix @ matrix
+    result = np.empty_like(rho)
+    for i in range(len(a)):
+        z = state[i] + 1j * residual[i]
+        if kind[i] == 0:
+            result[a[i], b[i]] = z
+        elif kind[i] == 1:
+            w = state[i + 1] + 1j * residual[i + 1]
+            result[a[i], b[i]] = z + 1j * w
+            result[b[i], a[i]] = z - 1j * w
     return result
 
 
 @njit(nogil=True, cache=True)
 def _advance(rho, unitary, population, coherence, count):
-    adjoint = unitary.conj().T.copy()
-    for _ in range(count):
-        rho = _dissipate(rho, population, coherence)
-        rho = unitary @ rho @ adjoint
-        rho = _dissipate(rho, population, coherence)
-    return rho
+    if count == 0:
+        return rho
+    if len(rho) == 16 and count >= 4096:
+        return _advance_power(rho, unitary, population, coherence, count)
+    return _advance_loop(rho, unitary, population, coherence, count)
 
 
 @njit(nogil=True, cache=True)
@@ -611,7 +846,15 @@ class FloquetPeriodKernel:
 
     Non-spectral low carriers retain CF4 and scoped gain anchors, as in the README.
 
-    Higher carriers retain DOP853 with min(1e-10,budget*1e-4), max_step=T/4.
+    Unsubdivided 16-level rows with at least 4096 complete periods apply the
+    same D/2,U,D/2 linear channel by real-matrix binary powering. Two real
+    coordinate vectors preserve complex density residuals without symmetrizing.
+    This changes rounding, not splitting or integration tolerances. All other
+    rows retain sequential half-bath/GEMM order with reusable scratch buffers.
+    Power matrices are transient (about 1.1 MiB per worker), never cached.
+
+    Higher carriers use DOP853 with min(1e-8,budget*1e-4), max_step=T/4.
+    This cap is calibrated through 10 us, not an arbitrary-duration error bound.
     One Newton polar step corrects endpoints before translation and composition.
     Invalid budgets/representatives/payloads raise ValueError; integration or
     nonfinite output raises RuntimeError without rerouting. nbytes charges all
@@ -697,8 +940,6 @@ class FloquetPeriodKernel:
             raise ValueError("Floquet period representatives must match keys")
         if not self.guard(table, rows, context).all():
             raise ValueError("Floquet period representatives must pass guard")
-        from .._gain_plan import build_plan, gain_anchor_resource, period_builder
-
         entries = []
         for key in keys:
             model = source.model(tuple(int(v) for v in key["level"]))
@@ -707,72 +948,7 @@ class FloquetPeriodKernel:
                 float(key["frequency"]),
                 float(key["gain"]),
             )
-            planned = build_plan(context, model, port, frequency, gain)
-            builder = (
-                period_builder(model, port, frequency, gain)
-                if planned is None
-                else planned[1]
-            )
-            dependencies = (
-                [
-                    (a, gain_anchor_resource(context, planned[0], a))
-                    for a in builder.anchors
-                ]
-                if planned is not None
-                else []
-            )
-            # Repeated keys never reopen a handed-off or released dependency.
-            reusable = dependencies and all(
-                not handle.released
-                and (
-                    gain in handle.remaining_consumers
-                    or (not handle.sealed and gain not in handle.actual_consumers)
-                )
-                for _, handle in dependencies
-            )
-            if not reusable:
-                entry = _build(
-                    model,
-                    _Tone(port, frequency, gain),
-                    budget,
-                    builder,
-                    work_plan=context.work_plan,
-                )
-            else:
-                for _, handle in dependencies:
-                    if not handle.sealed:
-                        handle.admit(gain)
-                neighbours = [
-                    _Neighbour(
-                        a,
-                        handle.get(
-                            partial(
-                                _build,
-                                model,
-                                _Tone(port, frequency, a),
-                                budget,
-                                PeriodBuilder("cf4"),
-                                work_plan=context.work_plan,
-                            )
-                        ),
-                    )
-                    for a, handle in dependencies
-                ]
-                entry = (
-                    neighbours[0].period
-                    if builder.anchors == (gain,)
-                    else _build(
-                        model,
-                        _Tone(port, frequency, gain),
-                        budget,
-                        builder,
-                        work_plan=context.work_plan,
-                        neighbours=neighbours,
-                    )
-                )
-                for _, handle in dependencies:
-                    handle.handoff(gain)
-            entries.append(entry)
+            entries.append(_prepare_entry(model, _Tone(port, frequency, gain), context))
         return _Periods(tuple(entries))
 
     def admit_prepared(

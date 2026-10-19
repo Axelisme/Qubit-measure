@@ -1,6 +1,7 @@
 """Fixed native/local circuit operators; no moving pulse basis."""
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 from numpy.typing import NDArray
@@ -63,20 +64,18 @@ class LocalCircuit:
         )
 
 
-def _fluxonium(p: FluxoniumCircuit) -> tuple[Matrix, ...]:
-    n = p.native_cutoff
+@lru_cache(maxsize=8)
+def _fluxonium(ec_ghz: float, el_ghz: float, n: int) -> tuple[Matrix, ...]:
     # Compute n² before truncation; retain the missing raising matrix element
     # at the top oscillator level instead of squaring an already cut n.
     a = np.diag(np.sqrt(np.arange(1, n + 1)), 1).astype(complex)
-    phi_zpf = (2 * p.ec_ghz / p.el_ghz) ** 0.25
+    phi_zpf = (2 * ec_ghz / el_ghz) ** 0.25
     phi = phi_zpf * (a + a.conj().T)
     charge = 1j * (a.conj().T - a) / (2 * phi_zpf)
     n2 = (charge @ charge)[:n, :n]
     phi, charge = phi[:n, :n], charge[:n, :n]
-    lc = np.diag(np.sqrt(8 * p.ec_ghz * p.el_ghz) * (np.arange(n) + 0.5)).astype(
-        complex
-    )
-    return tuple(
+    lc = np.diag(np.sqrt(8 * ec_ghz * el_ghz) * (np.arange(n) + 0.5)).astype(complex)
+    operators = tuple(
         np.asarray(op, dtype=np.complex128)
         for op in (
             charge,
@@ -89,6 +88,9 @@ def _fluxonium(p: FluxoniumCircuit) -> tuple[Matrix, ...]:
             lc,
         )
     )
+    for operator in operators:
+        operator.setflags(write=False)
+    return operators
 
 
 def _squid(p: SquidCircuit) -> tuple[Matrix, ...]:
@@ -110,7 +112,11 @@ def local_circuit(
     p: FluxoniumCircuit | SquidCircuit, flux: float
 ) -> tuple[LocalCircuit, NDArray[np.float64]]:
     """Build native then fixed-DC local operators, returning retained energies."""
-    operators = _fluxonium(p) if isinstance(p, FluxoniumCircuit) else _squid(p)
+    operators = (
+        _fluxonium(p.ec_ghz, p.el_ghz, p.native_cutoff)
+        if isinstance(p, FluxoniumCircuit)
+        else _squid(p)
+    )
     native = LocalCircuit(p, np.eye(len(operators[0]), dtype=complex), *operators)
     energies, vectors = np.linalg.eigh(native.hamiltonian(flux))
     vectors = vectors[:, : p.levels]

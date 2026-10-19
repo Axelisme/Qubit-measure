@@ -126,3 +126,28 @@ class ReadoutModel:
             object.__setattr__(self, name, array)
         if np.any(np.diag(self.rates_per_ns) != 0):
             raise ValueError("directional rates diagonal must be zero")
+
+
+def readout_model_key(model: ReadoutModel) -> tuple[object, ...]:
+    """Return a lossless hashable key of validated model and receiver content.
+
+    Includes identity, state order, all physical arrays, calibration and noise.
+    The key owns bytes rather than array views; no model reference is retained.
+    Model identity alone may name many DC points and is not sufficient.
+    """
+    receiver = model.receiver
+    return (
+        model.identity,
+        model.state_labels,
+        model.reference_frequency_ghz,
+        model.frequencies_ghz.tobytes(),
+        model.kappa_internal_per_ns.tobytes(),
+        model.kappa_external_per_ns.tobytes(),
+        model.rates_per_ns.tobytes(),
+        model.mismatch_phase_rad.tobytes(),
+        receiver.time_of_flight_ns,
+        receiver.gain,
+        receiver.phase_rad,
+        receiver.offset.tobytes(),
+        receiver.noise_covariance.tobytes(),
+    )

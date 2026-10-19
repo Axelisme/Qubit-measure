@@ -58,6 +58,7 @@ from ..kernel import (
     prepared_key_indices,
 )
 from ..secular import SecularModel
+from ..workplan import FactKey
 from . import _floquet_sidebands as sb
 from ._secular import coherence_decay
 
@@ -81,7 +82,6 @@ class _Entry:
     inverse: NDArray[np.complex128]
     couplings: NDArray[np.complex128]
     valid: bool
-    model: SecularModel
     sidebands: sb.Frame | None = None
 
     @property
@@ -113,6 +113,55 @@ class _Prepared:
     @property
     def nbytes(self) -> int:
         return self.keys.nbytes + sum(entry.nbytes for entry in self.entries)
+
+
+@dataclass(frozen=True)
+class _Certificates:
+    values: tuple[tuple[int, sb.Certificate], ...]
+
+
+def _extend_entry(
+    entry: _Entry, parameters: NDArray[np.float64], context: KernelContext
+) -> _Entry:
+    """Union missing complete-bin certificates without copying the cached frame."""
+    frame = entry.sidebands
+    if frame is None:
+        # Legacy-only frames did not retain Fourier candidates. Reconstructing
+        # them from rotations would change rounding, so retain the normal miss.
+        return entry
+    _, eligible = _admission(entry, parameters, context.budget)
+    bins = {(port, certificate.center) for port, certificate in frame.certificates}
+    missing = np.array(
+        [
+            use and (int(p[-1]), float(np.round(p[3] / 0.002) * 0.002)) not in bins
+            for p, use in zip(parameters, eligible, strict=True)
+        ],
+        dtype=bool,
+    )
+    if not missing.any():
+        return entry
+    parameters = parameters[missing]
+    # Every caller uses the complete table inventory, not its worker subset.
+    # Publish only small new certificates: WorkPlan copies facts on publication.
+    fact = FactKey(
+        ("floquet-certificates", id(entry), context.budget, parameters.tobytes()),
+        _Certificates,
+    )
+    extra = context.work_plan.fact(
+        fact,
+        lambda: _Certificates(
+            sb.prepare(
+                frame, entry.lam, entry.modes, entry.inverse, parameters
+            ).certificates
+        ),
+    )
+    certificates = tuple(
+        sorted(
+            frame.certificates + extra.values,
+            key=lambda pair: (pair[0], pair[1].center),
+        )
+    )
+    return replace(entry, sidebands=replace(frame, certificates=certificates))
 
 
 @dataclass(frozen=True)
@@ -320,7 +369,12 @@ def _sampling_ratio(model: SecularModel, key: np.void) -> float:
 
 
 def _build(
-    model: SecularModel, port: int, frequency: float, amplitude: float
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    parameters: NDArray[np.float64],
+    budget: float,
 ) -> _Entry:
     if frequency <= 0:
         raise ValueError("Floquet Stark frequency must be positive")
@@ -376,8 +430,8 @@ def _build(
     harmonic = np.asarray(np.fft.fftfreq(count) * count, dtype=np.float64)
     edge = np.abs(harmonic) >= count / 4
     frame_error = float(4 * sum(np.linalg.norm(c, 2) for c in coefficients[edge]))
-    # Keep only owned k=0 arrays. Rejected rows reconstruct Fourier samples from
-    # rotations and the immutable model; legacy accepts pay no sideband build.
+    # Full harmonics are construction scratch, never resident or evolve facts.
+    # Keep owned zero modes so returning the entry releases the large arrays.
     bath_zero, x_zero, y_zero = bath[0].copy(), x[0].copy(), y[0].copy()
     arrays = (
         energies,
@@ -395,7 +449,7 @@ def _build(
     )
     for array in arrays:
         array.flags.writeable = False
-    return _Entry(
+    entry = _Entry(
         frequency,
         energies,
         coefficients,
@@ -413,8 +467,16 @@ def _build(
         inverse,
         couplings,
         bool(valid),
-        model,
     )
+    _, eligible = _admission(entry, parameters, budget)
+    if eligible.any():
+        # Use the original samples, without the former FFT/ifft roundtrip and
+        # second full bath transform. Only compact candidates survive the build.
+        entry = replace(
+            entry,
+            sidebands=sb.build(bath, x, y, frequency, (modes, inverse), _comm),
+        )
+    return entry
 
 
 @njit(nogil=True, cache=True)
@@ -607,20 +669,6 @@ def _mask(data, bounds, parameters, budget):
             omitted <= budget / 3 and convergence * duration + frame_error <= budget / 3
         )
     return result
-
-
-def _with_sidebands(entry: _Entry) -> _Entry:
-    """Reconstruct candidates only for rejected k=0 rows, without redoing the frame."""
-    if entry.sidebands is not None:
-        return entry
-    samples = np.fft.ifft(entry.rotations, axis=0) * len(entry.rotations)
-    bath, x, y, _ = _averages(entry.model, samples)
-    return replace(
-        entry,
-        sidebands=sb.build(
-            bath, x, y, entry.frequency, (entry.modes, entry.inverse), _comm
-        ),
-    )
 
 
 def _sideband_plan(entry: _Entry, parameters: NDArray[np.float64]) -> sb.Plan:
@@ -906,6 +954,38 @@ class FloquetKernel:
         """Return validity for two constant tones, never reading initial density."""
         return self.guard_prepared(table, rows, context).accepted
 
+    def extend_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        context: KernelContext,
+    ) -> _Prepared:
+        """Extend cached frames to this complete table's missing probe bins exactly.
+
+        The caller must supply a payload from the same whole source, budget and
+        kernel revision. Only keys already in the payload participate. Existing
+        certificates and large frame arrays are borrowed unchanged; new immutable
+        certificates use the original calculation. Concurrent calls single-flight
+        new certificates through this evolve's WorkPlan and use the same full-table
+        union, independent of worker completion order. No row admission is retained.
+        A fully covered payload is returned unchanged. Legacy-only frames lacking
+        Fourier candidates remain unchanged and use the ordinary domain miss.
+        A different family's payload raises TypeError.
+        """
+        if not isinstance(prepared, _Prepared):
+            raise TypeError("Floquet requires its own prepared payload")
+        rows = np.arange(len(table.timeline), dtype=np.int64)
+        rows = rows[_candidate_positions(table, rows)]
+        keys = self.prepare_keys(table, rows, context)
+        parameters = _parameters(table, rows)
+        entries = tuple(
+            _extend_entry(entry, parameters[keys == key], context)
+            for key, entry in zip(prepared.keys, prepared.entries, strict=True)
+        )
+        if all(a is b for a, b in zip(entries, prepared.entries, strict=True)):
+            return prepared
+        return _Prepared(entries, prepared.keys)
+
     def admit_prepared(
         self,
         prepared: Prepared,
@@ -1002,7 +1082,6 @@ class FloquetKernel:
             entry = prepared.entries[0]
             _, eligible = _admission(entry, params[members], budget)
             if eligible.any():
-                entry = _with_sidebands(entry)
                 if entry.sidebands is None:
                     raise RuntimeError("Floquet sideband preparation failed")
                 frame = sb.prepare(
@@ -1055,7 +1134,14 @@ class FloquetKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> _Prepared:
-        """Prepare one immutable, density-independent Floquet frame per key."""
+        """Resolve one evolve-local frame per key, independent of density.
+
+        The complete table's same-key candidates decide whether construction
+        needs sidebands. Full Fourier averages are consumed inside that build;
+        only the compact immutable entry survives in the returned preparation.
+        Frame ownership follows resident admission or the current active binding,
+        never an evolve-long fact. Probe-bin certificates remain guard products.
+        """
         source, budget = context.source, context.budget
         if budget <= 0 or not np.array_equal(
             keys, self.prepare_keys(table, rows, context)
@@ -1064,8 +1150,12 @@ class FloquetKernel:
                 "Floquet requires positive budget and aligned representative rows"
             )
         entries = []
+        candidates = np.arange(len(table.timeline), dtype=np.int64)
+        candidates = candidates[_candidate_positions(table, candidates)]
+        candidate_keys = self.prepare_keys(table, candidates, context)
         for key in keys:
             model = source.model(tuple(int(v) for v in key["level"]))
+            parameters = _parameters(table, candidates[candidate_keys == key])
             try:
                 entries.append(
                     _build(
@@ -1073,6 +1163,8 @@ class FloquetKernel:
                         int(key["port"]),
                         float(key["frequency"]),
                         float(key["gain"]),
+                        parameters,
+                        budget,
                     )
                 )
             except np.linalg.LinAlgError as error:

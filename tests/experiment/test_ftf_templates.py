@@ -278,3 +278,38 @@ def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution()
     np.testing.assert_array_equal(
         plan.readouts[0].batch.grids[0][0].times_ns, [8, 9, 10, 11]
     )
+
+
+def test_sampled_readout_template_preserves_linear_envelope_without_field_ode(
+    monkeypatch,
+):
+    from zcu_tools.core.simulation import PulseEnvelope
+    from zcu_tools.experiment.ftf import plan_template
+    from zcu_tools.simulate import adc
+    from zcu_tools.simulate.adc import response
+
+    base = template()
+    samples = PulseEnvelope(
+        (0.0, 0.003, 0.011, 0.018), (0.1, 0.8 + 0.2j, 1.0 - 0.1j, 0.2)
+    )
+    shaped = replace(base, events=(replace(base.events[0], envelopes=(samples,)),))
+    batch = plan_template(settings(), snapshot(), shaped).readouts[0].batch
+    expected = np.stack(
+        [
+            adc.ConditionalReadout(batch.model, rtol=1e-12, atol=1e-14)
+            .response(ps, gs[0])
+            .traces.sum(axis=-2)
+            for ps, gs in zip(batch.pulses, batch.grids, strict=True)
+        ]
+    )
+    calls = []
+    solve = response.solve_ivp
+
+    def observe(*args, **kwargs):
+        calls.append(1)
+        return solve(*args, **kwargs)
+
+    monkeypatch.setattr(response, "solve_ivp", observe)
+    actual = adc.ConditionalReadout(batch.model).responses(batch)
+    assert not calls, "FTF sampled readout must expose its numeric envelope to ADC"
+    np.testing.assert_allclose(actual.sums[:, 0], expected, rtol=1e-6, atol=1e-9)

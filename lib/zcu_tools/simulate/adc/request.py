@@ -12,6 +12,52 @@ from .model import RealArray, readonly_array
 from .populations import validate_populations
 
 
+@dataclass(frozen=True, eq=False)
+class PiecewiseLinearEnvelope:
+    """Content-defined dimensionless complex envelope on pulse-local ns.
+
+    knots_ns: owned read-only finite nonempty increasing float64 vector, starting
+        at zero. values: owned read-only complex128 vector of the same shape.
+    Interpolate linearly and hold the last value through pulse end. Pulse support
+    belongs to ReadoutPulse. Calling with negative/nonfinite ns raises ValueError.
+    content_key is a lossless pair of bytes for numeric cache reuse. Only this
+    envelope type enables closed-form sampled propagation in responses(); arbitrary
+    callbacks retain the ODE. Invalid coordinates/values/shapes raise ValueError.
+    """
+
+    knots_ns: RealArray
+    values: NDArray[np.complex128]
+
+    def __post_init__(self) -> None:
+        knots = readonly_array(self.knots_ns, "envelope knots")
+        values = np.array(self.values, dtype=np.complex128, copy=True)
+        if (
+            knots.ndim != 1
+            or not len(knots)
+            or knots[0] != 0
+            or np.any(np.diff(knots) <= 0)
+            or values.shape != knots.shape
+            or not np.isfinite(values).all()
+        ):
+            raise ValueError(
+                "envelope requires finite matching vectors and increasing knots from zero"
+            )
+        values.setflags(write=False)
+        object.__setattr__(self, "knots_ns", knots)
+        object.__setattr__(self, "values", values)
+
+    @property
+    def content_key(self) -> tuple[bytes, bytes]:
+        """Lossless numeric coordinates and amplitudes, independent of identity."""
+        return self.knots_ns.tobytes(), self.values.tobytes()
+
+    def __call__(self, local_ns: float) -> complex:
+        """Evaluate finite nonnegative pulse-local ns, holding the last value."""
+        if not np.isfinite(local_ns) or local_ns < 0:
+            raise ValueError("envelope time must be finite and nonnegative")
+        return complex(np.interp(local_ns, self.knots_ns, self.values))
+
+
 @dataclass(frozen=True)
 class ReadoutPulse:
     """Finite coherent incident pulse in the model's rotating coordinates.
@@ -23,7 +69,9 @@ class ReadoutPulse:
         is amplitude*envelope(t-start)*exp(-2πi*(f-f_ref)*(t-start)+i*phase).
     phase_rad: carrier phase at pulse start, in radians.
     envelope: optional pure dimensionless complex callable of pulse-local ns;
-        None is flat one. Callable is caller-owned and must remain deterministic.
+        None is flat one. PiecewiseLinearEnvelope enables closed-form sampled
+        propagation in responses(); arbitrary callbacks retain the ODE and are
+        caller-owned and must remain deterministic.
         It is not normalized or sampled onto an artificial grid.
     breakpoints_ns: absolute ns semantic envelope corners for integration, inside
         pulse support. Other sample/event coordinates never restart the envelope.

@@ -66,6 +66,24 @@ class GainGroupPlan:
 
 
 @dataclass(frozen=True)
+class CF4CarrierGroupPlan:
+    """Narrow constant-CF4 inventory at one model, level, port and fixed gain.
+
+    carriers_ghz is sorted, unique, same-sign and at least sixteen entries wide;
+    its magnitude ratio is at most 1.01. anchors_ghz contains four real carriers
+    spanning that inventory. Gain dependencies take precedence for overlapping
+    keys, so no key expands two interpolation axes.
+    """
+
+    model_identity: str
+    level: tuple[int, ...]
+    port: int
+    gain: float
+    carriers_ghz: tuple[float, ...]
+    anchors_ghz: tuple[float, ...]
+
+
+@dataclass(frozen=True)
 class CarrierFamilyPlan:
     """Physical carrier group with fixed peak bound and subperiod resolution.
 
@@ -283,6 +301,7 @@ class WorkPlan:
         self._carrier_workspace: CarrierWorkspace | None = None
         self._published: set[str] = set()
         self._gain_groups: tuple[GainGroupPlan, ...] = ()
+        self._cf4_carrier_groups: tuple[CF4CarrierGroupPlan, ...] = ()
         self._carrier_families: tuple[CarrierFamilyPlan, ...] = ()
         self._ramp_families: tuple[RampFamilyPlan, ...] = ()
         self._lock = RLock()
@@ -292,6 +311,11 @@ class WorkPlan:
     def gain_groups(self) -> tuple[GainGroupPlan, ...]:
         """Caller-published gain inventories; empty until publication."""
         return self._gain_groups
+
+    @property
+    def cf4_carrier_groups(self) -> tuple[CF4CarrierGroupPlan, ...]:
+        """Complete constant-CF4 carrier inventories, fixed before admission."""
+        return self._cf4_carrier_groups
 
     @property
     def carrier_families(self) -> tuple[CarrierFamilyPlan, ...]:
@@ -356,6 +380,13 @@ class WorkPlan:
         self._publish("gain")
         self._gain_groups = groups
 
+    def publish_cf4_carrier_groups(
+        self, groups: tuple[CF4CarrierGroupPlan, ...]
+    ) -> None:
+        """Publish fixed constant-CF4 carrier groups once before worker builds."""
+        self._publish("cf4-carrier")
+        self._cf4_carrier_groups = groups
+
     def publish_carrier_families(self, groups: tuple[CarrierFamilyPlan, ...]) -> None:
         """Publish physical carrier groups once before workers start."""
         self._publish("carrier")
@@ -388,5 +419,6 @@ class WorkPlan:
             self._carrier_workspace = None
             self._published.clear()
             self._gain_groups = ()
+            self._cf4_carrier_groups = ()
             self._carrier_families = ()
             self._ramp_families = ()

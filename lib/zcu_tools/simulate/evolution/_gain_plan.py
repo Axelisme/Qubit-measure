@@ -1,16 +1,23 @@
-"""Complete-table gain coordinates, fixed dependencies and anchor admission."""
+"""Complete-table CF4 coordinates, fixed dependencies and anchor admission."""
 
 from bisect import bisect_left
-from collections.abc import Hashable
+from collections.abc import Hashable, Iterable
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .kernel import KernelContext, SegmentTable
 from .kernels._cf4_grid import coarse_count, finer_count, spectral_width
-from .kernels.floquet_period import PeriodBuilder, PeriodData
+from .kernels.floquet_period import PeriodAnchor, PeriodBuilder
 from .secular import ModelSource, SecularModel
-from .workplan import FactKey, GainBuildPlan, GainGroupPlan, ResourceHandle, WorkPlan
+from .workplan import (
+    CF4CarrierGroupPlan,
+    FactKey,
+    GainBuildPlan,
+    GainGroupPlan,
+    ResourceHandle,
+    WorkPlan,
+)
 
 
 def period_builder(
@@ -91,11 +98,12 @@ _FULL_TABLE_ROWS = FactKey("gain-full-table-rows", int)
 
 
 def plan_gain_groups(table: SegmentTable, source: ModelSource, plan: WorkPlan) -> None:
-    """Publish complete low-carrier inventories before prefix/worker planning.
+    """Publish gain and narrow CF4 carrier inventories before worker planning.
 
-    Only multi-gain physical groups need records. Builder selection and anchor
-    spacing retain the original cost and interpolation rules. No periods build
-    here. Prefix representatives are strict row subsets, so only a schedule
+    Gain records cover multi-gain physical groups; carrier records cover narrow
+    constant-CF4 inventories not owned by those gain groups. Builder selection
+    and gain spacing retain their original rules. No periods build here.
+    Prefix representatives are strict row subsets, so only a schedule
     with the complete row count may seal main resources. Content-preserving
     SegmentTable replacements (prefix inputs) still denote the full table.
     """
@@ -118,6 +126,98 @@ def plan_gain_groups(table: SegmentTable, source: ModelSource, plan: WorkPlan) -
             )
         )
     plan.publish_gain_groups(tuple(groups))
+    _plan_cf4_carriers(table, source, plan)
+
+
+def _plan_cf4_carriers(
+    table: SegmentTable, source: ModelSource, plan: WorkPlan
+) -> None:
+    inventories: dict[tuple[tuple[int, ...], int, float], set[float]] = {}
+    rows = np.flatnonzero(table.tones == 1)
+    rows = rows[table.constant_envelopes(rows)]
+    gain_groups = {(g.level, g.port, g.frequency_ghz) for g in plan.gain_groups}
+    for row in rows:
+        level = tuple(int(v) for v in table.level[row])
+        port = int(table.tone_port[row, 0])
+        frequency = float(table.tone_frequency_ghz[row, 0])
+        # Keep gain sharing authoritative for every overlapping physical key.
+        if not 0.03 <= abs(frequency) < 1.0 or (level, port, frequency) in gain_groups:
+            continue
+        gain = float(table.tone_amplitude[row, 0])
+        inventories.setdefault((level, port, gain), set()).add(frequency)
+    groups = []
+    for (level, port, gain), frequencies in inventories.items():
+        carriers = tuple(sorted(frequencies))
+        magnitudes = np.abs(carriers)
+        if (
+            len(carriers) < 16
+            or carriers[0] * carriers[-1] <= 0
+            or max(magnitudes) > 1.01 * min(magnitudes)
+        ):
+            continue
+        model = source.model(level)
+        # Do not recruit spectral or high-carrier keys into CF4 dependencies.
+        if any(period_builder(model, port, f, gain).kind != "cf4" for f in carriers):
+            continue
+        anchors = tuple(
+            carriers[i]
+            for i in np.linspace(0, len(carriers) - 1, 4).round().astype(int)
+        )
+        groups.append(
+            CF4CarrierGroupPlan(model.identity, level, port, gain, carriers, anchors)
+        )
+    plan.publish_cf4_carrier_groups(tuple(groups))
+
+
+def carrier_build_plan(
+    context: KernelContext,
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    gain: float,
+) -> CF4CarrierGroupPlan | None:
+    """Find the fixed carrier dependencies for this exact physical CF4 key."""
+    for group in context.work_plan.cf4_carrier_groups:
+        if (group.model_identity, group.level, group.port, group.gain) == (
+            model.identity,
+            model.level,
+            port,
+            gain,
+        ) and frequency in group.carriers_ghz:
+            return group
+    return None
+
+
+def carrier_anchor_resource(
+    context: KernelContext,
+    group: CF4CarrierGroupPlan,
+    frequency: float,
+) -> ResourceHandle[PeriodAnchor]:
+    """Borrow a carrier anchor with the same admission/handoff rules as gain anchors.
+
+    The product includes IP prefixes, owned only by this evolve's resource;
+    resident PeriodData never retains those extra arrays. Anchor keys consume
+    only themselves; non-anchor keys consume all four supports.
+    """
+    return context.work_plan.resource(
+        FactKey(
+            (
+                "cf4-carrier-anchor",
+                group.model_identity,
+                group.level,
+                group.port,
+                group.gain,
+                context.budget,
+                frequency,
+            ),
+            PeriodAnchor,
+        ),
+        planned_consumers=frozenset[Hashable](
+            f
+            for f in group.carriers_ghz
+            if f == frequency or f not in group.anchors_ghz
+        ),
+    )
 
 
 def build_plan(
@@ -151,7 +251,7 @@ def build_plan(
 
 def gain_anchor_resource(
     context: KernelContext, group: GainGroupPlan, gain: float
-) -> ResourceHandle[PeriodData]:
+) -> ResourceHandle[PeriodAnchor]:
     """Return the typed anchor handle with its complete planned gain consumers.
 
     Identity includes content, quantized coordinates, drive, carrier and budget.
@@ -169,7 +269,7 @@ def gain_anchor_resource(
                 context.budget,
                 gain,
             ),
-            PeriodData,
+            PeriodAnchor,
         ),
         planned_consumers=frozenset[Hashable](
             b.gain for b in group.builders if gain in b.anchors
@@ -192,22 +292,62 @@ def admit_shared_builds(
     choices depend on cache warmth or on these actual consumers.
     """
     plan = context.work_plan
-    if not plan.gain_groups or plan.fact(
-        _FULL_TABLE_ROWS, lambda: len(table.timeline)
-    ) != len(table.timeline):
+    if plan.fact(_FULL_TABLE_ROWS, lambda: len(table.timeline)) != len(table.timeline):
         return
     for group in plan.gain_groups:
         pending = _gains_at(table, pending_rows, group)
         stays_open = bool(_gains_at(table, open_rows, group))
-        for coordinate in sorted({a for b in group.builders for a in b.anchors}):
-            handle = gain_anchor_resource(context, group, coordinate)
-            if handle.released or handle.sealed:
-                continue
-            for gain in pending.intersection(handle.planned_consumers):
-                if gain not in handle.actual_consumers:
-                    handle.admit(gain)
-            if not stays_open:
-                handle.seal()
+        _admit_anchors(
+            (
+                gain_anchor_resource(context, group, coordinate)
+                for coordinate in sorted({a for b in group.builders for a in b.anchors})
+            ),
+            pending,
+            stays_open=stays_open,
+        )
+    for group in plan.cf4_carrier_groups:
+        pending = _carriers_at(table, pending_rows, group)
+        stays_open = bool(_carriers_at(table, open_rows, group))
+        _admit_anchors(
+            (
+                carrier_anchor_resource(context, group, frequency)
+                for frequency in group.anchors_ghz
+            ),
+            pending,
+            stays_open=stays_open,
+        )
+
+
+def _admit_anchors(
+    handles: Iterable[ResourceHandle[PeriodAnchor]],
+    pending: set[float],
+    *,
+    stays_open: bool,
+) -> None:
+    # Both physical axes have the same cache-miss admission and handoff lifetime.
+    for handle in handles:
+        if handle.released or handle.sealed:
+            continue
+        for consumer in pending.intersection(handle.planned_consumers):
+            if consumer not in handle.actual_consumers:
+                handle.admit(consumer)
+        if not stays_open:
+            handle.seal()
+
+
+def _carriers_at(
+    table: SegmentTable, rows: NDArray[np.int64], group: CF4CarrierGroupPlan
+) -> set[float]:
+    selected = rows[
+        (table.tones[rows] == 1)
+        & table.constant_envelopes(rows)
+        & np.all(table.level[rows] == group.level, axis=1)
+        & (table.tone_port[rows, 0] == group.port)
+        & (table.tone_amplitude[rows, 0] == group.gain)
+    ]
+    return set(table.tone_frequency_ghz[selected, 0].tolist()).intersection(
+        group.carriers_ghz
+    )
 
 
 def _gains_at(

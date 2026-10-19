@@ -80,6 +80,7 @@ class SimulationBinding:
         *,
         backend_version: str,
         seed: int | None = None,
+        wait_ready: Callable[[], object] | None = None,
     ) -> None:
         """Bind synchronous environment callbacks and choose the root seed once.
 
@@ -90,6 +91,9 @@ class SimulationBinding:
         resources; neither callback should perform QICK averaging or rounding.
         backend_version is an author-defined private implementation version
         string. seed is a nonnegative built-in int, or None for fresh entropy.
+        wait_ready optionally waits for environment startup after admission and
+        before consuming sequence or constructing requests. Its result is ignored;
+        errors release admission and propagate. It must not reenter acquisition.
 
         Raises ValueError for a boolean, non-int or negative seed, and TypeError
         if NumPy returns non-integer entropy. Callback execution is deferred to
@@ -99,6 +103,7 @@ class SimulationBinding:
             isinstance(seed, bool) or type(seed) is not int or seed < 0
         ):
             raise ValueError("seed must be a nonnegative integer or None")
+        self._wait_ready = wait_ready
         self.capture_snapshot = capture_snapshot
         self.execute = execute
         entropy = np.random.SeedSequence(seed).entropy
@@ -126,6 +131,12 @@ class SimulationBinding:
         """
         if not self._admission.acquire(blocking=False):
             raise RuntimeError("simulation acquisition is already active (reentry)")
+        try:
+            if self._wait_ready is not None:
+                self._wait_ready()
+        except BaseException:
+            self._admission.release()
+            raise
         sequence = self._sequence
         self._sequence += 1
         self.rounds = ()

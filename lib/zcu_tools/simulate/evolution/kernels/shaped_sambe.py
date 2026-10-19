@@ -1,4 +1,4 @@
-"""Real-envelope periods from shared finite Hilbert Fourier matrices."""
+"""Smooth-envelope periods from shared finite Hilbert Fourier matrices."""
 
 from dataclasses import dataclass
 
@@ -19,9 +19,10 @@ from ..kernel import (
     prepared_key_indices,
 )
 from ..secular import SecularModel
-from ..workplan import RampFamilyPlan
+from ..workplan import FactKey, RampFamilyPlan, WorkPlan
 from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
+    CompactPolynomial,
     PeriodEntry,
     PeriodPlayback,
     PeriodPrepared,
@@ -35,7 +36,7 @@ from ._period_table import (
 from ._sambe import eigensystem
 from ._secular import coherence_decay, population_generator
 from ._shaped import drive_bounds
-from ._workload_facts import envelope_bounds
+from ._workload_facts import drive_bound, envelope_bounds
 from .dop853 import prepare_models
 
 
@@ -194,17 +195,72 @@ class _Data:
         return self.periods.nbytes + self.keys.nbytes + self.errors.nbytes
 
 
+@dataclass(frozen=True)
+class _TailMaps:
+    # Half-tail secular maps; population casting preserves the original playback.
+    populations: NDArray[np.complex128]
+    coherences: NDArray[np.float64]
+
+
+def _tail_maps(
+    model: SecularModel, entry: PeriodEntry, tail: float, work_plan: WorkPlan
+) -> _TailMaps:
+    """Share exact half-tail maps, retaining the original subperiod power."""
+    step = 1 / (abs(entry.frequency) * entry.subdivisions)
+    key = FactKey(
+        ("shaped-tail-maps", model.identity, model.level, tail, step), _TailMaps
+    )
+
+    def build() -> _TailMaps:
+        population = np.asarray(
+            expm(tail / 2 * population_generator(model.rates_per_ns)), dtype=complex
+        )
+        # The power, rather than exp(-tail/2 * decay), preserves rounding.
+        coherence = entry.coherences ** (tail / step)
+        return _TailMaps(population, coherence)
+
+    return work_plan.fact(key, build)
+
+
+def _tail_blocks(
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    tail: float,
+    work_plan: WorkPlan,
+) -> NDArray[np.complex128]:
+    """Share all-phase Fourier blocks by their exact physical build inputs."""
+    key = FactKey[NDArray[np.complex128]](
+        (
+            "shaped-tail-blocks",
+            model.identity,
+            model.level,
+            port,
+            frequency,
+            amplitude,
+            tail,
+        ),
+        np.ndarray,
+    )
+    return work_plan.fact(
+        key, lambda: _spectral(model, port, frequency, amplitude, 3, tail)
+    )
+
+
 class ShapedSambeKernel:
-    """Finite-Fourier real-envelope propagation for shaped keys at any reuse.
+    """Finite-Fourier smooth-envelope propagation for shaped keys at any reuse.
 
     Keys contain level, port, signed GHz carrier, peak absolute gain,
-    duration in ns and gain-weighted envelope slope. They fix subperiod resolution.
+    duration in ns, gain-weighted slope and a complex-envelope flag.
+    They fix subperiod resolution, including the tighter complex motion limit.
     Comparing
     adjacent harmonic cutoffs (2/3, then 3/4) estimates Fourier truncation.
     Four/eight amplitude nodes control interpolation. Guard preparation is
     call-local and never reads density. Rejections retain the old shaped
     decision order. Apply uses frozen-envelope secular Strang steps, never
-    retries, clips or normalizes density. Complex envelopes and DC are rejected.
+    retries, clips or normalizes density. Complex amplitudes use their magnitude
+    polynomial and add their angle to carrier phase. DC is rejected.
     """
 
     revision = "carrier-physical-v3"
@@ -217,12 +273,12 @@ class ShapedSambeKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> NDArray[np.void]:
-        """Key peak gain, weighted slope and duration to fix subperiod resolution."""
+        """Key peak, slope, duration and complex motion class to fix resolution."""
         base = band_keys(table, rows, context.work_plan)
         keys = np.empty(
             len(rows),
             dtype=base.dtype.descr
-            + [("duration", "f8"), ("bound", "f8"), ("slope", "f8")],
+            + [("duration", "f8"), ("bound", "f8"), ("slope", "f8"), ("complex", "?")],
         )
         for name in base.dtype.names or ():
             keys[name] = base[name]
@@ -235,6 +291,7 @@ class ShapedSambeKernel:
             np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
         )
         keys["duration"] = table.duration_ns[rows]
+        keys["complex"] = ~bounds.real[table.tone_envelope[rows, 0]]
         return keys
 
     def _eligible(
@@ -250,11 +307,10 @@ class ShapedSambeKernel:
         # Strong, unresolved ramps need no keys or remaining eligibility work.
         if not np.any(bounded):
             return bounded
-        strength, _ = drive_bounds(table, rows, source)
+        strength, _ = drive_bounds(table, rows, source, context.work_plan)
         keys = self.prepare_keys(table, rows, context)
         frequency = np.abs(keys["frequency"])
         bounds = envelope_bounds(table, context.work_plan)
-        real = bounds.real
         peaks, slopes = bounds.peaks, bounds.slopes
         envelope = table.tone_envelope[rows, 0]
         resolved = (
@@ -265,7 +321,6 @@ class ShapedSambeKernel:
             (frequency >= 0.03)
             & (keys["bound"] > 0)
             & resolved
-            & real[table.tone_envelope[rows, 0]]
             & (keys["bound"] * strength <= 0.5 * frequency * subdivisions)
             & bounded
         )
@@ -292,6 +347,7 @@ class ShapedSambeKernel:
         # Spectral products remain call-local; only the family inventory moved
         # to the planner. Accepted payloads retain immutable coefficient arrays.
         families: dict[RampFamilyPlan, _SpectralFamily] = {}
+        compact: dict[int, CompactPolynomial] = {}
         for index, key in enumerate(keys):
             model = source.model(tuple(int(v) for v in key["level"]))
             port, f, bound = (
@@ -324,6 +380,8 @@ class ShapedSambeKernel:
             if ratio > 0.25 or interpolation * cycles > budget / 8:
                 nodes = 8
                 coefficients, interpolation, _ = family.polynomial((nodes, modes))
+            if id(coefficients) not in compact:
+                compact[id(coefficients)] = CompactPolynomial.from_dense(coefficients)
             errors.append((error + interpolation) * cycles)
             populations = np.asarray(
                 expm(step / 2 * population_generator(model.rates_per_ns)), dtype=float
@@ -334,11 +392,7 @@ class ShapedSambeKernel:
             direct = prepare_models([model])
             # Integer-period blocks avoid thousands of tiny matrix products on
             # long high-carrier ramps. Subperiod playback retains every phase.
-            drive = model.drives[port]
-            strength = max(
-                np.linalg.norm(drive.in_phase_ghz, 2),
-                np.linalg.norm(drive.quadrature_ghz, 2),
-            )
+            strength = drive_bound(model, port, context.work_plan).strength
             frozen_ns = min(
                 20.0,
                 np.sqrt(0.05 / max(2 * np.pi * strength * float(key["slope"]), 1e-30)),
@@ -350,13 +404,14 @@ class ShapedSambeKernel:
                     min(budget, 1e-8),
                     f,
                     bound,
-                    coefficients,
+                    compact[id(coefficients)],
                     populations,
                     coherences,
                     m,
                     block,
                     True,
                     modes,
+                    nodes,
                 )
             )
             models.append(model)
@@ -382,7 +437,7 @@ class ShapedSambeKernel:
     ) -> GuardResult | None:
         """Reuse key-covered convergence data and recheck current row eligibility.
 
-        Keys include duration, envelope bound and slope, so their stored errors
+        Keys include duration, bound, slope and complex motion class; stored errors
         cover the complete spectral domain. Missing keys return None; eligibility
         rejection returns a decision without rebuilding periods.
         """
@@ -462,7 +517,7 @@ class ShapedSambeKernel:
         states: NDArray[np.complex128],
         context: ApplyContext,
     ) -> NDArray[np.bool_]:
-        """Advance real envelopes; fractional steps use frozen spectral tails.
+        """Advance smooth envelopes; fractional steps use frozen spectral tails.
 
         Incompatible payloads raise ValueError; nonfinite output raises
         RuntimeError. Return an all-False accuracy-exceedance mask.
@@ -494,7 +549,7 @@ class ShapedSambeKernel:
                 ),
                 UnitaryTable(
                     entry.bound,
-                    entry.coefficients,
+                    entry.expanded_coefficients()[:, : entry.degrees],
                     entry.subdivisions,
                     entry.block_cycles,
                     entry.project_unitary,
@@ -521,26 +576,28 @@ class ShapedSambeKernel:
                 tail = table.duration_ns[row] - start
                 if tail <= 1e-10:
                     continue
-                amp = float(
-                    envelopes(table, np.array([row]), np.array([[start + tail / 2]]))[
-                        0, 0
-                    ].real
-                )
-                blocks = _spectral(model, port, entry.frequency, amp, 3, tail)
+                amplitude = envelopes(
+                    table, np.array([row]), np.array([[start + tail / 2]])
+                )[0, 0]
                 theta = (
                     table.tone_theta_rad[row, 0] + 2 * np.pi * entry.frequency * start
+                )
+                if amplitude.imag == 0:
+                    # Keep the signed-real spectral path numerically unchanged.
+                    amp = float(amplitude.real)
+                else:
+                    amp = float(abs(amplitude))
+                    theta += float(np.angle(amplitude))
+                blocks = _tail_blocks(
+                    model, port, entry.frequency, amp, tail, context.work_plan
                 )
                 harmonics = np.fft.fftfreq(16) * 16
                 u = np.einsum("k,kij->ij", np.exp(1j * harmonics * theta), blocks)
                 # Polar projection changes U, not density or populations.
                 left, _, right = np.linalg.svd(u)
                 u = left @ right
-                ratio = tail / step
-                population = np.asarray(
-                    expm(tail / 2 * population_generator(model.rates_per_ns)),
-                    dtype=complex,
-                )
-                coherence = entry.coherences**ratio
+                maps = _tail_maps(model, entry, tail, context.work_plan)
+                population, coherence = maps.populations, maps.coherences
                 rho = chunk[j]
                 for half in range(2):
                     diagonal = population @ np.diag(rho)
