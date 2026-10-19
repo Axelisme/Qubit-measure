@@ -110,24 +110,6 @@ class ValueSourceBinder:
             _CONTEXT_OWNER,
             [
                 _str_source(
-                    "context.chip_name",
-                    _CONTEXT_OWNER,
-                    lambda: self._context_string("chip_name"),
-                    "active context chip name",
-                ),
-                _str_source(
-                    "context.qub_name",
-                    _CONTEXT_OWNER,
-                    lambda: self._context_string("qub_name"),
-                    "active context qubit name",
-                ),
-                _str_source(
-                    "context.res_name",
-                    _CONTEXT_OWNER,
-                    lambda: self._context_string("res_name"),
-                    "active context resonator name",
-                ),
-                _str_source(
                     "context.active_label",
                     _CONTEXT_OWNER,
                     lambda: self._context_string("active_label"),

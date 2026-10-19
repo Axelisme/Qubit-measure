@@ -21,13 +21,8 @@ def fixture_qt(qapp):
 def fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
     monkeypatch.setattr(arb_waveform, "gettempdir", lambda: str(tmp_path))
     fx = Fixture()
-    db_path = tmp_path / "Database" / "chip_a" / "q1" / "2026" / "06" / "Data_0626"
-    fx.state.session_env = replace(
-        fx.state.session_env,
-        chip_name="chip_a",
-        qub_name="q1",
-        database_path=str(db_path),
-    )
+    db_path = tmp_path / "Database" / "entry_a"
+    fx.state.session_env = replace(fx.state.session_env, database_path=str(db_path))
     return fx
 
 
@@ -86,10 +81,7 @@ def test_scope_switch_routes_new_writes_and_preserves_captured_assets(
 
     fixture.state.session_env = replace(
         fixture.state.session_env,
-        qub_name="q2",
-        database_path=str(
-            tmp_path / "Database" / "chip_a" / "q2" / "2026" / "06" / "Data_0626"
-        ),
+        database_path=str(tmp_path / "Database" / "entry_b"),
     )
     recipe = {"segments": [{"duration": 0.002, "formula": "0.8"}], "normalize": "none"}
     assert dispatch_handler(
