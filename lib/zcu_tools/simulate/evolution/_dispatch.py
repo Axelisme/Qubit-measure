@@ -488,6 +488,14 @@ class _Classifier:
                 self.cached.get(kernel.name, _EMPTY_GUARD_HITS),
             )
         groups = group_keys(kernel, self.table, rows, self.context)
+        # A common refusal must reach the caller's complete legacy key groups.
+        # Deferring a unique common key can otherwise split one shared Floquet
+        # (or RWA/gate) build into one build per timeline after the refusal.
+        caller_keys = (
+            np.ones(len(groups.keys), dtype=bool)
+            if kernel.name == "common_frame"
+            else groups.shared
+        )
         if self.cache is not None:
             dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
             self.cached[kernel.name] = _GuardCacheHits(
@@ -509,18 +517,18 @@ class _Classifier:
                 - self.cache.charged_bytes
                 + self.cache.reclaimable_bytes,
             )
-            // max(1, int(np.count_nonzero(groups.shared)))
+            // max(1, int(np.count_nonzero(caller_keys)))
             if self.cache is not None
             else 0
         )
-        local = rows[~groups.shared[groups.inverse]]
+        local = rows[~caller_keys[groups.inverse]]
         self.deferred[local] = True
         if len(local):
             self.costs[local] = kernel.cost(self.table, local)
         selections = (
-            selected for index, selected in groups.selections() if groups.shared[index]
+            selected for index, selected in groups.selections() if caller_keys[index]
         )
-        if self.pool is not None and np.count_nonzero(groups.shared) >= 8:
+        if self.pool is not None and np.count_nonzero(caller_keys) >= 8:
             batches = self.pool(
                 delayed(_guard_cached)(
                     kernel, self.table, self.context, selected, hits, rejected_limit
