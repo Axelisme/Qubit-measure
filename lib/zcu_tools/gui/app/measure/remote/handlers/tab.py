@@ -326,6 +326,29 @@ def h_tab_describe_cfg(
         ) from exc
 
 
+def h_tab_refresh_sources(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Recapture tab sources on the owner thread, preserving all input.
+
+    params requires tab_id and accepts single-capture aliases overrides. The
+    adapter retains resource ownership. Admission failures become remote cfg
+    errors; unexpected capture/factory failures propagate to dispatch. Return
+    the new input/values/errors projection and follow the Run pane on success.
+    """
+    from ..form_errors import cfg_error_to_remote
+    from ..form_observation import observe_form
+
+    tab_id = str(params["tab_id"])
+    try:
+        resource = adapter.cfg_lookup(tab_id)
+        resource.refresh_sources(aliases=temporary_aliases(params))
+    except CfgPreconditionError as exc:
+        raise cfg_error_to_remote(exc) from exc
+    follow_tab(adapter, tab_id, "run")
+    return dict(observe_form(resource))
+
+
 def h_tab_reset_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
