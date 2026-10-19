@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import Hidden, Slot, Template
+from zcu_tools.cfg_model import Hidden, LogPoints, Slot, Template
 from zcu_tools.gui.form import Display, FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -71,7 +71,10 @@ def make_form(ctx: FormContext) -> Form[CPMGFormCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout"),
             },
-            "sweep": {"times": [1, 2, 4, 8, 16], "length": Hidden()},
+            "sweep": {
+                "times": LogPoints(max=16, points=5, include_zero=False),
+                "length": Hidden(),
+            },
             "length_range": Hidden(),
             "length_expts": Hidden(),
             "detune_ratio": 0.1,
