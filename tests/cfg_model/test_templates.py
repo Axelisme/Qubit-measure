@@ -82,6 +82,18 @@ def test_runtime_cfg_is_not_a_persistent_template_type() -> None:
         cfg_model.TemplateDef(cfg_model.PulseCfg, "Runtime cfg", {})
 
 
+def test_template_rejects_subclasses_of_persistent_specs() -> None:
+    class CustomPulse(cfg_model.PulseSpec):
+        pass
+
+    class CustomWaveform(cfg_model.ConstWaveformCfg):
+        pass
+
+    for spec_type in (CustomPulse, CustomWaveform):
+        with pytest.raises(TypeError, match="persistent"):
+            cfg_model.TemplateDef(spec_type, "Custom", {})
+
+
 def test_definition_detaches_seed_mapping_from_its_caller() -> None:
     seeds: dict[str, cfg_model.TemplateSeed] = {"gain": 0.2}
     definition = cfg_model.TemplateDef(cfg_model.PulseSpec, "Pulse", seeds)
