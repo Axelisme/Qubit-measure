@@ -1237,9 +1237,7 @@ class RecipeTab:
         if values is None:
             self._binding.origins[path] = "gui_default"
             return
-        if type(values) is not list or any(
-            type(value) is not int for value in values
-        ):
+        if type(values) is not list or any(type(value) is not int for value in values):
             raise ValueError("values must be a list of integers or null")
         reply = self._edit(
             [{"path": list(path), "value": {"kind": "list", "values": [*values]}}]
