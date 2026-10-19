@@ -25,8 +25,10 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
 
+# tolerated(capability): Real sockets verify framing, EOF, authentication, and
+# same-port restart at the transport seam; recording transports cannot cover these.
 # Real loopback disconnects are observed by the bridge's reader thread.
-pytestmark = pytest.mark.uses_wall_clock
+pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 
 
 @pytest.fixture
