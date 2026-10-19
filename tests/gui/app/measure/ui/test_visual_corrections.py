@@ -12,7 +12,6 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import (
     QHBoxLayout,
-    QLabel,
     QScrollArea,
     QSizePolicy,
 )
