@@ -52,6 +52,32 @@ def test_rescale_complex_warning_identifies_the_caller_and_preserves_data() -> N
     assert_allclose(signals, original)
 
 
+@pytest.mark.parametrize("axis", [0, 1, -1])
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_rescale_masked_axis_preserves_unselected_columns_and_input(
+    axis: int, dtype: str
+) -> None:
+    signals = np.array(
+        [[2.0, np.nan, 5.0], [6.0, np.nan, np.nan], [np.nan, np.nan, np.nan]],
+        dtype=dtype,
+    )
+    expected = np.array(
+        [[1.0, np.nan, 5.0], [3.0, np.nan, np.nan], [np.nan, np.nan, np.nan]],
+        dtype=dtype,
+    )
+    if axis != 0:
+        signals, expected = signals.T, expected.T
+    original = signals.copy()
+
+    result = rescale(signals, axis=axis)
+
+    assert result is not signals
+    assert not np.shares_memory(result, signals)
+    assert result.dtype == signals.dtype
+    assert_allclose(result, expected, equal_nan=True)
+    np.testing.assert_array_equal(signals, original)
+
+
 def _make_complex(rng: np.random.Generator, n: int = 50) -> np.ndarray:
     """Return a 1-D complex128 array with a known dominant direction."""
     angle = np.pi / 6  # 30 degrees
@@ -229,6 +255,31 @@ class TestMinusMean:
         a = np.array([np.nan, np.nan])
         out = minus_mean(a)
         assert np.all(np.isnan(out))
+
+    @pytest.mark.parametrize("axis", [0, 1, -1])
+    @pytest.mark.parametrize("dtype", ["float32", "float64", "complex128"])
+    def test_masked_axis_preserves_unselected_columns_and_input(
+        self, axis: int, dtype: str
+    ) -> None:
+        signals = np.array(
+            [[2.0, np.nan, 5.0], [6.0, np.nan, np.nan], [np.nan, np.nan, np.nan]],
+            dtype=dtype,
+        )
+        expected = np.array(
+            [[-2.0, np.nan, 0.0], [2.0, np.nan, np.nan], [np.nan, np.nan, np.nan]],
+            dtype=dtype,
+        )
+        if axis != 0:
+            signals, expected = signals.T, expected.T
+        original = signals.copy()
+
+        result = minus_mean(signals, axis=axis)
+
+        assert result is not signals
+        assert not np.shares_memory(result, signals)
+        assert result.dtype == signals.dtype
+        assert_allclose(result, expected, equal_nan=True)
+        np.testing.assert_array_equal(signals, original)
 
     def test_invalid_axis_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid axis"):

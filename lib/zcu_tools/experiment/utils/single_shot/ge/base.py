@@ -101,24 +101,16 @@ def hist(
     ne = ne / np.sum(ne)
     if ax is not None:
         xs = 0.5 * (bins[1:] + bins[:-1])
-        ax.hist(
-            xs,
-            bins=bins.tolist(),
-            range=xlims,
-            alpha=0.5,
-            color="b",
-            weights=ng,
-            label="g",
-        )
-        ax.hist(
-            xs,
-            bins=bins.tolist(),
-            range=xlims,
-            alpha=0.5,
-            color="r",
-            weights=ne,
-            label="e",
-        )
+        for weights, color, label in ((ng, "b", "g"), (ne, "r", "e")):
+            ax.hist(
+                xs,
+                bins=bins.tolist(),
+                range=xlims,
+                alpha=0.5,
+                color=color,
+                weights=weights,
+                label=label,
+            )
         ax.set_ylabel("Counts", fontsize=14)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")

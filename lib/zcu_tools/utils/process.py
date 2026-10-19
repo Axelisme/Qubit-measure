@@ -197,11 +197,13 @@ def minus_mean(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
 
         # minus the mean
         val_mask = ~np.all(np.isnan(signals), axis=0)
-        signals[:, val_mask] = np.subtract(
-            signals[:, val_mask],
-            np.nanmean(signals[:, val_mask], axis=0, keepdims=True),
-            out=signals[:, val_mask],
+        selected = signals[:, val_mask]
+        np.subtract(
+            selected,
+            np.nanmean(selected, axis=0, keepdims=True),
+            out=selected,
         )
+        signals[:, val_mask] = selected
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
 
@@ -256,11 +258,13 @@ def rescale(signals: NDArray[T_dtype], axis: int | None = None) -> NDArray[T_dty
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         val_mask = np.sum(~np.isnan(signals), axis=0) > 1
-        signals[:, val_mask] = np.divide(
-            signals[:, val_mask],
-            np.nanstd(signals[:, val_mask], axis=0, keepdims=True),
-            out=signals[:, val_mask],
+        selected = signals[:, val_mask]
+        np.divide(
+            selected,
+            np.nanstd(selected, axis=0, keepdims=True),
+            out=selected,
         )
+        signals[:, val_mask] = selected
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
     else:
