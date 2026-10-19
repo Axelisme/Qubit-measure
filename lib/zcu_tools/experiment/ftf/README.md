@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-19, source-scoped noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
+**Last updated:** 2026-10-19, source-scoped immutable envelope encoding, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -97,7 +97,15 @@ numeric-use identity and repeat report-only accuracy warnings. The public
 Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
 counts Python containers/keys and whole ndarray allocations, including bases of
 views. Active/caller references are separate from resident budgets. Bounded ADC
-solvers and exact contents also remain source-owned. Every round still captures a
+solvers and exact contents also remain source-owned. A separate source-owned
+32 MiB `envelope_encoder` retains the exact SHA256 input stream for immutable
+`PulseEnvelope` objects. Its budget includes retained tuples, numeric objects,
+encoded bytes and Python containers. It reports cumulative `builds`/`hits` and
+`resident_bytes`; `max_bytes` is adjustable between calls and zero disables
+residency. The capacity covers the full 101-length Gaussian host-scan working set,
+not just a short scan. Borrowed request arrays are reread on every key lookup.
+Generation changes still invalidate preparations; immutable encodings contain no
+generation data. Source close releases the encodings too. Every round still captures a
 live snapshot and samples the original stream. The binding serializes calls;
 direct author callers must do the same.
 

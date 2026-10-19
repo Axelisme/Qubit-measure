@@ -41,7 +41,7 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 
-from .preparation import PreparationCache, preparation_key
+from .preparation import EnvelopeEncoder, PreparationCache, preparation_key
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
 from .template import FTFModelFacts, plan_template
@@ -166,7 +166,9 @@ class FTFAcquire:
         owner = self._source
         # This check must precede every lookup, including equal-content requests.
         owner.model_facts(snapshot)
-        key = preparation_key(self.request, owner.readout)
+        key = preparation_key(
+            self.request, owner.readout, encoder=owner.envelope_encoder
+        )
         prepared = owner.preparation_cache.get(key)
         if prepared is None:
             prepared = self._prepare(snapshot, index)
@@ -294,7 +296,12 @@ class FTFSource:
     resident_bytes are author diagnostics. Full model/receiver/tolerance content
     selects solvers; physical-facts generation changes clear all readout residents.
     close releases physical facts/readout residents, invalidates the session and
-    closes the engine.
+    closes the engine. envelope_encoder owns at most 32 MiB of exact immutable
+    PulseEnvelope encodings, including retained tuples and Python containers.
+    Its cumulative builds/hits and resident_bytes report encoding reuse; its
+    max_bytes is adjustable between calls. Borrowed arrays are always reread.
+    Encodings contain no physical generation data and survive generation changes;
+    preparation invalidation is unchanged. Close releases all encodings.
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
@@ -326,6 +333,7 @@ class FTFSource:
         self._facts: FTFModelFacts | None = None
         self.readout_cache = ReadoutCache(8 * 1024**2)
         self.preparation_cache: PreparationCache[_Prepared] = PreparationCache()
+        self.envelope_encoder = EnvelopeEncoder()
         self._preparation_engine = self.engine
         self._closed = False
 
@@ -401,6 +409,7 @@ class FTFSource:
         self._facts = None
         self.readout_cache.clear()
         self.preparation_cache.clear()
+        self.envelope_encoder.clear()
         self._closed = True
         self.engine.close()
 
