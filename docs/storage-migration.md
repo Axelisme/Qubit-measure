@@ -6,7 +6,7 @@
 他機已寫入 `results/<name>/` 時，依[根目錄搬移](#將他機已寫入的-results-搬到-result)處理，不必重做遷移。
 `result_root` 可明確指定其他目錄，名稱本身不決定格式。
 也適用於他機應急工具只遷一半的資料，見[部分遷移接手](#從部分遷移的狀態手動接手)。
-本文不要求執行 `migrate_storage`，也不宣稱自動備份、exps discovery 或 cleanup 已可用。
+本文不要求執行 `migrate_storage`，也不宣稱自動備份、exps discovery、predictor 轉換或 cleanup 已可用。
 腳本操作另行補充。舊腳本可能仍限制在整個舊 result root 內寫入，本文不保證其 CLI 已支援同根目的地。
 手動操作只要求新 entry 與本次兩個來源樹不重疊。**先驗證完整備份，最後才清理舊來源。**
 
@@ -108,7 +108,7 @@ find "$BR/exps" -type f -iname '*.png' -printf '%P\n' | LC_ALL=C sort
 
 | 舊檔 | 新位置與處理 |
 | --- | --- |
-| 根層 `params.json` | 原檔可原樣存 `result/<name>/params.json` 作稽核副本；可用數值另轉入 setup/component，不能只 copy 就算完成。 |
+| 根層 `params.json` | 原檔可原樣存 `result/<name>/params.json` 作稽核副本；`fluxdep_fit` 另寫 `result/<name>/predictors/<component名>.json`，其餘依第 4 節保存到 component 的 `ext.legacy_params`，不能只 copy 就算完成。 |
 | 根層 `meta_info.json` | 依欄位 mapping 寫 `setup.yaml`；與 params 衝突時 meta 優先。 |
 | `exps/<sub>/meta_info.json` | `result/<name>/points/<sub>/point.yaml`，先繼承完整 setup 再套用 point meta。 |
 | `exps/<sub>/module_cfg.yaml` | 同一 point 的 `module_cfg.yaml`，轉正式 Spec，不原樣冒充新格式。 |
@@ -155,7 +155,7 @@ find "$BR/exps" -type f -iname '*.png' -printf '%P\n' | LC_ALL=C sort
 `permanent-pending` 表示目前無法安全轉換，已在完整備份中定位並說明缺哪項證據。
 衝突列出兩個來源、值、單位與採用理由。完成判斷是每個檔與每個未轉欄位都有去向，不能只記總數。
 
-## 4. 先把 params 寫進 setup
+## 4. 分開保存 predictor 與 setup
 
 先確定舊 qubit 對應哪個新 component，以及物理 kind。
 全新 entry 可沿用已確認的 `Q0` 等名稱；部分接手沿用現有 mapping 與 component 名稱。
@@ -178,8 +178,88 @@ PY
 預期印出新 UUID 與兩個目的路徑，產生 setup、points、records 及同名 Database 目錄。
 既有條目不跑 create，不重新產生身分。保存此 UUID 與建立時間。
 
+### fluxdep_fit 寫成 entry predictor
+
+`fluxdep_fit` 不再轉成 component 欄位，也不隨 setup 複製到 points。
+將它寫成 `$NEW_R/predictors/<component名>.json`，例如已確認唯一對應為 Q0 時用 `Q0.json`。
+component 名只決定本次遷移的檔名，不決定 predictor 的模型或參數 schema。
+格式 owner 是 **predictor-file**。其實作尚未 land 時，可按以下格式用編輯器直接寫 JSON。
+land 後改用 `resources.predictor_file.save_predictor_file(Path, PredictorFile)`，型別為 `PredictorFile`、`PredictorSource`。
+`ResultEntry.predictors_path` 只回傳路徑，不建立目錄，不能拿屬性讀取成功當成檔案已存在。
+這是手動寫法，不表示舊 migration 腳本已能輸出 predictor，也不保證目前 predictor UI 已能載入。
+
+先從唯讀備份核對模型、參數及來源，再建立 `predictors/` 並寫入檔案。
+目的檔已存在時先走部分接手，只核對或補缺，不覆寫不同內容。
+最小格式包含以下欄位。頂層只允許表列的六個 key。
+`source` 只允許 `run_id`、`created_at`，不要另加 metadata 或 migration 註記。
+
+| 欄位 | 寫法與證據 |
+| --- | --- |
+| `format`、`version` | 固定為 `"zcu.predictor"`、嚴格整數 `1`，不接受 `true` 或 `1.0`。不是 parameter-container 的 `format_version`。 |
+| `model` | 格式接受 `"fluxonium"` 或 `"transmon"`。本次只轉換下述已有契約的舊 Fluxonium fit，不從 component kind 或名稱猜測。 |
+| `params` | 模型參數及 `flux_half`、`flux_period`、`flux_bias` 的 mapping。沿用 simulate 的 `Params.from_mapping`，只用該模型的合法欄名；未知值可省略或填 `null`，已知值須是有限數字，不接受 bool、數字字串、NaN 或 Infinity。完整性與物理約束由 `build_predictor` 檢查。 |
+| `flux_unit` | 必填，非空字串或 `null`。只接受 params 根層 `flux_unit` 或 `fluxdep_fit.flux_unit` 的明示單位。只有一處時採該值，兩處都有時必須相同；皆無或衝突時寫 `null` 並列 pending。數值不換算。 |
+| `source` | `run_id`、`created_at` 都必填，值為非空字串或 `null`。舊 fit 的 `run_id` 寫 `null`；`created_at` 只採用可證實為含時區 ISO 8601 的 `fluxdep_fit.timestamp`，否則寫 `null` 並列 pending。不能拿 entry UUID、檔名、mtime 或本次遷移時間代填。 |
+
+舊 [FluxDepFit 契約](../lib/zcu_tools/resources/qubit_params.md) 的手動 mapping 如下：
+
+| 舊值或既有預設 | predictor 位置 |
+| --- | --- |
+| `fluxdep_fit.params.EJ`、`EC`、`EL` | `model` 寫 `"fluxonium"`，數值分別寫 `params.EJ`、`params.EC`、`params.EL`，保留 GHz。 |
+| `fluxdep_fit.flux_half`、`fluxdep_fit.flux_period` | 分別寫 `params.flux_half`、`params.flux_period`，不換算。 |
+| 舊 predictor 的 bias 預設 | `params.flux_bias` 寫 `0.0`。這是舊契約的預設，不是從 `flux_int` 或 half/period 推算。 |
+| `fluxdep_fit.flux_int` | 只作舊 alignment，不寫入 predictor，也不改名成 `flux_bias`。原文留備份。 |
+| `fluxdep_fit.timestamp` | 符合上述時間證據才寫 `source.created_at`，例如 `"2026-10-19T08:00:00Z"`；否則 `null` 並在報告定位備份內原文或缺失。 |
+
+已知 mapping 但缺參數值時，可以省略該參數或填 `null`，例如 `"EC": null`，並列 pending。
+JSON 格式有效不等於參數已足夠建立 predictor，不用零值補缺，也不為未知 source 造值。
+舊 owner 未定義的 transmon 或帶明示 `model` 的 fit 保持 pending，不自行擴充 legacy 輸入契約，也不把 EJ 改名成 EJmax。
+其他映射若缺可靠依據，保全原文及 metadata，報告記錄缺項與備份位置，請使用者與格式 owner 核對。
+
+以下是合成的舊 Fluxonium fit 遷移範例，不是 TestChip/Q0 的實測參數。
+假設允許的單位來源明示 A，舊 fit 的數值已核對，但沒有可證實的 timestamp，`result/<entry>/predictors/Q0.json` 可寫成：
+
+```json
+{
+  "format": "zcu.predictor",
+  "version": 1,
+  "model": "fluxonium",
+  "params": {
+    "EJ": 6.27,
+    "EC": 1.41,
+    "EL": 0.80,
+    "flux_half": 0.001,
+    "flux_period": 0.002,
+    "flux_bias": 0.0
+  },
+  "flux_unit": "A",
+  "source": {
+    "run_id": null,
+    "created_at": null
+  }
+}
+```
+
+本例的未知 timestamp 必須在報告列 pending，附備份內 `params.json#fluxdep_fit` 的定位，不能把它標為已驗證的歷史時間。
+若同一份已核對參數缺少單位或兩個允許來源互相衝突，把 `flux_unit` 寫成 `null`，保留數值，不換算。
+報告逐項記錄兩個來源、原值或缺失，並列 pending。這份檔案不代表磁通座標已可安全使用。
+`cur_A` 名稱、逐欄 unit、目前裝置、其他區塊或 meta_info 的單位都不能補作 predictor 的單位證據。
+predictor 的單位與數值在同一個 JSON，不寫進 `general.ext.flux_unit` 或 qubit 的 local `flux_unit`。
+保留完整原始 params 及 metadata 的 byte-identical 備份，不能只靠上述精簡 JSON 取代來源稽核。
+
+### 其餘 params 與 meta_info 寫入 setup
+
 編輯 `$NEW_R/setup.yaml`，使用[正式 component 欄位](../zcu_lab/components/)。
-以下是合成 Fluxonium 範例，不是 TestChip/Q0 的實測參數。UUID 與 created_at 應保留剛建立的實值。
+沒有正式欄位的區塊，如 dispersive、t1_curve_fit、plot_transitions，將整個原始區塊連同內含 metadata 放進
+`components.<qubit>.ext.legacy_params.<區塊名>`。不能只挑 params 數字或刪掉未知子欄位。
+另列 located pending，保留來源 JSON 的 byte-identical 備份。
+project/name/schema_version 等識別資料也記入稽核清單，沒有正式對應的內容原樣保留於 legacy_params，
+不冒充 entry UUID 或量測資訊。
+
+再套用根層 meta_info。已有 meta 值優先，params 只補有正式對應的缺值；這不包含已獨立保存的 fluxdep_fit。
+不一致時保留 meta，報告列兩個來源並 pending。predictor 不能作為 setup 的參數或單位後備來源。
+以下是合成 setup 範例，假設根層 meta 明示 `q_f: 5000.0`，legacy_params 保存原始 dispersive 區塊。
+UUID 與 created_at 應保留剛建立的實值。
 
 ```yaml
 format: zcu.parameter-container
@@ -188,34 +268,20 @@ general:
   entry_id: '54cd2da2-e8cd-49d5-a414-4ec40eb7eb14'
   created_at: '2026-10-20T08:00:00Z'
   description: 'Manual migration of one legacy qubit'
-  ext:
-    flux_unit: A
 components:
   Q0:
     kind: qubit/fluxonium
-    EJ: 6.27
-    EC: 1.41
-    EL: 0.80
-    flux_half: 0.001
-    flux_int: 0.0
-    flux_period: 0.002
+    freq: 5000.0
     ext:
       legacy_params:
         dispersive:
           params: {chi: 0.12}
           metadata: {comment: 'original analysis note'}
 metadata:
-  Q0.EJ:
-    source: 'params.json#fluxdep_fit.params.EJ'
-    comment: 'Copied in GHz, no conversion'
+  Q0.freq:
+    source: 'meta_info.json#q_f'
+    comment: 'Copied in MHz, no conversion'
 ```
-
-按以下順序填寫，預期得到可由新 loader 讀取的 setup：
-
-1. 讀原始 JSON。`fluxdep_fit.params` 的 `EJ`、`EC`、`EL` 寫入對應 component 同名欄位，單位 GHz，metadata 保留在 dotted path 旁表。不要從別的 fit 或缺值推算。Transmon 沒有 EJ/EL 正式欄位，這兩項 pending，不改名成 EJmax 或擴 schema。
-2. `flux_half`、`flux_int`、`flux_period` 只有明示單位才轉。單位證據只接受 params 根層 `flux_unit` 或 `fluxdep_fit.flux_unit`。兩處都有必須相同；皆無或衝突就將這些 flux 數值列 pending，不採 `cur_A` 名稱、逐欄 unit、目前裝置或其他區塊作證據。數字不換算，單位寫 `general.ext.flux_unit`，不是 qubit 的 local `flux_unit`。
-3. 沒有正式欄位的區塊，如 dispersive、t1_curve_fit、plot_transitions，將整個原始區塊連同內含 metadata 放進 `components.<qubit>.ext.legacy_params.<區塊名>`。不能只挑 params 數字或刪掉未知子欄位。另列 located pending，保留來源 JSON 的 byte-identical 備份。project/name/schema_version 等識別資料也記入稽核清單，沒有正式對應的內容原樣保留於 legacy_params，不冒充 entry UUID 或量測資訊。
-4. 套用根層 meta_info。已有 meta 值優先，params 只補缺。不一致時保留 meta，報告列兩個來源並 pending。若根層 meta 的 global unit 不同，也不能把 params 的 flux 數字套在新 unit 下。
 
 meta_info 的主要對照如下。Q、R、J 是你已確認的實際 component 名稱，不是角色字串。
 完整歷史 key 清單見 [storage_mapping.py](../migrations/storage_mapping.py)。未列出的 key 保全並 pending，不猜測用途。
@@ -232,14 +298,16 @@ meta_info 的主要對照如下。Q、R、J 是你已確認的實際 component �
 | `pi_gain`、`pi_len`、`pi2_gain`、`pi2_len` | module/waveform 資料，不直接塞 qubit scalar；依下一節的正式 Spec 處理 |
 
 頻率保留 MHz，時間保留 us，能量保留 GHz，metadata 不換算。
-新值寫在 `components`，metadata 的 key 則不加 `components.` 前綴。
+meta_info 的新值寫在 `components` 或表列的 `general.ext`，metadata 的 key 不加 `components.` 前綴。
+這些正式 component 欄位的 mapping 不因 predictor 獨立保存而改名或移除。
 若缺 R/J 的實體對應，相關欄位 pending，不為了套表新增虛構元件或通道。
 完成時逐欄比對 params 與根 meta；setup 中每個採用值都有來源，pending 不混入可用數值。
 
 ## 5. 複製完整 YAML 成 point，再套 point meta
 
 先完成 setup，再逐個建立 `exps/<sub>` 對應的 point。不要逐區塊挑 components 或 metadata。
-整份 copy 才能保存 `general.ext` 與其他合法內容，避免 flux 有數字卻沒單位。
+整份 copy 才能保存 `general.ext` 與其他合法內容，避免 meta_info 的 flux 有數字卻沒單位。
+predictor 留在 entry 的 `predictors/`，不複製到 point，也不從 JSON 把 fit 參數補進 point.yaml。
 本節用直接檔案操作，不依賴 checkout 的 `new_point` 是否已更新繼承行為。
 
 ```bash
@@ -269,21 +337,23 @@ format_version: '2.0'
 general:
   created_at: '2026-10-20T08:05:00Z'
   description: 'Manual migration of one legacy qubit'
-  ext: {flux_unit: A}
 components:
   Q0:
     kind: qubit/fluxonium
-    EJ: 6.27
-    EC: 1.41
-    EL: 0.80
+    freq: 5000.0
+    ext:
+      legacy_params:
+        dispersive:
+          params: {chi: 0.12}
+          metadata: {comment: 'original analysis note'}
 metadata:
-  Q0.EJ: {source: 'params.json#fluxdep_fit.params.EJ'}
+  Q0.freq: {source: 'meta_info.json#q_f'}
 ```
 
-如果 point meta 的 global unit 與 params 不同，移除 point 內僅由 params 繼承的 flux_half/int/period，
-以及這些值的 metadata，再寫入有該 point meta 單位證據的數值。
-不要留下「params 的 A 數字配上 point 的 V」。缺少 point 數字就保持缺值，報告列兩來源 pending，不換算。
-相同單位但數值不同也列衝突，保留 point meta。
+如果 point meta 的 global unit 與 setup 中根 meta 的單位不同，移除 point 副本中僅從根 meta 繼承的
+flux_half/int/period 及其 metadata，再寫入有該 point meta 單位證據的數值。
+不要留下「根 meta 的 A 數字配上 point 的 V」。缺少 point 數字就保持缺值，報告列兩來源 pending，不換算。
+相同單位但數值不同也列衝突，保留 point meta。這只處理 meta_info 的正式 component 欄位，不改 entry predictor。
 
 從另一個 point clone 時，整份來源改為該 point.yaml，不帶入 setup 的較新值。
 library 的複製與來源處理另依 context owner；不要直接複製帶 ledger event 引用的 library 到另一 entry。
@@ -581,8 +651,11 @@ printf 'Root move verified: %s\n' "$TO"
 | 缺某些 points | 先補 setup 的缺失 params，再依第 5 節為缺項完整 copy YAML，套其 meta/library。 | 每個舊 label 唯一對應 point；已存在的 point 不重建。 |
 | point 已有新修改 | 逐欄比較 params、根 meta、point meta 與當前值，只補缺值。 | 保留有效新值與原 metadata；不同值列兩來源 pending，需使用者決定才覆寫。 |
 | PNG 在 `migration-preserved/result/exps/<sub>/image`，未掛 point | 對照原始相對路徑與備份 hash。建好/驗證 point 後，從已驗證副本用 copy_checked 複製到該 point/figures。 | 原檔名與 hash 相同；preserved 多一份不算衝突，不急著刪它。 |
-| params.json 只 copy，component 沒有 fit | 確定唯一 qubit，依第 4 節補 setup，再逐個補既有 point 的缺值並套 point meta 優先規則。 | 改 setup 不會同步既有 point；每個 point 都需核對，不能重新 copy 蓋掉新值。 |
-| point 有繼承的 flux 數字卻缺 unit | 找 params 的允許單位證據與該 point meta，無衝突才補 general.ext.flux_unit。 | 無/衝突則移除僅遷移帶入且無證據的數字，保留原文與 pending；不猜 A。 |
+| params.json 只 copy，缺 `predictors/<component名>.json` | 確定唯一 qubit，依第 4 節將舊 EJ/EC/EL fit 寫成 fluxonium，bias=0.0，不寫 flux_int。核對兩個允許的 unit 來源與 timestamp。 | zcu.predictor v1 的必填 key 齊全，run_id=null；未知參數可省略/null，未知時間為 null 並 pending。未定義的 transmon/明示 model fit 保全並 pending，不造 mapping。component 沒有 fit 不再是缺項。 |
+| predictor 已存在或只寫了一半 | 對照備份逐欄核對 format/version、model、params、flux_unit、source；保存現檔，按契約補缺。 | 已有不同值保留並列衝突，不覆寫；未知參數省略/null，unit、run_id、created_at 不可省略。unit 缺失/衝突或時間無證據須為 null 且 pending。只改 header 不算完成。 |
+| fit 曾被寫進 setup/point component | 保存現況與來源，按第 4 節另寫 entry predictor。逐欄確認舊 fit 的誤寫範圍，再修正 setup 及每個既有 point。 | 只移除能證實僅由 fit 誤寫的欄位與 metadata；meta_info 自身的正式欄位和有效新值保留。來源不明列 pending，先核對，不整份覆寫。 |
+| 其餘 params 區塊未保存 | 依第 4 節補入對應 component.ext.legacy_params，保留完整原文及 metadata。 | setup 與每個既有 point 分別核對，不能重新 copy 蓋掉新值；無正式欄位者仍列 located pending。 |
+| point 有 meta_info 的 flux 數字卻缺 unit | 查根 meta、該 point meta 與目前值的來源，依原有 meta 單位規則補缺。 | 無/衝突則移除僅遷移帶入且無證據的數字，保留原文與 pending；不借用 predictor 或 params 的單位。 |
 | library 只換了 header 或有 dangling slot | 先保存現況，依正式 Spec 與 mapping 修補缺項，不覆寫有效 Spec。 | Spec、child keys、slot 與 asset 都有核對結果；不能轉者逐筆 pending。 |
 | Labber 已搬到新處 | 以原始盤點/hash 對照現檔，確認備份包含原 bytes。另用正常 reader 查 native 是否真的存在且有效。 | 「已搬」與「native 已轉」分開記；只有改檔名不算完成。 |
 | Labber 未搬，有完整 evidence | 依第 7 節產 native、generic/typed 讀回，再 copy/hash 原 Labber。 | 新 run 與原檔的對照清楚，舊來源保留到最後統一清理。 |
@@ -616,7 +689,9 @@ PY
 
 預期列出原 entry UUID 與所有 points，exit 0。接著逐項審閱，不用程式載入成功代替內容核對：
 
-- params/meta 已進正確 component；metadata、global/local unit、衝突處理均有記錄。
+- 每份 fluxdep_fit 已對應 entry 的 `predictors/<component名>.json`，或在備份定位並列永久 pending。逐欄核對嚴格整數 version、模型、模型與 flux 參數、unit、source，不加未知 key。entry loader 成功不代表已驗證 predictor。
+- predictor 的未知參數省略或填 null。unit 缺失/衝突、timestamp 無證據時，對應必填欄位為 null 且 pending，報告記錄備份內原文位置。
+- 其餘 params 已完整保存在正確 component.ext.legacy_params 並列 located pending。meta_info 仍寫正式 component/general 欄位。metadata、global/local unit、衝突處理均有記錄，fit 不混進 setup/point。
 - 每張 exps PNG 已掛正確 point，原名與 hash 相同。沒有「等 point」的暫待圖。
 - 每筆可轉 module/native 已由相應 owner 讀回，未完成、半份檔案與暫存 publication 都已處理。
 - samples、autofluxdep、未知檔及無法轉 Labber 已保全。永久 pending 逐筆以 BACKUP 內路徑與 hash 定位，原因可追溯。
@@ -647,7 +722,7 @@ test ! -e "$OLD_R" && test ! -e "$OLD_D"
 
 repo 範例的盤點為 5 個 exps、14 張 PNG，label 是 `062823`、`070216`、`070716_0.500`、
 `070800_0.500`、`072523`。params.json 只有 schema_version、project、name，沒有 fluxdep_fit，
-所以不能從這份範例憑空產出 EJ/EC/EL。
+所以不能從這份範例憑空產出 predictor，或把合成範例的 EJ/EC/EL 當成實值。
 
 舊流程的唯讀 dry-run 回報 exit 0、key_mappings 0、failures 0、pending 28，
 其中 association 18、unconverted file 10。該次使用獨立空 Database 作基準，沒有驗證真實 Labber。
