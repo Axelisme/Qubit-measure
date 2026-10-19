@@ -258,8 +258,9 @@ class SingleToneRWAKernel:
     difference against Floquet period playback was 0.010484 (<0.1); halving
     the largest verified dimension gives the 64 cap (2x safety factor).
     The 50 MHz window is only the initial edge set. Each iteration restores
-    every over-threshold one-photon edge and the omitted first-order edges
-    in every over-threshold two-photon channel's nonzero contributing paths.
+    every over-threshold one-photon edge and the strongest missing first-order
+    path per over-threshold two-photon channel and signed time order. The complete
+    omission rule is recomputed each round, with no amplitude cutoff.
     The shared omission estimate, Fourier terms and virtual diagonal all use
     that same final set; incompatible phase cycles still require pruning.
     Other component pairs use small complex generators; exact-zero input blocks

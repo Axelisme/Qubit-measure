@@ -26,8 +26,9 @@ from ._workload_facts import (
 # joint model: 50 MHz edges + 4 ns ceiling gave <= 1.76e-3 population change
 # against lab DOP853 through depth 16. The calibrated half-flux pair has
 # summed full-operator/carrier ratio 0.217, sampled normalized slope 0.0192/ns
-# and curvature 0.00231/ns² (including DAC quantization). Admission allows
-# margins up to 0.25, 0.025/ns and 0.003/ns². These are not rigorous bounds.
+# and curvature 0.00231/ns² (including DAC quantization).
+# Covariant admission keeps margins up to 0.25, 0.025/ns and 0.003/ns².
+# Ordinary multitone RWA instead resolves omitted channels below.
 _REVISION = "joint-rwa-v3"
 _EDGE_GHZ = 0.05
 _STEP_NS = 4.0
@@ -63,7 +64,15 @@ RWA_POLICY = (
 )
 
 
-ADAPTIVE_RWA_POLICY = ("omission-retained-edges-v1", CONSTANT_RWA_POLICY, RWA_POLICY)
+ADAPTIVE_RWA_POLICY = ("omission-strongest-parent-v2", CONSTANT_RWA_POLICY, RWA_POLICY)
+_MAX_OMISSION_PHASE_RAD = 0.0045
+_MAX_RETAINED_DIMENSION = 256
+MULTITONE_RETENTION_POLICY = (
+    "multitone-omission-retention-v1",
+    ADAPTIVE_RWA_POLICY,
+    _MAX_OMISSION_PHASE_RAD,
+    _MAX_RETAINED_DIMENSION,
+)
 
 
 @dataclass(frozen=True)
@@ -72,12 +81,19 @@ class RWARetention:
 
     edges has one ordered tuple of added (i,j) coordinates per positive carrier;
     the final set is the 50 MHz window union these edges. Negative Fourier masks
-    are the transposes. omission_transfer is the maximum
-    remaining first/second-order transfer proxy, not a rigorous error bound.
+    are the transposes. omission_transfer and omission_phase are maximum
+    remaining first/second-order transfer and phase proxies, not rigorous bounds.
+    dimension is sum(component_size**2), the real population/coherence dimension
+    of the full Fourier union graph, including isolated populations. Phase and
+    dimension are None for single constant rows, whose phase-graph owner keeps
+    its original phase/pruned-dimension policy. Exceeding a requested dimension
+    limit returns infinite omission proxies without further analysis.
     """
 
     edges: tuple[tuple[tuple[int, int], ...], ...]
     omission_transfer: float
+    omission_phase: float | None = None
+    dimension: int | None = None
 
 
 @dataclass(frozen=True)
@@ -123,7 +139,7 @@ class RWAPrepared:
 
     models: packed joint energies, drive quadratures, bases and secular rates.
     positive, negative: (keys,tones,M,M) coefficients multiplying z and conj(z),
-        respectively, after the 50 MHz Fourier-edge selection.
+        respectively, after the omission-resolved Fourier-edge selection.
     diagonal: (keys,max_active_tones,M) GHz/gain² diagonal terms from
         RWACoefficients, independent of carrier phase.
     """
@@ -179,12 +195,30 @@ def _two_step_coupling(data, first, second, i, k):
 
 
 @njit(nogil=True, cache=True)
-def _pair_probability(data, first, second, duration, additions):
+def _phase_estimate(coupling, detuning, duration, order):
+    """Order 0: oscillating diagonal, 2: virtual shift, 4: corrected remainder."""
+    strength = abs(coupling)
+    if strength == 0:
+        return 0.0
+    if detuning == 0:
+        return 2 * np.pi * duration * strength
+    if order == 0:
+        return min(2 * np.pi * duration * strength, 2 * strength / abs(detuning))
+    shift = strength**2 / abs(detuning)
+    if order == 4:
+        # The explicit virtual diagonal already contains the second-order term.
+        shift *= (strength / abs(detuning)) ** 2
+    return 2 * np.pi * duration * min(strength, shift)
+
+
+@njit(nogil=True, cache=True)
+def _pair_probability(data, first, second, duration, additions, phase_limit):
     energies, _, frequencies, _ = data
     a, sa = first
     b, sb = second
     combination = (1 - 2 * sa) * frequencies[a] + (1 - 2 * sb) * frequencies[b]
     maximum = 0.0
+    phase_maximum = 0.0
     for i in range(len(energies)):
         for k in range(len(energies)):
             if i == k and a == b and sa != sb:
@@ -192,22 +226,28 @@ def _pair_probability(data, first, second, duration, additions):
             coupling = _two_step_coupling(data, first, second, i, k)
             if first != second:
                 coupling += _two_step_coupling(data, second, first, i, k)
-            probability = _transfer_probability(
-                coupling, energies[i] - energies[k] + combination, duration
-            )
+            detuning = energies[i] - energies[k] + combination
+            probability = _transfer_probability(coupling, detuning, duration)
             maximum = max(maximum, probability)
-            if probability > _MAX_OMISSION_TRANSFER:
+            phase_exceeds = False
+            if phase_limit is not None:
+                phase = _phase_estimate(
+                    coupling, detuning, duration, 0 if i == k else 2
+                )
+                phase_maximum = max(phase_maximum, phase)
+                phase_exceeds = phase > phase_limit
+            if probability > _MAX_OMISSION_TRANSFER or phase_exceeds:
                 _restore_paths(data, first, second, i, k, additions)
                 if first != second:
                     _restore_paths(data, second, first, i, k, additions)
-    return maximum
+    return maximum, phase_maximum
 
 
 @njit(nogil=True, cache=True)
 def _omission_probability(energies, x, y, frequencies, amplitudes, duration):
     retained = _window_mask(energies, frequencies)
-    probability, _ = _omission_analysis(
-        energies, (x, y), frequencies, amplitudes, duration, retained
+    probability, _, _ = _omission_analysis(
+        energies, (x, y), frequencies, (amplitudes, duration), retained, None
     )
     return probability
 
@@ -229,24 +269,44 @@ def _window_mask(energies, frequencies):
 
 @njit(nogil=True, cache=True)
 def _restore_paths(data, first, second, i, k, additions):
-    # Restore only nonzero paths contributing to this effective channel.
-    energies, operators, _, retained = data
+    # Restore one strongest missing path per channel and signed time order.
+    # Recompute the complete omission estimate next round; no amplitude cutoff
+    # discards the weaker parents, and fast virtual edges need not all return.
+    energies, operators, frequencies, retained = data
     a, sa = first
     b, sb = second
+    largest = 0.0
+    best = -1
     for m in range(len(energies)):
-        if operators[a, sa, i, m] == 0 or operators[b, sb, m, k] == 0:
+        if retained[a, sa, i, m] and retained[b, sb, m, k]:
             continue
-        if not retained[a, sa, i, m]:
-            additions[a, sa, i, m] = True
-            additions[a, 1 - sa, m, i] = True
-        if not retained[b, sb, m, k]:
-            additions[b, sb, m, k] = True
-            additions[b, 1 - sb, k, m] = True
+        product = operators[a, sa, i, m] * operators[b, sb, m, k]
+        if product == 0:
+            continue
+        first_detuning = energies[i] - energies[m] + (1 - 2 * sa) * frequencies[a]
+        second_detuning = energies[m] - energies[k] + (1 - 2 * sb) * frequencies[b]
+        denominator = first_detuning if not retained[a, sa, i, m] else -second_detuning
+        strength = abs(product / denominator)
+        if strength > largest:
+            best, largest = m, strength
+    if best == -1:
+        return
+    if not retained[a, sa, i, best]:
+        additions[a, sa, i, best] = True
+        additions[a, 1 - sa, best, i] = True
+    if not retained[b, sb, best, k]:
+        additions[b, sb, best, k] = True
+        additions[b, 1 - sb, k, best] = True
 
 
 @njit(nogil=True, cache=True)
 def _omission_analysis(
-    energies, quadratures, frequencies, amplitudes, duration, retained
+    energies,
+    quadratures,
+    frequencies,
+    pulse,
+    retained,
+    phase_limit,
 ):
     """One rule for every removed first/second-order Fourier coupling.
 
@@ -262,8 +322,16 @@ def _omission_analysis(
     GHz/ns units and the finite-time cap follow the calibrated combination
     proxy, not a rigorous Dyson error bound (no claim of a 2*pi certificate).
     The maximum P is shared across window-excluded one-photon, same-tone and
-    cross-tone two-photon terms, including empty retained graphs. Only constant
-    rows use this rule; sampled/gate admission is unchanged.
+    cross-tone two-photon terms, including empty retained graphs.
+    Multitone rows weight Fourier operators by abs(gain)*peak(abs(envelope)),
+    a shared envelope bound covering the full row including offsets and holds.
+    A None phase_limit skips phase compilation for transfer-only callers.
+    Otherwise off-diagonal one-photon terms use
+    2*pi*T*min(|g|,|g|^4/|d|^3), since their second-order diagonal is explicit.
+    Two-photon off-diagonal terms use 2*pi*T*min(|g_eff|,|g_eff|²/|d_eff|).
+    Oscillating diagonal terms instead use min(2*pi*T*|g|,2*|g/d|).
+    Zero detuning uses the finite-time term. Both maxima trigger restoration;
+    legacy gate/single-constant callers retain their original transfer policy.
 
     Calibration: 96 once-only strict-lab points on the 16-level joint model,
     four flux fractions 0,0.4,0.8,1 between integer and near-half, theta 0/0.7,
@@ -277,7 +345,9 @@ def _omission_analysis(
     intermediate-flux points now fall back due to the new omissions.
     """
     x, y = quadratures
+    amplitudes, duration = pulse
     maximum = 0.0
+    phase_maximum = 0.0
     size, count = len(energies), len(frequencies)
     additions = np.zeros_like(retained)
     operators = np.empty((count, 2, size, size), dtype=np.complex128)
@@ -293,7 +363,17 @@ def _omission_analysis(
                             operators[a, sa, i, j], d, duration
                         )
                         maximum = max(maximum, probability)
-                        if probability > _MAX_OMISSION_TRANSFER:
+                        phase = (
+                            _phase_estimate(
+                                operators[a, sa, i, j], d, duration, 0 if i == j else 4
+                            )
+                            if phase_limit is not None
+                            else 0.0
+                        )
+                        phase_maximum = max(phase_maximum, phase)
+                        if probability > _MAX_OMISSION_TRANSFER or (
+                            phase_limit is not None and phase > phase_limit
+                        ):
                             additions[a, sa, i, j] = True
                             additions[a, 1 - sa, j, i] = True
     for a in range(count):
@@ -304,16 +384,17 @@ def _omission_analysis(
                         continue
                     data = (energies, operators, frequencies, retained)
                     first, second = (a, sa), (b, sb)
-                    maximum = max(
-                        maximum,
-                        _pair_probability(data, first, second, duration, additions),
+                    probability, phase = _pair_probability(
+                        data, first, second, duration, additions, phase_limit
                     )
-    return maximum, additions
+                    maximum = max(maximum, probability)
+                    phase_maximum = max(phase_maximum, phase)
+    return maximum, phase_maximum, additions
 
 
 @njit(nogil=True, cache=True)
 def _coefficients(models, ports, frequencies, tones, retained=None):
-    """Build retained edges and compact per-tone diagonal from the same window."""
+    """Build Fourier edges and compact diagonal using the same resolved mask."""
     size = models.energies.shape[1]
     positive = np.zeros((len(tones), ports.shape[1], size, size), np.complex128)
     negative = np.zeros_like(positive)
@@ -500,46 +581,100 @@ def _retained_norm(
     return context.work_plan.fact(key, build)
 
 
-def _constant_retention(
-    model: SecularModel,
-    port: int,
-    frequency: float,
-    amplitude: float,
-    duration_ns: float,
-) -> RWARetention:
-    """Resolve a single constant carrier's model-only retained set.
+@njit(nogil=True, cache=True)
+def _retained_dimension(retained, quadratures):
+    # Same measure as the single-tone real generator: sum(component_size**2),
+    # including isolated populations, without imposing covariant phase charges.
+    x, y = quadratures
+    size = x.shape[1]
+    adjacency = np.zeros((size, size), dtype=np.bool_)
+    for a in range(len(x)):
+        coefficient = _fourier_coefficient(x[a], y[a], np.int64(1))
+        for i in range(size):
+            for j in range(size):
+                if retained[a, 0, i, j] and coefficient[i, j] != 0:
+                    adjacency[i, j] = adjacency[j, i] = True
+    visited = np.zeros(size, dtype=np.bool_)
+    queue = np.empty(size, dtype=np.int64)
+    dimension = 0
+    for root in range(size):
+        if visited[root]:
+            continue
+        visited[root] = True
+        queue[0] = root
+        first, last = 0, 1
+        while first < last:
+            i = queue[first]
+            first += 1
+            for j in range(size):
+                if adjacency[i, j] and not visited[j]:
+                    visited[j] = True
+                    queue[last] = j
+                    last += 1
+        dimension += last * last
+    return dimension
 
-    Start at 50 MHz. Each round restores all over-threshold one-photon edges
-    and all omitted nonzero first-order edges in an over-threshold two-photon
-    channel's contributing paths, together with their adjoints. Recompute the
-    complete shared omission estimate after each round. Monotone edge addition
-    terminates on a finite graph. Consumers still enforce strength, phase,
-    compatible-charge pruning and block-size limits. No multitone policy changes.
-    Downstream graph/prepare identities include the final edge coordinates,
-    not a guessed wider window.
+
+def _resolve_retention(
+    model: SecularModel,
+    ports: tuple[int, ...],
+    carriers: tuple[float, ...],
+    amplitudes: NDArray[np.float64],
+    duration_ns: float,
+    *,
+    limits: tuple[float | None, int | None] = (None, None),
+) -> RWARetention:
+    """Resolve model-only retained edges for single or simultaneous carriers.
+
+    Start at 50 MHz. Restore over-threshold one-photon edges and the strongest
+    missing path per over-threshold two-photon channel/time order, with adjoints.
+    Recompute after each round. Monotone addition terminates on a finite graph.
+    A finite phase_limit also restores channels with excessive residual phase;
+    dimension_limit stops expansion when the real graph dimension is too large.
+    limits is (phase_limit in rad or None, dimension_limit or None).
+    None skips the corresponding analysis, including its compiled helpers.
+    Single constant callers keep their original phase/strength/pruning policy.
     """
-    drive = model.drives[port]
-    frequencies = np.array([frequency])
+    phase_limit, dimension_limit = limits
+    quadratures = (
+        np.array([model.drives[p].in_phase_ghz for p in ports]),
+        np.array([model.drives[p].quadrature_ghz for p in ports]),
+    )
+    # Match immutable model quadratures used by coefficient construction, so
+    # admission does not compile an otherwise identical writeable specialization.
+    for quadrature in quadratures:
+        quadrature.setflags(write=False)
+    frequencies = np.array(carriers)
     initial = _window_mask(model.energies_ghz, frequencies)
     retained = initial
+    probability = phase = np.inf
+    dimension: int | None = None
     while True:
-        probability, additions = _omission_analysis(
+        if dimension_limit is not None:
+            dimension = int(_retained_dimension(retained, quadratures))
+            if dimension > dimension_limit:
+                break
+        probability, phase, additions = _omission_analysis(
             model.energies_ghz,
-            (drive.in_phase_ghz[None], drive.quadrature_ghz[None]),
+            quadratures,
             frequencies,
-            np.array([abs(amplitude)]),
-            duration_ns,
+            (amplitudes, duration_ns),
             retained,
+            phase_limit,
         )
         if not np.any(additions & ~retained):
             break
         retained = retained | additions
-    edges = ()
-    if retained is not initial:
-        edges = tuple(
-            (int(i), int(j)) for i, j in np.argwhere(retained[0, 0] & ~initial[0, 0])
-        )
-    return RWARetention((edges,), float(probability))
+    edges = tuple(
+        tuple((int(i), int(j)) for i, j in np.argwhere(retained[a, 0] & ~initial[a, 0]))
+        for a in range(len(ports))
+    )
+    return RWARetention(
+        edges,
+        float(probability),
+        None if phase_limit is None else float(phase),
+        dimension,
+    )
 
 
 def constant_retentions(
@@ -571,17 +706,63 @@ def constant_retentions(
                 continue
             model = context.source.model(tuple(int(v) for v in table.level[row]))
             results.append(
-                _constant_retention(
+                _resolve_retention(
                     model,
-                    int(table.tone_port[row, 0]),
-                    float(table.tone_frequency_ghz[row, 0]),
-                    float(table.tone_amplitude[row, 0]),
+                    (int(table.tone_port[row, 0]),),
+                    (float(table.tone_frequency_ghz[row, 0]),),
+                    np.abs(table.tone_amplitude[row, :1]),
                     float(table.duration_ns[row]),
                 )
             )
         return ConstantRetentions(tuple(results))
 
     return context.work_plan.fact(key, build)
+
+
+def multitone_retention(
+    table: SegmentTable, row: int, context: KernelContext
+) -> RWARetention:
+    """Resolve a row's omitted channels using peak-weighted envelope bounds.
+
+    Caller establishes the multitone fixed-flux/smooth/carrier domain. The
+    row-local fact includes signed carriers, gains, peaks and duration; it never
+    depends on other scan rows or input densities. Keys and preparation reuse
+    the final mask. Phase and dimension limits are part of its policy identity.
+    """
+    count = int(table.tones[row])
+    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    ports = tuple(int(v) for v in table.tone_port[row, :count])
+    frequencies = tuple(float(v) for v in table.tone_frequency_ghz[row, :count])
+    bounds = envelope_bounds(table, context.work_plan)
+    amplitudes = (
+        np.abs(table.tone_amplitude[row, :count])
+        * bounds.peaks[table.tone_envelope[row, :count]]
+    )
+    duration = float(table.duration_ns[row])
+    key = FactKey(
+        (
+            "multitone-retention",
+            MULTITONE_RETENTION_POLICY,
+            model.identity,
+            model.level,
+            ports,
+            frequencies,
+            tuple(amplitudes),
+            duration,
+        ),
+        RWARetention,
+    )
+    return context.work_plan.fact(
+        key,
+        lambda: _resolve_retention(
+            model,
+            ports,
+            frequencies,
+            amplitudes,
+            duration,
+            limits=(_MAX_OMISSION_PHASE_RAD, _MAX_RETAINED_DIMENSION),
+        ),
+    )
 
 
 def admit_rows(
@@ -642,6 +823,7 @@ def _admit_rows(
     *,
     single_tone: bool,
     constant_single: bool = False,
+    adaptive_multitone: bool = False,
 ) -> NDArray[np.bool_]:
     tolerances(context.budget)
     bounds = envelope_bounds(table, context.work_plan)
@@ -669,14 +851,24 @@ def _admit_rows(
         ):
             continue
         model = context.source.model(tuple(int(v) for v in table.level[row]))
+        if adaptive_multitone:
+            resolved = multitone_retention(table, int(row), context)
+            # Ordinary multitone requests both calibrated limits.
+            assert (
+                resolved.dimension is not None and resolved.omission_phase is not None
+            )
+            accepted[index] = (
+                resolved.omission_transfer <= _MAX_OMISSION_TRANSFER
+                and resolved.omission_phase <= _MAX_OMISSION_PHASE_RAD
+                and resolved.dimension <= _MAX_RETAINED_DIMENSION
+            )
+            continue
         retention = None
         if constant_single:
             if retentions is None:
                 retentions = constant_retentions(table, context)
             retention = retentions.rows[row]
             assert retention is not None  # The row passed the same domain checks above.
-            if retention.omission_transfer > _MAX_OMISSION_TRANSFER:
-                continue
         elif constant:
             ports = table.tone_port[row, :count]
             probability = _omission_probability(
@@ -716,6 +908,10 @@ def _admit_rows(
         accepted[index] = (
             ratio <= _MAX_RATIO
             and 2 * np.pi * table.duration_ns[row] * phase <= phase_limit
+            and (
+                retention is None
+                or retention.omission_transfer <= _MAX_OMISSION_TRANSFER
+            )
         )
     return accepted
 
@@ -805,48 +1001,60 @@ def rwa_coefficients(
 
 
 class MultitoneRWAKernel:
-    """Joint RWA C5 family with unchanged sampled and covariant-gate admission.
+    """Joint RWA C5 family with omission-driven Fourier retention.
 
     Admission requires >=2 tones with a sampled envelope, or exactly two
     constant envelopes on distinct ports, fixed flux,
     real envelopes with peak-normalized slope <=0.025/ns and curvature
     <=0.003/ns², each |f|>=0.05 GHz, pairwise ||f_i|-|f_j||>=0.1 GHz,
-    sum of peak |gain|*(||X||₂+||Y||₂)/|f| <=0.25, and cumulative
-    counter-rotating phase proxy 2π*duration*sum((peak*gain*||V_ret||₂)²/|f|)
-    <=0.06 rad for sampled rows, or <=0.16 rad for distinct-port dual constant
-    rows. The constant cap uses one 96-point scan of the 16-level joint model
-    against strict lab DOP853 (budget 1e-7): flux offsets
-    (0.48*f,0.2,0.49*f) Phi0 for f=0,0.4,0.8,1 between integer and near-half;
-    phases (0,0) and (0.7,-1.2) rad; full-operator/carrier ratios 0.03, 0.07,
-    0.14, 0.24; durations 128, 512, 1024 ns. Among all forced-RWA points,
-    including combination-guard rejects, the smallest proxy with population
-    error >0.1 was 0.338362529 rad. Halving and rounding down gives 0.16 rad
-    (2.11x margin). All 44 points below this cap had error <=0.08641; the 36
-    also passing the combination guard had error <=0.005062. This empirical
-    cap is not an arbitrary-input or whole-sequence certificate. Sampled
-    admission and covariant gate policies remain unchanged. Budgets below
-    1e-3 decline: this calibrated approximation is not a tight-error solver.
+    and budget >=1e-3. Full-operator/carrier and retained-norm phase caps do
+    not apply here. Single-constant RWA and covariant gates keep their policies.
 
-    Constant rows also use the unified omitted-edge transfer estimate documented
-    in _omission_probability: window-excluded one-photon edges, same-tone and
-    cross-tone two-step paths all share a 5.8e-3 cap. This extends the existing
-    combination calibration rather than layering separate resonance guards.
-    Sampled rows and covariant gates do NOT use this constant-only estimate.
-    The threshold uses half the smallest failing proxy in strict-lab calibration;
-    it is empirical, not a whole-sequence or arbitrary-input error certificate.
-    Constant rows use a 16 ns ceiling; sampled rows retain 4 ns. No density
-    reduction, dissipator change, clipping or normalization occurs.
+    The shared omission solver starts from 50 MHz edges and estimates only
+    omitted one-photon and same/cross-tone two-photon terms with peak envelope
+    weights. It restores over-threshold terms and their contributing paths,
+    recomputing until remaining transfer <=0.0058 and residual phase <=0.0045 rad.
+    Each over-threshold combination channel/time order restores its strongest
+    missing parent path per round, not all nonzero virtual paths. No amplitude
+    cutoff is used; all remaining paths are re-estimated after every round.
+    Static single-tone second-order diagonals are already explicit, so their
+    one-photon phase estimate charges the fourth-order remainder instead.
+    The final Fourier union must fit real population/coherence dimension
+    sum(component_size**2) <=256, the same measure as single constant RWA.
+    Resolved masks enter both coefficient builders and prepare/fact identities.
+
+    Transfer retains half the measured 0.0116496 combination-channel boundary.
+    Phase calibration uses a 24-point two-tone, 16-level joint-model grid:
+    integer/quarter/half flux, constant/Gaussian (sigma=T/4), full-operator/carrier
+    ratios 0.1/0.5, durations 128/1024 ns and phases 0.7/-1.2 rad. Candidate
+    budget is 1e-3; lab DOP853 reference is 1e-7. Both transfer-only masks and
+    final masks after phase restoration are checked: restoration can change
+    the proxy/error relation. The smallest failing remaining phase is
+    0.00934095 rad. The 0.0045 cap leaves a 2.0758 safety factor; final-grid
+    maximum population error is 0.07511. Tightening apply alone does not fix
+    the failing omitted-channel approximations.
+
+    A 24-point chain/block scan covers real dimensions 4,16,64,128,256,512,
+    constant/Gaussian envelopes and 30/200 ns (short Gaussians are forced solver
+    probes, not smoothness admissions). Maximum population error is 0.001281;
+    256 halves the validated 512 ceiling. At dimension 256, build plus apply
+    is faster than same-budget DOP853 in all four envelope/duration probes.
+    These are empirical admission rules, not arbitrary-input or sequence error
+    certificates. Constant rows use a 16 ns ceiling; sampled rows retain 4 ns.
+    No density reduction, dissipator change, clipping or normalization occurs.
     """
 
     name = "multitone_rwa"
-    revision = _REVISION
+    revision = MULTITONE_RETENTION_POLICY
     guard_builds = False
 
     def guard(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.bool_]:
         """Return row-local admission under the explicit calibrated policy above."""
-        return admit_rows(table, rows, context)
+        return _admit_rows(
+            table, rows, context, single_tone=False, adaptive_multitone=True
+        )
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
@@ -855,7 +1063,12 @@ class MultitoneRWAKernel:
         keys = np.empty(len(rows), dtype="V32")
         for index, row in enumerate(rows):
             count = table.tones[row]
-            digest = sha256(repr((RWA_POLICY, context.budget)).encode("ascii"))
+            retention = multitone_retention(table, int(row), context)
+            digest = sha256(
+                repr(
+                    (MULTITONE_RETENTION_POLICY, retention.edges, context.budget)
+                ).encode("ascii")
+            )
             if all(
                 table.envelopes[e].kind == "constant"
                 for e in table.tone_envelope[row, :count]
@@ -909,12 +1122,32 @@ class MultitoneRWAKernel:
                 for row in rows
             ]
         )
-        positive, negative, diagonal = _coefficients(
-            models,
-            table.tone_port[rows],
-            table.tone_frequency_ghz[rows],
-            table.tones[rows],
+        positive = np.zeros(
+            (
+                len(rows),
+                table.tone_port.shape[1],
+                models.energies.shape[1],
+                models.energies.shape[1],
+            ),
+            dtype=np.complex128,
         )
+        negative = np.zeros_like(positive)
+        diagonal = np.zeros(
+            (len(rows), int(np.max(table.tones[rows])), models.energies.shape[1])
+        )
+        for index, row in enumerate(rows):
+            count = int(table.tones[row])
+            model = context.source.model(tuple(int(v) for v in table.level[row]))
+            coefficients = rwa_coefficients(
+                model,
+                tuple(int(v) for v in table.tone_port[row, :count]),
+                tuple(float(v) for v in table.tone_frequency_ghz[row, :count]),
+                multitone_retention(table, int(row), context),
+                work_plan=context.work_plan,
+            )
+            positive[index, :count] = coefficients.positive
+            negative[index, :count] = coefficients.negative
+            diagonal[index, :count] = coefficients.diagonal
         positive.setflags(write=False)
         negative.setflags(write=False)
         diagonal.setflags(write=False)
