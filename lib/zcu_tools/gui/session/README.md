@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，shared user cache root 與 entry-scoped arb 資產
+**Last updated:** 2026-10-20，Inspect general/ext 與 entry-scoped arb 資產
 
 # gui/session/ — 量測 session core
 
@@ -176,7 +176,7 @@ from these markers. The selected-device value poller keeps its independent lifet
   `BackgroundExecutor` 只宣告 `submit`，`quiesce` 留在 concrete adapter。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure `RUN`）用 wire 字串比較，故兩 enum 同一 gate。共享硬體互斥規則住在 `RunBlocksHardwareGate`，app-local gate 只保留 RUN kind 與 import boundary。
 - **app 繼承/實作**：measure `State(SessionState)`；Controller 暴露 `setup_control: SetupControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。
-- **Inspect 元件樹**：`ComponentTreeWidget` 透過 context facet 讀取 point／setup 文件並提交元件與參數命令。`ContextService` 擁有驗證與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或 alias 表。共用 Inspect 的 Modules 以 library entry 表單編輯；子項 library key 保持 key，Apply 以一個 replace 寫 Name 與 Spec，被拒時保留 draft。Library structure change 使用開啟表單時的固定 capture，透過 ContextService 提交；Delete 先固定 capture 再確認。
+- **Inspect 元件樹**：`ComponentTreeWidget` 透過 context facet 讀取 point／setup 文件並提交元件與參數命令。獨立的 general/ext 分支顯示所選文件的擴充欄位與巢狀 mapping，不把 general 當成 component。可定址欄位沿用 Value 就地編輯與唯讀限制。`ContextService` 擁有驗證與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或 alias 表。共用 Inspect 的 Modules 以 library entry 表單編輯；子項 library key 保持 key，Apply 以一個 replace 寫 Name 與 Spec，被拒時保留 draft。Library structure change 使用開啟表單時的固定 capture，透過 ContextService 提交；Delete 先固定 capture 再確認。
 - **Entry binding**：GUI Setup 和 remote entry.new/open 使用同一個 ProjectSettingsService。EntryInfo 提供 UUID、任意目錄名稱與 result／database 絕對路徑。Open 只開既有 entry，New 明確建立。成功發布 entry metadata，不自選 point、不碰硬體。失敗保留舊 binding；New 已建資源而安裝失敗時保留 entry，以 Open 恢復，不重試 New
 - **Entry 與 point**：ResultEntry 擁有 entry roots、setup 與 points。ProjectSettingsService 只負責明確 open/new 與 preferences，ContextService 安裝 binding。Point 操作作用在目前 opened entry，不從 chip／qubit／resonator 推導身分
 - **operation callback 邊界**：`OperationRunner` terminal delivery 會 catch/log policy callback 例外並把 operation settle failed；`settle()` 的 progress discard / handle settle / exclusion release 各自 best-effort 執行，避免 progress UI 或 cleanup 例外讓 handle 永遠 pending。第二次呼叫同一 settle closure 會記 error 並 no-op，讓 double-terminal policy bug 可診斷但不破壞 cleanup idempotence。`ProgressService` owner listener 逐一隔離，壞 listener 不阻斷其他 view 或 terminal cleanup。

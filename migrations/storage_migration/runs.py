@@ -9,10 +9,13 @@ from uuid import UUID
 from zcu_tools.datafile import (
     CfgSnapshot,
     ExperimentPayload,
+    JsonObject,
+    LabberSnapshotError,
     RunMetadata,
     RunSnapshot,
     decode_labber_comment,
     json_values_equal,
+    load_labber_device_snapshot,
     load_run_data,
     save_run_data,
 )
@@ -64,6 +67,8 @@ def _run_metadata(
     assignment: RunAssignment,
     entry_id: UUID,
     native_tag: str,
+    labber_path: str,
+    device_snapshot: dict[str, JsonObject] | None,
 ) -> RunMetadata:
     snapshot = legacy.snapshot
     return RunMetadata(
@@ -72,7 +77,7 @@ def _run_metadata(
         started_at=legacy.started_at,
         finished_at=None if legacy.started_at is None else legacy.finished_at,
         completion="unknown" if legacy.started_at is None else legacy.completion,
-        labber_path=None,
+        labber_path=labber_path,
         snapshot=RunSnapshot(
             entry_id=entry_id,
             entry_name=snapshot.entry_name,
@@ -81,6 +86,7 @@ def _run_metadata(
             roles=snapshot.roles,
         ),
         provenance=legacy.provenance,
+        device_snapshot=device_snapshot,
     )
 
 
@@ -186,6 +192,7 @@ def _convert_run(
         return
     native = session.state(source, "native")
     payload = None
+    device_snapshot = None
     if native is None or native.phase == "planned":
         try:
             payload = _load_payload(source, legacy, session, entry, mapping)
@@ -195,6 +202,12 @@ def _convert_run(
         except ValueError as exc:
             record_pending(session, source, "run evidence", str(exc))
             return
+        try:
+            device_snapshot = load_labber_device_snapshot(source)
+        except LabberSnapshotError as error:
+            record_pending(session, source, "device snapshot pending", str(error))
+        else:
+            clear_pending(session, source, "device snapshot pending")
     clear_pending(session, source, "run evidence")
     assignment = _assignment(session, source, legacy.source_hash, legacy.run_id)
     destination = session.manifest.report.destination
@@ -262,6 +275,8 @@ def _convert_run(
         assignment,
         session.manifest.identity.entry_id,
         mapping.native_tags.get((legacy.experiment, cfg.cfg_type), legacy.experiment),
+        (Path("Labber") / legacy.source).as_posix(),
+        device_snapshot,
     )
 
     def build(path: Path) -> None:
