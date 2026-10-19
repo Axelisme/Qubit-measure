@@ -41,7 +41,95 @@ from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.widgets import error_colour
 
+from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
 from tests.gui.session.ui._parameter_fakes import make_parameters
+
+
+def test_failed_address_shows_reason_and_allows_corrected_retry(qapp, tmp_path: Path):
+    from zcu_tools.device import FakeDevice
+    from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+    from zcu_tools.gui.session.device_control import DeviceControlFacet
+    from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
+    from zcu_tools.gui.session.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_runner import OperationRunner
+    from zcu_tools.gui.session.services.device import DeviceService
+    from zcu_tools.gui.session.services.progress import ProgressService
+    from zcu_tools.gui.session.state import SessionState
+    from zcu_tools.gui.session.types import SessionEnv
+
+    from tests.gui.session.services._device_waits import DeviceWorkers
+
+    workers = DeviceWorkers()
+    bus = EventBus()
+    gate = RunBlocksHardwareGate(run_kind="run", bus=bus)
+    bg = workers.background()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(gate, handles, progress, bg, bus)
+    driver = FakeDevice(fast_mode=True)
+
+    def create_driver(type_name: str, address: str) -> FakeDevice:
+        if address == "invalid-address":
+            raise ValueError("Invalid VISA resource: invalid-address")
+        return driver
+
+    service = DeviceService(
+        bus,
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        gate,
+        bg,
+        runner,
+        handles,
+        driver_factory=create_driver,
+    )
+    facet = DeviceControlFacet(bus=bus, device=service, progress=progress)
+    dialog = DeviceDialog(facet, parameter_provider=lambda: None)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        ui = ComponentDriver(dialog)
+        ui.choose_option("Type:", "FakeDevice")
+        ui.enter_text("Name:", "retry_device", commit=False)
+        ui.enter_text("Address:", "invalid-address", commit=False)
+        ui.screenshot(tmp_path / "01-invalid-address.png")
+        ui.click("Add Device")
+        # Driver creation must raise; owner delivery either retains the failed row
+        # or (the regression) removes it. No timing-based success condition.
+        qt_until(
+            lambda: (
+                not ui.list_rows()
+                or any(
+                    "Invalid VISA resource" in widget.text
+                    for widget in ui.visible().widgets
+                )
+            ),
+            label="failed address delivery",
+        )
+        ui.screenshot(tmp_path / "02-failed-address.png")
+        assert any(
+            "Invalid VISA resource" in widget.text for widget in ui.visible().widgets
+        )
+        assert ui.observe("Add Device").enabled
+        ui.enter_text("Address:", "corrected-address", commit=False)
+        ui.screenshot(tmp_path / "03-corrected-address.png")
+        ui.click("Add Device")
+        qt_until(
+            lambda: any(
+                "Connected retry_device." in widget.text
+                for widget in ui.visible().widgets
+            ),
+            label="corrected address connected",
+        )
+        ui.screenshot(tmp_path / "04-retry-connected.png")
+        assert [row.text for row in ui.list_rows()] == ["retry_device (FakeDevice)"]
+        ui.click("Close")
+    finally:
+        workers.close()
+        dialog.close()
+        dialog.deleteLater()
+        driver.close()
+        qapp.processEvents()
 
 
 def _listing(dialog: DeviceDialog) -> QListWidget:
