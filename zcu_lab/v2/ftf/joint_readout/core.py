@@ -77,12 +77,7 @@ class JointReadoutCfg(ProgramV2Cfg, ExpCfgModel):
         """Require independent charge generators and in-range original tones."""
         if self.modules.x180_f1.ch == self.modules.x180_f2.ch:
             raise ValueError("F1/F2 Xπ pulses require different charge generators")
-        if self.roles.tone_count != len(self.modules.readout.tones):
-            raise ValueError("Readout must retain every tone of the captured mux group")
-        if max(self.roles.f1_tone, self.roles.f2_tone) >= len(
-            self.modules.readout.tones
-        ):
-            raise ValueError("Captured F1/F2 tones exceed the complete mux readout")
+        self.roles.validate_readout(self.modules.readout)
         return self
 
 

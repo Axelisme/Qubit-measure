@@ -452,13 +452,13 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     draft = session.service.create_draft(
         [
             ParameterWriteback(
-                "driver.ext.readout_cal.g_center",
+                "$driver.ext.readout_cal.g_center",
                 "Ground center",
                 proposed_value=centers[0],
                 stderr=0.01,
             ),
             ParameterWriteback(
-                "driver.ext.readout_cal.e_center",
+                "$driver.ext.readout_cal.e_center",
                 "Excited center",
                 proposed_value=centers[1],
                 stderr=0.02,
@@ -490,7 +490,7 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     assert (
         evaluate_scalar_expr("$driver.ext.readout_cal.g_center", current) == centers[0]
     )
-    assert captured.value("driver.ext.readout_cal.g_center") == {
+    assert captured.value("$driver.ext.readout_cal.g_center") == {
         "__complex__": [0.2, -0.1]
     }
     assert session.control.read_context().target == second
@@ -523,7 +523,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
     draft = session.service.create_draft(
-        [ParameterWriteback("driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
+        [ParameterWriteback("$driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
         parameters=captured,
         run_id="original-run",
         experiment_name="test/writeback",
@@ -539,7 +539,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
         draft, (WritebackEdit("param-1"),), origin=CommandOrigin("mcp")
     )
     assert written == [WritebackWritten("param-1", "parameter", "Q1.rate", 0.6, 0.2)]
-    assert captured.value("driver.rate") == 0.1
+    assert captured.value("$driver.rate") == 0.1
     assert session.control.read_context().target == second
     assert session.control.read_context().document() == selected
     assert not draft.items[0].selected
@@ -630,7 +630,7 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
     )
     draft = session.service.create_draft(
         [
-            ParameterWriteback("driver.rate", "Role", proposed_value=0.2),
+            ParameterWriteback("$driver.rate", "Role", proposed_value=0.2),
             ParameterWriteback("Q1.rate", "Direct", proposed_value=0.3),
         ],
         parameters=captured,

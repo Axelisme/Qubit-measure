@@ -142,8 +142,8 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     assert tab.run.source_operation_id == token
     assert tab.run.parameters is captured
     if tab.run.parameters is not None:
-        assert tab.run.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
-        assert tab.run.parameters.value("source_qubit.rate") == 1.0
+        assert tab.run.parameters.resolve_path("$source_qubit.rate") == "Q1.rate"
+        assert tab.run.parameters.value("$source_qubit.rate") == 1.0
     assert not state.is_tab_running(tab_id)
     assert not gate.has_active(OperationKind.RUN)
 
@@ -155,7 +155,7 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     next_source = state.get_tab(tab_id).run.parameters
     assert next_source is not None
     assert next_source is q2
-    assert next_source.value("source_qubit.rate") == 2.0
+    assert next_source.value("$source_qubit.rate") == 2.0
     assert tab.run.source_operation_id == next_token
 
     state.clear_tab_results(tab_id)

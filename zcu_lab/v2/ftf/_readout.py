@@ -1,4 +1,4 @@
-"""Full-tone FTF binding and one-round mux collection shared by joint/idle runs."""
+"""Full-tone FTF binding and one-round mux collection shared by FTF runs."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, MuxReadoutCfg
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules import MuxReadout
 
@@ -39,6 +39,18 @@ class JointRoles(ConfigBase):
         if self.f1 == self.f2 or self.f1_tone == self.f2_tone:
             raise ValueError("F1 and F2 must be distinct components and tones")
         return self
+
+    def validate_readout(self, readout: MuxReadoutCfg) -> None:
+        """Require all captured tones and in-range F1/F2 original positions.
+
+        readout is the complete mux configuration, never a selected subset.
+        Raise ValueError for a count mismatch or out-of-range role index;
+        neither mapping nor readout is modified.
+        """
+        if self.tone_count != len(readout.tones):
+            raise ValueError("Readout must retain every tone of the captured mux group")
+        if max(self.f1_tone, self.f2_tone) >= len(readout.tones):
+            raise ValueError("Captured F1/F2 tones exceed the complete mux readout")
 
 
 def collect_joint_shots(
