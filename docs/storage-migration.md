@@ -207,11 +207,11 @@ PY
 
 2. **單位照抄，不換算。** 頻率 MHz、時間 us、能量 GHz。`flux_unit` 管 `cur_A` 與 `flx_*`，`jpa_flux_unit` 管 `best_jpa_flux`。磁通數字依序取單位：
    1. 同一份 meta 明寫的單位。
-   2. entry 已知的明寫單位：根層 meta_info 的單位；沒有時用 `params.json` 根層的 `flux_unit`。
+   2. entry 已知的明寫單位：根層 meta_info 的同一個 key；沒有時用 `params.json` 根層的 `flux_unit`。JPA 只認 `jpa_flux_unit`，不借 qubit 的單位，所以跳過 `params.json` 這一項。
    3. 使用者宣告的假設單位（本專案的資料用 `mA`），報告標「假設單位」。
    4. 以上都沒有：數字不寫入，列 pending。
 
-   明寫的單位互相衝突時列 pending，不擇一。報告記下實際採用的是哪份檔的單位。
+   同一層的兩個明寫單位互相衝突時（例如根層 meta 與 `params.json` 不同），列 pending，不擇一。報告記下實際採用的是哪份檔的單位。
 
 3. **params 原文 → `legacy_params`。** `params.json` 的每個區塊連同內含 metadata 原文寫進 `components.<Q>.ext.legacy_params.<區塊名>`。
    第 5 步轉成格式檔的區塊也照樣保留原文。`project`、`name`、`schema_version` 等識別資料也原文保留，不冒充 entry UUID。
