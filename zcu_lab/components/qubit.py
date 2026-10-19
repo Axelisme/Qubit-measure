@@ -1,14 +1,8 @@
-"""Shared qubit fields, channel wiring and predictor input conversion."""
+"""Shared qubit fields and channel wiring."""
 
-from math import isfinite
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from zcu_tools.resources.entry.schema import ComponentSchema
-from zcu_tools.resources.entry.views import ComponentView, FieldView
-from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
-from zcu_tools.simulate.predictor import PredictorInputError
-from zcu_tools.simulate.transmon import TransmonParams
 
 from .base import BuiltinComponent, Duration, Flux, Frequency, reject_null_channel
 
@@ -64,51 +58,3 @@ class QubitBaseSchema(BuiltinComponent):
     flux_source: str | None = Field(
         default=None, description="Name of the component that supplies flux bias."
     )
-
-
-def params_for(
-    component: ComponentSchema | ComponentView,
-) -> FluxoniumParams | TransmonParams:
-    """Read independent model inputs from a qubit component's current values.
-
-    Accept a notebook Point/Setup ComponentView or an isolated ComponentSchema
-    from a GUI context capture. Fluxonium reads EJ/EC/EL and SQUID transmon reads
-    EJmax/EC/d; energies are GHz and d is dimensionless. Both read flux_half,
-    flux_period and ext.flux_bias in native device units. Missing/unset fields
-    stay None. No read refreshes, edits, adds defaults or builds a model.
-    Unsupported kinds and nonnumeric/nonfinite supplied fields raise PredictorInputError
-    naming the field.
-    """
-    if component.kind not in ("qubit/fluxonium", "qubit/transmon"):
-        raise PredictorInputError(f"Unsupported predictor kind: {component.kind}")
-    ext = getattr(component, "ext", None)
-    if isinstance(ext, dict):
-        bias = ext.get("flux_bias")
-    elif isinstance(ext, FieldView):
-        bias = getattr(ext, "flux_bias", None)
-    else:
-        bias = None
-
-    def read(name: str) -> float | None:
-        return _optional_number(getattr(component, name, None), name)
-
-    affine = {
-        "flux_half": read("flux_half"),
-        "flux_period": read("flux_period"),
-        "flux_bias": _optional_number(bias, "flux_bias"),
-    }
-    if component.kind == "qubit/transmon":
-        return TransmonParams(EJmax=read("EJmax"), EC=read("EC"), d=read("d"), **affine)
-    return FluxoniumParams(EJ=read("EJ"), EC=read("EC"), EL=read("EL"), **affine)
-
-
-def _optional_number(value: object, name: str) -> float | None:
-    if value is None:
-        return None
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (float, int))
-        or not isfinite(value)
-    ):
-        raise PredictorInputError(f"{name} must be a finite number or None")
-    return float(value)

@@ -71,10 +71,17 @@ FakeDevice、YOKO、SGS 維持專屬面板，不改寫成 Form。未知 type 顯
 ## 獨立 predictor
 
 Predictor 不持有 installed session model，不參與 Run 或 Analyze／Post-analyze。
-`simulate` 擁有具名參數與中性 query 契約。使用者套件擁有 component→params_for 對應，
-app composition 顯式注入。Framework 不 import 使用者套件（C16）；simulate 不新增容器讀取依賴（C9）。
-Dialog 的試算參數是獨立 owner，不寫回元件。Service／remote 明確取得參數或具體元件名，
-不讀 dialog。Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 devices。
+`simulate` 擁有框架內建 fluxonium／transmon 的具名參數與中性 query 契約。
+`resources.predictor_file` 擁有 `zcu.predictor` JSON 讀寫與驗證，檔案放在 entry 的 `predictors/`。
+Session predictor service 透過 ContextControlPort 取得 ResultEntry 擁有的目錄，集中列檔、檔名驗證與載入。
+Dialog／remote 使用檔名或明確參數，不解讀 component 欄位，也不由 alias 選來源。
+Framework 不 import 使用者套件（C16）；simulate 不讀容器或檔案（C8、C9）。
+Dialog 擁有可手動修改的獨立 trial，不寫回元件或來源檔案。Service／remote 不讀 dialog。
+Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 devices。
+
+使用者於 2026-10-20 裁定：「框架內支援的fluxonium/transmon是理論上的兩種qubit，有自己定義的參數，與用戶定義的component解偶」。
+檔案交接採用原話：「我認為還有一個最簡單的，不轉。讓fluxdep的工具寫preditor要用的格式檔，而不是component的欄位。」
+對 entry 層檔案、格式與 dialog 方案，使用者回答：「1先entry吧。2可以。3可以。」
 
 ## Adapter capability 與事件
 

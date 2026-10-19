@@ -29,7 +29,7 @@ from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
-from zcu_tools.gui.session.services.predictor import ParamsFor, PredictorService
+from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.types import ParameterContext
@@ -137,7 +137,6 @@ def build_app_services(
     owner_scheduler: OwnerScheduler,
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
-    params_for: ParamsFor | None = None,
     alias_presets: AliasPresets | None = None,
     device_registry: DeviceRegistryPort | None = None,
     driver_factory: DriverFactoryPort | None = None,
@@ -181,7 +180,6 @@ def build_app_services(
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
         alias_rows=() if alias_presets is None else alias_presets["default"],
-        params_for=params_for,
     )
     session.device.publish_initial_devices()
     context = session.context

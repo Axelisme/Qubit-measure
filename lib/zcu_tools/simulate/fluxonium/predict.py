@@ -192,21 +192,6 @@ class FluxoniumPredictor:
     def flux_bias(self, new_flux_bias: float) -> None:
         self._engine.flux_bias = new_flux_bias
 
-    @classmethod
-    def from_file(cls, result_path: str, flux_bias: float = 0.0) -> FluxoniumPredictor:
-        """Legacy read-only params.json construction with an explicit native bias.
-
-        result_path names an existing QubitParams JSON file. Missing/unreadable
-        files and missing fluxdep_fit errors propagate from that owner. No file
-        is modified. New component callers use FluxoniumParams instead.
-        """
-        from zcu_tools.resources.qubit_params import QubitParams
-
-        model = QubitParams(result_path, readonly=True).require_fluxonium_model(
-            flux_bias=flux_bias
-        )
-        return cls(model.params, model.flux_half, model.flux_period, model.flux_bias)
-
     def clone(self) -> FluxoniumPredictor:
         """Return an independent instance with identical energies and affine inputs."""
         return FluxoniumPredictor(

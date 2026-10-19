@@ -203,8 +203,6 @@ ignore_imports =
     zcu_tools.program.v2.modules -> zcu_tools.resources.context
     zcu_tools.program.v2.modules.base -> zcu_tools.resources.context
     zcu_tools.program.v2.modules.waveform -> zcu_tools.resources.context
-    # Debt, see C12.
-    zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
 
 [importlinter:contract:cfg-kernel-external-only]
 name = C11: the cfg_model kernel depends only on utils and core.waveform_format
@@ -242,9 +240,6 @@ forbidden_modules =
     zcu_tools.program
     zcu_tools.qick_remote
     zcu_tools.resources
-ignore_imports =
-    # Debt: predict takes numeric parameters from its caller (backlog).
-    zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
 
 # Stateless shared core does not depend on domain/runtime owners.
 [importlinter:contract:core-utils-only]

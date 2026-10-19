@@ -129,14 +129,12 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.runtime import launch_gui_runtime
 
     from zcu_lab import load_alias_presets
-    from zcu_lab.components import params_for
 
     return launch_gui_runtime(
         MeasureGuiBehavior,
         runtime_options_from_args(args, log_root=REPO_ROOT),
         extra_logging_namespaces=("zcu_lab",),
         registry_factory=_build_measure_catalogs,
-        params_for=params_for,
         alias_presets=load_alias_presets(),
         clean=args.clean,
         startup_script=select_startup_script(

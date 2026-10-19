@@ -13,11 +13,13 @@ jupyter:
 ---
 
 ```python
+from pathlib import Path
+
 from scqubits.core.fluxonium import Fluxonium
 from scqubits.core.oscillator import Oscillator
 from scqubits.core.hilbert_space import HilbertSpace
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.simulate.fluxonium import FluxoniumPredictor
+from zcu_tools.resources.predictor_file import load_predictor_file
 
 qub_name = "Si001"
 
@@ -26,9 +28,15 @@ params_file = QubitParams(loadpath, readonly=True)
 fit = params_file.require_fluxdep_fit()
 dispersive = params_file.get_dispersive_fit()
 
-params = fit.params
-flx_half = fit.flux_half
-period = fit.flux_period
+predictor_file = load_predictor_file(
+    Path(f"../../../result/{qub_name}/predictors/default.json")
+)
+if predictor_file.model != "fluxonium":
+    raise ValueError("This notebook requires a fluxonium predictor file")
+predictor = predictor_file.params.build_predictor()
+params = predictor.params
+flx_half = predictor.flux_half
+period = predictor.flux_period
 allows = fit.plot_transitions
 
 print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
@@ -41,7 +49,6 @@ elif "r_f" in allows:
     r_f = allows["r_f"]
     print(f"r_f: {r_f} GHz")
 
-predictor = FluxoniumPredictor.from_file(loadpath)
 ```
 
 ```python
