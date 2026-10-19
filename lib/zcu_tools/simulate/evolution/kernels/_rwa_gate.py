@@ -13,11 +13,13 @@ from scipy.linalg import expm
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import ModelSource
-from ._dop853 import Tolerances, integrate
+from ..workplan import FactKey
+from ._dop853 import Tolerances, integrate, tolerances
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._secular import coherence_decay, population_generator, split_step
-from ._workload_facts import envelope_bounds
+from ._workload_facts import envelope_bounds, fixed_flux
 from .multitone_rwa import (
+    RWA_POLICY,
     RWACoefficients,
     admit_rows,
     admit_single_rows,
@@ -109,6 +111,47 @@ def _admitted(
     *,
     single_tone: bool,
 ) -> NDArray[np.bool_]:
+    tolerances(context.budget)
+    accepted = np.zeros(len(rows), dtype=np.bool_)
+    for index, row in enumerate(rows):
+        # Waveform support is not covariant: equal playback keys can have
+        # different flux motion, so this check must precede every fact lookup.
+        if not fixed_flux(table, int(row)):
+            continue
+        key = FactKey(
+            (
+                "covariant-gate-admission",
+                GATE_POLICY,
+                RWA_POLICY,
+                single_tone,
+                canonical_key(table, int(row), context.source),
+                context.budget,
+            ),
+            bool,
+        )
+
+        def build(row=int(row)) -> bool:
+            return bool(
+                _admit_physics(
+                    table,
+                    np.array([row], dtype=np.int64),
+                    context,
+                    single_tone=single_tone,
+                )[0]
+            )
+
+        accepted[index] = context.work_plan.fact(key, build)
+    return accepted
+
+
+def _admit_physics(
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    context: KernelContext,
+    *,
+    single_tone: bool,
+) -> NDArray[np.bool_]:
+    """Evaluate the unchanged RWA/graph/split formulas once per physics key."""
     accepted = (admit_single_rows if single_tone else admit_rows)(table, rows, context)
     peaks = envelope_bounds(table, context.work_plan).peaks
     for index in np.flatnonzero(accepted):

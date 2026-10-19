@@ -23,6 +23,61 @@ from ._engine import Payload, RecordingKernel, batch, run, source, track
 from .contract.kernel_suite import synthetic_model
 
 
+def test_geometry_preserves_track_order_mux_plateaus_and_flux_levels():
+    from zcu_tools.simulate.evolution.kernels import REGISTRY
+
+    base = synthetic_model()
+    model = replace(base, drives=(base.drives[0], replace(base.drives[0], name="mux")))
+    src = ModelSource(
+        source().initial_density, lambda level: replace(model, level=level)
+    )
+    env = EnvelopeSpec(
+        "sampled", np.array([0, 1j, 1j, 0], complex), np.array([0.0, 2.0, 12.0, 14.0])
+    )
+    pulse = replace(track(1, env, duration=20), frequency_ghz=np.array([-0.1]))
+    mux = replace(
+        track(1, EnvelopeSpec("constant"), start=4, duration=12),
+        port="mux",
+        phase_rad=np.array([0.7]),
+    )
+    silent = replace(track(1, env, start=1, duration=22), amplitude=np.zeros(1))
+    timeline = replace(
+        batch(1, duration=24),
+        tracks=(pulse, silent, mux),
+        flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 8.0]), np.array([[0], [1]])),
+    )
+    kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
+    result = run(Engine(1, 0, kernels=kernels), src, (timeline,))
+    observations = {
+        float(table.start_ns[row]): (table, int(row), kernel.name)
+        for kernel in kernels
+        for table, rows, _ in kernel.calls
+        for row in rows
+    }
+    assert sorted(observations) == [0.0, 2.0, 4.0, 8.0, 12.0, 16.0, 20.0]
+    for start, (table, row, family) in observations.items():
+        count = (start < 20) + (4 <= start < 16)
+        assert table.tones[row] == count
+        assert table.level[row].tolist() == [int(start >= 8)]
+        assert family == ("flux_dop853" if count else "t4")
+        if count:
+            assert table.tone_port[row, :count].tolist() == (
+                [0, 1] if count == 2 else [0]
+            )
+            flat = 2 <= start < 12
+            assert table.envelopes[table.tone_envelope[row, 0]].kind == (
+                "constant" if flat else "sampled"
+            )
+            assert table.tone_envelope_offset_ns[row, 0] == (0 if flat else start)
+            assert table.tone_theta_rad[row, 0] == (
+                2 * np.pi * -0.1 * start + (np.pi / 2 if flat else 0)
+            )
+            if count == 2:
+                assert table.tone_envelope_offset_ns[row, 1] == start - 4
+                assert table.tone_theta_rad[row, 1] == 2 * np.pi * 0.1 * start + 0.7
+    np.testing.assert_array_equal(result.densities[0], src.initial_density)
+
+
 class TimelineKernel(RecordingKernel):
     """Conservative timeline keys, optionally shared by equivalent copies."""
 
