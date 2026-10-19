@@ -6,9 +6,9 @@ from typing import Literal, NotRequired, TypedDict
 
 from typing_extensions import TypedDict as ExtTypedDict
 
+from zcu_tools.gui.app.analysis_project.project import ProjectInfoPayload
 from zcu_tools.gui.app.fluxdep.state import SpecType
 from zcu_tools.gui.interactive.flux_pick import FluxPickInfo
-from zcu_tools.gui.project import ProjectInfoPayload
 
 
 class PngImage(TypedDict):

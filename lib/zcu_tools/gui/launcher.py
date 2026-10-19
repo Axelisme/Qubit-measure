@@ -1,8 +1,8 @@
 """Import-light helpers for standalone GUI launcher scripts.
 
-This module owns CLI edge repetition only: shared runtime flags and the
-analysis-GUI project flags. It deliberately avoids importing Qt or matplotlib at
-module import time, so launcher scripts can import these helpers before the
+This module owns CLI edge repetition for shared runtime flags only. It avoids
+importing Qt or matplotlib at module import time, so launcher scripts can import
+these helpers before the
 runtime configures process-level plot policy.
 """
 
@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.project import ProjectInfo
     from zcu_tools.gui.runtime import GuiLaunchOptions
 
 DEFAULT_LOG_FILE_HELP = "Override the DEBUG log file path"
@@ -84,42 +83,4 @@ def runtime_options_from_args(
     )
 
 
-def add_analysis_project_cli_options(
-    parser: argparse.ArgumentParser,
-    *,
-    data_root_help: str,
-) -> None:
-    """Add common chip/qubit/path flags used by analysis GUIs."""
-    parser.add_argument("--chip", type=str, default="", help="Chip name")
-    parser.add_argument("--qub", type=str, default="", help="Qubit name")
-    parser.add_argument("--result-dir", type=str, default="", help="Result directory")
-    parser.add_argument("--data-root", type=str, default="", help=data_root_help)
-
-
-def project_info_from_args(
-    args: argparse.Namespace,
-    *,
-    project_root: str,
-) -> ProjectInfo:
-    """Build a ProjectInfo while preserving omitted-field defaults."""
-    from zcu_tools.gui.project import ProjectInfo
-
-    project_kwargs = {
-        key: value
-        for key, value in (
-            ("chip_name", getattr(args, "chip", "")),
-            ("qub_name", getattr(args, "qub", "")),
-            ("result_dir", getattr(args, "result_dir", "")),
-            ("data_root", getattr(args, "data_root", "")),
-        )
-        if value
-    }
-    return ProjectInfo(root_dir=project_root, **project_kwargs)
-
-
-__all__ = [
-    "add_analysis_project_cli_options",
-    "add_runtime_cli_options",
-    "project_info_from_args",
-    "runtime_options_from_args",
-]
+__all__ = ["add_runtime_cli_options", "runtime_options_from_args"]

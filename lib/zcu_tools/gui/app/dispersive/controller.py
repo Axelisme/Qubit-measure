@@ -21,6 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.dispersive.models import PreprocessResult
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.event_bus import (
     DispFitChangedPayload,
     EventBus,
@@ -38,7 +39,6 @@ from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
 )
 from zcu_tools.gui.controller_base import BaseController
-from zcu_tools.gui.project import ProjectInfo
 
 logger = logging.getLogger(__name__)
 
