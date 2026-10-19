@@ -53,6 +53,50 @@ def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
     return plan
 
 
+@dataclass(frozen=True)
+class _CandidateDomain:
+    mask: NDArray[np.bool_]
+    families: tuple[str, ...]
+
+
+def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
+    """Dispatch's structural domains and candidate inventory, before cost/guards.
+
+    Inventory visits every family. Classification uses these same domains and
+    reorders their candidates by acquire-wide cost or skips optional families.
+    """
+    table = geometry.table
+    flux = geometry.flux_drive & (table.tones > 0)
+    ordinary = ~flux
+    constant = table.constant_envelopes(np.arange(len(table.timeline), dtype=np.int64))
+    single = ordinary & (table.tones == 1)
+    return {
+        "idle": _CandidateDomain(table.tones == 0, ("t4",)),
+        "flux": _CandidateDomain(flux, ("flux_dop853",)),
+        "plateau": _CandidateDomain(
+            single & constant, ("dyson", "floquet_period", "t6")
+        ),
+        "shaped": _CandidateDomain(
+            single & ~constant,
+            (
+                "single_tone_gate",
+                "shaped_sambe",
+                "gate_cache",
+                "period_table",
+                "dop853",
+            ),
+        ),
+        "two": _CandidateDomain(
+            ordinary & (table.tones == 2) & constant,
+            ("multitone_rwa", "floquet", "dop853"),
+        ),
+        "multiple": _CandidateDomain(
+            ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)),
+            ("multitone_gate", "multitone_rwa", "dop853"),
+        ),
+    }
+
+
 def resident_inventory(
     geometry: Geometry,
     kernels: Mapping[str, Kernel],
@@ -76,35 +120,9 @@ def resident_inventory(
     }
     inventory = {}
     if current:
-        flux = geometry.flux_drive & (table.tones > 0)
-        ordinary = ~flux
-        constant = table.constant_envelopes(
-            np.arange(len(table.timeline), dtype=np.int64)
-        )
-        single = ordinary & (table.tones == 1)
-        plateau = single & constant
-        shaped = single & ~constant
-        two = ordinary & (table.tones == 2) & constant
-        multiple = ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3))
-        # Dispatch owns algorithm domains; admission only sees opaque keys.
-        domains = (
-            (table.tones == 0, ("t4",)),
-            (flux, ("flux_dop853",)),
-            (plateau, ("dyson", "floquet_period", "t6")),
-            (
-                shaped,
-                (
-                    "single_tone_gate",
-                    "shaped_sambe",
-                    "gate_cache",
-                    "period_table",
-                    "dop853",
-                ),
-            ),
-            (two, ("multitone_rwa", "floquet", "dop853")),
-            (multiple, ("multitone_gate", "multitone_rwa", "dop853")),
-        )
-        for mask, families in domains:
+        domains = _candidate_domains(geometry)
+        for domain in domains.values():
+            mask, families = domain.mask, domain.families
             rows = np.flatnonzero(mask)
             if not len(rows):
                 continue
@@ -171,7 +189,8 @@ class Dispatch:
     preparations: accepted caller guard products, grouped by family.
     rejected_preparations: model-only handoffs with no accepted rows, never apply
         bindings. Caller shared guards cap these by spare resident capacity and
-        per-key quotas; Schedule offers them below all actual consumers.
+        per-key quotas; Schedule consumes this mutable handoff queue when offering
+        them below actual consumers. Only admission retains unused products then.
     deferred: worker-owned row mask, or None when no rows need worker classification.
     shaped: fixed acquire-wide cost plan, or None when no shaped work exists.
     rejected: caller guard decisions to skip in worker-local fallback chains.
@@ -199,7 +218,7 @@ class Dispatch:
         default_factory=lambda: np.empty(0, dtype=np.int64)
     )
     cached: Mapping[str, tuple[PreparedPayload, ...]] = field(default_factory=dict)
-    rejected_preparations: Mapping[str, tuple[GuardPreparation, ...]] = field(
+    rejected_preparations: dict[str, tuple[GuardPreparation, ...]] = field(
         default_factory=dict
     )
 
@@ -419,6 +438,7 @@ class _Classifier:
         self.context = context
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
+        self.domains = _candidate_domains(geometry)
         self.names = np.full(len(self.table.timeline), "", dtype="U16")
         self.costs = np.zeros(len(self.names))
         self.deferred = np.zeros(len(self.names), dtype=bool)
@@ -577,13 +597,14 @@ class _Classifier:
                 preference(self.table, rows, self.kernels, self.context),
             )
         plan = self.shaped
-        covariant = self.kernels.get("single_tone_gate")
+        families = self.domains["shaped"].families
+        covariant = self.kernels.get(families[0])
         if covariant is not None:
             selected = plan.rows[self.scope[plan.rows]]
             preferred = single_gate_preferred(self.table, selected, self.context)
             if np.any(preferred):
                 self.try_kernel(covariant, selected[preferred])
-        spectral = self.kernels.get("shaped_sambe")
+        spectral = self.kernels.get(families[1])
         if spectral is not None:
             selected = plan.rows[
                 self.scope[plan.rows]
@@ -597,7 +618,7 @@ class _Classifier:
             & (self.names[plan.rows] == "")
             & ~self.deferred[plan.rows]
         )
-        families = ("gate_cache", "period_table", "dop853")
+        families = families[2:]
         pending_rows, order = plan.rows[pending], plan.order[pending]
         for permutation in np.unique(order, axis=0):
             selected = pending_rows[np.all(order == permutation, axis=1)]
@@ -606,42 +627,32 @@ class _Classifier:
     def classify(self) -> Dispatch:
         table = self.table
         rows = np.flatnonzero(self.scope)
-        self.accept(rows[table.tones[rows] == 0], ("t4",))
-        flux = self.geometry.flux_drive & (table.tones > 0)
-        self.accept(rows[flux[rows]], ("flux_dop853",))
-        ordinary = ~flux
-        constant = table.constant_envelopes(
-            np.arange(len(table.timeline), dtype=np.int64)
-        )
-        single = ordinary & (table.tones == 1)
-        plateau = rows[(single & constant)[rows]]
+        for name in ("idle", "flux"):
+            domain = self.domains[name]
+            self.accept(rows[domain.mask[rows]], domain.families)
+        domain = self.domains["plateau"]
+        plateau = rows[domain.mask[rows]]
         # Distinct inputs cannot share Dyson paths; period propagation is cheaper
         # within the 10 us FTF coverage. Keep Dyson when the period guard rejects.
         distinct_input = _unshared_driven_input(table) & (table.duration_ns <= 10000.0)
-        self.accept(plateau[distinct_input[plateau]], ("floquet_period", "dyson", "t6"))
-        self.accept(
-            plateau[~distinct_input[plateau]], ("dyson", "floquet_period", "t6")
-        )
-        shaped = np.flatnonzero(single & ~constant & self.scope)
-        if np.any(self.scope[shaped]):
+        dyson, period, terminal = domain.families
+        self.accept(plateau[distinct_input[plateau]], (period, dyson, terminal))
+        self.accept(plateau[~distinct_input[plateau]], domain.families)
+        shaped = np.flatnonzero(self.domains["shaped"].mask & self.scope)
+        if len(shaped):
             self.classify_shaped(shaped)
-        two_tone = np.flatnonzero(ordinary & (table.tones == 2) & constant)
+        two_tone = np.flatnonzero(self.domains["two"].mask)
         if len(two_tone):
             self.classify_two_tone(two_tone)
-        multiple = rows[
-            (ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)))[rows]
-        ]
+        domain = self.domains["multiple"]
+        multiple = rows[domain.mask[rows]]
         # A calibrated approximation has its own visible family. Custom
         # registries can omit this optional fast path, like shaped_sambe.
-        if "multitone_rwa" in self.kernels:
-            candidates = tuple(
-                name
-                for name in ("multitone_gate", "multitone_rwa", "dop853")
-                if name in self.kernels
-            )
+        if domain.families[1] in self.kernels:
+            candidates = tuple(name for name in domain.families if name in self.kernels)
             self.accept(multiple, candidates)
         else:
-            self.accept(multiple, ("dop853",))
+            self.accept(multiple, domain.families[2:])
         return self._result()
 
     def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
@@ -653,9 +664,10 @@ class _Classifier:
             )
         selected = rows[self.scope[rows]]
         direct = self.two_tone_direct[selected]
-        prefix = ("multitone_rwa",) if "multitone_rwa" in self.kernels else ()
-        self.accept(selected[direct], (*prefix, "dop853", "floquet"))
-        self.accept(selected[~direct], (*prefix, "floquet", "dop853"))
+        rwa, floquet, dop853 = self.domains["two"].families
+        prefix = (rwa,) if rwa in self.kernels else ()
+        self.accept(selected[direct], (*prefix, dop853, floquet))
+        self.accept(selected[~direct], (*prefix, floquet, dop853))
         self.retain_floquet_plan()
 
     def retain_floquet_plan(self) -> None:

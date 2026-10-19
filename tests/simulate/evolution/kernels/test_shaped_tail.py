@@ -1,6 +1,5 @@
 """Exact-input fractional tails share work without sharing carrier phase."""
 
-import cProfile
 from dataclasses import replace
 
 import numpy as np
@@ -15,6 +14,23 @@ from zcu_tools.simulate.evolution.kernels.shaped_sambe import ShapedSambeKernel
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import synthetic_model
+
+
+class CountingWorkPlan(WorkPlan):
+    """Count numerical array construction at the lazy-publication module seam."""
+
+    def __init__(self):
+        super().__init__()
+        self.array_builds = 0
+
+    def fact(self, key, build):
+        def observed():
+            value = build()
+            if isinstance(value, np.ndarray):
+                self.array_builds += 1
+            return value
+
+        return super().fact(key, observed)
 
 
 @pytest.mark.parametrize(
@@ -51,7 +67,7 @@ def test_fractional_tail_reuses_exact_inputs_but_not_phase(changed: str) -> None
         ),
     )
     solver = ShapedSambeKernel()
-    plan = WorkPlan()
+    plan = CountingWorkPlan()
 
     def prepare(current_table, current_source):
         context = KernelContext(current_source, 1e-3, plan)
@@ -71,19 +87,10 @@ def test_fractional_tail_reuses_exact_inputs_but_not_phase(changed: str) -> None
         return states
 
     prepared = prepare(table, source)
-    # WorkPlan has no public fact inventory; profile observes builds without
-    # patching or calling a private numerical helper.
-    profile = cProfile.Profile()
-    with profile:
-        actual = apply(prepared, table, plan)
-        # Representative tables may renumber rows in the same evolve.
-        repeated = apply(prepared, replace(table, timeline=np.array([7, 8])), plan)
-    builds = sum(
-        entry.callcount
-        for entry in profile.getstats()
-        if not isinstance(entry.code, str) and entry.code.co_name == "_spectral"
-    )
-    assert builds == 1, (
+    actual = apply(prepared, table, plan)
+    # Representative tables may renumber rows in the same evolve.
+    repeated = apply(prepared, replace(table, timeline=np.array([7, 8])), plan)
+    assert plan.array_builds == 1, (
         "equal physical tails must build Fourier blocks only once per WorkPlan"
     )
     np.testing.assert_array_equal(actual, repeated)
