@@ -79,7 +79,6 @@ class SoCConnectionService:
         self._handles = handles
         self._runner = runner
         # _active_token: POST-BEGIN set, on_terminal cleared (run.py pattern).
-        self._fixed_environment = False
         self._active_token: int | None = None
         self._connected_request: ConnectRequest | None = None
 
@@ -94,15 +93,48 @@ class SoCConnectionService:
         return self._state.session_env.soccfg
 
     def is_mock_soc(self) -> bool:
-        """Whether the successful GUI connection is the offline mock board."""
-        return self._fixed_environment
+        """Forward the installed board's optional ``is_mock`` flag, else False."""
+        return bool(getattr(self._state.session_env.soc, "is_mock", False))
 
-    def install_startup_soc(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
-        """Install once before readiness; never rebuild the environment binding."""
-        if self.has_soc() or self._active_token is not None:
-            raise RuntimeError("startup SoC must be installed before connecting")
-        self._fixed_environment = True
-        self._apply_connection(soc, soccfg, None)
+    def install_soc(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
+        """Publish an already constructed board and its QICK configuration.
+
+        Call on the session owner thread. Replace any installed pair, clear the
+        remote endpoint, bump the SoC version and publish SOC_CHANGED. Reject
+        Run or connect conflicts through the SOC_CONNECT gate. Neither the old
+        nor new board is closed; their creator owns external resource cleanup.
+        """
+        self._replace_soc(soc, soccfg)
+
+    def uninstall_soc(self) -> None:
+        """Clear the board/configuration and endpoint on the session owner thread.
+
+        Publish SOC_CHANGED with None handles and bump the SoC version, even
+        when already empty. Reject Run/connect conflicts. Do not close the
+        removed board; resource cleanup remains with its creator.
+        """
+        self._replace_soc(None, None)
+
+    def _replace_soc(self, soc: SocHandle | None, soccfg: SocCfgHandle | None) -> None:
+        self._gate.ensure_can_start(OperationKind.SOC_CONNECT, resource_id=None)
+        origin = self._bus.current_origin
+        token = self._handles.create(cancel_hook=None, origin=origin)
+        self._gate.register(
+            token,
+            OperationKind.SOC_CONNECT,
+            owner_id="soc",
+            origin_kind=origin.kind,
+            note="replace SoC",
+        )
+        with self._bus.origin(self._handles.event_origin(token)):
+            try:
+                self._apply_connection(soc, soccfg, None)
+                self._handles.settle(token, OperationOutcome("finished"))
+            except Exception as exc:
+                self._handles.settle(token, OperationOutcome("failed", str(exc)))
+                raise
+            finally:
+                self._gate.release(token)
 
     def connected_endpoint(self) -> dict[str, str | int | None]:
         """The last successful remote address, including GUI-initiated connects."""
@@ -155,14 +187,9 @@ class SoCConnectionService:
         identical State write and soc version bump as the async path. This low-level
         connection does not provision devices or a simulated environment.
         """
-        if self._fixed_environment:
-            raise RuntimeError(
-                "startup environment is fixed; close and restart to change it"
-            )
         if type(req) is not ConnectRemoteRequest:
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
 
-        is_mock = self._fixed_environment
         # Hold the SOC_CONNECT lease for the whole synchronous connect so it cannot
         # race the GUI's connect button (or an async start_connect). A connect has
         # no cancellation point, so the token is a lease handle only (cancel_hook
@@ -175,7 +202,7 @@ class SoCConnectionService:
             OperationKind.SOC_CONNECT,
             owner_id="soc",
             origin_kind=origin.kind,
-            note=f"connect SoC ({'mock' if is_mock else 'remote'})",
+            note="connect SoC (remote)",
         )
         self._active_token = token
         with self._bus.origin(self._handles.event_origin(token)):
@@ -200,14 +227,8 @@ class SoCConnectionService:
         cancellation point — §B.3 equivalence with old _ConnectWorker). Returns
         the operation token minted by runner.begin.
         """
-        if self._fixed_environment:
-            raise RuntimeError(
-                "startup environment is fixed; close and restart to change it"
-            )
         if type(req) is not ConnectRemoteRequest:
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
-
-        is_mock = self._fixed_environment
 
         def work(_factory: object) -> tuple[SocHandle, SocCfgHandle]:
             # factory is None (wants_progress=False). Both branches run off-main via
@@ -222,7 +243,9 @@ class SoCConnectionService:
                 soc, soccfg = bg.result
                 self._apply_connection(soc, soccfg, req)
                 settle(OperationOutcome("finished"))
-                self._bus.emit(ConnectionFinishedPayload(success=True, is_mock=is_mock))
+                self._bus.emit(
+                    ConnectionFinishedPayload(success=True, is_mock=self.is_mock_soc())
+                )
             else:
                 assert bg.error is not None
                 msg = _format_error(bg.error)
@@ -230,7 +253,7 @@ class SoCConnectionService:
                 self._bus.emit(
                     ConnectionFinishedPayload(
                         success=False,
-                        is_mock=is_mock,
+                        is_mock=self.is_mock_soc(),
                         error_message=msg,
                     )
                 )
@@ -239,7 +262,7 @@ class SoCConnectionService:
             exclusion=ExclusionRequest(
                 kind=OperationKind.SOC_CONNECT,
                 owner_id="soc",
-                note=f"connect SoC ({'mock' if is_mock else 'remote'})",
+                note="connect SoC (remote)",
             ),
             owner_id="soc",
             wants_progress=False,
@@ -256,10 +279,13 @@ class SoCConnectionService:
         return token
 
     def _apply_connection(
-        self, soc: SocHandle, soccfg: SocCfgHandle, req: ConnectRequest | None
+        self,
+        soc: SocHandle | None,
+        soccfg: SocCfgHandle | None,
+        req: ConnectRequest | None,
     ) -> None:
-        is_mock = self._fixed_environment
-        logger.info("connect succeeded: mock=%s", is_mock)
+        is_mock = bool(getattr(soc, "is_mock", False))
+        logger.info("SoC changed: connected=%s mock=%s", soc is not None, is_mock)
         new_ctx = dataclasses.replace(self._state.session_env, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
         self._connected_request = req

@@ -34,8 +34,7 @@ uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
 
 ## 資料作業
 
-- `download_result.py`：工作站有 Google Drive client 依賴與 credentials 的環境。輸入 entry 名稱與 `GOOGLE_DRIVE_PARENT_FOLDER_ID`，從 Drive 遞迴下載到 repo `results/<name>/`。本地不存在會建目錄，遠端較新會覆寫本地檔案並設定 mtime。OAuth token 讀取或更新目前工作目錄的 `token.json`，可能啟動認證流程。此腳本會存取網路及使用者資料。
-- `upload_result.py`：同上，但需要 Drive 寫入權限。從 repo `results/<name>/` 建立或更新 Drive 對應 entry 的檔案與目錄。明確選用 `--prune-remote` 時，還會刪除遠端缺少本地對應的檔案。OAuth token 存於目前工作目錄的 `token.json`。此腳本會存取網路與修改使用者的 Drive 資料。
+- `transfer_results.py`：唯一的結果傳輸入口，取代已移除的 upload/download 腳本。首次 `setup` 用官方 rclone GUI 授權、瀏覽雲端父資料夾、按 Refresh，再回終端機核對路徑並按 Enter 保存；之後 `upload <name>`／`download <name>` 直接走非互動 CLI，agent 可透過 Bash 使用。固定版 rclone 自動下載並驗證，`status --json`、`--dry-run`、`--all`、多 entry 與跨平台命令見 [結果傳輸教學](../docs/result-transfer.md)。預設本地根目錄是 checkout 的 `results/`，使用 copy 保留目的地多出的檔案。Google 共用 OAuth client 有 2026 停用警告；實際帳號授權與其他桌面平台仍待驗證。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。
 
 ## 模擬資料庫產生

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-20，Refresh／Reset 與純 Qt 版面保存
+**Last updated:** 2026-10-20，Refresh／Reset、純 Qt 版面保存與動態硬體生命週期
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -37,7 +37,7 @@ Artifact 與 Writeback 不直接互相 import，由 app composition 協調。
 `MeasureGuiBehavior` is the process-runtime behavior for the shared
 `gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
 persistence caretaker, and the app-local `RemoteControlAdapter`
-without owning process policy such as logging, rendering initialization,
+without loading board environments or owning process policy such as logging, rendering initialization,
 `QApplication`, control option construction, or exit-code handling. The
 standalone launcher is the process entrypoint; this module does not expose a
 second `run_app` path. After the window is shown, `after_show` opens the same
@@ -48,6 +48,14 @@ instance instead of building another.
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
+
+`Controller.install_soc` / `uninstall_soc` publish a caller-built board on the
+owner thread. `register_device` adopts a built driver through DeviceService.
+`close()` only drains work, leaving resources available for caller callbacks.
+After those callbacks, `close_hardware()` closes every registered driver and
+unpublishes the board; close failures are logged without stopping GUI teardown.
+The behavior's runtime close hook calls both as a fallback. Boards remain
+caller-owned and have no required close method.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.

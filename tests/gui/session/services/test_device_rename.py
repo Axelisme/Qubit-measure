@@ -163,7 +163,7 @@ def test_rename_requires_disconnected_idle_device_even_for_same_name(
     session = rename_session
     session.device.start_connect_device(
         ConnectDeviceRequest(
-            type_name="FakeDevice",
+            type_name="YOKOGS200",
             name="old",
             address="addr",
         )

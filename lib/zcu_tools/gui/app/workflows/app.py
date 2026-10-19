@@ -23,6 +23,7 @@ from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
+from zcu_tools.gui.session.ports import DriverFactoryPort
 from zcu_tools.gui.session.services.build import SessionServices, build_session_services
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
@@ -63,6 +64,7 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         project_root: str = "",
         clean: bool = False,
         cache_dir: Path | None = None,
+        driver_factory: DriverFactoryPort | None = None,
     ) -> None:
         """Configure roots and input restoration without I/O or Qt construction.
 
@@ -87,6 +89,10 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         Empty project_root means the launch cwd. clean skips reading the previous
         input file, but successful close still flushes current input. cache_dir
         overrides the shared user-cache directory, for embedding or isolated tests.
+        driver_factory creates instrument drivers from a type and address; None
+        selects the production hardware factory. Drivers enter this behavior's
+        session-owned registry and shutdown closes them after draining workers.
+        The factory does not change DeviceService admission or publish devices.
         Component definitions must be registered before Setup opens an entry.
         An existing QApplication is required for assemble, not for this call.
         """
@@ -99,6 +105,7 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         self._project_root = project_root
         self._clean = clean
         self._cache_dir = cache_dir
+        self._driver_factory = driver_factory
         self._caretaker: (
             SingleFileCaretaker[WorkflowInputSnapshot, WorkflowInputRestoreReport]
             | None
@@ -138,6 +145,7 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
             bind_assets=ArbWaveformDatabase.info_at,
             project_root=self._project_root,
             device_registry=self._devices,
+            driver_factory=self._driver_factory,
             alias_rows=()
             if self.alias_presets is None
             else self.alias_presets["default"],
