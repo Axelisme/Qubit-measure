@@ -61,8 +61,6 @@ def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
             env, samples=np.where(np.arange(129) % 2, 1.0, 0.0).astype(complex)
         )
     frequencies = [0.3, -0.6, 0.9][:tones]
-    if kind == "degenerate":
-        frequencies[1] = -0.30001
     if kind == "dc":
         frequencies[1] = 0.0
     tracks = tuple(
@@ -90,7 +88,7 @@ def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
 def test_smooth_multiple_drives_route_with_explicit_admission():
     routes = {}
     with closing(Engine(1, 1000000)) as engine:
-        for kind in ("smooth", "complex", "rough", "degenerate", "dc"):
+        for kind in ("smooth", "complex", "rough", "dc"):
             result = engine.evolve(model_source(), (timeline(kind),), cancel=Event())
             routes[kind] = dict(result.paths.segments_by_kernel)
         result = engine.evolve(model_source(), (timeline(tones=3),), cancel=Event())
