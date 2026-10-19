@@ -252,7 +252,7 @@ metadata:
 
 - 頂層只有表列的 key（predictor 另加 `model`、`flux_unit`）。`version` 是嚴格整數 `1`。
 - `source.run_id`：遷移一律 `null`。
-- `source.created_at`：只有原區塊 `timestamp` 是含時區的 ISO 8601 時才照抄原字串；否則 `null`，報告列 pending，附備份內原文位置。entry UUID、mtime 與遷移時間都不能代填。
+- `source.created_at`：只有原區塊 `timestamp` 是 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM` 的形式（例：`2026-10-20T08:00:00Z`）時才照抄原字串；否則 `null`，報告列 pending，附備份內原文位置。entry UUID、mtime 與遷移時間都不能代填。
 - 未知數值填 `null` 或省略，不補 0。已知數值必須是有限數字，不接受 bool 或數字字串。
 - 格式檔只放在 entry 層，不複製到 points。原區塊仍在 `legacy_params` 與備份裡。
 
