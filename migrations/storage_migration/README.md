@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-20，repo 平行備份與完成報告
+**Last updated:** 2026-10-20，repo 平行備份、日期報告與 native 2.1 歷史證據
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
@@ -14,10 +14,12 @@
 - Parameters 與 data 可分開執行。第二部分明確 resume 同一 manifest，不合併任意既有條目。完成的 setup／point 仍可編輯；resume 驗證當前文件，不恢復舊值。
 - Legacy evidence 1.x 的 params 與來源稽核使用本 package 的 `LegacyParameterSnapshot`、
   `LegacyParameterSource`、`LegacyCloneOrigin`。Wire shape 不變，完整 raw evidence 留在 manifest。
-  Converter 產生 native 2.0 簡單 context，不把歷史 params 投影到 native。
-- Manifest 保存固定 entry／run 身分、來源 baseline、完整 evidence raw 與逐檔 publication 狀態。Report 是累積快照。兩者保留同 major 的未知 JSON 欄位。
+  Converter 產生 native 2.1 簡單 context，不把歷史 params 投影到 native。
+- Legacy evidence 的 started_at 與 run_id 可缺省或為 null。開始時間無證據時，native 寫 started_at=None、completion=unknown、finished_at=None，即使原 evidence 留有完成狀態或結束時間也不宣稱已知生命週期；完整 raw 留在 manifest。已知開始時間時保留可證實時間與完成狀態，完成狀態缺省為 unknown。
+- 明示可信 run_id 須通過 datafile 的公開 `validate_run_id`。缺 ID 時依 entry 的 `new_run_id` 分配，報告標「遷移賦值」。分配時間不是歷史量測時間。Manifest 在 native publication 前固定來源/hash、ID 與輸出分配時間，resume 不重配。非法的非空時間或 ID 仍拒絕，不當成缺失。
+- Manifest 保存固定 entry／run 身分、來源 baseline、完整 evidence raw 與逐檔 publication 狀態。持久化 run 分配即固定該來源的完整 evidence，不必等到 native publication；resume 在任何 checkpoint 或 report 寫入前拒絕變更，避免把遷移 ID 改稱歷史 ID。Report 是累積快照。兩者保留同 major 的未知 JSON 欄位。
 - Native 的 `labber_path` 保存相對 entry Database 根的原檔保存路徑，例如 `Labber/2025/10/scan.hdf5`。`Instrument config` 透過 datafile owner 的唯讀 codec 轉為 device_snapshot，只用舊檔中的值。不能表示的 snapshot 列 `device snapshot pending`，該 run snapshot 為 None，但量測資料仍轉 native，原設定留在保存的 Labber。
-- Native publication 與驗證完成後才搬移對應 Labber。搬移先複製、驗證雜湊，再刪來源。Source_removed 只驗證目的 hash，舊位置重用不改既有 run，也不刪新檔。缺歷史證據時不產生 native 或逐檔搬移，只列 pending，不猜名稱或補量測時間。兩部分都完成後，這些舊檔隨來源清理，只保留在外部備份。
+- Native publication 與驗證完成後才搬移對應 Labber。搬移先複製、驗證雜湊，再刪來源。Source_removed 只驗證目的 hash，舊位置重用不改既有 run，也不刪新檔。除開始時間與 run_id 外，experiment tag+cfg_type、完整歷史 cfg、variable/axes/signal 名稱、單位、dtype、shape 或其他必要 mapping 缺失時，不產生 native 或逐檔搬移，只列 pending，不猜名稱或補量測時間。兩部分都完成後，這些舊檔隨來源清理，只保留在外部備份。
 - 新 entry 可與舊資料共用 result／Database root，只要目的與本次兩個舊來源樹互不包含。目的已存在就拒絕，不覆寫其他 entry；report 也不得寫入本次來源樹。
 - 正式執行在建立 entry 前完整備份兩棵來源樹。預設根為 `<repo_root.parent>/<repo_root.name>-backup/`，多個 entry 共用這個 repo 外目錄。`backup_parent`／CLI `--backup-parent` 可指定其他外部上層。`repo_root`／`--repo-root` 指定被保護的 checkout，省略時採工具 checkout。來源固定鏡像到 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`，包括空目錄。自訂來源根也使用這兩個邏輯鏡像，manifest 保留實際根路徑。允許共用備份根及其他 chip/qubit 資料已存在，但本次任一鏡像或 records 目錄已存在就拒絕，不採納、不覆寫。備份不得在 repo 內、包住來源或與目的重疊。備份路徑的 symlink、來源內 symlink 與非一般檔案都會阻擋遷移。
 - 本次 hash 清單位於 `migration-records/<chip>/<qubit>/result.sha256` 與 `Database.sha256`。每份為 typed JSON，記錄完整邏輯鏡像相對路徑、逐檔 SHA256 與目錄。自動報告在同目錄的 `migration-report-<UTC-date>.json`，日期在首次執行固定，resume 沿用 manifest 記錄的路徑。明填 `report_path`／`--report` 可選獨立外部檔，但不能寫入備份的 result／Database 鏡像。完成清理後另存一份 `result/<entry>/records/migration-report-<date>.json`，manifest 仍在該 entry 的 `records/migration-state.json`。

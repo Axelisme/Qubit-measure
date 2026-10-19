@@ -21,6 +21,7 @@ from .backup import (
     validate_backup_sources,
 )
 from .errors import MigrationInputError
+from .evidence import validate_run_evidence
 from .models import (
     MigrationDestination,
     MigrationIdentity,
@@ -381,6 +382,8 @@ def prepare_session(
         manifest, entry = _new_session(request, mapping, source, destination)
     session = MigrationSession(path, manifest, dry_run=request.dry_run)
     validate_owned_state(session, entry=entry)
+    if request.resume:
+        validate_run_evidence(request, session)
     session.checkpoint()
     publish_report(session)
     return session, entry

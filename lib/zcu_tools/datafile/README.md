@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-20，Labber 多 log 與保存的儀器設定
+**Last updated:** 2026-10-20，公開 native run ID 驗證、Labber 多 log 與保存的儀器設定
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -26,6 +26,7 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 - `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要。Summary 的直接 mapping 值將 numpy floating／integer scalar 轉為 Python float／int，轉後必須有限。
   Parameters 與更深 nested 值仍只接受有限的 strict JSON，不遞迴轉換。
   `encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
+- `validate_run_id` 檢查 native 身分 token：`YYYYMMDDTHHMMSSZ-` 加六個小寫 ASCII 英數字元。Native metadata 與離線 evidence 共用此規則。它不驗 calendar 語意，不從 ID 推導歷史 started_at；格式錯誤拋 ValueError，非字串拋 TypeError。
 - `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
   Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
   Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
