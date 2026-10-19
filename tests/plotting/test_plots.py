@@ -526,6 +526,7 @@ def test_invalid_2d_factory_options_or_duplicate_name_never_present() -> None:
     with pytest.raises(ValueError, match="Line count"):
         plots.liveplot_2d_with_line("scan", "x", "y", num_lines=0)
     with pytest.raises(ValueError, match="line_axis"):
+        # tolerated(cast): 2 bypasses Literal[0, 1] to test rejection before registration/presentation.
         plots.liveplot_2d_with_line("scan", "x", "y", line_axis=cast(Any, 2))
     assert list(plots) == []
     existing, _ = plots.subplots("scan")
