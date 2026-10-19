@@ -389,12 +389,16 @@ Accepted guard products are reused even when only a subset of timelines accepts.
 Before prefix evaluation or numerical guards, dispatch inventories every
 candidate family's prepare keys in the complete WorkPlan geometry. The caller
 keeps intersecting whole resident batches protected, including hits used only
-by a later prefix or suffix. It transfers other residents to an LRU stale queue
-without dropping their ownership. Resident and pending allocations share one
-byte account across all prefix and timeline schedules.
+by a later prefix or suffix. Key and model/family indexes locate those hits
+without scanning historical residents. Other residents stay in the reclaimable
+LRU until capacity is needed. Array bytes and retention charges update only on
+admission and eviction. Each immutable payload wrapper measures its array charge
+once. Resident and pending allocations share one byte account across all prefix
+and timeline schedules.
 
-Workers offer model-only products through a locked collector, never through the
-caller LRU. An accepted offer reclaims pending failed guards and stale residents
+Workers offer model-only products through a locked collector. They never perform
+caller lookups or LRU touches; the collector may remove reclaimable stale
+ownership under its admission lock. An accepted offer reclaims pending failed guards and stale residents
 only when capacity is needed. Failed stale residents yield before ordinary LRU
 residents. An impossible or oversize offer leaves existing ownership unchanged
 and streams without retention. Current whole-batch hits cannot be evicted by
@@ -404,14 +408,19 @@ extensions replace their predecessor's whole charge; rejected extensions grow
 only into idle capacity and retain their low priority.
 
 After each schedule joins, the caller publishes pending products for later
-prefix/suffix lookups. After the evolve pool drains, it restores surviving stale
-residents as older than current work, even on failure or cancellation. Fully
+prefix/suffix lookups. After the evolve pool drains, it releases current protection as newer than
+surviving stale residents, even on failure or cancellation. This visits current
+hits and products only, not the historical stale inventory. Fully
 rejected guard handoffs stay separate from apply bindings and fill only idle
 capacity. Schedule consumes Dispatch's rejected handoff queue on offer, so declined
 or evicted products have no remaining Dispatch owner. Current row, probe-bin,
 domain and budget checks still run on every
-evolve. The unified account bounds retained arrays, not transient builders,
-active nonretained/oversize bindings, input-bound data or process RSS.
+evolve. The unified account bounds retained arrays plus an estimated 4608 metadata bytes
+per whole allocation. The estimate covers Python/NumPy headers, keys and cache
+indexes, with headroom above the measured wide-scan mean of 3998 bytes. It does
+not bound transient builders, active nonretained/oversize bindings, input-bound
+data or process RSS. `PrepareCache.bytes` reports arrays only;
+`PrepareCache.charged_bytes` includes the metadata estimate used for admission.
 
 [PrepareCache](cache.py) namespaces whole model-only payload batches by family,
 whole-source model identity and budget. The zero-level identity must describe the
@@ -431,8 +440,9 @@ raises without a partial result, and cached exceedances still warn per call.
 
 The result LRU charges arrays and metadata up to `min(64 MiB, cache_bytes)` in
 addition to the prepare budget; zero disables both caches. `close()` clears both.
-FTF production uses a 2 GiB unified resident/pending budget, plus at most 64 MiB for
-results. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
+All Engines include the same per-allocation metadata estimate in retention
+charges. FTF production uses a 2 GiB unified resident/pending budget for arrays
+and estimated metadata, plus at most 64 MiB for results. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
 active payload references and ADC preparations are separate allocations. The
 process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
 4 GB ceiling. Numba's compilation cache is independent of the prepare LRU.

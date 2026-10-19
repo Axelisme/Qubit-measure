@@ -6,6 +6,7 @@ opaque prepared payloads; the engine only sees their resident array byte size.
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
 from types import MappingProxyType
 from typing import Protocol
 
@@ -290,6 +291,11 @@ class GuardPreparation:
 
     keys: NDArray[np.void]
     prepared: Prepared
+
+    @cached_property
+    def nbytes(self) -> int:
+        """Array charge read once for transfer into whole-payload ownership."""
+        return self.prepared.nbytes
 
     def __post_init__(self) -> None:
         keys = self.keys.copy()

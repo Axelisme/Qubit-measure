@@ -7,6 +7,7 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, FluxSchedule, ModelSource
+from zcu_tools.simulate.evolution.cache import RESIDENT_METADATA_BYTES
 from zcu_tools.simulate.evolution.kernel import GuardPreparation, GuardResult
 from zcu_tools.simulate.evolution.kernels.single_tone_rwa import SingleToneRWAKernel
 
@@ -110,7 +111,10 @@ class CountedGuardKernel(RecordingKernel):
 def test_resident_guard_payload_skips_build_but_rechecks_rows_and_domain(timelines):
     kernel = CountedGuardKernel()
     src = source()
-    with closing(Engine(1, 4096, kernels=(kernel,))) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(
+        Engine(1, 4096 + 8 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
+    ) as engine:
         engine.evolve(src, (batch(2),), cancel=Event())
         cold_builds = kernel.builds
         # Distinct point IDs bypass exact-result memo while preserving prepare keys.
@@ -193,7 +197,10 @@ class OverlappingGuardKernel(RecordingKernel):
 def overlapping_guard():
     kernel = OverlappingGuardKernel()
     src = source()
-    with closing(Engine(1, 4096, kernels=(kernel,))) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(
+        Engine(1, 4096 + 8 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
+    ) as engine:
         # Two shared guard builds retain overlapping domains in this order.
         engine.evolve(
             src,

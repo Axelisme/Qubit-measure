@@ -21,7 +21,7 @@ from ._shaped_dispatch import (
     single_gate_preferred,
 )
 from ._two_tone_dispatch import direct_preferred
-from .cache import PrepareCache, PreparedPayload
+from .cache import RESIDENT_METADATA_BYTES, PrepareCache, PreparedPayload
 from .engine import PathDiagnostics
 from .kernel import (
     GuardPreparation,
@@ -113,11 +113,7 @@ def resident_inventory(
     table = geometry.table
     zero = tuple(0 for _ in range(table.level.shape[1]))
     identity = context.source.model(zero).identity
-    current = {
-        name
-        for name, model, budget in cache.namespaces
-        if model == identity and budget == context.budget
-    }
+    current = cache.families(identity, context.budget)
     inventory = {}
     if current:
         domains = _candidate_domains(geometry)
@@ -374,9 +370,10 @@ def _guard_cached(
         if rejected_limit is not None and built.rejected_preparations:
             retained: list[GuardPreparation] = []
             for preparation in built.rejected_preparations:
-                if preparation.prepared.nbytes <= rejected_limit:
+                charge = preparation.nbytes + RESIDENT_METADATA_BYTES
+                if charge <= rejected_limit:
                     retained.append(preparation)
-                    rejected_limit -= preparation.prepared.nbytes
+                    rejected_limit -= charge
             built = _Guarded(
                 built.rows,
                 built.rejected,
@@ -485,7 +482,12 @@ class _Classifier:
         # Bound rejected handoffs even while pooled shared guards are returning.
         # Equal per-key quotas deliberately decline large non-revisiting scans.
         rejected_limit = (
-            max(0, self.cache.limit - self.cache.bytes)
+            max(
+                0,
+                self.cache.limit
+                - self.cache.charged_bytes
+                + self.cache.reclaimable_bytes,
+            )
             // max(1, int(np.count_nonzero(groups.shared)))
             if self.cache is not None
             else 0
