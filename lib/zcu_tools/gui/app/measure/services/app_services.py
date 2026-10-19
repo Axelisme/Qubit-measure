@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import (
         DeviceRegistryPort,
+        DriverFactoryPort,
         OwnerScheduler,
         ProgressTransport,
     )
@@ -124,8 +125,12 @@ def build_app_services(
     params_for: ParamsFor | None = None,
     alias_presets: AliasPresets | None = None,
     device_registry: DeviceRegistryPort | None = None,
+    driver_factory: DriverFactoryPort | None = None,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
+
+    driver_factory supplies drivers for device_registry. None selects the
+    hardware factory; simulation composition supplies its environment lookup.
 
     ``alias_presets`` maps names to ordered caller-owned rows. Omitted or None
     means no catalog and an empty initial table. A supplied mapping must contain
@@ -152,6 +157,7 @@ def build_app_services(
         state=state,
         bus=bus,
         device_registry=device_registry,
+        driver_factory=driver_factory,
         gate=operation_gate,
         handles=handles,
         background=background,

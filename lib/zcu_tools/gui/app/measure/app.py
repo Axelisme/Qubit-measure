@@ -215,6 +215,9 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             device_registry=None
             if self._environment is None
             else self._environment.devices,
+            driver_factory=None
+            if self._environment is None
+            else self._environment.create_device,
         )
 
         try:

@@ -218,8 +218,9 @@ class FTFAcquire:
 class FTFSource:
     """Environment coordinator with one persistent Engine and one current acquire.
 
-    settings is a validated immutable FTF resource; devices supplies live DC
-    readbacks to snapshot. engine optionally supplies a configured numerical
+    settings is a validated immutable FTF resource; devices supplies startup DC
+    identities whose live values are read by snapshot, even after session
+    disconnects or registry renames. engine optionally supplies a configured numerical
     executor; this source takes ownership, including close(). Without it, use
     workers=1 and a 2 GiB prepare cache. private_replay is an optional absolute
     author-only input archive directory; None performs no replay I/O. readout
@@ -260,6 +261,8 @@ class FTFSource:
             )
         self.settings = settings
         self.devices = devices
+        # The physical source survives session disconnects and registry renames.
+        self._source_devices = devices.get_all_devices()
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
         self.private_replay = private_replay
         self.engine = Engine(1, 2 * 1024**3) if engine is None else engine
@@ -285,10 +288,16 @@ class FTFSource:
         return self._facts
 
     def snapshot(self) -> EnvironmentSnapshot:
-        """Read fixed-unit live DC values once, rejecting missing/invalid devices."""
+        """Read bound startup DC values once, rejecting missing/invalid sources.
+
+        Source identities survive GUI registry disconnects/name changes; their
+        explicitly addressed FakeDevices retain the physical values and units.
+        """
         values = []
         for name, source in self.settings.dc_bias.sources.items():
-            info = self.devices.get_info(name)
+            if name not in self._source_devices:
+                raise ValueError(f"dc_bias.sources.{name}: missing startup device")
+            info = self._source_devices[name].get_info()
             if not isinstance(info, FakeDeviceInfo) or info.value_unit != source.unit:
                 raise ValueError(
                     f"dc_bias.sources.{name}.unit: fixed source unit mismatch"
@@ -374,7 +383,7 @@ def ftf(
     devices = DeviceManager()
     try:
         for name, source in settings.dc_bias.sources.items():
-            device = FakeDevice(fast_mode=True, value_unit=source.unit)
+            device = FakeDevice(address=name, fast_mode=True, value_unit=source.unit)
             devices.register_device(name, device)
             device.setup(
                 FakeDeviceInfo(

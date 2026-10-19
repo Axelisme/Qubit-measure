@@ -40,6 +40,22 @@ if _LIB_PATH not in sys.path:
     sys.path.insert(0, _LIB_PATH)
 
 
+@pytest.fixture(autouse=True, name="_isolated_fake_device_instances")
+def fixture_isolated_fake_device_instances():
+    """Restore the process-wide FakeDevice address scope after every test."""
+    from zcu_tools.device import FakeDevice
+
+    before = FakeDevice.instance_addresses()
+    try:
+        with FakeDevice.isolated_instances():
+            assert FakeDevice.instance_addresses() == ()
+            yield
+    finally:
+        assert FakeDevice.instance_addresses() == before, (
+            "FakeDevice address scope leaked"
+        )
+
+
 @pytest.fixture(autouse=True, name="_np_seed")
 def fixture_np_seed():
     """Seed NumPy randomness before each test."""

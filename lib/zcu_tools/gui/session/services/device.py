@@ -14,7 +14,7 @@ from typing import (
 
 from zcu_tools.device import DeviceActivity, DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
-from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
@@ -214,6 +214,8 @@ def list_supported_device_types() -> list[str]:
 def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     if type_name not in _DEVICE_TYPE_REGISTRY:
         raise DeviceRegistrationError(f"Unknown device type: {type_name!r}")
+    if type_name == "FakeDevice":
+        return FakeDevice(address=address)
     class_path, requires_address = _DEVICE_TYPE_REGISTRY[type_name]
     module_path, cls_name = class_path.rsplit(".", 1)
     cls = getattr(importlib.import_module(module_path), cls_name)

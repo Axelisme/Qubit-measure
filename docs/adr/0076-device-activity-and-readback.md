@@ -36,6 +36,14 @@ Dialog Apply、experiment、MCP 與 workflow 經由公開 driver 操作時，都
 
 顧問於 2026-10-18 細化 register 的拒絕條件。Register 使用既有 close claims，遇到正在 close 的 driver 時在入口 raise，即使原名字已被 drop 或 overwrite。這不新增 registry、鎖或追蹤結構，也不恢復 alias 掃描。`register_device` 的 docstring 寫明此契約。這是顧問對並行 close 邊界的細化，不是使用者原話。
 
+## FakeDevice 的 address 身分
+
+2026-10-19，使用者裁定：「FakeDevice採用以address為分辨的單例模式」，並指定「存在FakeDevice的類容器裡」。只有顯式 address 進入 process 共享的 class 容器。同 address 取回同一個 driver，保留模擬綁定、單位與設定。省略 address 的 anonymous instance 沒有可比較的身分，每次獨立建立，不進容器。真實 driver 不受影響。
+
+使用者說明上限「可以很大」，再修正「可能也不丟了，創建時報錯」。容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額時拒絕新 address，既有 address 仍可取回，不淘汰。測試使用公開 isolation scope，結束時清空測試建立的容器並還原原 scope。
+
+單名稱 registry 規則維持不變。同 address 的 driver 已連線時，第二個名稱的連線明確失敗。先斷開舊名再用新名連線，則取回同一實例。FTF source 以 source name 作 address，數值 owner 保留原 source 身分，不隨 GUI registry 改名。SimulationEnvironment 只保存可建模的 address metadata；composition 注入其 lookup，未知 type 或 address 明確失敗，不建立無作用的 FakeDevice。
+
 ## 活動資訊與數值讀回
 
 活動狀態不把寫入目標推定為儀器實際值，也不在每次 setter 或 sweep 的每一步新增硬體讀取。Run 結束後，host 在背景讀取一次已連線儀器，由 State owner 將讀回結果寫入 cached DeviceInfo。Device dialog 透過 State 的觀察投影顯示讀回值。
