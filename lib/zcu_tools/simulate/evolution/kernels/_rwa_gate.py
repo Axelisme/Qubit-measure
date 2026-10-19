@@ -5,7 +5,6 @@ from hashlib import sha256
 from typing import NamedTuple
 
 import numpy as np
-import scipy.integrate
 from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
@@ -387,6 +386,69 @@ def _adaptive_unitaries(context, duration_ns, segments):
     return result
 
 
+class _MultiContext(NamedTuple):
+    """Tone-aligned samples; lengths exclude padding, start_ns is row-local."""
+
+    energy: NDArray[np.float64]
+    coefficients: RWACoefficients
+    times: NDArray[np.float64]
+    samples: NDArray[np.complex128]
+    lengths: NDArray[np.int64]
+    gains: NDArray[np.float64]
+    offsets: NDArray[np.float64]
+    start_ns: float
+
+
+@njit(nogil=True, cache=True)
+def _multi_rhs(time, state, context):
+    row_time = time + context.start_ns
+    amplitudes = np.empty(len(context.gains), dtype=np.complex128)
+    for tone in range(len(context.gains)):
+        length = context.lengths[tone]
+        amplitudes[tone] = context.gains[tone] * sample_value(
+            row_time + context.offsets[tone],
+            context.times[tone, :length],
+            context.samples[tone, :length],
+        )
+    h = interaction_hamiltonian(
+        row_time, context.energy, context.coefficients, amplitudes
+    )
+    size = len(context.energy)
+    return (-2j * np.pi * h @ state.reshape(size, size)).ravel()
+
+
+@njit(nogil=True, cache=True)
+def _multi_unitaries(context, duration_ns, segments):
+    size = len(context.energy)
+    result = np.empty((segments, size, size), dtype=np.complex128)
+    boundaries = np.linspace(0.0, duration_ns, segments + 1)
+    for segment in range(segments):
+        start, end = boundaries[segment], boundaries[segment + 1]
+        interval = _MultiContext(
+            context.energy,
+            context.coefficients,
+            context.times,
+            context.samples,
+            context.lengths,
+            context.gains,
+            context.offsets,
+            start,
+        )
+        state = integrate(
+            _multi_rhs,
+            interval,
+            np.eye(size, dtype=np.complex128).ravel(),
+            end - start,
+            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS),
+            1.0,
+        )
+        endpoint = state.reshape(size, size)
+        endpoint *= np.exp(-2j * np.pi * context.energy * end)[:, None]
+        endpoint *= np.exp(2j * np.pi * context.energy * start)[None, :]
+        result[segment] = endpoint
+    return result
+
+
 def _build_unitaries(
     table: SegmentTable,
     row: int,
@@ -396,7 +458,6 @@ def _build_unitaries(
 ) -> NDArray[np.complex128]:
     model = context.source.model(tuple(int(v) for v in table.level[row]))
     count = table.tones[row]
-    size = len(model.energies_ghz)
     energy = model.energies_ghz + graph.charges @ table.tone_frequency_ghz[row, :count]
     energy -= energy[0]
 
@@ -428,39 +489,25 @@ def _build_unitaries(
             return _single_unitaries(single_context, duration)
         return _adaptive_unitaries(single_context, duration, segments)
 
-    def rhs(time, state):
-        amplitudes = np.empty(count, dtype=np.complex128)
-        for k in range(count):
-            env = table.envelopes[table.tone_envelope[row, k]]
-            amplitude = sample_value(
-                time + table.tone_envelope_offset_ns[row, k], env.sample_ns, env.samples
-            )
-            amplitudes[k] = table.tone_amplitude[row, k] * amplitude
-        h = interaction_hamiltonian(time, energy, coefficients, amplitudes)
-        return (-2j * np.pi * h @ state.reshape(size, size)).ravel()
-
-    result = []
-    for start, end in zip(
-        np.linspace(0, table.duration_ns[row], segments + 1)[:-1],
-        np.linspace(0, table.duration_ns[row], segments + 1)[1:],
-        strict=True,
-    ):
-        solution = scipy.integrate.solve_ivp(
-            rhs,
-            (start, end),
-            np.eye(size, dtype=complex).ravel(),
-            method="DOP853",
-            rtol=_RTOL,
-            atol=_ATOL,
-            max_step=_MAX_STEP_NS,
-        )
-        if not solution.success:
-            raise RuntimeError(f"joint gate integration failed: {solution.message}")
-        endpoint = solution.y[:, -1].reshape(size, size)
-        endpoint *= np.exp(-2j * np.pi * energy * end)[:, None]
-        endpoint *= np.exp(2j * np.pi * energy * start)[None, :]
-        result.append(endpoint)
-    return np.array(result)
+    envelopes = [table.envelopes[index] for index in table.tone_envelope[row, :count]]
+    lengths = np.array([len(env.samples) for env in envelopes], dtype=np.int64)
+    width = max(1, int(lengths.max()))
+    times = np.zeros((count, width), dtype=np.float64)
+    samples = np.zeros((count, width), dtype=np.complex128)
+    for tone, env in enumerate(envelopes):
+        times[tone, : lengths[tone]] = env.sample_ns
+        samples[tone, : lengths[tone]] = env.samples
+    multi_context = _MultiContext(
+        energy,
+        coefficients,
+        times,
+        samples,
+        lengths,
+        table.tone_amplitude[row, :count].copy(),
+        table.tone_envelope_offset_ns[row, :count].copy(),
+        0.0,
+    )
+    return _multi_unitaries(multi_context, float(table.duration_ns[row]), segments)
 
 
 @njit(nogil=True, cache=True)
@@ -533,7 +580,7 @@ class CovariantGateKernel:
     Numerical guard checks shared calibrated RWA and bounded phase-graph pruning.
     Preparation refines secular splitting without relaxing its proxy threshold.
     Both families allow sampled slices and final sample hold within row support.
-    Single-tone gates compile Hilbert integration through the shared DOP853 solver.
+    All gates compile Hilbert integration through the shared DOP853 solver.
     Dispatch/family wrappers own acquire-wide cost and reuse decisions.
     """
 
