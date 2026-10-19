@@ -13,6 +13,7 @@ from tests.experiment._ftf_templates import (
     request,
     settings,
     snapshot,
+    template,
 )
 
 
@@ -24,6 +25,51 @@ def draw(source, acquire=None, snap=None):
             0,
         )
     )
+
+
+def test_preparation_hits_preserve_source_usage_for_later_acquires():
+    import numpy as np
+    from zcu_tools.core.simulation import PulseEnvelope
+
+    base = template(tones=1)
+    drive, readout = base.events
+    times = np.linspace(0.0, 0.128, 129)
+    waveform = PulseEnvelope(
+        tuple(times), tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex))
+    )
+    drive = replace(
+        drive,
+        start_us=np.zeros(2),
+        duration_us=np.full(2, 0.128),
+        gain=np.full(2, -0.002),
+        envelopes=(waveform,),
+    )
+    readout = replace(readout, start_us=np.full(2, 0.140))
+    acquire = request(templates=(replace(base, events=(drive, readout)),))
+    histories, routes = [], []
+    for clear in (False, True):
+        source = FTFSource(settings(), DeviceManager())
+        try:
+            draw(source, acquire)
+            numeric = source.model_facts(snapshot()).source
+            first = dict(getattr(numeric, "gate_usage", {}))
+            assert first, "shaped acquire must record its complete gate inventory"
+            if clear:
+                source.preparation_cache.clear()
+            draw(source, replace(acquire, sequence=8))
+            assert source.preparation_cache.hits == (0 if clear else 1)
+            histories.append(dict(numeric.gate_usage))
+            assert histories[-1] == {key: 2 * count for key, count in first.items()}
+            later_drive = replace(drive, phase_deg=drive.phase_deg + 17.0)
+            later = replace(base, events=(later_drive, readout))
+            draw(source, replace(acquire, templates=(later,), sequence=9))
+            routes.append(source.evaluations[0].paths.segments_by_kernel)
+            source.close()
+            assert not numeric.gate_usage
+        finally:
+            source.close()
+    assert histories[0] == histories[1]
+    assert routes[0] == routes[1]
 
 
 def test_equal_content_acquires_skip_adc_preparation_and_keep_streams_exact():

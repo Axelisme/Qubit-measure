@@ -97,6 +97,56 @@ def test_inventory_amortizes_once_but_small_inventory_stays_sambe_even_when_warm
         )
 
 
+def test_source_history_amortizes_later_small_acquire_and_invalidates_old_memo():
+    src = source()
+    with closing(Engine(1, 1_000_000)) as engine:
+        small = batch(2)
+        cold = engine.evolve(src, (small,), cancel=Event())
+        assert cold.paths.segments_by_kernel.get("shaped_sambe") == 2
+        engine.evolve(src, (batch(160),), cancel=Event())
+        later = engine.evolve(src, (small,), cancel=Event())
+        assert later.paths.segments_by_kernel.get("single_tone_gate") == 2
+
+
+def test_source_acquire_order_has_same_routes_with_and_without_cache_retention():
+    routes = []
+    for retain in (True, False):
+        src = source()
+        run = []
+        with closing(Engine(1, 1_000_000)) as persistent:
+            for count, phase in ((160, 0.0), (2, 0.713), (2, 0.0)):
+                if retain:
+                    result = persistent.evolve(src, (batch(count, phase),), cancel=Event())
+                else:
+                    # Replacing the Engine releases both caches, not source history.
+                    with closing(Engine(1, 0)) as empty:
+                        result = empty.evolve(src, (batch(count, phase),), cancel=Event())
+                run.append(result.paths.segments_by_kernel)
+                assert result.paths.segments_by_kernel.get("single_tone_gate") == count
+        routes.append(run)
+    assert routes[0] == routes[1]
+
+
+def test_source_close_discards_usage_even_if_engine_preparations_survive():
+    src = source()
+    with closing(Engine(1, 1_000_000)) as engine:
+        engine.evolve(src, (batch(160),), cancel=Event())
+        warm = engine.evolve(src, (batch(2),), cancel=Event())
+        assert warm.paths.segments_by_kernel.get("single_tone_gate") == 2
+        src.close()
+        reset = engine.evolve(src, (batch(2),), cancel=Event())
+        assert reset.paths.segments_by_kernel.get("shaped_sambe") == 2
+
+
+def test_repeated_identical_acquires_count_even_when_results_are_memoized():
+    src = source()
+    with closing(Engine(1, 1_000_000)) as engine:
+        small = batch(2)
+        for _ in range(80):
+            result = engine.evolve(src, (small,), cancel=Event())
+        assert result.paths.segments_by_kernel.get("single_tone_gate") == 2
+
+
 def test_compiled_cold_cost_admits_reference_inventory_but_not_small_inventory():
     with closing(Engine(1, 1_000_000)) as engine:
         for phase in (0.0, 0.713):
