@@ -10,6 +10,7 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import PostWritebackRequest, WritebackRequest
+from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.writeback import (
@@ -32,7 +33,6 @@ from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
     PaneParams,
     PaneSummary,
-    PostSummary,
     native_save_session,
 )
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -74,11 +74,9 @@ class SampleProposingAdapter(AnalysisSavingAdapter):
     ) -> list[WritebackItem]:
         return sample_proposals()
 
-    def get_post_writeback_items(
+    def get_post_writeback_items[T: AnalyzeResult](
         self,
-        req: PostWritebackRequest[
-            RunRecord[SavingCfg, SavingResult], PaneSummary, PostSummary
-        ],
+        req: PostWritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary, T],
     ) -> list[WritebackItem]:
         return sample_proposals()
 

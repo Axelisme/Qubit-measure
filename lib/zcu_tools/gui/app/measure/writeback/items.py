@@ -65,9 +65,10 @@ class ModuleWriteback(WritebackItem):
 class SampleWriteback(WritebackItem):
     """Propose producer-defined JSON fields for target_name, a concrete component.
 
-    Only adapters whose Run keeps the flux device fixed provide this proposal.
-    WritebackService adds dev_value/dev_unit from the Run's fixed $flux_dev and
-    device snapshot, replacing those fields if supplied here. Missing captured
+    Only adapters whose Run keeps the coordinate device fixed provide this proposal.
+    The adapter declares sample_device_alias; None disables Sample writeback.
+    WritebackService adds dev_value/dev_unit from that alias in the Run's fixed
+    parameters and device snapshot, replacing those fields if supplied here. Missing captured
     device facts omit this item with a public reason. The sample can be selected
     independently; it needs no cfg schema or editor session.
     """
