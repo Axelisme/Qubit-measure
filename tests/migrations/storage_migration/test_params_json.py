@@ -293,6 +293,32 @@ def test_analysis_file_resume_validates_unfinished_and_preserves_completed_edits
         assert file.read_bytes() == edited
 
 
+def test_unfinished_t1_resume_rejects_new_active_null_channel(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    analysis_sections: JsonObject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = write_params(request_data, analysis_sections)
+    copyfile = shutil.copyfile
+
+    def interrupt(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
+        if src == source:
+            raise OSError("T1 checkpoint interrupted")
+        return copyfile(src, dst, follow_symlinks=follow_symlinks)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(shutil, "copyfile", interrupt)
+        with pytest.raises(OSError, match="T1 checkpoint interrupted"):
+            migrate(request_data, analysis_mapping)
+    file = open_entry(request_data).result_path / "t1_curve/Qlegacy.json"
+    raw = json.loads(file.read_text(encoding="utf-8"))
+    raw["params"]["params"]["Q_ind"] = None
+    file.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(MigrationInputError, match="differs"):
+        migrate(replace(request_data, resume=True), analysis_mapping)
+
+
 def test_analysis_dry_run_reports_the_same_files_without_writes(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
