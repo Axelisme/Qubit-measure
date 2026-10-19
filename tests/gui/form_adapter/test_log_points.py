@@ -46,7 +46,9 @@ def test_log_points_lower_to_rounded_unique_integer_list(maximum, points, expect
     assert state.input.to_json() == authored
 
 
-@pytest.mark.parametrize(("maximum", "expected"), [(128, [0, 128]), (1, [0, 1]), (0, [0])])
+@pytest.mark.parametrize(
+    ("maximum", "expected"), [(128, [0, 128]), (1, [0, 1]), (0, [0])]
+)
 def test_two_points_keep_zero_and_the_configured_maximum(maximum, expected):
     form, state, env = make_state(maximum, 2)
     assert cfg_result(form, state, env).depths == expected
