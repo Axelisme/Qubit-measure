@@ -21,7 +21,7 @@
 │   │   └── records/manual-migration-report-<date>.json
 │   └── Database/<name>/
 │       ├── runs/<run_id>/data.h5         ← Labber 轉成的 native
-│       ├── Labber/<原相對路徑>            ← 原 Labber 檔，bytes 不變
+│       ├── Labber/<原相對路徑>            ← 所有原 Labber 檔（含未轉 native 的），bytes 不變
 │       ├── arb_waveforms/**
 │       └── <原相對路徑>                   ← 無法轉換的舊 Database 檔，原樣放在對應位置
 └── Qubit-measure-gui-backup/             ← 平行備份根：舊格式，路徑與 repo 內相同
@@ -140,8 +140,8 @@ label 不合法時，由使用者決定新名，報告記舊名、新名與理�
 | `samples.csv` | `samples/<Q>.jsonl` | 第 7 步。有列轉不了時，原檔另外原樣放 `result/<name>/samples.csv`。 |
 | `arb_waveforms/**`（result 或 Database） | `Database/<name>/arb_waveforms/**` | 第 7 步 |
 | `autofluxdep_runs/**`、其他不支援的 result 檔 | `result/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
-| Database 的 Labber 檔 | `Database/<name>/runs/<run_id>/data.h5` ＋ `Database/<name>/Labber/<原相對路徑>` | 第 8 步 |
-| 其他 Database 檔、無法轉 native 的 Labber 檔 | `Database/<name>/<原相對路徑>` | 第 7 步，原樣複製；報告記未轉的原因。 |
+| Database 的 Labber 檔 | 原檔一律放 `Database/<name>/Labber/<原相對路徑>`；能轉的另產 `Database/<name>/runs/<run_id>/data.h5` | 第 8 步 |
+| 其他 Database 檔 | `Database/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
 
 `<Q>` 是舊 qubit 對應的新 component 名。找不到唯一對應時，所有寫到 `<Q>` 的項目整批列 permanent-pending，不任選一個。
 
@@ -421,7 +421,7 @@ print(report)
 
 Labber 與 native 都是 HDF5，但格式不同，把 `.hdf5` 改名成 `data.h5` 不會得到 native。
 
-**必要證據**齊全才轉：experiment tag 與 cfg_type、完整歷史 cfg、variable、axes 與 signal 的名稱、單位、dtype 和 shape。缺任何一項就整檔列 permanent-pending，原檔用 `copy_checked` 原樣複製到 `$NEW_D/<原相對路徑>`。
+**必要證據**齊全才轉：experiment tag 與 cfg_type、完整歷史 cfg、variable、axes 與 signal 的名稱、單位、dtype 和 shape。缺任何一項就整檔列 permanent-pending，原檔仍用 `copy_checked` 複製到 `$NEW_D/Labber/<原相對路徑>`，和已轉換的 Labber 放在一起。
 
 開始時間與 run_id 缺了也照樣轉：
 
