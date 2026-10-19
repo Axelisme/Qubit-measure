@@ -639,7 +639,7 @@ def test_report_rebuild_retains_future_fields(
     assert report["part"] == "all"
 
 
-def test_preserved_archives_keep_paths_bytes_and_sources(
+def test_preserved_files_keep_entry_relative_paths_bytes_and_sources(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     source = request_data.result_root / "chip" / "qubit"
@@ -647,7 +647,6 @@ def test_preserved_archives_keep_paths_bytes_and_sources(
         "arb_waveforms/wave.npz": b"arbitrary wave bytes",
         "context/image/figure.png": b"unknown point image",
         "autofluxdep_runs/run/blob.h5": b"workflow archive",
-        "samples.csv": b"old,columns\n1,2\n",
         "unrecognized.bin": b"retained only at source",
     }
     for relative, content in originals.items():
@@ -660,26 +659,23 @@ def test_preserved_archives_keep_paths_bytes_and_sources(
         validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
-    assert len(report.preserved_files) == 3
+    assert len(report.preserved_files) == 4
     for item in report.preserved_files:
         assert item.destination.read_bytes() == item.source.read_bytes()
         assert item.source_hash == item.destination_hash
     assert (
-        request_data.database_root / request_data.name / "arb_waveforms" / "wave.npz"
+        request_data.results_root / request_data.name / "arb_waveforms" / "wave.npz"
     ).read_bytes() == originals["arb_waveforms/wave.npz"]
     figures = request_data.results_root / request_data.name / "figures"
     assert (figures / "context/image/figure.png").read_bytes() == originals[
         "context/image/figure.png"
     ]
-    assert any(
-        item.source == source / "samples.csv" and item.location == "unconverted file"
-        for item in report.pending
-    )
-    assert any(
-        item.source == source / "unrecognized.bin"
-        and item.location == "unconverted file"
-        for item in report.pending
-    )
+    entry = request_data.results_root / request_data.name
+    assert (entry / "unrecognized.bin").read_bytes() == originals["unrecognized.bin"]
+    assert (entry / "autofluxdep_runs/run/blob.h5").read_bytes() == originals[
+        "autofluxdep_runs/run/blob.h5"
+    ]
+    assert report.converted_files == ()
     assert all(
         (source / relative).read_bytes() == content
         for relative, content in originals.items()

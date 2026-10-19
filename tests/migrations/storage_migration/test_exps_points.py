@@ -126,7 +126,7 @@ def test_exps_child_becomes_complete_point_with_independent_meta_and_library(
     assert report.failures == ()
 
 
-def test_entry_figures_keep_relative_paths_and_workflow_images_stay_archived(
+def test_entry_figures_and_workflow_files_keep_their_corresponding_paths(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     source = request_data.result_root / "chip/qubit"
@@ -147,10 +147,7 @@ def test_entry_figures_keep_relative_paths_and_workflow_images_stay_archived(
     assert (
         entry.result_path / "figures/overview/image/fit.png"
     ).read_bytes() == b"nested figure"
-    workflow = (
-        entry.database_path
-        / "migration-preserved/result/autofluxdep_runs/run/image/fit.png"
-    )
+    workflow = entry.result_path / "autofluxdep_runs/run/image/fit.png"
     assert workflow.read_bytes() == b"workflow figure"
     assert dry.failures == ()
     assert not any(
@@ -197,8 +194,6 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     assert copies[0].source_hash == copies[0].destination_hash
     assert copies[0].source_hash == hashlib.sha256(b"point figure bytes").hexdigest()
     assert not any(item.source == figure for item in report.pending)
-    archive = entry.database_path / "migration-preserved/result"
-    assert not (archive / "exps/070716_0.500/image/fit.png").exists()
     retained_outside = backup / "image/root.png"
     assert (
         entry.result_path / "figures/image/root.png"

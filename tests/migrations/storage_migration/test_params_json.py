@@ -472,7 +472,8 @@ def test_sample_declarations_publish_runtime_rows_and_resume_once(
         }
     )
     source = request.result_root / "chip/qubit/samples.csv"
-    source.write_text("calibrated mA,T1 (us)\n2,50\nbad,60\n", encoding="utf-8")
+    original = b"calibrated mA,T1 (us)\r\n2,50\r\nbad,60\r\n"
+    source.write_bytes(original)
     dry = migrate(replace(request, dry_run=True), analysis_mapping)
     assert not (request.results_root / request.name).exists()
     report = migrate(request, analysis_mapping)
@@ -484,10 +485,17 @@ def test_sample_declarations_publish_runtime_rows_and_resume_once(
     assert row["dev_unit"] == "A"
     assert row["t1_us"] == 50
     assert any(item.location == "row 2" for item in report.pending)
+    raw_csv = open_entry(request).result_path / "samples.csv"
+    assert raw_csv.is_file(), "partial conversion must also preserve the original CSV"
+    assert raw_csv.read_bytes() == original
+    preserved = next(item for item in report.preserved_files if item.source == source)
+    assert preserved.destination == raw_csv
+    assert preserved.source_hash == preserved.destination_hash
     assert dry.pending == report.pending
     before = table.path.read_bytes()
     migrate(replace(request, resume=True), analysis_mapping)
     assert table.path.read_bytes() == before
+    assert raw_csv.read_bytes() == original
 
 
 def test_sample_prepared_publication_resumes_without_duplicate_rows(
