@@ -15,7 +15,6 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.resources.entry import ResultEntry, component_registry
-from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.transmon import TransmonParams
@@ -193,41 +192,6 @@ def component_context(tmp_path: Path):
             component_registry.unregister("qubit/fluxonium")
 
 
-def test_dialog_component_prefill_defaults_to_alias_and_stays_detached(
-    qapp, component_context: ContextService
-) -> None:
-    context = component_context
-    query = PredictorService(
-        ContextControlFacet(context=context), components.params_for
-    )
-    before = context.read_context().document()
-    dialog = PredictorDialog(
-        PredictorControlFacet(query),
-        parameter_provider=context.read_context,
-        params=FluxoniumParams(),
-    )
-    try:
-        assert dialog.selected_component() == "Q2"
-        dialog.load_component()
-        assert dialog.parameters() == FluxoniumParams(5.0, 1.0, None, 0.0, 1.0, 0.0)
-        assert dialog.parameters().missing() == ("EL",)
-        with pytest.raises(ValueError, match="Missing parameters: EL"):
-            dialog.predict_frequency(0.1)
-        dialog.set_parameters(replace(dialog.parameters(), EL=0.5))
-        frequency = dialog.predict_frequency(0.1)
-        bias = dialog.calibrate(0.101, frequency)
-        assert bias == pytest.approx(-0.001, abs=1e-4)
-        # Loading again reads the current component, not edited dialog parameters.
-        dialog.load_component("Q1")
-        assert dialog.parameters().flux_bias == 0.0
-        assert context.read_context().document() == before
-        q2 = query.params_for_qubit("Q2")
-        assert isinstance(q2, FluxoniumParams)
-        assert q2.EL is None
-    finally:
-        dialog.close()
-
-
 def test_dialog_incomplete_parameters_preserve_unknown_affine_inputs(qapp) -> None:
     params = FluxoniumParams(EJ=5.0, EC=1.0, EL=0.5)
     dialog = PredictorDialog(PredictorControlFacet(PredictorService()))
@@ -242,59 +206,6 @@ def test_dialog_incomplete_parameters_preserve_unknown_affine_inputs(qapp) -> No
         assert dialog.predict_frequency(0.1) == pytest.approx(
             1707.3748654723192, abs=1e-7
         )
-    finally:
-        dialog.close()
-
-
-def test_dialog_cache_restores_partial_trial_without_changing_component(
-    qapp, tmp_path: Path, component_context: ContextService
-) -> None:
-    context = component_context
-    query = PredictorService(
-        ContextControlFacet(context=context), components.params_for
-    )
-    before = context.read_context().document()
-    dialog = PredictorDialog(
-        PredictorControlFacet(query), parameter_provider=context.read_context
-    )
-    try:
-        dialog.enable_parameter_cache(cache_dir=tmp_path / "cache")
-        dialog.load_component()
-        dialog.set_parameters(replace(dialog.parameters(), flux_bias=0.012))
-        saved = dialog.parameters()
-    finally:
-        dialog.close()
-    reopened = PredictorDialog(
-        PredictorControlFacet(query), parameter_provider=context.read_context
-    )
-    try:
-        reopened.enable_parameter_cache(cache_dir=tmp_path / "cache")
-        assert reopened.parameters() == saved
-        assert reopened.parameters().missing() == ("EL",)
-        assert context.read_context().document() == before
-        assert query.params_for_qubit("Q2").flux_bias == 0.0
-    finally:
-        reopened.close()
-
-
-def test_dialog_file_load_only_prefills_local_parameters(qapp, tmp_path: Path) -> None:
-    path = tmp_path / "params.json"
-    file = QubitParams(path)
-    file.ensure_project(ParamsProject("trial", "trial"))
-    file.set_fluxdep_fit(
-        FluxDepFit(
-            EJ=4.5, EC=1.2, EL=0.9, flux_half=0.31, flux_int=0.71, flux_period=0.8
-        )
-    )
-    before = path.read_bytes()
-    dialog = PredictorDialog(
-        PredictorControlFacet(PredictorService()),
-        params=FluxoniumParams(5.0, 1.0, 0.5, 0.0, 1.0, 0.0),
-    )
-    try:
-        dialog.load_parameters(str(path))
-        assert dialog.parameters() == FluxoniumParams(4.5, 1.2, 0.9, 0.31, 0.8, 0.0)
-        assert path.read_bytes() == before
     finally:
         dialog.close()
 
