@@ -315,6 +315,7 @@ def test_startup_progress_and_run_lock_with_user_input(
     evidence = Path(os.environ.get("STARTUP_UI_EVIDENCE", str(tmp_path))) / (
         "partial-failure" if fails else "complete"
     )
+    initial_size = driver.window_size()
     assert driver.status().text == "Waiting for synthetic source"
     assert not driver.observe("Run").enabled
     assert driver.observe("Run").tooltip == "Startup script is running"
@@ -344,6 +345,7 @@ def test_startup_progress_and_run_lock_with_user_input(
         driver.screenshot(evidence / "03-error.png")
         driver.click("OK")
         assert "Startup failed:" in driver.status().text
+        assert path.name in driver.status().text
     else:
         qt_until(
             lambda: driver.status().text == "Startup complete",
@@ -351,3 +353,6 @@ def test_startup_progress_and_run_lock_with_user_input(
         )
     assert driver.observe("Run").enabled
     driver.screenshot(evidence / "04-unlocked.png")
+    assert driver.window_size() == initial_size, (
+        "terminal status must not expand the window"
+    )

@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QTimer
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
 from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -261,6 +261,17 @@ class ComponentDriver:
             and widget.isEnabled()
             and (modal is None or widget is modal or modal.isAncestorOf(widget))
         )
+
+    def window_size(self) -> QSize:
+        """Read the shown window's client width/height in device-independent pixels.
+
+        Return a detached QSize value, excluding the native window frame.
+        A hidden window raises LookupError rather than supplying unseen geometry.
+        This is an observation only; it never resizes the window.
+        """
+        if not self._window.isVisible():
+            raise LookupError("window is not visible")
+        return self._window.size()
 
     def observe(
         self, text: str | None = None, *, object_name: str | None = None
