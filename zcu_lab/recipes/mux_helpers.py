@@ -181,9 +181,12 @@ def finish_mux(tab: RecipeTab, *, post: bool = False) -> RecipeGenerator:
     """Run once, save raw, analyze Primary (and GE Post), then ask before Apply.
 
     Cancellation returns without starting later steps. Finish-early follows the
-    owner's partial-data/save policy. Only an explicit accepted answer applies
-    captured candidates; skipped writes none. Native or transport failures
-    propagate at their author step. This helper never manufactures estimates.
+    owner's partial-data/save policy. Only an explicit accepted answer calls
+    tab.accept() to write all current draft items, Primary then Post, ignoring
+    GUI checkboxes. The draft is not frozen while waiting, and accept() does not
+    match it to the question snapshot's version. The question is not a version
+    lock. Skipped writes none. Native or transport failures propagate at their
+    author step. This helper never manufactures estimates.
     """
     result = yield from tab.run_step()
     run = result.run

@@ -119,10 +119,15 @@ GE keeps separate Primary and Post candidates. Missing capture produces no
 candidates; editing current aliases or Form values does not supply historical data.
 
 Review stable target names, values, uncertainty, quality and destination before
-answering. `skipped` writes nothing. `accepted` authorizes the proposed items and
-the recipe explicitly applies that accepted selection. Preview, analysis and
-waiting do not Apply. Use manual single-item Apply when only one calibration is
-authorized. Failed or partially acquired rows do not become successful proposals.
+answering. `skipped` writes nothing. On `accepted`, the recipe calls `tab.accept()`
+without an item selection. This writes all current draft items, Primary then
+Post, ignoring GUI checkboxes. The draft is not frozen while waiting for an
+answer. Changes made during that wait affect what is written. `accept()` does
+not match the current draft to the question snapshot's version; that snapshot
+is not a version lock or a bound item selection.
+Preview, analysis and waiting do not Apply. Use manual single-item Apply when
+only one calibration is authorized. Failed or partially acquired rows do not
+become successful proposals.
 
 Cancellation stops later steps. Finish-early keeps the native owner's partial-data
 and save policy. Native, admission and transport failures propagate at the step

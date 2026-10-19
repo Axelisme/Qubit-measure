@@ -24,8 +24,7 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.mux_results import captured_qubits, indexed_summary
+from zcu_lab.v2._support.measure.mux_results import captured_qubits, coherence_summary
 from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2._support.mux_coherence import MuxCoherenceResult
 from zcu_lab.v2._support.mux_coherence_analysis import MuxCoherenceFit
@@ -47,24 +46,7 @@ class MuxT2RamseyAnalyzeResult(AnalyzeResultBase):
 
     def to_summary_dict(self) -> dict[str, object]:
         """Present original positions/names, numerical values, quality or failure."""
-        summaries: list[dict[str, object]] = []
-        for outcome in self.outcomes:
-            if isinstance(outcome, MuxFitFailure):
-                values: dict[str, object] = {"failure": outcome.reason}
-            else:
-                values = {
-                    "t2": outcome.t2,
-                    "t2_err": outcome.t2_err,
-                    "detune": outcome.detune,
-                    "detune_err": outcome.detune_err,
-                    "fit_fringe": outcome.fit_fringe,
-                    "fit_quality": fit_quality_summary(
-                        {"fit": outcome.quality},
-                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
-                    ),
-                }
-            summaries.append(indexed_summary(self.names, outcome.index, values))
-        return {"tones": summaries}
+        return coherence_summary(self.outcomes, self.names)
 
 
 class MuxT2RamseyAdapter(
