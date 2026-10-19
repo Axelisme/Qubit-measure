@@ -15,6 +15,7 @@ if TYPE_CHECKING:
         PredictMatrixCurveResult,
         PredictorService,
     )
+    from zcu_tools.resources.predictor_file import PredictorFile
     from zcu_tools.simulate.parameters import ModelParams
     from zcu_tools.simulate.predictor import PredictorParams
 
@@ -25,6 +26,14 @@ class PredictorControlPort(Protocol):
     Units, shapes and failures are defined by the typed requests/results and
     PredictorService. No query installs a model or reads dialog state/cache.
     """
+
+    def list_files(self) -> tuple[str, ...]:
+        """List current entry predictor filenames; empty without an entry."""
+        ...
+
+    def load_file(self, filename: str) -> PredictorFile:
+        """Read one entry predictor filename; see PredictorService.load_file."""
+        ...
 
     def params_for_qubit(self, qubit: str) -> ModelParams:
         """Read current concrete component inputs; see PredictorService.params_for_qubit."""
@@ -58,6 +67,14 @@ class PredictorControlFacet:
 
     def __init__(self, predictor: PredictorService) -> None:
         self._predictor = predictor
+
+    def list_files(self) -> tuple[str, ...]:
+        """List current entry predictor filenames; empty without an entry."""
+        return self._predictor.list_files()
+
+    def load_file(self, filename: str) -> PredictorFile:
+        """Read one entry predictor filename; see PredictorService.load_file."""
+        return self._predictor.load_file(filename)
 
     def params_for_qubit(self, qubit: str) -> ModelParams:
         """Read current concrete inputs; see PredictorService.params_for_qubit."""

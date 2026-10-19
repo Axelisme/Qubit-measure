@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -16,6 +17,7 @@ from numpy.typing import NDArray
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.resources.entry.schema import ComponentSchema
 from zcu_tools.resources.entry.views import ComponentView
+from zcu_tools.resources.predictor_file import PredictorFile, load_predictor_file
 from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
@@ -132,6 +134,45 @@ class PredictorService:
     ) -> None:
         self._context = context
         self._params_for = params_for
+
+    def list_files(self) -> tuple[str, ...]:
+        """Return sorted *.json filenames in the current entry predictor directory.
+
+        No opened entry or missing directory returns an empty tuple. No point
+        selection is required. I/O failures propagate; no directories are created.
+        Listing does not read or validate file content.
+        """
+        root = (
+            self._context.get_predictors_path() if self._context is not None else None
+        )
+        if root is None or not root.exists():
+            return ()
+        return tuple(
+            sorted(path.name for path in root.glob("*.json") if path.is_file())
+        )
+
+    def load_file(self, filename: str) -> PredictorFile:
+        """Read one *.json filename from the current entry predictor directory.
+
+        Accept a filename including .json, not absolute paths or path segments.
+        Invalid filenames raise InvalidInputError; no opened entry raises
+        FailedPreconditionError. File and content errors from resources propagate.
+        No point selection is required, and no file or session state is changed.
+        """
+        if (
+            not filename
+            or "/" in filename
+            or "\\" in filename
+            or Path(filename).is_absolute()
+            or Path(filename).suffix != ".json"
+        ):
+            raise InvalidInputError("Expected a predictor filename ending in .json")
+        root = (
+            self._context.get_predictors_path() if self._context is not None else None
+        )
+        if root is None:
+            raise FailedPreconditionError("Open an entry to load predictor files")
+        return load_predictor_file(root / filename)
 
     def params_for_qubit(self, qubit: str) -> ModelParams:
         """Read named inputs for one concrete component at the current point.
