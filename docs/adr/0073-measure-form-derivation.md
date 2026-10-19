@@ -61,7 +61,14 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 
 Tree 對齊 model 的欄位。字串是 literal，`Expr` 才是 expression。
 `Range.around`／`Range.between` 宣告掃描，`AliasName` 產生 direct 名稱，
-`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。生成器把中立 metadata 翻成 Display，由 Form core 強制唯讀，不生成單值 Literal。
+`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。
+生成器把中立 metadata 翻成 Display，由 Form core 強制唯讀，不生成單值 Literal。
+
+`LogPoints(max, points)` 為指定的整數清單欄位宣告 Log 初值，`cfg_model` 不計算清單。
+`form_adapter` 擁有 Log／List 分支、換算與清單產生。Core 只接收 `list[int]`，普通 list 與 SweepCfg 不變。
+LogPoints 與 Range.between 使用相同的樹上初值邊界，依 advisor 2026-10-19 裁決。
+依 advisor 同日的邊界裁決，Log 必含 0 與 max，含 0 的 points 至少為 2，geometric samples 的末點固定為 max。
+單元素 List→Log 依最大值與長度回填為 invalid draft，不補點。
 
 Module 節點分為兩種。
 
