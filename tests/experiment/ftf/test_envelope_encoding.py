@@ -1,6 +1,7 @@
 """Exact preparation streams with source-scoped immutable envelope reuse."""
 
-from dataclasses import replace
+from collections import OrderedDict
+from dataclasses import dataclass, fields, replace
 from sys import getsizeof
 
 import numpy as np
@@ -35,6 +36,111 @@ def test_envelope_encoding_is_a_fixed_size_content_fingerprint():
         PulseEnvelope((0.0, 1.0), (0j, 1j)),
     ):
         assert encoder.encode(other) != fingerprint
+
+
+class SampleTimes(tuple[float, ...]):
+    """Non-builtin tuple producer accepted by the generic accounting path."""
+
+
+class SampleValue(complex):
+    """Non-builtin scalar with a larger object header than builtin complex."""
+
+
+@dataclass(frozen=True)
+class ExtendedEnvelope(PulseEnvelope):
+    calibration: tuple[float, ...] = (0.125, 0.25)
+
+
+def _accounting_envelope(kind: str) -> PulseEnvelope:
+    times = tuple(float(i) / 64 for i in range(64))
+    values = tuple(complex(i / 64, 0.5) for i in range(64))
+    if kind == "shared":
+        return PulseEnvelope(times, (complex(0.5, 0.25),) * len(times))
+    if kind == "empty":
+        return PulseEnvelope((), ())
+    if kind == "scalar-subclass":
+        return PulseEnvelope(times, tuple(SampleValue(v) for v in values))
+    if kind == "tuple-subclass":
+        return PulseEnvelope(SampleTimes(times), values)
+    if kind == "envelope-subclass":
+        return ExtendedEnvelope(times, values)
+    return PulseEnvelope(times, values)
+
+
+def _retained_charge(envelope: PulseEnvelope, fingerprint: bytes, *, deduplicate: bool):
+    """Independent size oracle for these tuple-only records and one LRU entry."""
+    objects: list[object] = [envelope, vars(envelope)]
+    for field in fields(envelope):
+        values = getattr(envelope, field.name)
+        objects.extend((field.name, values))
+        objects.extend(values)
+    if deduplicate:
+        objects = list({id(obj): obj for obj in objects}.values())
+    metadata = (
+        getsizeof(fingerprint)
+        + getsizeof(id(envelope))
+        + getsizeof((envelope, fingerprint, 0))
+        + getsizeof(0)
+        + getsizeof(OrderedDict([(id(envelope), (envelope, fingerprint, 0))]))
+    )
+    return sum(getsizeof(obj) for obj in objects) + metadata
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "distinct",
+        "shared",
+        "empty",
+        "scalar-subclass",
+        "tuple-subclass",
+        "envelope-subclass",
+    ],
+)
+def test_encoder_retained_charge_is_conservative_and_fallback_is_exact(kind):
+    envelope = _accounting_envelope(kind)
+    encoder = EnvelopeEncoder()
+    fingerprint = encoder.encode(envelope)
+    generic_charge = _retained_charge(envelope, fingerprint, deduplicate=True)
+    assert generic_charge <= encoder.resident_bytes <= encoder.max_bytes
+    if kind in ("distinct", "shared", "empty"):
+        occurrence_charge = _retained_charge(envelope, fingerprint, deduplicate=False)
+        assert encoder.resident_bytes >= occurrence_charge, (
+            "builtin accounting must conservatively charge every scalar/tuple occurrence"
+        )
+    else:
+        assert encoder.resident_bytes == generic_charge, (
+            "non-builtin records, containers and scalars must retain generic accounting"
+        )
+    assert encoder.encode(envelope) == fingerprint
+    assert (encoder.builds, encoder.hits) == (1, 1)
+    assert EnvelopeEncoder(0).encode(envelope) == fingerprint
+
+
+@pytest.mark.parametrize("kind", ["distinct", "shared", "empty", "scalar-subclass"])
+def test_encoder_accounting_respects_capacity_disable_and_clear(kind):
+    envelope = _accounting_envelope(kind)
+    encoder = EnvelopeEncoder()
+    fingerprint = encoder.encode(envelope)
+    encoder.max_bytes = encoder.resident_bytes
+    for _ in range(3):
+        assert encoder.encode(replace(envelope)) == fingerprint
+        assert 0 < encoder.resident_bytes <= encoder.max_bytes
+    builds = encoder.builds
+    assert encoder.encode(envelope) == fingerprint
+    assert encoder.builds == builds + 1, "the earlier entry must have been evicted"
+    encoder.clear()
+    assert encoder.resident_bytes == 0
+    assert encoder.encode(envelope) == fingerprint
+    assert encoder.builds == builds + 2
+    encoder.max_bytes = 0
+    assert encoder.encode(envelope) == fingerprint
+    assert encoder.resident_bytes == 0
+    assert encoder.encode(envelope) == fingerprint
+    assert encoder.builds == builds + 4, "disabled retention must rebuild every time"
+    encoder.clear()
+    assert encoder.resident_bytes == 0
+    assert encoder.builds == builds + 4
 
 
 class RecordingEngine(Engine):
