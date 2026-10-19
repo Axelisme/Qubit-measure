@@ -23,6 +23,7 @@ from zcu_tools.resources.entry import (
     ResultEntry,
 )
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.widgets.form._text_input import commit_text
 
@@ -493,7 +494,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert any(
         record.name == "zcu_tools.gui.app.workflows.tuning_panel"
         and record.exc_info is not None
-        and isinstance(record.exc_info[1], IsADirectoryError)
+        and isinstance(record.exc_info[1], DIRECTORY_OPEN_ERROR)
         and record.exc_info[1].filename == str(journal)
         for record in caplog.records
     )
@@ -521,7 +522,7 @@ def test_window_tunables_journal_failure_reports_the_original_path(
     journal.unlink()
     journal.mkdir()
     try:
-        with pytest.raises(IsADirectoryError) as caught:
+        with pytest.raises(DIRECTORY_OPEN_ERROR) as caught:
             window.apply_tunables(
                 "tuning", {("sample", "value"): 45.0}, actor=Actor("agent", "rpc")
             )

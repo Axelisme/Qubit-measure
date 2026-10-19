@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import json
+import platform
 import shutil
 import subprocess
 import sys
@@ -234,6 +236,93 @@ def pyright_counts(
         relative = path.relative_to(tree) if path.is_absolute() else path
         counts[(relative.as_posix(), item.get("rule") or "?")] += 1
     return counts
+
+
+def _pyright_base_cache_path(root: Path, base: str) -> Path:
+    """Locate the shared cache entry for this full-tree analysis environment."""
+    version = subprocess.run(
+        ("pyright", "--version"),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if version.returncode != 0 or not version.stdout.strip():
+        raise RatchetError(
+            f"cannot determine Pyright version: {version.stderr.strip()}"
+        )
+    key = (
+        "pyright-base-v1",
+        base,
+        hashlib.sha256((root / "pyproject.toml").read_bytes()).hexdigest(),
+        hashlib.sha256((root / "uv.lock").read_bytes()).hexdigest(),
+        version.stdout.strip(),
+        platform.python_implementation(),
+        platform.python_version(),
+    )
+    digest = hashlib.sha256(json.dumps(key).encode("utf-8")).hexdigest()
+    common = Path(
+        _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+    )
+    return common.parent / ".agent_state" / "ratchet" / "cache" / f"{digest}.json"
+
+
+def _read_pyright_base_cache(path: Path) -> Mapping[tuple[str, str], int] | None:
+    """Treat missing, unreadable or malformed cache entries as misses."""
+    try:
+        payload: object = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("schema") != 1:
+        return None
+    entries = payload.get("counts")
+    if not isinstance(entries, list):
+        return None
+    counts: dict[tuple[str, str], int] = {}
+    for entry in entries:
+        if not isinstance(entry, list) or len(entry) != 3:
+            return None
+        filename, rule, count = entry
+        if (
+            not isinstance(filename, str)
+            or not isinstance(rule, str)
+            or not filename
+            or not rule
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+            or count < 0
+            or (filename, rule) in counts
+        ):
+            return None
+        counts[(filename, rule)] = count
+    return counts
+
+
+def _write_pyright_base_cache(
+    path: Path, counts: Mapping[tuple[str, str], int]
+) -> None:
+    """Publish a complete entry atomically, including across concurrent worktrees."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(
+                {
+                    "schema": 1,
+                    "counts": [
+                        [name, rule, count]
+                        for (name, rule), count in sorted(counts.items())
+                    ],
+                },
+                stream,
+            )
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def file_size_counts(tree: Path, files: Iterable[str]) -> Mapping[tuple[str, str], int]:
@@ -449,6 +538,17 @@ def run(
     *,
     full_pyright: bool = False,
 ) -> dict[str, Any]:
+    """Compare named detectors in candidate checkout `root` against Git ref `base`.
+
+    None selects the merge-base with main. Detector names are ruff, pyright,
+    radon, file-size, path-correspondence, test-structure, capabilities and
+    suppressions; unknown names raise KeyError. Full Pyright requires pyright
+    in the selection. It compares all configured sources and caches only base
+    counts across worktrees; other detectors still compare changed files.
+    The JSON-compatible receipt reports regressions and configuration changes,
+    plus `pyright_base` (cache/computed) in full mode. Git and detector failures
+    raise RatchetError; filesystem failures propagate to the caller.
+    """
     resolved = resolve_base(root, base)
     touched = changed_paths(root, resolved)
     files = tuple(
@@ -471,6 +571,16 @@ def run(
     # repository-wide without touching one line of Python, so a candidate that
     # changes only the configuration still has to be judged.
     config_touched = bool({"pyproject.toml", ".importlinter"} & touched)
+    cache_path = _pyright_base_cache_path(root, resolved) if full_pyright else None
+    base_counts = (
+        _read_pyright_base_cache(cache_path) if cache_path is not None else None
+    )
+    pyright_base = "cache" if base_counts is not None else "computed"
+    needs_base_tree = (
+        config_touched
+        or any(name != "pyright" for name in selected)
+        or base_counts is None
+    )
     if files or config_touched or full_pyright:
         scratch_root = root / ".agent_state" / "ratchet"
         scratch_root.mkdir(parents=True, exist_ok=True)
@@ -478,7 +588,8 @@ def run(
             prefix="comparison-", dir=scratch_root
         ) as scratch:
             destination = Path(scratch)
-            extract_base_tree(root, resolved, destination)
+            if needs_base_tree:
+                extract_base_tree(root, resolved, destination)
             tree = destination / "tree"
             if config_touched:
                 before = quality_settings(tree, _BASE_CONFIG)
@@ -490,8 +601,12 @@ def run(
                 ]
             for name in selected:
                 if name == "pyright" and full_pyright:
+                    if base_counts is None:
+                        base_counts = pyright_counts(tree, None)
+                        if cache_path is not None:
+                            _write_pyright_base_cache(cache_path, base_counts)
                     found[name] = regressions(
-                        remap_counts(pyright_counts(tree, None), renames),
+                        remap_counts(base_counts, renames),
                         pyright_counts(root, None),
                     )
                 elif name == "suppressions":
@@ -507,6 +622,7 @@ def run(
         "base": resolved,
         "changed_files": list(files),
         "pyright_scope": "full" if full_pyright else "changed",
+        **({"pyright_base": pyright_base} if full_pyright else {}),
         "configuration_changes": configuration_changes,
         "detectors": {
             name: {

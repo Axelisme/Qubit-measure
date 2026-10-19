@@ -6,10 +6,11 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile, gettempdir
+from tempfile import NamedTemporaryFile
 from typing import Generic, Protocol, TypeVar
 
-from platformdirs import user_cache_dir
+from zcu_tools.utils import atomic_replace
+from zcu_tools.utils.cache import user_cache_root
 
 StateT = TypeVar("StateT")
 ReportT = TypeVar("ReportT")
@@ -54,13 +55,6 @@ class RestoreOutcome(Generic[ReportT]):
     load_error: PersistenceError | None
 
 
-def _safe_cache_root() -> Path:
-    try:
-        return Path(user_cache_dir("zcu_tools", "zcu_tools")) / "gui"
-    except Exception:
-        return Path(gettempdir()) / ".zcu_tools_gui"
-
-
 class SingleFileCaretaker(Generic[StateT, ReportT]):
     """Load and atomically replace one JSON snapshot file.
 
@@ -68,6 +62,10 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
     Loading never renames or rewrites the original file. Other provider/restore
     failures propagate. Hosts display RestoreOutcome.load_error and own save
     timing; recovered startup does not disable later flush.
+
+    cache_dir selects an explicit directory, bypassing user cache resolution.
+    When omitted, use <user_cache_root()>/gui; invalid ZCU_TOOLS_CACHE_DIR values
+    raise ValueError during construction.
     """
 
     def __init__(
@@ -82,7 +80,7 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
             raise ValueError("filename must be a non-empty basename")
         self._originator = originator
         self._codec = codec
-        base_dir = cache_dir if cache_dir is not None else _safe_cache_root()
+        base_dir = cache_dir if cache_dir is not None else user_cache_root() / "gui"
         self._path = base_dir / filename
 
     @property
@@ -117,7 +115,7 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
             ) as file:
                 temp_path = Path(file.name)
                 file.write(json.dumps(payload, ensure_ascii=True, indent=2))
-            temp_path.replace(self._path)
+            atomic_replace(temp_path, self._path)
         except Exception as exc:
             if temp_path is not None:
                 try:

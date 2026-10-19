@@ -20,6 +20,8 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.experiment.workflows.journal import TunablesChanged
 from zcu_tools.experiment.workflows.tunables import TunableValues
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
+
 from ._engine_fakes import Plan, Rig, State
 
 
@@ -176,7 +178,7 @@ def test_append_failure_keeps_complete_model_revision_and_original_cause(
     journal.unlink()
     journal.mkdir()
     try:
-        with pytest.raises(IsADirectoryError) as caught:
+        with pytest.raises(DIRECTORY_OPEN_ERROR) as caught:
             rig.engine.update_tunables(
                 "run", Tunables(reps=4), expected_revision=0, actor=Actor("user", "gui")
             )
