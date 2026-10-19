@@ -18,9 +18,9 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.form import FormInput, FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -54,7 +54,9 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
         return cfg
 
 
-def test_deferred_restore_preserves_pending_until_point_is_ready(qapp: QApplication) -> None:
+def test_deferred_restore_preserves_pending_until_point_is_ready(
+    qapp: QApplication,
+) -> None:
     application = Fixture(headless=True)
     application.registry.register("trace", TraceAdapter)
     try:
@@ -74,7 +76,9 @@ def test_deferred_restore_preserves_pending_until_point_is_ready(qapp: QApplicat
         application.ctrl.context_control.use_point(PointUseRequest("ctx001"))
         restored_ids = application.ctrl.list_tab_ids()
         assert len(restored_ids) == 1
-        assert application.ctrl.cfg_resources.lookup(restored_ids[0]).result() == TraceCfg(amount=7.0)
+        assert application.ctrl.cfg_resources.lookup(
+            restored_ids[0]
+        ).result() == TraceCfg(amount=7.0)
         assert application.ctrl.restore_session().restored_tabs == 0
         application.ctrl.context_control.use_point(PointUseRequest("ctx001"))
         assert application.ctrl.list_tab_ids() == restored_ids

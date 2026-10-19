@@ -21,6 +21,7 @@ from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.events import (
+    ContextSwitchedPayload,
     DeviceOperationFinishedPayload,
     DeviceSetupFinishedPayload,
     GatePresence,
@@ -93,6 +94,7 @@ if TYPE_CHECKING:
     from .artifacts import SaveControlPort
     from .services import AppServices
     from .services.operation_control import OperationControlPort
+    from .services.persistence_types import PersistedSession
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.tab_control import TabControlPort
     from .services.tab_form import TabFormResources
@@ -367,6 +369,9 @@ class Controller(SessionControllerMixin):
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
+        self._pending_session: PersistedSession | None = None
+        self._auto_restore_tabs = True
+        bus.subscribe(ContextSwitchedPayload, self._on_restore_context_ready)
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
@@ -624,18 +629,57 @@ class Controller(SessionControllerMixin):
         settings = self._settings_svc.capture_settings(
             left_panel_width=self._capture_left_panel_width()
         )
-        session = self._workspace_svc.capture_session()
+        session = self._pending_session
+        if session is None:
+            session = self._workspace_svc.capture_session()
         return AppPersistedState(startup=settings, session=session)
 
     def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
-        """Dispatch a memento back to the sub-owners: seed remembered settings +
-        register remembered devices, then rebuild tabs. Returns the session's
-        per-tab restore report (presented to the user by ``restore_all``)."""
+        """Restore settings and retain caller's session until sources are ready.
+
+        Call on the owner thread. Automatic mode rebuilds tabs immediately only
+        with a selected point, otherwise on the first ready binding fact. Script
+        mode waits for restore_session or finish_startup_script. Before adoption,
+        capture preserves these original tabs. Settings/source failures propagate.
+        The returned report is empty when restoration is deferred.
+        """
         with self._bus.origin(EventOrigin(kind="system")):
             self._settings_svc.restore_settings(state.startup)
-            report = self._workspace_svc.apply_session(state.session)
+            self._pending_session = state.session.model_copy(deep=True)
+            if self._auto_restore_tabs and self.has_active_context():
+                return self.restore_session()
+            return RestoreReport(restored_tabs=0, rejected_tabs=())
+
+    def restore_session(self) -> RestoreReport:
+        """Adopt pending saved tabs once using current sources, on the owner thread.
+
+        Without a selected point raise FailedPreconditionError(no_context),
+        retaining pending tabs for retry. Return restored count, rejections and
+        dropped input paths; present rejections through diagnostic sinks. After
+        adoption, repeated calls return an empty report. Sources are captured by
+        each new tab, never shared with or owned by this coordinator. Unexpected
+        preparation failures propagate without consuming the pending session.
+        """
+        if not self.has_active_context():
+            raise FailedPreconditionError(
+                "Select or create a working point before restoring session tabs",
+                reason_code="no_context",
+            )
+        if self._pending_session is None:
+            return RestoreReport(restored_tabs=0, rejected_tabs=())
+        with self._bus.origin(EventOrigin(kind="system")):
+            report = self._workspace_svc.apply_session(self._pending_session)
+            self._pending_session = None
             self._present_restore_report(report)
             return report
+
+    def _on_restore_context_ready(self, _payload: ContextSwitchedPayload) -> None:
+        if (
+            self._auto_restore_tabs
+            and self._pending_session is not None
+            and self.has_active_context()
+        ):
+            self.restore_session()
 
     # -- lifecycle façade (runtime startup / MainWindow close) ---------------
 
