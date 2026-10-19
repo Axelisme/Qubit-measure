@@ -6,6 +6,9 @@ from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
 from zcu_lab.v2.fastflux.distortion.acc_phase.gui import AccPhaseAdapter
+from zcu_lab.v2.fastflux.distortion.freq.gui import FastFluxFreqAdapter
+from zcu_lab.v2.fastflux.distortion.phase.gui import PhaseAdapter
+from zcu_lab.v2.fastflux.t1.gui import T1Adapter as FastFluxT1Adapter
 from zcu_lab.v2.fastflux.twotone.gui import TwoToneAdapter
 from zcu_lab.v2.ftf.chevron.gui import ChevronAdapter
 from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
@@ -83,6 +86,8 @@ from zcu_lab.v2.twotone.zigzag_sweep.gui import (
 
 ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "fastflux/distortion/acc_phase": AccPhaseAdapter,
+    "fastflux/distortion/freq": FastFluxFreqAdapter,
+    "fastflux/t1": FastFluxT1Adapter,
     "ftf/joint_readout": JointReadoutAdapter,
     "ftf/idle_zz": IdleZZAdapter,
     "ftf/conditional_spectroscopy": SpectroscopyAdapter,
@@ -93,6 +98,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/local_z": LocalZAdapter,
     "ftf/rb": TwoQubitRBAdapter,
     "fastflux/twotone": TwoToneAdapter,
+    "fastflux/distortion/phase": PhaseAdapter,
     "lookback": LookbackAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
