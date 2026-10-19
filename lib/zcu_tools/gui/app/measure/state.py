@@ -374,7 +374,7 @@ class State(SessionState):
         """
         self._assert_owner()
         tab = self.tabs[tab_id]
-        layout = self._save_layout(pane)
+        layout = self._save_layout(pane, experiment=tab.adapter_name)
         artifacts = ArtifactTracker()
         if pane.result is not None and layout is not None:
             artifacts.replace_section(
@@ -511,7 +511,7 @@ class State(SessionState):
             analysis=State._retired_analysis(tab.analysis),
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        layout = self._save_layout(tab.run)
+        layout = self._save_layout(tab.run, experiment=tab.adapter_name)
         if layout is not None:
             tab.artifacts.replace_section(
                 "analysis",
@@ -606,7 +606,7 @@ class State(SessionState):
         retired = RetiredPaneResources(
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        layout = self._save_layout(tab.run)
+        layout = self._save_layout(tab.run, experiment=tab.adapter_name)
         if layout is not None:
             tab.artifacts.replace_section(
                 "post_analysis",
@@ -716,7 +716,9 @@ class State(SessionState):
         return self.get_tab(tab_id).artifacts.snapshot()
 
     @staticmethod
-    def _save_layout(run: RunPaneState[T_Result]) -> SaveLayout | None:
+    def _save_layout(
+        run: RunPaneState[T_Result], *, experiment: str
+    ) -> SaveLayout | None:
         """Plan against this result's source, never tab birth or live selection."""
         metadata = run.metadata
         storage = run.storage
@@ -726,6 +728,7 @@ class State(SessionState):
             result_path=storage.result_path,
             database_path=storage.database_path,
             run_id=metadata.run_id,
+            experiment=experiment,
             point=metadata.snapshot.point,
             saved_at=datetime.now().astimezone(),
         )

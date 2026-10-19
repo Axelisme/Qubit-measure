@@ -27,6 +27,7 @@ def layout(tmp_path: Path) -> SaveLayout:
         result_path=tmp_path / "Result",
         database_path=tmp_path / "Database",
         run_id="captured-run",
+        experiment="synthetic",
         point="p",
         saved_at=datetime(2026, 10, 8, tzinfo=UTC),
     )
