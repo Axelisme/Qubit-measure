@@ -1,11 +1,10 @@
 """Offline conversion of legacy analysis handoffs into entry-scoped resources."""
 
 from dataclasses import dataclass, replace
-from math import isfinite
 from pathlib import Path
 
 from pydantic import TypeAdapter
-from zcu_tools.datafile import JsonObject, json_values_equal
+from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -14,13 +13,21 @@ from zcu_tools.resources.entry import (
     document_value,
     snapshot,
 )
+from zcu_tools.resources.predictor_file import (
+    PredictorFile,
+    PredictorSource,
+    load_predictor_file,
+    save_predictor_file,
+    validate_predictor_file,
+)
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from .analysis_files import convert_analysis_files, proven_created_at
 from .backup import backup_source_path
 from .errors import MigrationInputError
 from .models import KeyMappingItem, MigrationMapping
 from .paths import contained_path
-from .state import MigrationSession, record_pending, write_json
+from .state import MigrationSession, record_pending
 
 _JSON = TypeAdapter(JsonObject)
 _YAML = TypeAdapter(YamlValue)
@@ -86,23 +93,23 @@ def _flux_unit(
     return unit, None
 
 
-def _write_predictor(path: Path, document: JsonObject) -> None:
+def _write_predictor(path: Path, predictor: PredictorFile) -> None:
     # The destination belongs to this migration, but an interrupted write may
     # already have committed it. Never replace a conflicting document on resume.
     if path.is_symlink():
         raise MigrationInputError(f"{path}: predictor symlink conflict")
     if path.exists():
-        existing = _JSON.validate_json(path.read_text(encoding="utf-8"), strict=True)
-        # JSON numeric equivalence is valid for params, not the integer version.
-        if type(existing.get("version")) is not int or not json_values_equal(
-            existing, document
-        ):
+        try:
+            existing = load_predictor_file(path)
+        except ValueError as error:
+            raise MigrationInputError(f"{path}: invalid predictor: {error}") from error
+        if existing != predictor:
             raise MigrationInputError(
                 f"{path}: predictor differs from planned legacy fit"
             )
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_json(path, document, replace_existing=False)
+    save_predictor_file(path, predictor)
 
 
 def _project_fit(
@@ -142,11 +149,9 @@ def _project_fit(
             continue
         value = container[field]
         reason = None
-        if value is not None and (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not isfinite(value)
-        ):
+        try:
+            FluxoniumParams.from_mapping({field: value})
+        except ValueError:
             reason = "Expected a finite numeric value or null; no expression evaluation or coercion"
         else:
             params[field] = value
@@ -202,16 +207,15 @@ def _project_fit(
                 ),
             )
         )
-    document: JsonObject = {
-        "format": "zcu.predictor",
-        "version": 1,
-        "model": "fluxonium",
-        "params": params,
-        "flux_unit": unit,
-        "source": {"run_id": None, "created_at": created_at},
-    }
+    predictor = PredictorFile(
+        model="fluxonium",
+        params=FluxoniumParams.from_mapping(params),
+        flux_unit=unit,
+        source=PredictorSource(run_id=None, created_at=created_at),
+    )
+    validate_predictor_file(predictor)
     if not session.dry_run:
-        _write_predictor(target, document)
+        _write_predictor(target, predictor)
     return rows
 
 
