@@ -149,6 +149,16 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 
 `program` 以 `type`／`style` 對應到執行用的 Module builder，取代 cfg 上的 `build()`。`resources` 的 module library 以核心 schema 作為 DocumentStore 的 model，並實作核心的 Protocol。驗證 context 注入固定 library 與 asset capability。Program 的 ModuleCfgFactory.from_core 集中轉換成 native cfg，透過 assets.path_for 取得絕對路徑。Native arb 只保留 data key 與必填 path，不保留 provider，不查 global DB。
 
+### 分析 app 的過渡 project owner
+
+2026-10-20 裁決：「新增 gui/app/analysis_project/ 共用過渡 owner」。
+
+`gui.app.analysis_project` 集中 fluxdep／dispersive 共用的 ProjectInfo、ProjectDialog、
+ResultScopeManager、project CLI 與 RPC 投影，保留既有 chip／qubit 資料流。
+共用 GUI、session、remote、measure 與 workflows 不依賴這個分析 owner。
+`.importlinter` 的 `shared-no-analysis-project` contract 保護此方向。
+中立的 `nearest_existing` 位於 `gui.widgets.file_dialog`，callers 直接匯入，不經分析 owner re-export。
+
 ### 模組之間的合作
 
 - 需要另一個模組負責的能力，而它沒有提供時，擴充那個模組或停下來問。不在呼叫端重做。

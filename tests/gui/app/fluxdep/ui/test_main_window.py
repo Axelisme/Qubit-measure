@@ -16,11 +16,11 @@ from matplotlib.text import Text
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
 from zcu_tools.analysis.fluxdep.search import ParamBounds
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
-from zcu_tools.gui.project import ProjectInfo
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.fluxdep._search_result import (

@@ -7,6 +7,7 @@ import pytest
 from qtpy.QtWidgets import QLabel, QPushButton, QSlider
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
@@ -14,7 +15,6 @@ from zcu_tools.gui.app.dispersive.state import (
     OnetoneEntry,
 )
 from zcu_tools.gui.app.dispersive.ui.pipeline_panel import PipelinePanelWidget
-from zcu_tools.gui.project import ProjectInfo
 
 
 def _inputs() -> FluxoniumInputs:
