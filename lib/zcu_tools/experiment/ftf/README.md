@@ -26,7 +26,7 @@ process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.
 Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
-`FTFSource.close()` clears preparations and the engine cache. Dropping the
+`FTFSource.close()` clears preparations, model-source cumulative gate usage and the engine cache. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
 The source retains at most one snapshot's `FTFModelFacts` across acquires.
 The exact key includes full settings, the entire snapshot and backend/numeric
@@ -96,7 +96,11 @@ Its key reads full current C1 content, layout, mode, reps and readout values,
 including absolute phase origins. Physical settings/snapshot/numeric changes,
 engine replacement, failed preparation and close clear the preparations. It never
 retains request seeds, acquire sequences, noisy IQ or round results. Hits update
-numeric-use identity and repeat report-only accuracy warnings. The public
+numeric-use identity and repeat report-only accuracy warnings. Each cached entry
+also retains its complete single-tone gate inventory increment. A hit replays
+that increment into the current model source so later cost decisions do not
+depend on preparation residency. The hit itself returns the saved result and
+routing diagnostics; equal consecutive software rounds remain one preparation. The public
 `source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
 Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
 counts Python containers/keys and whole ndarray allocations, including bases of

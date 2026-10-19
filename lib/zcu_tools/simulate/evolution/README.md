@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone omitted-channel retention
+**Last updated:** 2026-10-19, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone omitted-channel retention
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -60,7 +60,7 @@ tries the next candidate in the following graph.
 | Driven continuous flux | `flux_dop853`, continuous Hamiltonian evaluation from `FluxExpansion`, with baths switching at quantized segment boundaries. |
 | One constant tone, unshared driven input, duration at most 10 us | `single_tone_rwa` → `floquet_period` → `dyson` → `t6`. |
 | Other single constant tone | `dyson` → `single_tone_rwa` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
-| One shaped tone | Choose canonical `single_tone_gate` keys in the lowest estimated complete-acquire mixed gate/Sambe cold plan. Rejected or unamortized rows try `shaped_sambe`, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
+| One shaped tone | Choose canonical `single_tone_gate` keys in the lowest estimated mixed gate/Sambe cold plan using source-cumulative usage through the complete current acquire. Rejected or unamortized rows try `shaped_sambe`, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
 | Two constant tones | Try `multitone_rwa` first for distinct ports. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order, cheaper family first. |
 | Shaped two-tone or three-or-more-tone row | `multitone_gate` → `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated carriers with acceptable omitted-channel estimates with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
 
@@ -438,7 +438,11 @@ entire source, including absolute DC flux and model parameters; row keys also
 include quantized levels. A cache hit never replaces the row's guard. Eviction
 releases cache ownership, not references already held by active work.
 
-Exact-input repeats bypass geometry, planning and every kernel call. The
+Exact-input repeats without single-tone shaped gate candidates bypass geometry,
+planning and every kernel call because their routes do not depend on usage.
+Inventories with those candidates always count the complete acquire and choose
+cold costs first. Their memo key also includes selected gate keys, so a prior
+Sambe result cannot hide a later source-amortized gate decision. The
 Engine-local result LRU retains owned densities, points and diagnostics, not
 ADC or random samples. Its key covers the whole-source DC model identity,
 initial density, optional flux expansion, budget and complete batch content,
@@ -510,6 +514,15 @@ Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
 `close()` waits for active work, clears the prepare cache and is idempotent.
+
+`ModelSource` owns cumulative canonical single-tone gate-key row counts, separate
+from resident preparations and numerical guards. Each complete acquire increments
+counts before prefix planning or memo lookup; cache eviction and Engine replacement
+do not reset them. Source callers serialize acquires, even across Engines.
+`gate_usage` returns a detached snapshot; `record_gate_usage` also lets source-owned
+preparation caches replay an acquire inventory without numerical work.
+`ModelSource.close()` clears models and counts after active work drains. It is
+idempotent and leaves immutable builder inputs reusable with a fresh history.
 
 `SEGMENT_NUMERIC_VERSION` is `segment-engine-v4`. `experiment.ftf` owns private
 replay and checks backend, model, numerical, RNG and dependency versions before

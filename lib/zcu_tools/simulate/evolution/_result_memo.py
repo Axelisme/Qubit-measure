@@ -15,6 +15,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .engine import EvolutionResult, TimelineBatch
+from .kernel import KernelContext, SegmentTable
 from .secular import ModelSource
 
 # In addition to the prepare budget. Small/disabled Engines never retain more
@@ -103,6 +104,24 @@ def input_key(
                 digest.array(envelope.samples)
                 digest.array(envelope.sample_ns)
     return digest.value.digest()
+
+
+def single_gate_key(key: bytes, table: SegmentTable, context: KernelContext) -> bytes:
+    """Bind an exact-input digest to the current source-amortized gate route.
+
+    Complete inventory counting precedes this call, including memo hits. Growing
+    counters alone do not change output; selected canonical keys do. Only plans
+    without cumulative candidates retain the raw key for safe early lookup.
+    """
+    from ._shaped_dispatch import populate_single_gate_plan
+
+    choices = populate_single_gate_plan(
+        table, context.source, context.work_plan, context.budget
+    )
+    if not choices:
+        return key
+    selected = sorted({k for choice in choices for k in choice.keys})
+    return sha256(key + b"".join(selected)).digest()
 
 
 class ResultMemo:

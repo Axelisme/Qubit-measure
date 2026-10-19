@@ -74,7 +74,7 @@ class SingleGateChoice:
     """Lowest estimated cold plan for one physical Sambe spectral family.
 
     keys: canonical keys selected for covariant gates; other rows retain Sambe.
-    uses: complete-acquire row count for this family.
+    uses: source-cumulative row count for this family's current keys.
     gate_seconds: total mixed-plan build, playback and guard/key CPU estimate.
     sambe_seconds: all-Sambe cold CPU estimate for the same complete inventory.
     preferred: at least one canonical key uses a gate in the cheaper plan.
@@ -136,7 +136,7 @@ def _cold_key_cost(
 def populate_single_gate_plan(
     table: SegmentTable, source: ModelSource, plan: WorkPlan, budget: float = 1e-3
 ) -> tuple[SingleGateChoice, ...]:
-    """Choose mixed gate/Sambe cold plans from complete-acquire spectral families.
+    """Choose cold plans using source-cumulative complete-acquire key usage.
 
     Each canonical gate key pays its own numerically admitted build plus n-step
     playback. The alternative pays actual Sambe subdivisions, four-coefficient/
@@ -156,7 +156,9 @@ def populate_single_gate_plan(
     Fractional tails cost 0.9 ms/ns above 1 GHz or 0.1 ms for a spectral tail.
     Cubic dimension scaling applies to both alternatives. These are conservative
     relative CPU estimates, not numerical certificates or resident-cache prices.
-    Prefix/worker subsets borrow this decision; no future acquire is predicted.
+    Source usage includes this complete inventory once, before any guards or
+    prefix work. Counts survive eviction; no future acquire or cache warmth is
+    consulted. Prefix/worker subsets borrow the fixed decision without recounting.
     """
 
     def build() -> tuple[SingleGateChoice, ...]:
@@ -165,19 +167,28 @@ def populate_single_gate_plan(
         if not families:
             return ()
         canonical = canonical_keys(table, context)
-        choices = []
+        inventory: dict[bytes, int] = {}
         for family in families:
-            group: dict[tuple[bytes, bool], tuple[int, int]] = {}
             for row in family.rows:
                 key = canonical[row]
-                identity = (key, fixed_flux(table, row))
-                representative, count = group.get(identity, (row, 0))
-                group[identity] = (representative, count + 1)
+                inventory[key] = inventory.get(key, 0) + 1
+        usage = source.record_gate_usage(inventory)
+        choices = []
+        for family in families:
+            group: dict[tuple[bytes, bool], int] = {}
+            for row in family.rows:
+                key = canonical[row]
+                group.setdefault((key, fixed_flux(table, row)), row)
             scale = (len(source.model(family.level).energies_ghz) / 16) ** 3
             shared = scale * 0.008
             costs = [
-                (key, *_cold_key_cost(table, row, count, context, family.subdivisions))
-                for (key, _fixed), (row, count) in group.items()
+                (
+                    key,
+                    *_cold_key_cost(
+                        table, row, usage[key], context, family.subdivisions
+                    ),
+                )
+                for (key, _fixed), row in group.items()
             ]
             all_sambe = shared + sum(sambe for _, _, sambe in costs)
             selected = {key for key, gate, sambe in costs if gate < sambe}
@@ -194,7 +205,7 @@ def populate_single_gate_plan(
             choices.append(
                 SingleGateChoice(
                     tuple(sorted(selected)),
-                    len(family.rows),
+                    sum(usage[key] for key, _fixed in group),
                     float(mixed),
                     float(all_sambe),
                     bool(selected),
@@ -202,7 +213,7 @@ def populate_single_gate_plan(
             )
         return tuple(choices)
 
-    return plan.fact(FactKey(("single-tone-gate-mixed-cold-v2", budget), tuple), build)
+    return plan.fact(FactKey(("single-tone-gate-mixed-cold-v3", budget), tuple), build)
 
 
 def single_gate_preferred(
