@@ -220,20 +220,9 @@ class EarlyStopMixin(TypedAcquireMixin):
                         return self._finish_stopped_partial_accumulated_round(
                             soc, stats_start=stats_start
                         )
-                    for ii, nreads in enumerate(reads_per_shot):
-                        if new_points * nreads != data[ii].shape[0]:
-                            logger.error(
-                                "data size mismatch: new_points=%d, nreads=%d, data shape %s"
-                                % (new_points, nreads, data[ii].shape)
-                            )
-                        if count + new_points > total_count:
-                            logger.error(
-                                "got too much data: count=%d, new_points=%d, total_count=%d"
-                                % (count, new_points, total_count)
-                            )
-                        self.acc_buf[ii].reshape((-1, 2))[
-                            count * nreads : (count + new_points) * nreads
-                        ] = data[ii]
+                    self._store_accumulated_chunk(
+                        reads_per_shot, data, count, new_points, total_count
+                    )
                     count += new_points
                     self.stats.append(stats)
                     reps_pbar.update(new_points)
@@ -265,6 +254,35 @@ class EarlyStopMixin(TypedAcquireMixin):
             self._close_rounds_pbar()
             return False
         return True
+
+    def _store_accumulated_chunk(
+        self,
+        reads_per_shot: Sequence[int],
+        data: Sequence[NDArray[np.int64]],
+        count: int,
+        new_points: int,
+        total_count: int,
+    ) -> None:
+        """Write each channel at its shot offset, logging sizes before NumPy assignment.
+
+        Keep QICK's channel order and slice/broadcast failures; size diagnostics
+        do not reject or normalize the transport's data.
+        """
+        assert self.acc_buf is not None
+        for ii, nreads in enumerate(reads_per_shot):
+            if new_points * nreads != data[ii].shape[0]:
+                logger.error(
+                    "data size mismatch: new_points=%d, nreads=%d, data shape %s"
+                    % (new_points, nreads, data[ii].shape)
+                )
+            if count + new_points > total_count:
+                logger.error(
+                    "got too much data: count=%d, new_points=%d, total_count=%d"
+                    % (count, new_points, total_count)
+                )
+            self.acc_buf[ii].reshape((-1, 2))[
+                count * nreads : (count + new_points) * nreads
+            ] = data[ii]
 
     def _finish_stopped_partial_accumulated_round(
         self, soc, *, stats_start: int
