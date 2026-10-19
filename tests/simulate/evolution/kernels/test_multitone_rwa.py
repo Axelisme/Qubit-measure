@@ -72,7 +72,7 @@ def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
             np.array([128.0]),
             np.array([f]),
             np.array([0.4 + slot]),
-            np.array([100.0 if kind == "strong" else 0.08]),
+            np.array([0.08]),
             (env,),
             np.array([0]),
             np.array([True]),
@@ -90,7 +90,7 @@ def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
 def test_smooth_multiple_drives_route_with_explicit_admission():
     routes = {}
     with closing(Engine(1, 1000000)) as engine:
-        for kind in ("smooth", "complex", "rough", "degenerate", "dc", "strong"):
+        for kind in ("smooth", "complex", "rough", "degenerate", "dc"):
             result = engine.evolve(model_source(), (timeline(kind),), cancel=Event())
             routes[kind] = dict(result.paths.segments_by_kernel)
         result = engine.evolve(model_source(), (timeline(tones=3),), cancel=Event())
@@ -234,7 +234,7 @@ def test_continuous_flux_motion_declines_even_at_one_quantized_level(
     assert case.kernel.guard(fixed, np.arange(3), context).all()
 
 
-def test_accumulated_counter_rotating_phase_rejects_long_weak_pulses(
+def test_gate_counter_rotating_phase_rejects_long_weak_pulses(
     kernel_case: KernelCase,
 ):
     case = kernel_case
@@ -257,9 +257,11 @@ def test_accumulated_counter_rotating_phase_rejects_long_weak_pulses(
     table = replace(case.table, tone_frequency_ghz=case.table.tone_frequency_ghz * 10)
     context = KernelContext(source, case.budget, WorkPlan())
     rows = np.arange(3)
-    assert case.kernel.guard(table, rows, context).all()
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import admit_rows
+
+    assert admit_rows(table, rows, context).all()
     long = replace(table, duration_ns=np.full(3, 1280.0))
-    assert not case.kernel.guard(long, rows, context).any()
+    assert not admit_rows(long, rows, context).any()
 
 
 @pytest.mark.parametrize("frequency", [0.3, -0.3])
@@ -490,20 +492,211 @@ def test_constant_pair_uses_joint_rwa_and_preserves_coherent_joint_input():
 
 
 @pytest.mark.parametrize("offsets", [(0.084, -0.052), (0.084, 0.084)])
-def test_constant_combination_resonance_returns_to_lab_even_without_retained_edges(
-    offsets,
-):
+def test_constant_combination_resonance_restores_contributing_edges(offsets):
     source, safe = constant_pair()
     _, risky = constant_pair(offsets)
-    # First prove the domain is enabled; rejecting every constant row is not
-    # combination admission. Sum and difference resonances both need fallback.
+    # The effective channel is unsafe to omit, but its four-state retained
+    # graph fits. Restoring its paths must keep the full-drive joint dynamics.
     with closing(Engine(1, 1000000)) as engine:
         admitted = engine.evolve(source, (safe,), cancel=Event())
         rejected = engine.evolve(source, (risky,), cancel=Event())
     assert (admitted.paths.segments_by_kernel, rejected.paths.segments_by_kernel) == (
         {"multitone_rwa": 1},
-        {"dop853": 1},
+        {"multitone_rwa": 1},
     )
+    with closing(Engine(1, 1000000)) as engine:
+        expected = engine.evolve(source, (risky,), budget=1e-7, cancel=Event())
+    np.testing.assert_allclose(
+        rejected.densities, expected.densities, atol=0.01, rtol=0
+    )
+
+
+@pytest.mark.parametrize("sampled", [False, True])
+@pytest.mark.parametrize("detuning", [0.0, 0.07])
+def test_omission_admission_accepts_strong_retained_rows(sampled, detuning):
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import MultitoneRWAKernel
+
+    from tests.simulate.evolution.contract.kernel_suite import reference
+
+    drives = []
+    for port, target in (("a", 1), ("b", 2)):
+        positive = np.zeros((3, 3), dtype=np.complex128)
+        positive[0, target] = 0.04
+        drives.append(
+            SecularDrive(port, positive + positive.T, 1j * (positive - positive.T))
+        )
+    model = SecularModel(
+        (0,),
+        "strong-circular",
+        np.array([0.0, 0.3, 0.9]),
+        np.eye(3, dtype=np.complex128),
+        tuple(drives),
+        np.zeros((3, 3)),
+        np.zeros((3, 3)),
+    )
+    initial = np.full((3, 3), 1 / 3, dtype=np.complex128)
+    source = ModelSource(initial, lambda level: replace(model, level=level))
+    table = SegmentTable(
+        timeline=np.array([0]),
+        start_ns=np.array([0.0]),
+        duration_ns=np.array([128.0]),
+        level=np.zeros((1, 1), dtype=np.int64),
+        tones=np.array([2]),
+        tone_port=np.array([[0, 1]]),
+        tone_frequency_ghz=np.array([[0.3 + detuning, 0.9]]),
+        tone_amplitude=np.ones((1, 2)),
+        tone_theta_rad=np.array([[0.7, -1.2]]),
+        tone_envelope=np.zeros((1, 2), dtype=np.int64),
+        tone_envelope_offset_ns=np.zeros((1, 2)),
+        envelopes=(smooth() if sampled else EnvelopeSpec("constant"),),
+    )
+    kernel = MultitoneRWAKernel()
+    budget = 1e-3
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(source, budget, plan)
+        rows = np.array([0])
+        assert kernel.guard(table, rows, context).all()
+        keys = kernel.prepare_keys(table, rows, context)
+        prepared = kernel.prepare(keys, table, rows, context)
+        actual = initial[None].copy()
+        kernel.apply(prepared, rows, table, rows, actual, ApplyContext(budget))
+    expected = reference(KernelCase(kernel, source, table, initial[None]), 0, initial)
+    # Lab comparison includes the RWA DOP853 playback's budget-level error.
+    np.testing.assert_allclose(actual[0], expected, atol=budget, rtol=0)
+
+
+def test_connected_retained_graph_over_block_limit_declines():
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import MultitoneRWAKernel
+
+    size = 17
+    positive = np.diag(np.full(size - 1, 0.001), 1).astype(np.complex128)
+    drive = SecularDrive("a", positive + positive.T, 1j * (positive - positive.T))
+    model = SecularModel(
+        (0,),
+        "connected-chain",
+        np.arange(size) * 0.3,
+        np.eye(size, dtype=np.complex128),
+        (drive, replace(drive, name="b")),
+        np.zeros((size, size)),
+        np.zeros((size, size)),
+    )
+    source = ModelSource(
+        np.eye(size, dtype=np.complex128) / size,
+        lambda level: replace(model, level=level),
+    )
+    table = SegmentTable(
+        timeline=np.array([0]),
+        start_ns=np.array([0.0]),
+        duration_ns=np.array([128.0]),
+        level=np.zeros((1, 1), dtype=np.int64),
+        tones=np.array([2]),
+        tone_port=np.array([[0, 1]]),
+        tone_frequency_ghz=np.array([[0.3, 0.9]]),
+        tone_amplitude=np.ones((1, 2)),
+        tone_theta_rad=np.zeros((1, 2)),
+        tone_envelope=np.zeros((1, 2), dtype=np.int64),
+        tone_envelope_offset_ns=np.zeros((1, 2)),
+        envelopes=(EnvelopeSpec("constant"),),
+    )
+    with closing(WorkPlan()) as plan:
+        assert (
+            not MultitoneRWAKernel()
+            .guard(table, np.array([0]), KernelContext(source, 1e-3, plan))
+            .any()
+        )
+
+
+def test_combination_restores_strongest_parent_without_fast_weak_paths(kernel_case):
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import RWAPrepared
+
+    from tests.simulate.evolution.contract.kernel_suite import reference
+
+    case = kernel_case
+    drives = []
+    for name, edges in (("a", ((0, 1), (0, 2))), ("b", ((1, 3), (2, 3)))):
+        positive = np.zeros((4, 4), dtype=np.complex128)
+        for (i, j), coupling in zip(edges, (0.01, 0.00001), strict=True):
+            positive[i, j] = coupling
+        drives.append(
+            SecularDrive(name, positive + positive.T, 1j * (positive - positive.T))
+        )
+    model = SecularModel(
+        (0,),
+        "dominant-raman-parent",
+        np.array([0.0, 0.6, 0.7, 1.2]),
+        np.eye(4, dtype=np.complex128),
+        tuple(drives),
+        np.zeros((4, 4)),
+        np.zeros((4, 4)),
+    )
+    initial = np.diag([1.0, 0.0, 0.0, 0.0]).astype(np.complex128)
+    source = ModelSource(initial, lambda level: replace(model, level=level))
+    table = replace(
+        case.table,
+        tones=np.full(3, 2),
+        tone_port=np.tile([0, 1, -1], (3, 1)),
+        tone_frequency_ghz=np.tile([0.3, 0.9, 0.0], (3, 1)),
+        tone_amplitude=np.ones((3, 3)),
+        tone_envelope=np.tile([0, 0, -1], (3, 1)),
+        envelopes=(EnvelopeSpec("constant"),),
+        duration_ns=np.full(3, 128.0),
+    )
+    rows = np.array([0])
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(source, case.budget, plan)
+        assert case.kernel.guard(table, rows, context).all()
+        keys = case.kernel.prepare_keys(table, rows, context)
+        prepared = case.kernel.prepare(keys, table, rows, context)
+        assert isinstance(prepared, RWAPrepared)
+        assert np.count_nonzero(prepared.positive) == 2
+        actual = initial[None].copy()
+        case.kernel.apply(
+            prepared, rows, table, rows, actual, ApplyContext(case.budget)
+        )
+    expected = reference(
+        KernelCase(case.kernel, source, table, initial[None]), 0, initial
+    )
+    np.testing.assert_allclose(actual[0], expected, atol=case.budget, rtol=0)
+
+
+def test_residual_phase_restores_edges_even_below_transfer_threshold(kernel_case):
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import RWAPrepared
+
+    case = kernel_case
+    model = case.source.model((0,))
+    positive = np.zeros((3, 3), dtype=np.complex128)
+    positive[0, 1] = 0.001
+    x, y = positive + positive.T, 1j * (positive - positive.T)
+    model = replace(
+        model,
+        drives=(SecularDrive("a", x, y), SecularDrive("b", x * 0, y * 0)),
+    )
+    source = ModelSource(
+        case.source.initial_density, lambda level: replace(model, level=level)
+    )
+    table = replace(
+        case.table,
+        tones=np.full(3, 2),
+        tone_port=np.tile([0, 1, -1], (3, 1)),
+        tone_frequency_ghz=np.tile([0.2, 0.9, 0.0], (3, 1)),
+        tone_amplitude=np.ones((3, 3)),
+        tone_envelope=np.tile([0, 0, -1], (3, 1)),
+        envelopes=(EnvelopeSpec("constant"),),
+    )
+    # g/d=.01 gives transfer <.0004 at every duration. Only accumulated
+    # residual phase, after the explicit second-order shift, needs restoration.
+    for duration, retained in ((10.0, False), (1e12, True)):
+        selected = replace(table, duration_ns=np.full(3, duration))
+        with closing(WorkPlan()) as plan:
+            context = KernelContext(source, case.budget, plan)
+            rows = np.array([0])
+            assert case.kernel.guard(selected, rows, context).all()
+            keys = case.kernel.prepare_keys(selected, rows, context)
+            prepared = case.kernel.prepare(keys, selected, rows, context)
+            assert isinstance(prepared, RWAPrepared)
+            assert bool(np.any(prepared.positive)) == retained
 
 
 def phase_proxy_pair(phase_rad, *, domain="constant"):
@@ -557,7 +750,7 @@ def phase_proxy_pair(phase_rad, *, domain="constant"):
     )
 
 
-def test_constant_phase_cap_expands_without_relaxing_other_domains():
+def test_retained_only_phase_does_not_reject_long_rows():
     routes = {}
     for domain in ("constant", "same_port", "sampled"):
         for phase in (0.05, 0.07, 1.0):
@@ -565,9 +758,7 @@ def test_constant_phase_cap_expands_without_relaxing_other_domains():
             with closing(Engine(1, 1000000)) as engine:
                 result = engine.evolve(source, (batch,), cancel=Event())
             routes[domain, phase] = "multitone_rwa" in result.paths.segments_by_kernel
-            if not (domain == "constant" and phase in (0.05, 0.07)) and not (
-                domain == "sampled" and phase == 0.05
-            ):
+            if domain == "same_port":
                 # Rejected rows retain the original two-tone routing and density.
                 original_kernels = tuple(
                     k for k in REGISTRY if k.name != "multitone_rwa"
@@ -579,10 +770,7 @@ def test_constant_phase_cap_expands_without_relaxing_other_domains():
                 )
                 np.testing.assert_array_equal(result.densities, original.densities)
     assert routes == {
-        (domain, phase): domain == "constant"
-        and phase in (0.05, 0.07)
-        or domain == "sampled"
-        and phase == 0.05
+        (domain, phase): domain != "same_port"
         for domain in ("constant", "same_port", "sampled")
         for phase in (0.05, 0.07, 1.0)
     }
