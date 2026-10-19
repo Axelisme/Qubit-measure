@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.colors import Colormap
 from matplotlib.image import AxesImage, NonUniformImage
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
@@ -97,8 +98,9 @@ class Plot2DSegment(AbsSegment):
 
 
 class PlotNonUniform2DSegment(AbsSegment):
-    """Render nonuniform monotonic coordinates in either scan direction.
+    """Render monotonic sample-centered coordinates in either scan direction.
 
+    Uniform and nonuniform axes use the same nearest-sample rendering rule.
     Updates accept signals shaped (len(xs), len(ys)) without changing inputs.
     Each axis follows its input coordinate order; flip swaps the displayed axes.
     """
@@ -122,7 +124,12 @@ class PlotNonUniform2DSegment(AbsSegment):
 
         self.im: NonUniformImage | None = None
 
-    def init_ax(self, ax: Axes) -> None:
+    def init_ax(self, ax: Axes, *, cmap: str | Colormap = "RdBu_r") -> None:
+        """Initialize labeled axes with a nearest-sample image in the given cmap.
+
+        cmap is a Matplotlib Colormap or registered name; invalid names raise
+        ValueError. The default preserves the liveplot diverging palette.
+        """
         if self.flip:
             ax.set_xlabel(self.ylabel)
             ax.set_ylabel(self.xlabel)
@@ -133,7 +140,7 @@ class PlotNonUniform2DSegment(AbsSegment):
         if self.title is not None:
             ax.set_title(self.title)
 
-        self.im = NonUniformImage(ax, cmap="RdBu_r", interpolation="nearest")
+        self.im = NonUniformImage(ax, cmap=cmap, interpolation="nearest")
         self.im.set_extent((0, 1, 0, 1))
         self.im.set_data([0, 1], [0, 1], [[0, 1e-6], [0, 1e-6]])
         self.im.set_clim(vmin=self.vmin, vmax=self.vmax)
