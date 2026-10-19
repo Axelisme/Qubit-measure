@@ -56,6 +56,26 @@ def test_repeated_admission_and_oversize_preserve_resident_budget():
     assert disabled.find(SPACE, {b"a"}) == []
 
 
+def test_rejected_priority_and_whole_batch_lru_keep_exact_array_charges():
+    cache = PrepareCache(30)
+    counts = AllocationCounts()
+    first = payload(counts, 10, b"a", b"shared")
+    failed = payload(counts, 5, b"failed")
+    recent = payload(counts, 10, b"b")
+    cache.add(SPACE, first)
+    cache.add(OTHER_SPACE, failed, rejected=True)
+    cache.add(SPACE, recent)
+    assert cache.bytes == 25
+    assert cache.find(SPACE, {b"shared"}) == [first]
+    cache.add(SPACE, payload(counts, 10, b"new"))
+    assert cache.bytes == 30
+    assert cache.find(OTHER_SPACE, {b"failed"}) == []
+    cache.add(SPACE, payload(counts, 10, b"last"))
+    assert cache.bytes == 30
+    assert cache.find(SPACE, {b"b"}) == []
+    assert cache.find(SPACE, {b"a"}) == [first]
+
+
 def test_model_only_payloads_persist_in_matching_namespace():
     cache = PrepareCache(10)
     counts = AllocationCounts()
