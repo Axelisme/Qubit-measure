@@ -40,6 +40,7 @@ from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAdapter
 from zcu_lab.v2.singleshot.mist.freq.gui import MistFreqAdapter
 from zcu_lab.v2.singleshot.mist.power.gui import MistPowerAdapter
 from zcu_lab.v2.singleshot.mist.power_freq.gui import MistPowerFreqAdapter
+from zcu_lab.v2.singleshot.mist.pre_freq.gui import MistPreFreqAdapter
 from zcu_lab.v2.singleshot.reset_check.gui import SsResetCheckAdapter
 from zcu_lab.v2.singleshot.t1.t1.gui import SsT1Adapter
 from zcu_lab.v2.singleshot.t1.t1_with_tone.gui import SsT1ToneAdapter
@@ -143,6 +144,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "singleshot/mist/freq": MistFreqAdapter,
     "singleshot/mist/power": MistPowerAdapter,
     "singleshot/mist/power_freq": MistPowerFreqAdapter,
+    "singleshot/mist/pre_freq": MistPreFreqAdapter,
     "jpa/freq": JpaFreqAdapter,
     "jpa/flux": JpaFluxAdapter,
     "jpa/power": JpaPowerAdapter,
