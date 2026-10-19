@@ -367,8 +367,14 @@ def test_reset_aliases_fixes_parameter_reads_until_next_reset(form_rpc) -> None:
         restore_registry(before)
 
 
-def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(form_rpc) -> None:
-    from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(
+    form_rpc,
+) -> None:
+    from tests.resources.entry.fakes import (
+        register_fakes,
+        registry_state,
+        restore_registry,
+    )
 
     fixture, tab, rpc = form_rpc
     before = registry_state()
@@ -381,10 +387,14 @@ def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(for
         owner.write({("gain",): {"expr": "$qubit.rate / 100"}})
         authored = owner.input.data
         rows = context.get_alias_rows()
-        reply = rpc.call("tab.refresh_sources", {"tab_id": tab, "aliases": {"qubit": "Q2"}})
+        reply = rpc.call(
+            "tab.refresh_sources", {"tab_id": tab, "aliases": {"qubit": "Q2"}}
+        )
         assert reply["ok"], reply
         assert reply["result"]["input"] == authored
-        assert {tuple(item["path"]): item["value"] for item in reply["result"]["values"]}[("gain",)] == 0.2
+        assert {
+            tuple(item["path"]): item["value"] for item in reply["result"]["values"]
+        }[("gain",)] == 0.2
         assert context.get_alias_rows() == rows
         context.set_parameter(context.read_context().target, "Q2.rate", 30.0)
         assert owner.preview().values[("gain",)] == 0.2
@@ -397,7 +407,8 @@ def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(for
             fixture.state.set_tab_running(tab, running=False)
         fixture.ctrl.control_identity.reclaim_local()
         rejected = rpc.call("tab.refresh_sources", {"tab_id": tab})
-        assert rejected["error"]["code"] == "not_holder", rejected
+        assert rejected["error"]["code"] == "precondition_failed", rejected
+        assert rejected["error"]["reason"] == "not_holder", rejected
         assert owner.input.data == authored
         assert owner.preview().values[("gain",)] == 0.2
     finally:
