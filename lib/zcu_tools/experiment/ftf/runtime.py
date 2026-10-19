@@ -296,12 +296,13 @@ class FTFSource:
     resident_bytes are author diagnostics. Full model/receiver/tolerance content
     selects solvers; physical-facts generation changes clear all readout residents.
     close releases physical facts/readout residents, invalidates the session and
-    closes the engine. envelope_encoder owns at most 32 MiB of exact immutable
-    PulseEnvelope encodings, including retained tuples and Python containers.
-    Its cumulative builds/hits and resident_bytes report encoding reuse; its
-    max_bytes is adjustable between calls. Borrowed arrays are always reread.
-    Encodings contain no physical generation data and survive generation changes;
-    preparation invalidation is unchanged. Close releases all encodings.
+    closes the engine. envelope_encoder owns at most 32 MiB of immutable
+    PulseEnvelope content fingerprints, including full retained envelopes and
+    Python containers. Its cumulative builds/hits and resident_bytes report
+    fingerprint reuse; max_bytes is adjustable between calls. Borrowed arrays
+    are always reread. Fingerprints contain no physical generation data and
+    survive generation changes; preparation invalidation is unchanged. Close
+    releases all fingerprints and retained envelopes.
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
