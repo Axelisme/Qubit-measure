@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     US_TO_S,
@@ -72,7 +73,13 @@ class CPMG_ModuleCfg(ConfigBase):
 
 
 class CPMG_SweepCfg(ConfigBase):
-    times: SweepCfg | list[int]
+    """Explicit nonempty positive pi-pulse counts, plus the runtime time sweep."""
+
+    times: Annotated[
+        list[Annotated[int, Field(strict=True, ge=1)]],
+        Field(min_length=1),
+        FieldMeta(label="Pi pulse counts"),
+    ]
     length: SweepCfg | None = None
 
 
@@ -81,8 +88,10 @@ class CPMG_Cfg(ProgramV2Cfg, ExpCfgModel):
     sweep: CPMG_SweepCfg
     length_range: list[tuple[float, float]] | tuple[float, float]
     length_expts: int
-    detune_ratio: float = 0.0
-    earlystop_snr: float | None = None
+    detune_ratio: Annotated[
+        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
+    ] = 0.0
+    earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
 @dataclass(frozen=True)
@@ -241,11 +250,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
         pi2_pulse = modules.pi2_pulse
         pi_pulse = modules.pi_pulse
 
-        time_sweep = cfg.sweep.times
-        times = sweep2array(time_sweep, allow_array=True)
-        if not np.allclose(times, np.round(times)):
-            raise ValueError("Times must be integers")
-        times = times.astype(np.int64)
+        times = np.array(cfg.sweep.times, dtype=np.int64)
 
         length_ranges = cfg.length_range
         if isinstance(length_ranges, tuple):
@@ -271,9 +276,6 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
             ]
         )
         length_idxs = np.arange(cfg.length_expts, dtype=np.int64)
-
-        if np.min(times) <= 0:
-            raise ValueError("times should be larger than 0")
 
         # Reject timing that cannot fit the preparation and refocusing pulses.
         min_interval = np.min(length_ranges[:, 0] / (2 * times))
