@@ -89,7 +89,7 @@ class MixedEngine(Engine):
     def __init__(self):
         super().__init__(1, 0)
 
-    def evolve(self, source, batches, *, budget=1e-3, cancel):
+    def evolve(self, source, batches, *, budget=1e-3, cancel, telemetry=False):
         points = np.concatenate([batch.points for batch in batches])
         densities = np.tile(np.diag([0.4, 0.6])[None], (len(points), 1, 1))
         return EvolutionResult(points, densities, PathDiagnostics())

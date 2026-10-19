@@ -150,8 +150,10 @@ class RecordingEngine(Engine):
         super().__init__(1, 1024**2)
         self.density_bytes = b""
 
-    def evolve(self, source, batches, *, budget=1e-3, cancel):
-        result = super().evolve(source, batches, budget=budget, cancel=cancel)
+    def evolve(self, source, batches, *, budget=1e-3, cancel, telemetry=False):
+        result = super().evolve(
+            source, batches, budget=budget, cancel=cancel, telemetry=telemetry
+        )
         self.density_bytes = result.densities.tobytes()
         return result
 
