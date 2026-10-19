@@ -104,12 +104,14 @@ def test_multitone_optional_families_are_independent(
 def test_multitone_missing_terminal_keeps_required_family_error(optional):
     attempts = []
     kernels = tuple(GuardRecorder(name, attempts, accepts=False) for name in optional)
-    with closing(Engine(1, 0, kernels=kernels)) as engine:
-        with pytest.raises(
+    with (
+        closing(Engine(1, 0, kernels=kernels)) as engine,
+        pytest.raises(
             RuntimeError,
             match=r"segment 0 \(timeline 0, start 0.0 ns\) requires kernel dop853",
-        ):
-            engine.evolve(source(), (multitone_batch(False),), cancel=Event())
+        ),
+    ):
+        engine.evolve(source(), (multitone_batch(False),), cancel=Event())
 
 
 class PlannedFloquet(RecordingKernel):
