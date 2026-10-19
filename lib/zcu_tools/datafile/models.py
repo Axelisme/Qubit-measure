@@ -295,7 +295,7 @@ class LabberData:
 
     @classmethod
     def load(cls, path: str) -> LabberData:
-        from .labber import load_labber_data
+        from .labber_reader import load_labber_data
 
         return load_labber_data(path)
 

@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-19，shared Labber metadata
+**Last updated:** 2026-10-19，Labber reader／writer／format owners
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -97,6 +97,10 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 - `format_ext` / `remove_ext` 只處理檔名 suffix，不改路徑中段的 `.h5` /
   `.hdf5` 子串；`reserve_labber_filepath` 保留 Labber-style numeric sequence，
   但孤立的數字尾碼可作為 caller 命名的一部分。
+
+`labber.py` 擁有 uniform／trace writer，`labber_reader.py` 擁有完整讀取與 log 解碼。
+`labber_format.py` 集中 Labber 1.8.6 bookkeeping labels、compound dtypes 與 attribute／string 轉換，
+由 writer、reader、grouped 與 streaming 共用。`labber_writer.py` 保留 ExperimentPayload 到 Labber 的投影。
 
 `datafile/` 內部 module 是責任拆分，不是額外 public import path。
 

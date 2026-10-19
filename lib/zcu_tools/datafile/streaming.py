@@ -16,7 +16,8 @@ import h5py
 import numpy as np
 
 from .grouped import DATA_VARIABLE_ATTR, DATA_VARIABLES_ATTR, GROUPED_VERSION_ATTR
-from .labber import labber_string_array, write_payload_to_log
+from .labber import write_payload_to_log
+from .labber_format import labber_string_array
 from .models import Axis, DataVariable, LabberMetadata, LabberPayload, as_axis
 from .paths import format_ext
 

@@ -13,11 +13,8 @@ if TYPE_CHECKING:
     from .comment import LabberComment, decode_labber_comment, encode_labber_comment
     from .fluxdep_database import FluxdepDatabaseInfo, read_fluxdep_database_info
     from .grouped import load_grouped_labber_data, save_grouped_labber_data
-    from .labber import (
-        load_labber_data,
-        save_labber_data,
-        save_labber_trace_data,
-    )
+    from .labber import save_labber_data, save_labber_trace_data
+    from .labber_reader import load_labber_data
     from .labber_schema import cast_labber_values, validate_labber_payload
     from .labber_writer import write_labber
     from .models import (
@@ -116,7 +113,7 @@ _EXPORT_MODULES = {
     "encode_labber_comment": ".comment",
     "load_grouped_labber_data": ".grouped",
     "save_grouped_labber_data": ".grouped",
-    "load_labber_data": ".labber",
+    "load_labber_data": ".labber_reader",
     "save_labber_data": ".labber",
     "save_labber_trace_data": ".labber",
     "cast_labber_values": ".labber_schema",
