@@ -1,9 +1,11 @@
 """A host write callable takes the editor's parsed input and may reject it."""
 
+import sys
 from collections.abc import Callable, Iterator, Mapping
 
 import pytest
 from pydantic import JsonValue
+from pydantic_core import PydanticCustomError
 from qtpy.QtWidgets import QApplication, QCheckBox, QLineEdit, QWidget
 from zcu_tools.gui.form import (
     FormEnv,
@@ -154,6 +156,30 @@ def test_rejected_text_stays_typed_with_the_host_message_until_accepted(
     assert field_error(editor, path) == ""
     assert editor.errors() is None
     assert observed == [False, True]
+
+
+def test_source_rejection_is_a_field_error_not_an_unhandled_qt_exception(
+    build: Build, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = new_state()
+    unhandled: list[BaseException] = []
+    monkeypatch.setattr(sys, "excepthook", lambda _kind, error, _tb: unhandled.append(error))
+
+    def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
+        if batch.get(("note",)) == "missing":
+            raise PydanticCustomError("source_missing", "Library source is missing")
+        state.write(batch, FormEnv())
+
+    editor = build(state, write)
+    text = child(editor, QLineEdit, "form.input.note")
+    commit_text(text, "missing")
+    assert field_error(editor, "note") == "Library source is missing"
+    assert text.text() == "missing"
+    assert state.input.data["note"] == ""
+    assert unhandled == []
+    commit_text(text, "available")
+    assert state.input.data["note"] == "available"
+    assert editor.errors() is None
 
 
 def test_rejected_checkbox_and_section_show_state_with_the_host_message(
