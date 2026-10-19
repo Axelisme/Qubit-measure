@@ -332,6 +332,7 @@ def test_failed_device_connection_propagates_and_retains_memory_row(startup_app,
 
 def test_summary_survives_terminal_and_cache_root_is_available(startup_app, tmp_path):
     _behavior, _assembly, ctrl, window, _probe = startup_app
+    window.show()
     run_script(ctrl, write_script(
         tmp_path,
         "    assert ctx.cache_root.is_absolute()\n"
