@@ -2,7 +2,8 @@
 
 本指南把舊 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/` 整理成新 entry。
 範例直接建立同根下的 `result/<name>/` 與 `Database/<name>/`，不必先放另一個 root 再搬回。
-`result_root` 也可明確指定其他目錄，owner 文件常以 `results/` 示意；目錄拼字不決定格式。
+目前 [GUI runtime](../lib/zcu_tools/gui/session/services/build.py) 使用 `result/`，部分 owner／ADR 舊例使用 `results/`，兩者尚待裁決。
+本文維持 `result/` 範例；實際 root 以裁決結果為準。`result_root` 可明確指定其他目錄，名稱本身不決定格式。
 也適用於他機應急工具只遷一半的資料，見[部分遷移接手](#從部分遷移的狀態手動接手)。
 本文不要求執行 `migrate_storage`，也不宣稱自動備份、exps discovery 或 cleanup 已可用。
 腳本操作另行補充。舊腳本可能仍限制在整個舊 result root 內寫入，本文不保證其 CLI 已支援同根目的地。
@@ -116,7 +117,7 @@ find "$BR/exps" -type f -iname '*.png' -printf '%P\n' | LC_ALL=C sort
 | `samples.csv` | 原樣保全到 `Database/<name>/migration-preserved/result/samples.csv`；不是新的 SampleTable。 |
 | `autofluxdep_runs/**` | 同相對路徑保全到 `Database/<name>/migration-preserved/result/autofluxdep_runs/**`；不是新 workflow run。 |
 | exps 外的 `image/**`、未知 result 檔 | 原樣保全到 `Database/<name>/migration-preserved/result/<相對路徑>`，無法確定關聯則 pending。 |
-| `Database/.../arb_waveforms/**` | 原樣複製到 `Database/<name>/arb_waveforms/**`，核對 hash；asset key 不改。 |
+| `result/<chip>/<qub>/arb_waveforms/**` 或 `Database/<chip>/<qub>/arb_waveforms/**` | 原樣複製到 `Database/<name>/arb_waveforms/**`，保留 arb_waveforms 下的相對 asset key 並核對 hash；兩來源對應同一目的但 bytes 不同時停下列衝突，不覆寫。 |
 | Database Labber 檔 | 有完整證據才產 native，再保留原 Labber bytes。證據不足先留完整備份並 pending，可另存 `migration-preserved/Database/<原相對路徑>`。 |
 | 其他 Database 檔 | 備份保全，報告記明原相對位置與未知用途；需新副本時放 `migration-preserved/Database/`，不冒充 run。 |
 
@@ -252,7 +253,9 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 
 預期有完整 point.yaml 與 header-only library。用編輯器做以下修改：
 
-- 刪除 point 中 setup-only 的 `general.entry_id`，因為 [PointGeneral](../lib/zcu_tools/resources/entry/schema.py) 不接受此欄。不要刪 setup 的 UUID。
+- 為相容目前 main 的 [PointGeneral loader](../lib/zcu_tools/resources/entry/schema.py)，刪除 point 副本中的 `general.entry_id`。目前版本會拒絕此欄，這不是永久格式禁令。
+  setup 的 UUID 必須保留，不另造 point UUID。
+  owner 更新為整份來源複製並接受 optional seed UUID 後，可保留來源 UUID。下方省略此欄的最小格式仍可讀，不依賴該更新。
 - `general.created_at` 改為剛才印出的建立時間。這是新 point 的建立時間，不是歷史量測時間。
 - description 未明確指定時保留來源描述；明確提供字串時使用該字串，空字串也有效。
 - 其他全部內容保留，再套 `exps/<sub>/meta_info.json`。meta 提供值優先；缺值才繼承 setup。
@@ -379,7 +382,8 @@ helper 不是跨檔交易，中斷可能留下半份目的檔；先記為未完�
 不要把半份檔案認作永久 pending 然後清理來源。
 
 對 autofluxdep_runs、exps 外 image 與未知檔，逐檔以相對路徑呼叫 helper 到 preservation 位置。
-arb_waveforms 亦逐檔比對到 NEW_D/arb_waveforms，保留 key 與目錄關係。
+從 `$BR/arb_waveforms/` 與 `$BD/arb_waveforms/` 各自存在的檔案逐檔複製到 `$NEW_D/arb_waveforms/`，保留各自 arb_waveforms 下的相對 asset key 與目錄關係。
+兩來源若落在同一目的，bytes 相同才視為同一副本；不同就停下，報告列兩來源與 hash，不覆寫。
 預期每個 preservation 副本 hash 都等於備份，報告記明它不是新格式資料。
 舊 samples 要成新 JSONL，另需[樣本 owner](../lib/zcu_tools/resources/sample_table/README.md) 要求的列、座標與來源證據。
 沒有證據就保全 pending，不把 CSV 改副檔名成 JSONL，也不把舊 autofluxdep manifest 放進 workflows 假裝新 run。
@@ -403,15 +407,50 @@ Labber 與 native 都可能是 HDF5，但格式不同。把 `.hdf5` 改名為 `d
 | 可信 run_id 或經明確授權的遷移 ID 分配 | 保留可信既有 ID。若分配新 ID，報告寫「遷移賦值」，不能冒充歷史 ID 或歷史量測時間。沒有裁定先 pending。 |
 
 正式型別與欄位見 [datafile owner](../lib/zcu_tools/datafile/README.md) 與
-[native models](../lib/zcu_tools/datafile/native_models.py)。欄位齊全且矛盾已處理後，在離線 Python 工作階段操作：
+[native models](../lib/zcu_tools/datafile/native_models.py)。以下先示範完整物件構造，再接讀寫順序。
+這是合成範例，所有數字、時間、ID、名稱與路徑都不可直接用在真檔。
+假設虛構實驗 `synthetic_demo` 的 `DemoCfg` 完整 cfg 只有 reps，資料是單一 frequency 軸的複數 response；它不是 repo 已註冊的實驗。
+真檔必須換成已確認的 `(tag, cfg_type, schema_version)`、完整歷史 cfg JSON 與正式 disk schema，不可只換檔名或套用這份 reps。
+None 與空 provenance mapping 示範「證據確實不可得」，不是略過查證。缺必要證據就 pending。
 
 ```python
+import os
+from pathlib import Path
+from uuid import UUID
+import numpy as np
 from migrations.legacy_labber import load_legacy_labber_payload
-from zcu_tools.datafile import load_run_data, save_run_data, validate_experiment_payload
+from zcu_tools.datafile import (
+    AxisSchema, CfgSnapshot, DataVariable, RunMetadata, RunSnapshot,
+    SoftwareProvenance, VariableSchema,
+    load_run_data, save_run_data, validate_experiment_payload,
+)
 
-# source 是備份內原檔；schema 是按該歷史實驗明示的 tuple[VariableSchema, ...]。
-# metadata 是上表證據建立的 RunMetadata；cfg 是完整的 CfgSnapshot。
-# destination 是 NEW_D/runs/<已確認或明示分配的run_id>/data.h5。
+schema = (VariableSchema(
+    variable=DataVariable("response"),
+    axes=(AxisSchema(name="frequency", unit="Hz", dtype=np.dtype("float64")),),
+    signal_name="signal", signal_unit="V", signal_dtype=np.dtype("complex128"),
+),)
+cfg = CfgSnapshot(
+    values={"reps": 10}, cfg_type="DemoCfg", schema_version="1.0",
+)
+metadata = RunMetadata(
+    run_id="20261020T080000Z-abc123", experiment="synthetic_demo",
+    started_at="2026-10-20T08:00:00Z", finished_at=None,
+    completion="complete", labber_path=None,
+    snapshot=RunSnapshot(
+        entry_id=UUID("54cd2da2-e8cd-49d5-a414-4ec40eb7eb14"),
+        entry_name="migrated-Q0", point="070716_0.500",
+        description="Synthetic example only", roles={"qubit": "Q0"},
+    ),
+    provenance=SoftwareProvenance(
+        software_versions={}, git_commit=None, git_dirty=None,
+        qick_version=None, soc_fingerprint=None, hostname=None, simulation_id=None,
+    ),
+    device_snapshot=None,
+)
+# source 換成備份內已驗 hash 的原檔；新 run_id 須有明示分配授權並記入報告。
+source = Path(os.environ["BD"]) / "synthetic-only.hdf5"
+destination = Path(os.environ["NEW_D"]) / "runs" / metadata.run_id / "data.h5"
 payload = load_legacy_labber_payload(source, schema=schema)
 validate_experiment_payload(payload, schema=schema)
 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -420,6 +459,9 @@ stored = load_run_data(destination)
 validate_experiment_payload(stored.payload, schema=schema)
 ```
 
+schema 只宣告名稱、單位與 dtype，axes 依 inner-first 排列；軸值、signal arrays、shape、timestamps 與 Labber metadata 由來源 payload 讀入並驗證，不在此補造。
+此例單軸 signal shape 必須為 `(該軸長度,)`；多軸 shape 為反向 axes 長度。
+HDF5 階層與序列化交給 [datafile owner](../lib/zcu_tools/datafile/README.md) 的 writer，不手填 dataset。
 此段是 owner API 的操作順序，不是能替任意 Labber 猜出 schema 的通用轉換器。
 先依該實驗的正式 cfg model 驗證歷史 cfg；寫完還要由具體 experiment 的 `load_run` 讀回，
 逐欄比對 cfg、tag、時間、snapshot、axes、signal、timestamps 與原 payload。
