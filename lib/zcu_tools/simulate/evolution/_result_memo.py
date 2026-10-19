@@ -100,9 +100,9 @@ def input_key(
                 digest.array(array)
             digest.text(str(len(track.envelopes)))
             for envelope in track.envelopes:
-                digest.text(envelope.kind)
-                digest.array(envelope.samples)
-                digest.array(envelope.sample_ns)
+                # The immutable record already hashes kind, complex samples and
+                # their time axis. Reuse it rather than serializing every pulse.
+                digest.text(envelope.identity)
     return digest.value.digest()
 
 

@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
+from numba import njit
 from numpy.typing import NDArray
 
 from .engine import DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
@@ -167,13 +168,56 @@ def _active_level_ports(
     return level_index, ports
 
 
+@njit(cache=True)
+def _support_rows(active, support_start, support_end, row_offsets, start, end):
+    """Index half-open support in sorted per-point rows, retaining whole rows.
+
+    Pulse/plateau endpoints already split the table. Binary searches avoid a
+    full row-array scan for every historical pulse. Empty point spans and
+    support beyond readout contribute no rows.
+    """
+    first = np.zeros(len(active), dtype=np.int64)
+    last = np.zeros(len(active), dtype=np.int64)
+    count = 0
+    for point in range(len(active)):
+        if not active[point]:
+            continue
+        base, stop = row_offsets[point], row_offsets[point + 1]
+        times = start[base:stop]
+        a = base + np.searchsorted(times, support_start[point])
+        b = base + np.searchsorted(times, support_end[point])
+        if b > a and end[b - 1] > support_end[point]:
+            b -= 1
+        first[point], last[point] = a, b
+        count += b - a
+    chosen = np.empty(count, dtype=np.int64)
+    offset = 0
+    for point in range(len(active)):
+        for row in range(first[point], last[point]):
+            chosen[offset] = row
+            offset += 1
+    return chosen
+
+
 def _tone_columns(batch, tracks, table, source, flux_point):
     """Write only playing tones, in track order, folding phase and flux flags."""
     point, start, end, level = table
     rows = len(point)
+    row_offsets = np.r_[0, np.cumsum(np.bincount(point, minlength=len(batch.points)))]
+    track_rows = tuple(
+        _support_rows(
+            geometry.pulse.active,
+            geometry.pulse.start,
+            geometry.pulse.end,
+            row_offsets,
+            start,
+            end,
+        )
+        for geometry in tracks
+    )
     counts = np.zeros(rows, dtype=np.int64)
-    for geometry in tracks:
-        counts += geometry.pulse.contains(point, start, end)
+    for chosen in track_rows:
+        counts[chosen] += 1
     width = int(counts.max(initial=0))
     port = np.full((rows, width), -1, dtype=np.int64)
     frequency, amplitude, theta, offset = (np.zeros((rows, width)) for _ in range(4))
@@ -187,9 +231,7 @@ def _tone_columns(batch, tracks, table, source, flux_point):
     )
     change[batch.flux.offsets[:-1]] = False
     level_index, ports = _active_level_ports(source, level, counts > 0)
-    for track, geometry in zip(batch.tracks, tracks, strict=True):
-        active = geometry.pulse.contains(point, start, end)
-        chosen = np.flatnonzero(active)
+    for track, geometry, chosen in zip(batch.tracks, tracks, track_rows, strict=True):
         if not len(chosen):
             continue
         slot = used[chosen]
@@ -228,7 +270,7 @@ def _tone_columns(batch, tracks, table, source, flux_point):
             & (times < batch.end_ns[flux_point])
         )
         np.logical_or.at(changed_points, flux_point, inside)
-        flux_drive |= active & changed_points[point]
+        flux_drive[chosen] |= changed_points[point[chosen]]
     return (
         counts,
         (port, frequency, amplitude, theta, env_index, offset),
