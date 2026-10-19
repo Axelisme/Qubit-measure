@@ -406,7 +406,7 @@ class Engine:
                 else 1
             )
             # Drain workers before releasing evolve-local ownership.
-            with closing(create_work_plan(geometry.table, source)) as work_plan:
+            with closing(create_work_plan(geometry.table, source, budget)) as work_plan:
                 context = KernelContext(source, budget, work_plan)
                 kernels = self._kernels
                 inventory = resident_inventory(geometry, kernels, context, self._cache)

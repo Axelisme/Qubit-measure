@@ -39,7 +39,7 @@ class MultitoneGateKernel(CovariantGateKernel):
     """Joint RWA gates with complete-inventory reuse >=20 and shared numerics.
 
     Requires coextensive real sampled support, shared RWA admission, pruning
-    bound <=min(budget,1e-3), and four-way secular split proxy <=.01.
+    bound <=min(budget,1e-3), and adaptive n-way secular split proxy <=.01.
     Rejection retains ordinary row RWA. Products use the Engine resident LRU.
     """
 
