@@ -19,14 +19,22 @@ from .settings import (
 from .setup import run_setup
 
 
-def _parser(default_local_root: Path) -> argparse.ArgumentParser:
+def _parser(
+    default_local_root: Path, default_settings_dir: Path
+) -> argparse.ArgumentParser:
     config_dir, cache_dir = user_directories()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config-dir",
         type=Path,
         default=config_dir,
-        help="Dedicated account and transfer settings directory",
+        help="Per-user rclone account directory (rclone.conf), shared by checkouts",
+    )
+    parser.add_argument(
+        "--settings-dir",
+        type=Path,
+        default=default_settings_dir,
+        help="This checkout's transfer.json directory (default: this checkout/.result-transfer)",
     )
     parser.add_argument(
         "--cache-dir",
@@ -86,14 +94,17 @@ def _parser(default_local_root: Path) -> argparse.ArgumentParser:
     return parser
 
 
-def _status(config_dir: Path, local_root: Path, *, as_json: bool) -> int:
-    selection = load_settings(config_dir)
+def _status(
+    config_dir: Path, settings_dir: Path, local_root: Path, *, as_json: bool
+) -> int:
+    selection = load_settings(settings_dir)
     configured = selection is not None and (config_dir / "rclone.conf").is_file()
     value = {
         "configured": configured,
         "remote_parent": selection.remote_parent if selection else None,
         "local_root": str(local_root),
         "config_dir": str(config_dir),
+        "settings_dir": str(settings_dir),
     }
     if as_json:
         print(json.dumps(value, ensure_ascii=False))
@@ -216,28 +227,29 @@ def _all_entries(
     return sorted(entries)
 
 
-def _run(default_local_root: Path) -> int:
+def _run(default_local_root: Path, default_settings_dir: Path) -> int:
     """Run setup or CLI copy; return rclone failures and never prompt an unattended agent.
 
     Common path overrides precede the subcommand. Without a subcommand, opens
     setup. Missing settings trigger GUI setup only for an interactive transfer;
     noninteractive transfers fail immediately with exit 2 and setup instructions.
     """
-    parser = _parser(default_local_root)
+    parser = _parser(default_local_root, default_settings_dir)
     args = parser.parse_args()
     action = args.action or "setup"
     config_dir = args.config_dir.expanduser().resolve()
     cache_dir = args.cache_dir.expanduser().resolve()
+    settings_dir = args.settings_dir.expanduser().resolve()
     local_root = args.local_root.expanduser().resolve()
     if action == "status":
-        return _status(config_dir, local_root, as_json=args.json)
+        return _status(config_dir, settings_dir, local_root, as_json=args.json)
     if action in ("upload", "download"):
         if bool(args.entries) == args.all:
             parser.error("Specify entry names or --all, but not both.")
         if args.jobs < 1:
             raise ValueError("--jobs must be positive.")
         _validate_entries(args.entries, local_root, action)
-        selection = load_settings(config_dir)
+        selection = load_settings(settings_dir)
         if selection is None and not sys.stdin.isatty():
             print(
                 "Not configured. Run 'transfer_results.py setup' on your desktop first; CLI transfer did not start a GUI.",
@@ -248,12 +260,15 @@ def _run(default_local_root: Path) -> int:
         selection = None
     config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     cache_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    settings_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     binary = prepare_rclone(cache_dir)
     if action == "prepare":
         print(f"Verified executable: {binary}")
         return 0
     if action == "setup" or selection is None:
-        selection = run_setup(binary, config_dir, cache_dir, no_browser=args.no_browser)
+        selection = run_setup(
+            binary, config_dir, cache_dir, settings_dir, no_browser=args.no_browser
+        )
         if action == "setup":
             return 0
     if args.all:
@@ -265,16 +280,19 @@ def _run(default_local_root: Path) -> int:
     return _transfer(binary, config_dir, selection, local_root, args)
 
 
-def main(default_local_root: Path) -> int:
-    """Run the transfer CLI with a caller-supplied default local results parent.
+def main(default_local_root: Path, default_settings_dir: Path) -> int:
+    """Run the transfer CLI with caller-supplied checkout defaults.
 
-    Parses process arguments, installs signal handling, and returns a shell exit
-    status. The script composition root supplies its checkout's results path;
-    library installation paths never determine where result data is written.
+    default_local_root is the local entry parent (the checkout's result/);
+    default_settings_dir holds that checkout's transfer.json, so different
+    checkouts keep separate cloud parents while sharing the per-user rclone
+    account. Parses process arguments, installs signal handling, and returns a
+    shell exit status. Library installation paths never determine where result
+    data or settings are written.
     """
     signal.signal(signal.SIGTERM, _interrupt)
     try:
-        return _run(default_local_root)
+        return _run(default_local_root, default_settings_dir)
     except KeyboardInterrupt:
         print("\nResult transfer cancelled.", file=sys.stderr)
         return 130

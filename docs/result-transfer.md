@@ -96,7 +96,7 @@ uv run --directory /workspace/Qubit-measure --no-sync -- python scripts/transfer
 `status --json` 只輸出非機密設定，例如：
 
 ```json
-{"configured": true, "remote_parent": "lab-drive:measurement-results", "local_root": "/workspace/Qubit-measure/result", "config_dir": "/home/user/.config/qubit-measure/result-transfer"}
+{"configured": true, "remote_parent": "lab-drive:measurement-results", "local_root": "/workspace/Qubit-measure/result", "config_dir": "/home/user/.config/qubit-measure/result-transfer", "settings_dir": "/workspace/Qubit-measure/.result-transfer"}
 ```
 
 它檢查設定檔存在與格式，不代表網路或 Google token 仍然可用。
@@ -134,11 +134,11 @@ Rclone 的傳輸輸出直接送到終端機，可由 Bash 正常重導向。
 ## 重新設定與憑證保存
 
 換帳號或改雲端父資料夾時，再執行 `setup`。
-兩個設定檔分開保存：`rclone.conf` 含帳號與 token；`transfer.json` 只保存選定的 remote 路徑。
+兩個設定檔分開保存：`rclone.conf` 含帳號與 token，放在下表的使用者設定目錄，同一使用者的所有 checkout 共用，登入一次即可；`transfer.json` 只保存選定的 remote 路徑，放在各 checkout 的 `.result-transfer/`（已 gitignore），所以不同 checkout 各自選雲端父資料夾、不會上傳到同一處。每個 checkout 第一次使用時執行一次 `setup` 選資料夾。
 不讀舊 `.env`、`token.json` 或 `GOOGLE_DRIVE_PARENT_FOLDER_ID`，也不自動刪除舊憑證檔。
 舊入口已移除，沒有相容 wrapper。
 
-| 系統 | 設定目錄 | 快取目錄 |
+| 系統 | 帳號設定目錄（`rclone.conf`） | 快取目錄 |
 | --- | --- | --- |
 | Windows | `%APPDATA%/qubit-measure/result-transfer` | `%LOCALAPPDATA%/Cache/qubit-measure/result-transfer` |
 | macOS | `~/Library/Application Support/qubit-measure/result-transfer` | `~/Library/Caches/qubit-measure/result-transfer` |
@@ -146,7 +146,7 @@ Rclone 的傳輸輸出直接送到終端機，可由 Bash 正常重導向。
 
 `rclone.conf` 不是加密的憑證保管庫，不要提交或分享。
 Google 帳號的第三方應用程式管理可撤銷授權；只移除本地 remote 不等於撤銷 Google 授權。
-如需隔離帳號或工作流程，可在子命令前提供 `--config-dir` 與 `--cache-dir` 的絕對路徑。
+如需隔離帳號或工作流程，可在子命令前提供 `--config-dir`、`--settings-dir` 與 `--cache-dir` 的絕對路徑。
 
 ## 工具準備與維護
 
