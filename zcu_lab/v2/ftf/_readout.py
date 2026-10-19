@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Self
+from typing import Annotated, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import ConfigBase, MuxReadoutCfg
+from zcu_tools.cfg_model import ConfigBase, FieldMeta, MuxReadoutCfg
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules import MuxReadout
 
@@ -18,20 +18,20 @@ class JointRoles(ConfigBase):
 
     f1/f2 name distinct fluxonium components, coupler names their transmon,
     and mux names the MuxGroup. f1_tone/f2_tone are their original zero-based
-    positions in 0..tone_count-1. Form derives them from MuxGroup.qubits, never
-    labels or ADCs. Core
-    callers supply that same resolved mapping and tone_count, the complete
+    positions in 0..tone_count-1. All fields remain visible and readonly in
+    Forms, derived from captured MuxGroup.qubits, never labels or ADCs.
+    Core callers supply that same resolved mapping and tone_count, the complete
     captured group size in 1..8. Names persist with the run; no
     live alias/library lookup occurs during acquisition or offline analysis.
     """
 
-    f1: str = Field(min_length=1)
-    f2: str = Field(min_length=1)
-    coupler: str = Field(min_length=1)
-    mux: str = Field(min_length=1)
-    f1_tone: int = Field(ge=0)
-    f2_tone: int = Field(ge=0)
-    tone_count: int = Field(ge=1, le=8)
+    f1: Annotated[str, FieldMeta(readonly=True)] = Field(min_length=1)
+    f2: Annotated[str, FieldMeta(readonly=True)] = Field(min_length=1)
+    coupler: Annotated[str, FieldMeta(readonly=True)] = Field(min_length=1)
+    mux: Annotated[str, FieldMeta(readonly=True)] = Field(min_length=1)
+    f1_tone: Annotated[int, FieldMeta(readonly=True)] = Field(ge=0)
+    f2_tone: Annotated[int, FieldMeta(readonly=True)] = Field(ge=0)
+    tone_count: Annotated[int, FieldMeta(readonly=True)] = Field(ge=1, le=8)
 
     @model_validator(mode="after")
     def validate_distinct(self) -> Self:

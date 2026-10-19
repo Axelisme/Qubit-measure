@@ -43,7 +43,7 @@ Adapter 可以公開不同於 core 的輸入。需要 extras 時，Form 接受�
 
 使用者 2026-10-13：「採用，更新草稿，form.py慣例也記進去」。
 
-Core 的 `Annotated[..., FieldMeta(...)]` 保存 label、unit、decimals、description 與 group。
+Core 的 `Annotated[..., FieldMeta(...)]` 保存 label、unit、decimals、description、group、readonly 與 element_label。
 group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此與其他欄位描述一起放在 core。
 前端決定實際的 widget、排版與折疊行為。
 沒有標記的欄位由生成器使用欄位名。FieldMeta 不改序列化格式。
@@ -61,10 +61,27 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 
 Tree 對齊 model 的欄位。字串是 literal，`Expr` 才是 expression。
 `Range.around`／`Range.between` 宣告掃描，`AliasName` 產生 direct 名稱，
-`Locked` 與 `Hidden` 宣告表單偏差。Module 節點分為兩種。
+`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。生成器把中立 metadata 翻成 Display，由 Form core 強制唯讀，不生成單值 Literal。
 
-- `Slot(path, copy=False, set={}, lock={})` 使用捕捉的 library 槽位。Copy 產生 inline input。
-- `Template(id, set={}, lock={})` 從注入的持久範本建 fresh inline input。
+Module 節點分為兩種。
+
+- `Slot(path, copy=False, set={})` 使用捕捉的 library 槽位。Copy 產生 inline input。
+- `Template(id, set={})` 從注入的持久範本建 fresh inline input。
+
+Slot／Template 不提供 lock 參數，也不提供 `Locked` 節點。List 各位置可有不同的唯讀初值。
+
+範本保留各自的 input projection／model，承載非 lock 初值、Expr requiredness 與 branch ancestry，不在其中生成單值 Literal 來實作 lock。範本初值、依 branch ancestry 的 inline 切換初值與 `input.model.default_input(env)` 重算維持既有行為，不改用通用 defaults。
+
+Module 子欄位唯讀時仍可選 library key。Module 節點本身標唯讀則固定整個 module 子樹，包含 ref／inline 選擇與所有子欄位，不論初值是 ref 或 inline。不另設 selector-only 宣告，也不自動強制 inline。使用者於 2026-10-19 裁定：「我會選B，lock應該被認知為只對子樹作用。」
+
+只為組實驗 cfg 存在的固定值不放進 Form 或實驗 cfg 型別，由 `run()` 補齊，例如單發的 reps／rounds=1。Mux tone name 需要給使用者看，保留並宣告唯讀。使用者於 2026-10-19 裁定：「有一些是為了方便轉換成experiment cfg而塞入的，其實可以改成直接不曝露欄位。run再補齊。」
+
+FTF roles 的 f1、f2、coupler、mux、tone index 與 tone_count 供驗證、離線 analysis 與 writeback 使用，不屬於只為組 cfg 存在的固定值。這些欄位保留唯讀，初值仍來自 captured group，cfg／result／保存契約不變。
+
+Bath reset freq 的 `tested_reset.pi2_cfg.phase` 移除舊 lock，由 Template 的 `set` 給初值 90，欄位可編輯。
+`run()` 組 program 時使用 cfg 的 phase，不覆寫為固定值。Guide 註明 90 是建議的 tomography offset。
+現有 Template 沒有 nested Hidden／readonly 作者入口，且只有這一處需要，因此不新增 nested metadata API。
+不複製共用 module 型別，也不另建局部 cfg 型別。
 
 缺 Slot 來源時，optional 欄位停用且有效，required 欄位留空且 Invalid。
 沒有 Slot fallback 或 init 模式。需要選來源時，make_form 明寫 if／else。
@@ -112,7 +129,7 @@ Make_form 回 `Form(Cfg, tree)`，不把 ctx 傳進 Form。
 Registry 的範本目錄。Register 不執行 factory，也不預檢範本。
 Edit、preview、result 與 Run 使用同一捕捉，不重建 Form 或刷新來源。
 Reset 可以同時換形狀和初值；失敗保留原 Form。Memento 保存 selection／branch 與 Form input，
-由可信宣告重建，還原不執行 converter。型別或來源 identity 不匹配明確報錯，不靜默丟葉，
+由可信宣告重建，還原不執行 converter。唯讀欄位保留存檔值，不從宣告重算。型別或來源 identity 不匹配明確報錯，不靜默丟葉，
 不加舊版雙讀或 native cfg 反向回填，見 [[0079]]。
 Load 只載分析／writeback 所需結果，不覆蓋表單。
 

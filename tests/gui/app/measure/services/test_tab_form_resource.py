@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormInputRejected
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -587,7 +587,7 @@ def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
     assert resource.accept().values["participants"] == ["B", "A"]
     assert resource.preview().values[("tones", 0, "gain")] == 5
     before = resource.input
-    with pytest.raises(ValueError, match="identity"):
+    with pytest.raises(FormInputRejected, match="Readonly"):
         resource.write({("tones",): []})
     assert resource.input.same_as(before)
 

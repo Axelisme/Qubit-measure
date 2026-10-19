@@ -145,7 +145,7 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
         editor.close()
 
 
-def test_owner_identity_refusal_is_visible_and_navigation_still_works(
+def test_readonly_refusal_is_visible_and_navigation_still_works(
     qapp: QApplication, tmp_path: Path
 ):
     from typing import Annotated
@@ -194,7 +194,7 @@ def test_owner_identity_refusal_is_visible_and_navigation_still_works(
             evidence=tmp_path / "02-owner-menu.png",
         )
         driver.screenshot(tmp_path / "03-owner-refused.png")
-        assert "identity" in driver.observe(object_name="form.row.tones").tooltip
+        assert "Readonly" in driver.observe(object_name="form.row.tones").tooltip
         assert driver.observe(object_name="form.picker.tones").text == "0: A"
         driver.choose_option(object_name="form.picker.tones", value="1: B")
         driver.enter_text(object_name="form.input.tones.1.gain", value="4")

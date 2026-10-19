@@ -1,6 +1,6 @@
 """Capture-owned native mux Form; the picker never selects participants."""
 
-from zcu_tools.cfg_model import FormNode, Hidden, Locked, Slot, Template
+from zcu_tools.cfg_model import FormNode, Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2._support.measure.mux_forms import captured_mux_names, mux_relax_delay
@@ -40,8 +40,6 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
             "shots": 100000,
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
-            "reps": Locked(1),
-            "rounds": Locked(1),
         },
         fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
     )

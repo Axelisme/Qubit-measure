@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，Variable element reporting
+**Last updated:** 2026-10-19，Form readonly、via_ref 與 locked
 
 # `zcu_tools/mcp/measure/`
 
@@ -61,15 +61,19 @@ Recipe helper 分成「工作步驟」與「交還控制權」。工作步驟以
 
 `RecipeTab` 的欄位、origins 與 summary 宣告使用 typed logical paths。作者傳非空 tuple，例如 `("modules", "readout", "freq")` 或 `("tones", 1, "drive", "gain")`。Str 是原始欄位名，int 是完整 list 的原始位置。數字字串仍是欄位名，不拆 dotted string，不以元素 name 或 participants 順序解讀位置。Adapter 只隱藏生成器加入的 wrapper，真實名為 module 的欄位仍保留。Range count 是 n，`set_sweep` 的公開 expts 參數送出時轉為 n。完整 start／stop／expts 以一次 container edit 選 Range + Expts，可覆蓋無效 Center／Step draft；部分設定只編輯 active leaves，不在 caller 換算座標或採樣。細部切換先讀 `tab.describe_cfg` 的 active 數值欄位 commands，再由 `rpc_call` 呼叫 `tab.run_cfg_command`，沒有額外高階 tool。Step 的 input 是 authored 原稿，value／values 明示有效端點，讀取不改 input。
 
-`read_field` 每次送一次 `tab.read_recipe_field`。同一 owner turn 回傳 metadata、authored input、ordinary value、value_status、selector/source、readonly 與局部 logical errors。Input_present 區分未填與 null。Value_status 區分 available、missing 與 unavailable；available 的 null 是有效觀察。Value 與局部 errors 不證明整份 cfg 有效，get_cfg 與 Run admission 仍檢查 cfg。
+`read_field` 每次送一次 `tab.read_recipe_field`，將同一 owner turn 的回覆投影成公開 `RecipeFormField`。它包含 metadata、authored input、ordinary value、value_status、selector/source、via_ref 與局部 logical errors。MCP 將 owner observation／wire 的 `readonly` 投影為 `RecipeFormField.via_ref`，不改 owner 或 wire 欄位名稱。Input_present 區分未填與 null。Value_status 區分 available、missing 與 unavailable；available 的 null 是有效觀察。Value 與局部 errors 不證明整份 cfg 有效，get_cfg 與 Run admission 仍檢查 cfg。
 
-Mode/key 只來自 owner 的 selector。普通 scalar 不繼承祖先 mode，library key 也不是 scalar 值。Locked 使用 fixed 或 selection_fixed，不從 readonly 或選單數量推導。Fields 是 logical direct children，ref selector 可列 captured Spec 的可讀欄位。穿過 ref 的值沒有 authored input，source 指明最近 supplying selector、actual key、namespace 與 Spec path。讀取不 materialize input、不 refresh capture，也不授權後續寫入。
+Mode/key 只來自 owner 的 selector。普通 scalar 不繼承祖先 mode，library key 也不是 scalar 值。`RecipeFormField.locked` 是 selection_fixed、fixed 與宣告 readonly 三者的 or，不從當次選單數量推導。Core cfg 自有的單值 Literal 仍算固定值。`via_ref` 表示路徑穿過 library 引用，不表示宣告唯讀。Fields 是 logical direct children，ref selector 可列 captured Spec 的可讀欄位。穿過 ref 的值沒有 authored input，source 指明最近 supplying selector、actual key、namespace 與 Spec path。讀取不 materialize input、不 refresh capture，也不授權後續寫入。
 
-`use_library(field, name)` 直接送一次 `tab.select_recipe_module`。Owner 檢查 actual key、family、選單與宣告限制，MCP 不遍歷 Option 或組 ref JSON。Name=None 保留 input，fresh read 檢查現況；required 缺有效 key 回 MissingParameter，不記成功來源。明填成功記 explicit，保留成功記 gui_default。`disable_library` 送 disable，nullable 與 lock 由 owner 檢查，成功記 disabled。
+`use_library(field, name)` 直接送一次 `tab.select_recipe_module`。Owner 檢查 actual key、family、選單與宣告限制，MCP 不遍歷 Option 或組 ref JSON。Name=None 保留 input，fresh read 檢查現況；required 缺有效 key 回 MissingParameter，不記成功來源。明填成功記 explicit，保留成功記 gui_default。`disable_library` 送 disable，nullable 與唯讀限制由 owner 檢查，成功記 disabled。
 
 `use_inline` 送同一 selector RPC 的 use_inline action，從固定 capture 明確複製。先逐層複製 ref 祖先，再改內容。外層 copy 保留 child key，child selector 仍需另行 copy。既有 inline 是 guarded no-op，holder、busy、lifetime 與通知重入仍可拒絕。Missing、disabled 與 unresolved 不建立預設內容。Copy 已成功而下一次 set 失敗時，不回滾 copy。
 
-`set`、`set_fields` 與 `set_sweep` 把 supplied logical edits 一次送 `tab.edit_recipe_fields`，不預讀 canonical mapping。None 保留 input 並記 gui_default，全 None 或空批次不送 mutation。Expression 原文保持不變。Owner 在同一 turn 解析全部 paths、檢查 admission 並提交，結構、來源或 ref 祖先拒絕不留成功前綴。一般 invalid draft 仍會安裝；MCP 回 invalid_cfg 時保留 owner draft，且不記成功 provenance。
+`set`、`set_fields` 與 `set_sweep` 把 supplied logical edits 一次送 `tab.edit_recipe_fields`，不預讀 canonical mapping。None 保留 input 並記 gui_default，全 None 或空批次不送 mutation。Expression 原文保持不變。Owner 在同一 turn 解析全部 paths、檢查 admission 並提交，結構、來源、宣告唯讀或 ref 祖先拒絕不留成功前綴。一般 invalid draft 仍會安裝；MCP 回 invalid_cfg 時保留 owner draft，且不記成功 provenance。
+
+宣告唯讀由 Form core 統一執行，同值寫入通過，不同值拒絕，父層或批次寫入不能繞過唯讀子欄位。拒絕保留 `error.reason="form_input_rejected"` 與 `error.data.form_path`，唯讀拒絕另帶 `error.data.reason="readonly"` 與目前值的 JSON 形式 `error.data.current`；其他 rejection 不帶這兩個欄位。
+
+子欄位唯讀不限制祖先 module 選 library key。Module 節點本身標唯讀則固定 ref／inline 選擇與全部子欄位，不論初值是 ref 或 inline；它不自動強制 inline，也不另設 selector-only 宣告。
 
 `RecipeTab.read_module(field)` 保留明確 materialization 的用途，回 detached module values、mode 與 source。Field 使用非空 typed tuple，str 是欄位名，int 是完整 model-list 的原始位置，原樣交共同 owner。Wire 的 `tab.read_module` 與專用 `tab.use_inline` 同樣接受 typed array，不轉 dotted string。它不實作 read_field 或 summary scalar。一次觀察全部元素可用 `rpc_call(method="tab.read_elements", params={"tab_id": ..., "path": ["tones"]})`。GUI owner 一次回完整元素的 authored input、可用 canonical preview leaves 與定向錯誤，MCP 不逐元素拼接或保存名稱排序表。`retain_module_source(field, summary_field=..., value_path=...)` 要求 summary_field 與 field 加 value_path 指向同一 logical scalar，透過 logical read 記來源，不拆 wrapper 或 materialize。Caller 也可讀 source.key，再用 `retain_source` 記 `library:<key>`。這些 labels 只影響呈現，不改值或寫入權限。
 

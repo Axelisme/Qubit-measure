@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -79,7 +78,7 @@ class MuxGEToneCfg(ConfigBase):
         return self
 
 
-class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
+class MuxGECfg(ExpCfgModel):
     """Complete named tones, ordered participants and shared acquisition controls.
 
     modules holds optional reset and complete mux readout. tones contains one
@@ -87,12 +86,27 @@ class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
     participants is a nonempty, duplicate-free list of those names; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Every drive is required/validated, including nonparticipants, on independent
-    generators distinct from readout. shots is positive. Run warns and forces rounds=1 and reps=shots; the
-    original requested reps/rounds remain in RunRecord.cfg.
-    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    generators distinct from readout. shots is positive. Run sets program rounds=1
+    and reps=shots; these derived runtime counts are not experiment inputs.
+    initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay", unit="us", description="Delay before the first shot."
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Delay after each shot.",
+        ),
+    ] = 1.0
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
@@ -101,8 +115,8 @@ class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
     @model_validator(mode="after")
     def validate_acquisition(self) -> MuxGECfg:
         """Reject invalid counts, full-list length or active channel conflicts."""
-        if self.shots <= 0 or self.reps <= 0 or self.rounds <= 0:
-            raise ValueError("shots, reps and rounds must be positive")
+        if self.shots <= 0:
+            raise ValueError("shots must be positive")
         if any(
             not math.isfinite(v) or v < 0
             for v in (self.initial_delay, self.relax_delay)
@@ -263,7 +277,7 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=MuxGEResult,
         cfg_type=MuxGECfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="2.0",
         tag="mux/singleshot/ge",
     )
 
@@ -275,25 +289,20 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         after the longest branch. Return normalized raw IQ shaped (K,2,shots),
         without averaging, sorting or classification. K follows participants;
         the two rows mean probe off/on, not guaranteed pure ground/excited states.
-        Use one round with reps=shots, leaving config unchanged. Requested
-        rounds or reps other than 1 emit warnings.
+        Use one round with reps=shots, leaving config unchanged.
         context supplies hardware, stop signal and live magnitude plots. Missing
         preparations remain NaN; check context.cancel_signal.raise_if_error()
         before reporting success. Invalid config or program builds raise.
         """
         # 1. Use one raw-shot round and preserve the requested participant order.
         cfg = MuxGECfg.model_validate(config.model_dump())
-        if cfg.rounds != 1:
-            warnings.warn(
-                "rounds will be overwritten to 1 for singleshot measurement",
-                stacklevel=2,
-            )
-        if cfg.reps != 1:
-            warnings.warn(
-                "reps will be overwritten by singleshot measurement shots", stacklevel=2
-            )
-        cfg.rounds = 1
-        cfg.reps = cfg.shots
+        program_cfg = ProgramV2Cfg(
+            reps=cfg.shots,
+            rounds=1,
+            initial_delay=cfg.initial_delay,
+            relax_delay=cfg.relax_delay,
+        )
+
         indices = participant_indices(
             [tone.name for tone in cfg.tones], cfg.participants
         )
@@ -339,7 +348,7 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
                     for i in indices
                 ]
                 builder = (
-                    step.prog_builder(context.soc, context.soccfg)
+                    step.prog_builder(context.soc, context.soccfg, cfg=program_cfg)
                     .add_reset("reset", cfg.modules.reset)
                     .add(Join(*branches), MuxReadout("readout", readout))
                 )

@@ -28,7 +28,6 @@ from zcu_tools.cfg_model import (
     Slot,
     Template,
     TemplateDef,
-    TemplateLiteral,
     WaveformSpec,
 )
 from zcu_tools.gui.form import (
@@ -65,7 +64,7 @@ from ._seeds import (
     template_input,
     template_seed_tree,
 )
-from ._types import annotated_type, literal_type, members, type_tag, union_type
+from ._types import annotated_type, members, type_tag, union_type
 from .input_types import KeyRef, ModuleInline, ModuleRef
 from .logical import ModuleSelector
 
@@ -266,11 +265,7 @@ def _unsupported(name: str, info: FieldInfo) -> bool:
     return not info.is_required() and name in _UNSUPPORTED_FIELDS
 
 
-def _editable(
-    annotation: object,
-    locks: Mapping[str, TemplateLiteral],
-    seeds: Mapping[str, JsonValue],
-) -> object:
+def _editable(annotation: object, seeds: Mapping[str, JsonValue]) -> object:
     wrapper = inline_wrapper(annotation)
     if wrapper is not None or (
         str in members(annotation)
@@ -279,48 +274,38 @@ def _editable(
             for member in members(annotation)
         )
     ):
-        return _tagged_annotation(annotation, locks, seeds)
+        return _tagged_annotation(annotation, seeds)
     if isinstance(annotation, TypeAliasType):
-        return _editable(annotation.__value__, locks, seeds)
+        return _editable(annotation.__value__, seeds)
     args = get_args(annotation)
     origin = get_origin(annotation)
     if origin is Annotated:
-        result = _editable(args[0], locks, seeds)
+        result = _editable(args[0], seeds)
         for metadata in args[1:]:
             if not isinstance(metadata, ModuleSelector):
                 result = annotated_type(result, metadata)
         return result
     if origin in (Union, UnionType):
         items = tuple(
-            _editable(member, locks, seeds)
-            for member in args
-            if member is not QickParam
-            and (
-                not locks
-                or any(
-                    isinstance(model, type) and issubclass(model, BaseModel)
-                    for model in members(member)
-                )
-            )
+            _editable(member, seeds) for member in args if member is not QickParam
         )
         return union_type(items)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return editable_spec(annotation, locks, seeds)
+        return editable_spec(annotation, seeds)
     return annotation
 
 
 def _tagged_annotation(
     annotation: object,
-    locks: Mapping[str, TemplateLiteral],
     seeds: Mapping[str, JsonValue],
 ) -> object:
-    """Derive one family-limited tagged selector, retaining nullable/locked shape.
+    """Derive one family-limited tagged selector, retaining nullable shape.
 
     Re-derivation for a template unwraps the existing input annotation first;
-    the persistent seed and lock paths do not contain wrapper segments.
+    persistent seed paths do not contain wrapper segments.
     """
     models = tuple(
-        editable_spec(member, locks, seeds)
+        editable_spec(member, seeds)
         for member in members(spec_annotation(annotation))
         if isinstance(member, type) and issubclass(member, BaseModel)
     )
@@ -336,11 +321,7 @@ def _tagged_annotation(
         kind=(Literal["inline"], "inline"),
         module=(module, ...),
     )
-    tagged = (
-        inline
-        if locks
-        else annotated_type(union_type((KeyRef, inline)), Field(discriminator="kind"))
-    )
+    tagged = annotated_type(union_type((KeyRef, inline)), Field(discriminator="kind"))
     specs = tuple(
         spec
         for spec in _PERSISTENT_SPECS
@@ -364,9 +345,9 @@ def _tagged_annotation(
     )
 
 
-def _spec_display(name: str, info: FieldInfo, *, locked: bool) -> Display | None:
+def _spec_display(name: str, info: FieldInfo) -> Display | None:
     """Adapter-owned structural tags remain hidden even at a standalone Spec root."""
-    display = field_display(info, locked=locked)
+    display = field_display(info)
     if (
         name in ("type", "style")
         and get_origin(info.annotation) is Literal
@@ -378,16 +359,14 @@ def _spec_display(name: str, info: FieldInfo, *, locked: bool) -> Display | None
 
 def editable_spec(
     model: type[BaseModel],
-    locks: Mapping[str, TemplateLiteral],
     seeds: Mapping[str, JsonValue],
 ) -> type[BaseModel]:
     """Derive the input subclass of a persistent Spec and its nested models.
 
-    locks maps relative leaf paths to single-value Literal fields with that
-    default. seeds marks Expr initial values, whose fields lose static defaults.
+    seeds marks Expr initial values, whose fields lose static defaults.
     QickParam alternatives are removed. FieldMeta becomes Display metadata.
     str-or-model children become tagged ref/name or inline/module wrappers;
-    persistent seed and lock paths still name Spec fields, without envelopes.
+    persistent seed paths still name Spec fields, without envelopes.
     Optional desc is removed, so input,
     descriptions and writes cannot set them; validating as the Spec restores defaults.
     The Spec's validators are inherited; the Spec class is not modified.
@@ -402,18 +381,9 @@ def editable_spec(
             # A ClassVar annotation removes the inherited Pydantic field.
             annotations[name] = ClassVar[None]
             continue
-        nested = {
-            path.partition(".")[2]: value
-            for path, value in locks.items()
-            if path.partition(".")[0] == name and "." in path
-        }
         seed = seeds.get(name)
-        annotations[name] = (
-            literal_type(locks[name])
-            if name in locks
-            else _editable(
-                info.annotation, nested, seed if isinstance(seed, dict) else {}
-            )
+        annotations[name] = _editable(
+            info.annotation, seed if isinstance(seed, dict) else {}
         )
         derived = deepcopy(info)
         if inline_wrapper(annotations[name]) is not None:
@@ -428,9 +398,7 @@ def editable_spec(
         if isinstance(seed, dict) and "expr" in seed:
             derived.default = PydanticUndefined
             derived.default_factory = None
-        if name in locks:
-            derived.default = locks[name]
-        display = _spec_display(name, info, locked=name in locks)
+        display = _spec_display(name, info)
         if display is not None:
             derived.metadata.append(display)
         namespace[name] = derived
@@ -578,10 +546,7 @@ class ModuleField:
         self.node = node
         self.nullable = type(None) in members(annotation)
         self.catalog: Mapping[str, TemplateDef] = {}
-        self.locks = node.lock if node is not None else {}
-        self.editable = tuple(
-            editable_spec(spec, self.locks, {}) for spec in self.specs
-        )
+        self.editable = tuple(editable_spec(spec, {}) for spec in self.specs)
         self.native = any(
             isinstance(member, type) and issubclass(member, NativeModuleBase)
             for member in members(annotation)
@@ -635,10 +600,8 @@ class ModuleField:
             raise TypeError("Generated inline model must implement ModuleInline")
         self.inline = inline
         self._inline_fields: dict[type[BaseModel], type[BaseModel]] = {}
-        self.annotation = (
-            inline
-            if self.locks
-            else annotated_type(union_type((ref, inline)), Field(discriminator="kind"))
+        self.annotation = annotated_type(
+            union_type((ref, inline)), Field(discriminator="kind")
         )
         self.annotation = annotated_type(
             self.annotation,
@@ -673,7 +636,7 @@ class ModuleField:
         Empty kinds have no editable content and do not get an Inline selection.
         """
         key_commands: tuple[tuple[str, OptionCommand], ...] = ()
-        if not self.locks and env.library is not None:
+        if env.library is not None:
             key_commands = tuple(
                 (
                     key,
@@ -715,12 +678,8 @@ class ModuleField:
         if isinstance(self.node, Slot):
             for path, value in self.node.set.items():
                 set_path(seeds, path, scalar_seed(value))
-            for path, value in self.locks.items():
-                set_path(seeds, path, scalar_seed(value))
         if seeds:
-            self.editable = tuple(
-                editable_spec(spec, self.locks, seeds) for spec in self.specs
-            )
+            self.editable = tuple(editable_spec(spec, seeds) for spec in self.specs)
             module = union_type(self.editable)
             if len(self.specs) > 1:
                 module = annotated_type(module, Field(discriminator="type"))
@@ -754,7 +713,7 @@ class ModuleField:
                 raise ValueError(
                     f"Slot {self.node.path!r} has incompatible module family"
                 )
-            if not self.node.copy and not self.locks:
+            if not self.node.copy:
                 return {"kind": "ref", "name": key}
             model = next(
                 model for model in self.editable if type_tag(model) == spec.type
@@ -767,8 +726,6 @@ class ModuleField:
             return None
         for path, value in self.node.set.items():
             set_slot_path(model, module, path, scalar_seed(value), env)
-        for path, value in self.locks.items():
-            set_path(module, path, scalar_seed(value))
         selected = next(
             model for model in self.editable if type_tag(model) == module.get("type")
         )
@@ -832,7 +789,7 @@ class ModuleField:
         return ModuleValues(cfg.model_dump(mode="json"), mode, source)
 
     def fresh_inline_input(self, env: FormEnv) -> dict[str, JsonValue]:
-        """Build fresh Template/blank input and locks without copying any prior ref."""
+        """Build fresh Template/blank input without copying any prior ref."""
         template = self.node if isinstance(self.node, Template) else None
         if template is not None:
             module = template_input(template, self.catalog, self.editable, env)
@@ -840,8 +797,6 @@ class ModuleField:
             module = complete_input(self.editable[0], {})
         else:
             return static_defaults(self.inline)
-        for path, value in self.locks.items():
-            set_path(module, path, scalar_seed(value))
         return {"kind": "inline", "module": self._project(module)}
 
     def materialize(self, item: BaseModel, env: FormEnv) -> ConfigBase:

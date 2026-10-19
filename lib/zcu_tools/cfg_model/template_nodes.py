@@ -29,10 +29,9 @@ class Template:
     """Request a fresh inline module from an injected template catalog.
 
     ``id`` names a TemplateDef in that catalog. ``set`` maps dotted paths relative
-    to the module root to initial literal, Expr or Slot seeds. ``lock`` maps
-    relative scalar paths to fixed literals; forms reapply locks on branch
-    switches, but apply set only at initialization. ``qubit`` and ``resonator``
-    bind component placeholders to authored paths, defaulting to primary aliases.
+    to the module root to initial literal, Expr or Slot seeds. ``qubit`` and
+    ``resonator`` bind component placeholders to authored paths, defaulting to
+    primary aliases.
 
     Construction detaches the mappings. Consumers validate the ID, module family,
     path compatibility and placeholder syntax; this node does not read sources.
@@ -40,13 +39,11 @@ class Template:
 
     id: str
     set: Mapping[str, TemplateSeed] = field(default_factory=dict)
-    lock: Mapping[str, TemplateLiteral] = field(default_factory=dict)
     qubit: str = "$qubit"
     resonator: str = "$resonator"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "set", MappingProxyType(dict(self.set)))
-        object.__setattr__(self, "lock", MappingProxyType(dict(self.lock)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,17 +53,15 @@ class Slot:
     ``path`` is an authored slot or library root, optionally containing component
     placeholders. Forms resolve it at Reset to a direct key. ``copy=False`` keeps
     a reference; ``copy=True`` copies the module inline. ``set`` maps relative
-    dotted paths to initial literal, Expr or Slot seeds; ``lock`` maps relative
-    scalar paths to fixed literals and forces inline form content. When the slot
+    dotted paths to initial literal, Expr or Slot seeds. When the slot
     is unset, dangling or its alias is unbound, forms leave input absent: required
     core fields are Invalid; nullable core fields with a None default remain
-    disabled and Valid. Set is initialization-only; locks are reapplied on form
-    branch switches.
+    disabled and Valid. Set is initialization-only.
 
     Construction detaches mappings and rejects an empty path with ValueError.
     TemplateDef expansion changes only path placeholders, not Form options or
     references. The library creation catalog accepts Slot(path), but rejects
-    Slot.copy/set/lock with TypeError. Bound unset/dangling sources keep nested
+    Slot.copy/set with TypeError. Bound unset/dangling sources keep nested
     structural defaults; unbound aliases stay linked empty. Each consumer owns
     source lookup and schema compatibility failures. Form authors choose alternate
     sources in make_form(ctx), not in this declaration.
@@ -75,13 +70,11 @@ class Slot:
     path: str
     copy: bool = False
     set: Mapping[str, TemplateSeed] = field(default_factory=dict)
-    lock: Mapping[str, TemplateLiteral] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.path.strip():
             raise ValueError("Slot path must not be empty")
         object.__setattr__(self, "set", MappingProxyType(dict(self.set)))
-        object.__setattr__(self, "lock", MappingProxyType(dict(self.lock)))
 
 
 type TemplateSeed = TemplateLiteral | Expr | Slot

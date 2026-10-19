@@ -294,7 +294,7 @@ def test_spec_template_locks_and_handwritten_generated_fields_use_same_mapper() 
     assert object_at(copied.input.data, ("extras", "reference"))["kind"] == "inline"
     spec = adapter.module_form(PulseSpec)
     template = spec.template_input(
-        Template("pulse", lock={"freq": 42.0}),
+        Template("pulse", set={"freq": 42.0}),
         {
             "pulse": TemplateDef(
                 PulseSpec,
@@ -311,12 +311,8 @@ def test_spec_template_locks_and_handwritten_generated_fields_use_same_mapper() 
         },
         env,
     )
-    locked = spec.read_logical_field(template, ("freq",), env)
-    assert (
-        locked.description.target is not None
-        and locked.description.target.fixed
-        and locked.value == 42.0
-    )
+    seeded = spec.read_logical_field(template, ("freq",), env)
+    assert seeded.value == 42.0
     assert (
         spec.prepare_logical_edits(
             template, [adapter.LogicalEdit(("gain",), 0.5)], env
@@ -493,40 +489,6 @@ def test_missing_null_and_failed_scalar_values_have_distinct_statuses() -> None:
         and failed.input_present
         and failed.value is None
     )
-
-
-def test_locked_selector_rejects_library_and_preserves_inline_noop() -> None:
-    form = adapter.Form(LogicalCfg, {"drive": Template("pulse", lock={"freq": 7.0})})
-    form.bind_templates(
-        {
-            "pulse": TemplateDef(
-                PulseSpec,
-                "Locked pulse",
-                {
-                    "ch": 1,
-                    "nqz": 1,
-                    "freq": 1.0,
-                    "gain": 0.2,
-                    "waveform.style": "const",
-                    "waveform.length": 0.1,
-                },
-            )
-        },
-        adapter="synthetic",
-    )
-    env = captured()
-    input = form.default_input(env)
-    before = input.to_json()
-    observed = form.read_logical_field(input, ("drive",), env)
-    assert (
-        observed.description.target is not None
-        and observed.description.target.selection_fixed
-    )
-    with pytest.raises(adapter.LogicalEditError) as failure:
-        form.prepare_library_selection(input, ("drive",), "Q.pulses.drive", env)
-    assert failure.value.reason_code == "module_selector"
-    assert not form.prepare_inline_copy(input, ("drive",), env).changed
-    assert input.to_json() == before
 
 
 def test_ordinary_union_write_keeps_only_authored_raw_and_initial_active_structure() -> (

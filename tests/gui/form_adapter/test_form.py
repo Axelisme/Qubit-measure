@@ -213,7 +213,7 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
         ScalarCfg,
         {
             "sweep": {"freq": nodes.Range.around("10", halfwidth="2", expts=5)},
-            "count": nodes.Locked(7),
+            "count": 7,
             "amount": Expr("2 * 3"),
             "hidden": nodes.Hidden(),
             "text": "$literal",
@@ -241,8 +241,6 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
     count = state.describe(("count",), env).target
     assert count is not None
     assert count.title == "Repeats" and count.description == "Repeat count."
-    state.write({("count",): 8}, env)
-    assert isinstance(state.result(env), FormErrors)
 
 
 def test_range_single_point_conversion_reports_core_error_at_sweep_path() -> None:
@@ -386,17 +384,3 @@ def test_field_meta_group_reaches_description() -> None:
     env = FormEnv()
     amplitude = FormState(form.default_input(env)).describe(("amplitude",), env).target
     assert amplitude is not None and amplitude.group == "Advanced"
-
-
-def test_locked_field_with_decimals_metadata_has_description() -> None:
-    form = form_adapter.Form(DisplayedCfg, {"amplitude": nodes.Locked(0.25)})
-    env = FormEnv()
-
-    state = FormState(form.default_input(env))
-    amplitude = state.describe(("amplitude",), env).target
-    result = state.result(env)
-
-    assert amplitude is not None and amplitude.fixed and amplitude.fixed_value == 0.25
-    assert not isinstance(result, FormErrors)
-    cfg = form.to_cfg(result, env)
-    assert isinstance(cfg, DisplayedCfg) and cfg.amplitude == 0.25

@@ -1,6 +1,6 @@
 """Starting values for singleshot/ge; sources are captured at Open/Reset."""
 
-from zcu_tools.cfg_model import Hidden, Locked, Slot, Template
+from zcu_tools.cfg_model import Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
@@ -24,8 +24,6 @@ def make_form(ctx: FormContext) -> Form[GE_Cfg]:
             },
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "shots": 100000,
-            "reps": Locked(1),
-            "rounds": Locked(1),
             "initial_delay": Hidden(),
         },
     )

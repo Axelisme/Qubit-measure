@@ -7,7 +7,7 @@ from .dependencies import (
     WaveformAssetInfo,
 )
 from .field_meta import FieldMeta, get_field_meta
-from .form_nodes import AliasName, FormNode, Hidden, Locked, Range
+from .form_nodes import AliasName, FormNode, Hidden, Range
 from .inputs import CfgInputMap, CfgInputValue
 from .materialization import (
     ModuleCfgFactory,
@@ -62,7 +62,6 @@ __all__ = [
     "AliasName",
     "FormNode",
     "Hidden",
-    "Locked",
     "Range",
     "ConfigBase",
     "Expr",

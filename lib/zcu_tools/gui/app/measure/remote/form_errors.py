@@ -36,12 +36,19 @@ def cfg_error_to_remote(exc: CfgPreconditionError) -> RemoteError:
 
 
 def input_rejected_to_remote(exc: FormInputRejected) -> RemoteError:
-    """Preserve a declaration refusal and its original typed mutation path."""
+    """Preserve a refusal path, adding reason/current only for readonly input.
+
+    Keep the existing form_input_rejected taxonomy. Readonly current is raw JSON,
+    including null; ordinary owner refusals retain only form_path in data.
+    """
+    data: dict[str, object] = {"form_path": list(exc.path)}
+    if exc.reason == "readonly":
+        data.update(reason="readonly", current=exc.current)
     return RemoteError(
         ErrorCode.INVALID_PARAMS,
         str(exc),
         reason="form_input_rejected",
-        data={"form_path": list(exc.path)},
+        data=data,
     )
 
 

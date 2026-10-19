@@ -788,14 +788,14 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
     )
 
 
-def test_template_input_models_isolate_locks_defaults_and_recomputation(
+def test_template_input_models_isolate_defaults_and_recomputation(
     creation_templates: dict[str, TemplateDef],
 ) -> None:
     form = form_adapter.module_form(PulseSpec)
     original_model = form.model
     env = creation_env()
-    first_template = Template("pulse", lock={"gain": 0.6})
-    second_template = Template("pulse", set={"phase": 7.0}, lock={"ch": 3})
+    first_template = Template("pulse", set={"gain": 0.6})
+    second_template = Template("pulse", set={"phase": 7.0, "ch": 3})
     first = form.template_input(first_template, creation_templates, env)
     second = form.template_input(second_template, creation_templates, env)
     first_state = FormState(first)
@@ -804,24 +804,17 @@ def test_template_input_models_isolate_locks_defaults_and_recomputation(
     assert issubclass(first.model, original_model)
     assert issubclass(second.model, original_model)
     assert form.model is original_model
-    first_state.write({("gain",): 0.7}, env)
-    errors = first_state.result(env)
-    assert isinstance(errors, FormErrors) and set(errors.messages) == {("gain",)}
-    first_state.write({("gain",): 0.6}, env)
     first_cfg = result_spec(form, first_state, env)
     second_cfg = result_spec(form, second_state, env)
     assert type(first_cfg) is PulseSpec and first_cfg.gain == 0.6
     assert type(second_cfg) is PulseSpec and second_cfg.gain == 0.25
     assert second_cfg.phase == 7.0 and second_cfg.ch == 3
-    second_state.write({("gain",): 0.4, ("ch",): 2}, env)
-    errors = second_state.result(env)
-    assert isinstance(errors, FormErrors) and set(errors.messages) == {("ch",)}
     refreshed = first.model.default_input(creation_env(125.0))
     assert refreshed.data["freq"] == 125.0 and refreshed.data["gain"] == 0.6
     assert first.data["freq"] == 120.0
     assert form.default_input(env).data == original_model.default_input(env).data
-    assert dict(first_template.lock) == {"gain": 0.6}
-    assert dict(second_template.set) == {"phase": 7.0}
+    assert dict(first_template.set) == {"gain": 0.6}
+    assert dict(second_template.set) == {"phase": 7.0, "ch": 3}
 
 
 def test_template_input_slot_keeps_bound_key(

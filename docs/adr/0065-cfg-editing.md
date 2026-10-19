@@ -22,13 +22,17 @@ Library entry 表單由 session 擁有，固定 root 的具體 Spec family。初
 
 None、library keys 與各 Inline kind 在同一個合併下拉。Key 只顯示名稱，不展開唯讀 descendants。普通選 Inline 由欄位 converter 依明確的型別配對政策繼承；明確的 to_inline 指令從固定 library 複製內容。無 converter 時只改 selection，子表單結構與 input 不變，不補 fresh defaults，見 [[0079]]。Advanced 群組預設折疊。Expression 只適用於文字欄位，下拉與勾選欄位不求值。
 
-實驗 adapter 宣告 `Form(core_cfg, tree)`。Core annotations 定義可編輯形狀，tree 定義起始值、Slot、Template 與 lock。Open 與 Reset 計算 defaults。Memento 保存 selection／branch 與原始 Form input，不保存來源覆寫；還原不執行 converter，identity 不相容時明確報錯，見 [[0079]]。Make_form、範本與固定來源的契約見 [[0073]]。Reset 可在同一資源內更換形狀與初值；成功後舊 editor state 不再承接寫入。
+實驗 adapter 宣告 `Form(core_cfg, tree)`。Core annotations 定義可編輯形狀，tree 定義起始值、唯讀屬性、Slot 與 Template。Open 與 Reset 計算 defaults。Memento 保存 selection／branch 與原始 Form input，不保存來源覆寫；還原不執行 converter，identity 不相容時明確報錯，見 [[0079]]。Make_form、範本與固定來源的契約見 [[0073]]。Reset 可在同一資源內更換形狀與初值；成功後舊 editor state 不再承接寫入。
 
 ## Input 與宿主提交
 
 FormInput 保存未填、null 與 expression 原文，FormModel 實例只承載求值後的普通值。FormState 擁有 draft／base，不持有 Engine revision。FormEditor 擁有尚未 parse 的文字與 local parse errors；宿主提交前檢查這些錯誤，再取得 Form result，不能把 preview 當成可提交結果。
 
 Host 決定 capture、Apply、Discard 與 input 保存時機。Library／writeback 提交持久 Spec；workflow host 交普通 plan／tunables 給 Engine，只有 Engine 成功 publication 後才接受 input／base，見 [[0062]]。Expression 留在 FormInput，不進 Engine journal。Host 保留 input 的責任不表示它擁有另一套 evaluator、validator 或 codec。
+
+宣告唯讀的欄位使用初值與 `Display(readonly=True)`，由 Form core 對 Qt、MCP 與 RPC 執行同一寫入規則。同值寫入通過，不同值拒絕；父層或批次寫入不能繞過唯讀子欄位。RPC／MCP 拒絕保留 `error.reason="form_input_rejected"` 與 `error.data.form_path`。唯讀拒絕另帶 `error.data.reason="readonly"` 與目前值的 JSON 形式 `error.data.current`；其他 rejection 不帶這兩個欄位。
+
+使用者於 2026-10-19 裁定：「那為什麼不直接都用ReadOnly就好？」「1同樣值不報錯。2我選存檔的版本，因為有些lock值可能是生成的。能不能執行是另外一回事」。還原保留唯讀欄位的存檔值，不從宣告重新計算，執行有效性仍由一般驗證判定，見 [[0079]]。
 
 共用核心不依賴 app、widgets、remote、experiment 或 Qt，editor 不依賴 app、remote、experiment 或 MCP。既有 `.importlinter` contracts `form-core-no-ui-policy` 與 `form-editor-no-host` 投影這兩個方向。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入本篇及 [[0062]]，方法與欄位細節留在 owner 文件。
 
@@ -48,7 +52,7 @@ Preview、result 與 description 都不暗改 input。Values 顯示有效端點�
 
 `tab.describe_cfg(path)` 以 str 欄位名／int index 查目標與直接 children，不產生整棵 JSON Schema。回覆同時包含局部 input_present、input、value 與 Form preview 定向 errors，不 materialize 或呼叫 to_cfg。Lowered cfg errors 用 get_cfg 或 Run admission 檢查。Unknown、inactive 與 whole-leaf 子路徑回 invalid_params／form_path，data.form_path 保留請求路徑。其他 ValueError 維持 controller_error。Writeback 的 observe_entry 同樣只回 input、values、errors。
 
-使用者 2026-10-15：「好，先照這個規劃開始」。共用描述直接讀宣告與目前 input，options 只列 label、value 與 command name／label，不帶 fields。查 active path 才列 children；單一普通 model wrapper 攤平一層，完整 path 仍保留 wrapper。can_expand 只表示結構可展開，不執行 child hooks 或保證 children 非空。selection_fixed 表示本層 annotation 只有一個非 null 分支，不凍結內部欄位；fixed 表示完整值固定。Recipe lock 取兩者的 or。
+使用者 2026-10-15：「好，先照這個規劃開始」。共用描述直接讀宣告與目前 input，options 只列 label、value 與 command name／label，不帶 fields。查 active path 才列 children；單一普通 model wrapper 攤平一層，完整 path 仍保留 wrapper。can_expand 只表示結構可展開，不執行 child hooks 或保證 children 非空。selection_fixed 表示本層 annotation 只有一個非 null 分支，不凍結內部欄位；fixed 表示完整值固定。Core cfg 本身的單值 Literal 仍算固定值。`RecipeFormField.locked` 是 selection_fixed、fixed 與宣告 readonly 三者的 or，不從當次選單數量推定。
 
 FormEditor 首次展開才查詢並建立 descendants，收起保留 widgets 與未提交文字，不偷寫 input。換選項只替換該子樹。折疊錯誤從完整 preview 聚合到可見祖先。Measure、workflows、Inspect、New Entry 與 writeback 共用此機制，保留各宿主的固定 capture、Apply／Cancel、guard 與 lifetime。
 
@@ -68,9 +72,9 @@ Open 與 Reset 捕捉一次 point、library、alias 表、cached device infos �
 
 RecipeSession.open_tab 的公開 aliases/reuse 用法不變。新 tab 與 reuse tab 都先 Reset，再設定參數與 Run。Target 對到 Reset 的 aliases，而非 preview 或 Run 的臨時解析。Recipe 的參數 schema 保持手寫，不從 Form 或 Python signatures 生成。
 
-Form Slot 使用公開 ModuleRef/ModuleInline input。Key branch 保存 `{kind: ref, name: actual_library_key}`，inline branch 保存 `{kind: inline, module: Spec input}`。Nested key-or-inline 欄位用普通字串作 key。RecipeTab.use_library 寫實際 key，不建立舊 __ref editing intent。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕選 key。
+Form Slot 使用公開 ModuleRef/ModuleInline input。Key branch 保存 `{kind: ref, name: actual_library_key}`，inline branch 保存 `{kind: inline, module: Spec input}`。Nested key-or-inline 欄位用普通字串作 key。RecipeTab.use_library 寫實際 key，不建立舊 __ref editing intent。Module 子欄位唯讀不限制祖先選擇，仍可選 library key。Module 節點本身標唯讀則固定整個子樹，包含 ref／inline 選擇與所有子欄位，不論初值是 ref 或 inline；不另設 selector-only 宣告，也不自動強制 inline。
 
-RecipeTab.read_field 每次以一次 `tab.describe_cfg` 讀同一 owner turn 的目前欄位，回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、Form lock、目前 child field names 與 directed errors。它不投影 CfgSchema kind，也不承諾 ref descendants 唯讀。Inline model 的路徑包含 module，例如 `modules.readout.module.freq`。Range count 的路徑是 n。set_sweep 的完整 start／stop／expts 設定以一次 container edit 建立 Range + Expts，不寫 Center／Step 的 inactive paths，也不要求舊 draft 可換算。部分設定仍只編輯目前 active leaves。
+RecipeTab.read_field 每次以一次 `tab.describe_cfg` 讀同一 owner turn 的目前欄位，回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、locked、via_ref、目前 child field names 與 directed errors。`via_ref` 表示路徑穿過 library 引用，不表示宣告唯讀。它不投影 CfgSchema kind，觀察 ref descendants 也不授權寫入。Inline model 的路徑包含 module，例如 `modules.readout.module.freq`。Range count 的路徑是 n。set_sweep 的完整 start／stop／expts 設定以一次 container edit 建立 Range + Expts，不寫 Center／Step 的 inactive paths，也不要求舊 draft 可換算。部分設定仍只編輯目前 active leaves。
 
 實驗 cfg 依 [[0073]] 使用具名裝置欄位，例如 flux_dev、jpa_flux_dev，不再保存 dev role mapping。Form 的 AliasName 在 Open／Reset 解析 direct 名稱。使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 與 Notebook 不提供隱含 default，GUI 的初始值為 A。Recipe helper 只比 cached unit，成功後寫 caller 指定的具名裝置欄位與獨立 flux_unit，不換算、不連線或 setup。
 
