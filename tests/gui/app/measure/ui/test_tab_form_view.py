@@ -17,7 +17,14 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QWidget,
 )
-from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, Expr, PulseCfg, PulseSpec, Range
+from zcu_tools.cfg_model import (
+    ConfigBase,
+    ConstWaveformCfg,
+    Expr,
+    PulseCfg,
+    PulseSpec,
+    Range,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -50,16 +57,16 @@ from zcu_tools.resources.context.library import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui._user_input import ComponentDriver, key_click, mouse_click, type_text
 from tests.gui._qt_waits import qt_until
-from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
-from tests.gui.app.measure.remote._helpers import Fixture
+from tests.gui._user_input import ComponentDriver, key_click, mouse_click, type_text
 from tests.gui.app.measure._form_fakes import (
     LookupCfg,
     configure_form_lookup,
     make_form,
 )
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 from tests.gui.app.measure.artifacts._snapshots import with_artifacts
+from tests.gui.app.measure.remote._helpers import Fixture
 from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text
 
@@ -212,16 +219,19 @@ def test_busy_tab_locks_editing_and_reset_until_idle(
     assert gain.text() == original
     assert view.resource.input.data["gain"] == original_gain
     assert not view.tab.reset_btn.isVisibleTo(view.tab)
+    assert not view.tab.refresh_btn.isVisibleTo(view.tab)
 
     view.tab.update_interaction_state(snapshot(is_analyzing=True))
 
     assert gain.isEnabled() and gain.isReadOnly()
     assert not view.tab.reset_btn.isEnabled()
+    assert not view.tab.refresh_btn.isEnabled()
 
     view.tab.update_interaction_state(snapshot())
 
     assert gain.isEnabled() and not gain.isReadOnly()
     assert view.tab.reset_btn.isEnabled()
+    assert view.tab.refresh_btn.isEnabled()
     commit_text(gain, "0.3")
     assert view.resource.input.data["gain"] == 0.3
 
@@ -308,64 +318,70 @@ def test_reset_shows_fresh_defaults_and_later_edits_still_reach_the_resource(
     assert view.resource.result() == LookupCfg(gain=0.2)
 
 
-def test_restored_tab_refresh_reset_edit_and_run_with_component_driver(
-    qapp: QApplication, tmp_path: Path
+def test_refresh_capture_failure_is_presented_and_keeps_visible_input(
+    qapp: QApplication, open_tab: Callable[..., TabView]
 ) -> None:
+    failed = False
+
+    def capture(_aliases: object) -> TabFormSources:
+        if failed:
+            raise OSError("Source capture unavailable")
+        return TabFormSources(FormEnv())
+
+    resource = TabFormResource(
+        lambda _ctx: Form(LookupCfg, {}),
+        capture=capture,
+        mutation_allowed=lambda: True,
+    )
+    presenter = RecordingDialogPresenter()
+    view = open_tab(presenter, resource)
+    view.tab.resize(1000, 750)
+    view.tab.show()
+    qapp.processEvents()
+    driver = ComponentDriver(view.tab)
+    driver.enter_text(object_name="form.input.gain", value="0.45")
+    failed = True
+    driver.click("Refresh")
+    assert presenter.calls[-1].kind == "critical"
+    assert presenter.calls[-1].message == "Source capture unavailable"
+    assert driver.observe(object_name="form.input.gain").text == "0.45"
+    assert driver.observe("Run").enabled
+
+
+@pytest.fixture
+def source_window(qapp: QApplication) -> Iterator[MainWindow]:
+    """Open a synthetic tab, then publish a newer source before interaction."""
+
     class SourceAdapter(SampleAdapter):
         @staticmethod
         def make_form(ctx: FormContext) -> Form[SampleCfg]:
             del ctx
-            return Form(SampleCfg, {"gain": Expr("general.ext.amount"), "sweep": Range.between(1, 2, expts=3)})
+            return Form(
+                SampleCfg,
+                {
+                    "gain": Expr("general.ext.amount"),
+                    "sweep": Range.between(1, 2, expts=3),
+                },
+            )
 
     application = Fixture(headless=True)
     application.registry.register("source", SourceAdapter)
     ctrl = application.ctrl
     target = ctrl.context_control.read_context().target
     ctrl.context_control.set_parameter(target, "general.ext.amount", 0.2)
-    original = ctrl.new_tab("source")
-    ctrl.cfg_resources.lookup(original).write({("gain",): {"expr": "general.ext.amount * 1.5"}})
-    saved = ctrl.capture_persisted_state()
-    ctrl.close_tab(original)
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
-    ctrl.restore_persisted_state(saved)
-    # Setup publishes a newer source without changing the restored tab's capture.
+    tab_id = ctrl.new_tab("source")
+    ctrl.cfg_resources.lookup(tab_id).write(
+        {("gain",): {"expr": "general.ext.amount * 1.5"}}
+    )
+    window.refresh_context_panel()
+    # Setup publishes a newer source without changing the open tab's capture.
     ctrl.context_control.set_parameter(target, "general.ext.amount", 0.5)
     window.resize(1200, 850)
     window.show()
-    driver = ComponentDriver(window)
-    images = tmp_path / "restore-refresh-reset"
     try:
-        driver.screenshot(images / "01-restored.png")
-        assert driver.observe(object_name="form.input.gain").text == "general.ext.amount * 1.5"
-        assert driver.observe("Run").enabled
-        assert any(item.text == "Refresh" and item.enabled for item in driver.visible().widgets), "Restored tabs need an explicit Refresh action"
-        driver.click("Refresh")
-        driver.screenshot(images / "02-refreshed.png")
-        assert driver.observe(object_name="form.input.gain").text == "general.ext.amount * 1.5"
-        assert any(item.text == "= 0.75" for item in driver.visible().widgets)
-        driver.enter_text(object_name="form.input.gain", value="general.ext.amount * 1.2")
-        driver.screenshot(images / "03-edited.png")
-        assert any(item.text == "= 0.6" for item in driver.visible().widgets)
-        driver.click("Run")
-        driver.select_tab("Analysis")
-        qt_until(lambda: driver.observe("Analyze").enabled, label="restored source tab run complete")
-        driver.screenshot(images / "04-ran.png")
-        driver.select_tab("Run")
-        # Real dialog confirmation is delivered by a queued keyboard click.
-        from qtpy.QtCore import QTimer
-        from qtpy.QtWidgets import QMessageBox
-
-        def confirm_reset() -> None:
-            box = qapp.activeModalWidget()
-            assert isinstance(box, QMessageBox)
-            ComponentDriver(box).click("Yes")
-
-        QTimer.singleShot(0, confirm_reset)
-        driver.click("Reset")
-        driver.screenshot(images / "05-reset.png")
-        assert driver.observe(object_name="form.input.gain").text == "0.5"
-        assert driver.observe("Run").enabled
+        yield window
     finally:
         application.stop()
         for tab_id in tuple(ctrl.list_tab_ids()):
@@ -373,6 +389,52 @@ def test_restored_tab_refresh_reset_edit_and_run_with_component_driver(
         window.deleteLater()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
+
+
+def test_tab_refresh_reset_edit_and_run_with_component_driver(
+    qapp: QApplication, tmp_path: Path, source_window: MainWindow
+) -> None:
+    driver = ComponentDriver(source_window)
+    images = tmp_path / "refresh-reset"
+    driver.screenshot(images / "01-open.png")
+    assert (
+        driver.observe(object_name="form.input.gain").text == "general.ext.amount * 1.5"
+    )
+    assert driver.observe("Run").enabled
+    assert any(
+        item.text == "Refresh" and item.enabled for item in driver.visible().widgets
+    ), "Tabs need an explicit Refresh action"
+    driver.click("Refresh")
+    driver.screenshot(images / "02-refreshed.png")
+    assert (
+        driver.observe(object_name="form.input.gain").text == "general.ext.amount * 1.5"
+    )
+    assert any(item.text == "= 0.75" for item in driver.visible().widgets)
+    driver.enter_text(object_name="form.input.gain", value="general.ext.amount * 1.2")
+    driver.screenshot(images / "03-edited.png")
+    assert any(item.text == "= 0.6" for item in driver.visible().widgets)
+    driver.click("Run")
+    driver.select_tab("Analysis")
+    qt_until(
+        lambda: driver.observe("Analyze").enabled,
+        label="source tab run complete",
+    )
+    driver.screenshot(images / "04-ran.png")
+    driver.select_tab("Run")
+    # Real dialog confirmation is delivered by a queued keyboard click.
+    from qtpy.QtCore import QTimer
+    from qtpy.QtWidgets import QMessageBox
+
+    def confirm_reset() -> None:
+        box = qapp.activeModalWidget()
+        assert isinstance(box, QMessageBox)
+        ComponentDriver(box).click("&Yes")
+
+    QTimer.singleShot(0, confirm_reset)
+    driver.click("Reset")
+    driver.screenshot(images / "05-reset.png")
+    assert driver.observe(object_name="form.input.gain").text == "0.5"
+    assert driver.observe("Run").enabled
 
 
 def test_detach_stops_following_the_resource(

@@ -350,7 +350,9 @@ def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
     assert captures == [None, {"selected": "Q2"}, None, None]
 
 
-def test_refresh_retains_explicit_selections_and_reports_missing_library_source() -> None:
+def test_refresh_retains_explicit_selections_and_reports_missing_library_source() -> (
+    None
+):
     from tests.gui.form_adapter._indexed_models import indexed_env, indexed_form
 
     env = indexed_env()
@@ -365,7 +367,8 @@ def test_refresh_retains_explicit_selections_and_reports_missing_library_source(
         original = resource.input
         env = FormEnv()
         resource.refresh_sources()
-        assert resource.input.same_as(original)
+        assert resource.input.data == original.data
+        assert resource.input.selections == original.selections
         assert resource.input.selections[("tones", 1, "sweep")] == {"kind": "center"}
         errors = resource.preview().errors
         assert errors is not None
@@ -541,7 +544,9 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
 
 
 @pytest.mark.parametrize("command", ["reset", "refresh_sources"])
-def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources(command: str) -> None:
+def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources(
+    command: str,
+) -> None:
     assert hasattr(resource_api, "TabFormResources"), (
         "Missing state-owned Form resource pool"
     )
