@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -12,7 +13,13 @@ from zcu_tools.resources.entry import (
     ResultEntry,
 )
 
-from .backup import backup_location, create_backup, validate_backup_sources
+from .backup import (
+    backup_location,
+    backup_records_path,
+    create_backup,
+    validate_backup_report_path,
+    validate_backup_sources,
+)
 from .errors import MigrationInputError
 from .evidence import validate_run_evidence
 from .models import (
@@ -168,8 +175,7 @@ def _resume_session(
         raise MigrationInputError(
             f"{path}: verified backup identity changed or missing"
         )
-    if manifest.report_path.is_relative_to(backup.path):
-        raise MigrationInputError(f"{path}: report cannot write into verified backup")
+    validate_backup_report_path(backup.path, manifest.report_path)
     validate_backup_sources(MigrationSession(path, manifest, dry_run=True))
     _validate_report_location(manifest.report_path, source, destination)
     manifest = _recover_first_report(manifest)
@@ -213,12 +219,11 @@ def _validate_report_location(
 ) -> None:
     for root in (source.result_path, source.database_path):
         _protect_source(root, report_path.resolve())
-    default = destination.result_path / "records" / "migration-report.json"
     if not report_path.is_absolute() or report_path.resolve() != report_path:
         raise MigrationInputError(
             f"{report_path}: report path must be resolved and absolute"
         )
-    if report_path != default and any(
+    if any(
         report_path.is_relative_to(root)
         for root in (
             source.result_path,
@@ -241,10 +246,13 @@ def _new_session(
     for target in (destination.result_path, destination.database_path):
         if target.exists() or target.is_symlink():
             raise FileExistsError(target)
+    backup_path = backup_location(request, source)
+    report_date = datetime.now(timezone.utc).date()
     report_path = (
         request.report_path.resolve()
         if request.report_path is not None
-        else destination.result_path / "records" / "migration-report.json"
+        else backup_records_path(backup_path, source)
+        / f"migration-report-{report_date}.json"
     )
     if report_path.exists() or report_path.is_symlink():
         raise FileExistsError(report_path)
@@ -263,7 +271,6 @@ def _new_session(
             )
         if not report_path.parent.is_dir():
             raise MigrationInputError(f"{report_path}: report parent must exist")
-    backup_path = backup_location(request, source)
     backup = create_backup(backup_path, source, dry_run=request.dry_run)
     entry = None
     entry_id = uuid4()
@@ -286,6 +293,7 @@ def _new_session(
         identity=_identity(request, entry_id),
         mapping_version=mapping.mapping_version,
         report_path=report_path,
+        report_date=report_date,
         source_hashes={},
         evidence=None,
         files=(),
@@ -302,10 +310,16 @@ def publish_report(session: MigrationSession) -> None:
     """Publish the session's accumulated JSON report at its immutable owned path.
 
     First publication is exclusive; later updates replace only the recorded report.
-    Checkpoint first-publication ownership. dry_run writes nothing. I/O/collisions
-    propagate; the durable manifest can rebuild an interrupted report update."""
+    Checkpoint first-publication ownership. After cleanup completes, also publish
+    the dated entry records copy, recovering only an exact interrupted first copy.
+    dry_run writes nothing. I/O/collisions propagate; the durable manifest can
+    rebuild an interrupted report update."""
     if session.dry_run:
         return
+    backup = session.manifest.backup
+    if backup is None:
+        raise MigrationInputError("manifest: verified backup is required")
+    validate_backup_report_path(backup.path, session.manifest.report_path)
     write_json(
         session.manifest.report_path,
         report_json(session.manifest.report),
@@ -313,6 +327,29 @@ def publish_report(session: MigrationSession) -> None:
     )
     if not session.manifest.report_published:
         session.manifest = replace(session.manifest, report_published=True)
+        session.checkpoint()
+    if session.manifest.cleanup_phase == "complete":
+        _publish_completion_report(session)
+
+
+def _publish_completion_report(session: MigrationSession) -> None:
+    manifest = session.manifest
+    path = (
+        manifest.report.destination.result_path
+        / "records"
+        / f"migration-report-{manifest.report_date}.json"
+    )
+    if path.is_symlink() or path.parent.is_symlink():
+        raise MigrationInputError(f"{path}: completion report symlink conflict")
+    owned = manifest.completion_report_published
+    if not owned and path.exists():
+        existing = _JSON.validate_json(path.read_text(encoding="utf-8"), strict=True)
+        if not json_values_equal(existing, report_json(manifest.report)):
+            raise MigrationInputError(f"{path}: unowned completion report collision")
+        owned = True
+    write_json(path, report_json(manifest.report), replace_existing=owned)
+    if not manifest.completion_report_published:
+        session.manifest = replace(manifest, completion_report_published=True)
         session.checkpoint()
 
 

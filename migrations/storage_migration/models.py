@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -199,12 +199,14 @@ class MigrationRequest:
     not physical identifiers to parse. part selects parameters, data or both.
     dry_run reads only and publishes nothing. resume requires this tool's prior
     manifest, never an arbitrary existing entry. report_path is an optional
-    independent report file; None selects records/migration-report.json.
+    independent report file; None selects the shared backup's dated report.
+    Completion also publishes a dated report in the entry records directory.
     run_evidence is the complete caller-loaded document or None. The converter
     resolves paths and rejects source/destination overlaps and identity changes.
     repo_root is the checkout to exclude from backup, or None for this tool's
     checkout. backup_parent is an external directory, or None for repo_root.parent;
-    the tool exclusively creates its <name>-backup child before migration writes.
+    the tool accumulates chip/qubit mirrors in its <repo-name>-backup child.
+    Either existing source mirror is refused before migration writes.
     assume_flux_unit supplies A/mA/V/mV only when flux unit keys are absent;
     explicit invalid/conflicting evidence stays pending. assume_jpa_flux_unit
     independently supplies A/V only for absent JPA unit evidence; it never uses
@@ -430,14 +432,15 @@ class ModuleFilePublication:
 class MigrationBackup:
     """Verified external backup identity fixed before any migration writes.
 
-    path is the resolved <name>-backup directory. inventory_hash is SHA256 of
-    sha256.json, binding its complete relative file hashes and directory list.
+    path is the resolved shared <repo-name>-backup directory. inventory_hashes
+    maps result and Database to SHA256 of their respective records/*.sha256 lists,
+    binding complete relative file hashes and directory lists for this chip/qubit.
     source_hashes maps absolute original files to their backed-up SHA256, so
     publications reject changed/new sources before any individual move deletes.
     """
 
     path: Path
-    inventory_hash: str
+    inventory_hashes: Mapping[str, str]
     source_hashes: Mapping[str, str]
 
 
@@ -446,7 +449,10 @@ class MigrationManifest:
     """Durable state for this tool's entry, not a multi-file transaction.
 
     identity is immutable; mapping_version must match exactly on resume.
-    report_path is the immutable resolved report location. source_hashes maps
+    report_path is the immutable resolved report location. report_date is the
+    first execution's UTC ISO date, also naming the completion report in entry
+    records. completion_report_published records ownership of that entry copy.
+    source_hashes maps
     absolute source path strings to baseline SHA256. evidence stores the full
     original JSON document or None, including unknown fields. files records
     owned publications; runs records fixed run assignments. parameters_complete
@@ -467,6 +473,7 @@ class MigrationManifest:
     identity: MigrationIdentity
     mapping_version: str
     report_path: Path
+    report_date: date
     source_hashes: Mapping[str, str]
     evidence: JsonObject | None
     files: tuple[MigrationFileState, ...]
@@ -475,6 +482,7 @@ class MigrationManifest:
     data_complete: bool
     report: MigrationReport
     report_published: bool = False
+    completion_report_published: bool = False
     format: str = "zcu.storage-migration"
     format_version: str = "1.0"
     raw: JsonObject = field(default_factory=dict)

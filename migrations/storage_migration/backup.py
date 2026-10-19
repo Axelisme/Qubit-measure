@@ -16,8 +16,10 @@ from .state import MigrationSession, file_hash
 class BackupInventory:
     """Complete backup listing relative to its directory, without symlinks.
 
-    hashes maps result/<relative> and Database/<relative> files to lowercase
-    SHA256. directories records all directories, including empty source roots.
+    hashes maps each caller-supplied root label plus relative file path to
+    lowercase SHA256. On disk the labels are result/<chip>/<qubit> and
+    Database/<chip>/<qubit>; cleanup uses result and Database labels internally.
+    directories records every directory, including empty source roots.
     """
 
     hashes: Mapping[str, str]
@@ -28,14 +30,17 @@ _INVENTORY = TypeAdapter(BackupInventory)
 
 
 def backup_location(request: MigrationRequest, source: MigrationSource) -> Path:
-    """Resolve an external <name>-backup path without writing or allowing overlaps.
+    """Resolve an external <repo-name>-backup root without writes or overlaps.
 
     request.repo_root defaults to the tool checkout. Reject a backup within that
-    repo, enclosing either source, or overlapping either destination or report.
+    repo, enclosing either source, or overlapping either destination. Reports
+    cannot write into the logical mirrors.
     Existence is checked separately so resume can verify the owned backup.
     """
     repo = (request.repo_root or Path(__file__).resolve().parents[2]).resolve()
-    path = ((request.backup_parent or repo.parent) / f"{request.name}-backup").resolve()
+    candidate = (request.backup_parent or repo.parent) / f"{repo.name}-backup"
+    _reject_symlinks(candidate)
+    path = candidate.resolve()
     targets = (
         source.result_path,
         source.database_path,
@@ -48,11 +53,63 @@ def backup_location(request: MigrationRequest, source: MigrationSource) -> Path:
         raise MigrationInputError(
             f"{path}: backup must be outside repo and source/destination trees"
         )
-    if request.report_path is not None and request.report_path.resolve().is_relative_to(
-        path
-    ):
-        raise MigrationInputError(f"{path}: backup cannot contain the migration report")
+    if request.report_path is not None:
+        validate_backup_report_path(path, request.report_path)
     return path
+
+
+def _reject_symlinks(path: Path) -> None:
+    for ancestor in (path, *path.parents):
+        if ancestor.is_symlink():
+            raise MigrationInputError(f"{ancestor}: backup symlink conflict")
+
+
+def _mirror_roots(path: Path, source: MigrationSource) -> dict[str, Path]:
+    relative = Path(source.result_path.parent.name) / source.result_path.name
+    return {label: path / label / relative for label in ("result", "Database")}
+
+
+def backup_records_path(path: Path, source: MigrationSource) -> Path:
+    """Return this source's records directory under the shared backup root.
+
+    path is the validated backup root; source names the selected chip/qubit.
+    This only computes a location, never creates or adopts existing records.
+    """
+    return (
+        path
+        / "migration-records"
+        / source.result_path.parent.name
+        / source.result_path.name
+    )
+
+
+def validate_backup_report_path(path: Path, report_path: Path) -> None:
+    """Reject a report inside either logical mirror, without writing anything.
+
+    path is the shared backup root. Reports may use its non-mirror locations or
+    an independent external path. Symlink ancestors are unsupported.
+    """
+    _reject_symlinks(report_path)
+    if any(
+        report_path.resolve().is_relative_to(path / label)
+        for label in ("result", "Database")
+    ):
+        raise MigrationInputError(
+            f"{report_path}: report cannot write into backup mirrors"
+        )
+
+
+def backup_source_path(path: Path, source: MigrationSource, original: Path) -> Path:
+    """Locate an original source file in the logical backup mirror, without I/O.
+
+    path is the shared backup root; source owns the original result/Database
+    trees. Return original unchanged if it belongs to neither source tree.
+    """
+    mirrors = _mirror_roots(path, source)
+    for label, root in _source_roots(source).items():
+        if original.is_relative_to(root):
+            return mirrors[label] / original.relative_to(root)
+    return original
 
 
 def _inventory(
@@ -90,62 +147,92 @@ def _source_roots(source: MigrationSource) -> dict[str, Path]:
 def create_backup(
     path: Path, source: MigrationSource, *, dry_run: bool
 ) -> MigrationBackup | None:
-    """Copy both complete source trees and publish sha256.json after byte verification.
+    """Copy complete sources into a shared root and publish two verified hash lists.
 
-    Refuse existing paths, symlinks or non-regular source files. dry_run validates
-    the inventory but writes nothing and returns None. Failures leave any partial
-    backup for explicit operator review, never grant migration permission.
+    Refuse either existing chip/qubit mirror or records directory, symlinks and
+    non-regular files. Unrelated backups remain untouched. dry_run validates but
+    writes nothing and returns None. Failures retain partial backups for operator
+    review, never grant migration permission or remove the shared root.
     """
-    if path.exists() or path.is_symlink():
-        raise FileExistsError(path)
+    mirrors = _mirror_roots(path, source)
+    records = backup_records_path(path, source)
+    for target in (*mirrors.values(), records):
+        _reject_symlinks(target)
+        if target.exists():
+            raise FileExistsError(target)
     inventory = _inventory(_source_roots(source))
     if dry_run:
         return None
-    path.mkdir(parents=True, exist_ok=False)
     for label, root in _source_roots(source).items():
-        shutil.copytree(root, path / label, copy_function=shutil.copy2)
-    copied = _inventory({label: path / label for label in ("result", "Database")})
-    if copied != inventory or _inventory(_source_roots(source)) != inventory:
+        mirrors[label].parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(root, mirrors[label], copy_function=shutil.copy2)
+    if (
+        _inventory(mirrors) != inventory
+        or _inventory(_source_roots(source)) != inventory
+    ):
         raise MigrationInputError(
             f"{path}: backup verification failed or sources changed"
         )
-    inventory_path = path / "sha256.json"
-    with inventory_path.open("xb") as stream:
-        stream.write(_INVENTORY.dump_json(inventory, indent=2))
+    records.mkdir(parents=True, exist_ok=False)
+    inventory_hashes: dict[str, str] = {}
+    for label, mirror in mirrors.items():
+        inventory_path = records / f"{label}.sha256"
+        mirror_label = mirror.relative_to(path).as_posix()
+        with inventory_path.open("xb") as stream:
+            stream.write(
+                _INVENTORY.dump_json(_inventory({mirror_label: mirror}), indent=2)
+            )
+        inventory_hashes[label] = file_hash(inventory_path)
     backup = MigrationBackup(
         path=path,
-        inventory_hash=file_hash(inventory_path),
+        inventory_hashes=inventory_hashes,
         source_hashes=_absolute_hashes(inventory, source),
     )
-    verify_backup(backup)
+    verify_backup(backup, source)
     return backup
 
 
-def verify_backup(backup: MigrationBackup) -> BackupInventory:
+def verify_backup(backup: MigrationBackup, source: MigrationSource) -> BackupInventory:
     """Verify the bound inventory and every backup file, independent of old sources.
 
-    Return the complete typed listing. Reject changed lists, hashes, extra files,
+    source identifies this chip/qubit's mirrors. Return their complete typed listing.
+    Reject changed lists, hashes, extra files within these mirrors,
     missing directories and symlinks with MigrationInputError; I/O propagates.
     No backup is rewritten, even when migration has already moved source files.
     """
     path = backup.path
-    inventory_path = path / "sha256.json"
-    if path.is_symlink() or inventory_path.is_symlink():
-        raise MigrationInputError(f"{path}: backup symlink conflict")
-    if file_hash(inventory_path) != backup.inventory_hash:
-        raise MigrationInputError(f"{path}: backup inventory hash changed")
-    try:
-        inventory = _INVENTORY.validate_json(inventory_path.read_bytes(), strict=True)
-    except ValidationError as exc:
-        raise MigrationInputError(f"{path}: invalid backup inventory") from exc
-    actual = _inventory({label: path / label for label in ("result", "Database")})
-    if actual != inventory or {item.name for item in path.iterdir()} != {
-        "result",
-        "Database",
-        "sha256.json",
-    }:
-        raise MigrationInputError(f"{path}: backup contents differ from inventory")
-    return inventory
+    mirrors = _mirror_roots(path, source)
+    records = backup_records_path(path, source)
+    if set(backup.inventory_hashes) != set(mirrors):
+        raise MigrationInputError(f"{path}: backup inventory identities differ")
+    hashes: dict[str, str] = {}
+    directories: list[str] = []
+    for label, mirror in mirrors.items():
+        inventory_path = records / f"{label}.sha256"
+        _reject_symlinks(inventory_path)
+        _reject_symlinks(mirror)
+        if file_hash(inventory_path) != backup.inventory_hashes[label]:
+            raise MigrationInputError(f"{path}: backup inventory hash changed")
+        try:
+            inventory = _INVENTORY.validate_json(
+                inventory_path.read_bytes(), strict=True
+            )
+        except ValidationError as exc:
+            raise MigrationInputError(f"{path}: invalid backup inventory") from exc
+        mirror_label = mirror.relative_to(path).as_posix()
+        if _inventory({mirror_label: mirror}) != inventory:
+            raise MigrationInputError(f"{path}: backup contents differ from inventory")
+        hashes.update(
+            {
+                f"{label}{name.removeprefix(mirror_label)}": digest
+                for name, digest in inventory.hashes.items()
+            }
+        )
+        directories.extend(
+            f"{label}{name.removeprefix(mirror_label)}"
+            for name in inventory.directories
+        )
+    return BackupInventory(hashes=hashes, directories=tuple(sorted(directories)))
 
 
 def _absolute_hashes(
@@ -169,8 +256,8 @@ def validate_backup_sources(session: MigrationSession) -> BackupInventory:
     backup = session.manifest.backup
     if backup is None:
         raise MigrationInputError("manifest: verified backup is required")
-    inventory = verify_backup(backup)
     source = session.manifest.report.source
+    inventory = verify_backup(backup, source)
     if backup.source_hashes != _absolute_hashes(inventory, source):
         raise MigrationInputError(
             "manifest: backup source hashes disagree with inventory"
@@ -226,11 +313,9 @@ def _retained_pending(
 ) -> tuple[PendingItem, ...]:
     pending: list[PendingItem] = []
     for item in session.manifest.report.pending:
-        path = item.source
-        for label, root in _source_roots(session.manifest.report.source).items():
-            if path.is_relative_to(root):
-                path = backup.path / label / path.relative_to(root)
-                break
+        path = backup_source_path(
+            backup.path, session.manifest.report.source, item.source
+        )
         pending.append(
             replace(
                 item,

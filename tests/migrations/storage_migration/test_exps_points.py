@@ -46,7 +46,7 @@ def _entry(request: MigrationRequest) -> ResultEntry:
 
 
 def _backup_result(request: MigrationRequest) -> Path:
-    return request.result_root.parent.parent / f"{request.name}-backup" / "result"
+    return request.result_root.parent.parent / "repo-backup/result/chip/qubit"
 
 
 def _image(request: MigrationRequest, label: str, contents: bytes = b"figure") -> Path:

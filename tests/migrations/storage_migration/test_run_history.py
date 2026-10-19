@@ -181,7 +181,15 @@ def test_unknown_start_still_publishes_native_and_reports_assigned_identity(
     )
     assert report.moved_labber_files[0].destination.read_bytes() == before
     assert report.backup_path is not None
-    backup_source = report.backup_path / "Database" / "2025" / "10" / "scan.hdf5"
+    backup_source = (
+        report.backup_path
+        / "Database"
+        / request.source_chip
+        / request.source_qubit
+        / "2025"
+        / "10"
+        / "scan.hdf5"
+    )
     assert backup_source.read_bytes() == before
     manifest = json.loads(manifest_path(request).read_text())
     assert request.run_evidence is not None

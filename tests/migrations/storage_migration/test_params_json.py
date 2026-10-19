@@ -145,7 +145,7 @@ def backup_path(request: MigrationRequest) -> Path:
     """Locate the explicit synthetic backup; never use production defaults."""
     if request.backup_parent is None:
         raise ValueError("Tests must supply a synthetic backup_parent")
-    return request.backup_parent / f"{request.name}-backup"
+    return request.backup_parent / "repo-backup"
 
 
 def predictor_params(request: MigrationRequest) -> JsonObject:
@@ -981,7 +981,7 @@ def test_unproven_time_is_null_with_pending_at_verified_backup_original(
         "run_id": None,
         "created_at": None,
     }
-    backup_source = backup_path(request_data) / "result/params.json"
+    backup_source = backup_path(request_data) / "result/chip/qubit/params.json"
     pending = [
         item
         for item in report.pending

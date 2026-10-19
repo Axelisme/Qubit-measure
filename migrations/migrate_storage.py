@@ -58,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backup-parent",
         type=Path,
-        help="External parent for <name>-backup (default: checkout parent)",
+        help="External parent for <repo-name>-backup (default: checkout parent)",
     )
     parser.add_argument("--assume-flux-unit", choices=("A", "mA", "V", "mV"))
     parser.add_argument("--assume-jpa-flux-unit", choices=("A", "V"))
