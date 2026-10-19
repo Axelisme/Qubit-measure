@@ -165,7 +165,7 @@ def test_same_name_rename_is_a_noop(rename_session: RenameSession) -> None:
 
     assert changed == []
     assert session.binder.snapshot() == before
-    assert session.device.list_device_names() == ["occupied", "old"]
+    assert {entry.name for entry in session.device.list_devices()} == {"occupied", "old"}
 
 
 @pytest.mark.parametrize("new_name", ["new", "old"])
