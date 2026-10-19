@@ -9,7 +9,9 @@ from zcu_tools.notebook.analysis.fluxdep.interactive.find_line import Interactiv
 def _spectrum() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     devs = np.linspace(-5.0, 5.0, 60, dtype=np.float64)
     freqs = np.linspace(4.0, 5.0, 30, dtype=np.float64)
-    signals = np.exp(-(devs[:, None] ** 2) / 2).astype(np.complex128)
+    signals = np.repeat(np.exp(-(devs[:, None] ** 2) / 2), freqs.size, axis=1).astype(
+        np.complex128
+    )
     return signals, devs, freqs
 
 
