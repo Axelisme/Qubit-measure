@@ -31,7 +31,7 @@ class ArbWaveformKeys(Protocol):
 
 
 class ArbWaveformPort(ArbWaveformKeys, Protocol):
-    """Qubit-scoped asset operations; saving never requests a preview.
+    """Entry-scoped asset operations; saving never requests a preview.
 
     Successful mutations advance the asset revision once. Preview failures do
     not undo saved assets or their revisions. Rename/delete do not rewrite refs.

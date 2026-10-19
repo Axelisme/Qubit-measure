@@ -112,9 +112,6 @@ class SessionPreferences:
 
     # Remembered ResultEntry name for Setup prefill, not an opened entry.
     entry_name: str = ""
-    chip_name: str = ""
-    qub_name: str = ""
-    res_name: str = ""
     scope_id: str = ""
     result_dir: str = ""
     database_path: str = ""

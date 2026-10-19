@@ -51,6 +51,14 @@ MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不
 
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
 
+Native `zcu.experiment-data` 新檔寫 2.1。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造，也不加遷移來源標記。正常量測路徑仍必填開始時間，只產生已知完成狀態。2.1 的 started_at attr 必填，以空字串編碼 None；completion attr 以 unknown 編碼未知。缺失 attr、非法型別與非法時間仍拒絕。
+
+Reader 接受 2.0 與同 major 的後續 minor。2.0 仍要求已知 started_at 與 complete／partial／stopped，不接受 2.1 的新值。保真 image 寫回一律使用 max(來源版本, 2.1)：2.0 不論有無新值都升為 2.1，future-minor 保留原版本。單一版本規則避免依欄位值條件升版，讓寫回結果可預測。
+
+GUI Load 與共用 typed loader 保留未知歷史值，不把 unknown 改成 complete。Workflow `load_trace` 是 complete-only 分析入口：None＋complete 可載入，unknown 與 partial／stopped 同樣拒絕，因為未知完成度不能證明 acquisition 完整。Notebook 仍只載入 RunRecord，不把載入資料變成 acquisition evidence。現有前端不顯示或排序這兩個 metadata 欄位，本格式變更不新增 UI。
+
+使用者於 2026-10-19 對 started_at 可為 None、completion 加 unknown、不加來源標記的建議裁決：「可以，採用建議」。
+
 `RunMetadata.device_snapshot` 保存 Run 開始前讀取的全部已連線 device 設定。GUI 在取得 operation hardware lease 後、adapter.run 前讀取。Notebook 在使用者的程序內同步執行，由 caller 擁有資源，不新增 lease；snapshot 在建立 RunContext 後、core.run 前讀取。
 
 兩路每台只呼叫一次 get_info。任一台失敗就拒絕 Run，不寫設定、不進 adapter/core，也不用 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，不是 setup 後或每個 core 的 checkpoint。後續 sweep 不改寫它，實驗使用的值由 cfg 的 dev、flux_unit、sweep 範圍與 persisted axes 記錄。

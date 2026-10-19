@@ -1,4 +1,4 @@
-"""Unit tests for gui/project.py shared wire helpers (Fix 4 regression).
+"""Tests for analysis-project identity and wire helpers.
 
 ``project_info_payload`` and ``is_real_project`` are pure functions that carry
 no Qt or library dependency — no qapp fixture required.
@@ -7,7 +7,7 @@ no Qt or library dependency — no qapp fixture required.
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.project import (
+from zcu_tools.gui.app.analysis_project.project import (
     DEFAULT_CHIP,
     DEFAULT_QUBIT,
     ProjectInfo,
