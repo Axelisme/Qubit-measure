@@ -121,6 +121,34 @@ forbidden_modules =
     zcu_tools.gui
 
 
+# ADR-0072: chip/qubit project policy belongs only to the analysis apps.
+[importlinter:contract:shared-no-analysis-project]
+name = Shared GUI mechanisms do not depend on analysis project policy
+type = forbidden
+source_modules =
+    zcu_tools.gui.launcher
+    zcu_tools.gui.runtime
+    zcu_tools.gui.remote
+    zcu_tools.gui.session
+    zcu_tools.gui.widgets
+    zcu_tools.gui.form
+    zcu_tools.gui.form_adapter
+    zcu_tools.gui.interactive
+    zcu_tools.gui.plotting
+    zcu_tools.gui.catalog_loader
+    zcu_tools.gui.control_identity
+    zcu_tools.gui.controller_base
+    zcu_tools.gui.error_messages
+    zcu_tools.gui.event_bus
+    zcu_tools.gui.expected_error
+    zcu_tools.gui.logging_setup
+    zcu_tools.gui.owner
+    zcu_tools.gui.version_table
+    zcu_tools.gui.app.measure
+    zcu_tools.gui.app.workflows
+forbidden_modules =
+    zcu_tools.gui.app.analysis_project
+
 # ADR-0067: shared session primitives cannot import app policy.
 [importlinter:contract:session-no-app]
 name = C2: shared session does not depend on apps

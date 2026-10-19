@@ -7,6 +7,7 @@ import os
 import numpy as np
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.state import (
     DEFAULT_BARE_RF,
     FIT_VERSION_KEY,
@@ -18,7 +19,6 @@ from zcu_tools.gui.app.dispersive.state import (
     OnetoneEntry,
     VersionTable,
 )
-from zcu_tools.gui.project import ProjectInfo
 
 
 def _make_onetone(name: str = "r1") -> OnetoneEntry:

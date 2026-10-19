@@ -48,6 +48,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.app.analysis_project.project import DEFAULT_CHIP, DEFAULT_QUBIT
 from zcu_tools.gui.app.fluxdep.controller import (
     Controller,
     PendingKind,
@@ -80,7 +81,6 @@ from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, stage_status
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
@@ -815,7 +815,7 @@ class MainWindow(QMainWindow):
         """Edit the project chip/qubit names (and optional roots)."""
         if not self._writable:
             return
-        from zcu_tools.gui.widgets.project_dialog import ProjectDialog
+        from zcu_tools.gui.app.analysis_project.project_dialog import ProjectDialog
 
         dialog = ProjectDialog(
             self._ctrl.state.project,
