@@ -79,6 +79,140 @@ def test_geometry_preserves_track_order_mux_plateaus_and_flux_levels():
     np.testing.assert_array_equal(result.densities[0], src.initial_density)
 
 
+@pytest.mark.parametrize(
+    ("times", "values"),
+    [
+        ([0.0, 10.0, 30.0, 240.0], [0.0, 1j, 1j, 0.3j]),
+        ([0.0, 12.0, 32.0, 240.0], [0.0, 1j, 1j, 0.3j]),
+        ([0.0, 10.0, 30.0, 240.0], [0.0, 1j, 1j, 0.4j]),
+    ],
+)
+def test_equal_waveform_copies_keep_physical_rows_across_batches(times, values):
+    from zcu_tools.simulate.evolution.kernels import REGISTRY
+
+    base = synthetic_model()
+    drives = (base.drives[0], replace(base.drives[0], name="mux"))
+
+    def model(level):
+        return replace(
+            base, level=level, drives=drives if level == (0,) else drives[::-1]
+        )
+
+    src = ModelSource(source().initial_density, model)
+    batches = []
+    for point, duration in enumerate((254.0, 256.0, 254.0, 256.0)):
+        # Equal content is deliberately reconstructed as a distinct record.
+        env = EnvelopeSpec("sampled", np.array(values), np.array(times))
+        batches.append(
+            replace(
+                batch(1, duration=duration),
+                points=np.array([point]),
+                flux=FluxSchedule(
+                    np.array([0, 2]),
+                    np.array([0.0, 100.0]),
+                    np.array([[0], [1]]),
+                ),
+                tracks=(
+                    replace(
+                        track(1, env, duration=duration),
+                        phase_rad=np.array([point * 0.13]),
+                    ),
+                    replace(
+                        track(1, env, duration=duration),
+                        port="absent",
+                        active=np.array([False]),
+                    ),
+                    replace(
+                        track(1, EnvelopeSpec("constant"), start=4, duration=238),
+                        port="mux",
+                    ),
+                ),
+            )
+        )
+    kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
+    result = run(Engine(1, 0, kernels=kernels), src, tuple(batches))
+    observations = {
+        (int(table.timeline[row]), float(table.start_ns[row])): (table, int(row))
+        for kernel in kernels
+        for table, rows, _ in kernel.calls
+        for row in rows
+    }
+    for point, duration in enumerate((254.0, 256.0, 254.0, 256.0)):
+        boundaries = [0.0, 4.0, times[1], times[2], 100.0, 240.0, 242.0, duration]
+        assert (
+            sorted(start for p, start in observations if p == point) == boundaries[:-1]
+        )
+        for start, end in zip(boundaries[:-1], boundaries[1:], strict=True):
+            table, row = observations[point, start]
+            assert table.duration_ns[row] == end - start
+            count = 1 + (4 <= start < 242)
+            level = int(start >= 100)
+            assert table.level[row].tolist() == [level]
+            assert table.tones[row] == count
+            assert (
+                table.tone_port[row, :count].tolist()
+                == ([0, 1] if not level else [1, 0])[:count]
+            )
+            physical = table.envelopes[table.tone_envelope[row, 0]]
+            flat = times[1] <= start < times[2] or start >= 240
+            assert physical.kind == ("constant" if flat else "sampled")
+            if flat:
+                value = values[-1] if start >= 240 else 1j
+                assert table.tone_amplitude[row, 0] == abs(value)
+                assert table.tone_envelope_offset_ns[row, 0] == 0
+                assert table.tone_theta_rad[
+                    row, 0
+                ] == 2 * np.pi * 0.1 * start + point * 0.13 + np.angle(value)
+            else:
+                np.testing.assert_array_equal(physical.samples, values)
+                np.testing.assert_array_equal(physical.sample_ns, times)
+                assert table.tone_envelope_offset_ns[row, 0] == start
+    np.testing.assert_array_equal(result.points, np.arange(4))
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], 4, axis=0)
+    )
+
+
+def test_waveform_time_and_complex_samples_remain_distinct_in_one_acquire():
+    envelopes = (
+        EnvelopeSpec("sampled", np.array([0.2, 1j]), np.array([0.0, 2.0])),
+        EnvelopeSpec("sampled", np.array([0.2, 1j]), np.array([0.0, 3.0])),
+        EnvelopeSpec("sampled", np.array([0.2, -1j]), np.array([0.0, 2.0])),
+    )
+    timelines = tuple(
+        replace(
+            batch(1),
+            points=np.array([point]),
+            tracks=(track(1, env),),
+        )
+        for point, env in enumerate(envelopes)
+    )
+    direct = RecordingKernel("dop853")
+    src = source()
+    result = run(Engine(1, 0, kernels=(direct,)), src, timelines)
+    for table, rows, _ in direct.calls:
+        for row in rows:
+            expected = envelopes[table.timeline[row]]
+            physical = table.envelopes[table.tone_envelope[row, 0]]
+            np.testing.assert_array_equal(physical.samples, expected.samples)
+            np.testing.assert_array_equal(physical.sample_ns, expected.sample_ns)
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], 3, axis=0)
+    )
+
+
+def test_active_unknown_port_raises_value_error():
+    timeline = replace(
+        batch(1),
+        tracks=(replace(track(1, EnvelopeSpec("constant")), port="absent"),),
+    )
+    with (
+        closing(Engine(1, 0, kernels=(RecordingKernel("t6"),))) as engine,
+        pytest.raises(ValueError, match="absent"),
+    ):
+        engine.evolve(source(), (timeline,), cancel=Event())
+
+
 class TimelineKernel(RecordingKernel):
     """Conservative timeline keys, optionally shared by equivalent copies."""
 
