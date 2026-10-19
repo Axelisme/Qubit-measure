@@ -27,11 +27,11 @@ def test_log_list_real_input_and_actual_point_count(qapp, tmp_path: Path):
         driver.enter_text(object_name="form.input.depths.max", value="3")
         driver.screenshot(tmp_path / "02-deduplicated.png")
         assert driver.observe(object_name="form.value.depths.points").text == "Effective: 4"
-        driver.choose_option(object_name="form.option.depths", option="List")
+        driver.choose_option(object_name="form.input.depths", value="List")
         driver.screenshot(tmp_path / "03-list.png")
         assert driver.observe(object_name="form.input.depths.values").text == "[0, 1, 2, 3]"
         driver.enter_text(object_name="form.input.depths.values", value="[0, 2, 7, 16]")
-        driver.choose_option(object_name="form.option.depths", option="Log")
+        driver.choose_option(object_name="form.input.depths", value="Log")
         driver.screenshot(tmp_path / "04-log-from-list.png")
         assert driver.observe(object_name="form.input.depths.max").text == "16"
         assert driver.observe(object_name="form.input.depths.points").text == "4"
