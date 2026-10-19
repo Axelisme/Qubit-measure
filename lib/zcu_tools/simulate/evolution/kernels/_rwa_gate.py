@@ -142,21 +142,6 @@ def canonical_keys(table: SegmentTable, context: KernelContext) -> tuple[bytes, 
     return context.work_plan.fact(key, build)
 
 
-def _common_support(table: SegmentTable, row: int) -> bool:
-    # First release intentionally accepts complete, coextensive shaped pulses.
-    # Partly overlapping, sliced or constant companions retain ordinary RWA.
-    for tone in range(table.tones[row]):
-        env = table.envelopes[table.tone_envelope[row, tone]]
-        offset = table.tone_envelope_offset_ns[row, tone]
-        if (
-            env.kind != "sampled"
-            or env.sample_ns[0] != offset
-            or env.sample_ns[-1] != offset + table.duration_ns[row]
-        ):
-            return False
-    return True
-
-
 def _row_graph(table: SegmentTable, row: int, context: KernelContext) -> PhaseGraph:
     count = table.tones[row]
     return phase_graph(
@@ -220,9 +205,10 @@ def _admit_physics(
     peaks = envelope_bounds(table, context.work_plan).peaks
     for index in np.flatnonzero(accepted):
         row = int(rows[index])
-        if not single_tone and not _common_support(table, row):
-            accepted[index] = False
-            continue
+        # SegmentTable owns finite playback support. As for single-tone gates,
+        # sample grids may extend beyond a row or end before its final hold.
+        # The builder samples only the row interval with the same offsets and
+        # interpolation as direct integration; no waveform rewrite is needed.
         graph = _row_graph(table, row, context)
         count = table.tones[row]
         amplitudes = (
@@ -505,9 +491,9 @@ class CovariantGateKernel:
     """Shared adaptive U builder and playback for single/multi-tone families.
 
     Numerical guard checks shared calibrated RWA and bounded phase-graph pruning.
-    Preparation refines secular splitting without relaxing its proxy threshold. Multi-tone gates additionally require coextensive
-    sampled support. Single-tone gates allow slices and final sample hold,
-    and compile Hilbert integration through the shared DOP853 solver.
+    Preparation refines secular splitting without relaxing its proxy threshold.
+    Both families allow sampled slices and final sample hold within row support.
+    Single-tone gates compile Hilbert integration through the shared DOP853 solver.
     Dispatch/family wrappers own acquire-wide cost and reuse decisions.
     """
 

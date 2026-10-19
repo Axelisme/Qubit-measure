@@ -17,7 +17,11 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
@@ -215,7 +219,12 @@ def test_native_sample_support_and_adaptive_split_match_lab_density(
             assert len(intervals) > 4, "large split proxy must refine, not reject"
         states = np.repeat(src.initial_density[None], len(rows), axis=0)
         kernel.apply(
-            prepared, np.zeros(3, dtype=np.int64), table, rows, states, ApplyContext(1e-3)
+            prepared,
+            np.zeros(3, dtype=np.int64),
+            table,
+            rows,
+            states,
+            ApplyContext(1e-3),
         )
         direct = next(k for k in REGISTRY if k.name == "dop853")
         reference = np.repeat(src.initial_density[None], len(rows), axis=0)
