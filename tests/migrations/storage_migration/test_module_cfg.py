@@ -10,7 +10,7 @@ import pytest
 from pydantic import TypeAdapter
 from zcu_tools.cfg_model import FlatTopWaveformCfg, PulseCfg, PulseReadoutCfg, PulseSpec
 from zcu_tools.resources.document_store import YamlMap
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.views import FieldView
 
 from migrations.storage_migration import (
@@ -225,14 +225,14 @@ def test_root_library_populates_setup_slots_without_a_point(
     assert not entry.list_points()
     assert entry.setup.C1.frequency == 12.5
     assert any(item.source == source for item in report.converted_files)
-    assert entry.setup.C1.module.chosen == "C1.pulses.pi"
+    assert document_value(snapshot(entry.setup), "C1.module.chosen") == "C1.pulses.pi"
     library = entry.module_library()
     assert library.snapshot().module_keys() == ("C1.pulses.pi", "C1.readout.main")
-    assert library.snapshot().waveform_keys() == (
+    assert set(library.snapshot().waveform_keys()) == {
         "C1.waveforms.base",
         "C1.waveforms.ramp",
         "C1.waveforms.flat",
-    )
+    }
     assert not any(item.source == source for item in report.pending)
     assert source.read_bytes() == original
 

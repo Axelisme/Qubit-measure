@@ -208,6 +208,66 @@ def test_assumption_supplies_missing_metadata_evidence_without_changing_values(
     assert any("假設單位" in row.reason for row in report.key_mappings)
 
 
+@pytest.mark.parametrize("unit_source", ["meta_info.json", "params.json"])
+def test_entry_explicit_unit_beats_assumption_and_reports_its_file(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    unit_source: str,
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {**adapter.dump_python(request_data), "assume_flux_unit": "mA"}
+    )
+    root = request.result_root / "chip/qubit"
+    (root / unit_source).write_text('{"flux_unit": "V"}', encoding="utf-8")
+    write_meta(request, "bias", {"flx_half": 0.3})
+    report = migrate(request, metadata_mapping)
+    point = snapshot(open_entry(request).use_point("bias"))
+    assert document_value(point, "general.ext.flux_unit") == "V"
+    assert document_value(point, "Q1.flux_half") == 0.3
+    assert any(
+        row.old_key == "flx_half" and str(root / unit_source) in row.reason
+        for row in report.key_mappings
+    )
+
+
+def test_conflicting_point_unit_keeps_inherited_values_and_located_pending(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    root_meta = write_meta(request_data, "", {"flux_unit": "V", "flx_half": 0.2})
+    point_meta = write_meta(request_data, "bias", {"flux_unit": "A", "flx_half": 0.3})
+    report = migrate(request_data, metadata_mapping)
+    point = snapshot(open_entry(request_data).use_point("bias"))
+    assert document_value(point, "Q1.flux_half") == 0.2
+    assert document_value(point, "general.ext.flux_unit") == "V"
+    assert any(
+        item.source == point_meta
+        and item.location == "flx_half"
+        and str(root_meta) in item.reason
+        for item in report.pending
+    )
+
+
+def test_conflicting_entry_units_block_values_instead_of_using_assumption(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {**adapter.dump_python(request_data), "assume_flux_unit": "mA"}
+    )
+    write_params(request, {"flux_unit": "A"})
+    source = write_meta(request, "", {"flux_unit": "V", "flx_half": 0.2})
+    report = migrate(request, metadata_mapping)
+    setup = snapshot(open_entry(request).setup)
+    assert document_value(setup, "general.ext") == {}
+    assert any(
+        item.source == source
+        and item.location == "flx_half"
+        and "params.json" in item.reason
+        for item in report.pending
+    )
+
+
 def test_sample_declarations_publish_runtime_rows_and_resume_once(
     request_data: MigrationRequest, analysis_mapping: MigrationMapping
 ) -> None:

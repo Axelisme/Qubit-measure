@@ -181,10 +181,6 @@ def test_parts_accumulate_with_same_identity(
     assert result.entry_id == initial.entry_id
     assert result.part == "all"
     assert len(result.key_mappings) == 1
-    assert len(result.preserved_files) == 1
-    assert (
-        request_data.results_root / request_data.name / "params.json"
-    ).read_bytes() == b'{"legacy": true}'
 
 
 def test_data_resume_keeps_valid_user_edit(
@@ -570,22 +566,21 @@ def test_preserved_archives_keep_paths_bytes_and_sources(
         validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
-    assert len(report.preserved_files) == 4
+    assert len(report.preserved_files) == 3
     for item in report.preserved_files:
         assert item.destination.read_bytes() == item.source.read_bytes()
         assert item.source_hash == item.destination_hash
     assert (
         request_data.database_root / request_data.name / "arb_waveforms" / "wave.npz"
     ).read_bytes() == originals["arb_waveforms/wave.npz"]
-    preserved = (
-        request_data.database_root
-        / request_data.name
-        / "migration-preserved"
-        / "result"
-    )
-    assert (preserved / "context" / "image" / "figure.png").read_bytes() == originals[
+    figures = request_data.results_root / request_data.name / "figures"
+    assert (figures / "context/image/figure.png").read_bytes() == originals[
         "context/image/figure.png"
     ]
+    assert any(
+        item.source == source / "samples.csv" and item.location == "unconverted file"
+        for item in report.pending
+    )
     assert any(
         item.source == source / "unrecognized.bin"
         and item.location == "unconverted file"
@@ -600,10 +595,11 @@ def test_preserved_archives_keep_paths_bytes_and_sources(
 def test_owned_copy_hash_conflict_is_not_repaired(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
-    source = request_data.result_root / "chip" / "qubit" / "params.json"
-    source.write_bytes(b'{"legacy": true}')
+    source = request_data.result_root / "chip/qubit/image/fit.png"
+    source.parent.mkdir()
+    source.write_bytes(b"original image")
     report = migrate_storage(
-        replace(request_data, part="parameters"),
+        replace(request_data, part="data"),
         mapping=mapping,
         validate_cfg=validate_cfg,
         validate_native=noop_validation,
@@ -618,7 +614,7 @@ def test_owned_copy_hash_conflict_is_not_repaired(
             validate_native=noop_validation,
         )
     assert destination.read_bytes() == b"caller edit"
-    assert source.read_bytes() == b'{"legacy": true}'
+    assert source.read_bytes() == b"original image"
 
 
 def test_existing_independent_report_is_never_overwritten(

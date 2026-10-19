@@ -200,9 +200,11 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     archive = entry.database_path / "migration-preserved/result"
     assert not (archive / "exps/070716_0.500/image/fit.png").exists()
     retained_outside = backup / "image/root.png"
-    assert (archive / "image/root.png").read_bytes() == retained_outside.read_bytes()
+    assert (
+        entry.result_path / "figures/image/root.png"
+    ).read_bytes() == retained_outside.read_bytes()
     assert retained_outside.read_bytes() == b"unassociated root image"
-    assert any(
+    assert not any(
         item.source == retained_outside and item.location == "association"
         for item in report.pending
     )
