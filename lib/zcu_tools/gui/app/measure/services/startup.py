@@ -65,6 +65,7 @@ class StartupService:
         self._state = state
         self._closing = False
         self._callbacks: list[Callable[[], None]] = []
+        self._summary: str | None = None
 
     def start(self, path: Path, context: StartupContext) -> int:
         """Run trusted path's startup(context) once in a dedicated background worker.
@@ -92,7 +93,11 @@ class StartupService:
                 error = _describe_failure(path, result.error)
                 logger.error(error, exc_info=result.error)
             settle(OperationOutcome("finished" if error is None else "failed", error))
-            message = f"Startup failed: {path.name}" if error else "Startup complete"
+            message = (
+                f"Startup failed: {path.name}"
+                if error
+                else (self._summary or "Startup complete")
+            )
             self._bus.emit(StartupChangedPayload(False, message, error))
 
         try:
@@ -124,6 +129,20 @@ class StartupService:
         if not message.strip():
             raise ValueError("startup progress must not be blank")
         self._bus.emit(StartupChangedPayload(True, message))
+
+    def summary(self, message: str) -> None:
+        """Set successful startup's final single-line status on the owner thread.
+
+        Nonblank single-line text only; invalid text raises ValueError. Last
+        call wins. Calls outside active startup raise RuntimeError. Unhandled
+        failures override this summary; this method never emits a dialog or I/O.
+        """
+        self._owner.assert_owner()
+        if not self._state.is_startup_active():
+            raise RuntimeError("startup is not running")
+        if not message.strip() or len(message.splitlines()) != 1:
+            raise ValueError("startup summary must be one nonblank line")
+        self._summary = message
 
     def on_close(self, callback: Callable[[], None]) -> None:
         """Retain callback for close_callbacks, including after partial script failure.

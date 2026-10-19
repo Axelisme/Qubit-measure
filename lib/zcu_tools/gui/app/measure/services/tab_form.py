@@ -40,6 +40,8 @@ from zcu_tools.gui.form_adapter import (
     ModuleValues,
 )
 
+from .tab_input import TabInput
+
 _logger = getLogger(__name__)
 
 
@@ -88,7 +90,7 @@ class TabFormResource:
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
         mutation_allowed: Callable[[], bool],
         notification_active: Callable[[], bool] = lambda: False,
-        initial: Mapping[str, JsonValue] | None = None,
+        initial: Mapping[str, JsonValue] | TabInput | None = None,
     ) -> None:
         """Prepare default input using one capture before exposing the resource.
 
@@ -98,9 +100,11 @@ class TabFormResource:
         mutation_allowed is the app busy/control policy; notification_active
         reports notifications in other tab resources. Neither callback may do
         hardware I/O. initial optionally supplies fixed FormInput {data,selections}
-        JSON for recursive restore on fresh defaults; dropped_paths reports
-        discarded input paths. Source captures are not
-        restored. Capture/default failures propagate without a resource.
+        JSON, either as a detached mapping or opaque TabInput from to_json().
+        The form owner decodes with FormInput.from_json and recursively restores
+        on fresh defaults; dropped_paths reports discarded paths. Malformed JSON
+        raises ValueError. Source captures are not restored. Caller retains its
+        input; capture/default failures propagate without a resource.
         """
         self._capture = capture
         self._make_form = make_form
@@ -111,7 +115,12 @@ class TabFormResource:
         self._state = FormState(self._form.default_input(self._sources.env))
         self._dropped_paths = (
             self._state.restore_input(
-                FormInput.from_json(self._state.input.model, json.dumps(initial)),
+                FormInput.from_json(
+                    self._state.input.model,
+                    initial.form_json
+                    if isinstance(initial, TabInput)
+                    else json.dumps(initial),
+                ),
                 self._sources.env,
             )
             if initial is not None
@@ -544,13 +553,14 @@ class TabFormResources:
         make_form: Callable[[FormContext], Form[C]],
         *,
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
-        initial: Mapping[str, JsonValue] | None = None,
+        initial: Mapping[str, JsonValue] | TabInput | None = None,
     ) -> TabFormResource:
         """Prepare one fixed capture and optional compatible restoration before registration.
 
         tab_id is a nonempty new app identity. make_form builds a catalog-bound
         definition; capture reads published sources on Open/Reset only. initial
-        is saved Form input JSON, never an old CfgSchema memento. Duplicate/empty
+        is native Form input JSON or opaque TabInput, never a cfg/result. Owner
+        thread only; caller retains input, pool owns the resource. Duplicate/empty
         identities raise ValueError; preparation failures leave no association.
         Notifications in any pooled resource forbid lifetime mutation.
         """

@@ -62,12 +62,24 @@ driver failures are logged without skipping the remaining cleanup. Boards remain
 caller-owned and have no required close method.
 
 `StartupContext` exposes typed soc, device, setup, context and tab commands.
-Each facet calls the existing owner synchronously through `OwnerScheduler`.
-On-close callbacks run on-owner and use the same facets without self-queuing.
+Each facet calls the existing owner through `OwnerScheduler`. Live `current()`
+queries project remote endpoints, device rows, entry/point and authored tab inputs
+without hardware I/O. Blocking SoC/device connections run through the existing
+async services and wait only on script workers. Owner calls reject before
+admission. `devices.remember` publishes an idle row for adapter Reconnect.
+`tabs.new_tab(adapter, input=TabInput(...))` lets the form owner restore opaque
+`FormInput.to_json()` input on fresh sources. Incompatible paths are logged.
+On-close callbacks run on-owner and use nonblocking facets without self-queuing.
+`cache_root` locates the user cache without defining a session schema. Scripts
+own their files and close-time capture. `summary()` sets the successful terminal
+status line; unhandled script errors override it.
 `StartupService` shares the operation runner, handles and background drain.
 Its app-local startup lease blocks Run while allowing script hardware commands.
-Progress and terminal facts update the status bar and Run controls. Unhandled
-script errors report the script path and line while retaining completed work.
+Progress and terminal facts update the status bar and Run controls. Owner calls
+carry an app-local system startup origin through existing operation attribution.
+Script-initiated device failures retain their terminal fact, failed handle and
+logs, without a duplicate item dialog. Manual GUI device failures still notify.
+Unhandled script errors report the script path and line while retaining completed work.
 The framework does not load lab environments or own script cache formats.
 
 User experiment adapters import `gui.app.measure` contracts. The framework

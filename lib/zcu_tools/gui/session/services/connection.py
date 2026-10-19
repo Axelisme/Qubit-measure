@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ConnectRemoteRequest:
-    """Connect to a remote ZCU board via SocProxy."""
+    """Remote endpoint: ip is the board host/address, port its TCP service port."""
 
     ip: str
     port: int
@@ -135,6 +135,15 @@ class SoCConnectionService:
                 raise
             finally:
                 self._gate.release(token)
+
+    def current_request(self) -> ConnectRemoteRequest | None:
+        """Read the last successful remote endpoint on-owner, without network I/O.
+
+        None means no board or a caller-installed board without a remote
+        endpoint. This detached value is not a connection preference or a file
+        format; failed connects preserve the previous successful endpoint.
+        """
+        return self._connected_request
 
     def connected_endpoint(self) -> dict[str, str | int | None]:
         """The last successful remote address, including GUI-initiated connects."""

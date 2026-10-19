@@ -9,6 +9,7 @@ from pydantic import JsonValue
 
 from zcu_tools.cfg_model import Template, TemplateDef
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
+from zcu_tools.gui.app.measure.events.startup import STARTUP_ORIGIN
 from zcu_tools.gui.app.measure.services.experiment_reload import (
     ReloadPreview,
     ReloadReport,
@@ -550,6 +551,14 @@ class Controller(SessionControllerMixin):
     ) -> None:
         if payload.success:
             self._info(f"Device {payload.action}ed: {payload.name}")
+            return
+        origin = self._bus.current_origin
+        if (origin.kind, origin.client_id) == (
+            STARTUP_ORIGIN.kind,
+            STARTUP_ORIGIN.client_id,
+        ):
+            # The script owns per-item logs and its final status summary. Keep
+            # the terminal fact/failed handle; do not duplicate it as a dialog.
             return
         self._notify(
             "error",

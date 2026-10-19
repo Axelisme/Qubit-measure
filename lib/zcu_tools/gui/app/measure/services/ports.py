@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from zcu_tools.resources.entry.ledger_models import JsonObject
 
     from ..writeback import WritebackDraft
+    from .tab_input import TabInput
     from .workspace_types import WorkspaceTab
 
 
@@ -185,6 +186,8 @@ class TabLifecyclePort(Protocol):
         self,
         adapter_name: str,
         from_dict: WorkspaceTab | None = None,
+        *,
+        input: TabInput | None = None,
     ) -> str:
         """Create or restore a tab using the current session sources."""
         ...

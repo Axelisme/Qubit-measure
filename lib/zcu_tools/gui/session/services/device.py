@@ -673,6 +673,33 @@ class DeviceService:
         # signal — no direct worker.cancel() coupling.
         self._handles.cancel(op.token)
 
+    def remember_device(self, name: str, type_name: str, address: str) -> None:
+        """Publish one idle memory-only identity on-owner, without hardware I/O.
+
+        name is session-unique; type_name is the driver's adapter key and address
+        its connection string. Unknown types are allowed but have no factory.
+        Empty/blank fields raise InvalidInputError. Live or mutating rows and
+        Run conflicts reject before changing state. Repeating an idle identity
+        retains its error; changing it clears the obsolete error. No driver is
+        owned or closed and no disk file is written. Reconnect uses this row.
+        """
+        self._owner_guard.assert_owner()
+        if not all(value.strip() for value in (name, type_name, address)):
+            raise InvalidInputError("Device name, type and address must not be blank")
+        self._gate.ensure_can_start(OperationKind.DEVICE_CONNECT, resource_id=name)
+        current = self._state.get_device(name)
+        if current is not None and not current.is_memory_only():
+            raise FailedPreconditionError(
+                f"Device {name!r} is already connected or busy"
+            )
+        if current is not None and (current.type_name, current.address) == (
+            type_name,
+            address,
+        ):
+            return
+        self.register_remembered_devices([DeviceMemoryInfo(type_name, name, address)])
+        self._emit_device_changed(name)
+
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None:
         for entry in entries:
             current = self._state.get_device(entry.name)

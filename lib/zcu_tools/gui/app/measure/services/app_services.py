@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from platformdirs import user_cache_dir
 
 from zcu_tools.gui.app.measure.artifacts import SaveControlFacet, SaveService
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
@@ -292,16 +295,18 @@ def build_app_services(
         access=access,
     )
     startup = StartupService(runner, bus, state)
-    calls = OwnerCalls(owner_scheduler)
+    calls = OwnerCalls(owner_scheduler, bus)
     startup_context = StartupContext(
-        soc=StartupSoc(calls, session.soc_connection),
-        devices=StartupDevices(calls, device),
+        soc=StartupSoc(calls, session.soc_connection, handles),
+        devices=StartupDevices(calls, device, handles),
         setup=StartupSetup(calls, session.setup_control),
         context=StartupParameters(calls, session.context_control),
         tabs=StartupTabs(calls, tab_control),
         calls=calls,
         register_close=startup.on_close,
         report_progress=startup.progress,
+        report_summary=startup.summary,
+        cache_root=Path(user_cache_dir("zcu_tools", "zcu_tools")) / "gui",
     )
     return AppServices(
         startup=startup,

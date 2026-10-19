@@ -10,10 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.format_version import YamlMap
+from zcu_tools.gui.app.measure.events.startup import STARTUP_ORIGIN
 from zcu_tools.gui.app.measure.services.tab_control import TabControlPort
+from zcu_tools.gui.app.measure.services.tab_input import StartupTab, TabInput
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
@@ -22,9 +26,13 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
     SavedPoint,
 )
+from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.ports import OwnerScheduler
-from zcu_tools.gui.session.services.connection import SoCConnectionService
-from zcu_tools.gui.session.services.device import DeviceService
+from zcu_tools.gui.session.services.connection import (
+    ConnectRemoteRequest,
+    SoCConnectionService,
+)
+from zcu_tools.gui.session.services.device import DeviceService, DeviceSnapshot
 from zcu_tools.gui.session.setup_control import SetupControlPort
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
@@ -39,12 +47,50 @@ class OwnerCalls:
     """
 
     scheduler: OwnerScheduler
+    bus: BaseEventBus
 
     def call[T](self, command: Callable[[], T]) -> T:
-        """Run command inline on-owner, or block a foreign caller until it returns."""
+        """Run inline on-owner or block a worker, with script origin inside owner scope.
+
+        bus is the session event bus. Its origin scope is created in the owner
+        callback, since ContextVar does not cross worker threads. Existing
+        operations capture this identity for their own terminal facts; no fact,
+        failure or handle is suppressed here. Command exceptions propagate.
+        """
+
+        def on_owner() -> T:
+            with self.bus.origin(STARTUP_ORIGIN):
+                return command()
+
         if self.scheduler.is_owner_thread():
-            return command()
-        return self.scheduler.call(command)
+            return on_owner()
+        return self.scheduler.call(on_owner)
+
+
+def _wait_for_connection(handles: OperationHandles, token: int) -> None:
+    # Only workers wait; owner remains free to commit the existing async terminal.
+    while True:
+        result = handles.await_known_outcome(token, 60)
+        if result.reason == "timeout":
+            continue
+        outcome = result.outcome
+        if outcome is None or outcome.status != "finished":
+            raise RuntimeError(
+                outcome.error if outcome is not None else "Missing connection outcome"
+            )
+        return
+
+
+@dataclass(frozen=True)
+class StartupSelection:
+    """Current opened entry and selected point, not remembered preferences.
+
+    entry is cached owner metadata or None when unopened. point_label is the
+    selected saved label or None when no point is selected. No disk I/O occurs.
+    """
+
+    entry: EntryInfo | None
+    point_label: str | None
 
 
 @dataclass(frozen=True)
@@ -52,11 +98,37 @@ class StartupSoc:
     """Board installation facet; calls marshals to owner and service owns publication.
 
     The script keeps ownership of external board resources, including cleanup.
-    No universal SoC close method is assumed.
+    No universal SoC close method is assumed. handles is the session's existing
+    thread-safe operation registry used only for worker connection waits.
     """
 
     calls: OwnerCalls
     service: SoCConnectionService
+    handles: OperationHandles
+
+    def current(self) -> ConnectRemoteRequest | None:
+        """Read the current remote endpoint on-owner without network I/O.
+
+        Worker/owner safe. None means absent or caller-installed without an
+        endpoint. This detached projection does not confer ownership of a board.
+        """
+        return self.calls.call(self.service.current_request)
+
+    def connect(self, address: str, port: int) -> None:
+        """Connect address/TCP port via the owner's async SOC_CONNECT operation.
+
+        Worker-only: owner calls raise RuntimeError before admission. Blocks
+        this worker, not Qt, until terminal; no timeout/retry is added. Gate or
+        submission errors propagate. Async failures raise RuntimeError with the
+        service diagnostic and preserve the previous pair. GUI owns publication,
+        not board cleanup; scripts must not assume a universal close contract.
+        """
+        if self.calls.scheduler.is_owner_thread():
+            raise RuntimeError("Blocking connect requires a script worker")
+        token = self.calls.call(
+            lambda: self.service.start_connect(ConnectRemoteRequest(address, port))
+        )
+        _wait_for_connection(self.handles, token)
 
     def install(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
         """Publish caller-owned board/config through SOC_CONNECT gate.
@@ -69,10 +141,51 @@ class StartupSoc:
 
 @dataclass(frozen=True)
 class StartupDevices:
-    """Driver registration facet; calls selects owner and service takes ownership."""
+    """Device facet; calls selects owner, service owns drivers and row publication.
+
+    handles is the existing session registry used for off-owner terminal waits.
+    """
 
     calls: OwnerCalls
     service: DeviceService
+    handles: OperationHandles
+
+    def current(self) -> tuple[DeviceSnapshot, ...]:
+        """Read detached live and memory-only rows on-owner, without hardware I/O.
+
+        Worker/owner safe. Name/type/address/status/error describe current state,
+        not connectivity guarantees. Caller owns the returned tuple.
+        """
+        return self.calls.call(self.service.list_device_snapshots)
+
+    def remember(self, name: str, type_name: str, address: str) -> None:
+        """Publish a memory-only name/type/address through the device owner.
+
+        Worker/owner safe; no disk or hardware I/O and no driver ownership.
+        Blank fields, Run, live/busy name conflicts propagate without mutation.
+        Known adapters can Reconnect even when manual GUI Add is disabled;
+        unknown types have no factory. Identical idle rows retain their error.
+        """
+        self.calls.call(lambda: self.service.remember_device(name, type_name, address))
+
+    def connect(self, name: str, type_name: str, address: str) -> None:
+        """Remember and Reconnect a trusted identity through the existing owner.
+
+        Worker-only; owner calls raise RuntimeError before creating a row/work.
+        Blocks this worker until async terminal, never Qt. No timeout/retry.
+        Admission errors propagate; driver failures raise RuntimeError with the
+        diagnostic and retain the offline row/error. GUI owns successful driver
+        close. Unknown types never gain an implicit factory.
+        """
+        if self.calls.scheduler.is_owner_thread():
+            raise RuntimeError("Blocking connect requires a script worker")
+
+        def start() -> int:
+            self.service.remember_device(name, type_name, address)
+            return self.service.start_reconnect_device(name)
+
+        token = self.calls.call(start)
+        _wait_for_connection(self.handles, token)
 
     def register[Info: BaseDeviceInfo](
         self, name: str, driver: BaseDevice[Info]
@@ -92,6 +205,18 @@ class StartupSetup:
 
     calls: OwnerCalls
     control: SetupControlPort
+
+    def current(self) -> StartupSelection:
+        """Read entry/point in one owner turn, without loading any source.
+
+        Worker/owner safe. Return detached metadata; caller owns the value,
+        while the existing context owner retains entry/point resource handles.
+        """
+        return self.calls.call(
+            lambda: StartupSelection(
+                self.control.get_entry_info(), self.control.current_point_label()
+            )
+        )
 
     def open_entry(self, name: str) -> EntryInfo:
         """Open an existing entry by single-segment name; do not select a point.
@@ -147,14 +272,25 @@ class StartupTabs:
     calls: OwnerCalls
     control: TabControlPort
 
-    def new_tab(self, adapter: str) -> str:
+    def current(self) -> tuple[StartupTab, ...]:
+        """Read detached ordered adapter/input projections without recapture or I/O.
+
+        Worker/owner safe. Inputs are the Form owner's opaque authored encoding,
+        not results; later GUI edits do not change these copies. Caller owns them.
+        """
+        return self.calls.call(self.control.read_inputs)
+
+    def new_tab(self, adapter: str, *, input: TabInput | None = None) -> str:
         """Create adapter's tab, capture ready sources once, and return its ID.
 
-        adapter is a registered catalog name. Unknown adapters and form/source
-        failures propagate before publication. Earlier tabs remain. Worker/owner
-        safe; the GUI owns the created tab and its captured input.
+        adapter is a registered catalog name. input optionally transfers opaque
+        FormInput.to_json data, preserving drafts/selections on fresh sources.
+        Incompatible paths are discarded by Form restore and logged. Unknown
+        adapters, malformed input and form/source failures propagate before
+        publication. Earlier tabs remain. Worker/owner safe; caller owns input,
+        GUI owns the created tab. No file I/O or pending restoration occurs.
         """
-        return self.calls.call(lambda: self.control.new_tab(adapter))
+        return self.calls.call(lambda: self.control.new_tab(adapter, input=input))
 
 
 @dataclass(frozen=True)
@@ -163,10 +299,14 @@ class StartupContext:
 
     soc installs caller-owned boards. devices transfers successfully registered
     drivers to GUI ownership. setup selects existing entry/point. context edits
-    aliases/components. tabs creates tabs from ready sources. register_close
-    records callbacks in the runner; report_progress publishes script progress.
-    Both callbacks are owner commands, reached through calls. Facets and these
-    methods support worker scripts and owner-thread on-close callbacks.
+    aliases/components. tabs creates tabs from ready sources and reads authored
+    inputs. calls selects the session owner. register_close records callbacks in
+    the runner; report_progress publishes progress and report_summary sets final
+    status. These callbacks are owner commands reached through calls.
+    cache_root is the absolute user cache directory for scripts to choose their
+    own files; it need not exist. Scripts own file schemas, I/O and errors.
+    Queries and nonblocking commands support worker/owner callbacks. Blocking
+    soc/device connect is worker-only and rejects owner calls before admission.
     """
 
     soc: StartupSoc
@@ -177,6 +317,17 @@ class StartupContext:
     calls: OwnerCalls
     register_close: Callable[[Callable[[], None]], None]
     report_progress: Callable[[str], None]
+    report_summary: Callable[[str], None]
+    cache_root: Path
+
+    def summary(self, message: str) -> None:
+        """Set the final single-line status for successful startup terminal delivery.
+
+        Worker/owner safe while startup runs. Blank or multiline messages raise
+        ValueError; calls after terminal raise RuntimeError. Last call wins.
+        Does not display a dialog or hide an unhandled script failure. No I/O.
+        """
+        self.calls.call(lambda: self.report_summary(message))
 
     def on_close(self, callback: Callable[[], None]) -> None:
         """Register callback for reverse-order, once-only execution after drain.

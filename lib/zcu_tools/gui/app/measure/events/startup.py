@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import ClassVar
 
-from zcu_tools.gui.event_bus import BasePayload
+from zcu_tools.gui.event_bus import BasePayload, EventOrigin
+
+# App-local lifecycle identity. OperationHandles replaces only operation_id;
+# client_id survives terminal delivery so presentation can identify script work.
+STARTUP_ORIGIN = EventOrigin(kind="system", client_id="startup-script")
 
 
 class StartupEvent(str, Enum):

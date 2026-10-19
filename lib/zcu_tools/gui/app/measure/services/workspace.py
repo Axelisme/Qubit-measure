@@ -14,6 +14,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 from .ports import RestoreDroppedInputs, RestoreIssue, RestoreReport
+from .tab_input import TabInput
 from .workspace_types import WorkspaceSnapshot, WorkspaceTab
 
 if TYPE_CHECKING:
@@ -38,12 +39,19 @@ class WorkspaceService:
         self._tabs = tabs
         self._bus = bus
 
-    def new_tab(self, adapter_name: str) -> str:
+    def new_tab(self, adapter_name: str, *, input: TabInput | None = None) -> str:
         """Create, activate and announce a tab using current global sources.
 
-        Default-cfg failure publishes no tab fact.
+        Owner-only; input is optional opaque authored Form JSON. The tab/form
+        owner restores compatible paths, logs discards and rejects malformed JSON
+        before publication. Caller retains input, GUI owns the new tab. Source or
+        default-cfg failure publishes no tab fact.
         """
-        tab_id = self._tabs.new_tab(adapter_name)
+        tab_id = (
+            self._tabs.new_tab(adapter_name)
+            if input is None
+            else self._tabs.new_tab(adapter_name, input=input)
+        )
         self._state.set_active_tab(tab_id)
         self._bus.emit(
             TabAddedPayload(tab_id=tab_id, adapter_name=adapter_name),
