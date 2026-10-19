@@ -51,6 +51,24 @@ def test_result_focus_and_panel_width_are_owned_by_tab(
     assert window.current_left_panel_width() == tab.left_panel_width()
 
 
+def test_window_dimensions_roundtrip_through_layout_caretaker(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str], tmp_path: Path
+) -> None:
+    _session, ctrl, window, original_tab = live_ui
+    ctrl.add_view(window)
+    ctrl.attach_caretaker(create_persistence_caretaker(ctrl, cache_dir=tmp_path))
+    window.resize(1100, 820)
+    ctrl.persist_all()
+    window.resize(900, 650)
+    try:
+        ctrl.restore_all()
+        assert (window.width(), window.height()) == (1100, 820)
+    finally:
+        for tab_id in tuple(ctrl.list_tab_ids()):
+            if tab_id != original_tab:
+                ctrl.close_tab(tab_id)
+
+
 def test_prepare_run_container_clears_run_and_downstream_figures(
     live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
 ) -> None:
