@@ -16,6 +16,7 @@ from zcu_tools.analysis.fluxdep.onetone import (
     analyze_onetone_pick,
 )
 from zcu_tools.analysis.fluxdep.processing import onetone_background
+from zcu_tools.plotting.liveplot.segments.plot2d import PlotNonUniform2DSegment
 
 from .palette import KEPT_COLOR
 
@@ -25,7 +26,8 @@ class OneTonePickPlot:
 
     Uses Device value/GHz axes and normalized-amplitude curve, ticks and grids.
     The background is the spectrum's dip depth under gray_r, so resonator
-    dips draw dark on a light background.
+    dips draw dark on a light background. Background cells follow the native
+    sample coordinates, including descending and nonuniform axes.
     Does not own analysis state, Qt canvas, presentation, or a pyplot manager.
     """
 
@@ -53,20 +55,16 @@ class OneTonePickPlot:
         ax_image = figure.add_subplot(2, 1, 1)
         ax_curve = figure.add_subplot(2, 1, 2)
         background = onetone_background(spectrum.signals)
-        ax_image.imshow(
-            background.values.T,
-            aspect="auto",
-            origin="lower",
-            extent=(
-                float(spectrum.dev_values[0]),
-                float(spectrum.dev_values[-1]),
-                float(spectrum.freqs[0]),
-                float(spectrum.freqs[-1]),
-            ),
-            cmap="gray_r",
+        image = PlotNonUniform2DSegment(
+            "Device value",
+            "Frequency (GHz)",
             vmin=background.vmin,
             vmax=background.vmax,
         )
+        image.init_ax(ax_image, cmap="gray_r")
+        image.update(ax_image, spectrum.dev_values, spectrum.freqs, background.values)
+        # Keep later overlays from autoscaling against the segment placeholder.
+        ax_image.set_ylim(ax_image.get_ylim())
         ax_image.axhline(
             spectrum.freqs[inputs.max_freq_index], color="red", linewidth=1
         )
