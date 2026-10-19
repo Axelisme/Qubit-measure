@@ -3,20 +3,24 @@
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field
 from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
+    FieldMeta,
     PulseCfg,
     PulseSpec,
     Slot,
     Template,
     TemplateDef,
 )
-from zcu_tools.gui.app.measure.remote.form_description import description_wire
+from zcu_tools.gui.app.measure.remote.form_description import (
+    description_wire,
+    recipe_field_wire,
+)
 from zcu_tools.gui.app.measure.remote.form_observation import observe_form
 from zcu_tools.gui.app.measure.remote.handlers.tab import module_path
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
@@ -94,6 +98,22 @@ class FormGui(LookbackGui):
                 self.owner.run_command(path, "to_inline")
             return dict(observe_form(self.owner))
         return super().__call__(method, params)
+
+
+class ReadonlyCfg(ConfigBase):
+    serial: Annotated[str, FieldMeta(readonly=True)] = "A"
+    tag: Literal["fixed"] = "fixed"
+
+
+def test_readonly_and_literal_fields_report_locked_without_reference() -> None:
+    definition = Form(ReadonlyCfg, {})
+    env = FormEnv()
+    input = definition.default_input(env)
+    for path in (("serial",), ("tag",)):
+        observation = recipe_field_wire(definition.read_logical_field(input, path, env))
+        field = read_form_field(observation, path)
+        assert field.locked
+        assert getattr(field, "via_ref", None) is False
 
 
 def test_read_field_reports_form_input_values_and_directed_errors(
@@ -550,7 +570,8 @@ def test_logical_ref_scalar_and_copy_keep_summary_facts_detached(
         assert observed.value_status == "available"
         assert observed.mode is None and observed.key is None
         assert observed.input_present is False and observed.input is None
-        assert observed.readonly and not observed.locked
+        assert getattr(observed, "via_ref", None) is True
+        assert not observed.locked
         assert observed.source is not None
         assert observed.source["key"] == "Q1.pulses.pi"
         assert client.transport.sent[sent:] == [
