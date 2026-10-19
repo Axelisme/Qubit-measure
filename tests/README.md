@@ -381,7 +381,7 @@ interaction.
 
 `DeviceManager` 是 instance registry，入口只接受 `BaseDevice` instance。GUI service unit tests 若用
 `MagicMock` driver 驗證 call interaction，注入 `tests/gui/session/services/_device_fakes.py::FakeDeviceRegistry`。
-Registry CRUD 使用真 `FakeDevice`。`test_simulated_environment.py` 經真 session owners 驗證明確組裝、部分斷線失敗與來源綁定，不靠一般 SoC change 通知補建資源。
+Registry CRUD 使用真 `FakeDevice`。`services/test_device_registration.py` 經真 manager 與 session owner 驗證 runtime 註冊、失敗保留與逐台 close；`app/measure/test_device_lifecycle.py` 驗證 drain 保留資源，以及 app 關閉隔離 driver 錯誤並卸載 SoC。不靠 SoC change 通知補建資源。
 
 `DeviceService.poll_device_info(name)` 測試應視為 best-effort off-main live-read contract：memory-only、
 connect/disconnect 等非 setup mutation 會 skip；`SETTING_UP` 的 selected device 可 poll current driver

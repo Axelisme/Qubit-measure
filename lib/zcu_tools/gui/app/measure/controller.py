@@ -71,6 +71,7 @@ from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    from zcu_tools.device.base import BaseDevice
     from zcu_tools.experiment.artifacts import SaveReport
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.alias_presets import AliasPresets
@@ -287,8 +288,8 @@ class Controller(SessionControllerMixin):
         """Compose services for state/registry with an optional view and adapters.
 
         driver_factory creates device drivers; None selects the real hardware
-        factory. Simulation composition supplies its environment-owned lookup.
-        device_registry owns registered drivers and their eventual cleanup.
+        factory. Tests may inject a hardware-free constructor. device_registry
+        supplies registered drivers, which close_hardware eventually closes.
 
         ``alias_presets`` maps names to ordered caller-owned alias rows. None
         or omission means no catalog and an empty initial table. A supplied
@@ -367,6 +368,7 @@ class Controller(SessionControllerMixin):
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
+        self._hardware_close_attempted = False
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
@@ -376,10 +378,6 @@ class Controller(SessionControllerMixin):
         bus.subscribe(
             DeviceOperationFinishedPayload, self._on_device_operation_finished
         )
-        # FLUX-AWARE-MOCK: the mock flux source provisioning (SOC_CHANGED hook +
-        # fake_flux register/reconnect/ramp) is owned by the shared session-layer
-        # MockFluxProvisioner (built in build_session_services), so this controller
-        # carries no provisioning code of its own.
 
     def _bind_services(self, services: AppServices) -> None:
         """Retain the bundle and name the service instances used by the facade."""
@@ -804,6 +802,39 @@ class Controller(SessionControllerMixin):
         self._background_svc.stop_accepting()
         if not self._background_svc.quiesce(timeout_ms):
             raise TimeoutError("Controller background work did not drain in time")
+
+    def register_device(self, name: str, driver: BaseDevice[Any]) -> None:
+        """Adopt a constructed driver through DeviceService on the owner thread.
+
+        ``name`` is a nonblank session name and ``driver`` supplies its own info.
+        Replaces an idle remembered row or adds a nonremembered connected row.
+        Run/mutation conflicts, duplicate live names and driver/registry failures
+        propagate without publishing a candidate. Ownership transfers only on
+        success; GUI teardown closes registered drivers after drain and callbacks.
+        """
+        if self._hardware_close_attempted:
+            raise FailedPreconditionError("GUI hardware has already closed")
+        self._dev_svc.register_device(name, driver)
+
+    def close_hardware(self) -> None:
+        """Close managed drivers once, then unpublish the caller-owned SoC.
+
+        Call on the Qt owner thread only after successful close() drain and any
+        caller on-close callbacks. Every driver gets one attempt; successful rows
+        become MEMORY_ONLY and failed rows stay CONNECTED with error. Aggregate
+        close errors are logged, not raised, so they cannot block GUI teardown.
+        The SoC has no close contract. Its creator still owns external cleanup.
+        Repeated calls do not retry failed driver closes or emit duplicate facts.
+        """
+        if self._hardware_close_attempted:
+            return
+        self._hardware_close_attempted = True
+        try:
+            self._dev_svc.close_all_devices()
+        except ExceptionGroup:
+            logger.exception("Failed to close GUI-managed devices")
+        finally:
+            self._soc_svc.uninstall_soc()
 
     def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation, wait (with a timeout) for them to stop,

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，device 連線失敗與重試、未連線改名、模擬 device address lookup 與重連
+**Last updated:** 2026-10-19，runtime SoC／device 註冊與逐台關閉
 
 # gui/session/ — 量測 session core
 
@@ -95,17 +95,21 @@ session/
 
 共用 Setup、Inspect、Devices 與 ARB 對話框由宿主呼叫 `set_read_only` 決定是否可編輯，不讀控制權或 run 狀態。Setup 唯讀時保留 point 選取、description、paths、查詢刷新與 Close，停用 entry／point 提交及 Connect。連線完成與事件刷新不會解除宿主的唯讀狀態。ARB 唯讀時停用編輯與 Save，保留鎖前草稿；asset 選取、Refresh、預覽與 Close 照常可用。解鎖後 Save 仍受驗證結果限制。Inspect 唯讀時「Arb Waveforms…」入口仍可按，ARB 依宿主規則以唯讀開啟。
 
-Simulation is selected at measure startup with `--simulate <environment.py>`.
-Composition injects the returned manager and calls `DeviceService.publish_initial_devices`
-before preference restore. Live rows win over same-name remembered rows; other
-remembered rows stay MEMORY_ONLY without connecting. `install_startup_soc` publishes
-the bound SoC/config through the connection owner and fixes that pair for this process.
-Composition also injects the environment's device lookup into DeviceService.
-Explicit FakeDevice addresses retrieve process-shared instances without resetting
-settings or model bindings. Unsupported simulation types/addresses fail clearly;
-real-mode hardware creation is unchanged. Session has no environment builder,
-second instance cache or dynamic simulation coordinator. The host drains work
-and closes the same manager; Controller close alone does not close drivers.
+`SoCConnectionService.install_soc(soc, soccfg)` 可在 owner thread 替換 board/config，
+`uninstall_soc()` 發布空 pair。兩者走 SOC_CONNECT gate，Run 或 connect 中拒絕。
+Board 自述的 optional `is_mock` 直接轉發，缺旗標時為 False；session 不判斷來源，
+也不對 board 假定 close 契約。建立者保留 board 外部資源的清理責任。
+
+`DeviceService.register_device(name, driver)` 接受已建好的 BaseDevice，先讀 info，
+成功後才接管並發布 cache。Live 同名拒絕，idle MEMORY_ONLY 可替換並保留 remember。
+Run 或同名 mutation 中拒絕；失敗不接管或關閉候選 driver。通用 DriverFactoryPort
+仍服務手動連線；注入 registry 可用 `publish_initial_devices()` 發布既有 drivers。
+Live rows 優先於同名 remembered rows，其他 remembered rows 不自動連線。
+
+Host 在工作 drain 及 caller callbacks 完成後呼叫 `close_all_devices()`。
+每台 driver 各嘗試一次，成功轉 MEMORY_ONLY，失敗保留 CONNECTED 與 error，最後
+拋彙整 ExceptionGroup。Measure 的 `Controller.close()` 只 drain，`close_hardware()`
+才逐台關閉並卸載 SoC。後者記錄關閉錯誤而不阻擋 GUI 結束，重呼不自動重試。
 
 Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提供獨立 `value_unit` 編輯。完整 cfg 的單位由 Info 驗證，snapshot 與 recipe 沿同一儲存事實。
 

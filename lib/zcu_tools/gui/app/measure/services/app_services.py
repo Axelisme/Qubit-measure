@@ -130,7 +130,7 @@ def build_app_services(
     """Construct and wire every domain service into a frozen bundle.
 
     driver_factory supplies drivers for device_registry. None selects the
-    hardware factory; simulation composition supplies its environment lookup.
+    hardware factory; tests may inject a hardware-free constructor.
 
     ``alias_presets`` maps names to ordered caller-owned rows. Omitted or None
     means no catalog and an empty initial table. A supplied mapping must contain

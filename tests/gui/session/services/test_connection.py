@@ -180,9 +180,7 @@ def test_connect_bumps_soc_not_context_version(qapp, real_bg):
 
 
 def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
-    """connect_sync runs inline (no bg), sets the soc, and emits SocChangedPayload
-    synchronously (the hook the MockFluxProvisioner rides). It returns the handles
-    directly and releases the SOC_CONNECT lease."""
+    """Synchronous connect publishes board identity and releases its lease."""
     gate = OperationGate(EventBus())
     state = _make_state()
     bus = EventBus()
@@ -200,7 +198,7 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     # The shared _apply_connection side effects fired synchronously.
     assert state.version.get("soc") == soc_before + 1
     assert len(payloads) == 1
-    assert payloads[0].is_mock is False
+    assert payloads[0].is_mock is True
     # Lease released, no lingering active token.
     assert not gate.has_active(OperationKind.SOC_CONNECT)
     assert not svc.is_connect_active()
@@ -222,7 +220,7 @@ def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
 
     monkeypatch.setattr(remote, "make_soc_proxy", proxy)
     svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
-    assert not svc.is_mock_soc()
+    assert svc.is_mock_soc()
     assert svc.connected_endpoint() == {"address": "192.0.2.1", "port": 8888}
 
     def fail(ip: str, port: int):
@@ -232,7 +230,7 @@ def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
     with pytest.raises(ConnectionRefusedError, match="offline"):
         svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
     assert svc.has_soc()
-    assert not svc.is_mock_soc()
+    assert svc.is_mock_soc()
     assert svc.connected_endpoint() == {"address": "192.0.2.1", "port": 8888}
 
 
@@ -322,7 +320,9 @@ def test_runtime_soc_changes_reject_busy_gate_without_losing_installed_pair(busy
     if busy == "connect":
         svc.start_connect(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
     else:
-        gate.register(999, MeasureOpKind.RUN, owner_id="tab", origin_kind="user", note="running")
+        gate.register(
+            999, MeasureOpKind.RUN, owner_id="tab", origin_kind="user", note="running"
+        )
     try:
         with pytest.raises(OperationConflictError):
             svc.install_soc(MagicMock(), MagicMock())

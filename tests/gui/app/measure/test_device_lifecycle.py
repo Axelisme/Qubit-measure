@@ -59,7 +59,9 @@ def test_behavior_closes_runtime_registered_drivers_after_drain(assembled_app):
     ctrl.register_device("runtime", driver)
     assert ctrl.device_control.get_device_info("runtime") == driver.get_info()
     ctrl.close()
-    assert driver.attempts == 0  # drain alone must leave resources for on_close callbacks
+    assert (
+        driver.attempts == 0
+    )  # drain alone must leave resources for on_close callbacks
 
     behavior.close(assembly)
 
@@ -71,7 +73,9 @@ def test_behavior_closes_runtime_registered_drivers_after_drain(assembled_app):
     assert driver.attempts == 1
 
 
-def test_close_hardware_isolates_driver_failure_and_still_uninstalls_soc(assembled_app, caplog):
+def test_close_hardware_isolates_driver_failure_and_still_uninstalls_soc(
+    assembled_app, caplog
+):
     _behavior, assembly = assembled_app
     ctrl = controller_of(assembly.controller)
     bad = ClosingDriver(fast_mode=True)
@@ -86,8 +90,13 @@ def test_close_hardware_isolates_driver_failure_and_still_uninstalls_soc(assembl
         ctrl.close_hardware()
         assert bad.attempts == good.attempts == 1
         assert not ctrl.has_soc()
-        rows = {name: ctrl.device_control.get_device_snapshot(name) for name in ("bad", "good")}
-        assert rows["good"] is not None and rows["good"].status is DeviceStatus.MEMORY_ONLY
+        rows = {
+            name: ctrl.device_control.get_device_snapshot(name)
+            for name in ("bad", "good")
+        }
+        assert (
+            rows["good"] is not None and rows["good"].status is DeviceStatus.MEMORY_ONLY
+        )
         assert rows["bad"] is not None and rows["bad"].status is DeviceStatus.CONNECTED
         assert "close failed for synthetic driver" in caplog.text
         ctrl.close_hardware()
