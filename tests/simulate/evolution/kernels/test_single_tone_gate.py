@@ -23,6 +23,7 @@ from zcu_tools.simulate.evolution.kernel import (
     SegmentTable,
 )
 from zcu_tools.simulate.evolution.kernels import REGISTRY
+from zcu_tools.simulate.evolution.kernels._rwa_gate import GatePrepared
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 
@@ -88,13 +89,20 @@ def test_inventory_amortizes_once_but_small_inventory_stays_sambe_even_when_warm
         for phase in (0.0, 0.713):
             result = engine.evolve(source(), (batch(1024, phase),), cancel=Event())
             assert result.paths.segments_by_kernel.get("single_tone_gate") == 1024
-        assert len(calls) == 4, (
-            "one canonical key builds four U only once across phases"
-        )
+        assert len(calls) == 0, "single-tone cold builds stay in compiled integration"
         warm_small = engine.evolve(source(), (batch(2, 0.713),), cancel=Event())
         assert (
             warm_small.paths.segments_by_kernel == cold_small.paths.segments_by_kernel
         )
+
+
+def test_compiled_cold_cost_admits_reference_inventory_but_not_small_inventory():
+    with closing(Engine(1, 1_000_000)) as engine:
+        for phase in (0.0, 0.713):
+            reference = engine.evolve(source(), (batch(160, phase),), cancel=Event())
+            assert reference.paths.segments_by_kernel.get("single_tone_gate") == 160
+            small = engine.evolve(source(), (batch(2, phase),), cancel=Event())
+            assert small.paths.segments_by_kernel.get("shaped_sambe") == 2
 
 
 @pytest.mark.parametrize("frequency", [0.6, -0.6])
@@ -156,3 +164,76 @@ def test_covariance_preserves_complex_density_for_sliced_support_and_key_domains
         changed = kernel.prepare_keys(replace(table, **{field: values}), rows, context)
         assert changed[0] != keys[0]
     assert not kernel.guard(table, rows, replace(context, budget=1e-4)).any()
+
+
+@pytest.mark.parametrize("frequency", [0.6, -0.6])
+def test_compiled_four_unitaries_match_scipy_at_sliced_absolute_intervals(
+    frequency, monkeypatch
+):
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import (
+        interaction_hamiltonian,
+        rwa_coefficients,
+    )
+
+    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
+    table = SegmentTable(
+        timeline=np.array([0]),
+        start_ns=np.array([37.0]),
+        duration_ns=np.array([126.0]),
+        level=np.zeros((1, 1), dtype=np.int64),
+        tones=np.ones(1, dtype=np.int64),
+        tone_port=np.zeros((1, 1), dtype=np.int64),
+        tone_frequency_ghz=np.array([[frequency]]),
+        tone_amplitude=np.array([[0.08]]),
+        tone_theta_rad=np.array([[0.713]]),
+        tone_envelope=np.zeros((1, 1), dtype=np.int64),
+        tone_envelope_offset_ns=np.array([[4.0]]),
+        envelopes=(envelope(),),
+    )
+    src = source()
+    rows = np.array([0])
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+        keys = kernel.prepare_keys(table, rows, context)
+        calls = []
+        solve = scipy.integrate.solve_ivp
+
+        def observed(*args, **kwargs):
+            calls.append(1)
+            return solve(*args, **kwargs)
+
+        monkeypatch.setattr(scipy.integrate, "solve_ivp", observed)
+        prepared = kernel.prepare(keys, table, rows, context)
+        assert isinstance(prepared, GatePrepared)
+        model = src.model((0,))
+        coefficients = rwa_coefficients(model, (0,), (frequency,))
+        energy = model.energies_ghz + prepared.charges[0, :, 0] * frequency
+        energy -= energy[0]
+        env = table.envelopes[0]
+
+        def rhs(time, state):
+            amplitude = 0.08 * np.interp(time + 4, env.sample_ns, env.samples)
+            h = interaction_hamiltonian(
+                time, energy, coefficients, np.array([amplitude])
+            )
+            return (-2j * np.pi * h @ state.reshape(3, 3)).ravel()
+
+        reference = []
+        boundaries = np.linspace(0, 126, 5)
+        for start, end in zip(boundaries[:-1], boundaries[1:], strict=True):
+            result = solve(
+                rhs,
+                (start, end),
+                np.eye(3, dtype=complex).ravel(),
+                method="DOP853",
+                rtol=1e-9,
+                atol=1e-11,
+                max_step=4.0,
+            )
+            assert result.success
+            endpoint = result.y[:, -1].reshape(3, 3)
+            endpoint *= np.exp(-2j * np.pi * energy * end)[:, None]
+            endpoint *= np.exp(2j * np.pi * energy * start)[None, :]
+            reference.append(endpoint)
+        np.testing.assert_allclose(prepared.unitaries[0], reference, atol=1e-7, rtol=0)
+        assert not calls, "single-tone preparation must use the compiled builder"
