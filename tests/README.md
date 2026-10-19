@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-19，IR optimization 測試按公開契約歸位
+**Last updated:** 2026-10-20，DeviceManager 測試按 registry/setup 與 close 契約歸位
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -276,6 +276,10 @@ GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guar
 `tests/device/test_manager_lock.py` 覆蓋 instance `DeviceManager` registry lock 只保護
 registry dict、`get_info` 不被其它 device 的 setup ramp 阻塞、整批 name validation
 fast-fail、以及 `setup_devices(..., cancel_signal=...)` 的顯式協作取消語意。取消測試使用真 `FakeDevice`，不註冊 MagicMock driver。
+
+`tests/device/test_manager_close.py` 覆蓋 registry-owned disconnect：關閉權的並發排他、
+成功後的 registry 清理、失敗與重試，以及 close 期間的 registry 變更。
+兩個 owner 共用 `tests/device/conftest.py` 的 function-scope `manager` fixture，每案建立新 manager，不自動 close。
 
 ### Offline acquisition transports
 
