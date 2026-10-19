@@ -422,6 +422,7 @@ def test_save_and_resave_use_host_local_labber_date(
         )
         labber_paths.append(labber)
         assert labber.is_file()
+        assert labber.name == f"test_saving_{acquisition.run_id[-6:]}_1.hdf5"
         assert (
             labber.relative_to(tmp_path / "Database" / "entry" / "Labber").parts[:3]
             == expected
