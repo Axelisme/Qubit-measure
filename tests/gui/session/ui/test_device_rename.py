@@ -81,6 +81,7 @@ def test_readonly_device_dialog_disables_rename(
     ui = rename_ui
     evidence = Path(os.environ.get("DEVICE_RENAME_EVIDENCE", str(tmp_path)))
     ui.select_list_row("old (FakeDevice) [not connected]")
+    assert any(widget.text == "Rename" for widget in ui.visible().widgets)
     assert not ui.observe("Rename").enabled
     assert not ui.observe(object_name="device_rename_name").enabled
     ui.screenshot(evidence / "12-readonly.png")
@@ -95,6 +96,7 @@ def test_disconnected_device_can_be_renamed_and_reconnected(
     evidence = Path(os.environ.get("DEVICE_RENAME_EVIDENCE", str(tmp_path)))
     ui.screenshot(evidence / "01-open.png")
     ui.select_list_row("live (FakeDevice)")
+    assert any(widget.text == "Rename" for widget in ui.visible().widgets)
     assert not ui.observe("Rename").enabled
     assert "Disconnect" in ui.observe("Rename").tooltip
     ui.screenshot(evidence / "02-connected-disabled.png")
