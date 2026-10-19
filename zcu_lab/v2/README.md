@@ -97,7 +97,7 @@ zcu_lab/
 
 ## Reading routes
 
-- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。首批校準定義皆已提供離線驗證，實際 FTF 控制鏈 smoke 仍待驗收。
+- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈 smoke 已完成，不代表物理校準或 fidelity 已驗收。
   - 四分支 [conditional spectroscopy](ftf/conditional_spectroscopy/guide.md)、[relative-phase × duration constructive phase](ftf/constructive_phase/guide.md) 與 [common-frequency × duration Rabi chevron](ftf/chevron/guide.md) 提供雙線校準圖與分析。
   - [CZ common-amplitude](ftf/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
   - [Conditional phase](ftf/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。

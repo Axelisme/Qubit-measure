@@ -36,8 +36,9 @@ def analyze_spectra(
 ) -> SpectroscopyAnalysis:
     """Validate saved cfg/raw, average only complete DC/branches and draw spectra.
 
-    Require axes and shape to match saved cfg exactly. Missing slots must be whole
-    NaN rounds; any other nonfinite acquired IQ raises ValueError. This does not
+    Require axes and shape to match saved cfg, allowing only SI conversion
+    roundoff in frequency coordinates. Missing slots must be whole NaN rounds;
+    any other nonfinite acquired IQ raises ValueError. This does not
     consult current Form/library, select shots, fit peaks or propose calibration.
     Register four-branch I/Q curves per original tone and, for DC scans, separate
     four-branch I/Q heatmaps. No GE centers or level identity assumptions are used.
@@ -52,7 +53,10 @@ def analyze_spectra(
     ntones, nshots = len(cfg.modules.readout.tones), cfg.rounds * cfg.reps
     if (
         not np.array_equal(data.dc_values, dc)
-        or not np.array_equal(data.frequencies, frequencies)
+        or data.frequencies.shape != frequencies.shape
+        or not np.allclose(
+            data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
+        )
         or not np.array_equal(data.branches, np.arange(4))
         or not np.array_equal(data.tone_indices, np.arange(ntones))
         or not np.array_equal(data.shot_indices, np.arange(nshots))

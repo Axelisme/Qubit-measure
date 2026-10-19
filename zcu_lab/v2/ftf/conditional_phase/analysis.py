@@ -48,6 +48,7 @@ def analyze_phase(
     """Validate raw against saved cfg and analyze only complete X/Y round pairs.
 
     Missing quadrature/branch or calibration gives a reason, not an inferred phase.
+    Frequency axes allow only SI conversion roundoff; other axes match exactly.
     Any partly missing round or nonfinite acquired value raises ValueError.
     Thermal mixture and weak contrast remain in the result; no shots are removed.
     """
@@ -118,17 +119,21 @@ def _source_quadratures(
     data: ConditionalPhaseResult,
 ) -> tuple[NDArray[np.complex128], NDArray[np.int64], NDArray[np.bool_]]:
     """Validate saved raw axes/whole-round sentinels and average complete projections."""
+    frequencies = sweep2array(cfg.frequency)
     nf, nn, nt, ns = (
-        len(sweep2array(cfg.frequency)),
+        len(frequencies),
         len(cfg.gate_counts),
         len(cfg.modules.readout.tones),
         cfg.rounds * cfg.reps,
     )
+    if data.frequencies.shape != frequencies.shape or not np.allclose(
+        data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
+    ):
+        raise ValueError("Conditional phase raw axes must match saved cfg")
     for actual, expected in (
         (data.branches, np.arange(2)),
         (data.quadratures, np.arange(2)),
         (data.gate_counts, np.array(cfg.gate_counts)),
-        (data.frequencies, sweep2array(cfg.frequency)),
         (data.shot_indices, np.arange(ns)),
         (data.tone_indices, np.arange(nt)),
     ):

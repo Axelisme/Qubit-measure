@@ -1,4 +1,8 @@
-"""Zero-phase, first-positive-cycle CZ return policy from decision 0089."""
+"""Fit CZ return with phase fixed at zero gain scale, not a free phase.
+
+Select only the first positive full-cycle return (scale = period), requiring
+measured coverage from zero through that period rather than extrapolation.
+"""
 
 from __future__ import annotations
 
