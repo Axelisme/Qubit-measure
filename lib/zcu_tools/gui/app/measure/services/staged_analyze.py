@@ -1,4 +1,4 @@
-"""_StagedAnalyzeService — the shared spine of the two off-main analyze stages.
+"""StagedAnalyzeService — the shared spine of the two off-main analyze stages.
 
 ``AnalyzeService`` (primary FIT/INTERACTIVE) and ``PostAnalyzeService`` (second
 layer) run the identical operation lifecycle: a per-tab async handle (no exclusion,
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from .ports import AnalyzeStatePort
 
 
-class _StagedAnalyzeService:
+class StagedAnalyzeService:
     """Lifecycle skeleton shared by the primary- and post-analyze services.
 
     Subclasses declare their completion stage while the shared EventBus facts carry

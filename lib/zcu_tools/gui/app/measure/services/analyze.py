@@ -19,7 +19,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.resources.entry.ledger_models import JsonObject
 
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
-from .staged_analyze import _StagedAnalyzeService
+from .staged_analyze import StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class ActiveInteractive:
     plots: Plots
 
 
-class AnalyzeService(_StagedAnalyzeService):
+class AnalyzeService(StagedAnalyzeService):
     FAILURE_STAGE = "primary"
     STARTED_FACT = TabInteractionFact.PRIMARY_ANALYZE_STARTED
     SUCCEEDED_FACT = TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED
