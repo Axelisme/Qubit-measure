@@ -35,6 +35,9 @@ _MAX_SLOPE = 0.025
 _MAX_CURVATURE = 0.003
 # Integer 256 ns gain sweep exceeded 1e-2 at gain 0.4184, proxy 0.063 rad.
 _MAX_PHASE_RAD = 0.06
+# Constant-only calibration and safety margin are documented on the kernel.
+# Keep RWA_POLICY unchanged for sampled rows and covariant gate identities.
+_MAX_CONSTANT_PHASE_RAD = 0.16
 RWA_POLICY = (
     _REVISION,
     _EDGE_GHZ,
@@ -449,9 +452,10 @@ def _admit_rows(
                 )
                 / frequencies[tone]
             )
+        phase_limit = _MAX_CONSTANT_PHASE_RAD if constant else _MAX_PHASE_RAD
         accepted[index] = (
             ratio <= _MAX_RATIO
-            and 2 * np.pi * table.duration_ns[row] * phase <= _MAX_PHASE_RAD
+            and 2 * np.pi * table.duration_ns[row] * phase <= phase_limit
         )
     return accepted
 
@@ -505,7 +509,18 @@ class MultitoneRWAKernel:
     <=0.003/ns², each |f|>=0.05 GHz, pairwise ||f_i|-|f_j||>=0.1 GHz,
     sum of peak |gain|*(||X||₂+||Y||₂)/|f| <=0.25, and cumulative
     counter-rotating phase proxy 2π*duration*sum((peak*gain*||V_ret||₂)²/|f|)
-    <=0.06 rad. Budgets below
+    <=0.06 rad for sampled rows, or <=0.16 rad for distinct-port dual constant
+    rows. The constant cap uses one 96-point scan of the 16-level joint model
+    against strict lab DOP853 (budget 1e-7): flux offsets
+    (0.48*f,0.2,0.49*f) Phi0 for f=0,0.4,0.8,1 between integer and near-half;
+    phases (0,0) and (0.7,-1.2) rad; full-operator/carrier ratios 0.03, 0.07,
+    0.14, 0.24; durations 128, 512, 1024 ns. Among all forced-RWA points,
+    including combination-guard rejects, the smallest proxy with population
+    error >0.1 was 0.338362529 rad. Halving and rounding down gives 0.16 rad
+    (2.11x margin). All 44 points below this cap had error <=0.08641; the 36
+    also passing the combination guard had error <=0.005062. This empirical
+    cap is not an arbitrary-input or whole-sequence certificate. Sampled
+    admission and covariant gate policies remain unchanged. Budgets below
     1e-3 decline: this calibrated approximation is not a tight-error solver.
     Dual constant rows also require an omitted-path combination transfer proxy
     <=5.8e-3 for every signed sum/difference and dressed level pair.
@@ -545,6 +560,15 @@ class MultitoneRWAKernel:
         for index, row in enumerate(rows):
             count = table.tones[row]
             digest = sha256(repr((RWA_POLICY, context.budget)).encode("ascii"))
+            if all(
+                table.envelopes[e].kind == "constant"
+                for e in table.tone_envelope[row, :count]
+            ):
+                digest.update(
+                    repr(("constant_phase_rad", _MAX_CONSTANT_PHASE_RAD)).encode(
+                        "ascii"
+                    )
+                )
             digest.update(table.level[row].astype("<i8").tobytes())
             digest.update(
                 np.array(

@@ -504,3 +504,85 @@ def test_constant_combination_resonance_returns_to_lab_even_without_retained_edg
         {"multitone_rwa": 1},
         {"dop853": 1},
     )
+
+
+def phase_proxy_pair(phase_rad, *, domain="constant"):
+    """Three levels with analytically known retained norms of 0.025 GHz/gain."""
+    drives = []
+    for port, target in (("a", 1), ("b", 2)):
+        positive = np.zeros((3, 3), dtype=np.complex128)
+        positive[0, target] = 0.025
+        drives.append(
+            SecularDrive(port, positive + positive.T, 1j * (positive - positive.T))
+        )
+    model = SecularModel(
+        (0,),
+        "phase-proxy-pair",
+        np.array([0.0, 0.3, 0.9]),
+        np.eye(3, dtype=np.complex128),
+        tuple(drives),
+        np.zeros((3, 3)),
+        np.zeros((3, 3)),
+    )
+    initial = np.diag([1.0, 0.0, 0.0]).astype(np.complex128)
+    source = ModelSource(initial, lambda level: replace(model, level=level))
+    # With distinct ports both resonant Fourier operators have norm 0.025.
+    # For the same port only the 0.3 GHz edge is retained.
+    inverse_frequencies = 1 / 0.3 + (0 if domain == "same_port" else 1 / 0.9)
+    duration = phase_rad / (2 * np.pi * 0.025**2 * inverse_frequencies)
+    sampled = EnvelopeSpec(
+        "sampled",
+        np.ones(3, dtype=np.complex128),
+        np.array([0.0, duration / 2, duration]),
+    )
+    tracks = tuple(
+        DriveTrack(
+            "a" if domain == "same_port" else port,
+            np.array([0.0]),
+            np.array([duration]),
+            np.array([frequency]),
+            np.array([0.3]),
+            np.array([1.0]),
+            (sampled if domain == "sampled" else EnvelopeSpec("constant"),),
+            np.array([0]),
+            np.array([True]),
+        )
+        for port, frequency in (("a", 0.3), ("b", 0.9))
+    )
+    return source, TimelineBatch(
+        np.array([0]),
+        tracks,
+        FluxSchedule(np.array([0, 1]), np.array([0.0]), np.array([[0]])),
+        np.array([duration]),
+    )
+
+
+def test_constant_phase_cap_expands_without_relaxing_other_domains():
+    routes = {}
+    for domain in ("constant", "same_port", "sampled"):
+        for phase in (0.05, 0.07, 1.0):
+            source, batch = phase_proxy_pair(phase, domain=domain)
+            with closing(Engine(1, 1000000)) as engine:
+                result = engine.evolve(source, (batch,), cancel=Event())
+            routes[domain, phase] = "multitone_rwa" in result.paths.segments_by_kernel
+            if not (domain == "constant" and phase in (0.05, 0.07)) and not (
+                domain == "sampled" and phase == 0.05
+            ):
+                # Rejected rows retain the original two-tone routing and density.
+                original_kernels = tuple(
+                    k for k in REGISTRY if k.name != "multitone_rwa"
+                )
+                with closing(Engine(1, 1000000, kernels=original_kernels)) as engine:
+                    original = engine.evolve(source, (batch,), cancel=Event())
+                assert (
+                    result.paths.segments_by_kernel == original.paths.segments_by_kernel
+                )
+                np.testing.assert_array_equal(result.densities, original.densities)
+    assert routes == {
+        (domain, phase): domain == "constant"
+        and phase in (0.05, 0.07)
+        or domain == "sampled"
+        and phase == 0.05
+        for domain in ("constant", "same_port", "sampled")
+        for phase in (0.05, 0.07, 1.0)
+    }
