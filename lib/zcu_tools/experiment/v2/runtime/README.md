@@ -21,6 +21,7 @@ acquire。`ResultTree` 提供 structured `BufferProtocol`，可交給同一個
   writable view。
 - `SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 `on_update`。
 - `trigger_update()` 用於沒有新資料寫入、但 caller 想強制刷新 liveplot 的等待期。
+- `flush_pending_update()` 立即交付被節流、尚未呈現的更新。若 callback 已經完成，這個方法不重複呼叫它。顯式 `trigger_update(flush=True)` 則仍會強制刷新。
 
 ### `BufferProtocol`
 
@@ -102,6 +103,8 @@ with Schedule(cfg, signals_buffer) as sched:
   對一般 `SignalBuffer` 不改變 `on_update(data)` public shape。
 - `sched.trigger_update(flush=True)` 是 root-level update，會對 root buffer 傳
   `step=None`；step-level update 才帶 `ScheduleStep`。
+- 正常離開 scope 時（包含 requested stop），`Schedule` 對 root `SignalBuffer` 呼叫 `flush_pending_update()`，交付最後尚未呈現的資料。已顯式 flush 或已經呈現的更新不重複發布。Body 拋出例外或 `KeyboardInterrupt` 時不做自動 flush；正常退出的 callback 錯誤會傳播，但 scope 仍關閉。
+- 自動 flush 不擴充 `BufferProtocol`，也不對其它實作廣播 root update。`ResultTree` 維持由 caller 顯式 flush，以保留既有 env 與 path 事件語意。
 
 ### `ProgramBuilder`
 
