@@ -367,6 +367,42 @@ def test_reset_aliases_fixes_parameter_reads_until_next_reset(form_rpc) -> None:
         restore_registry(before)
 
 
+def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(form_rpc) -> None:
+    from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+
+    fixture, tab, rpc = form_rpc
+    before = registry_state()
+    try:
+        register_fakes()
+        context = fixture.ctrl.context_control
+        context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
+        context.add_component("Q2", "fake/drive/a", {"rate": 20.0})
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        owner.write({("gain",): {"expr": "$qubit.rate / 100"}})
+        authored = owner.input.data
+        rows = context.get_alias_rows()
+        reply = rpc.call("tab.refresh_sources", {"tab_id": tab, "aliases": {"qubit": "Q2"}})
+        assert reply["ok"], reply
+        assert reply["result"]["input"] == authored
+        assert {tuple(item["path"]): item["value"] for item in reply["result"]["values"]}[("gain",)] == 0.2
+        assert context.get_alias_rows() == rows
+        context.set_parameter(context.read_context().target, "Q2.rate", 30.0)
+        assert owner.preview().values[("gain",)] == 0.2
+        fixture.state.set_tab_running(tab, running=True)
+        try:
+            busy = rpc.call("tab.refresh_sources", {"tab_id": tab})
+            assert busy["error"]["reason"] == "busy", busy
+        finally:
+            fixture.state.set_tab_running(tab, running=False)
+        fixture.ctrl.control_identity.reclaim_local()
+        rejected = rpc.call("tab.refresh_sources", {"tab_id": tab})
+        assert rejected["error"]["code"] == "not_holder", rejected
+        assert owner.input.data == authored
+        assert owner.preview().values[("gain",)] == 0.2
+    finally:
+        restore_registry(before)
+
+
 def test_form_tuple_complex_values_have_lossless_json_projection(form_rpc) -> None:
     fixture, _, rpc = form_rpc
     fixture.registry.register("tuple", TupleAdapter)
