@@ -133,6 +133,30 @@ def test_script_selection_uses_only_default_custom_or_clean(tmp_path):
         )
 
 
+def test_composition_rejects_clean_script_before_factory_and_global_hooks(tmp_path):
+    factory_calls: list[str] = []
+
+    def registry_factory():
+        factory_calls.append("called")
+        return Registry(), Loader()
+
+    previous_hook = sys.excepthook
+    previous_thread_hook = threading.excepthook
+    try:
+        with pytest.raises(ValueError, match="--clean.*--script"):
+            MeasureGuiBehavior(
+                registry_factory, clean=True, startup_script=tmp_path / "startup.py"
+            )
+        assert (factory_calls, sys.excepthook, threading.excepthook) == (
+            [],
+            previous_hook,
+            previous_thread_hook,
+        )
+    finally:
+        sys.excepthook = previous_hook
+        threading.excepthook = previous_thread_hook
+
+
 def test_background_facets_lock_run_and_keep_completed_work(startup_app, tmp_path):
     _behavior, _assembly, ctrl, _window, probe = startup_app
     path = write_script(
