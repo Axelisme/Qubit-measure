@@ -74,7 +74,14 @@ Slot／Template 不提供 lock 參數，也不提供 `Locked` 節點。List 各�
 
 Module 子欄位唯讀時仍可選 library key。Module 節點本身標唯讀則固定整個 module 子樹，包含 ref／inline 選擇與所有子欄位，不論初值是 ref 或 inline。不另設 selector-only 宣告，也不自動強制 inline。使用者於 2026-10-19 裁定：「我會選B，lock應該被認知為只對子樹作用。」
 
-只為組實驗 cfg 存在的固定值不放進 Form 或實驗 cfg 型別，由 `run()` 補齊。這包括單發的 reps／rounds=1，以及 FTF 從 group 推得的 roles／tone index。Mux tone name 需要給使用者看，保留並宣告唯讀。使用者於 2026-10-19 裁定：「有一些是為了方便轉換成experiment cfg而塞入的，其實可以改成直接不曝露欄位。run再補齊。」
+只為組實驗 cfg 存在的固定值不放進 Form 或實驗 cfg 型別，由 `run()` 補齊，例如單發的 reps／rounds=1。Mux tone name 需要給使用者看，保留並宣告唯讀。使用者於 2026-10-19 裁定：「有一些是為了方便轉換成experiment cfg而塞入的，其實可以改成直接不曝露欄位。run再補齊。」
+
+FTF roles 的 f1、f2、coupler、mux、tone index 與 tone_count 供驗證、離線 analysis 與 writeback 使用，不屬於只為組 cfg 存在的固定值。這些欄位保留唯讀，初值仍來自 captured group，cfg／result／保存契約不變。
+
+Bath reset freq 的 `tested_reset.pi2_cfg.phase` 移除舊 lock，由 Template 的 `set` 給初值 90，欄位可編輯。
+`run()` 組 program 時使用 cfg 的 phase，不覆寫為固定值。Guide 註明 90 是建議的 tomography offset。
+現有 Template 沒有 nested Hidden／readonly 作者入口，且只有這一處需要，因此不新增 nested metadata API。
+不複製共用 module 型別，也不另建局部 cfg 型別。
 
 缺 Slot 來源時，optional 欄位停用且有效，required 欄位留空且 Invalid。
 沒有 Slot fallback 或 init 模式。需要選來源時，make_form 明寫 if／else。

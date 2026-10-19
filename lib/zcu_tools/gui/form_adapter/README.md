@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-19，初值與唯讀、library 引用觀察
+**Last updated:** 2026-10-19，固定值分類與 logical observation readonly
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -47,7 +47,7 @@ Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、
 
 Module 子欄位唯讀不移除 library key 選項。Module 節點本身標唯讀則固定整個 module 子樹，包含 ref／inline 選擇與所有子欄位，不論初值是 ref 或 inline。不另設 selector-only 宣告，也不自動強制 inline。
 
-只為組實驗 cfg 存在的固定值不進 Form 或實驗 cfg 型別，由實驗的 `run()` 補齊。使用者需要看到但不能改的值才保留為唯讀欄位，見 ADR-0073。
+只為組實驗 cfg 存在的固定值不進 Form 或實驗 cfg 型別，由實驗的 `run()` 補齊。供驗證、analysis 或 writeback 使用的固定輸入仍可保留為唯讀欄位。具體分類由 [ADR-0073](../../../../docs/adr/0073-measure-form-derivation.md#form-的形狀與初值) 定義。
 
 ## 固定元素宣告
 
@@ -106,7 +106,7 @@ Step 驗證保留 start 與 step，以 floor count 投影實際 stop／center／
 
 生成器在 core cfg、Spec 與手寫 `ModuleInputField.annotation` 附上 `ModuleSelector` metadata。它記錄 wrapper 名稱、inline/ref families 與 module/waveform namespace，沒有 env 或 mutable state。Logical paths 只略過這些生成 wrapper，真實名為 `module` 的欄位保留。Canonical Form/widget paths 與持久 JSON 不變。
 
-`Form.read_logical_field(input, path, env)` 回 `LogicalFieldObservation`。Description、children 與 errors 使用 logical paths。Authored input、普通值、available/missing/unavailable、selector mode/key、最近 captured source 與 `via_ref` 各自有欄位。`via_ref` 表示穿過 library 引用，與宣告 readonly 分開。穿 ref 只讀 captured Spec，以 core 的 field-local preview 求值，不轉 native cfg、不載 asset samples，也不寫 input/base/library。目標 ref 缺來源時仍可觀察選擇與 unavailable errors。穿 ref 祖先讀 descendants 或執行 copy 缺來源時，raise `LogicalSourceError`，不補 defaults。
+`Form.read_logical_field(input, path, env)` 回 `LogicalFieldObservation`。Description、children 與 errors 使用 logical paths。Authored input、普通值、available/missing/unavailable、selector mode/key、最近 captured source 與 `readonly` 各自有欄位。`LogicalFieldObservation.readonly` 表示穿過 ref 祖先，不表示宣告唯讀，也不授予寫入權限。穿 ref 只讀 captured Spec，以 core 的 field-local preview 求值，不轉 native cfg、不載 asset samples，也不寫 input/base/library。目標 ref 缺來源時仍可觀察選擇與 unavailable errors。穿 ref 祖先讀 descendants 或執行 copy 缺來源時，raise `LogicalSourceError`，不補 defaults。
 
 `prepare_logical_edits` 先按呼叫開始時的 active structure 解析整批 paths，再經 core prepare_write 一次產生候選。重複、重疊、不可達路徑與 ref 祖先整批拒絕，`LogicalEditError` 保留原 edit index。普通 model-invalid 值仍是可安裝的 draft。Generated selector 本身只接受專用的 `prepare_library_selection`、`prepare_inline_copy` 與 `prepare_module_disable`。Library selection 檢查 actual key/family 與宣告限制；copy 保留 child keys；disable 只允許 nullable selector。Inline copy 的 no-op 回 changed=False。Read 不會讓 ref descendants 變成可寫。
 
