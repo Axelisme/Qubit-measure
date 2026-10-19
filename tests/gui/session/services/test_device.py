@@ -70,6 +70,7 @@ def _make_svc(
     bus: EventBus | None = None,
     handles: OperationHandles | None = None,
     bg: BackgroundExecutor | None = None,
+    registry: FakeDeviceRegistry | None = None,
 ) -> tuple[DeviceService, MagicMock]:
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
@@ -91,14 +92,14 @@ def _make_svc(
             runner,
             handles,
             driver_factory=lambda type_name, address: device,
-            device_registry=FakeDeviceRegistry(),
+            device_registry=registry if registry is not None else FakeDeviceRegistry(),
         ),
         device,
     )
 
 
 def _req(name: str = "dev1") -> ConnectDeviceRequest:
-    return ConnectDeviceRequest(type_name="FakeDevice", name=name, address="addr")
+    return ConnectDeviceRequest(type_name="YOKOGS200", name=name, address="addr")
 
 
 def _connect(svc: DeviceService, req: ConnectDeviceRequest) -> None:
@@ -109,6 +110,31 @@ def _connect(svc: DeviceService, req: ConnectDeviceRequest) -> None:
     svc.start_connect_device(req)
     qt_until(lambda: bool(connected or errors), label=f"connect {req.name}")
     assert not errors
+
+
+@pytest.mark.parametrize("simulated", [False, True])
+@pytest.mark.parametrize("remembered", [False, True])
+def test_manual_fake_device_is_rejected_before_operation_admission(
+    qapp, remembered, simulated
+):
+    from zcu_tools.gui.session.ports import DeviceMemoryInfo
+
+    registry = FakeDeviceRegistry()
+    svc, driver = _make_svc(registry=registry)
+    if simulated:
+        registry.register_device("published", driver)
+        svc.publish_initial_devices()
+        driver.get_info.reset_mock()
+    if remembered:
+        svc.register_remembered_devices(
+            [DeviceMemoryInfo(type_name="FakeDevice", name="manual", address="addr")]
+        )
+    before = svc.list_device_snapshots()
+    with pytest.raises(FailedPreconditionError, match="simulation.*publish"):
+        svc.start_connect_device(ConnectDeviceRequest("FakeDevice", "manual", "addr"))
+    assert svc.list_device_snapshots() == before
+    assert svc.get_active_device_operations() == ()
+    driver.get_info.assert_not_called()
 
 
 def test_device_connect_returns_operation_handle(qapp):
@@ -248,7 +274,7 @@ def test_device_connect_failure_is_reported_without_live_registration(qapp):
 
     device.get_info.side_effect = None
     device.get_info.return_value = FakeDeviceInfo(address="corrected", value=0.0)
-    _connect(svc, ConnectDeviceRequest("FakeDevice", "dev1", "corrected"))
+    _connect(svc, ConnectDeviceRequest("YOKOGS200", "dev1", "corrected"))
     retried = svc.get_device_snapshot("dev1")
     assert retried is not None
     assert retried.status is DeviceStatus.CONNECTED
@@ -429,7 +455,7 @@ def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
 def test_connect_writes_device_state_to_state_with_remember(qapp):
     state = State(MagicMock())
     svc, _device = _make_svc(state=state)
-    _connect(svc, ConnectDeviceRequest("FakeDevice", "dev1", "addr", remember=False))
+    _connect(svc, ConnectDeviceRequest("YOKOGS200", "dev1", "addr", remember=False))
     dev = state.get_device("dev1")
     assert dev is not None
     assert dev.status is DeviceStatus.CONNECTED
@@ -774,7 +800,7 @@ def _connect_named(svc: DeviceService, name: str) -> None:
     on_device_operation_failed(svc, lambda _n, error: errors.append(error))
     # address == name so _make_multi_svc keys the driver by name.
     svc.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name=name, address=name)
+        ConnectDeviceRequest(type_name="YOKOGS200", name=name, address=name)
     )
     qt_until(lambda: bool(connected or errors), label=f"connect {name}")
     assert not errors
