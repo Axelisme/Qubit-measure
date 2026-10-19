@@ -235,6 +235,19 @@ uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyrigh
 不建立 base 的另一個環境。receipt 的 `pyright_scope` 記錄範圍，成本與全樹相關，
 因此不放進快速 gate。`gate.py --with-pyright` 是現況報告，exit 0 不代表本次變更已驗收。
 
+Full 模式會重用 base 的 Pyright counts。快取位於主 checkout 的
+`.agent_state/ratchet/cache/`，透過 Git common dir 定位，所有 worktree 共用。
+Key 包含 base commit SHA、candidate `pyproject.toml` 與 `uv.lock` 的 SHA-256、
+Pyright 版本，以及目前 Python 的 implementation 與版本。任一成分改變即重新計算。
+快取以原子替換寫入，損壞或讀取失敗的檔案視為未命中並重新計算。
+刪除該目錄即可清除全部快取。
+
+Full receipt 新增 `pyright_base`，值為 `cache` 或 `computed`。命中時跳過 base 的
+Pyright；若沒有其他 detector 或設定差異需要 base，也跳過 base tree 展開。
+Candidate 仍每次執行 Pyright。Changed-files 模式不使用快取，行為不變。
+快取沿用 `uv.lock` 描述的環境，不偵測同一 lock 下已安裝依賴的原地修改。
+這類環境修改後需刪除快取再跑。
+
 設定差異與診斷分開判讀。合併前必須審閱 `configuration_changes`，不能只看 `PASS`。
 暫存 base tree 放在 invoking worktree 的 `.agent_state/ratchet/`，比較結束即移除該次目錄。
 

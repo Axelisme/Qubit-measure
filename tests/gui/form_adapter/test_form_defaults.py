@@ -23,7 +23,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
 )
-from zcu_tools.gui.form_adapter import Form, ModuleInline
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -163,29 +163,12 @@ def test_copy_command_does_not_reapply_initial_set() -> None:
     assert not isinstance(value, FormErrors), value
     initial = form.to_cfg(value, env)
     assert isinstance(initial, Core) and initial.probe.gain == 0.8
-    state.write({("probe", "kind"): "ref", ("probe", "name"): "Q.pulses.probe"}, env)
+    state.select(("probe",), {"kind": "ref", "name": "Q.pulses.probe"}, env)
     state.run_command(("probe",), "to_inline", env)
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
     copied = form.to_cfg(value, env)
     assert isinstance(copied, Core) and copied.probe.gain == 0.3
-
-
-def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
-    form = bound_form(Slot("Q.pulses.probe", set={"gain": 0.8}, lock={"freq": 0.0}))
-    env = environment()
-    state = FormState(form.default_input(env))
-    value = state.result(env)
-    assert not isinstance(value, FormErrors), value
-    cfg = form.to_cfg(value, env)
-    assert isinstance(cfg, Core) and cfg.probe.freq == 0 and cfg.probe.gain == 0.8
-    inline = form.model.model_fields["probe"].annotation
-    assert isinstance(inline, type) and issubclass(inline, ModuleInline)
-    defaults = inline.defaults(env)
-    module = defaults["module"]
-    assert isinstance(module, dict) and module["freq"] == 0
-    state.write({("probe", "kind"): "ref"}, env)
-    assert isinstance(state.result(env), FormErrors)
 
 
 @pytest.mark.parametrize("expression", ["$unbound.value", "'not a number'", "2 * 3"])
@@ -294,10 +277,9 @@ def test_default_none_module_is_explicit_and_selectable(
     [
         Slot("Q.pulses.probe"),
         Slot("Q.pulses.probe", copy=True),
-        Slot("Q.pulses.probe", lock={"freq": 0.0}),
         Template("pulse"),
     ],
-    ids=["key", "copy", "lock", "template"],
+    ids=["key", "copy", "template"],
 )
 def test_optional_module_keeps_available_initial_selection(
     node: Slot | Template,
@@ -309,18 +291,14 @@ def test_optional_module_keeps_available_initial_selection(
     probe_input = state.input.data["probe"]
     assert isinstance(probe_input, dict)
     assert probe_input["kind"] == (
-        "ref"
-        if isinstance(node, Slot) and not node.copy and not node.lock
-        else "inline"
+        "ref" if isinstance(node, Slot) and not node.copy else "inline"
     )
     value = state.result(env)
     if isinstance(value, FormErrors):
         pytest.fail(str(value.messages))
     cfg = form.to_cfg(value, env)
     assert isinstance(cfg, OptionalCore) and cfg.probe is not None
-    assert cfg.probe.freq == (
-        120 if isinstance(node, Template) else 0 if node.lock else 100
-    )
+    assert cfg.probe.freq == (120 if isinstance(node, Template) else 100)
 
 
 class ResetCore(ConfigBase):
@@ -655,56 +633,6 @@ def test_alias_static_default_is_valid_and_selectable(binding: str | None) -> No
         assert isinstance(rejected, FormErrors)
         assert rejected.messages == {(name,): "Value is not among current choices"}
         state.write({(name,): default}, env)
-
-
-@pytest.mark.parametrize("enabled", [False, True], ids=["disabled", "enabled"])
-def test_optional_partially_locked_module_describes_fixed_branch_not_value(
-    enabled: bool,
-) -> None:
-    class OptionalCore(ConfigBase):
-        probe: PulseCfg | None = None
-
-    form = Form(OptionalCore, {"probe": Slot("Q.pulses.probe", lock={"freq": 0.0})})
-    form.bind_templates(templates(), adapter="synthetic")
-    env = environment()
-    initial = form.default_input(env)
-    inline = initial.data["probe"]
-    state = FormState(initial)
-    if not enabled:
-        state.write({("probe",): None}, env)
-    row = state.describe((), env).children[0]
-    description = state.describe(("probe",), env)
-    assert description.target == row
-    assert row.nullable is True
-    assert row.selection_fixed is True
-    assert row.fixed is False
-    assert row.fixed_value is None
-    assert row.options is not None
-    assert [option.label for option in row.options] == ["None", "Inline"]
-    assert row.can_expand is enabled
-
-    if not enabled:
-        assert description.children == ()
-        state.write({("probe",): inline}, env)
-    state.write({("probe", "module", "gain"): 0.6}, env)
-    value = state.result(env)
-    assert not isinstance(value, FormErrors), value
-    cfg = form.to_cfg(value, env)
-    assert isinstance(cfg, OptionalCore) and cfg.probe is not None
-    assert cfg.probe.freq == 0.0
-    assert cfg.probe.gain == 0.6
-
-    state.write({("probe",): None}, env)
-    value = state.result(env)
-    assert not isinstance(value, FormErrors), value
-    cfg = form.to_cfg(value, env)
-    assert isinstance(cfg, OptionalCore) and cfg.probe is None
-    disabled = state.describe(("probe",), env)
-    assert disabled.target is not None
-    assert disabled.target.selection_fixed is True
-    assert disabled.target.fixed is False
-    assert disabled.target.nullable is True
-    assert disabled.children == ()
 
 
 def nested_copy_env(*, inline: bool = False) -> FormEnv:

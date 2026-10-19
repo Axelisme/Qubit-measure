@@ -445,17 +445,24 @@ def test_prepare_scalar_native_data_does_not_add_labber_restrictions(
     assert not labber.exists()
 
 
-@pytest.mark.parametrize("completion", ["complete", "partial", "stopped"])
+@pytest.mark.parametrize("started_at", [None, "2026-10-06T01:00:00Z"])
+@pytest.mark.parametrize("completion", ["complete", "partial", "stopped", "unknown"])
 def test_full_metadata_load_preserves_historical_evidence(
     tmp_path: Path,
-    completion: Literal["complete", "partial", "stopped"],
+    completion: Literal["complete", "partial", "stopped", "unknown"],
+    started_at: str | None,
 ) -> None:
     record = RunRecord(
         cfg=NativeCfg(), result=SingleResult(np.array([4000.0]), np.array([1j]))
     )
-    metadata = replace(native_metadata(SINGLE.tag), completion=completion)
+    metadata = replace(
+        native_metadata(SINGLE.tag), completion=completion, started_at=started_at
+    )
     path = tmp_path / "historical.h5"
-    save_run(record, path, spec=SINGLE, metadata=metadata)
+    try:
+        save_run(record, path, spec=SINGLE, metadata=metadata)
+    except ValueError as error:
+        pytest.fail(f"Historical evidence must be saveable: {error}")
     loaded, restored = load_run_with_metadata(path, spec=SINGLE)
     old_loaded, snapshot = load_run(path, spec=SINGLE)
     assert restored == metadata

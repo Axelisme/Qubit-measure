@@ -26,6 +26,8 @@ from .ports import (
     SavePaneSnapshot,
     TabSnapshot,
 )
+from .tab_input import StartupTab, TabInput
+from .workspace_types import WorkspaceTab
 
 logger = logging.getLogger(__name__)
 
@@ -117,13 +119,14 @@ class TabService:
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
-        populated). The persist/restore form of ``TabSnapshot`` is produced
-        elsewhere (codec / restore) with the live fields left empty."""
+        populated). cfg_input is raw live data. RAM reload uses the
+        separate WorkspaceTab FormInput JSON contract."""
         tab = self._state.get_tab(tab_id)
         ctx = self._state.session_env
         is_running = self._state.is_tab_running(tab_id)
         interaction = TabInteractionState(
             global_run_active=self._state.is_run_active() and not is_running,
+            startup_active=self._state.is_startup_active(),
             has_context=ctx.has_context(),
             has_active_context=ctx.is_active(),
             has_soc=ctx.has_soc(),
@@ -195,16 +198,24 @@ class TabService:
     def new_tab(
         self,
         adapter_name: str,
-        from_dict: TabSnapshot | None = None,
+        from_dict: WorkspaceTab | None = None,
+        *,
+        input: TabInput | None = None,
     ) -> str:
         """Create a tab form with one fixed source snapshot and fresh defaults.
 
         Defaults use current global aliases. Unresolved consumed fields may make
         the form Invalid without blocking tab creation. from_dict optionally
-        supplies detached cfg_input JSON to overlay via write_compatible; dropped
-        paths are available through dropped_input_paths. Source captures and pane
-        results are not restored. Failed preparation publishes no partial tab.
+        supplies caller-owned RAM WorkspaceTab FormInput JSON for reload. input
+        instead accepts an opaque authored TabInput; supplying both raises
+        ValueError. Malformed input raises ValueError before publication.
+        Compatible restoration logs discarded paths, also available through
+        dropped_input_paths. Source captures and pane results are not restored.
+        Owner-only; GUI owns the created tab, caller retains its input copy.
+        Failed preparation publishes no partial tab.
         """
+        if from_dict is not None and input is not None:
+            raise ValueError("Specify either reload input or authored input, not both")
         adapter = self._registry.create(adapter_name)
         tab_id = f"{_slug(adapter_name)}-{uuid.uuid4().hex[:8]}"
         logger.info(
@@ -223,8 +234,14 @@ class TabService:
             tab_id,
             make_form,
             capture=self._form_sources,
-            initial=from_dict.cfg_input if from_dict is not None else None,
+            initial=from_dict.form_input if from_dict is not None else input,
         )
+        if cfg.dropped_paths:
+            logger.warning(
+                "Tab %s discarded incompatible input paths: %s",
+                adapter_name,
+                cfg.dropped_paths,
+            )
         self._state.add_tab(
             tab_id,
             Session(
@@ -239,6 +256,17 @@ class TabService:
 
         cfg.subscribe(cfg_changed)
         return tab_id
+
+    def read_inputs(self) -> tuple[StartupTab, ...]:
+        """Read detached authored inputs in current tab order on the owner thread.
+
+        No capture, evaluation or hardware I/O occurs. Later edits do not change
+        these copies; callers own their destination and lifetime.
+        """
+        return tuple(
+            StartupTab(tab.adapter_name, TabInput(tab.cfg.input.to_json()))
+            for tab in self._state.tabs.values()
+        )
 
     def dropped_input_paths(self, tab_id: str) -> tuple[FormPath, ...]:
         """Return discarded paths from this tab's compatible initial restoration."""

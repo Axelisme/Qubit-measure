@@ -184,22 +184,6 @@ def test_text_field_expressions_still_evaluate(
     assert getattr(result, field) == value
 
 
-def test_compatible_restore_drops_expr_on_picked_leaves_and_library_keys(
-    env: FormEnv,
-) -> None:
-    state = FormState(PickedForm.default_input(env))
-    before = state.input.data
-    saved: dict[str, JsonValue] = {
-        "unit": {"expr": "$unit"},
-        "speed": {"expr": "$speed"},
-        "drive": {"kind": "ref", "name": {"expr": "$device"}},
-        "amount": {"expr": "1 / 4"},
-    }
-    dropped = state.write_compatible(saved, env)
-    assert set(dropped) == {("unit",), ("speed",), ("drive", "name")}
-    assert state.input.data == {**before, "amount": {"expr": "1 / 4"}}
-
-
 class AutoGainForm(FormModel):
     """A number or a picked "auto": a union of text and picked values."""
 
@@ -254,5 +238,6 @@ def test_result_rejects_a_union_of_text_and_picked_values(
 def _read(data: Mapping[str, JsonValue], path: FormWritePath) -> JsonValue:
     current: JsonValue = dict(data)
     for part in path:
+        assert isinstance(part, str)
         current = _object(current)[part]
     return current

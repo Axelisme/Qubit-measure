@@ -450,15 +450,23 @@ def test_resume_rejects_changed_library_hash_without_overwriting(
     source = _library(write_meta(request, "context", {}), _payload())
     _convert(request, library_mapping)
     destination = _entry(request).module_library("context").source_path
+    backup = (
+        request.result_root.parent.parent
+        / f"{request.name}-backup/result/context/module_cfg.yaml"
+    )
+    backup_before = backup.read_bytes()
     path = source if changed == "source" else destination
     if changed == "destination-invalid-yaml":
         path.write_bytes(b"not-a-library\n")
     else:
         path.write_bytes(path.read_bytes() + b"\n ")
     before = (source.read_bytes(), destination.read_bytes())
-    with pytest.raises(MigrationInputError, match="hash"):
+    with pytest.raises(
+        MigrationInputError, match="backup" if changed == "source" else "hash"
+    ):
         _convert(replace(request, resume=True), library_mapping)
     assert (source.read_bytes(), destination.read_bytes()) == before
+    assert backup.read_bytes() == backup_before
 
 
 def test_partial_parameter_resume_does_not_rewrite_recorded_library(

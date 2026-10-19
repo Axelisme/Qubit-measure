@@ -1,4 +1,64 @@
-# Mux Echo core
+# Mux Echo
+
+## GUI setup
+
+Open `mux/t2echo` from **New Tab** after binding `$mux` to a MuxGroup.
+The capture must contain every qubit and its matching resonator in readout order.
+An existing readout slot must use the mux family with that full tone count.
+If no readout is stored, fill the blank mux readout before running.
+
+The Tones picker chooses which element to edit, not which qubit runs.
+Name is read-only. Ordinary edits cannot add, remove, rename or reorder tones.
+Set Participants to a JSON name list, for example `["Q3", "Q1"]`.
+That order becomes execution/data rows for original positions 2/0.
+The picker can show Q2 while Q3/Q1 run.
+Empty, duplicate and unknown participants remain editable invalid drafts and block Run.
+
+Every tone needs a valid drive, including nonparticipants.
+Errors in another picker element remain visible on the Tones row.
+Select that element to fix them; hiding it or removing its name from Participants
+does not bypass validation. Reps, rounds and recovery delay are common controls.
+Recovery initially uses five times the largest captured T1, with the existing
+missing-T1 default. A stored invalid T1 leaves recovery blank for correction.
+
+## GUI results and saved sources
+
+Run draws a combined `measurement` figure.
+All lines use the common requested-delay axis.
+The legend uses original index and source cfg name in participants order.
+Per-tone native `measurement_i` figures remain available.
+Analyze reads the selected Run/Load source, not the current Form.
+Use the Analysis figure picker to inspect `fit_i`.
+Here `i` is an original tone position, never a participants row number.
+
+Use Data to save measurement data and analysis artifacts.
+Load Data selects a native file or a saved run.
+Loading replaces the analysis source without changing current Form inputs.
+A later Form edit does not alter the historical pulse, binding or destination.
+Failed or partial rows do not produce calibration candidates.
+Read each Writeback preview destination, value and fit diagnostics.
+Deselect unwanted items before **Apply Selected**.
+Preview and Analyze do not write; applying one item does not apply other candidates.
+
+## Form drafts
+
+Form persistence contains exactly `data` and `selections`.
+Selections use typed paths with integer list positions.
+Invalid leaf text and participants drafts survive save/restore.
+Restoration reports dropped fields and does not run converters or refresh capture.
+If the saved input cannot be read, the host reports it and uses fresh defaults.
+Reset explicitly captures current parameters and rebuilds initial values.
+
+A raw `FormState.write` replaces the complete value at its path and clears selections
+at or below it. To change one leaf, use its complete path, for example
+`("tones", 0, "drive", "module", "gain")` for an inline drive.
+Do not send a partial tone or pulse dictionary expecting a merge.
+Writing does not run a converter; selecting another module kind does.
+Recipe/MCP logical field paths omit the inline wrapper, for example
+`("tones", 0, "drive", "gain")`. The integer is the full original tone position,
+not a row in Participants and not a name key.
+
+## Core reference
 
 `MuxT2EchoExp.run(config, *, context)` measures Hahn Echo on selected qubits in
 one program with independent drives and a common mux readout. It does not create
@@ -6,12 +66,17 @@ a Form, recipe, catalog entry or writeback proposal.
 
 ## Configuration and timing
 
+`participants` is a nonempty, unique list of names in the complete `tones` list.
+Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
+Every element requires valid drives on independent generators, even when not
+participating. Names, count and order match the fixed capture.
+
 Import `MuxT2EchoCfg`, `MuxT2EchoExp` and `MuxEchoToneCfg` from
 `zcu_lab.v2.mux.t2echo`. Supply common `MuxDriveModuleCfg` with optional reset
 and full readout, a full ordered `tones` list, and `delay: SweepCfg` in us.
 
-Each tone contains strict `active`, optional `drive` for x90, optional `pi_pulse`
-for x180, and `detune` in MHz. Both pulses are required only for active tones.
+Each tone contains fixed `name`, required `drive` for x90, required `pi_pulse`
+for x180, and `detune` in MHz. Both pulses are validated for nonparticipants too.
 A tone's two pulses use the same generator, but may have different waveform,
 carrier, gain and phase. Active tones use independent generators, distinct from
 readout. All pulse parameters must be fixed and finite. Delay bounds must be
@@ -95,10 +160,38 @@ coherence estimate.
 
 `save_run(source, path, metadata=...)` saves the full cfg, shared requested delay,
 original indices, IQ and per-tone actual detune/source frequency metadata.
-Disk units are seconds/Hz; memory units are us/MHz. `load_run(path)` restores the
-source without reading a current cfg or Form. The caller sets
-complete/partial/stopped from the run outcome.
+Disk units are seconds/Hz; memory units are us/MHz.
+The grouped axes spec declares the Labber `independent` layout. Native and
+Labber outputs preserve IQ on the delay/tone grid and detune and source frequency
+on the tone-only grid. The writer uses this declaration, without an automatic
+grid fallback, broadcasting per-tone values or splitting files.
+A successful save reports both native and Labber members as `saved`.
+Inspect each output's status and error if saving fails; recipe completion alone
+does not prove that every output saved.
+`load_run(path)` restores the source without reading a current cfg or Form.
+The caller sets complete/partial/stopped from the run outcome.
 
 This core makes no calibration proposal. A later caller can use a usable Echo
 fit for T2E, independently of unavailable detune. NaN actual detune must never be
 replaced by a guessed frequency correction.
+
+## Adapter source and proposals
+
+`MuxT2EchoAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
+Its native generated Form is registered as `mux/t2echo`.
+The registered MCP recipe is `mux_t2echo`. See the
+[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
+source-bound reporting and explicit writeback decisions.
+
+Summary rows include original tone `position`, source `name`, fit model, quality
+and values, or a failure reason. Q3/Q1 gives indices 2/0 in that row order.
+Quality errors identify the summary row. Missing source cfg leaves the name
+unavailable; the adapter does not read current settings to reconstruct it.
+
+A successful, fully finite tone proposes its captured qubit's `t2e` in us and
+a T2E sample at captured bias. Echo does not propose a frequency correction.
+Unavailable actual detune does not suppress an otherwise usable T2E fit.
+Missing capture produces no proposals; inconsistent captured bindings raise.
+Failed and partial rows produce none. Inspect the model, quality, uncertainty
+and captured destination before explicitly applying individual items.
+Analyze and proposal creation do not write.

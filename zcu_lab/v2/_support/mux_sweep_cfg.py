@@ -1,12 +1,12 @@
-"""Numeric full-tone cfg admission shared by mux frequency and Amp Rabi."""
+"""Validate named drive tones and participant order for mux measurements."""
 
 import math
 from collections.abc import Sequence
-from typing import Self
+from typing import Annotated, Self
 
-from pydantic import StrictBool, model_validator
+from pydantic import model_validator
 from qick.asm_v2 import QickParam
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, ResetCfg, SweepCfg
 from zcu_tools.program.v2.modules import (
     ConstWaveformCfg,
@@ -27,34 +27,30 @@ class MuxDriveModuleCfg(ConfigBase):
 
 
 class MuxToneCfg(ConfigBase):
-    """One original tone's enabled flag, optional drive and independent sweep.
+    """One named original tone's required drive and independent pulse sweep.
 
-    active is a strict bool. Only active tones require drive. sweep is SweepCfg
-    in the leaf's units: MHz, normalized gain, or requested total pulse length
-    in us for Len Rabi. Len Rabi's prepared coordinates use the time-grid owner's
-    quantized requested lengths, not compiled durations or hardware traces.
-    Finite sweep bounds/step are required.
-    Active drives must have fixed finite numeric frequency/gain/phase/delays and
-    nonnegative delays. Waveform durations must be fixed, not hardware sweeps.
-    Native pulse/waveform schemas own their shape and conversion rules.
+    name is its nonempty capture-generated qubit name; full-list admission
+    rejects duplicates. drive is required even when not participating. Its MHz
+    frequency, normalized gain, degree phase and us delays must be fixed finite
+    values, with nonnegative delays and unswept waveform duration. sweep uses
+    MHz, normalized gain or us according to the leaf, with finite bounds/step.
+    Native pulse/waveform schemas own shape and clock conversion.
     """
 
-    active: StrictBool
-    drive: PulseCfg | None
+    name: Annotated[str, FieldMeta(readonly=True)]
+    drive: PulseCfg
     sweep: SweepCfg
 
     @model_validator(mode="after")
     def validate_tone(self) -> Self:
-        """Reject missing active drive or a nonfinite/swept active configuration."""
+        """Reject a nonfinite sweep or a nonfinite/swept drive for every element."""
+        # Sweeps describe the scan; source pulses must stay fixed until preparation.
         if not all(
             math.isfinite(v)
             for v in (self.sweep.start, self.sweep.stop, self.sweep.step)
         ):
             raise ValueError("sweep start/stop/step must be finite")
-        if not self.active:
-            return self
-        if self.drive is None:
-            raise ValueError("active tone requires drive")
+
         drive = self.drive
         for name in ("freq", "gain", "phase", "pre_delay", "post_delay"):
             value = getattr(drive, name)
@@ -70,16 +66,20 @@ class MuxToneCfg(ConfigBase):
 
 
 def validate_mux_scan(
-    cfg: ProgramV2Cfg, modules: MuxDriveModuleCfg, tones: Sequence[MuxToneCfg]
+    cfg: ProgramV2Cfg,
+    modules: MuxDriveModuleCfg,
+    tones: Sequence[MuxToneCfg],
+    participants: Sequence[str],
 ) -> None:
-    """Validate full-list size, active zip counts and independent drive channels.
+    """Validate complete named tones, participants, zip counts and drive channels.
 
     cfg provides shared positive reps/rounds and finite nonnegative delays in us.
-    tones must match the full numeric readout length, with at least one active.
-    Only active sweeps must have equal point counts; their drive channels must
+    tones must match the full numeric readout length. Every sweep must have
+    equal point counts, including nonparticipants; every drive channel must
     be distinct and different from readout.gen_ch. Raise ValueError with original
     indices/actual values; never read bindings or change inputs.
     """
+    # Check shared averaging and readout dimensions before indexing full tones.
     if cfg.reps <= 0 or cfg.rounds <= 0:
         raise ValueError("reps and rounds must be positive")
     if any(not math.isfinite(v) or v < 0 for v in (cfg.initial_delay, cfg.relax_delay)):
@@ -88,21 +88,51 @@ def validate_mux_scan(
         raise ValueError(
             f"tones length={len(tones)}; full readout count={len(modules.readout.tones)}"
         )
-    active = [(i, t) for i, t in enumerate(tones) if t.active]
-    if not active:
-        raise ValueError("tones must include at least one active element")
-    count = active[0][1].sweep.expts
+    participant_indices([tone.name for tone in tones], participants)
+
+    # All tones share a zip point count but use independent drive channels.
+    count = tones[0].sweep.expts
     channels: dict[int, int] = {}
-    for i, tone in active:
+    for i, tone in enumerate(tones):
         if tone.sweep.expts != count:
             raise ValueError(
                 f"tones[{i}].sweep.expts={tone.sweep.expts}; expected {count}"
             )
         drive = tone.drive
-        if drive is None:
-            raise ValueError(f"tones[{i}].drive is required")
         if drive.ch == modules.readout.gen_ch or drive.ch in channels:
             raise ValueError(
                 f"tones[{i}].drive.ch={drive.ch}: requires independent generator; prior tone={channels.get(drive.ch)}; readout.gen_ch={modules.readout.gen_ch}"
             )
         channels[drive.ch] = i
+
+
+def participant_indices(names: Sequence[str], participants: Sequence[str]) -> list[int]:
+    """Resolve participant names to original positions, retaining caller order.
+
+    names is the complete capture-ordered tone identity list. Both lists must
+    contain nonempty names without duplicates; participants must be nonempty
+    and contain only names in names. Raise ValueError with the offending name
+    or position. Never sort, mutate inputs or consult a capture/library.
+    """
+    # Resolve against the complete list so subset order never changes identities.
+    index_of: dict[str, int] = {}
+    for index, name in enumerate(names):
+        if not name or name in index_of:
+            raise ValueError(
+                f"tones[{index}].name={name!r}: empty or duplicate name; prior index={index_of.get(name)}"
+            )
+        index_of[name] = index
+
+    # Retain the requested order while rejecting unknown or repeated participants.
+    if not participants:
+        raise ValueError("participants must be nonempty")
+    seen: set[str] = set()
+    indices: list[int] = []
+    for position, name in enumerate(participants):
+        if name not in index_of or name in seen:
+            raise ValueError(
+                f"participants[{position}]={name!r}: unknown or duplicate name"
+            )
+        seen.add(name)
+        indices.append(index_of[name])
+    return indices

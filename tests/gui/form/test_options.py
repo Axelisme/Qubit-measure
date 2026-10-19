@@ -19,6 +19,8 @@ from zcu_tools.gui.form import (
     FormState,
 )
 
+from tests.gui._form_converters import RebuildingForm
+
 
 class Speed(StrEnum):
     slow = "slow"
@@ -41,7 +43,9 @@ class Second(FormModel):
         return {"kind": "second", "shared": {"expr": "2 * 4"}}
 
 
-class Picks(FormModel):
+class Picks(RebuildingForm):
+    branch_models = {("branch",): (First, Second)}
+
     count: Literal[1, 2] = 1
     speed: Speed = Speed.slow
     device: str = "a"
@@ -52,6 +56,90 @@ class Picks(FormModel):
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         return {("device",): tuple(env.devices) or ("a", "b")}
+
+
+@pytest.mark.parametrize("dynamic", [False, True], ids=["static-C", "missing-old-key"])
+def test_saved_unlisted_selection_is_visible_invalid_input_not_a_restore_failure(
+    dynamic: bool,
+) -> None:
+    hooks_enabled = False
+
+    class HookSelection(FormModel):
+        key: str
+
+        @classmethod
+        def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            assert hooks_enabled, "Restore must not execute declaration hooks"
+            keys = (
+                (() if env.library is None else env.library.module_keys())
+                if dynamic
+                else ("A", "B")
+            )
+            return {("key",): tuple(api.Option(key, key) for key in keys)}
+
+    selection = "old-key" if dynamic else "C"
+    authored = FormInput(HookSelection, {"key": "A"}, selections={("key",): selection})
+    restored = FormInput.from_json(HookSelection, authored.to_json())
+    hooks_enabled = True
+    state = FormState(restored)
+    errors = state.result(FormEnv())
+    assert isinstance(errors, FormErrors)
+    assert ("key",) in errors.messages
+    assert "option" in errors.messages[("key",)].lower()
+    assert state.preview(FormEnv()).errors == errors
+    assert state.input.same_as(authored)
+
+
+def test_hook_options_do_not_restrict_raw_value_without_selection_override() -> None:
+    class Ref(BaseModel):
+        kind: Literal["ref"] = "ref"
+        name: str
+
+    class RefForm(FormModel):
+        source: Ref
+
+        @classmethod
+        def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            return {
+                ("source",): (api.Option("Listed", {"kind": "ref", "name": "listed"}),)
+            }
+
+    raw: dict[str, JsonValue] = {"source": {"kind": "ref", "name": "unlisted"}}
+    ordinary = FormState(FormInput(RefForm, raw))
+    assert isinstance(ordinary.result(FormEnv()), RefForm)
+    explicit = FormState(
+        FormInput(RefForm, raw, selections={("source",): raw["source"]})
+    )
+    errors = explicit.result(FormEnv())
+    assert isinstance(errors, FormErrors)
+    assert ("source",) in errors.messages
+    assert explicit.input.data == raw
+
+
+def test_reselecting_scalar_replaces_stale_override_and_tracks_new_choice() -> None:
+    listed = ["A", "B"]
+
+    class ChangingChoices(FormModel):
+        key: str
+
+        @classmethod
+        def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+            return {("key",): tuple(api.Option(key, key) for key in listed)}
+
+    env = FormEnv()
+    state = FormState(
+        FormInput(ChangingChoices, {"key": "A"}, selections={("key",): "C"})
+    )
+    assert isinstance(state.result(env), FormErrors)
+    state.select(("key",), "B", env)
+    assert isinstance(state.result(env), ChangingChoices)
+    assert state.input.data == {"key": "B"}
+    assert state.input.selections == {("key",): "B"}
+    listed.remove("B")
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("key",) in errors.messages
+    assert state.input.data == {"key": "B"}
 
 
 def obj(value: JsonValue) -> dict[str, JsonValue]:
@@ -92,19 +180,14 @@ def test_option_matches_typed_leaves_first_match_and_missing_without_mutation() 
         Option("bad fields", "key", fields=First)
 
 
-@pytest.mark.parametrize(
-    "batch", [{("branch",): {"kind": "second"}}, {("branch", "kind"): "second"}]
-)
-def test_branch_selection_starts_from_fresh_defaults_and_commits_once(
-    batch: Mapping[tuple[str, ...], JsonValue],
-) -> None:
+def test_branch_selection_starts_from_fresh_defaults_and_commits_once() -> None:
     env = FormEnv()
     state = FormState(
         FormInput(Picks, {"branch": {"kind": "first", "shared": {"expr": "99"}}})
     )
     observed: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: observed.append(state.input.data))
-    state.write(batch, env)
+    state.select(("branch",), {"kind": "second"}, env)
     assert state.input.data == {"branch": {"kind": "second", "shared": 8}}
     assert observed == [state.input.data]
     result = state.result(env)
@@ -133,13 +216,17 @@ class CommandForm(FormModel):
     value: Source | Destination = Field(default_factory=Source, discriminator="kind")
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
-        def convert(captured: FormEnv) -> JsonValue:
-            if captured is not env:
-                raise ValueError("wrong capture")
-            return {"kind": "snapshot", "name": "copied"}
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        def convert(
+            _old: api.FormCommandSnapshot, _context: api.FormCommandContext
+        ) -> api.FormCommandResult:
+            return api.FormCommandResult(
+                {"kind": "snapshot"}, Destination, {"name": "copied"}
+            )
 
-        def fail(_captured: FormEnv) -> JsonValue:
+        def fail(
+            _old: api.FormCommandSnapshot, _context: api.FormCommandContext
+        ) -> api.FormCommandResult:
             raise ValueError("unavailable source")
 
         return {
@@ -235,7 +322,13 @@ class ActiveBranch(FormModel):
                 api.Option(
                     "One",
                     1,
-                    commands=(api.OptionCommand("active", "Active", lambda _env: 2),),
+                    commands=(
+                        api.OptionCommand(
+                            "active",
+                            "Active",
+                            lambda _old, _context: api.FormCommandResult(None, None, 2),
+                        ),
+                    ),
                 ),
             )
         }
@@ -253,14 +346,20 @@ class InactiveBranch(FormModel):
                     "One",
                     1,
                     commands=(
-                        api.OptionCommand("inactive", "Inactive", lambda _env: 3),
+                        api.OptionCommand(
+                            "inactive",
+                            "Inactive",
+                            lambda _old, _context: api.FormCommandResult(None, None, 3),
+                        ),
                     ),
                 ),
             )
         }
 
 
-class BranchCommands(FormModel):
+class BranchCommands(RebuildingForm):
+    branch_models = {("branch",): (ActiveBranch, InactiveBranch)}
+
     branch: ActiveBranch | InactiveBranch = Field(
         default_factory=ActiveBranch, discriminator="kind"
     )
@@ -276,7 +375,7 @@ def test_commands_only_use_the_active_branch_declaration() -> None:
     assert state.input.data == before
     state.run_command(("branch", "value"), "active", env)
     assert state.input.data == {"branch": {"kind": "active", "value": 2}}
-    state.write({("branch", "kind"): "inactive"}, env)
+    state.select(("branch",), {"kind": "inactive"}, env)
     state.run_command(("branch", "value"), "inactive", env)
     assert state.input.data == {"branch": {"kind": "inactive", "value": 3}}
 
@@ -303,7 +402,9 @@ class InactiveSharedBranch(FormModel):
         return {("child", "value"): InactiveBranch.options(env)[("value",)]}
 
 
-class SharedBranchCommands(FormModel):
+class SharedBranchCommands(RebuildingForm):
+    branch_models = {("branch",): (ActiveSharedBranch, InactiveSharedBranch)}
+
     branch: ActiveSharedBranch | InactiveSharedBranch = Field(
         default_factory=ActiveSharedBranch, discriminator="kind"
     )
@@ -323,7 +424,7 @@ def test_shared_child_commands_follow_active_ancestor_branch() -> None:
     state.run_command(("branch", "child", "value"), "active", env)
     assert state.input.data == {"branch": {"kind": "active", "child": {"value": 2}}}
     assert events == [state.input.data]
-    state.write({("branch", "kind"): "inactive"}, env)
+    state.select(("branch",), {"kind": "inactive"}, env)
     with pytest.raises(ValueError, match="command"):
         state.run_command(("branch", "child", "value"), "active", env)
     state.run_command(("branch", "child", "value"), "inactive", env)
@@ -391,58 +492,12 @@ class UnavailableBranch(FormModel):
         raise api.field_error(("source",), "Unavailable captured source")
 
 
-class FailureContainer(FormModel):
+class FailureContainer(RebuildingForm):
+    branch_models = {("branch",): (First, UnavailableBranch)}
+
     branch: First | UnavailableBranch = Field(
         default_factory=First, discriminator="kind"
     )
-
-
-class OrdinaryChildInline(FormModel):
-    kind: Literal["inline"] = "inline"
-    child: UnavailableBranch
-
-
-class OrdinaryChildContainer(FormModel):
-    branch: First | OrdinaryChildInline = Field(
-        default_factory=First, discriminator="kind"
-    )
-
-
-class OrdinaryChildFailureForm(FormModel):
-    outer: OrdinaryChildContainer = Field(default_factory=OrdinaryChildContainer)
-    flag: bool = False
-
-
-def test_partial_branch_ordinary_child_source_failure_keeps_full_path_and_atomicity() -> (
-    None
-):
-    env = FormEnv()
-    state = FormState(OrdinaryChildFailureForm.default_input(env))
-    before = state.input.data
-    events: list[dict[str, JsonValue]] = []
-    state.subscribe(lambda: events.append(state.input.data))
-    with pytest.raises(
-        PydanticCustomError, match="Unavailable captured source"
-    ) as caught:
-        state.write(
-            {
-                ("flag",): True,
-                ("outer", "branch"): {
-                    "kind": "inline",
-                    "child": {"source": "explicit"},
-                },
-            },
-            env,
-        )
-    assert (caught.value.context or {}).get("path") == (
-        "outer",
-        "branch",
-        "child",
-        "source",
-    )
-    assert state.input.data == before
-    assert state.base.data == before
-    assert events == []
 
 
 class SourceFailureForm(FormModel):
@@ -450,9 +505,7 @@ class SourceFailureForm(FormModel):
     flag: bool = False
 
 
-def test_partial_branch_source_failure_preserves_parent_path_and_batch_atomicity() -> (
-    None
-):
+def test_selection_source_failure_preserves_parent_path_and_atomicity() -> None:
     env = FormEnv()
     state = FormState(SourceFailureForm.default_input(env))
     before = state.input.data
@@ -461,9 +514,7 @@ def test_partial_branch_source_failure_preserves_parent_path_and_batch_atomicity
     with pytest.raises(
         PydanticCustomError, match="Unavailable captured source"
     ) as caught:
-        state.write(
-            {("flag",): True, ("outer", "branch"): {"kind": "unavailable"}}, env
-        )
+        state.select(("outer", "branch"), {"kind": "unavailable"}, env)
     assert (caught.value.context or {}).get("path") == ("outer", "branch", "source")
     assert state.input.data == before
     assert state.base.data == before
@@ -482,7 +533,9 @@ class PlainBranch(FormModel):
     b_only: float = 4.0
 
 
-class StringAliasForm(FormModel):
+class StringAliasForm(RebuildingForm):
+    branch_models = {("branch",): (AliasedBranch, PlainBranch)}
+
     branch: AliasedBranch | PlainBranch = Field(discriminator="kind")
 
 
@@ -498,7 +551,9 @@ class NumericPlainBranch(FormModel):
     b_only: float = 4.0
 
 
-class NumericAliasForm(FormModel):
+class NumericAliasForm(RebuildingForm):
+    branch_models = {("branch",): (NumericAliasedBranch, NumericPlainBranch)}
+
     branch: NumericAliasedBranch | NumericPlainBranch = Field(discriminator="kind")
 
 
@@ -521,7 +576,7 @@ def test_every_intrinsic_tag_is_a_typed_option_sharing_its_branch_fields(
     assert [option.label for option in target.options] == [str(tag) for tag in tags]
     assert target.selected == tags.index(alias)
     assert {child.path[-1] for child in description.children} == {"shared", "a_only"}
-    state.write({("branch",): {"kind": tags[-1]}}, env)
+    state.select(("branch",), {"kind": tags[-1]}, env)
     assert {child.path[-1] for child in state.describe(("branch",), env).children} == {
         "shared",
         "b_only",

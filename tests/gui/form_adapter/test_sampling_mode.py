@@ -10,10 +10,8 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    StepCenter,
-    StepRange,
 )
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, StepCenter, StepRange
 from zcu_tools.program.v2.sweep import SweepCfg
 
 
@@ -22,12 +20,12 @@ class SamplingCfg(ConfigBase):
     other: float = 1
 
 
-def convert(state: FormState[FormModel], field: str, label: str) -> None:
+def convert(state: FormState[FormModel], _field: str, label: str) -> None:
     env = FormEnv()
-    commands = getattr(state.describe(("sweep", field), env).target, "commands", ())
+    commands = getattr(state.describe(("sweep",), env).target, "commands", ())
     command = next((item for item in commands if item.label == label), None)
     assert command is not None, f"Missing sampling command {label}"
-    state.run_command(("sweep", field), command.name, env)
+    state.run_command(("sweep",), command.name, env)
 
 
 def step_state(start: float = 0, stop: float = 1, n: int = 5):
@@ -147,11 +145,15 @@ def test_inconsistent_expts_cannot_be_repaired_by_sampling_switch(start, stop, n
         {("sweep", "start"): start, ("sweep", "stop"): stop, ("sweep", "n"): n},
         FormEnv(),
     )
-    commands = getattr(state.describe(("sweep", "n"), FormEnv()).target, "commands", ())
-    assert commands, "Expts must expose sampling conversion"
+    commands = getattr(state.describe(("sweep",), FormEnv()).target, "commands", ())
+    assert commands, "Sweep row must expose sampling conversion"
     before = state.input.to_json()
     with pytest.raises(FormCommandError):
-        state.run_command(("sweep", "n"), commands[0].name, FormEnv())
+        state.run_command(
+            ("sweep",),
+            next(item.name for item in commands if item.name == "to_step"),
+            FormEnv(),
+        )
     assert state.input.to_json() == before
 
 
@@ -192,11 +194,15 @@ def test_sampling_failure_keeps_all_expression_sources(field):
         },
         FormEnv(),
     )
-    commands = getattr(state.describe(("sweep", "n"), FormEnv()).target, "commands", ())
-    assert commands, "Expts must expose sampling conversion"
+    commands = getattr(state.describe(("sweep",), FormEnv()).target, "commands", ())
+    assert commands, "Sweep row must expose sampling conversion"
     before = state.input.to_json()
     with pytest.raises(FormCommandError):
-        state.run_command(("sweep", "n"), commands[0].name, FormEnv())
+        state.run_command(
+            ("sweep",),
+            next(item.name for item in commands if item.name == "to_step"),
+            FormEnv(),
+        )
     assert state.input.to_json() == before
 
 

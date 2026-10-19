@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     US_TO_S,
@@ -53,6 +54,12 @@ def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 @dataclass(frozen=True)
 class CPMG_Result:
+    """Mean complex IQ for each pi-pulse count and total evolution time.
+
+    ns lists pi-pulse counts. delays holds each count's quantized time grid in
+    us; signals has the same (count, time index) shape. IQ is not population.
+    """
+
     ns: NDArray[np.int64]
     delays: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -66,7 +73,13 @@ class CPMG_ModuleCfg(ConfigBase):
 
 
 class CPMG_SweepCfg(ConfigBase):
-    times: SweepCfg | list[int]
+    """Explicit nonempty positive pi-pulse counts, plus the runtime time sweep."""
+
+    times: Annotated[
+        list[Annotated[int, Field(strict=True, ge=1)]],
+        Field(min_length=1),
+        FieldMeta(label="Pi pulse counts"),
+    ]
     length: SweepCfg | None = None
 
 
@@ -75,8 +88,10 @@ class CPMG_Cfg(ProgramV2Cfg, ExpCfgModel):
     sweep: CPMG_SweepCfg
     length_range: list[tuple[float, float]] | tuple[float, float]
     length_expts: int
-    detune_ratio: float = 0.0
-    earlystop_snr: float | None = None
+    detune_ratio: Annotated[
+        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
+    ] = 0.0
+    earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
 @dataclass(frozen=True)
@@ -211,6 +226,21 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
         context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> CPMG_Result:
+        """Measure coherence decay versus refocusing-pulse count and time.
+
+        After optional reset, apply pi/2, a train of n pi pulses, then a final
+        pi/2 projection and readout. The first and last timing intervals include
+        the finite pi and pi/2 pulse-width correction. detune_ratio advances the
+        final projection phase by 360 * detune_ratio degrees per time index.
+
+        cfg.sweep.times supplies positive integer pi-pulse counts. length_range
+        gives total-time bounds in us, shared or one pair per count, sampled at
+        length_expts points. Too-short intervals or invalid counts raise
+        ValueError. acquire_kwargs forwards optional acquisition settings.
+        Return each count's quantized times and mean complex IQ; analyze fits
+        their decay to estimate T_CPMG. earlystop_snr can stop averaging a row.
+        """
+        # 1. Prepare pulse counts and each count's hardware-rounded time grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         detune_ratio, earlystop_snr = cfg.detune_ratio, cfg.earlystop_snr
@@ -220,11 +250,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
         pi2_pulse = modules.pi2_pulse
         pi_pulse = modules.pi_pulse
 
-        time_sweep = cfg.sweep.times
-        times = sweep2array(time_sweep, allow_array=True)
-        if not np.allclose(times, np.round(times)):
-            raise ValueError("Times must be integers")
-        times = times.astype(np.int64)
+        times = np.array(cfg.sweep.times, dtype=np.int64)
 
         length_ranges = cfg.length_range
         if isinstance(length_ranges, tuple):
@@ -251,9 +277,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
         )
         length_idxs = np.arange(cfg.length_expts, dtype=np.int64)
 
-        if np.min(times) <= 0:
-            raise ValueError("times should be larger than 0")
-
+        # Reject timing that cannot fit the preparation and refocusing pulses.
         min_interval = np.min(length_ranges[:, 0] / (2 * times))
         if min_interval < 0.5 * (  # the first and last delays are half of the interval
             pi2_pulse.waveform.length + pi_pulse.waveform.length
@@ -265,6 +289,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
                 f"pi_pulse_length: {pi_pulse.waveform.length:.2g}",
             )
 
+        # 2. Track mean IQ and the SNR used to stop averaging each decay curve.
         current_snr = 0.0
 
         def update_snr(snr: float) -> None:
@@ -289,6 +314,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
                     title=f"snr = {current_snr:.1f}" if current_snr else None,
                 )
 
+            # Scan pi-pulse counts on the host; sweep evolution time on the board.
             for idx, (time_value, step) in enumerate(sched.scan("times", times)):
                 current_length_idx = idx
                 cfg = step.cfg
@@ -315,8 +341,10 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
                     )
                 )
 
+                # Half-spacing sets the end intervals; inner pi pulses use twice it.
                 interval = length_param / (2 * time)
 
+                # 3. Refocus n times, project with the phase ramp, then read out.
                 _ = (
                     step.prog_builder(soc, soccfg)
                     .add(
@@ -351,6 +379,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
                     )
                 )
 
+        # 4. Keep the per-count time grids alongside the unnormalized mean IQ.
         return CPMG_Result(
             ns=times,
             delays=lengths,
@@ -364,6 +393,14 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
         *,
         plots: Plots,
     ) -> CPMGAnalysis:
+        """Fit T_CPMG in us for each pulse count and plot its count dependence.
+
+        Fit a decay with or without fringes according to fit_fringe. Incomplete
+        rows and fits failing the decay-time, uncertainty or contrast checks
+        retain NaN T2 values. Raise ValueError if no row passes. Optional t2r
+        and t1 values in us add Ramsey and 2*T1 reference lines, not fit inputs.
+        Return counts, accepted decay times and their fit uncertainties.
+        """
         result = source.result
         fit_fringe, t2r, t1 = options.fit_fringe, options.t2r, options.t1
 
@@ -381,6 +418,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
                 t2r < np.max(lens) and t2err < 0.5 * t2r and fit_ptp > 4 * mean_residual
             )
 
+        # Fit each complete curve relative to its own first sampled time.
         t2s = np.full(len(times), np.nan, dtype=np.float64)
         t2errs = np.zeros_like(t2s)
         for i, (real_signal, lens) in enumerate(
@@ -402,6 +440,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
+        # Compare decay times across pulse counts without treating IQ as population.
         fig, _ = plots.subplots("fit", nrows=1, ncols=2, figsize=(8, 3))
         ax1, ax2 = fig.axes
 

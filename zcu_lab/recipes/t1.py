@@ -1,4 +1,4 @@
-"""One calibrated T1 delay sweep, with explicit generator handoffs."""
+"""Measure excited-state relaxation versus delay to estimate T1."""
 
 from math import isfinite
 
@@ -43,23 +43,28 @@ def t1(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     reps: int | None = None,
     rounds: int | None = None,
 ) -> RecipeGenerator:
-    """Save one T1 delay sweep and yield Primary before asking to write.
+    """Measure T1 from the decay of the qubit's excited-state population.
 
-    target binds the new tab's primary role without changing GUI focus.
-    Omission uses focus. Do not pass target when reusing an existing tab.
+    After optional reset, apply a calibrated pi pulse, wait the swept delay,
+    and read out the qubit. Fit the decay to estimate the relaxation time, save
+    raw IQ, and ask before applying the proposed T1; skipping writes nothing.
 
-    session is driver-supplied. reuse_tab_id resets that idle twotone/t1 tab.
+    session is supplied by the recipe driver. target selects the qubit alias
+    without changing GUI focus; omission uses focus. reuse_tab_id resets an idle
+    twotone/t1 tab and must not be combined with target.
     readout_ref/pi_ref select calibrated library modules; None retains the GUI
-    selection, which must use a calibrated pi pulse rather than a custom pulse.
-    Readout frequency prefers a usable library, then resonator calibration.
-    None disables reset; use_reset selects its library module. max_delay_us is
-    a positive finite delay endpoint in us; points is at least 2. reps/rounds
-    are integer counts. Omitted values retain GUI defaults and expressions.
-    Invalid arguments fail before preparing; missing readout/pi calibration
-    reports both names. Invalid cfg/native failures throw at their author step.
-    Cancelled yields return; finish_early saves usable raw data. Primary may
-    hand off for interaction. accepted explicitly writes; skipped writes none.
+    selection, which must provide a calibrated pi pulse rather than a custom
+    pulse. Readout frequency uses a usable library value, then resonator
+    calibration. use_reset selects a library reset module; None disables reset.
+    max_delay_us is a positive finite delay sweep stop in us; points is at least
+    2. reps/rounds are integer counts. Omitted sweep/scalar values retain GUI
+    defaults and expressions.
+
+    Invalid inputs raise ValueError before opening a tab. Missing readout/pi
+    calibration raises RecipeNeedsParameters with every missing input; invalid
+    cfg or measurement/analysis failures propagate from the failing step.
     """
+    # 1. Reject invalid overrides before preparing the measurement.
     _validate_inputs(
         (
             ("reuse_tab_id", reuse_tab_id),
@@ -71,53 +76,60 @@ def t1(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         points,
     )
 
+    # 2. Choose the qubit tab, readout and optional reset modules.
     tab = session.open_tab(
         "twotone/t1",
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
     if use_reset is None:
-        tab.disable_library("modules.reset")
+        tab.disable_library(("modules", "reset"))
     else:
-        tab.use_library("modules.reset", use_reset)
-    tab.use_library("modules.readout", readout_ref)
+        tab.use_library(("modules", "reset"), use_reset)
+    tab.use_library(("modules", "readout"), readout_ref)
 
-    # Report every absent calibration before Run, as the existing tool does.
+    # 3. Require calibrated pulses and a readout frequency before acquisition.
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
-        "modules.readout.freq",
+        ("modules", "readout", "freq"),
         calibration="$resonator.freq",
         required="readout_ref",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.readout")
+        tab.use_inline(("modules", "readout"))
         apply_frequency(tab, frequency.edit)
     if (
-        parameter := tab.use_library("modules.pi_pulse", pi_ref, required="pi_ref")
+        parameter := tab.use_library(("modules", "pi_pulse"), pi_ref, required="pi_ref")
     ) is not None:
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
+    # 4. Set the waiting-time sweep after the pi pulse.
     tab.set_sweep(
-        "sweep.length",
+        ("sweep", "length"),
         stop=max_delay_us,
         expts=points,
         sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    tab.set("reps", reps, source="explicit")
-    tab.set("rounds", rounds, source="explicit")
+    tab.set(("reps",), reps, source="explicit")
+    tab.set(("rounds",), rounds, source="explicit")
 
+    # 5. Acquire the sweep and save raw IQ before fitting.
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
         return
     run.save_raw()
+
+    # 6. Fit the population decay to estimate the relaxation time T1.
     analysis = yield from run.analyze_step("primary")
     if analysis.status == "cancelled":
         return
+
+    # 7. Apply the proposed calibration only after explicit acceptance.
     decision = yield from ask(run.propose_writeback())
     if decision.status == "cancelled":
         return
@@ -149,18 +161,18 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.freq",
+            ("modules", "readout", "freq"),
             "MHz",
         ),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("use_reset", "modules.reset"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("delay", "sweep.length", "us"),
-        SummaryParameter("pi_ref", "modules.pi_pulse"),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("use_reset", ("modules", "reset")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("delay", ("sweep", "length"), "us"),
+        SummaryParameter("pi_ref", ("modules", "pi_pulse")),
     ),
     summary_estimates=(
-        SummaryEstimate("t1", "t1", "t1_err", "us"),
-        SummaryEstimate("t1b", "t1b", "t1b_err", "us"),
+        SummaryEstimate("t1", ("t1",), ("t1_err",), "us"),
+        SummaryEstimate("t1b", ("t1b",), ("t1b_err",), "us"),
     ),
 )

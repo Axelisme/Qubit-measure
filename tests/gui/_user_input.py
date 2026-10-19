@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QTimer
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
 from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -261,6 +261,17 @@ class ComponentDriver:
             and widget.isEnabled()
             and (modal is None or widget is modal or modal.isAncestorOf(widget))
         )
+
+    def window_size(self) -> QSize:
+        """Read the shown window's client width/height in device-independent pixels.
+
+        Return a detached QSize value, excluding the native window frame.
+        A hidden window raises LookupError rather than supplying unseen geometry.
+        This is an observation only; it never resizes the window.
+        """
+        if not self._window.isVisible():
+            raise LookupError("window is not visible")
+        return self._window.size()
 
     def observe(
         self, text: str | None = None, *, object_name: str | None = None
@@ -521,26 +532,30 @@ class ComponentDriver:
         action: str = "",
         *,
         object_name: str | None = None,
+        evidence: Path | None = None,
     ) -> None:
         """Open a control's context menu and click an exact visible action caption.
 
         Supply exactly one exact text/form-label or object_name selector. Missing/
-        ambiguous captions raise LookupError; non-combo/non-line-edit targets raise
-        TypeError. Unavailable widgets and disabled actions are no-ops. Hidden
+        ambiguous captions raise LookupError. Unavailable widgets and disabled actions are no-ops. Hidden
         actions are not selected. Real context-menu/mouse events are delivered;
         actions and product handlers are never called directly. A scheduled menu
         delivery has a 30-second watchdog; all popup/callback failures are returned
         to the caller after closing the menu, never left in Qt's event loop.
+        evidence optionally captures the visible popup before selecting the action.
         """
         widget = self._field_control(text, object_name)
-        if not isinstance(widget, (QComboBox, QLineEdit)):
-            raise TypeError("Context action requires QComboBox or QLineEdit")
         if not self._can_interact(widget):
             return
         errors: list[Exception] = []
 
         def choose() -> None:
             try:
+                if evidence is not None:
+                    menu = QApplication.activePopupWidget()
+                    if not isinstance(menu, QMenu):
+                        raise LookupError("No visible context menu")
+                    ComponentDriver(menu).screenshot(evidence)
                 self._select_menu_path((action,))
             except (LookupError, RuntimeError, ValueError, TypeError) as error:
                 errors.append(error)
@@ -740,14 +755,16 @@ class ComponentDriver:
         value: str = "",
         *,
         object_name: str | None = None,
+        commit: bool = True,
     ) -> None:
-        """Replace a line edit using its visible form label/name, then press Enter."""
+        """Replace a visible line edit; commit with Enter unless commit=False."""
         widget = self._find(text, object_name, editable=True)
         if self._can_interact(widget):
             mouse_click(widget, widget.rect().center())
             key_click(widget, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
             type_text(widget, value)
-            key_click(widget, Qt.Key.Key_Return)
+            if commit:
+                key_click(widget, Qt.Key.Key_Return)
         QApplication.processEvents()
 
     def select_combo(self, value: str, *, object_name: str) -> None:

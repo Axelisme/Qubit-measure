@@ -24,7 +24,9 @@ status: draft
 
 ### Python 是環境入口，preset 的 YAML 是參數
 
-環境以 `--simulate <path.py>` 在啟動時選定，只呼叫一次 `build_environment()`。Python 組合物理模型、模擬資源、接線與 backend；不同拓樸不必填入同一固定 engine。FTF preset 自行讀 YAML，一般使用者複製範例並調整數值即可換樣品。
+環境由可信的 `startup(ctx)` 腳本 import builder 並組裝，GUI 不載入 environment。Measure 使用 `--script <path.py>` 選擇腳本；不給時只跑 zcu_lab 預設腳本，`--clean` 不跑任何腳本且與 `--script` 互斥。自訂腳本需要預設行為時自己 import 並呼叫，框架不先跑預設。選擇與 lifecycle 見 [[0064]]。
+
+Python 組合物理模型、模擬資源、接線與 backend，不同拓樸不必填入同一固定 engine。FTF preset 自行讀 YAML，一般使用者複製範例並調整數值即可換樣品。Composition 注入選好的腳本 Path，lib 不反向 import lab，沿用 [[0072]] 的 C16。
 
 2026-10-14，使用者澄清：「但我預期模擬參數yaml中能夠設計ch，也就是說，build_enviroment回傳應該包含mock soc」。FTF builder 依 YAML 的 channel 設定組裝可執行的模擬 SoC、匹配 soccfg 與模型接線。GUI／Notebook 直接使用這一對物件，不另外呼叫預設設定 helper 建立第二份 soccfg。具體 channel schema 由實作完成。
 
@@ -34,23 +36,27 @@ status: draft
 
 YAML 不是通用 environment DSL。Launcher／runtime 不辨識 FTF 欄位，不建立 registry、設定繼承、plugin 自動探索或 hot reload。環境檔是可信 Python，不提供 sandbox。
 
-2026-10-14，使用者比較傳入 controller 與回傳環境兩種方案，裁決：「考慮到要與gui解耦，我選第二種方案。」build_environment() 不接收 GUI controller，回傳具名結構中的已組裝 Python 物件。GUI／Notebook 共用組裝入口，再由各自資源 owner 接管裝置與模擬板。宿主不解析 FTF 參數或依描述重新建立 backend，不繞過 owner 修改 registry／State。
+2026-10-14，使用者比較傳入 controller 與回傳環境兩種方案，裁決：「考慮到要與gui解耦，我選第二種方案。」`build_environment()` 不接收 GUI controller，回傳具名結構中的已組裝 Python 物件。Startup 腳本與 Notebook 共用 builder。GUI 不解析 FTF 參數或依描述重建 backend。
 
-同日，對「直接回傳已填好的 DeviceManager，並以 build_environment() 成功回傳作為清理責任交接點」的建議，使用者回答：「好，沒意見」。Bundle 直接包含已綁定的 soc、匹配的 soccfg、已註冊具名裝置的 devices: DeviceManager，以及不含模型真值的公開 description，不再增加 board／SimulatedBoard 容器。GUI 注入同一 manager，由 DeviceService 發布裝置狀態；Notebook 直接使用它。不搬移 driver 或重新註冊，避免兩個 manager 同時負責關閉同一裝置。
+`SimulationEnvironment` 包含已綁定的 soc、匹配的 soccfg、已註冊具名裝置的 devices: DeviceManager，以及不含模型真值的公開 description。Builder 成功回傳後，caller 負責安排清理。Notebook 直接使用並清理 manager；GUI 腳本則經公開 facets 安裝 board 並逐一 register 已建 drivers，不把 environment manager 注入 session。GUI 只接管成功 register 的 driver，SoC 仍由 caller 擁有，不假設通用 close 方法。
 
-Builder 回傳前失敗，由 builder 清理已建立資源；成功回傳後，由宿主負責安排清理，不等 GUI State 發布成功才交接。安裝失敗時，宿主透過同一 manager 清理本次資源，不開放 Run／remote readiness，也不回退正常模式或白雜訊。部分 close 失敗保留失敗裝置與錯誤，不自動 retry，不宣稱清理成功；原始啟動錯誤與清理錯誤都保留。
+FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry、setup components、entry aliases 與第一個 `initial` point，再組裝環境、install SoC、register devices 及開 tab。它不依賴 `create_entry` CLI。建 entry／component 與 alias Apply 都走既有資源 owner，不由腳本自行寫 entry 檔案。
 
-啟動失敗的清理不能只依賴成功顯示視窗後的關閉事件。正常關閉仍遵守既有 operation／Run gate，不因持有 manager 而繞過使用資源的工作。`SimulationEnvironment` 回傳同一 manager，`DeviceService` 先發布 live devices 再還原偏好。同名 live 不被替換，其餘 remembered devices 保持離線。這不新增通用交易框架。
+`build_environment(*, settings_path=None, workers=None, warmup=True)` 允許 caller 指定 YAML 與準備成本。省略 settings_path 仍讀 builder 相鄰 `ftf.yaml`，指定檔缺失或無效直接報錯，不 fallback。無參數 Notebook 行為不變，worker 數為至少一個並預留兩顆 host CPUs，warmup 預設開啟。Startup 範例明示相鄰的 settings_path、workers=1、warmup=False，不在啟動時做數值 warmup 或 acquire。
+
+Builder 回傳前失敗，由 builder 清理已建立資源。回傳成功後，腳本在第一個可能失敗的交付前登記 on_close，並只在 register 成功後記錄交給 GUI 的名稱。模擬資料來源繼續透過 environment manager 借用 drivers。Close callback 先從該 manager drop 已交付名稱而不 close，再關未交付 drivers，之後 GUI 才關自己接管的 drivers，避免雙關。未捕捉的腳本失敗保留已完成工作與 cleanup 登記，不回退正常模式或白雜訊。部分 close 失敗保留診斷，不宣稱清理成功，也不自動 retry。
+
+正常關閉遵守既有 operation／Run gate，先 drain 再反序執行 callbacks，最後關閉 GUI 管理的 drivers。Device 的同名 live 不被替換，記得但未連線列只由腳本明確 remember，不由 framework persistence 回填。這不新增通用交易框架。
 
 2026-10-13，使用者提出：「我覺得可以有FTF的enviroment或preset，內部有個yaml檔來放一些超參數，這樣方便用戶調」。對 Python 組裝、YAML 調參的分工確認：「好，繼續，同時你可以將我們的討論記錄到docs/discusssion中了」。更早的原則原話為「我第一版想做簡單一點的，不要做出什麼複雜的DSL架構，可以考慮宣告本身是python腳本」，原始日期未保留，於2026-10-13彙整。
 
-### 啟動固定模式與可信程式
+### 啟動腳本與可信程式
 
-正常／simulate 模式不在程序中途切換。載入、驗證或安裝失敗就中止，不回退正常模式、白雜訊或半成品環境。MCP launch 傳遞同一環境路徑；attach 不改模式或重新組裝。正常模式不代表自動連硬體。
+GUI 不持有正常／simulate 模式。模擬認知集中在腳本，GUI 只提供一般 install／register／entry／tab 操作。選另一份腳本或重讀 YAML 要明確重啟，不提供 environment reload RPC。MCP `connect(script=...)` 只在 launch 新 GUI 時選腳本，attach 不重跑，顯式 script 在 attach 時拒絕。一般 startup 錯誤保留已完成部分並顯示 path／line，GUI 仍可用，不以 socket readiness 表示環境已完整建立。
 
-2026-10-14，使用者對直接移除 GUI Use Simulate Env 與 MCP simulation.initialize 回答「同意」。不保留相容入口或同名隱式重啟；切換環境、修改 YAML 後須明確重啟。裝置目前 bias 的合法修改是量測輸入，不是重載環境。Memento、Setup 或 RPC 不改啟動模式。
+2026-10-19，使用者要求：「gui本身應該設計成對simulation無知，然模擬的認知集中在啟動腳本中」。這取代 GUI 固定模擬模式的啟動規則。`--simulate`、GUI Use Simulate Env 與 MCP `simulation.initialize` 都不留相容入口。`is_mock` 由 SoC 自述，GUI 只轉發，不載入模擬類別判斷來源。
 
-同日，使用者裁決：「先不必拒絕真實資源，我自己會採用主機隔離的安全方案。」因此不新增依 simulate 模式拒絕真實資源的連線／操作政策。既有 Run lease、控制身份與 mutation gate 照常生效；合法實驗內部控制不因這次設計被禁止。
+2026-10-14，使用者裁決：「先不必拒絕真實資源，我自己會採用主機隔離的安全方案。」因此不新增依模擬身份拒絕真實資源的連線／操作政策。既有 Run lease、控制身份與 mutation gate 照常生效，腳本選擇可能連硬體，仍需 caller 審閱及授權。
 
 ### 模型參數、裝置設定與量測輸入分開
 
@@ -229,7 +235,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 不建立 mixing、n/ncrit、短窗、背景 photon occupation 的 runtime 適用域門檻、警告、拒絕或 quality policy。模型假設仍明示，不代表任意設定都準確。必要輸入合法性、未支援操作與真正 solver 失敗仍報錯，非有限或空資料不能冒充成功。
 
-同日，使用者要求：「我不希望改動太多gui內的邏輯，前者不要有太多模擬認知」。GUI 只做必要組裝與既有流程接線，不新增 T1／物理判斷、專用警告面板或 Run 狀態。一般錯誤沿通用契約傳遞，通用能力不足時回報缺口，不另建模擬機制。
+同日，使用者要求：「我不希望改動太多gui內的邏輯，前者不要有太多模擬認知」。GUI 只提供一般資源操作與既有流程接線，不新增 T1／物理判斷、專用警告面板或 Run 狀態。一般錯誤沿通用契約傳遞，通用能力不足時回報缺口，不另建模擬機制。
 
 ### White_noise preset
 
@@ -276,7 +282,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 ## 交付狀態與限制
 
-- Program 提供具名環境 binding、Module timeline 與 request／signal 契約。GUI 先發布同一 manager 的 live devices，再還原 remembered devices。正常硬體路徑不變，模擬的 raw compile hooks 明確拒絕。
+- Program 提供具名環境 binding、Module timeline 與 request／signal 契約。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers 並開 tab。GUI 不載入 environment，也不持有模擬啟動模式。模擬的 raw compile hooks 明確拒絕。
 - Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播；重播用相同數值與 RNG 版本重算，不引用已保存的 density。
 - Evolution 提供預設快速分段算法及記憶體 prepare 快取。離線 U 表、Intel OpenCL、持久 exact records 及建庫入口已刪除。快取預算不是 process RAM 上限。
 - 舊 TLS、隱式白雜訊及雙模式 mock API 已移除，Notebook 使用新環境。沒有相容層。參數化 make_mock_soccfg 仍支援離線編譯。

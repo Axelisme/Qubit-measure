@@ -428,8 +428,11 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     memory-unit arrays; result_validator, when supplied, checks results on save
     and load. Invalid declarations raise ValueError; non-dataclass types or wrong
     builder return types raise TypeError. cfg_schema_version is the declaration's
-    major.minor cfg version, defaulting to 1.0. Labber exports require a common
-    grid; native persistence permits different grids for each variable.
+    major.minor cfg version, defaulting to 1.0. labber_layout defaults to
+    'common', requiring a shared grid. Explicit 'independent' preserves each
+    variable's own axes and supports one or two dimensions per variable.
+    There is no automatic layout fallback. Native persistence permits different
+    grids regardless of the Labber layout.
     """
 
     variables: tuple[VariableSpec, ...]
@@ -439,9 +442,12 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     result_builder: Callable[[GroupedLoadData[T_Config]], T_Result]
     result_validator: Callable[[T_Result], None] | None = None
     cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
+    labber_layout: Literal["common", "independent"] = "common"
 
     def __post_init__(self) -> None:
         _validate_cfg_schema_version(self.cfg_schema_version)
+        if self.labber_layout not in {"common", "independent"}:
+            raise ValueError("labber_layout must be common or independent")
         if not self.variables:
             raise ValueError("GroupedAxesSpec requires at least one variable")
         result_type = self.result_type
@@ -498,7 +504,7 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         comment: str | None = None,
         tag: str | None = None,
     ) -> None:
-        """Map this explicit record to one common-grid Labber export.
+        """Map this explicit record to one Labber export using labber_layout.
 
         source.cfg must be present. destination follows the existing Labber
         extension normalization. comment is optional user text; tag overrides
@@ -525,6 +531,7 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
                 source.cfg, schema_version=self.cfg_schema_version
             ),
             comment=comment,
+            grouped_layout=self.labber_layout,
         )
 
 

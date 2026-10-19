@@ -85,6 +85,10 @@ def test_session_core_connects_and_cancels_on_owner_thread(
                 raise ValueError(f"unknown device: {name}")
             del self._devices[name]
 
+        def close_device(self, name: str) -> None:
+            self.get_device(name).close()
+            self.drop_device(name)
+
         def get_device(self, name: str) -> Any:
             return self._devices[name]
 
@@ -188,7 +192,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     success_outcome = handles.poll(success_token)
     assert success_outcome is not None and success_outcome.status == "finished"
     assert session.soc_connection.has_soc()
-    assert not session.soc_connection.is_mock_soc()
+    assert session.soc_connection.is_mock_soc()
     assert state.session_env.soc is not None
     assert state.session_env.soccfg is not None
     assert state.version.get("soc") == 1

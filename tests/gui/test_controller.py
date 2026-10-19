@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -28,14 +29,10 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services import (
-    ConnectionPreferences,
-)
-from zcu_tools.gui.app.measure.services import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
-from zcu_tools.gui.app.measure.services.ports import RestoreIssue, RestoreReport
 from zcu_tools.gui.app.measure.state import DeviceStatus, State
-from zcu_tools.gui.event_bus import BaseEventBus, EventMeta, EventOrigin
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -71,7 +68,6 @@ def _make_ctx() -> SessionEnv:
         parameters=None,
         soc=MagicMock(),  # simulate connected soc
         soccfg=make_mock_soccfg(),
-        res_name="fake_res",
     )
 
 
@@ -80,6 +76,8 @@ def _make_view() -> MagicMock:
     view.show_status_message = MagicMock()
     view.show_error_dialog = MagicMock()
     view.make_run_container = MagicMock(return_value=None)
+    view.current_window_size.return_value = (1280, 750)
+    view.current_left_panel_width.return_value = 560
 
     # The Controller fans diagnostics out via notify_diagnostic (ADR-0068);
     # mirror MainWindow's dispatch so tests can assert on show_*.
@@ -115,6 +113,9 @@ class ControllerFixture:
             view=self.view,
             bus=self.bus,
             project_root=project_root or mkdtemp(prefix="context-"),
+            driver_factory=lambda type_name, address: FakeDevice(
+                address=address, fast_mode=True
+            ),
         )
         self.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
         self.ctrl.setup_control.new_point(
@@ -663,9 +664,9 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
 def test_device_connect_updates_state_and_presents_ui_feedback(
     cf: ControllerFixture,
 ):
-    """The default FakeDevice connects through the public device control facet."""
+    """A synthetic hardware driver connects through the public control facet."""
     cf.ctrl.device_control.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
+        ConnectDeviceRequest(type_name="YOKOGS200", name="flux", address="addr")
     )
     _wait_for(lambda: not cf.ctrl.device_control.get_active_device_operations())
 
@@ -766,78 +767,12 @@ def test_get_adapter_names_preserves_injected_order(cf):
     assert cf.ctrl.get_adapter_names() == ["fake", "interactive"]
 
 
-def test_persist_then_restore_app_state(tmp_path):
-    """Full round-trip through the PersistenceCaretaker single-file memento:
-    capture (flush) on one Controller, restore on a fresh one sharing the dir."""
-    cf = ControllerFixture(cache_dir=tmp_path)
-    tab_id = cf.ctrl.new_tab("fake")
-
-    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
-    cfg.write({("reps",): 42})
-    cf.ctrl.setup_control.new_entry(EntryRequest("chip"))
-    cf.ctrl.setup_control.remember_connection(
-        ConnectionPreferences(ip="10.0.0.2", port=7000)
-    )
-    cf.ctrl.persist_all()
-
-    cf_restored = ControllerFixture(cache_dir=tmp_path)
-    cf_restored.ctrl.restore_all()
-
-    assert len(cf_restored.state.tabs) == 1
-    restored_tab = next(iter(cf_restored.state.tabs.values()))
-    assert restored_tab.adapter_name == "fake"
-    assert restored_tab.cfg.input.data["reps"] == 42
-    # remembered settings round-tripped (prefill values; project not auto-applied).
-    prefs = cf_restored.ctrl.setup_control.get_setup_preferences()
-    assert prefs.entry_name == "chip"
-    assert prefs.ip == "10.0.0.2"
-    assert prefs.port == 7000
-    assert cf_restored.state.session_env.readiness is ContextReadiness.ACTIVE
-
-
-def test_restore_tab_events_use_system_origin(tmp_path) -> None:
-    source = ControllerFixture(cache_dir=tmp_path / "source", mock_emit=False)
-    source.ctrl.new_tab("fake")
-    persisted = source.ctrl.capture_persisted_state()
-    restored = ControllerFixture(cache_dir=tmp_path / "restored", mock_emit=False)
-    observed: list[EventMeta] = []
-    from zcu_tools.gui.app.measure.events.tab import TabAddedPayload
-
-    restored.bus.subscribe_with_meta(
-        TabAddedPayload, lambda _payload, meta: observed.append(meta)
-    )
-
-    restored.ctrl.restore_persisted_state(persisted)
-
-    assert len(observed) == 1
-    assert observed[0].origin == EventOrigin(kind="system")
-
-
 def test_restore_corrupt_file_is_visible_to_user(cf, tmp_path):
     """A corrupt / wrong-version state file → defaults + a user-visible error."""
-    cf.caretaker._path.parent.mkdir(parents=True, exist_ok=True)
-    cf.caretaker._path.write_text("{ not valid json", encoding="utf-8")
+    cf.caretaker.state_path.parent.mkdir(parents=True, exist_ok=True)
+    cf.caretaker.state_path.write_text("{ not valid json", encoding="utf-8")
 
     cf.ctrl.restore_all()
 
     title, _ = cf.view.show_error_dialog.call_args.args
     assert title == "Settings restore failed"
-
-
-def test_restore_invalid_tab_is_rejected_and_reported(cf):
-    cf.ctrl._workspace_svc = MagicMock()
-    cf.ctrl._workspace_svc.apply_session.return_value = RestoreReport(
-        restored_tabs=0,
-        rejected_tabs=(RestoreIssue("fake", "invalid saved configuration (bad cfg)"),),
-    )
-    cf.ctrl.restore_all()
-
-    title, message = cf.view.show_error_dialog.call_args.args
-    assert title == "Some session tabs were not restored"
-    assert "invalid saved configuration" in message
-
-
-# ---------------------------------------------------------------------------
-# Connection / predictor — handled by ConnectionService.
-# (Direct controller setters are removed in Phase 62.2.)
-# ---------------------------------------------------------------------------

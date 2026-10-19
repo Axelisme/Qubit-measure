@@ -15,7 +15,7 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.library_entry import ModuleEntryForm
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleResolutionError, document_unit
+from zcu_tools.resources.entry import RoleResolutionError, document_unit, document_value
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
 
@@ -115,8 +115,11 @@ def _destination_value(
     item: WritebackItem, parameters: ParameterContext, path: str
 ) -> object:
     if isinstance(item, ParameterWriteback):
-        result = parameters.lookup(path)
-        return result.value if result.present else None
+        # The destination is already concrete; do not resolve captured roles again.
+        try:
+            return document_value(parameters.document(), path)
+        except AttributeError:
+            return None
     library = parameters.library
     if path not in library.module_keys():
         return None
@@ -373,7 +376,9 @@ class WritebackService:
 
         The input is a proposal collection, not an adapter or stage. Items are
         shallow-copied so draft-local ``session_id``, selection, target and value
-        edits cannot mutate the adapter's proposal objects. Each module proposal
+        edits cannot mutate the adapter's proposal objects. Author element
+        identities are detached at creation and never resolved against aliases.
+        Each module proposal
         is projected into a library entry Form (ModuleEntryForm): child library
         keys stay keys, and the optional hardware fields the shared Form
         generator leaves out return to Spec defaults. A proposal that is not a
@@ -784,6 +789,7 @@ class WritebackService:
     @staticmethod
     def _copy_item(item: WritebackItem) -> WritebackItem:
         copied = copy.copy(item)
+        copied.element = copy.deepcopy(item.element)
         copied.session_id = ""
         copied.selected = True
         return copied

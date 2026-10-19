@@ -17,8 +17,11 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
                 "init_pulse": Slot("$qubit.module.x180"),
                 "tested_reset": Template(
                     "bath_reset",
-                    set={"pi2_cfg": Slot("$qubit.module.x90", copy=True)},
-                    lock={"pi2_cfg.phase": 90.0},
+                    set={
+                        "pi2_cfg": Slot(
+                            "$qubit.module.x90", copy=True, set={"phase": 90.0}
+                        )
+                    },
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")

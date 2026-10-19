@@ -35,9 +35,6 @@ def _destination_context(adapter: RemoteControlAdapter) -> dict[str, object]:
     ctx = adapter.ctrl.get_session_env()
     return {
         "active_label": ctx.active_label,
-        "chip_name": ctx.chip_name,
-        "qub_name": ctx.qub_name,
-        "res_name": ctx.res_name,
         "database_path": ctx.database_path,
         "result_dir": ctx.result_dir,
         "has_active_context": bool(ctx.is_active()),
@@ -62,6 +59,8 @@ def _writeback_item_wire(item: WritebackItem) -> dict[str, object]:
         "description": item.description,
         "selected": bool(item.selected),
     }
+    if item.element is not None:
+        base["element"] = item.element.copy()
     if isinstance(item, ParameterWriteback):
         base["kind"] = "parameter"
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)

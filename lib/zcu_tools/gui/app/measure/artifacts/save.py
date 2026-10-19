@@ -159,6 +159,7 @@ class SaveService:
             result_path=storage.result_path,
             database_path=storage.database_path,
             run_id=metadata.run_id,
+            experiment=tab.adapter_name,
             point=history.point,
             saved_at=datetime.now().astimezone(),
         )

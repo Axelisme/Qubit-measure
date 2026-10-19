@@ -1,4 +1,4 @@
-"""Frequency/gain survey with raw save and original Run preview only."""
+"""Resonator frequency/gain map with raw save and Run preview only."""
 
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
@@ -29,33 +29,41 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
     reps: int | None = None,
     rounds: int | None = None,
 ) -> RecipeGenerator:
-    """Run/save one power survey and capture its Run PNG, with no analysis/write.
+    """Map the resonator response versus readout frequency and gain.
 
-    target binds the new tab's primary role without changing GUI focus.
-    Omission uses focus. Do not pass target when reusing an existing tab.
+    At each gain, sweep readout frequency and average IQ to show how the
+    resonance changes with drive amplitude. Save the raw map and capture its
+    Run preview only; this survey performs no analysis or writeback.
 
-    session is driver-supplied. reuse_tab_id resets an idle onetone/power_dep tab.
-    readout_ref selects a library; None retains the selection. center/span use MHz
-    and default to resonator/linewidth calibration. gain_range contains two native
-    amplitude endpoints; None retains the GUI range. Counts/averages retain GUI
-    defaults when None. Missing calibration ends needs_parameters; cfg/native/PNG
-    failures throw at their author step. Cancelled Run returns; finish_early saves
-    usable data. Later cancellation does not suppress the ordinary save/preview.
+    session is driver-supplied. target overrides the qubit alias for this Reset;
+    None uses global aliases. reuse_tab_id resets an idle onetone/power_dep tab.
+    readout_ref selects a library module; None retains its GUI selection.
+    center_mhz and positive span_mhz use MHz; omitted values use resonator
+    frequency and three linewidths for the full span. gain_range has two native
+    amplitude endpoints; freq_points/gain_points count each sweep axis.
+    reps/rounds control averaging. Other None values retain GUI defaults.
+    Missing calibration reports needs_parameters; invalid inputs/cfg/native/PNG
+    failures propagate. A cancelled Run stops before save and preview.
     """
+    # 1. Validate inputs before selecting the measurement sources.
     for name, value in (("reuse_tab_id", reuse_tab_id), ("readout_ref", readout_ref)):
         if value is not None and not value.strip():
             raise ValueError(f"{name} must be a non-empty string or null")
     if span_mhz is not None and span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
+
+    # 2. Open/reset the tab and select the pulse libraries.
     tab = session.open_tab(
         "onetone/power_dep",
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
-    tab.use_library("modules.readout", readout_ref)
+    tab.use_library(("modules", "readout"), readout_ref)
+
+    # 3. Set the scan range and averaging for the resonator response.
     missing = set_frequency_sweep(
         tab,
-        "sweep.freq",
+        ("sweep", "freq"),
         calibration=FrequencySweepCalibration(
             "$resonator.freq", "$resonator.kappa", 3.0
         ),
@@ -66,19 +74,23 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
     if missing:
         raise RecipeNeedsParameters(missing)
     tab.set_sweep(
-        "sweep.gain",
+        ("sweep", "gain"),
         start=None if gain_range is None else gain_range[0],
         stop=None if gain_range is None else gain_range[1],
         expts=gain_points,
     )
-    retain_scalar(tab, "modules.readout.gain")
-    tab.set("reps", reps)
-    tab.set("rounds", rounds)
+    retain_scalar(tab, ("modules", "readout", "gain"))
+    tab.set(("reps",), reps)
+    tab.set(("rounds",), rounds)
+
+    # 4. Acquire and save the raw IQ sweep.
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
         return
     run.save_raw()
+
+    # 5. Capture the map preview without fitting or changing calibration.
     run.preview()
 
 
@@ -112,12 +124,12 @@ DEFINITION = RecipeDefinition(
     run=onetone_spectrum_over_power,
     adapter_name="onetone/power_dep",
     summary_parameters=(
-        SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.gain"),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("gain_sweep", "sweep.gain"),
+        SummaryParameter("frequency_sweep", ("sweep", "freq"), "MHz"),
+        SummaryParameter("gain", ("modules", "readout", "gain")),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("gain_sweep", ("sweep", "gain")),
     ),
     summary_estimates=(),
 )

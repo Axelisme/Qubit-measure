@@ -39,6 +39,8 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class LengthResult:
+    """Reset pulse lengths in us and mean complex IQ (length,)."""
+
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
 
@@ -75,6 +77,14 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
     )
 
     def run(self, cfg: LengthCfg, *, context: RunContext) -> LengthResult:
+        """Measure the single-tone reset response versus pulse duration.
+
+        Apply optional reset and initialization, the length-swept tested
+        reset pulse, then read out. Return reset lengths in us and mean
+        complex IQ shaped (Nlength,). The curve shows duration dependence,
+        not a calibrated reset fidelity; analysis only plots the response.
+        """
+        # Quantize the tested reset duration on its generator channel.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -87,6 +97,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse_cfg.ch)
         )
 
+        # Retain complex IQ while displaying the duration-dependent projection.
         viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Amplitude")
         signals_buffer = SignalBuffer(
             (len(lengths),),
@@ -94,6 +105,8 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
                 lengths, reset_length_signal2real(data)
             ),
         )
+
+        # Sweep only the tested reset length after the optional preparation.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
@@ -120,6 +133,11 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the projected reset IQ response versus pulse duration in us.
+
+        Omit unmeasured NaN points and publish fit without fitting or returning
+        an optimal length. source.cfg may be None.
+        """
         del options
         result = source.result
 

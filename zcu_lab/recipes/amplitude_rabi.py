@@ -1,4 +1,4 @@
-"""One gain Rabi sweep, with explicit Primary and writeback handoffs."""
+"""Measure Rabi oscillations versus drive gain to calibrate rotation amplitudes."""
 
 from math import isfinite
 
@@ -51,24 +51,29 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     reps: int | None = None,
     rounds: int | None = None,
 ) -> RecipeGenerator:
-    """Save one gain sweep and yield Primary before asking to write.
+    """Sweep drive gain at fixed pulse length to calibrate pi and pi/2 rotations.
 
-    target binds the new tab's primary role without changing GUI focus.
-    Omission uses focus. Do not pass target when reusing an existing tab.
+    After optional reset, apply the drive pulse and read out the qubit at each
+    gain. Fit the Rabi oscillations to estimate pi and pi/2 gains, save raw IQ,
+    and ask before applying the proposed calibration; skipping writes nothing.
 
-    session is driver-supplied. reuse_tab_id resets that idle amp_rabi tab.
+    session is supplied by the recipe driver. target selects the qubit alias
+    without changing GUI focus; omission uses focus. reuse_tab_id resets an idle
+    amp_rabi tab and must not be combined with target.
     readout_ref/drive_ref select library modules; None retains the GUI selection.
-    Drive frequency prefers explicit frequency_mhz, then a usable library, then
-    qubit calibration. Readout prefers a usable library, then resonator calibration.
-    No pi calibration is required. None disables reset; use_reset selects its
-    library module. pulse_length_us is the fixed pulse length in us; gain_range
-    contains two finite endpoints in native gain units. points is at least 2.
-    reps/rounds are integer counts. Omitted values retain GUI defaults/expressions.
-    Invalid inputs fail before preparing; absent frequency sources report all
-    missing parameters. Invalid cfg/native failures throw at their author step.
-    Cancelled yields return; finish_early saves usable raw data. Primary may
-    hand off for interaction. accepted explicitly writes; skipped writes none.
+    Drive frequency uses explicit frequency_mhz (MHz), then a usable library
+    value, then qubit calibration. Readout uses library frequency, then resonator
+    calibration. No pi calibration is needed. use_reset selects a library reset
+    module; None disables reset.
+    pulse_length_us is the fixed length in us. gain_range has two finite
+    endpoints in native gain units; points is at least 2. reps/rounds are integer
+    counts. Omitted sweep/scalar values retain GUI defaults and expressions.
+
+    Invalid inputs raise ValueError before opening a tab. Missing frequency
+    sources raise RecipeNeedsParameters with every missing input; invalid cfg
+    or measurement/analysis failures propagate from the failing step.
     """
+    # 1. Reject invalid overrides before preparing the measurement.
     _validate_inputs(
         (
             ("reuse_tab_id", reuse_tab_id),
@@ -81,68 +86,75 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
         points,
     )
 
+    # 2. Choose the qubit tab, readout and optional reset modules.
     tab = session.open_tab(
         "twotone/rabi/amp_rabi",
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
     if use_reset is None:
-        tab.disable_library("modules.reset")
+        tab.disable_library(("modules", "reset"))
     else:
-        tab.use_library("modules.reset", use_reset)
-    tab.use_library("modules.readout", readout_ref)
-    tab.use_library("modules.qub_pulse", drive_ref)
+        tab.use_library(("modules", "reset"), use_reset)
+    tab.use_library(("modules", "readout"), readout_ref)
+    tab.use_library(("modules", "qub_pulse"), drive_ref)
 
-    # Preserve the complete missing-source list rather than failing on its first item.
+    # 3. Resolve drive and readout frequencies; report all missing sources.
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
-        "modules.qub_pulse.freq",
+        ("modules", "qub_pulse", "freq"),
         frequency_mhz,
         calibration="$qubit.freq",
         required="frequency_mhz",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.qub_pulse")
+        tab.use_inline(("modules", "qub_pulse"))
         apply_frequency(tab, frequency.edit)
     frequency = choose_frequency(
         tab,
-        "modules.readout.freq",
+        ("modules", "readout", "freq"),
         calibration="$resonator.freq",
         required="readout_ref",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.readout")
+        tab.use_inline(("modules", "readout"))
         apply_frequency(tab, frequency.edit)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
+    # 4. Sweep gain while keeping the drive duration fixed.
     tab.set_sweep(
-        "sweep.gain",
+        ("sweep", "gain"),
         start=gain_range[0] if gain_range is not None else None,
         stop=gain_range[1] if gain_range is not None else None,
         expts=points,
         sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
     if pulse_length_us is not None:
-        tab.use_inline("modules.qub_pulse")
-        tab.use_inline("modules.qub_pulse.waveform")
-        tab.set("modules.qub_pulse.waveform.length", pulse_length_us)
+        tab.use_inline(("modules", "qub_pulse"))
+        tab.use_inline(("modules", "qub_pulse", "waveform"))
+        tab.set(("modules", "qub_pulse", "waveform", "length"), pulse_length_us)
     else:
-        retain_scalar(tab, "modules.qub_pulse.waveform.length")
-    tab.set("reps", reps, source="explicit")
-    tab.set("rounds", rounds, source="explicit")
+        retain_scalar(tab, ("modules", "qub_pulse", "waveform", "length"))
+    tab.set(("reps",), reps, source="explicit")
+    tab.set(("rounds",), rounds, source="explicit")
 
+    # 5. Acquire the sweep and save raw IQ before fitting.
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
         return
     run.save_raw()
+
+    # 6. Fit Rabi oscillations to estimate pi and pi/2 drive gains.
     analysis = yield from run.analyze_step("primary")
     if analysis.status == "cancelled":
         return
+
+    # 7. Apply the proposed calibration only after explicit acceptance.
     decision = yield from ask(run.propose_writeback())
     if decision.status == "cancelled":
         return
@@ -183,20 +195,22 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.freq",
+            ("modules", "readout", "freq"),
             "MHz",
         ),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("use_reset", "modules.reset"),
-        SummaryParameter("reps", "reps"),
-        SummaryParameter("rounds", "rounds"),
-        SummaryParameter("frequency_mhz", "modules.qub_pulse.freq", "MHz"),
-        SummaryParameter("drive_ref", "modules.qub_pulse"),
-        SummaryParameter("pulse_length_us", "modules.qub_pulse.waveform.length", "us"),
-        SummaryParameter("gain_sweep", "sweep.gain"),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("use_reset", ("modules", "reset")),
+        SummaryParameter("reps", ("reps",)),
+        SummaryParameter("rounds", ("rounds",)),
+        SummaryParameter("frequency_mhz", ("modules", "qub_pulse", "freq"), "MHz"),
+        SummaryParameter("drive_ref", ("modules", "qub_pulse")),
+        SummaryParameter(
+            "pulse_length_us", ("modules", "qub_pulse", "waveform", "length"), "us"
+        ),
+        SummaryParameter("gain_sweep", ("sweep", "gain")),
     ),
     summary_estimates=(
-        SummaryEstimate("pi_gain", "pi_gain", "pi_gain_err"),
-        SummaryEstimate("pi2_gain", "pi2_gain", "pi2_gain_err"),
+        SummaryEstimate("pi_gain", ("pi_gain",), ("pi_gain_err",)),
+        SummaryEstimate("pi2_gain", ("pi2_gain",), ("pi2_gain_err",)),
     ),
 )

@@ -19,6 +19,9 @@ class SimulationSoc(QickConfig):
     Getters retain the last completed realization, never execute or resample it.
     """
 
+    # Consumers forward this board-owned identity without importing simulation.
+    is_mock: bool = True
+
     def __init__(
         self,
         soccfg: QickConfig,

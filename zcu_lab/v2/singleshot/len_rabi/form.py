@@ -1,6 +1,6 @@
 """Starting values for singleshot/len_rabi; sources are captured at Open/Reset."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Locked, Range, Slot, Template
+from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
@@ -27,8 +27,6 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
             "radius": Expr("$qubit.ext.readout_cal.radius"),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "shots": 1000,
-            "reps": Locked(1),
-            "rounds": Locked(1),
             "initial_delay": Hidden(),
         },
     )

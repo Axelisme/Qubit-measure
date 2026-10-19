@@ -18,7 +18,11 @@ Recipe 自動推導的 owner、generator 協作及取消結果見 [[0075]]；MCP
 
 Auto Align 與 search 中途沒有 agent 可影響結果的判斷，因此 MCP 輪詢到結束才回，不設整體等待上限。等待時同一 stdio server 不處理其他呼叫。GUI 仍持有 context lifetime、operation、完整 inputs、recorded quality 與 fit freshness。GUI Show 和 MCP 使用同一 fit renderer；MCP 不回過期結果的疊圖，GUI 仍顯示過期與原因。這是 fluxdep 的局部契約，不把 fit 依賴模型升為所有 app 的規則。跨 app 的 MCP 設計原則見 [[0075]] 的 MCP 設計原則。
 
-同機跨程序的 MCP 使用 socket；同機並不等於同程序呼叫。GUI 可停用 remote socket，GUI core 不依賴 MCP。MCP `connect` 可接上現有 GUI，或經明確選項啟動 GUI；MCP server 結束只斷開連線，不關閉 GUI。外部 CLI／MCP workflow 擁有 agent 的啟動。GUI 不啟動 agent terminal、不管理可恢復的 agent session，也不注入 bootstrap prompt。Connection authentication 與 method exposure 是兩道不同的邊界：有 token 時 GUI 在 method 前驗證；沒有 token 的 loopback 允許本機可連線程序控制 GUI。隱藏 method 不等於授權機制，現有連線方式不承諾任意跨機部署。
+同機跨程序的 MCP 使用 socket；同機並不等於同程序呼叫。GUI 可停用 remote socket，GUI core 不依賴 MCP。MCP `connect` 可接上現有 GUI，或經明確選項啟動 GUI；MCP server 結束只斷開連線，不關閉 GUI。
+
+Measure `connect(script=...)` 只在 launch 新 GUI 時選擇可信 `startup(ctx)`，取代預設腳本；`clean=True` 不跑任何腳本且與 script 互斥。Attach 不重跑 startup，顯式 script 選項在 attach 時拒絕，不改既有 GUI。GUI／session／MCP 不載入 simulation environment，FTF 由一般啟動腳本使用公開 facets 安裝，沒有 `--simulate` 或 `simulation.initialize` 相容入口，見 [[0064]]。
+
+外部 CLI／MCP workflow 擁有 agent 的啟動。GUI 不啟動 agent terminal、不管理可恢復的 agent session，也不注入 bootstrap prompt。Connection authentication 與 method exposure 是兩道不同的邊界：有 token 時 GUI 在 method 前驗證；沒有 token 的 loopback 允許本機可連線程序控制 GUI。隱藏 method 不等於授權機制，現有連線方式不承諾任意跨機部署。
 
 ## Method 與一致性
 
@@ -48,9 +52,11 @@ Standalone `apply_writeback(tab, items=None)` 按穩定 `target_name` 選擇當�
 
 Measure `tab.get_cfg` 回 Form authored input、ordinary leaf values 與 directed errors。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 cfg ref 或 expected revision。`tab.describe_cfg` 另回單層 metadata 與同次局部 input／value／Form preview errors，不附 lowered cfg errors。Workflows 的 `workflow.form` 不附 schema，`workflow.describe_form` 可描述同次 batch candidate，不提交 draft 或 Engine。
 
-`tab.run_cfg_command` 是 live catalog 的通用 Form 指令入口，由既有 rpc_call 使用，不另增 MCP tool。Path 沿 model-field 字串陣列契約，name 只選目前 active description 的公開 command，不提供任意方法執行。Remote 呼叫 resource.run_command，保留控制身份、busy、lifetime 與 mutation guard。成功回 Form input／values／errors；未知指令、inactive path 與換算失敗不留下部分寫入。Description 的數值欄位 commands 帶 target 與參與 inputs，remote 不求值、不重建座標或採樣。Step 的 input 保留 authored 原稿，values 使用共用 Form 的有效端點投影，read 不寫回原稿。to_inline 專用入口不變。
+`tab.run_cfg_command` 是 live catalog 的通用 Form 指令入口，由既有 rpc_call 使用，不另增 MCP tool。Path 依 [[0079]] 的目標契約使用 str 欄位名／int list index，name 只選目前 active description 的公開 command，不提供任意方法執行。Remote 呼叫 resource.run_command，保留控制身份、busy、lifetime 與 mutation guard。成功回 Form input／values／errors；未知指令、inactive path 與換算失敗不留下部分寫入。Command 只修改掛載欄位與 descendants，sweep 的指令掛在 sweep row。Remote 不求值、不重建座標或採樣。Step 的 input 保留 authored 原稿，values 使用共用 Form 的有效端點投影，read 不寫回原稿。to_inline 專用入口不變。
 
-Edit 以 model-field paths 原子寫入目前 input。Reset 捕捉一次來源並取 adapter defaults，可接受單次 aliases，但不改全域列或 memento。Run 只接受畫面上目前有效的 Form result，在 focus 或 operation 效果前拒絕非空 aliases。直接 RPC 只轉送一次，不隱藏 refresh 或 retry。Recipe 在建立或重用 tab 後都先 Reset，再設定參數與 Run，只有 Reset 收單次 aliases。Fixed sources、source provenance 與 acceptance 見 [[0065]]。Holder、authentication、domain busy 與硬體 guards 分別檢查，不以 cfg 版本授權。
+[[0079]] 的 indexed editing 與逐元素 recipe 設計已採用，實作尚待完成。Describe 列出 list index 與元素 name，不增加名稱 path grammar。Owner 在單次 readonly 呼叫提供完整元素觀察，MCP 不以 N 次讀取拼接。Recipe 使用 participants 與 name-keyed overrides，由 owner 在 Run 前解析位置；逐葉保留 explicit／default／derived，actual、estimates 與 writeback candidates 以同次元素 name 標示。既有 Run facts capture 與 writeback owner 邊界不變。
+
+Edit 以 model-field paths 原子寫入目前 input。`tab.refresh_sources(aliases=...)` 重新 capture，保留全部 authored input 與 explicit selections，包括 expression 原稿和既有 direct 值。`tab.reset_cfg(aliases=...)` 重新 capture 並重算 defaults。兩者的單次 aliases 都不改全域列或保存為來源覆寫。Run 只接受畫面上目前有效的 Form result，在 focus 或 operation 效果前拒絕非空 aliases。直接 RPC 只轉送一次，不隱藏 refresh 或 retry。Recipe 在建立或重用 tab 後都先 Reset，再設定參數與 Run，只有 Reset 收單次 aliases。Fixed sources、source provenance 與 acceptance 見 [[0065]]。Holder、authentication、domain busy 與硬體 guards 分別檢查，不以 cfg 版本授權。
 
 共用 ParamSpec 同時擁有 string enum 的宣告驗證、schema 投影與 request membership。Flux plugin 從 domain FluxLineRole 提供選項，typed Action 仍做 domain 驗證。`device.snapshot.unit` 讀 cached Info 的 `value_unit`，YOKO 為 A／V，Fake 為 native。缺 Info 標 none，不按 device type 猜單位，不讀硬體。Zcu_lab flux recipe helper 比對 caller 明填 unit 與 snapshot unit，包括 native，沒有 Fake 特例；none 不是可用 flux 座標。Recipe policy 不延伸到共用 device 或 cfg 安全規則。
 
@@ -60,7 +66,7 @@ Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數�
 
 讀取是取得當前資料，不建立 per-connection mutation baseline。Resource counters 可供來源、結果 replacement 與 provenance 使用，但不再以 seen map、guard dependencies 或 observation rollback 限制寫入。Result-bound operation ID、editor／interactive lifetime、domain busy、互斥及後續提交檢查仍由 owner 維持，生命週期見 [[0066]]。Timeout、斷線或回覆編碼失敗不證明命令沒有副作用，也不回滾 business publication。沒有明確冪等契約時不自動重送。
 
-`context.snapshot` 從同一次公開 capture 回 native target、point、library 與有序 aliases。Alias rows 保留 authored value 與 resolved 名稱，單列解析失敗附 error；它不是歷史 Run 的參數版本。Parameter／library／alias 變更事件提示重讀這份 snapshot。既有 tab 仍使用 Open／Reset 的固定來源，需 Reset 才取用新來源。Caller 使用 native snapshot，不使用舊 md／ml getters。Optional summaries 保留 dict tree 與 scalar，摘要 array／list leaves。Path 優先選取完整的單一值；這些投影不授權寫入。完整與部分讀取都使用同一固定 capture，精確投影見 remote owner README。
+`context.snapshot` 從同一次公開 capture 回 native target、point、library 與有序 aliases。Alias rows 保留 authored value 與 resolved 名稱，單列解析失敗附 error；它不是歷史 Run 的參數版本。Parameter／library／alias 變更事件提示重讀這份 snapshot。既有 tab 使用 Open／Refresh／Reset 的固定來源。需明確 Refresh 才在保留 input 下取新來源，Reset 則重算 defaults；來源事件不自動刷新。Caller 使用 native snapshot，不使用舊 md／ml getters。Optional summaries 保留 dict tree 與 scalar，摘要 array／list leaves。Path 優先選取完整的單一值；這些投影不授權寫入。完整與部分讀取都使用同一固定 capture，精確投影見 remote owner README。
 
 ## Workflows 的同一 run
 
@@ -87,6 +93,8 @@ Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 
 ## 事件與錯誤
 
 Application state 和明確讀取是資料來源。EventBus 產生同步的 domain facts 與 `EventMeta(seq, origin)`；dispatch 宣告 origin，operation 跨執行緒顯式攜帶原發起者與 operation id。Seq 表示同一 process 的順序，不是可靠交付證明；過濾或重啟後的跳號不能直接判定遺失。Wire 的 EventBus push 加上 seq 與不含 client id 的 origin，保留原 event payload；subscriber 可自行收合呈現，不能改變必要的 domain commit 順序。Endpoint 只有找到 matching subscriber 才建立、編碼 payload，並在 enqueue 前重驗原 recipients 的訂閱和連線狀態。完成 unsubscribe／disconnect 後不會收到遲到的 push。診斷由 Controller 直接 fan-out，不經 EventBus 訂閱；這不表示 socket 故障時仍能交付。Measure MCP 不訂閱業務 push，而以讀取與 operation wait 接手進度；重連重新讀 snapshot，沒有 replay 承諾。高頻 plot／progress 不預設推送給每個 client。
+
+啟動腳本的 owner commands 沿既有 EventOrigin 歸因，operation 保留原發起者直到 terminal delivery。Measure 僅略過 script-origin device operation 的 terminal dialog，terminal fact、failed handle 與 log 都照常交付。預設腳本逐項隔離失敗，最後顯示狀態列摘要。使用者手動 GUI device 錯誤仍顯示對話框，不以「啟動中」全域抑制通知。未捕捉的 startup 錯誤仍顯示含腳本路徑／行號的錯誤對話框，保留已完成部分與 callbacks，見 [[0064]]。
 
 可由 caller 修正的失敗由 producer 用 remote-independent `ExpectedError` 類別顯式分類。共用 dispatch 只翻譯已標記的 invalid input 與 failed precondition；handler 直接提出的 `RemoteError` 保留原本的結構化資料。它不從 `RuntimeError`、訊息字串或 reason 前綴猜測分類。Unexpected failure 留下診斷。`wait` 呼叫本身失敗與 operation outcome 為 failed 是兩件事；timeout 亦不是安全重試的許可。精確 error code 與 reason 見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
 

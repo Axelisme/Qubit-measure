@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-13，泛型宿主與 workflow 自有繪圖
+**Last updated:** 2026-10-19，完整 native tunables 提交與日誌快照
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [ADR-0062](../../../../docs/adr/0062-experiment-workflow.md)。
 
@@ -10,7 +10,7 @@
 
 `Next` 配對步驟摘要與下一步 state。`Done` 不新增點 record，`Aborted` 表達明確的業務終止。`Completed` 配對 experiment 返回時的 Run.cfg 副本與 Result，workflow 自行決定保存與單次檔案格式。`Failed` 表達可由 workflow 處理的 Schedule 失敗，不包含部分 Result。
 
-`workflow(name, *, plan, tunables, init)` 將具名宣告附在原函式，不執行 init，也不建立全域 catalog。State／record 型別由 init 與 step 簽名推導，state 只需支援 deepcopy，不限定 dataclass。`WorkflowRegistry` 由宿主顯式填入，每次重載建立新 instance。Tunables 宣告檢查 JSON schema，dot path 的 leaf／model 判定也由宣告 owner 提供。Package 內的 TunableValues 集中完整 model 驗證、deepcopy capture 與 revision，整批 journal append 成功後才發布新值。Engine 擁有 run_id 與 lifecycle 政策。當前 step 的 capture 不受新 revision 影響。
+`workflow(name, *, plan, tunables, init)` 將具名宣告附在原函式，不執行 init，也不建立全域 catalog。State／record 型別由 init 與 step 簽名推導，state 只需支援 deepcopy，不限定 dataclass。`WorkflowRegistry` 由宿主顯式填入，每次重載建立新 instance。Tunables 宣告檢查 JSON schema。Engine.update_tunables 接收完整的宣告型別 model、expected_revision 與 actor，重新驗證全部欄位後整體替換，不比對差異。每次成功都增加一次 revision，相同值也一樣。Package 內的 TunableValues 集中完整 model 驗證、deepcopy capture 與 revision。TunablesChanged 記完整新 tunables JSON 與 actor、revision_before／after，journal append 成功後才發布新值。不提供 dotted path 更新或舊日誌格式相容層。Engine 擁有 run_id 與 lifecycle 政策。當前 step 的 capture 不受新 revision 影響。
 
 `InitEnv` 只提供原始 UTC start 與 detached context。`WorkflowEnv` 的 effect helpers 使用 `yield from`，把 request 與回應的型別交接留在核心。同步 `get_device_cfg` 是例外，它在 worker 直接讀取 live cfg。環境共用 injected `Plots` 與 engine-owned progress bars。WorkflowEnv 的 soc／devices 與 context 存取在缺 port 時立即 raise，供定義者在步驟開頭自檢。Engine 不做 capability admission，也不記錄 requires。硬體操作應經 effect 保留 journal 與取消；框架信任定義者，不強制阻擋直接操作。
 

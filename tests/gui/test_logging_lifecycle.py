@@ -16,7 +16,6 @@ from zcu_tools.gui.app.measure.services.caretaker import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
 from zcu_tools.gui.app.measure.services.persistence_types import AppPersistedState
-from zcu_tools.gui.app.measure.services.ports import RestoreReport
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.operation_handles import (
@@ -71,20 +70,26 @@ def test_operation_settle_success_logs_info(caplog) -> None:
 
 def test_caretaker_load_failure_logs_warning(tmp_path: Path, caplog) -> None:
     class _Originator:
-        def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
-            return RestoreReport(restored_tabs=0, rejected_tabs=())
+        def restore_persisted_state(self, state: AppPersistedState) -> None:
+            pass
 
         def capture_persisted_state(self) -> AppPersistedState:  # pragma: no cover
             raise AssertionError
 
     caretaker = PersistenceCaretaker(_Originator(), cache_dir=tmp_path)
     caretaker.state_path.write_text("{ not json", encoding="utf-8")
-    with caplog.at_level(
-        logging.WARNING, logger="zcu_tools.gui.app.measure.services.caretaker"
-    ):
-        caretaker.restore_all(load=True)
-    warnings = [r for r in caplog.records if "persistence load failed" in r.message]
+    with caplog.at_level(logging.WARNING, logger="zcu_tools.gui.session.persistence"):
+        outcome = caretaker.restore_all(load=True)
+    assert outcome.load_error is not None
+    warnings = [
+        record
+        for record in caplog.records
+        if record.name == "zcu_tools.gui.session.persistence"
+        and record.message == str(outcome.load_error)
+    ]
     assert warnings and warnings[0].levelno == logging.WARNING
+    assert "Failed to read GUI state" in warnings[0].message
+    assert "using defaults" in warnings[0].message
 
 
 def test_background_worker_exception_logs_traceback(qapp, caplog) -> None:

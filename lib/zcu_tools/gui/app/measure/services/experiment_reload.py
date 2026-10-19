@@ -18,13 +18,13 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
-from .persistence_types import PersistedSession, PersistedTab
 from .ports import RestoreIssue, RestoreReport
+from .workspace_types import WorkspaceSnapshot, WorkspaceTab
 
 
 class ReloadWorkspacePort(Protocol):
-    def capture_session(self) -> PersistedSession: ...
-    def apply_session(self, session: PersistedSession) -> RestoreReport: ...
+    def capture_session(self) -> WorkspaceSnapshot: ...
+    def apply_session(self, session: WorkspaceSnapshot) -> RestoreReport: ...
     def close_tab(self, tab_id: str) -> None: ...
 
 
@@ -64,8 +64,8 @@ class ExperimentReloadService:
         self._owner = get_ident()
         self._preview: ReloadPreview | None = None
         self._identity: object = None
-        self._recovery: PersistedSession | None = None
-        self._skipped: tuple[PersistedTab, ...] = ()
+        self._recovery: WorkspaceSnapshot | None = None
+        self._skipped: tuple[WorkspaceTab, ...] = ()
         self._restart_required = False
 
     @property
@@ -196,16 +196,16 @@ class ExperimentReloadService:
         self._access.available = True
         return report
 
-    def _restore(self, snapshot: PersistedSession) -> ReloadReport:
+    def _restore(self, snapshot: WorkspaceSnapshot) -> ReloadReport:
         restored = 0
         issues: list[RestoreIssue] = []
-        skipped: list[PersistedTab] = []
+        skipped: list[WorkspaceTab] = []
         active: str | None = None
         for index, entry in enumerate(snapshot.tabs):
             before = set(self._state.list_tab_ids())
             # The existing workspace seam owns raw-cfg decoding and TabAdded.
             report = self._workspace.apply_session(
-                PersistedSession(tabs=(entry.model_copy(deep=True),))
+                WorkspaceSnapshot(tabs=(entry.model_copy(deep=True),))
             )
             issues.extend(report.rejected_tabs)
             if report.rejected_tabs:
@@ -229,7 +229,7 @@ class ExperimentReloadService:
         self._access.require_available()
         active = self._state.active_tab_id
         with self._switch():
-            report = self._restore(PersistedSession(tabs=self._skipped))
+            report = self._restore(WorkspaceSnapshot(tabs=self._skipped))
             if active is not None and self._state.has_tab(active):
                 self._state.set_active_tab(active)
             return report

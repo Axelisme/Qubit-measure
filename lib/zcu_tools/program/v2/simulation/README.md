@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-20，SoC-owned statistics validation certificates, optional round pacing and acquire completion observer
+**Last updated:** 2026-10-20，SoC-owned statistics validation certificates, optional round pacing and acquire completion observer；board 自述身分與 caller-owned 啟動
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -44,10 +44,11 @@ def build_environment():
     )
 ```
 
-The measure launcher accepts `--simulate /absolute/path/noise_environment.py`.
-It imports the file and calls `build_environment()` without arguments once.
-No environment path means normal mode, without an automatic board connection.
-Load or installation errors abort startup without a fallback.
+The caller imports the builder and owns the returned environment. GUI startup
+scripts can install its board and register its built drivers through public
+facets. The GUI does not load or select an environment. `SimulationSoc.is_mock`
+is True, so consumers can forward the board's identity without importing the
+simulation implementation.
 
 Notebook callers import the same builder and use its returned objects:
 
@@ -75,13 +76,13 @@ finally:
 ```
 
 `SimulationEnvironment` returns `soc`, matching `soccfg`, `devices` and a public
-`description`. The builder owns cleanup before successful return. The host owns
-cleanup after return, even if publication or window assembly fails. GUI injects
-the same `DeviceManager`, publishes live drivers through `DeviceService`, and
-restores preferences afterward. Same-name live devices win; other remembered
-rows remain offline. After operation admission closes and work drains, composition
-closes the manager. Failed driver closes remain registered and propagate. There
-is no automatic retry. `Controller.close()` drains work but does not close drivers.
+`description`. The builder owns cleanup before successful return. The caller
+owns cleanup after return. GUI registration transfers each accepted driver's
+lifetime to DeviceService; rejected candidates remain caller-owned. The caller
+retains ownership of the board and other environment resources. Register their
+cleanup with the startup script's on-close hook when needed. After callbacks and
+operation drain, the GUI tries every registered driver once. Failed closes stay
+registered with an error; they do not prevent GUI exit or trigger automatic retry.
 
 ## Compact timelines and statistics
 

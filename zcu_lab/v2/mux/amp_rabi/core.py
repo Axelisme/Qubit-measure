@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from collections.abc import Sequence
+from functools import partial
+from typing import Annotated, ClassVar
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import model_validator
 from qick import QickConfig
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
-from zcu_lab.v2._support.mux_acquisition import acquire_mux_scan
+from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
+    participant_indices,
     validate_mux_scan,
 )
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
@@ -29,50 +36,48 @@ from .analysis import MuxAmpRabiFit, analyze_amplitude
 
 
 class MuxAmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
-    """Full ordered tones and shared reps/rounds/reset/readout/delays.
+    """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules holds optional reset and complete mux readout. tones has exactly one
-    active/drive/sweep element per full tone; at least one active. Active drives
-    use independent generators distinct from readout. Active sweeps are finite
-    normalized gains in [-1,1], with equal point counts. Inactive drives may be
-    None and their sweeps do not constrain the active zip count. Counts must be
-    positive and inherited initial_delay/relax_delay finite nonnegative us.
-    Numeric cfg contains no capture, component names or writeback destinations.
+    modules holds optional reset and complete mux readout. tones contains one
+    MuxToneCfg per original readout position, with unique nonempty names.
+    participants is a nonempty, duplicate-free list of those names; its order
+    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
+    Every drive is required/validated, including nonparticipants, on independent
+    generators distinct from readout. Independent normalized-gain sweeps stay in [-1,1], with equal point counts.
+    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxToneCfg]
+    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
+    participants: list[str]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxAmpRabiCfg:
         """Reject invalid full length, drive channels, counts or gain ranges."""
-        validate_mux_scan(self, self.modules, self.tones)
+        validate_mux_scan(self, self.modules, self.tones, self.participants)
         for index, tone in enumerate(self.tones):
-            if tone.active and max(abs(tone.sweep.start), abs(tone.sweep.stop)) > 1:
+            if max(abs(tone.sweep.start), abs(tone.sweep.stop)) > 1:
                 raise ValueError(f"tones[{index}].sweep gains must be in [-1,1]")
         return self
 
 
 def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPulseScan:
-    """Lower full tones once and prepare fixed per-point pulses without acquisition.
+    """Prepare simultaneous gain sweeps on the board's actual gain grids.
 
-    cfg is validated again from a copy, never mutated. soccfg is the target
-    board's public QickConfig; coordinates use each active drive's own normalized
-    gain grid and match program-native conversion. Returned point_pulses keeps nominal
-    values so the program remains the sole native-conversion owner. Equal point
-    counts are zipped by index, never expanded to a product. Invalid cfg raises
-    ValueError; hardware conversion errors propagate. No devices, GUI, files or
-    bindings are accessed. Program construction is left to acquire_mux_scan.
+    cfg supplies the complete tones and ordered participants; it is not mutated.
+    soccfg describes the target board. Each participant gets its own normalized
+    gain coordinates and one pulse per point. Sweeps advance together by point
+    index, not as a Cartesian product. Pulses retain nominal gains for compilation.
+    Invalid cfg raises ValueError; board conversion errors propagate.
     """
     cfg = MuxAmpRabiCfg.model_validate(cfg.model_dump())
-    indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
+    indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     coordinates = []
     points = [[] for _ in range(cfg.tones[indices[0]].sweep.expts)]
     for index in indices:
         tone = cfg.tones[index]
         drive = tone.drive
-        if drive is None:
-            raise ValueError(f"tones[{index}].drive is required")
         nominal = sweep2array(tone.sweep, "none")
         actual = round_zcu_gain(nominal, soccfg, drive.ch)
         coordinates.append(actual)
@@ -82,11 +87,11 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
 
 
 class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
-    """Stateless zipped mux amplitude Rabi with per-original-index results.
+    """Measure each participant's Rabi oscillation versus drive gain.
 
-    Run uses a common-start Join and host zip scan. Analysis and native
-    persistence retain independent quantized coordinates, complex IQ and full cfg.
-    Core neither registers a GUI nor produces binding-dependent proposals.
+    Reset precedes simultaneous drives and a shared mux readout at each point.
+    Fits give pi and pi/2 gains. Results retain each tone's actual gain grid,
+    complex IQ and original index; saved data also retains the complete cfg.
     """
 
     AXES_SPEC = mux_sweep_spec(
@@ -100,21 +105,87 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
 
     def run(self, config: MuxAmpRabiCfg, *, context: RunContext) -> MuxSweepResult:
-        """Acquire independent zipped drives with common-start mux readout.
+        """Sweep participant gains together and measure their averaged complex IQ.
 
-        config is copied and validated without mutation. Coordinates and complex
-        average IQ are (K,P), in active original tone order. Gains are normalized.
-        context owns compatible hardware, plots and a fresh cancel signal.
-        Publish measurement_i for each original index; caller finishes/releases
-        plots. Cancellation preserves completed points and the current point's
-        completed-round average, leaving unwritten IQ NaN. Acquisition errors
-        remain on context.cancel_signal: call raise_if_error() before success.
-        Validation/build errors propagate. No saving or GUI access occurs.
+        config supplies reset, readout, drives, gain sweeps and averaging controls;
+        it is copied before use. After reset, all drives start together. Readout
+        waits for the longest drive at that point, without end-alignment padding.
+        context supplies the board, plots and stop signal. Coordinates and IQ have
+        shape (participants, points), in participant order, with normalized gains.
+        Cancellation keeps completed averages and leaves unmeasured points NaN.
+        Call context.cancel_signal.raise_if_error() before reporting success;
+        the caller also finishes/releases plots. Invalid cfg/build errors propagate.
         """
+        # Prepare each gain grid and select readout tones in participant order.
         cfg = MuxAmpRabiCfg.model_validate(config.model_dump())
         scan = prepare_amplitude_scan(cfg, soccfg=context.soccfg)
-        return acquire_mux_scan(
-            cfg, cfg.modules, scan, context=context, coordinate_label="Pulse gain"
+        readout = cfg.modules.readout.with_updates(
+            tones=[cfg.modules.readout.tones[index] for index in scan.indices]
+        )
+
+        # Keep live traces on each drive's own quantized gain axis.
+        viewers = [
+            context.plots.liveplot_1d(
+                f"measurement_{index}", "Pulse gain", "Magnitude (a.u.)"
+            )
+            for index in scan.indices
+        ]
+
+        def update(data: NDArray[np.complex128]) -> None:
+            for row, viewer in enumerate(viewers):
+                viewer.update(scan.coordinates[row], np.abs(data[:, row]))
+            draw_mux_magnitudes(
+                context.plots,
+                scan.coordinates,
+                data.T,
+                [f"{index}: {cfg.tones[index].name}" for index in scan.indices],
+                "Pulse gain",
+            )
+
+        # Normalize averaged ADC I/Q using the compiled readout windows.
+        def averaged_signal(
+            prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
+        ) -> NDArray[np.complex128]:
+            # Builder copies modules; read IQ through the initialized program.
+            for module in prog.modules:
+                if isinstance(module, MuxReadout) and module.name == "readout":
+                    iq = module.collect_iq(prog, acquired, read_index=0)
+                    return iq[:, 0] + 1j * iq[:, 1]
+            raise ValueError("Mux scan program is missing its named MuxReadout")
+
+        # Store points first so each acquisition writes one complete tone vector.
+        signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
+        with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+            for pulses, step in sched.scan("point", scan.point_pulses):
+                # Reset, start all drives together, then read after the longest.
+                builder = (
+                    step.prog_builder(context.soc, context.soccfg)
+                    .add_reset("reset", cfg.modules.reset)
+                    .add(
+                        Join(
+                            *[
+                                Pulse(f"drive_{index}", pulse)
+                                for index, pulse in zip(
+                                    scan.indices, pulses, strict=True
+                                )
+                            ]
+                        ),
+                        MuxReadout("readout", readout),
+                    )
+                )
+
+                # Compile once per point; preserve completed-round partial averages.
+                prog = builder.build()
+                _ = builder.run_program(
+                    prog, raw2signal_fn=partial(averaged_signal, prog)
+                )
+
+        # Publish final plots and return tone-major data, including unmeasured NaNs.
+        signals.trigger_update(flush=True)
+        return MuxSweepResult(
+            np.asarray(scan.indices, dtype=np.int64),
+            scan.coordinates,
+            signals.array.T.copy(),
         )
 
     def analyze(
@@ -124,9 +195,10 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
         *,
         plots: Plots,
     ) -> tuple[MuxAmpRabiFit | MuxFitFailure, ...]:
-        """Fit explicit source using each row's gains and existing Rabi policy.
+        """Fit each tone's IQ oscillation to obtain pi and pi/2 gains.
 
-        cfg=None is supported. Return pi/pi2 gain values/errors/quality or an
-        indexed failure reason. Plots owns fit_i; no identity or live state read.
+        source contains the acquired gain grids and IQ; its cfg may be None.
+        options.skip omits leading points. Return gains, errors and fit quality,
+        or a failure reason per original tone index. plots receives fit_i figures.
         """
         return analyze_amplitude(source.result, options, plots=plots)

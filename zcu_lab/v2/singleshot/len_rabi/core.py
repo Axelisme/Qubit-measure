@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from numbers import Real
@@ -61,7 +60,22 @@ class LenRabiModuleCfg(ConfigBase):
     readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
-class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
+class LenRabiCfg(ExpCfgModel):
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay", unit="us", description="Delay before the first shot."
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Delay after each shot.",
+        ),
+    ] = 1.0
     modules: LenRabiModuleCfg
     sweep: LenRabiSweepCfg
     shots: Annotated[int, FieldMeta(label="Shots")]
@@ -100,7 +114,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=LenRabiResult,
         cfg_type=LenRabiCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/len_rabi",
     )
 
@@ -110,19 +124,28 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         *,
         context: RunContext,
     ) -> LenRabiResult:
+        """Measure Rabi oscillations versus pulse length with raw single-shot IQ.
+
+        At each host-side length, apply optional reset, the qubit pulse, then
+        readout for cfg.shots repetitions in one round. Return rounded lengths
+        in us and complex IQ shaped (Nlength, shots), not averaged populations.
+        Later analysis jointly fits Rabi dynamics and readout distributions.
+
+        Only const and flat_top waveforms are supported. cfg supplies distinct
+        finite G/E centers and a positive finite radius for the live preview.
+        Acquisition requires exactly one readout channel and raises on an
+        unexpected shot-buffer shape.
+        """
+
+        # Set up one raw-shot cloud per length without changing the caller cfg.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        if cfg.rounds != 1:
-            warnings.warn(
-                "rounds will be overwritten to 1 for singleshot measurement",
-                stacklevel=2,
-            )
-            cfg.rounds = 1
-        if cfg.reps != cfg.shots:
-            warnings.warn(
-                "reps will be overwritten by singleshot measurement shots", stacklevel=2
-            )
-            cfg.reps = cfg.shots
+        program_cfg = ProgramV2Cfg(
+            reps=cfg.shots,
+            rounds=1,
+            initial_delay=cfg.initial_delay,
+            relax_delay=cfg.relax_delay,
+        )
 
         modules = cfg.modules
         assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
@@ -135,6 +158,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         )
         expected_shape = (len(lengths), cfg.shots)
 
+        # Preview classified populations while keeping raw IQ as the result.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
             for line, label in zip(
@@ -169,8 +193,10 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             for length, step in sched.scan("length", lengths.tolist()):
                 modules = step.cfg.modules
                 modules.qub_pulse.set_param("length", length)
+
+                # Acquire one length at a time to bound the board raw-buffer size.
                 program = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(soc, soccfg, cfg=program_cfg)
                     .add_reset("reset", modules.reset)
                     .add_pulse("qubit_pulse", modules.qub_pulse)
                     .add_readout("readout", modules.readout)
@@ -182,6 +208,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                     step.set_stop()
                     break
 
+                # Write a full shot cloud only after this point finishes.
                 raw_iq = raw_shots_to_signal(program)
                 expected_point_shape = (cfg.shots,)
                 if raw_iq.shape != expected_point_shape:
@@ -190,6 +217,8 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                         f"expected {expected_point_shape}, got {raw_iq.shape}"
                     )
                 buffer[step].set(raw_iq)
+
+        # Completed rows survive cancellation; unacquired lengths remain NaN.
         signals = buffer.array
         update_view(signals)
 

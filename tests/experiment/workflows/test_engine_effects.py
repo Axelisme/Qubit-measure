@@ -19,12 +19,13 @@ from zcu_tools.experiment.workflows import (
     Next,
     Run,
     Step,
-    TunableChange,
     WorkflowEnv,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.modules import SoftDelay
+
+from tests._filesystem import DIRECTORY_OPEN_ERROR
 
 from ._engine_fakes import Cfg, Plan, Rig, State, Tunables, save_integer
 
@@ -686,10 +687,10 @@ def test_active_update_journal_failure_cancels_then_reports_original_cause(
         journal = rig.paths.metadata_root / "journal.jsonl"
         journal.unlink()
         journal.mkdir()
-        with pytest.raises(IsADirectoryError):
+        with pytest.raises(DIRECTORY_OPEN_ERROR):
             rig.engine.update_tunables(
                 "run",
-                (TunableChange("value", 2),),
+                Tunables.model_construct(value=2),
                 expected_revision=0,
                 actor=Actor("user", "test"),
             )
@@ -699,7 +700,7 @@ def test_active_update_journal_failure_cancels_then_reports_original_cause(
     observed = start_effect(rig, acquire)
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"
-    assert "IsADirectoryError" in str(status.reason)
+    assert DIRECTORY_OPEN_ERROR.__name__ in str(status.reason)
     assert "unusable" not in str(status.reason)
     assert status.revision == 0
     assert observed == []

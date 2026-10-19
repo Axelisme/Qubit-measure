@@ -27,10 +27,11 @@ from zcu_tools.experiment.workflows import (
     RunPaths,
     RunStatus,
     Step,
-    TunableChange,
     WorkflowEnv,
     workflow,
 )
+
+from tests._filesystem import DIRECTORY_OPEN_ERROR
 
 from ._engine_fakes import START, Cfg, Plan, RecordingBar, Rig, State, Tunables
 
@@ -168,7 +169,7 @@ def test_revision_is_captured_once_and_nested_inputs_are_detached(rig: Rig) -> N
         if state.index == 0:
             changed = rig.engine.update_tunables(
                 "run",
-                (TunableChange("value", 8),),
+                Tunables.model_construct(value=8),
                 expected_revision=0,
                 actor=Actor("agent", "test"),
             )
@@ -189,12 +190,7 @@ def test_revision_is_captured_once_and_nested_inputs_are_detached(rig: Rig) -> N
     assert rig.kinds().index("tunables_changed") < rig.kinds().index("step_committed")
     event = next(event for event in rig.events() if event["kind"] == "tunables_changed")
     assert (event["revision_before"], event["revision_after"]) == (0, 1)
-    changes = event["changes"]
-    assert isinstance(changes, list)
-    assert len(changes) == 1
-    change = changes[0]
-    assert isinstance(change, dict)
-    assert (change["path"], change["old"], change["new"]) == ("value", 1, 8)
+    assert event["tunables"] == {"value": 8}
 
 
 def test_resume_without_device_input_keeps_commits_and_latest_revision(
@@ -218,7 +214,7 @@ def test_resume_without_device_input_keeps_commits_and_latest_revision(
     assert len(records) == 1 and records[0].revision == 0
     rig.engine.update_tunables(
         "run",
-        (TunableChange("value", 3),),
+        Tunables.model_construct(value=3),
         expected_revision=0,
         actor=Actor("user", "test"),
     )
@@ -263,7 +259,7 @@ def test_pause_discards_mutated_copy_and_resume_repeats_deadline(rig: Rig) -> No
     assert rig.engine.pause("run") == paused
     rig.engine.update_tunables(
         "run",
-        (TunableChange("value", 3),),
+        Tunables.model_construct(value=3),
         expected_revision=0,
         actor=Actor("user", "test"),
     )
@@ -349,7 +345,7 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
             with pytest.raises(InvalidRunState):
                 rig.engine.update_tunables(
                     "run",
-                    (TunableChange("value", 2),),
+                    Tunables.model_construct(value=2),
                     expected_revision=0,
                     actor=Actor("user", "test"),
                 )
@@ -407,7 +403,7 @@ def test_final_capture_rejects_resume_until_paused_segment_returns(
 
     rig.engine.update_tunables(
         "run",
-        (TunableChange("value", 9),),
+        Tunables.model_construct(value=9),
         expected_revision=0,
         actor=Actor("user", "test"),
     )
@@ -544,7 +540,7 @@ def test_bad_revision_or_values_do_not_fail_or_publish(rig: Rig) -> None:
     with pytest.raises(RevisionConflict) as caught:
         rig.engine.update_tunables(
             "run",
-            (TunableChange("value", 2),),
+            Tunables.model_construct(value=2),
             expected_revision=1,
             actor=Actor("user", "test"),
         )
@@ -552,7 +548,7 @@ def test_bad_revision_or_values_do_not_fail_or_publish(rig: Rig) -> None:
     with pytest.raises(ValidationError):
         rig.engine.update_tunables(
             "run",
-            (TunableChange("value", -1),),
+            Tunables.model_construct(value=-1),
             expected_revision=0,
             actor=Actor("user", "test"),
         )
@@ -566,17 +562,17 @@ def test_update_journal_failure_keeps_revision_and_fails_idle_run(rig: Rig) -> N
     journal = rig.paths.metadata_root / "journal.jsonl"
     journal.unlink()
     journal.mkdir()
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(DIRECTORY_OPEN_ERROR):
         rig.engine.update_tunables(
             "run",
-            (TunableChange("value", 2),),
+            Tunables.model_construct(value=2),
             expected_revision=0,
             actor=Actor("user", "test"),
         )
     status = rig.engine.status()
     assert status is not None and status.lifecycle == "failed"
     assert status.revision == 0
-    assert "IsADirectoryError" in str(status.reason)
+    assert DIRECTORY_OPEN_ERROR.__name__ in str(status.reason)
     assert rig.engine.tunables("run").values == {"value": 1}
     assert rig.initialized == []
     with pytest.raises(InvalidRunState):
@@ -804,7 +800,7 @@ def test_commit_journal_failure_does_not_publish_record_or_next_state(rig: Rig) 
     rig.start(step)
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"
-    assert "IsADirectoryError" in str(status.reason)
+    assert DIRECTORY_OPEN_ERROR.__name__ in str(status.reason)
     assert status.committed_seq == 0
     assert rig.engine.records("run") == ()
 

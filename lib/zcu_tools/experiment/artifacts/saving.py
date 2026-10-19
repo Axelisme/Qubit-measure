@@ -30,6 +30,7 @@ from zcu_tools.resources.entry import (
     SaveLayout,
 )
 from zcu_tools.resources.entry.ledger_models import validate_origin
+from zcu_tools.utils import atomic_replace
 
 from .items import (
     AnalysisItem,
@@ -194,7 +195,12 @@ def _save_data(
         try:
             output.path.parent.mkdir(parents=True, exist_ok=True)
             if output.format == "labber":
-                write_labber(output.path, member.data.payload, cfg=member.data.cfg)
+                write_labber(
+                    output.path,
+                    member.data.payload,
+                    cfg=member.data.cfg,
+                    grouped_layout=member.data.labber_layout,
+                )
                 metadata = replace(metadata, labber_path=str(output.path))
             else:
                 save_run_data(
@@ -255,6 +261,6 @@ def _replace_file(destination: Path, content: bytes) -> None:
             stream.write(content)
             stream.flush()
             stream.close()
-            temporary.replace(destination)
+            atomic_replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)

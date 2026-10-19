@@ -37,6 +37,8 @@ from zcu_tools.simulate import value2flux
 
 @dataclass(frozen=True)
 class FluxDepResult:
+    """Flux device values, probe gains, and mean complex IQ [flux, gain]."""
+
     values: NDArray[np.float64]
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -110,11 +112,22 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         *,
         context: RunContext,
     ) -> FluxDepResult:
+        """Map the MIST readout response versus flux bias and probe gain.
+
+        Step flux on the host. At each bias, reset, apply the optional init
+        pulse, apply the gain-swept probe, then read out. The board sweeps
+        probe gain. Return flux device values, hardware gain coordinates,
+        and mean complex IQ shaped [flux, gain]. Changes in IQ reveal the
+        probe-induced response; they are not calibrated state populations.
+
+        ``flux_dev`` must name a device in ``context.devices``;
+        ``flux_unit`` selects its working unit without conversion.
+        """
+        # 1. Prepare external flux values and the board's probe-gain coordinates.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
 
-        # predict sweep points
         values = sweep2array(cfg.sweep.flux, allow_array=True)
         gains = sweep2array(
             cfg.sweep.gain,
@@ -134,6 +147,8 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             (len(values), len(gains)),
             on_update=lambda data: viewer.update(values, gains, mist_signal2real(data)),
         )
+
+        # 2. Set each external bias before acquiring its full gain trace.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for flux, step in sched.scan("flux", values.tolist()):
                 set_flux(
@@ -143,6 +158,8 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                     stop=context.cancel_signal,
                     progress=False,
                 )
+
+                # 3. Reset, initialize, perturb with the probe, then measure IQ.
                 modules = step.cfg.modules
                 modules.probe_pulse.set_param(
                     "gain", sweep2param("gain", step.cfg.sweep.gain)
@@ -159,6 +176,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                     .build_and_acquire()
                 )
 
+        # 4. Preserve raw complex response; baseline subtraction is display-only.
         return FluxDepResult(values=values, gains=gains, signals=signals_buffer.array)
 
     def analyze(
@@ -168,6 +186,15 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the baseline-subtracted MIST magnitude map from ``source``.
+
+        Each flux row uses its first 5% of gains (at least one) as a mean
+        IQ reference; display clipping limits strong outliers. ``ac_coeff``
+        maps gain squared to photon number when supplied. Flux conversion
+        uses ``flux_half`` and ``flux_period`` together; requesting the
+        secondary device-value axis without both raises ValueError.
+        No state-population fit or calibration value is returned.
+        """
         result = source.result
         flux_half, flux_period = options.flux_half, options.flux_period
         if options.secondary_xaxis and (flux_half is None or flux_period is None):
@@ -179,7 +206,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             xlabel = r"$\phi$ (a.u.)"
         else:
             xs = dev_values
-            xlabel = r"$A$ (mA)"
+            xlabel = "Flux device value"
 
         amp_diff = mist_signal2real(signals)
         if options.ac_coeff is None:

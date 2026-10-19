@@ -10,6 +10,8 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormPreview
 from zcu_tools.gui.session.types import ParameterContext
 
+from .tab_input import StartupTab, TabInput
+
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -23,11 +25,18 @@ if TYPE_CHECKING:
 class TabControlPort(Protocol):
     """App-facing tab resource surface for driving adapters."""
 
-    def new_tab(self, adapter_name: str) -> str:
-        """Create/activate a tab whose cfg uses current global sources.
+    def new_tab(self, adapter_name: str, *, input: TabInput | None = None) -> str:
+        """Create/activate on-owner with current sources and optional authored input.
 
-        Adapter/default-cfg failures propagate before registration.
+        input is an opaque FormInput.to_json projection, not a cfg/result. The
+        form owner restores compatible paths on fresh defaults and logs discarded
+        paths. Unknown adapters, malformed input and source/default errors
+        propagate before publication. Caller owns input; GUI owns the new tab.
         """
+        ...
+
+    def read_inputs(self) -> tuple[StartupTab, ...]:
+        """Read detached authored inputs in tab order on-owner, without capture/I/O."""
         ...
 
     def open_tab_from_file(
@@ -92,10 +101,14 @@ class TabControlFacet:
         self._load_tab_result = load_tab_result
         self._access = access if access is not None else ExperimentAccess()
 
-    def new_tab(self, adapter_name: str) -> str:
+    def new_tab(self, adapter_name: str, *, input: TabInput | None = None) -> str:
         """Create/activate using current sources; see TabControlPort.new_tab."""
         self._access.require_available()
-        return self._workspace.new_tab(adapter_name)
+        return self._workspace.new_tab(adapter_name, input=input)
+
+    def read_inputs(self) -> tuple[StartupTab, ...]:
+        """Read detached authored inputs; see TabControlPort.read_inputs."""
+        return self._tab.read_inputs()
 
     def open_tab_from_file(
         self, adapter_name: str, data_path: str

@@ -42,8 +42,7 @@ def test_slot_path_expands_without_resolving_or_rewriting_form_options() -> None
     slot = cfg_model.Slot(
         "{qubit}.module.x90",
         copy=True,
-        set={"freq": cfg_model.Expr("{resonator}.freq")},
-        lock={"ch": 2},
+        set={"freq": cfg_model.Expr("{resonator}.freq"), "ch": 2},
     )
     definition = cfg_model.TemplateDef(
         cfg_model.BathResetSpec,
@@ -54,13 +53,12 @@ def test_slot_path_expands_without_resolving_or_rewriting_form_options() -> None
     assert expanded["pi2_cfg"] == cfg_model.Slot(
         "$unbound.module.x90",
         copy=True,
-        set={"freq": cfg_model.Expr("{resonator}.freq")},
-        lock={"ch": 2},
+        set={"freq": cfg_model.Expr("{resonator}.freq"), "ch": 2},
     )
     assert expanded["desc"] == "$literal"
     assert expanded["detune"] == cfg_model.Expr("$unbound.freq")
     assert definition.expanded_seeds()["pi2_cfg"] == cfg_model.Slot(
-        "$qubit.module.x90", copy=True, set=slot.set, lock=slot.lock
+        "$qubit.module.x90", copy=True, set=slot.set
     )
 
 

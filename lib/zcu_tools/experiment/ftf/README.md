@@ -4,7 +4,8 @@
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
-`DeviceManager`, applies their initial values once and binds the derived channel
+`DeviceManager`, uses each source name as its explicit FakeDevice address,
+applies initial values at environment construction and binds the derived channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
 The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
@@ -74,7 +75,10 @@ family usage shares, rejection counts, CPU per relative cost unit, and weighted
 ## Numeric source
 
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
-limits without restoring startup values. `execute` consumes detached templates.
+limits without restoring startup values. Source identities survive session
+registry disconnects and name changes. Reconnection retrieves the original
+class-retained driver, preserving V/A units and current values.
+`execute` consumes detached templates.
 The segment engine's fast algorithms are the default numeric path.
 One source owns one `Engine`, whose 2 GiB resident/pending prepare budget survives across
 acquires. This shared byte budget counts retained model-only payload arrays, not total

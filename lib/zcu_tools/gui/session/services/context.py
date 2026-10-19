@@ -230,6 +230,13 @@ class ContextService:
         """
         return deepcopy(self._source_binding)
 
+    def get_predictors_path(self) -> Path | None:
+        """Return the opened entry predictor directory, or None without an entry.
+
+        Read the ResultEntry-owned path without I/O, directory creation or point selection.
+        """
+        return None if self._entry is None else self._entry.predictors_path
+
     def get_entry_info(self) -> EntryInfo | None:
         """Return cached entry metadata, or None when no entry is opened.
 

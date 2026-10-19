@@ -1,4 +1,4 @@
-"""GE calibration with explicit Primary, Post and writeback handoffs."""
+"""Probe-off/on IQ shots with Primary and Post discrimination analysis."""
 
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
@@ -35,21 +35,25 @@ def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool in
     init_pulse_ref: str | None = None,
     shots: int | None = None,
 ) -> RecipeGenerator:
-    """Save GE raw data, then yield Primary and Post before asking to write.
+    """Measure probe-off/on IQ clouds for ground/excited discrimination.
 
-    target binds the new tab's primary role without changing GUI focus.
-    Omission uses focus. Do not pass target when reusing an existing tab.
+    Apply optional reset/init pulses, then acquire shots without and with the
+    calibrated pi probe before readout. Primary estimates IQ rotation, threshold,
+    cloud width and discrimination fidelity; Post adds classification
+    radius and confusion diagnostics. Save raw shots and both analyses, then
+    ask before applying their calibration proposals in Primary-to-Post order.
 
-    session is driver-supplied. reuse_tab_id resets that idle singleshot/ge tab.
-    readout_ref and pi_ref select calibrated library modules; None retains their
-    GUI selections. The readout frequency prefers a usable library, then resonator
-    calibration. None disables reset/init_pulse; named values select libraries.
+    session is driver-supplied. target overrides the qubit alias for this Reset;
+    None uses global aliases. reuse_tab_id resets an idle singleshot/ge tab.
+    readout_ref and pi_ref select library modules; None retains GUI selections.
+    Readout frequency uses a valid library value, then resonator calibration.
+    None disables reset/init_pulse; named references select those modules.
     shots is a positive acquisition count; None retains the GUI default.
-    Missing readout/pi calibration ends needs_parameters with both missing names.
-    Invalid inputs/cfg/native failures throw at their author step. Cancelled yields
-    return; finish_early saves usable raw data. Both analyses may hand off for
-    interaction. accepted explicitly writes Primary then Post; skipped writes none.
+    Missing readout/pi calibration reports both names in needs_parameters.
+    Invalid inputs/cfg/native failures propagate. Cancellation stops later
+    steps; skipped writeback changes nothing.
     """
+    # 1. Validate inputs before selecting the measurement sources.
     _validate_inputs(
         (
             ("reuse_tab_id", reuse_tab_id),
@@ -61,52 +65,63 @@ def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool in
         shots,
     )
 
+    # 2. Open/reset the tab and select the pulse libraries.
     tab = session.open_tab(
         "singleshot/ge",
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
     if use_reset is None:
-        tab.disable_library("modules.reset")
+        tab.disable_library(("modules", "reset"))
     else:
-        tab.use_library("modules.reset", use_reset)
+        tab.use_library(("modules", "reset"), use_reset)
     if init_pulse_ref is None:
-        tab.disable_library("modules.init_pulse")
+        tab.disable_library(("modules", "init_pulse"))
     else:
-        tab.use_library("modules.init_pulse", init_pulse_ref)
-    tab.use_library("modules.readout", readout_ref)
+        tab.use_library(("modules", "init_pulse"), init_pulse_ref)
+    tab.use_library(("modules", "readout"), readout_ref)
 
-    # Report both absent calibrations before any Run, as the existing tool does.
+    # 3. Resolve readout frequency and require the calibrated pi probe.
+    # Report both absent calibrations before Run.
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
-        "modules.readout.freq",
+        ("modules", "readout", "freq"),
         calibration="$resonator.freq",
         required="readout_ref",
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline("modules.readout")
+        tab.use_inline(("modules", "readout"))
         apply_frequency(tab, frequency.edit)
     if (
-        parameter := tab.use_library("modules.probe_pulse", pi_ref, required="pi_ref")
+        parameter := tab.use_library(
+            ("modules", "probe_pulse"), pi_ref, required="pi_ref"
+        )
     ) is not None:
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set("shots", shots, source="explicit")
+    tab.set(("shots",), shots, source="explicit")
 
+    # 4. Acquire and save raw probe-off/on shots.
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
         return
     run.save_raw()
+
+    # 5. Fit the IQ clouds before the Post classification diagnostics.
     analysis = yield from run.analyze_step("primary")
     if analysis.status == "cancelled":
         return
+
+    # 6. Derive classification radius and confusion diagnostics from Primary.
     analysis = yield from run.analyze_step("post")
     if analysis.status == "cancelled":
         return
+
+    # 7. Ask before applying the proposed calibration.
     decision = yield from ask(run.propose_writeback())
     if decision.status == "cancelled":
         return
@@ -140,19 +155,19 @@ DEFINITION = RecipeDefinition(
     summary_parameters=(
         SummaryParameter(
             "readout_frequency_mhz",
-            "modules.readout.freq",
+            ("modules", "readout", "freq"),
             "MHz",
         ),
-        SummaryParameter("readout_ref", "modules.readout"),
-        SummaryParameter("use_reset", "modules.reset"),
-        SummaryParameter("shots", "shots"),
-        SummaryParameter("pi_ref", "modules.probe_pulse"),
-        SummaryParameter("init_pulse_ref", "modules.init_pulse"),
+        SummaryParameter("readout_ref", ("modules", "readout")),
+        SummaryParameter("use_reset", ("modules", "reset")),
+        SummaryParameter("shots", ("shots",)),
+        SummaryParameter("pi_ref", ("modules", "probe_pulse")),
+        SummaryParameter("init_pulse_ref", ("modules", "init_pulse")),
     ),
     summary_estimates=(
-        SummaryEstimate("fidelity", "fidelity"),
-        SummaryEstimate("theta", "theta"),
-        SummaryEstimate("threshold", "threshold"),
-        SummaryEstimate("ge_s", "ge_s"),
+        SummaryEstimate("fidelity", ("fidelity",)),
+        SummaryEstimate("theta", ("theta",)),
+        SummaryEstimate("threshold", ("threshold",)),
+        SummaryEstimate("ge_s", ("ge_s",)),
     ),
 )

@@ -47,7 +47,9 @@ class DummyResourceManager:
         self.session = session
         self.opened_addresses: list[str] = []
 
-    def open_resource(self, address: str) -> DummySession:
+    def open_resource(
+        self, address: str, *, open_timeout: int, timeout: int
+    ) -> DummySession:
         self.opened_addresses.append(address)
         return self.session
 

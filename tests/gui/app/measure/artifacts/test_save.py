@@ -98,10 +98,16 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
 ) -> None:
     session = native_session
     assert session.state.get_tab("tab").run.confirmed_run_id is None
+    planned = session.state.get_artifact_snapshots("tab")
+    assert (
+        planned[0].artifacts[0].members[0].outputs[1].path.name
+        == "saving_a1b2c3_1.hdf5"
+    )
     first = session.save()
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     native, labber = first.outputs
     assert native.status == labber.status == "saved"
+    assert labber.output.path.name == "saving_a1b2c3_1.hdf5"
     assert (
         native.output.path
         == session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
@@ -115,7 +121,7 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     second = session.save(origin=CommandOrigin("mcp"))
     assert second.run_id == first.run_id
     assert second.outputs[0].output.path == native.output.path
-    assert second.outputs[1].output.path != labber.output.path
+    assert second.outputs[1].output.path.name == "saving_a1b2c3_2.hdf5"
     events = session.entry.ledger.events()
     assert len(events) == 2
     assert [event.origin for event in events] == ["gui", "mcp"]

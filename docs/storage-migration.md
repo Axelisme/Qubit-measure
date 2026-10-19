@@ -1,110 +1,617 @@
-# Agent 離線遷移說明書
+# 舊資料遷移指南（手動）
 
-**Last updated:** 2026-10-11，離線工具與 CLI 移至 root migrations
+本指南把一個舊 qubit 的資料，也就是 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/`，整理成一個新格式 entry。
+全程用 shell、編輯器與 repo 的公開 API 完成，不需要遷移腳本。
 
-此文件供執行舊 `result/`、Database 遷移，以及修改 component kind 的 agent 使用。入口是 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行。它不控制硬體，也不改正常 loader。`migrations/storage_migration/README.md` 說明框架邊界，具體對照位於 `migrations/storage_mapping.py`，native declarations 位於 `migrations/migration_experiments.py`。
+## 遷移完成後的樣子
 
-## 執行前
-
-1. 取得本次操作授權。列明可讀來源、可寫目的地、可刪除的 Labber 來源，以及 report 的位置。開發任務的合成資料驗證不授權遷移真實資料。真實資料複本也需要使用者指定與授權。
-2. 保留獨立備份。工具不修改舊 result 樹，但成功的 data 遷移會刪除已確認的 Labber 來源檔。先記錄兩個來源樹的逐檔 SHA256。
-3. 固定使用的 checkout 與 Python 環境。使用該 checkout 的 `uv run --directory <worktree> --no-sync --`，不在遷移過程安裝依賴。
-4. 明確選擇 `source-chip`、`source-qubit`、新 `name` 與 `qubit-kind`。前兩者只定位目錄，不承載物理語意。Kind 可選 `qubit/fluxonium` 或 `qubit/transmon`，工具不從名稱猜測。
-5. 確認 `results/<name>` 與 `Database/<name>` 都不存在。新目的、report 與 Database 寫入或刪除都不能落入整個舊 `result-root`，也不能包住它。不同 entry 或 symlink 別名仍受此限制。一次只允許一個 writer。工具不提供並行遷移、跨檔交易或掉電恢復保證。
-
-完成本節時，授權與備份有明確位置，兩個目的地都空缺，來源 hash 已保存。任何條件不成立就停下來，不清理 caller 的既有檔案來避開碰撞。
-
-## 先 dry-run
-
-以下命令在 worktree 根目錄執行。將示例路徑換成已授權的絕對路徑。
-
-```bash
-uv run --directory <worktree> --no-sync -- python -m migrations.migrate_storage \
-  --result-root /authorized/legacy/result \
-  --database-root /authorized/Database \
-  --results-root /authorized/results \
-  --source-chip TestChip --source-qubit TestQubit --name migrated-entry \
-  --qubit-kind qubit/fluxonium --part all --dry-run \
-  > /authorized/task/dry-run.json
+```text
+<父目錄>/
+├── Qubit-measure-gui/                    ← 原 repo：只剩新格式
+│   ├── result/<name>/
+│   │   ├── setup.yaml
+│   │   ├── module_cfg.yaml               ← 舊根層 module_cfg 轉成的 setup library
+│   │   ├── predictors/<Q>.json           ← 舊 fluxdep_fit
+│   │   ├── dispersive/<Q>.json           ← 舊 dispersive ＋ plot_transitions
+│   │   ├── t1_curve/<Q>.json             ← 舊 t1_curve_fit
+│   │   ├── samples/<Q>.jsonl             ← 舊 samples.csv
+│   │   ├── figures/<原相對路徑>           ← exps 以外的舊圖
+│   │   ├── <原相對路徑>                   ← 不支援的舊檔，原樣放在對應位置
+│   │   ├── points/<label>/{point.yaml,module_cfg.yaml,figures/}
+│   │   └── records/manual-migration-report-<date>.json
+│   └── Database/<name>/
+│       ├── runs/<run_id>/data.h5         ← Labber 轉成的 native
+│       ├── Labber/<原相對路徑>            ← 所有原 Labber 檔（含未轉 native 的），bytes 不變
+│       ├── arb_waveforms/**
+│       └── <原相對路徑>                   ← 無法轉換的舊 Database 檔，原樣放在對應位置
+└── Qubit-measure-gui-backup/             ← 平行備份根：舊格式，路徑與 repo 內相同
+    ├── result/<chip>/<qub>/              ← 原樣複製
+    ├── Database/<chip>/<qub>/            ← 原樣複製
+    └── migration-records/<chip>/<qub>/   ← hash 清單、工作紀錄、報告
 ```
 
-`result-root` 是舊小資料根，來源為其下的 `<source-chip>/<source-qubit>`。`database-root` 同時是舊重資料根與新 Database 根。`results-root` 是新的小資料根，與舊 `result-root` 分開。
+三條規則決定整個流程：
 
-Dry-run 只讀來源，將 report 印到 stdout。它會以具體 cfg model 檢查已知 pair 的可轉換性，也會驗證 point-local module／waveform 的 typed Spec 與引用。它不建立條目或 manifest，不搬移 Labber，也不執行 native validation。Library 的 `key_mappings` rows 以 `library_kind` 區分 module 與 waveform，保留 canonical `new_path`。Dry-run 未取得目的 handle，所以這些 rows 的 `new_file=None` 不代表轉換失敗。Report 有 pending 時仍可能 exit 0。逐項檢視 `key_mappings` 與 `pending`，確認新路徑與單位的證據，不能把 exit 0 當成全部資料已遷移。
+1. **平行備份。** 舊來源整份複製到 repo 旁的 `<repo 目錄名>-backup/`，保留 repo 內的相對路徑，逐檔核對 hash。每次遷移都累積到同一個備份根。
+2. **新格式寫回原 repo。** 新 entry 直接寫在同一個 `result/`、`Database/` 根下，與舊來源不重疊。
+3. **最後刪舊來源。** 新 entry 全部核對完、使用者授權後，刪掉 repo 內本次的 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/`。repo 從此只剩新格式；舊格式只存在平行備份裡。
 
-工具保留未知值與 expression 的原文。Expression 不會 evaluate。舊 `flux_unit` 寫入 `general.ext.flux_unit`，`cur_A` 寫入 `general.ext.flux_value`，單位與數字不換算。Local 的 `local_flux_unit` → `Q1.flux_unit`、`jpa_flux_unit` → `J1.flux_unit` 與其他對照不變。Flux 單位必須有明確證據，`cur_A` 的名稱不是單位證據。缺 cfg identity、實驗 schema、歷史 snapshot、量測時間或 completion 的 run 保留來源，列待處理。
+## 選路線
 
-完成本節時，report 中每個 pending 都有後續處置或明確保留理由。對照表及真實複本結果由使用者確認，不能用自動驗證代簽。
-
-## 補充歷史 run evidence
-
-需要補充歷史證據時，準備 JSON，再傳 `--run-evidence /authorized/task/evidence.json`。先用公開 `load_run_evidence(Path(...))` 檢查輸入。文件是 `zcu.migration-run-evidence`，`format_version` 為 `1.0`，`entries` 是逐檔證據陣列。同 major 未知欄位保留，較新 major 拒絕。
-
-每筆 evidence 的欄位與型別由 `LegacyRunEvidence`、`LegacySnapshotEvidence` 的 docstring 定義，從 `migrations.storage_migration` 匯入。至少核對以下資訊。
-
-| 欄位 | 核對來源 |
+| 現況 | 走法 |
 | --- | --- |
-| `source`、`source_hash` | 相對 `Database/<source-chip>/<source-qubit>` 的 path 與實際 SHA256。Path 不得逃出此根目錄。 |
-| `experiment`、`cfg` | 明確 persisted tag，以及完整歷史 `CfgSnapshot.values`、`cfg_type`、`schema_version`。Schema 依 `(tag, cfg_type)` 配對，同 tag 不代表同 cfg。 |
-| `started_at`、`finished_at`、`completion` | 可證明的 UTC ISO 量測時間與 `complete`、`partial` 或 `stopped`。Finished time 可為 null，不用 mtime 或 Labber creation time 補量測時間。 |
-| `snapshot` | 當時的 entry_name、point、description、roles 與 params。Point 可明確為 null。不要拿新容器的當前值冒充歷史快照。 |
-| `provenance` | `SoftwareProvenance`，缺少證據的欄位只填型別允許的 null，不假造 commit、主機或 SoC。 |
+| 舊資料還沒動過 | 依序做第 1 到第 9 步。 |
+| 已有部分新 entry（應急工具或人工只做一半） | 做第 1 到第 3 步，再到[部分接手](#部分接手)。 |
+| 他機把新 entry 寫在 `results/<name>/`（多一個 s） | 只需[搬到 result](#把-results-搬到-result)，不重做遷移。 |
 
-Evidence 必須與來源 hash、檔內 tag 及 cfg 相符。巢狀 JSON 中的 true／1、false／0 不視為相同證據。矛盾不會被補充文件覆蓋。已知 pair 的 cfg 缺必要欄位、版本不是完整 `major.minor` 或 major 不符時，工具在分配 run_id 與規劃 native 前列 pending，保留來源。同 major 的合法 minor 可以轉換。驗證使用隔離副本，不把可推導的欄位回填歷史 cfg。尚未 planned 的 pending evidence 可補正版本後明確 resume，不需手改 manifest。缺 cfg 或 cfg_type 的文件仍保留完整 raw，但該 run pending。缺少必填時間或 snapshot 的 evidence 文件會直接拒絕；缺證據時可先不提供該筆 evidence，保留來源待查。
+## 名詞
 
-FreqGainCfg 的來源仍使用歷史 tag `twotone/ge/ro_optimize/freq`。離線 declaration 將新 native tag 寫為 `twotone/ge/ro_optimize/freq_gain`，typed reader 用新 spec 讀取。FreqCfg 的 tag 不變，原 Labber 與完整 evidence 也不改。正常 loader 沒有舊 tag alias。
+- **來源**：本次的 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/`，包括隱藏檔、空目錄與未知檔。
+- **備份**：平行備份根裡與來源相同相對路徑的副本，hash 與來源逐檔相同。後續一律從備份讀，來源保持不動直到第 9 步。
+- **報告**：`manual-report.json`，每個來源檔與每個未轉欄位一列，記去向與狀態。它是交接清單，不是工具的 resume manifest。
+- **狀態**：`verified` 表示目的已讀回核對；`temporary-pending` 表示還能完成，只是尚未完成；`permanent-pending` 表示缺證據無法轉換，列出備份內的位置與缺的證據。
+- **證據**：舊檔裡明寫的值。路徑日期、mtime、檔名、目前 setup 與目前裝置都不算證據。缺證據就列 pending，不推論、不補零。
 
-轉換後 native 的 snapshot.entry_id 是新條目的 UUID，不是舊系統曾記錄的 UUID。Report 明示這項賦值。新 run_id 的時間是遷移賦值時間，也不是歷史量測時間。Migration native 的 labber_path 固定為 null，已成功搬移的 Labber 路徑從 report 的 `moved_labber_files` 查。
+## 1. 固定路徑與授權
 
-完成本節時，每筆證據都有可追溯來源，且 loader 接受整份文件。無法證明的欄位留待處理，不為了消除 pending 補猜測值。
+停止會寫入這些目錄的 GUI、Notebook 與 agent。向使用者取得本次讀、寫與最後刪除的授權；沒有刪除授權時，做到第 8 步為止。
+命令使用 Bash 與 GNU coreutils、findutils。範例值全部換成該機確認過的值。
 
-## 正式執行與分段
+```bash
+set -euo pipefail
+export REPO=/absolute/path/to/Qubit-measure-gui
+export CHIP=TestChip QUB=Q0 NAME=migrated-Q0
+export RESULTS="$REPO/result" DATABASE="$REPO/Database"
+export OLD_R="$RESULTS/$CHIP/$QUB" OLD_D="$DATABASE/$CHIP/$QUB"
+export NEW_R="$RESULTS/$NAME" NEW_D="$DATABASE/$NAME"
+export BACKUP_ROOT="$(dirname "$REPO")/$(basename "$REPO")-backup"
+export BR="$BACKUP_ROOT/result/$CHIP/$QUB" BD="$BACKUP_ROOT/Database/$CHIP/$QUB"
+export REC="$BACKUP_ROOT/migration-records/$CHIP/$QUB"
+realpath -m -- "$OLD_R" "$OLD_D" "$NEW_R" "$NEW_D" "$BR" "$BD" "$REC"
+```
 
-移除 `--dry-run` 後執行同一命令，保存 stdout report 與 stderr log。預設 report 位於 `results/<name>/records/migration-report.json`。`--report` 可選已授權的獨立檔案，但首次執行拒絕既有檔，resume 也不能改換位置。
+逐項確認，全部成立才往下：
 
-`--part parameters` 與 `--part data` 可分開執行，任一部分都會先建立新條目。第二次明確加 `--resume`。兩種順序都有效。
+- `CHIP`、`QUB`、`NAME` 各是單一路徑段，不含 `/`、`.`、`..`。
+- `BACKUP_ROOT` 在 repo 外。`BR`、`BD`、`REC` 都還不存在；已存在表示這個 qubit 遷移過，改走[部分接手](#部分接手)。
+- 全新遷移時 `NEW_R`、`NEW_D` 都不存在；已存在就改走部分接手，不刪掉重來。
+- 新 entry 不包住、也不透過 symlink 指進任一來源。
+- `find "$OLD_R" "$OLD_D" -type l -o ! -type d ! -type f` 沒有輸出。有輸出就停下，向使用者確認實體來源。
+- `OLD_D` 不存在時，記下並取得使用者確認；之後只備份 `OLD_R`，不建立空 Database 充數。
 
-- Parameters 建立 setup 與自足 point，不使用讀時疊層。`params.json` 原樣保存，不推導 Q1.params。
-- Data 先發布 native，再用正常 reader 與具體 typed loader 驗證。成功後才複製 Labber、核對 hash、刪除該來源檔。
-- Parameters 同時轉換 child point 的 legacy module cfg。來源必須含 `modules` 與 `waveforms` mappings，缺少或錯誤的 section 會失敗。Mapping 明示來源 family 與目的 key，不依名稱猜 module 或 waveform。工具透過正式 Spec 與 library owner 提交 point-local `module_cfg.yaml`，不建立 root library。Root entries、未支援 expression／Spec、缺 mapping 或 child reference 不能轉換時保留 located pending。Arb asset key 不改寫，也不搬 asset。
+## 2. 備份到平行備份根並驗證
 
-Report 的 part 是已執行部分的聯集。`all` 不代表 pending 已解決。Library 的 converted file 表示單檔 Spec 已提交，不保證每個 legacy entry 已轉換、asset 已存在或全部模組已可 materialize。不能只看文件存在或 module-slot 字串。核對每個 pending 的來源與定位，並用公開 library seam 檢查成功項目的 Spec、引用和工作單位。
+```bash
+hash_tree() {
+  (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum)
+}
+test -d "$OLD_R" && test -d "$OLD_D"
+test ! -e "$BR" && test ! -e "$BD" && test ! -e "$REC"
+mkdir -p -- "$REC" "$(dirname "$BR")" "$(dirname "$BD")"
+hash_tree "$OLD_R" > "$REC/result.sha256"
+hash_tree "$OLD_D" > "$REC/Database.sha256"
+cp -a -- "$OLD_R" "$BR"
+cp -a -- "$OLD_D" "$BD"
+(cd "$BR" && sha256sum --quiet -c "$REC/result.sha256")
+(cd "$BD" && sha256sum --quiet -c "$REC/Database.sha256")
+cmp "$REC/result.sha256" <(hash_tree "$BR")
+cmp "$REC/Database.sha256" <(hash_tree "$BD")
+diff -qr -- "$OLD_R" "$BR"
+diff -qr -- "$OLD_D" "$BD"
+cmp "$REC/result.sha256" <(hash_tree "$OLD_R")
+cmp "$REC/Database.sha256" <(hash_tree "$OLD_D")
+```
 
-完成 parameters 後，可以經 ResultEntry 公開 edit 修改 setup／point；data resume 驗證當前文件，不還原舊參數。逐檔發布的 params.json、副本、Labber、native 與已記錄完成的 module library 則受 manifest hash 保護，修改它們會報衝突。
+完成條件：每個命令 exit 0，`cmp`、`diff` 沒有輸出。最後兩行確認備份期間來源沒有變動。
+`sha256sum -c` 抓不到多出的檔案，所以還要比完整清單。
 
-完成本節時，每個已確定的 run 能由正常 `load_run_data` 與其具體 experiment 的 `load_run` 讀回，report 的成功與待處理清單一致。
+接著在 `$REC/notes.md` 寫下路徑、操作者、授權範圍與目前 checkout 的 commit。之後的工作檔都放 `$REC`。
 
-## 中斷後 resume
+**中斷時：** 保留既有備份，用 `$REC` 的清單重驗。驗證失敗的半份備份不能當清理依據。
 
-保留 `results/<name>/records/migration-state.json`。它記錄 entry_id、run_id、來源 baseline、逐檔 publication、完整 evidence 與 report ownership。Resume 使用相同 roots、source-chip、source-qubit、name、kind mapping revision 與 report 位置。Part 可以不同。
+**來源已被應急工具搬走一部分時：** 現在複製的只是殘存部分，不算完整備份。先找回搬移前的完整副本，或用原始 hash 清單從新舊兩端逐檔補回備份內的原相對路徑，並記錄補回來源。補不齊就停在這裡，不進清理。
 
-1. 核對失敗 log、manifest 與仍在的來源。不要手動把未完成動作標為完成。
-2. 用原命令加 `--resume`。只有 manifest 擁有的 temp 可由工具清理或重寫。Final 已存在時必須通過持久 hash 核對。
-3. Native writer 或 validation 失敗時，Labber 來源仍在。Resume 先恢復 native，再搬移來源。已 validated 的 native 也必須再核對 hash。
-4. Labber 已複製但來源未刪時，工具核對兩端再刪來源。來源已刪但 manifest 尚未更新時，工具依 published 記錄與目的 hash 確認完成。Source_removed 只查目的，不重讀或 resolve 舊位置。舊位置被新普通檔或 symlink 重用時，resume 不讀取或刪除它。
-5. Report 更新中斷時，工具從 manifest 重建累積 report。可新增尚未 planned source 的 evidence；已 planned 的證據不得替換，也不能改寫已 source_removed 的 run。
-6. 已記錄完成的 module library 只核對來源 baseline 與目的 hash，不重做或覆寫。Library 單檔提交與 manifest 不是跨檔原子。Library 已寫入但未記錄完成的窗口沒有專門 recovery。發生時先停下，取得清理授權後刪目的地重跑，不把中間文件當作可續跑的 legacy 來源。
+## 3. 盤點每個舊檔的去向
 
-骨架已建立、初始 manifest 尚未發布時，來源未動，但工具不能自動接管殘留條目。停下來記錄目錄與 hash，取得明確清理授權後再重試。碰到目的 hash、身分或 mapping revision 衝突也先停下，不刪 manifest、不改版本來強行續跑。
+```bash
+find "$BR" -type f -printf '%P\n' | LC_ALL=C sort > "$REC/result-files.txt"
+find "$BD" -type f -printf '%P\n' | LC_ALL=C sort > "$REC/Database-files.txt"
+find "$BR/exps" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort
+```
 
-Exit 0 表示確定的工作完成，pending 可以仍在。Exit 1 是執行、schema 或 I/O 失敗，查 stderr 與 manifest 的 failures。Exit 2 是輸入、目的地或身分衝突。保留失敗 log，不能只保存最後一次成功 report。
+最後一行列出的每個 `exps/<sub>` 就是一個新 point，`<sub>` 原樣當 point label，例如 `070716_0.500`，不從名稱解讀磁通或時間。
+label 不合法時，由使用者決定新名，報告記舊名、新名與理由。沒有 `exps/` 時，改列實際存在的舊直屬 point 目錄。
 
-## 驗證來源保全
+每個舊檔在報告中都要有一列。下表是去向：
 
-以執行前基線核對整個舊 result 樹的逐檔 hash。它應完全不變。每個 `moved_labber_files` 的目的 hash 應等於來源基線；只刪成功確認的來源檔，不清空日期目錄。
+| 舊檔 | 新位置 | 做法 |
+| --- | --- | --- |
+| 根層 `meta_info.json` | `setup.yaml` | 第 4 步 |
+| 根層 `params.json` 的 `fluxdep_fit` | `predictors/<Q>.json` | 第 5 步 |
+| 根層 `params.json` 的 `dispersive`，以及 `fluxdep_fit.plot_transitions` | `dispersive/<Q>.json` | 第 5 步 |
+| 根層 `params.json` 的 `t1_curve_fit` | `t1_curve/<Q>.json` | 第 5 步 |
+| 根層 `params.json` 的每個區塊原文 | `components.<Q>.ext.legacy_params.<區塊名>` | 第 4 步。`params.json` 本身不複製進新 entry。 |
+| 根層 `module_cfg.yaml` | entry 的 setup library | 第 6 步 |
+| `exps/<sub>/meta_info.json` | `points/<sub>/point.yaml` | 第 6 步 |
+| `exps/<sub>/module_cfg.yaml` | `points/<sub>/module_cfg.yaml` | 第 6 步 |
+| `exps/<sub>/image/*.png` | `points/<sub>/figures/<原檔名>` | 第 7 步 |
+| 舊直屬 `<sub>/{meta_info.json,module_cfg.yaml}` | 同名 point | 與 `exps/<sub>` 同名時停下，列出兩個來源，不合併。 |
+| exps 以外的圖 | `result/<name>/figures/<原相對路徑>` | 第 7 步 |
+| `samples.csv` | `samples/<Q>.jsonl` | 第 7 步。有列轉不了時，原檔另外原樣放 `result/<name>/samples.csv`。 |
+| `arb_waveforms/**`（result 或 Database） | `Database/<name>/arb_waveforms/**` | 第 7 步 |
+| `autofluxdep_runs/**`、其他不支援的 result 檔 | `result/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
+| Database 的 Labber 檔 | 原檔一律放 `Database/<name>/Labber/<原相對路徑>`；能轉的另產 `Database/<name>/runs/<run_id>/data.h5` | 第 8 步 |
+| 其他 Database 檔 | `Database/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
 
-`arb_waveforms/` 原樣保留在 `Database/<name>/arb_waveforms/`。未能證明新格式關係的 samples.csv、image 與 autofluxdep_runs 副本位於 `Database/<name>/migration-preserved/result/`。它們不是新的 SampleTable、workflow run 或 SaveLayout 輸出。原 result 仍保留，其他未辨識檔案由 pending 定位。
+`<Q>` 是舊 qubit 對應的新 component 名。找不到唯一對應時，所有寫到 `<Q>` 的項目整批列 permanent-pending，不任選一個。
 
-交付時列出新條目 UUID、已遷移與待處理數、report／manifest／log 位置、來源 hash 核對結果，以及仍待使用者確認的對照。只有使用者裁決後才安排真實資料遷移，不由本說明書擴大授權。
+報告放 `$REC/manual-report.json`，最小格式：
 
-## 修改 kind 時的遷移步驟
+```json
+{
+  "mode": "manual-handoff",
+  "entry": "migrated-Q0",
+  "backup_root": "/abs/Qubit-measure-gui-backup",
+  "items": [
+    {
+      "source": "result/TestChip/Q0/params.json#fluxdep_fit.timestamp",
+      "source_sha256": "<actual SHA256 of params.json>",
+      "destination": "result/migrated-Q0/predictors/Q0.json#source.created_at",
+      "status": "permanent-pending",
+      "reason": "timestamp has no time zone"
+    }
+  ],
+  "unfinished_publications": [],
+  "temporary_pending": []
+}
+```
 
-Kind 定義屬於具體 component owner。Framework 沒有通用 kind migration registry。修改定義前，列出受影響的 setup 與所有 point，確認新欄位、型別、單位和 default 的意義。Setup 的修改不會同步更新既有 point。
+`source` 是 repo 內的相對路徑，也就是備份根內的相對路徑。衝突列兩個來源、兩個值、單位與採用理由。
+完成條件：每個來源檔、每個未轉欄位都有一列，不能只寫總數。
 
-1. 選擇並取得本次修改策略的授權。若要在 model 定義加入舊欄位相容邏輯，使用 before validator，並明示接受哪些舊輸入。這是 component model 的選擇，不是 framework fallback。
-2. 若只需一次性更新資料，使用明確授權的 ruamel script，逐份讀取、修改與驗證 YAML。先在複本比對差異，保留未修改節點的註解與順序。不要只改 kind 字串而留下不相容欄位。
-3. 用顯式註冊的新 model，經 ResultEntry.open 驗證 setup，再逐個 use_point 驗證完整 point。開啟、refresh 或空 edit 不會寫回 normalized model；不要把讀取成功當成磁碟已轉換。
-4. 寫入授權涵蓋的文件，保留 entry_id、point label、created_at 與來源引用。多個 point 是逐檔更新，不提供整批 all-or-nothing。保留基線、差異與失敗紀錄，以便回復尚未完成的文件。
-5. 重讀全部受影響的文件，核對新型別、值、單位與 provenance。若更改 legacy conversion mapping 的 seed、rules、roles、schema 或 native tag 轉換，同時更新 mapping_version。舊 manifest 的 resume 要求完全相等；不要拿新 revision 接管舊計畫。
+## 4. 建 entry 並寫 setup
 
-完成本節時，每個受影響的 setup／point 都由新 model 讀回，既有身分和來源仍可解析，未轉換文件有明確清單。此步驟不授權改寫歷史 native 或 Labber，這些檔案仍保存當時的 cfg 與 snapshot。
+用公開 API 建骨架，不手填 UUID。這一步只寫檔，不接硬體。
+
+```bash
+uv run --directory "$REPO" --no-sync -- python - <<'PY'
+import os
+from zcu_tools.resources.entry import ResultEntry
+entry = ResultEntry.create(
+    os.environ["NAME"], result_root=os.environ["RESULTS"],
+    database_root=os.environ["DATABASE"],
+)
+print(entry.entry_id, entry.result_path, entry.database_path)
+PY
+```
+
+印出的 UUID 與兩個路徑記入 `$REC/notes.md`。部分接手時跳過這段，沿用既有 UUID。
+
+接著編輯 `$NEW_R/setup.yaml`，欄位依[正式 component 定義](../zcu_lab/components/)：
+
+1. **meta_info → 正式欄位。** 依下表寫入。meta 與 params 衝突時採 meta，報告列兩來源。
+
+   | 舊 key | 新 logical path |
+   | --- | --- |
+   | `q_f`、`qf_w`、`t1`、`t2r`、`t2e` | `Q.freq`、`Q.kappa`、`Q.t1`、`Q.t2r`、`Q.t2e` |
+   | `r_f`、`rf_w` | `R.freq`、`R.kappa` |
+   | `qub_0_1_ch`；沒有它時用 `qub_ch` | `Q.wiring.ch` |
+   | `lo_flux_ch`、`res_ch`、`ro_ch` | `Q.wiring.lo_flux_ch`、`R.wiring.ch`、`R.wiring.ro_ch` |
+   | `flux_unit`、`cur_A` | `general.ext.flux_unit`、`general.ext.flux_value` |
+   | `flx_half`、`flx_int`、`flx_period` | `Q.flux_half`、`Q.flux_int`、`Q.flux_period` |
+   | `local_flux_unit`、`jpa_flux_unit`、`best_jpa_flux` | `Q.flux_unit`、`J.flux_unit`、`J.flux` |
+   | `t1err`、`t2r_err`、`t2e_err` | `metadata[Q.t1 / Q.t2r / Q.t2e].stderr` |
+   | `pi_gain`、`pi_len`、`pi2_gain`、`pi2_len` | 有對應的轉換後 module 時寫進該 module；沒有時存 `Q.ext.<舊 key>` |
+
+   Q、R、J 是已確認的實際 component 名。缺 R 或 J 的實體對應時，相關欄位列 pending，不新增虛構元件。
+   未列出的 key 原文保全並列 pending；歷史 key 全表在 [storage_mapping.py](../migrations/storage_mapping.py)。
+
+2. **單位照抄，不換算。** 頻率 MHz、時間 us、能量 GHz。磁通數字分兩組：`flux_unit` 管 global 組（`cur_A`、`flx_half`、`flx_period`、`flx_int`、`flux_bias`），單位寫到 `general.ext.flux_unit`；`jpa_flux_unit` 管 `best_jpa_flux`，單位寫到 `J.flux_unit`。`local_flux_unit` 只照抄成 `Q.flux_unit`，不當任何數字的單位。每組依序取單位：
+   1. 同一份 meta 明寫的單位。
+   2. entry 已知的明寫單位：根層 meta_info 的同一個 key；沒有時用 `params.json` 根層的 `flux_unit`。JPA 只認 `jpa_flux_unit`，不借 qubit 的單位，所以跳過 `params.json` 這一項。
+   3. 使用者宣告的假設單位，報告標「假設單位」。本專案的資料：global 組用 `mA`，JPA 組用 `V`。
+   4. 以上都沒有：數字不寫入，列 pending。
+
+   同一組、同一層的兩個明寫單位互相衝突時（例如根層 meta 與 `params.json` 不同），列 pending，不擇一。單位不符合欄位型別時（`J.flux_unit`、`Q.flux_unit` 只接受 A 或 V），不換算，整組列 pending。數字與單位一起寫入或一起 pending。報告記下實際採用的是哪份檔的單位。
+
+3. **params 原文 → `legacy_params`。** `params.json` 的每個區塊連同內含 metadata 原文寫進 `components.<Q>.ext.legacy_params.<區塊名>`。
+   第 5 步轉成格式檔的區塊也照樣保留原文。`project`、`name`、`schema_version` 等識別資料也原文保留，不冒充 entry UUID。
+
+範例（合成值）：
+
+```yaml
+format: zcu.parameter-container
+format_version: '2.0'
+general:
+  entry_id: '54cd2da2-e8cd-49d5-a414-4ec40eb7eb14'
+  created_at: '2026-10-20T08:00:00Z'
+  description: 'Manual migration of TestChip/Q0'
+  ext: {flux_unit: mA, flux_value: 0.5}
+components:
+  Q0:
+    kind: qubit/fluxonium
+    freq: 5000.0
+    ext:
+      legacy_params:
+        dispersive:
+          params: {g: 0.12, bare_rf: 7.1}
+          timestamp: '2024-05-01 10:00'
+metadata:
+  Q0.freq: {source: 'meta_info.json#q_f'}
+```
+
+完成條件：setup 的每個值都能指回一個舊 key，pending 的欄位不出現在 setup 的可用數值裡。
+
+## 5. 寫 entry 層格式檔
+
+`fluxdep_fit`、`dispersive`、`t1_curve_fit` 各寫成 entry 層的一個 JSON 檔，檔名是 `<Q>.json`。三者共用同一個外框：
+
+```text
+{"format": "...", "version": 1, "params": {...}, "source": {"run_id": null, "created_at": null}}
+```
+
+- 頂層只有表列的 key（predictor 另加 `model`、`flux_unit`）。`version` 是嚴格整數 `1`。
+- `source.run_id`：遷移一律 `null`。
+- `source.created_at`：只有原區塊 `timestamp` 是 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM` 的形式（例：`2026-10-20T08:00:00Z`）時才照抄原字串；否則 `null`，報告列 pending，附備份內原文位置。entry UUID、mtime 與遷移時間都不能代填。
+- 未知數值填 `null` 或省略，不補 0。已知數值必須是有限數字，不接受 bool 或數字字串。
+- 格式檔只放在 entry 層，不複製到 points。原區塊仍在 `legacy_params` 與備份裡。
+
+寫完每個檔都要用 owner 讀回一次：predictor 用 `zcu_tools.resources.predictor_file.load_predictor_file(path)`，它會驗證欄名、數值與 source。dispersive、t1_curve 的 owner 模組 land 前，先用 JSON parser 讀回，land 後改用對應的 `load_*`。見 [resources README](../lib/zcu_tools/resources/README.md)。
+
+### predictor：`predictors/<Q>.json`
+
+只轉舊 Fluxonium fit（`fluxdep_fit.params` 含 `EJ`、`EC`、`EL`）。transmon 或已帶 `model` 的 fit 列 permanent-pending。
+
+| 舊值 | predictor 欄位 |
+| --- | --- |
+| `fluxdep_fit.params.EJ`、`EC`、`EL` | `model: "fluxonium"`，`params.EJ`、`params.EC`、`params.EL`，GHz |
+| `fluxdep_fit.flux_half`、`flux_period` | `params.flux_half`、`params.flux_period`，不換算 |
+| （舊 predictor 的預設） | `params.flux_bias: 0.0` |
+| `fluxdep_fit.flux_int` | 不寫入；它只用於舊 alignment，原文留在 `legacy_params` |
+| params 根層 `flux_unit` 或 `fluxdep_fit.flux_unit` | `flux_unit`。只有一處時用該值；兩處相同時用該值；兩處衝突時寫 `null` 並列 pending；兩處都沒有時用使用者宣告的假設單位並標「假設單位」，沒有宣告就寫 `null` 並列 pending |
+| `fluxdep_fit.timestamp` | `source.created_at`，規則見上 |
+
+`cur_A` 這類欄名、meta_info 的單位、目前裝置的單位都不能當 predictor 的單位證據。
+
+```json
+{
+  "format": "zcu.predictor",
+  "version": 1,
+  "model": "fluxonium",
+  "params": {"EJ": 6.27, "EC": 1.41, "EL": 0.80, "flux_half": 0.001, "flux_period": 0.002, "flux_bias": 0.0},
+  "flux_unit": "A",
+  "source": {"run_id": null, "created_at": null}
+}
+```
+
+### dispersive：`dispersive/<Q>.json`
+
+`dispersive` 的 `g`、`bare_rf` 寫進 `params`；`fluxdep_fit.plot_transitions` 寫進 `params.plot_transitions`。
+只有 `plot_transitions`、沒有 `dispersive` 區塊時也要產檔，`g`、`bare_rf` 寫 `null`。
+`g`、`bare_rf`、`plot_transitions.r_f` 的單位是 GHz；`plot_transitions` 其他欄位原文照抄。
+`source.created_at` 取 `dispersive.timestamp`；只有 `plot_transitions` 時取 `fluxdep_fit.timestamp`。
+
+```json
+{
+  "format": "zcu.dispersive",
+  "version": 1,
+  "params": {"g": 0.12, "bare_rf": 7.1, "plot_transitions": {"r_f": 7.1}},
+  "source": {"run_id": null, "created_at": null}
+}
+```
+
+### T1 曲線：`t1_curve/<Q>.json`
+
+`t1_curve_fit` 的 `params`、`stderr`、`bounds`、`fixed`、`free`、`cost`、`init`、`reduced_chi2`、`success`、`message`、`residual_mode`、`loss`、`max_nfev` 原樣寫進 `params`。
+`Temp` 的單位是 K；`Q_cap`、`Q_ind`、`x_qp` 沒有單位。`params.params` 裡出現的 key 是 active 參數，值為 `null` 表示 active 但未知。
+`fixed`、`free`、`bounds`、`stderr`、`init` 只能引用 active 參數。
+
+```json
+{
+  "format": "zcu.t1-curve",
+  "version": 1,
+  "params": {
+    "params": {"Q_cap": null, "Temp": null},
+    "stderr": {"Q_cap": null},
+    "fixed": ["Temp"],
+    "free": ["Q_cap"],
+    "bounds": {"Q_cap": [null, null]},
+    "cost": null
+  },
+  "source": {"run_id": null, "created_at": null}
+}
+```
+
+完成條件：每個有內容的舊區塊都有對應的格式檔，或在報告中列 pending；每個 `null` 都有對應的報告列。
+
+## 6. 建 points 與 module library
+
+### point：先整份複製 setup，再套 point meta
+
+setup 完成後才建 point。每個 point 都從完整的 `setup.yaml` 複製，所以 `general.ext.flux_unit` 這類 entry 層資訊會一起帶到 point。
+
+```bash
+export LABEL=070716_0.500
+export POINT="$NEW_R/points/$LABEL"
+test ! -e "$POINT"
+mkdir -- "$POINT"
+cp -- "$NEW_R/setup.yaml" "$POINT/point.yaml"
+printf "format: zcu.module-library\nformat_version: '2.0'\n" > "$POINT/module_cfg.yaml"
+date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+接著編輯 `point.yaml`：
+
+1. `general.entry_id` 保留不動。它是複製來源 setup 的 UUID，不是 point 的身分。
+2. `general.created_at` 改成剛印出的時間，也就是新 point 的建立時間。
+3. 套用 `exps/<sub>/meta_info.json`：用第 4 步的對照表，point meta 有的值覆蓋 setup 繼承的值。
+4. 單位依第 4 步的順序決定。point meta 沒寫單位時，沿用從 setup 繼承的單位，報告記「unit from root meta_info.json」。
+   point meta 寫了與 setup 不同的單位時，移除同一組從 setup 繼承、但 point 沒覆寫的數字及其 metadata，只留 point meta 自己的數字，不讓 setup 的數字配上 point 的單位。
+
+完成條件：每個 `exps/<sub>` 對應一個 point，各自有完整 components、metadata 與正確的 flux 單位。
+`entry.list_points()` 只列出 `point.yaml`、`module_cfg.yaml` 兩檔都在的目錄，所以另外用 `find "$NEW_R/points" -mindepth 1 -maxdepth 2` 檢查未完成的骨架。
+
+### module_cfg：轉成正式 Spec
+
+舊 `module_cfg.yaml` 的 `modules`、`waveforms` mapping 不是新 library，只換 header 不算轉換。逐筆建立「舊 family、舊 key、新 canonical key、引用位置」的對照，轉成 `components.<Q>.{pulses,readout,reset,waveforms}.<name>`，再把 point 的 module slot 指到新 key，例如 `components.Q0.module.x180: Q0.pulses.pi_amp`。
+
+1. 用 [cfg_model](../lib/zcu_tools/cfg_model/README.md) 的 `module_spec_from_raw(raw)`、`waveform_spec_from_raw(raw)` 驗證每筆候選；child key 用 `remap_module_references`、`remap_waveform_references` 改。expression 不求值，缺的必要欄位不猜。
+2. readout 要轉成平鋪的 `readout/pulse` Spec：generator 是 `gen_ch`，ADC 是 `ro_ch`，只有一個 `freq`。不能確定舊 `pulse_cfg`、`ro_cfg` 怎麼組合時，該筆列 pending。
+3. 用 owner 提交並讀回：
+
+```python
+from zcu_tools.cfg_model import waveform_spec_from_raw
+spec = waveform_spec_from_raw(raw_waveform)
+with entry.module_library(label).edit() as draft:
+    draft.set_waveform("Q0.waveforms.drive", spec)
+print(entry.module_library(label).snapshot().waveform_spec("Q0.waveforms.drive"))
+```
+
+`entry` 依第 9 步的方式註冊 component models 後開啟。provenance 由 owner 產生，不手寫事件或 run_id。
+一般讀取 library 時會自動備份並移除壞掉的條目，所以先在工作副本試轉候選，不拿真檔試錯。
+
+**根層 `module_cfg.yaml`** 用同樣規則轉成 entry 的 setup library，新 point 從 setup library 繼承。目前 main 的 `module_library` 只接受 point label；setup library 的支援 land 前，根層 module_cfg 列 temporary-pending，land 後再補。
+
+完成條件：每筆舊 module 和 waveform 都已轉換並讀回，或逐筆列 pending。空 library 本身合法，但不能說成「舊 library 已全部轉換」。
+
+## 7. 複製圖、樣本與保全檔
+
+所有複製都用這個 helper：目的不存在才複製；已存在且 bytes 相同算完成；不同就停下並記衝突。
+
+```bash
+copy_checked() {
+  local src=$1 dst=$2
+  test -f "$src" && test ! -L "$src" && test ! -L "$dst"
+  mkdir -p -- "$(dirname "$dst")"
+  if test -e "$dst"; then cmp -- "$src" "$dst"; else cp --no-clobber -- "$src" "$dst" && cmp -- "$src" "$dst"; fi
+  sha256sum -- "$src" "$dst"
+}
+shopt -s nullglob
+for point_src in "$BR"/exps/*/; do
+  label=$(basename "$point_src")
+  test -f "$NEW_R/points/$label/point.yaml"
+  for png in "$point_src"image/*.png; do
+    copy_checked "$png" "$NEW_R/points/$label/figures/$(basename "$png")"
+  done
+done
+```
+
+- **exps 以外的圖**：`copy_checked "$BR/<相對路徑>" "$NEW_R/figures/<相對路徑>"`，保留原檔名與目錄。
+- **`arb_waveforms/**`**：`$BR/arb_waveforms/` 與 `$BD/arb_waveforms/` 的每個檔複製到 `$NEW_D/arb_waveforms/`，保留相對路徑。兩個來源落到同一目的而 bytes 不同時，停下並列出兩邊的 hash。
+- **不支援的檔**：沒有轉換規則的舊檔原樣複製到新 entry 的對應位置。result 那邊的 `$BR/<相對路徑>` 複製到 `$NEW_R/<相對路徑>`；`exps/<sub>/` 裡的檔複製到 `$NEW_R/points/<sub>/<sub 內相對路徑>`；Database 那邊的 `$BD/<相對路徑>` 複製到 `$NEW_D/<相對路徑>`。報告註明它不是新格式資料。對應位置已被新格式的檔或目錄佔用時（例如 `setup.yaml`、`points/`、`records/`、`runs/`），停下列衝突，不覆寫。
+- **`samples.csv`**：由使用者指定值欄與單位，例如值欄 `calibrated mA`、單位 `mA`，再用 sample owner 轉換：
+
+  `entry` 依第 9 步的方式開啟。
+
+```python
+import os
+from migrations.sample_csv import convert_sample_csv
+report = convert_sample_csv(
+    [os.environ["BR"] + "/samples.csv"], entry=entry, component="Q0",
+    dev_value_column="calibrated mA", source_unit="mA",
+)
+print(report)
+```
+
+  回傳的 pending 列逐列記入報告。使用者沒有指定值欄或單位時，整份 CSV 列 pending。用法細節見 [migrations README](../migrations/README.md#sample-csv--jsonl)。
+
+完成條件：每對 hash 相同；每張 `exps` 圖都掛在正確的 point。helper 中斷可能留下半份目的檔，記入 `unfinished_publications`，從備份核對後再補。
+
+## 8. Labber 檔轉 native
+
+Labber 與 native 都是 HDF5，但格式不同，把 `.hdf5` 改名成 `data.h5` 不會得到 native。
+
+**必要證據**齊全才轉：experiment tag 與 cfg_type、完整歷史 cfg、variable、axes 與 signal 的名稱、單位、dtype 和 shape。缺任何一項就整檔列 permanent-pending，原檔仍用 `copy_checked` 複製到 `$NEW_D/Labber/<原相對路徑>`，和已轉換的 Labber 放在一起。
+
+開始時間與 run_id 缺了也照樣轉：
+
+- 沒有可證實的開始時間：`started_at=None`、`completion="unknown"`、`finished_at=None`。
+- 沒有可信的 run_id：用 `resources.entry.new_run_id()` 分配，報告標「遷移賦值」。ID 裡的時戳是分配當下的時間，不能拿來填 `started_at`。
+- 有可證實的時間或可信 ID 就保留原值；完成狀態只用證據支持的 complete、partial 或 stopped。
+
+| 證據 | 寫到 |
+| --- | --- |
+| 來源相對路徑與 SHA256 | 報告；必須與備份清單一致 |
+| tag、cfg_type、schema_version | 對應明確的 cfg model 與 disk schema |
+| 完整歷史 cfg | `CfgSnapshot(values, cfg_type, schema_version)`，不用目前的預設值補 |
+| variable、axes、signal | `VariableSchema`；axes 由內到外排列，array shape 是 axes 長度的反序 |
+| 時間與完成狀態 | `RunMetadata` |
+| entry、point、description、roles | `RunSnapshot`；沒有證據時 point 寫 None |
+| 軟體、主機、SoC | `SoftwareProvenance`；未知寫 None 或空 mapping |
+| 原 Labber 檔的新位置 | `RunMetadata.labber_path`，寫 `Labber/<原相對路徑>` |
+| Labber `Instrument config` | `device_snapshot`。轉換對照由遷移工具提供，land 前手動寫 None，報告列 temporary-pending |
+
+型別見 [datafile owner](../lib/zcu_tools/datafile/README.md) 與 [native models](../lib/zcu_tools/datafile/native_models.py)。
+分配 run_id 前，先把「來源、hash → run_id」對照寫進 `$REC`。中斷後沿用同一份對照，不重新分配。
+
+以下是合成範例。`synthetic_demo`、`DemoCfg` 不是 repo 已註冊的實驗；真檔要換成確認過的 `(tag, cfg_type, schema_version)`、完整歷史 cfg 與正式 schema。
+
+```python
+import hashlib, json, os
+from pathlib import Path
+from uuid import UUID
+import numpy as np
+from migrations.legacy_labber import load_legacy_labber_payload
+from zcu_tools.datafile import (
+    AxisSchema, CfgSnapshot, DataVariable, RunMetadata, RunSnapshot,
+    SoftwareProvenance, VariableSchema, load_run_data, save_run_data,
+    validate_experiment_payload,
+)
+from zcu_tools.resources.entry import new_run_id
+
+bd = Path(os.environ["BD"])
+source = bd / "2024/05/01/synthetic.hdf5"
+relative = source.relative_to(bd).as_posix()
+digest = hashlib.file_digest(source.open("rb"), "sha256").hexdigest()
+identity_path = Path(os.environ["REC"]) / f"run-id-{digest[:12]}.json"
+if identity_path.exists():
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert identity["source"] == relative and identity["source_sha256"] == digest
+else:
+    identity = {"source": relative, "source_sha256": digest,
+                "run_id": new_run_id(), "run_id_origin": "遷移賦值"}
+    with identity_path.open("x", encoding="utf-8") as stream:
+        json.dump(identity, stream, ensure_ascii=False, indent=2)
+
+schema = (VariableSchema(
+    variable=DataVariable("response"),
+    axes=(AxisSchema(name="frequency", unit="Hz", dtype=np.dtype("float64")),),
+    signal_name="signal", signal_unit="V", signal_dtype=np.dtype("complex128"),
+),)
+metadata = RunMetadata(
+    run_id=identity["run_id"], experiment="synthetic_demo",
+    started_at=None, finished_at=None, completion="unknown",
+    labber_path=f"Labber/{relative}",
+    snapshot=RunSnapshot(
+        entry_id=UUID("54cd2da2-e8cd-49d5-a414-4ec40eb7eb14"),
+        entry_name="migrated-Q0", point="070716_0.500",
+        description="Synthetic example only", roles={"qubit": "Q0"},
+    ),
+    provenance=SoftwareProvenance(
+        software_versions={}, git_commit=None, git_dirty=None, qick_version=None,
+        soc_fingerprint=None, hostname=None, simulation_id=None,
+    ),
+    device_snapshot=None,
+)
+destination = Path(os.environ["NEW_D"]) / "runs" / metadata.run_id / "data.h5"
+payload = load_legacy_labber_payload(source, schema=schema)
+validate_experiment_payload(payload, schema=schema)
+destination.parent.mkdir(parents=True, exist_ok=True)
+save_run_data(destination, payload, metadata,
+              cfg=CfgSnapshot(values={"reps": 10}, cfg_type="DemoCfg", schema_version="1.0"))
+validate_experiment_payload(load_run_data(destination).payload, schema=schema)
+```
+
+寫入後：
+
+1. 用該實驗的 `load_run` 讀回，逐欄比對 cfg、tag、時間、snapshot、axes、signal 與原 payload。typed metadata 用 `experiment.native_persistence.load_run_with_metadata(path, spec=...)` 核對。只接受 complete 的分析入口會拒絕 unknown，這不代表 native 無效。
+2. 讀回通過後，`copy_checked "$BD/<相對路徑>" "$NEW_D/Labber/<相對路徑>"`，保留原檔名與 bytes。
+3. 報告記錄 run_id 與它的來源（「遷移賦值」或證據）、native 路徑、Labber 路徑、原檔 hash，以及哪些時間未知。
+
+native 已存在時，用 reader 核對既有的 ID 與資料，只補缺的部分，不用 `replace=True` 覆寫。
+不手造 ledger 事件；Measure GUI 的 Load 清單直接掃描 `runs/*/data.h5`。
+
+完成條件：每個 Labber 檔都是 native 加原檔副本、都已讀回，或列 permanent-pending 並附缺少的證據。
+
+## 9. 最後核對與刪除舊來源
+
+在新的 process 裡讀回整個 entry：
+
+```bash
+uv run --directory "$REPO" --no-sync -- python - <<'PY'
+import os
+from zcu_lab.components import register_all
+from zcu_tools.resources.entry import ResultEntry, component_registry
+register_all(component_registry)
+entry = ResultEntry.open(os.environ["NAME"], result_root=os.environ["RESULTS"],
+                         database_root=os.environ["DATABASE"])
+print("entry", entry.entry_id)
+for label in entry.list_points():
+    entry.use_point(label)
+    print("point", label)
+PY
+```
+
+預期印出原 UUID 與所有 points。程式能載入不等於內容正確，還要逐項看：
+
+- [ ] 每個 `exps/<sub>` 都有 point，每張舊圖都在正確的 `figures/`，hash 相同。
+- [ ] setup 與每個 point 的值都有來源；磁通數字都有同一份 meta 的單位，或標了「假設單位」。
+- [ ] predictor、dispersive、t1_curve 格式檔齊全或已列 pending；每個 `null` 都有報告列。
+- [ ] module 與 waveform 都已讀回或逐筆列 pending。
+- [ ] Labber 都已轉 native 並讀回，或已列 pending；遷移賦值的 run_id 與 `$REC` 裡的對照一致。
+- [ ] 報告的 `unfinished_publications`、`temporary_pending` 都是空的。只剩 permanent-pending，而且每筆都指到備份內的路徑。
+
+再跑一次第 2 步最後的四個 `cmp`，確認備份與來源都沒變。來源出現新檔時停下並重新盤點，因為那可能是遷移期間新寫入的資料。
+
+報告複製到 `$REC/manual-migration-report-<date>.json` 與 `$NEW_R/records/manual-migration-report-<date>.json`，不覆寫既有的報告。
+
+使用者看過以上結果並授權刪除後，才執行：
+
+```bash
+realpath -- "$OLD_R" "$OLD_D" "$BR" "$BD" "$NEW_R" "$NEW_D"
+rm -ri -- "$OLD_R" "$OLD_D"
+test ! -e "$OLD_R" && test ! -e "$OLD_D"
+```
+
+只刪本次的兩個舊來源；其他 qubit、上層的 `<chip>/` 與 Database 根都留著。刪除後重讀新 entry，把刪除日期與範圍補進報告。
+
+## 部分接手
+
+適用於應急工具或人工只遷了一半的情況。先做第 1 到第 3 步，再保存現有新 entry 的完整副本與 hash 清單到 `$REC/existing-entry/`，之後才修改。
+不重新 create entry，也不靠應急工具的 manifest 判斷成功。
+
+以備份的盤點當左欄、現有新 entry 當右欄，逐項比對：
+
+| 現況 | 做法 | 完成條件 |
+| --- | --- | --- |
+| 缺某些 points | 先補 setup 的缺值，再依第 6 步建缺的 point。 | 每個舊 label 對應一個 point，既有 point 不重建。 |
+| point 已被手動改過 | 逐欄比較舊 meta 與目前值，只補缺值。 | 不同值列兩來源並 pending，由使用者決定是否覆寫。 |
+| 圖在應急工具的 `migration-preserved/result/exps/<sub>/image/`，沒掛到 point | point 建好後，從備份用 `copy_checked` 複製到 `points/<sub>/figures/`。 | 原檔名與 hash 相同。preserved 那份可以保留。 |
+| 只複製了 `params.json`，缺格式檔 | 依第 5 步寫 predictor、dispersive、t1_curve；`params.json` 副本從新 entry 移除。 | 格式檔齊全或已列 pending。 |
+| 格式檔已存在或只寫一半 | 對照備份逐欄核對，只補缺項。 | 已有的不同值保留並列衝突。 |
+| fit 被寫進了 setup 或 point 的 component 欄位 | 另寫 entry predictor；只移除能證明是 fit 誤寫的欄位。 | meta_info 本身的正式欄位保留。 |
+| point 有 flux 數字卻缺單位 | 依第 4 步的單位規則補單位或標「假設單位」。 | 沒有單位證據也沒有宣告時，移除數字並列 pending。 |
+| library 只換了 header，或有 dangling slot | 依第 6 步補轉換，有效的 Spec 不動。 | Spec、child key、slot 都核對過。 |
+| Labber 已搬走，但沒有 native | 用原始 hash 清單確認備份裡有原 bytes，再依第 8 步轉換。 | 「已搬」與「已轉」分開記錄。 |
+| 已有 native 或已固定 run_id | 用 reader 核對，沿用既有 ID。 | 有效的 native 不覆寫，固定的 ID 不重新分配。 |
+| 來源與目的都在，但 hash 不同 | 兩份都保存，不看 mtime 選新的。 | 列衝突，使用者決定前不刪來源。 |
+
+每補一項就讀回或 `cmp`，並更新該列的狀態。手動接手後，原工具可能無法再 resume；要切回工具前，先由工具 owner 確認接手方式。
+
+## 把 results 搬到 result
+
+他機寫在 `results/<name>/` 的 entry，只要整個目錄搬到 `result/<name>/`。這是單純的目錄搬移：UUID、point、內容與 `Database/<name>/` 都不變。
+搬完不代表遷移已完成，原有的 pending 與清理條件照舊。
+
+```bash
+set -euo pipefail
+export REPO=/absolute/path/to/Qubit-measure-gui NAME=migrated-Q0
+export FROM="$REPO/results/$NAME" TO="$REPO/result/$NAME"
+export BACKUP_ROOT="$(dirname "$REPO")/$(basename "$REPO")-backup"
+export WORK="$BACKUP_ROOT/migration-records/root-move/$NAME"
+hash_tree() { (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum); }
+inventory_tree() { (cd "$1" && find . -printf '%y %m %P\0' | LC_ALL=C sort -z); }
+
+test -d "$FROM" && test ! -e "$TO" && test ! -e "$WORK"
+test -z "$(find "$FROM" -type l -o ! -type d ! -type f)"
+mkdir -p -- "$WORK" "$(dirname "$TO")"
+hash_tree "$FROM" > "$WORK/before.sha256"
+inventory_tree "$FROM" > "$WORK/before.inventory"
+cp -a -- "$FROM" "$WORK/entry-before-move"
+cmp "$WORK/before.sha256" <(hash_tree "$WORK/entry-before-move")
+mv -T --no-clobber -- "$FROM" "$TO"
+test ! -e "$FROM"
+cmp "$WORK/before.sha256" <(hash_tree "$TO")
+cmp "$WORK/before.inventory" <(inventory_tree "$TO")
+echo "Root move verified: $TO"
+```
+
+完成條件：最後印出 `Root move verified`，搬移前的副本留在 `$WORK`。
+`$TO` 已存在時不要執行 `mv`，改走[部分接手](#部分接手)逐項比對。只搬 `results/<name>`；`results/` 裡可能還有其他 entry，不要整個刪掉。
+搬完後用新路徑重新開啟 entry，核對 UUID 與 points。
+
+## TestChip/Q0 核對基準
+
+repo 範例的盤點結果：5 個 exps、14 張 PNG，label 是 `062823`、`070216`、`070716_0.500`、`070800_0.500`、`072523`。
+`params.json` 只有 `schema_version`、`project`、`name`，沒有 `fluxdep_fit`，所以不會產生 predictor。
+手動完成後應有 5 個 points、14 張 point figures，每張 hash 都一致。

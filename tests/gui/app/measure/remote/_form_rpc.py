@@ -74,6 +74,27 @@ class ContainerRpcAdapter(SampleAdapter):
         )
 
 
+class IndexedRpcAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext):
+        from zcu_tools.gui.form_adapter import FixedElements
+
+        from tests.gui.form_adapter._indexed_models import NativeTone, indexed_tree
+
+        del ctx
+        cfg = create_model(
+            "IndexedRpcCfg",
+            __base__=SampleCfg,
+            tones=(list[NativeTone], ...),
+            participants=(list[str], ...),
+        )
+        return Form(
+            cfg,
+            {"sweep": Range.between(1, 2, expts=3), **indexed_tree()},
+            fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        )
+
+
 class ModuleRpcAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:

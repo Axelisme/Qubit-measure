@@ -82,9 +82,11 @@ def mapping(registered_kind: None) -> MigrationMapping:
 @pytest.fixture
 def request_data(tmp_path: Path) -> MigrationRequest:
     request = MigrationRequest(
-        result_root=tmp_path / "result",
-        database_root=tmp_path / "Database",
-        results_root=tmp_path / "results",
+        result_root=tmp_path / "repo" / "result",
+        database_root=tmp_path / "repo" / "Database",
+        results_root=tmp_path / "repo" / "results",
+        repo_root=tmp_path / "repo",
+        backup_parent=tmp_path,
         source_chip="chip",
         source_qubit="qubit",
         name="destination",

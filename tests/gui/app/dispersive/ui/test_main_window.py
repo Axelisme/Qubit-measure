@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.state import DispersiveState
-from zcu_tools.gui.project import ProjectInfo
 
 
 def test_main_window_builds_with_pipeline_panel(qapp):

@@ -520,6 +520,63 @@ def test_nonuniform_2d_column_lines_and_invalid_update_preserve_artists() -> Non
     assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
 
 
+@pytest.mark.parametrize(
+    ("reverse_x", "reverse_y"), [(True, False), (False, True), (True, True)]
+)
+def test_nonuniform_heatmap_renders_descending_coordinates_during_scan(
+    reverse_x: bool, reverse_y: bool
+) -> None:
+    plots = Plots(NonPresentingHost())
+    viewer = plots.liveplot_2d_with_line(
+        "scan", "Flux", "Frequency", line_axis=1, num_lines=2, uniform=False
+    )
+    xs = np.array([-1.0, -0.6, 0.0, 0.3, 1.0])
+    ys = np.array([10.0, 13.0, 19.0])
+    values = np.array(
+        [
+            [0.0, 2.0, 1.0],
+            [3.0, 5.0, 4.0],
+            [6.0, 8.0, 7.0],
+            [9.0, 11.0, 10.0],
+            [12.0, 14.0, 13.0],
+        ]
+    )
+    if reverse_x:
+        xs, values = xs[::-1], values[::-1, :]
+    if reverse_y:
+        ys, values = ys[::-1], values[:, ::-1]
+    data = np.full(values.shape, np.nan)
+    figure = plots["scan"]
+    heatmap, recent = figure.axes
+    canvas = FigureCanvasAgg(figure)
+    try:
+        for completed in (3, 5):
+            data[:completed] = values[:completed]
+            before_update = data.copy()
+            viewer.update(xs, ys, data)
+            canvas.draw()
+            rgba = np.asarray(canvas.buffer_rgba())
+            image = heatmap.images[0]
+            # Each known scalar must appear at its physical coordinate, not
+            # merely survive in the artist's array. NaN rows are not acquired.
+            for row in range(completed):
+                for column in range(len(ys)):
+                    px, py = heatmap.transData.transform((xs[row], ys[column]))
+                    actual = rgba[rgba.shape[0] - 1 - int(py), int(px), :3]
+                    expected = image.to_rgba(values[row, column], bytes=True)[:3]
+                    np.testing.assert_allclose(actual, expected, atol=1)
+            assert heatmap.xaxis_inverted() == reverse_x
+            assert heatmap.yaxis_inverted() == reverse_y
+            np.testing.assert_array_equal(recent.lines[-1].get_xdata(), ys)
+            np.testing.assert_array_equal(
+                recent.lines[-1].get_ydata(), values[completed - 1]
+            )
+            np.testing.assert_array_equal(data, before_update)
+    finally:
+        plots.finish()
+        plots.release()
+
+
 def test_invalid_2d_factory_options_or_duplicate_name_never_present() -> None:
     host = RecordingHost()
     plots = Plots(host)

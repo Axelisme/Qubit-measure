@@ -39,7 +39,8 @@ if TYPE_CHECKING:
     from zcu_tools.resources.entry.ledger_models import JsonObject
 
     from ..writeback import WritebackDraft
-    from .persistence_types import AppPersistedState
+    from .tab_input import TabInput
+    from .workspace_types import WorkspaceTab
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,9 +106,9 @@ class SavePaneSnapshot:
 class TabSnapshot:
     """Immutable full-state snapshot of one tab (contract-layer DTO).
 
-    Render (``TabService.get_snapshot``) populates every field; persist/restore
-    uses only the serializable head (adapter_name + cfg_input). cfg_input is
-    detached authored Form JSON, never an accepted cfg or source snapshot. Pane-owned
+    Render (``TabService.get_snapshot``) populates every field. cfg_input is
+    detached raw input for live observation, not persistence wire JSON. Restore
+    uses WorkspaceTab with the shared FormInput codec instead. Pane-owned
     read models (run/analysis/post_analysis/save/artifacts) are the only
     runtime/read-model contract — no flat projections for legacy callers.
     """
@@ -126,7 +127,7 @@ class TabSnapshot:
 
 @dataclass(frozen=True)
 class RestoreIssue:
-    """One rejected tab during session restore (adapter missing / cfg invalid)."""
+    """One rejected tab during live workspace reload (adapter missing / cfg invalid)."""
 
     subject: str
     message: str
@@ -146,27 +147,13 @@ class RestoreDroppedInputs:
 
 @dataclass(frozen=True)
 class RestoreReport:
-    """Outcome of applying a persisted session: how many tabs restored, and the
+    """Outcome of live RAM workspace reload: how many tabs restored, and the
     per-tab rejections to surface to the user."""
 
     restored_tabs: int
     rejected_tabs: tuple[RestoreIssue, ...]
     # Successfully restored tabs may discard incompatible leaves, grouped by adapter.
     dropped_inputs: tuple[RestoreDroppedInputs, ...] = ()
-
-
-@runtime_checkable
-class PersistOriginatorPort(Protocol):
-    """The Memento Originator surface the ``PersistenceCaretaker`` depends on.
-
-    The Caretaker (a Driven Adapter doing only disk I/O) never touches State,
-    services, or cfg — it only asks the originator (the Controller) for one
-    immutable snapshot to write, and hands one back to restore. Two narrow
-    methods keep the Caretaker decoupled from the whole Controller interface.
-    """
-
-    def capture_persisted_state(self) -> AppPersistedState: ...
-    def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport: ...
 
 
 @runtime_checkable
@@ -198,7 +185,9 @@ class TabLifecyclePort(Protocol):
     def new_tab(
         self,
         adapter_name: str,
-        from_dict: TabSnapshot | None = None,
+        from_dict: WorkspaceTab | None = None,
+        *,
+        input: TabInput | None = None,
     ) -> str:
         """Create or restore a tab using the current session sources."""
         ...

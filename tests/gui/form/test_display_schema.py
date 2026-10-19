@@ -10,8 +10,8 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormModel,
     FormState,
-    LinRange,
 )
+from zcu_tools.gui.form_adapter import LinRange
 
 
 def test_hidden_field_stays_in_description_input_and_validation() -> None:

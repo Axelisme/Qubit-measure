@@ -1,6 +1,6 @@
 """Independent fluxonium / SQUID transmon simulator dialog; edits and calibration remain local.
 
-The optional device control supplies values only. params.json loads are read-only
+The optional device control supplies values only. Entry predictor files are read-only
 prefill. No operation installs a model or writes a component or source file.
 """
 
@@ -21,13 +21,11 @@ from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -83,7 +81,7 @@ _DEFAULT_TRANSITIONS: list[tuple[int, int]] = [
     (1, 3),
 ]
 
-# Initial standalone trial values, not defaults for missing component inputs.
+# Initial standalone trial values, not defaults for missing file inputs.
 _DEFAULT_EJ: float = 4.0
 _DEFAULT_EC: float = 1.0
 _DEFAULT_EL: float = 1.0
@@ -93,7 +91,7 @@ _DEFAULT_ASYMMETRY: float = 0.0
 _DEFAULT_FLUX_HALF: float = 0.0
 _DEFAULT_FLUX_PERIOD: float = 0.005
 _DEFAULT_FLUX_BIAS: float = 0.0
-_DEFAULT_CALIBRATION_EXPR: str = "qubit.freq"
+_DEFAULT_CALIBRATION_EXPR: str = ""
 
 # Column indices for the 4-column tracked-transitions table.
 # Both matrix operators (n and phi) are shown side by side — there is no selector.
@@ -109,7 +107,6 @@ class PredictorDialogState:
 
     tracked_transitions: tuple[tuple[int, int], ...]
     tab_index: int
-    params_path_text: str
 
 
 def _normalize_tracked_transitions(
@@ -137,9 +134,9 @@ class PredictorDialog(QDialog):
     """Own detached fluxonium or SQUID transmon inputs for prediction and calibration.
 
     device optionally supplies cached/live device values. parameter_provider
-    supplies fixed ParameterContext captures for component choices/alias default
-    and frequency expressions; omitted or None-returning providers allow only
-    explicit trials. params optionally prefills complete or partial local inputs.
+    supplies fixed ParameterContext captures for optional frequency expressions.
+    Predictor files come from the current entry through predictor control.
+    params optionally prefills complete or partial local inputs.
     Unresolved frequency paths disable calibration without substituting a value.
     persistent_on_close hides instead of finishing, retaining the plotted model.
     """
@@ -191,6 +188,7 @@ class PredictorDialog(QDialog):
 
         # ── Left: controls column ─────────────────────────────────────────
         left_widget = QWidget()
+        left_widget.setMinimumWidth(480)
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -277,36 +275,24 @@ class PredictorDialog(QDialog):
         self._model_combo.addItem("Fluxonium", "fluxonium")
         self._model_combo.addItem("SQUID transmon", "transmon")
         model_form.addRow("Model:", self._model_combo)
-
-        self._component_combo = QComboBox()
-        self._component_combo.setMinimumContentsLength(12)
-        component_row = QHBoxLayout()
-        component_row.addWidget(self._component_combo, stretch=1)
-        self._component_refresh_btn = QPushButton("↻")
-        self._component_refresh_btn.setToolTip(
-            "Refresh component choices without loading parameters"
+        self._file_combo = QComboBox()
+        self._file_combo.setObjectName("predictor_file")
+        self._file_combo.setMinimumContentsLength(12)
+        file_row = QHBoxLayout()
+        file_row.addWidget(self._file_combo, stretch=1)
+        self._file_refresh_btn = QPushButton("Refresh files")
+        self._file_refresh_btn.setToolTip(
+            "Refresh entry predictor filenames without loading"
         )
-        self._component_refresh_btn.clicked.connect(self._refresh_components)
-        component_row.addWidget(self._component_refresh_btn)
-        self._component_load_btn = QPushButton("Load component")
-        self._component_load_btn.clicked.connect(self._on_load_component_clicked)
-        component_row.addWidget(self._component_load_btn)
-        # Same as the params.json row: a holder widget's margins squeeze the row.
-        model_form.addRow("Component:", component_row)
-
-        self._params_path_edit = QLineEdit()
-        self._params_path_edit.setPlaceholderText("params.json containing fluxdep_fit")
-        params_path_row = QHBoxLayout()
-        params_path_row.addWidget(self._params_path_edit, stretch=1)
-        self._load_btn = QPushButton("Load")
-        self._load_btn.clicked.connect(self._on_load_path_clicked)
-        params_path_row.addWidget(self._load_btn)
-        self._browse_btn = QPushButton("Browse")
-        self._browse_btn.clicked.connect(self._on_browse_file)
-        params_path_row.addWidget(self._browse_btn)
-        # Add the row layout directly: a holder widget's default layout margins
-        # squeezed the edit and buttons to a few pixels inside the form row.
-        model_form.addRow("params.json:", params_path_row)
+        self._file_refresh_btn.clicked.connect(self._refresh_files)
+        file_row.addWidget(self._file_refresh_btn)
+        self._file_load_btn = QPushButton("Load")
+        self._file_load_btn.clicked.connect(self._on_load_file_clicked)
+        file_row.addWidget(self._file_load_btn)
+        model_form.addRow("Predictor file:", file_row)
+        self._file_hint = QLabel()
+        self._file_hint.setWordWrap(True)
+        model_form.addRow(self._file_hint)
 
     def _build_transition_group(self) -> QGroupBox:
         # ── Tracked transitions group (predict controls + table + remove) ──
@@ -503,7 +489,7 @@ class PredictorDialog(QDialog):
         self._parameter_timer.setSingleShot(True)
         self._parameter_timer.setInterval(_DEBOUNCE_MS)
         self._parameter_timer.timeout.connect(self._refresh_curves)
-        self._refresh_components()
+        self._refresh_files()
         self._model_combo.currentIndexChanged.connect(self._on_parameters_changed)
         for spin, known in self._known_fields.items():
             spin.valueChanged.connect(self._on_parameters_changed)
@@ -514,7 +500,6 @@ class PredictorDialog(QDialog):
         else:
             self._refresh_curves()
         self._sync_live_mode_controls()
-        self._params_path_edit.textChanged.connect(self._emit_state_changed)
         self._tab_widget.currentChanged.connect(self._emit_state_changed)
 
     def parameters(self) -> ModelParams:
@@ -591,28 +576,24 @@ class PredictorDialog(QDialog):
         self._transmon_energies_label.setVisible(transmon)
         self._transmon_energies_row.setVisible(transmon)
 
-    def selected_component(self) -> str | None:
-        """Return the concrete prefill selection, or None with no choices.
+    def selected_file(self) -> str | None:
+        """Return the selected entry filename, or None; selection alone never loads."""
+        return self._file_combo.currentText() or None
 
-        Selection alone never loads parameters or binds the trial to a component.
+    def load_file(self, filename: str | None = None) -> None:
+        """Prefill this local trial from a current-entry predictor filename.
+
+        Omit filename to load the current selection. Failures from predictor
+        control propagate without changing the trial. The source is never written.
         """
-        return self._component_combo.currentText() or None
-
-    def load_component(self, qubit: str | None = None) -> None:
-        """Prefill current-point params via injected params_for; never write back.
-
-        Omit qubit to use the selector (initially alias qubit, when bound).
-        Unknown/unsupported component and unavailable context errors propagate.
-        Missing fields remain None. Loading is explicit, not live binding.
-        """
-        name = qubit if qubit is not None else self.selected_component()
+        name = filename if filename is not None else self.selected_file()
         if name is None:
-            raise FailedPreconditionError("No qubit component selected")
-        params = self._pred.params_for_qubit(name)
-        self.set_parameters(params)
-        index = self._component_combo.findText(name)
+            raise FailedPreconditionError("No predictor file selected")
+        predictor = self._pred.load_file(name)
+        self.set_parameters(predictor.params)
+        index = self._file_combo.findText(name)
         if index >= 0:
-            self._component_combo.setCurrentIndex(index)
+            self._file_combo.setCurrentIndex(index)
 
     def enable_parameter_cache(self, *, cache_dir: Path | None = None) -> None:
         """Restore and enable versioned user-cache persistence for this trial.
@@ -671,41 +652,36 @@ class PredictorDialog(QDialog):
         self._save_parameters()
         self._parameter_timer.start()
 
-    def _refresh_components(self) -> None:
-        previous = self.selected_component()
-        self._component_combo.clear()
+    def _refresh_files(self) -> None:
+        previous = self.selected_file()
+        self._file_combo.clear()
         try:
-            context = self._parameter_provider()
-            if context is None:
-                return
-            names = [
-                name
-                for name, component in context.document().components.items()
-                if component.kind.startswith("qubit/")
-            ]
-            self._component_combo.addItems(names)
-            preferred = previous
-            if preferred is None:
-                preferred = next(
-                    (
-                        row.resolved
-                        for row in context.resolved_aliases()
-                        if row.alias == "qubit"
-                    ),
-                    None,
-                )
-            if preferred in names:
-                self._component_combo.setCurrentIndex(names.index(preferred))
-        except ExpectedError as exc:
-            self._set_status(str(exc), error=True)
-        finally:
-            self._component_load_btn.setEnabled(self.selected_component() is not None)
+            names = self._pred.list_files()
+            self._file_combo.addItems(names)
+            if previous in names:
+                self._file_combo.setCurrentIndex(names.index(previous))
+            self._file_hint.setText(
+                ""
+                if names
+                else "Open an entry with predictors/*.json, or add predictor files."
+            )
+        except (ExpectedError, OSError) as exc:
+            self._file_hint.setText(str(exc))
+            logger.exception("predictor file listing failed")
+        self._file_combo.setEnabled(
+            not self._live_mode and self.selected_file() is not None
+        )
+        self._file_load_btn.setEnabled(
+            not self._live_mode and self.selected_file() is not None
+        )
 
-    def _on_load_component_clicked(self) -> None:
+    def _on_load_file_clicked(self) -> None:
         try:
-            self.load_component()
-        except (ExpectedError, PredictorInputError) as exc:
+            self.load_file()
+        except (ExpectedError, OSError, ValueError) as exc:
             self._set_status(str(exc), error=True)
+        else:
+            self._set_status("Loaded predictor file into local trial", error=False)
 
     def predict_frequency(
         self, value: float, transition: tuple[int, int] = (0, 1)
@@ -735,23 +711,11 @@ class PredictorDialog(QDialog):
         self._display_calibration(result)
         return result.flux_bias
 
-    def load_parameters(self, path: str) -> None:
-        """Read an existing params.json into this local trial, never changing the file.
-
-        PredictorLoadError reports unreadable/missing fluxdep_fit; invalid inputs
-        raise ValueError without changing fields. See read_fluxdep_fit_params.
-        """
-        from zcu_tools.gui.session.services.predictor import read_fluxdep_fit_params
-
-        self.set_parameters(read_fluxdep_fit_params(path))
-        self._params_path_edit.setText(path)
-
     def capture_state(self) -> PredictorDialogState:
         """Return the persistent UI state only; live marker/device/cache state is excluded."""
         return PredictorDialogState(
             tracked_transitions=tuple(self._tracked),
             tab_index=int(self._tab_widget.currentIndex()),
-            params_path_text=self._params_path_edit.text(),
         )
 
     def restore_state(self, state: PredictorDialogState) -> None:
@@ -762,7 +726,6 @@ class PredictorDialog(QDialog):
         self._suppress_state_changed = True
         try:
             self._tracked = list(transitions)
-            self._params_path_edit.setText(state.params_path_text)
             self._tab_widget.setCurrentIndex(tab_index)
             self._rebuild_table()
         finally:
@@ -809,7 +772,7 @@ class PredictorDialog(QDialog):
             self._set_status("Live predictor view", error=False)
             return
         self._refresh_device_selector()
-        self._refresh_components()
+        self._refresh_files()
         selected = self._selected_device_name()
         if selected is not None:
             self._apply_cached_device_value(selected)
@@ -847,9 +810,6 @@ class PredictorDialog(QDialog):
     def _sync_live_mode_controls(self) -> None:
         enabled = not self._live_mode
         for widget in (
-            self._params_path_edit,
-            self._load_btn,
-            self._browse_btn,
             self._ej_spin,
             self._ec_spin,
             self._el_spin,
@@ -871,11 +831,9 @@ class PredictorDialog(QDialog):
             known.setEnabled(enabled)
             spin.setEnabled(enabled and known.isChecked())
         self._model_combo.setEnabled(enabled)
-        self._component_combo.setEnabled(enabled)
-        self._component_refresh_btn.setEnabled(enabled)
-        self._component_load_btn.setEnabled(
-            enabled and self.selected_component() is not None
-        )
+        self._file_combo.setEnabled(enabled and self.selected_file() is not None)
+        self._file_refresh_btn.setEnabled(enabled)
+        self._file_load_btn.setEnabled(enabled and self.selected_file() is not None)
         if self._device_combo is not None:
             self._device_combo.setEnabled(enabled)
         if self._device_refresh_btn is not None:
@@ -902,6 +860,9 @@ class PredictorDialog(QDialog):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
         for label, spin in pairs:
+            editor = spin.lineEdit()
+            if editor is not None:
+                editor.setObjectName(f"predictor_input_{label}")
             known = QCheckBox(label)
             known.setToolTip(
                 "Checked: known input. Uncheck for unknown; check to enter a value."
@@ -1213,10 +1174,7 @@ class PredictorDialog(QDialog):
             self._set_status(reason, error=is_error)
             self._sync_calibration_button()
             return
-        from zcu_tools.gui.session.services.predictor import (
-            CalibrateFluxBiasRequest,
-            PredictorLoadError,
-        )
+        from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
 
         frequency_mhz = self._resolve_calibration_frequency_mhz()
         if frequency_mhz is None:
@@ -1230,7 +1188,7 @@ class PredictorDialog(QDialog):
         )
         try:
             result = self._pred.calibrate_flux_bias(self.parameters(), req)
-        except (PredictorLoadError, PredictorInputError) as exc:
+        except PredictorInputError as exc:
             self._set_status(str(exc), error=True)
             return
         except Exception as exc:
@@ -1621,56 +1579,6 @@ class PredictorDialog(QDialog):
         for canvas in self._all_canvases:
             canvas.set_highlights(highlights)
         self._sync_calibration_button()
-
-    # ------------------------------------------------------------------
-    # Browse / Apply handlers
-    # ------------------------------------------------------------------
-
-    def _on_load_path_clicked(self) -> None:
-        """Read the typed params.json path into local fields only."""
-        if self._live_mode:
-            self._set_status("Live mode keeps model params read-only.", error=False)
-            return
-        path = self._params_path_edit.text().strip()
-        if not path:
-            self._set_status("Enter a params.json path.", error=True)
-            return
-        self._load_params_file(path)
-
-    def _on_browse_file(self) -> None:
-        """Pick a params.json, populate the typed path, then load it.
-
-        Reading changes only the local fields, never the source or session.
-        """
-        if self._live_mode:
-            self._set_status("Live mode keeps model params read-only.", error=False)
-            return
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select params.json",
-            "",
-            "JSON files (*.json);;All files (*)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        if not path:
-            return
-        self._params_path_edit.setText(path)
-        self._load_params_file(path)
-
-    def _load_params_file(self, path: str) -> bool:
-        from zcu_tools.gui.session.services.predictor import (
-            PredictorLoadError,
-            read_fluxdep_fit_params,
-        )
-
-        try:
-            params = read_fluxdep_fit_params(path)
-        except PredictorLoadError as exc:
-            self._set_status(str(exc), error=True)
-            return False
-        self.set_parameters(params)
-        self._set_status("Loaded parameters into simulator", error=False)
-        return True
 
     # ------------------------------------------------------------------
     # Bus subscription

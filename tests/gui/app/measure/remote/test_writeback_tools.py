@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -93,9 +94,6 @@ def _ctrl() -> MagicMock:
     )
     ctrl.get_session_env.return_value = MagicMock(
         active_label="ctx001",
-        chip_name="chip",
-        qub_name="qubit",
-        res_name="res",
         database_path="/tmp/db",
         result_dir="/tmp/result",
         is_active=lambda: True,
@@ -206,6 +204,27 @@ def test_preview_serializes_parameter_and_module():
     assert mod["kind"] == "module"
     assert mod["target_name"] == "readout_rf"
     assert mod["role_id"] == "readout"
+
+
+def test_preview_preserves_author_element_identity_without_retargeting():
+    ctrl = _ctrl()
+    items = _items()
+    items[0].element = ElementIdentity(index=2, name="Q3")
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id, items, has_writeback_draft=True
+    )
+    result = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
+    candidates = result["items"]
+    if not isinstance(candidates, list):
+        raise TypeError("Expected writeback candidate list")
+    candidate = candidates[0]
+    assert candidate.get("element") == {"index": 2, "name": "Q3"}
+    assert candidate["target_name"] == "r_f"
+    assert candidate["actual_path"] == "r_f"
+    assert candidate["proposed"] == 6012.3
+    assert candidate["selected"] is True
 
 
 def test_preview_serializes_full_service_values_at_the_requested_pane():

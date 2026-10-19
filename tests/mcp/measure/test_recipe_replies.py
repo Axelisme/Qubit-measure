@@ -23,7 +23,12 @@ from ._support import full_execution_reply, make_client
                 "trigger_offset_us": 0.2,
                 "rounds": 7,
             },
-            {},
+            {
+                "frequency_mhz": {"value": 6020.0, "source": "explicit", "unit": "MHz"},
+                "readout_length_us": {"value": 2.5, "source": "explicit", "unit": "us"},
+                "trigger_offset_us": {"value": 0.2, "source": "explicit", "unit": "us"},
+                "rounds": {"value": 7, "source": "explicit"},
+            },
         ),
         (
             {
@@ -32,6 +37,9 @@ from ._support import full_execution_reply, make_client
                 "trigger_offset_us": 0.2,
             },
             {
+                "frequency_mhz": {"value": 6120.0, "source": "explicit", "unit": "MHz"},
+                "readout_length_us": {"value": 2.5, "source": "explicit", "unit": "us"},
+                "trigger_offset_us": {"value": 0.2, "source": "explicit", "unit": "us"},
                 "rounds": {"value": 3, "source": "gui_default"},
             },
         ),
@@ -107,14 +115,11 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
             assert summary["error"] == full["error"]
 
 
-def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_path):
+def test_writeback_destination_summary_keeps_context_identity(tmp_path):
     gui = ExecutionGui()
     destination = {
         "active_label": "sample",
         "has_active_context": True,
-        "chip_name": "chip",
-        "qub_name": "q",
-        "res_name": "r",
         "database_path": "/resolved/experiment/data",
         "result_dir": "/resolved/experiment/result",
     }
@@ -133,7 +138,6 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
         full = client.call("status", {"execution": key, "detail": "full"})
         assert summary["writeback"]["destination"] == {
             "context": {"active_label": "sample"},
-            "project": {"chip_name": "chip", "qub_name": "q", "res_name": "r"},
         }
         assert full["writeback"]["destination_context"] == destination
         assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [

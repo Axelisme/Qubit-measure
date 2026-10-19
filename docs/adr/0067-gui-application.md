@@ -2,7 +2,7 @@
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-18，device 活動快照與 run 後 cache 讀回
+**Last updated:** 2026-10-20，腳本 session 所有權、動態資源與儀器 adapter 邊界
 
 ## 問題與決策
 
@@ -30,9 +30,11 @@ WritebackService 先以分析來源的固定 capture 解析與 lower 全部選�
 
 公開 `read_context(aliases=None)` 固定 point、library、storage 與全表，不檢查 consumer kind。GUI adapter、Tab、Run、Load 和 template create 直接使用它，不宣告角色。裸 `$alias` 回名稱，欄位路徑延後交讀取 owner 檢查。非空具名 overrides 只改本次 capture，不保存到 tab、全域表或檔案。EMPTY 無覆寫由 app 保留 None 的 context-free／deferred 路徑；非空覆寫拒絕 no_context。Notebook 保留自己的顯式 role kind 契約與 caller 提供的 bindings。
 
-Shared `gui.session.ui.alias_dialog` 是 Measure 與 workflows 的同一編輯入口，兩者直接 import，不設 app-local wrapper。Apply 保持 dialog 開啟，Cancel 不撤回已 Apply 的表。Tab 不顯示角色列，也不在建立時固定環境。Cfg refresh 使用目前 point／library 和 alias 表；Run admission 才固定 ParameterContext、解析名稱與 storage capability。FIT、interactive、Post、Writeback 和 Save 使用結果的固定來源，不因後來選取而換目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
+Shared `gui.session.ui.alias_panel` 是 Measure 與 workflows 的 Inspect Aliases 編輯入口，不設 app-local wrapper。Apply 保持 Inspect 開啟，Cancel 不撤回已 Apply 的表。Tab 不顯示角色列，建立時固定目前 point／library、alias 表、cached device infos 與 value sources。Refresh 重新 capture 並保留 authored inputs，Reset 重新 capture 並重算 defaults。來源事件不自動刷新，Run 使用目前 tab 的有效 Form result 與固定來源。FIT、interactive、Post、Writeback 和 Save 使用結果的固定來源，不因後來選取而換目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
 
-Device 的連線資訊與 cached DeviceInfo 在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作；remembered device 的磁碟保存由 Persistence owner 從已提交狀態選擇性投影。State 是否供多方觀察與資料是否重啟後保存是兩個問題。Live SoC handle 可屬 session environment 而不落盤，worker、lease 和 driver 的控制權也不因有人需要觀察其狀態而交給 State。
+Device 的連線資訊、記得但未連線列與 cached DeviceInfo 在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作。記哪些 device、重啟時嘗試哪些連線由腳本決定，framework 不從 domain session 快取回填。Setup preferences 只是 live 預填值。State 是否供多方觀察與資料是否重啟後保存是兩個問題，worker、lease 和 driver 的控制權不因有人需要觀察而交給 State。
+
+Measure framework 只保存 Qt 外觀，不保存或還原 SoC、devices、entry／point、tabs／input，也不提供 legacy session 遷移。預設腳本的重開與 on_close 保存見 [[0064]]。Entry 自身的 aliases.yaml 路徑維持不變，預設腳本不另存或恢復 alias。Workspace 的 RAM 快照只供目前程序重建與 reload，不是持久 session schema。
 
 RunContext 提供 devices 與 cancel_signal 等執行能力，不提供儀器設定方法。Device 層只提供 current／voltage、frequency／power、output 或 value 等操作，不知道 flux／RF 角色。實驗層 helper 負責把角色用途與明示單位對應到 driver 操作；新增儀器接口不因此擴充 RunContext。這沿既有 C8 分層與 C9 無循環 contracts，experiment 使用 device，而非由 device 反向理解實驗。
 
@@ -52,13 +54,34 @@ State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由
 
 建立一條依賴時，先辨認互動：查詢走可用的狀態或 read contract，命令呼叫負責該行為的 owner，對已提交變化的反應訂閱 domain fact。Command 可以是單向的 owning-service 合作；不把「service 絕不互調」當成禁令，也不為每條邊建立 Protocol。窄 port 用在跨 owner 或 shared／app 邊界有隔離需求的地方。Port 和 EventBus 不會自動消除循環，仍要檢查誰發起、誰寫入、誰反應。組裝決定注入哪些模組；有界流程的 coordinator 可決定觸發、順序與分支，但仍透過 owner 的 commands／queries 工作，不直接取得它的寫入權威。Startup／mock setup 與 pane 反應是不同流程，不合成萬用 coordinator。
 
+## 動態資源與儀器 adapters
+
+`SoCConnectionService` 在 owner thread install／uninstall board/config，走 SOC_CONNECT gate，Run 或 connect 中拒絕。Idle 時可替換，uninstall 發布 soc=None。`is_mock` 由 SoC 自述，缺旗標時為 False，GUI 只轉發，不藉此選擇模擬模式。SoC 仍由 caller 擁有，service 不假設或呼叫通用 close 方法。
+
+`DeviceService.register_device(name, driver)` 接受已建好的 BaseDevice，讀取 info 並成功登錄後才移轉 GUI close 責任與發布 cache。Live 同名、Run、同名 mutation 或 info／registry 失敗不移轉候選 driver，caller 仍須清理。Idle MEMORY_ONLY row 可替換，保留 remember。這些操作沿用既有 rename、同 address 與單 driver 單名稱規則，見 [[0076]]。
+
+正常關閉先 drain 工作，再反序執行一次 script callbacks，最後嘗試全部 GUI 管理的 drivers。成功列轉 MEMORY_ONLY，失敗列保留 CONNECTED 與 error。DeviceService 全部嘗試後可 raise 彙整錯誤，Measure teardown 記 log 並繼續退出，不自動重試失敗 driver。關閉接線見 [[0064]]、[[0066]]。
+
+`gui.session.devices` 擁有明確登錄的儀器 adapter catalog。每個儀器 module 同檔放 adapter 與既有 Qt panel。Base 定義 `BaseDeviceAdapter`、`DeviceCapabilities(bias_source, user_connectable)` 與 panel protocol；adapter 宣告 driver_cls、panel_cls、capabilities 並提供 `connect(address)`。Core driver／Info 不變，DeviceService 與 DeviceDialog 共用 catalog，不各養一套 type registry。新增儀器需要 driver、GUI module 與一行明確登錄，不自動掃描目錄。
+
+FakeDevice、YOKO、SGS 維持專屬面板，不改寫成 Form。未知 type 顯示空白頁，不新增通用或唯讀 info panel，也沒有預設 factory。`bias_source` 管 cached bias／unit 能力。`user_connectable=False` 只禁止 GUI 手動 Add；腳本 register／remember 的既有已知 row 仍能經 adapter 在原 address Reconnect，改名後相同。它不是所有連線的禁令，也不依模擬身份特判。
+
+使用者於 2026-10-19 要求：「我認為service層儘量與具體儀器類別解耦」「我認為應該參考core->adapter->service的設計，由一個歸屬於gui層的adapter來描述device」。同日對 adapter 與 panel 同檔、明確登錄及搬移現有面板的方案回答：「可以」。因此儀器知識集中在 GUI adapter，service 只使用其契約。
+
 ## 獨立 predictor
 
 Predictor 不持有 installed session model，不參與 Run 或 Analyze／Post-analyze。
-`simulate` 擁有具名參數與中性 query 契約。使用者套件擁有 component→params_for 對應，
-app composition 顯式注入。Framework 不 import 使用者套件（C16）；simulate 不新增容器讀取依賴（C9）。
-Dialog 的試算參數是獨立 owner，不寫回元件。Service／remote 明確取得參數或具體元件名，
-不讀 dialog。Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 devices。
+`simulate` 擁有框架內建 fluxonium／transmon 的具名參數與中性 query 契約。
+`resources.predictor_file` 擁有 `zcu.predictor` JSON 讀寫與驗證，檔案放在 entry 的 `predictors/`。
+Session predictor service 透過 ContextControlPort 取得 ResultEntry 擁有的目錄，集中列檔、檔名驗證與載入。
+Dialog／remote 使用檔名或明確參數，不解讀 component 欄位，也不由 alias 選來源。
+Framework 不 import 使用者套件（C16）；simulate 不讀容器或檔案（C8、C9）。
+Dialog 擁有可手動修改的獨立 trial，不寫回元件或來源檔案。Service／remote 不讀 dialog。
+Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 devices。
+
+使用者於 2026-10-20 裁定：「框架內支援的fluxonium/transmon是理論上的兩種qubit，有自己定義的參數，與用戶定義的component解偶」。
+檔案交接採用原話：「我認為還有一個最簡單的，不轉。讓fluxdep的工具寫preditor要用的格式檔，而不是component的欄位。」
+對 entry 層檔案、格式與 dialog 方案，使用者回答：「1先entry吧。2可以。3可以。」
 
 ## Adapter capability 與事件
 

@@ -53,6 +53,22 @@ class Range:
 
 
 @dataclass(frozen=True, slots=True)
+class LogPoints:
+    """Opt a list[int] field into Log/List input with these fresh Log values.
+
+    max is the inclusive integer endpoint. include_zero=True keeps a zero
+    point and counts it in points. False requests positive points starting at
+    1; max>1 needs at least two points, while max=1 accepts one. The frontend
+    owns generation, rounding, deduplication and validation; this declaration
+    performs no computation.
+    """
+
+    max: int = 128
+    points: int = 9
+    include_zero: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class AliasName:
     """Resolve an alias once at Reset to a direct name, not an expression.
 
@@ -64,17 +80,6 @@ class AliasName:
 
     alias: str
     choices_source: Literal["devices"] | None = "devices"
-
-
-@dataclass(frozen=True, slots=True)
-class Locked:
-    """A scalar value validated as a single-value Literal in the generated model.
-
-    value is an ordinary scalar, never an expression. It remains visible in
-    input/schema; changing it causes validation failure, not silent overriding.
-    """
-
-    value: str | int | float | bool | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,8 +95,9 @@ type FormNode = (
     TemplateSeed
     | Template
     | Range
+    | LogPoints
     | AliasName
-    | Locked
     | Hidden
     | Mapping[str, FormNode]
+    | list[FormNode]
 )

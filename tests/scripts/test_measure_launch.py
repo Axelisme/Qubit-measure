@@ -26,3 +26,12 @@ def test_invalid_project_root_exits_before_gui_assembly(
     assert failure.value.code != 0
     error = capsys.readouterr().err.split("error:")[-1].lower()
     assert reason in error
+
+
+def test_clean_and_script_conflict_exits_before_gui_assembly(capsys) -> None:
+    with pytest.raises(SystemExit) as failure:
+        main(["--clean", "--script", "synthetic.py"])
+    assert failure.value.code == 2
+    error = capsys.readouterr().err
+    assert "--clean" in error and "--script" in error
+    assert "not allowed" in error

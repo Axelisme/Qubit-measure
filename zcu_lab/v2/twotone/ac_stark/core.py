@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fitlor
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     US_TO_S,
@@ -43,6 +43,8 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class AcStarkResult:
+    """Stark gains, probe frequencies in MHz, and mean IQ shaped (Ngain, Nfreq)."""
+
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -50,6 +52,8 @@ class AcStarkResult:
 
 @dataclass(frozen=True)
 class AcStarkRamseyResult:
+    """Stark gains, Ramsey delays in us, and mean IQ shaped (Ngain, Nlength)."""
+
     gains: NDArray[np.float64]
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -120,20 +124,20 @@ def get_resonance_freq(
 
 class AcStarkModuleCfg(ConfigBase):
     reset: ResetCfg | None = None
-    stark_pulse1: PulseCfg
-    stark_pulse2: PulseCfg
+    stark_pulse1: Annotated[PulseCfg, FieldMeta(label="Stark resonator tone")]
+    stark_pulse2: Annotated[PulseCfg, FieldMeta(label="Qubit spectroscopy probe")]
     readout: ReadoutCfg
 
 
 class AcStarkSweepCfg(ConfigBase):
-    gain: SweepCfg
-    freq: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
 
 
 class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AcStarkModuleCfg
     sweep: AcStarkSweepCfg
-    earlystop_snr: float | None = None
+    earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
 class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
@@ -158,6 +162,16 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         *,
         context: RunContext,
     ) -> AcStarkResult:
+        """Measure the qubit's AC Stark shift versus resonator drive gain.
+
+        Reset, launch stark_pulse1 without blocking, then play the
+        frequency-swept qubit probe stark_pulse2 and read out. Configure the
+        pulse timing for the intended overlap. Host gain points are uniform
+        in gain squared before hardware rounding; the FPGA sweeps probe
+        frequency. Return mean complex IQ shaped (Ngain, Nfreq), with
+        frequencies in MHz. ``earlystop_snr`` can end averaging per spectrum.
+        """
+        # Prepare probe frequencies and gain points spaced by nominal drive power.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -198,6 +212,8 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                 title=f"snr = {current_snr:.1f}" if current_snr else None,
             ),
         )
+
+        # Acquire one frequency trace per Stark gain, retaining its SNR early stop.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("resonator gain", gains.tolist()):
                 step_cfg = step.cfg
@@ -211,6 +227,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                     step.prog_builder(soc, soccfg)
                     .add(
                         Reset("reset", modules.reset),
+                        # Launch the Stark tone without waiting before the probe.
                         Pulse("stark_pulse1", modules.stark_pulse1, block_mode=False),
                         Pulse("stark_pulse2", modules.stark_pulse2),
                         Readout("readout", modules.readout),
@@ -235,6 +252,15 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         *,
         plots: Plots,
     ) -> AcStarkAnalysis:
+        """Convert the gain-squared Stark slope to a mean-photon calibration.
+
+        Extract Lorentzian qubit centers and fit frequency against gain
+        squared. Supply chi and kappa in MHz; ``deg`` must be 1 or 2, else
+        raise ValueError. ``cutoff`` excludes gains at or above that value.
+        Return ac_coeff for mean photon number = ac_coeff * gain**2, using
+        the linear coefficient and the dispersive correction from chi/kappa.
+        Publish ``fit``; source cfg may be None.
+        """
         result = source.result
         chi, kappa, deg, cutoff = (
             options.chi,
@@ -257,7 +283,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         gains2 = gains**2
         s_gains2 = s_gains**2
 
-        # fitting max_freqs with ax2 + bx + c
+        # Fit the Stark shift versus gain squared, allowing optional curvature.
         x2_fit = np.linspace(min(gains2), max(gains2), 100)
         if deg == 1:
             b, c = np.polyfit(s_gains2, s_freqs, 1)
@@ -268,7 +294,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         else:
             raise ValueError(f"Degree {deg} is not supported.")
 
-        # Calculate the Stark shift
+        # Convert the linear Stark slope to photons using the supplied chi/kappa.
         eta = kappa**2 / (kappa**2 + chi**2)
         ac_coeff = abs(b) / (2 * eta * chi)
 
@@ -326,21 +352,21 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 
 class AcStarkRamseyModuleCfg(ConfigBase):
     reset: ResetCfg | None = None
-    pi2_pulse: PulseCfg
-    stark_pulse: PulseCfg
+    pi2_pulse: Annotated[PulseCfg, FieldMeta(label="Ramsey pi/2 pulse")]
+    stark_pulse: Annotated[PulseCfg, FieldMeta(label="Stark resonator tone")]
     readout: ReadoutCfg
 
 
 class AcStarkRamseySweepCfg(ConfigBase):
-    gain: SweepCfg
-    length: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
+    length: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
 
 
 class AcStarkRamseyCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AcStarkRamseyModuleCfg
-    wait_delay: float
+    wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
     sweep: AcStarkRamseySweepCfg
-    detune: float = 0.0
+    detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
 
 class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
@@ -365,6 +391,17 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         *,
         context: RunContext,
     ) -> AcStarkRamseyResult:
+        """Measure Stark-induced Ramsey fringes versus tone gain and free delay.
+
+        After reset, start the fixed configured Stark pulse alongside
+        wait_delay -> pi/2 -> swept delay -> pi/2. Advance the final pulse's
+        phase by 360 * detune * delay (MHz times us), then read out after both
+        branches finish. Choose Stark duration and wait_delay for the desired
+        overlap. Host gains are spaced uniformly in gain squared before
+        rounding; the FPGA sweeps the Ramsey delay, not Stark pulse duration.
+        Return mean complex IQ on the (gain, delay) grid with delays in us.
+        """
+        # Prepare Ramsey delays and gain points spaced by nominal Stark power.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -397,6 +434,8 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
                 acstark_ramsey_signal2real(data),
             ),
         )
+
+        # At each Stark gain, sweep the Ramsey delay and its programmed phase.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("resonator gain", gains.tolist()):
                 step_cfg = step.cfg
@@ -410,6 +449,7 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
                     step.prog_builder(soc, soccfg)
                     .add(
                         Reset("reset", modules.reset),
+                        # Join waits for both the tone and the Ramsey branch.
                         Join(
                             Pulse("stark_pulse", modules.stark_pulse),
                             [
@@ -440,6 +480,14 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         *,
         plots: Plots,
     ) -> None:
+        """Plot Ramsey contrast and its FFT versus Stark gain squared.
+
+        ``cutoff`` excludes gains at or above that value. ``detune`` in MHz
+        selects a +/-5 MHz FFT window and is subtracted from its frequency
+        axis; set it to the acquisition detune when removing that offset.
+        Publish ``fit`` with per-gain normalized FFT magnitudes, not a fitted
+        Stark coefficient or coherence time. Source cfg may be None.
+        """
         result = source.result
         detune, cutoff = options.detune, options.cutoff
 

@@ -105,7 +105,7 @@ def _selector(target: Field, marker: ModuleSelector, env: FormEnv) -> LogicalSel
         )
     if target.name not in target.level.data:
         return LogicalSelector("missing", None, keys)
-    raw = target.level.data[target.name]
+    raw = target.level.value(target.name)
     if raw is None:
         return LogicalSelector("disabled", None, keys)
     if isinstance(raw, dict):
@@ -226,10 +226,10 @@ def _resolve(
     validate_path(path)
     if not path:
         raise FormPathError(path, "Root is not an editable field")
-    level = root_level(input.model, input.data, env)
+    level = root_level(input.model, input.data, env, input.selections)
     source: LogicalSource | None = None
     for index, name in enumerate(path):
-        if name not in level.model.model_fields:
+        if not level.has(name):
             raise FormPathError(path, f"Unknown logical field: {path!r}")
         if source is not None:
             source = replace(source, spec_path=(*source.spec_path, name))
@@ -266,7 +266,7 @@ def _shell(target: Field) -> tuple[type[FormModel], dict[str, JsonValue]]:
         value=(target.info.annotation, deepcopy(target.info)),
     )
     data = (
-        {"value": target.level.data[target.name]}
+        {"value": target.level.value(target.name)}
         if target.name in target.level.data
         else {}
     )
@@ -329,13 +329,22 @@ def _local_value(
     for key, value in values.items():
         current = subtree
         for part in key[1:-1]:
+            if not isinstance(part, str):
+                raise FormPathError(
+                    position.path, "Logical subtree requires model-field names"
+                )
             child = current.get(part)
             if not isinstance(child, dict):
                 child = {}
                 current[part] = child
             current = child
         if len(key) > 1:
-            current[key[-1]] = value
+            name = key[-1]
+            if not isinstance(name, str):
+                raise FormPathError(
+                    position.path, "Logical subtree requires model-field names"
+                )
+            current[name] = value
     return bool(subtree), subtree or None, errors
 
 
@@ -384,7 +393,7 @@ def _read_reference(
     target = position.target
     readonly = position.source is not None
     input_present = not readonly and target.name in target.level.data
-    raw = target.level.data.get(target.name) if input_present else None
+    raw = target.level.value(target.name) if input_present else None
     try:
         level, source = _content(position, env, path, writing=False)
     except LogicalSourceError as exc:
@@ -428,7 +437,7 @@ def read(
     validate_path(path)
     root = input.model
     if not path:
-        level = root_level(input.model, input.data, env)
+        level = root_level(input.model, input.data, env, input.selections)
         value, errors = _ordinary_level(level, env)
         observed = LogicalFieldObservation(
             FormDescription((), None, _children(level, (), root)),
@@ -448,7 +457,7 @@ def read(
     selector = _selector(target, marker, env) if marker is not None else None
     authored = position.source is None
     input_present = authored and target.name in target.level.data
-    raw = target.level.data.get(target.name) if input_present else None
+    raw = target.level.value(target.name) if input_present else None
     source = position.source
     if selector is not None and selector.mode == "key":
         observed = _read_reference(position, selector, metadata, env, root)
@@ -527,7 +536,7 @@ def _candidate(
         raise LogicalEditError(
             str(exc), reason_code="form_source", path=path, edit_index=index
         ) from exc
-    return LogicalEditCandidate(candidate, candidate.data != input.data)
+    return LogicalEditCandidate(candidate, not candidate.same_as(input))
 
 
 def edits(
@@ -608,7 +617,9 @@ def select(
     description = _metadata(position, input.model)
     selector = _selector(position.target, marker, env)
     if action == "copy" and selector.mode == "inline":
-        return LogicalEditCandidate(FormInput(input.model, input.data), False)
+        return LogicalEditCandidate(
+            FormInput(input.model, input.data, selections=input.selections), False
+        )
     if description.fixed or (action == "library" and description.selection_fixed):
         raise LogicalEditError(
             "Declaration forbids this selection",
@@ -665,7 +676,7 @@ def logical_errors(
         return None
     result: dict[FormPath, str] = {}
     for canonical, message in errors.messages.items():
-        level = root_level(input.model, input.data, env)
+        level = root_level(input.model, input.data, env, input.selections)
         logical: list[str | int] = []
         index = 0
         while index < len(canonical):

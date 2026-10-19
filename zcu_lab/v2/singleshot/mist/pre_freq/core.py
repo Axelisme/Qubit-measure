@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -13,7 +13,7 @@ from zcu_tools.analysis.singleshot import (
     correct_populations,
     raw_population_signal,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     MHZ_TO_HZ,
@@ -52,23 +52,23 @@ class PreFreqResult:
 
 
 class PreFreqModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg
-    pi_pulse: PulseCfg | None = None
-    probe_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg, FieldMeta(label="Preparation pulse")]
+    pi_pulse: Annotated[PulseCfg | None, FieldMeta(label="Pi pulse")] = None
+    probe_pulse: Annotated[PulseCfg, FieldMeta(label="MIST probe pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class PreFreqSweepCfg(ConfigBase):
-    freq: SweepCfg
+    freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
 
 
 class PreFreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PreFreqModuleCfg
     sweep: PreFreqSweepCfg
-    g_center: complex
-    e_center: complex
-    radius: float
+    g_center: Annotated[complex, FieldMeta(label="Ground center")]
+    e_center: Annotated[complex, FieldMeta(label="Excited center")]
+    radius: Annotated[float, FieldMeta(label="Classification radius")]
 
     @field_serializer("g_center", "e_center")
     def serialize_center(self, value: complex) -> str:
@@ -108,6 +108,19 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
     )
 
     def run(self, cfg: PreFreqCfg, *, context: RunContext) -> PreFreqResult:
+        """Measure MIST populations versus the preparation-pulse frequency.
+
+        After optional reset, sweep init_pulse frequency on the board, apply
+        the optional pi pulse, then the fixed probe pulse and readout.
+        Return rounded preparation frequencies (MHz) and classified G/E
+        fractions shaped (Nfreq, 2), averaged over shots and rounds.
+
+        cfg supplies distinct finite IQ centers and a positive finite radius.
+        Other is 1-G-E, not calibrated leakage; optional confusion correction
+        belongs to subsequent analysis.
+        """
+
+        # Sweep the preparation tone, not the later MIST probe.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -118,6 +131,7 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules.init_pulse.ch},
         )
 
+        # Show G/E and the unclassified remainder without altering saved fractions.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
             for line, label in zip(
@@ -143,6 +157,8 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
             modules = run_cfg.modules
             freq_sweep = run_cfg.sweep.freq
             modules.init_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+
+            # Vary initialization before the optional pi pulse and fixed probe.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add_reset("reset", modules.reset)
@@ -152,12 +168,15 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
                 .add_readout("readout", modules.readout)
                 .declare_sweep("freq", freq_sweep)
                 .build_and_acquire(
+                    # Classify individual shots, then average their G/E fractions.
                     raw2signal_fn=raw_population_signal,
                     g_center=cfg.g_center,
                     e_center=cfg.e_center,
                     ge_radius=cfg.radius,
                 )
             )
+
+        # Store G/E only; the Other curve is derived as 1-G-E.
         signals = buffer.array
 
         return PreFreqResult(freqs=freqs, signals=signals)
@@ -169,6 +188,12 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot G/E/Other populations versus preparation frequency in MHz.
+
+        Use the explicit run's G/E fractions, derive Other as 1-G-E, and apply
+        the optional confusion matrix. Publish a named fit figure without
+        estimating scalars. Historical data can be analyzed without cfg.
+        """
         result = source.result
         freqs, populations = result.freqs, result.signals
 

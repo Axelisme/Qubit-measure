@@ -12,7 +12,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, TypeGuard
 
-from zcu_tools.experiment.simulation import SimulationEnvironment, load_environment
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 from zcu_tools.gui.runtime import (
     GuiAssembly,
@@ -28,7 +27,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.session.services.predictor import ParamsFor
 
 RegistryFactory = Callable[[], tuple["Registry", "ExperimentCatalogLoader"]]
 
@@ -41,10 +39,10 @@ def _make_empty_ctx() -> SessionEnv:
 
 
 class MeasureGuiBehavior(GuiRuntimeBehavior):
-    """measure-gui wiring; params_for optionally injects user-owned component prefill.
+    """measure-gui wiring for user catalogs and shared session services.
 
-    registry_factory supplies catalogs after runtime setup. clean skips preference
-    restore; project_root anchors entry roots. Predictor queries never depend on
+    registry_factory supplies catalogs after runtime setup. clean skips saved
+    Qt layout and startup scripts; project_root anchors entry roots. Predictor queries never depend on
     dialog state. Assembly/source failures propagate without hidden retries.
     """
 
@@ -59,15 +57,19 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         registry_factory: RegistryFactory,
         *,
         clean: bool = False,
+        startup_script: Path | None = None,
         project_root: str | None = None,
-        params_for: ParamsFor | None = None,
         alias_presets: AliasPresets | None = None,
-        simulate: str | Path | None = None,
     ) -> None:
         """Build caller catalogs and retain complete alias data for assembly.
 
         ``registry_factory`` returns the registry (including templates) and reload loader
-        after runtime setup. ``clean`` skips restoring persisted preferences;
+        after runtime setup. ``clean`` skips saved Qt layout and startup scripts.
+        ``startup_script`` is the already-selected trusted Python path, or None
+        to run no script and show Setup. Composition chooses the default, not
+        this module. clean with a script raises ValueError. The script runs on
+        a background worker after the Qt loop starts. Errors keep completed
+        commands and show path/line diagnostics. Callback teardown runs on-owner.
         ``project_root`` anchors default paths, or uses the working directory.
         ``alias_presets`` maps preset names to ordered authored rows. Omitted
         or None means no catalog and an empty initial table. An explicit mapping
@@ -77,34 +79,28 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         composition, not a file location. Assembly uses default rows for the
         session's one-time unique-focus initialization. Saved entry tables take
         precedence, including empty tables. No device or cache binding occurs.
-        ``simulate`` selects a trusted Python builder at assembly, once per process.
-        Its successful return transfers ownership of the exact manager to this
-        composition; startup failure propagates and triggers manager cleanup.
         """
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (
             install_global_exception_hook,
         )
 
+        if clean and startup_script is not None:
+            raise ValueError("--clean and --script are mutually exclusive")
         validate_alias_presets(alias_presets)
         install_global_exception_hook(show_error_dialog)
         self._registry, self._catalog_loader = registry_factory()
         self._clean = clean
+        self._startup_script = startup_script
         self._project_root = project_root
-        self._params_for = params_for
         self.alias_presets: AliasPresets | None = alias_presets
-        self._simulate = simulate
-        self._environment: SimulationEnvironment | None = None
         self._assembled = False
-        self._environment_close_attempted = False
         self._controller: Controller | None = None
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         if self._assembled:
             raise RuntimeError("measure behavior can only assemble once")
         self._assembled = True
-        if self._simulate is not None:
-            self._environment = load_environment(self._simulate)
         try:
             return self._assemble(control)
         except Exception:
@@ -123,8 +119,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         )
 
         self._controller = ctrl
-        if self._environment is not None:
-            ctrl.install_startup_soc(self._environment.soc, self._environment.soccfg)
 
         adapter = None
         if control is not None:
@@ -144,23 +138,22 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
     def close(self, assembly: GuiAssembly | None) -> None:
-        """Drain app work before closing this environment's exact DeviceManager.
+        """Drain work, then close GUI-managed drivers and unpublish the board.
 
-        Runtime calls on both startup failure and normal exit. Driver close
-        failures retain registry entries and propagate; no hidden retry occurs.
-        Controller.close only drains, it never closes drivers itself.
+        Runtime calls on the Qt owner thread for startup failure or normal exit.
+        ``assembly=None`` uses the controller retained during assembly. Driver
+        failures are logged by Controller.close_hardware and do not prevent exit.
+        A drain timeout still raises TimeoutError; live work must not lose its
+        resources. Repeated successful calls do not retry failed driver closes.
         """
+        ctrl = self._controller
         if assembly is not None:
             if assembly.control_adapter is not None:
                 assembly.control_adapter.stop()
-            ctrl = assembly.controller
-            if _is_controller(ctrl):
-                ctrl.close()
-        if self._controller is not None:
-            self._controller.close()
-        if self._environment is not None and not self._environment_close_attempted:
-            self._environment_close_attempted = True
-            self._environment.devices.close_all_devices()
+            if _is_controller(assembly.controller):
+                ctrl = assembly.controller
+        if ctrl is not None:
+            ctrl.finish_close()
 
     def before_show(self, assembly: GuiAssembly) -> None:
         from qtpy.QtWidgets import QApplication
@@ -187,7 +180,17 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         assert _is_main_window(parent)
         # The same Setup a toolbar click opens: non-modal so the Qt event loop
         # (and the remote control socket) keeps pumping while it is visible.
-        parent.open_dialog(DialogName.SETUP)
+        if self._startup_script is not None:
+            ctrl = assembly.controller
+            assert _is_controller(ctrl)
+            script = self._startup_script
+
+            def start_script() -> None:
+                ctrl.start_startup(script)
+
+            ctrl.owner_scheduler.post(start_script)
+        else:
+            parent.open_dialog(DialogName.SETUP)
 
     def _build_window(
         self,
@@ -210,11 +213,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             bus=bus,
             project_root=project_root,
             catalog_loader=self._catalog_loader,
-            params_for=self._params_for,
             alias_presets=self.alias_presets,
-            device_registry=None
-            if self._environment is None
-            else self._environment.devices,
         )
 
         try:

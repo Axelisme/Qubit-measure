@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.measure.events.startup import StartupChangedPayload
 from zcu_tools.gui.app.measure.events.tab import (
     TabActivatedPayload,
     TabAddedPayload,
@@ -62,6 +63,9 @@ class MainWindowEventHost(Protocol):
     def refresh_context_panel(self) -> None: ...
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None: ...
+    def refresh_startup(self, payload: StartupChangedPayload) -> None:
+        """Render script progress/terminal and refresh Run availability."""
+        ...
 
 
 class _TabReaction(Enum):
@@ -203,6 +207,7 @@ class MainWindowEventCoordinator:
         self._subs.subscribe(
             bus, TabInteractionChangedPayload, self._on_tab_interaction_changed
         )
+        self._subs.subscribe(bus, StartupChangedPayload, self._on_startup_changed)
         self._subs.subscribe(bus, RunStartedPayload, self._on_run_started)
         self._subs.subscribe(bus, RunFinishedPayload, self._on_run_finished)
         self._subs.subscribe(bus, ContextSwitchedPayload, self._on_context_switched)
@@ -223,6 +228,9 @@ class MainWindowEventCoordinator:
         self, payload: TabInteractionChangedPayload
     ) -> None:
         self._react_to_tab(payload.tab_id, _INTERACTION_REACTIONS[payload.fact])
+
+    def _on_startup_changed(self, payload: StartupChangedPayload) -> None:
+        self._host.refresh_startup(payload)
 
     def _on_run_started(self, payload: RunStartedPayload) -> None:
         self._react_to_tab(

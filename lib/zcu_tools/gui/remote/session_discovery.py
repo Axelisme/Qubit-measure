@@ -33,6 +33,8 @@ import socket
 from pathlib import Path
 from typing import TypedDict
 
+from zcu_tools.utils.cache import user_cache_root
+
 logger = logging.getLogger(__name__)
 
 # The four apps that advertise a session. The slug is the discovery key shared by
@@ -55,14 +57,11 @@ class SessionEntry(TypedDict):
 def session_dir() -> Path:
     """The per-user directory holding one ``<app>.json`` per running GUI.
 
-    ``~/.cache/zcu-tools/sessions/``. This is a per-machine/per-user runtime fact
-    (the GUI and the MCP server run as the same user on the same host), so it
-    lives under the user cache, not inside any repo checkout. On Windows
-    ``Path.home()/".cache"`` is not the conventional cache location
-    (``%LOCALAPPDATA%`` is) — Windows support for this discovery path is
-    unverified; the repo's client runs on Linux.
+    Use ``<user_cache_root()>/sessions`` on every platform. GUI writers and MCP
+    readers must use the same user and cache-root environment on the same host.
+    An empty or relative ZCU_TOOLS_CACHE_DIR raises ValueError at this entrypoint.
     """
-    return Path.home() / ".cache" / "zcu-tools" / "sessions"
+    return user_cache_root() / "sessions"
 
 
 def _session_path(app: SessionApp) -> Path:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -27,12 +28,15 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     ParameterWriteback,
+    WritebackRequest,
 )
 from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSectionSnapshot,
     ArtifactSnapshot,
     SaveStatus,
 )
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.services.tab_form import (
     AcceptedFormConfig,
@@ -48,6 +52,11 @@ from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
@@ -56,7 +65,14 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._form_fakes import configure_form_lookup, make_form
+from tests.gui.app.measure._synthetic import (
+    SampleAdapter,
+    SampleAnalysis,
+    SampleRun,
+)
 from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 from tests.gui.widgets.form._text_input import commit_text
 
@@ -794,6 +810,115 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
         window.show_status_message.assert_called_once_with("Writeback applied: param-1")
     finally:
         window.remove_tab_widget("tab-1")
+
+
+@pytest.fixture
+def blocked_writeback_window(
+    tmp_path: Path, qapp: QApplication
+) -> Iterator[tuple[MainWindow, str]]:
+    class BlockedWritebackAdapter(SampleAdapter):
+        def get_writeback_items(
+            self, req: WritebackRequest[SampleRun, SampleAnalysis]
+        ) -> list[ParameterWriteback]:
+            return [
+                ParameterWriteback(
+                    "general.ext.blocked.sigma", "Nested calibration", 1.0
+                )
+            ]
+
+    registry = Registry()
+    registry.register("blocked-writeback", BlockedWritebackAdapter)
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        registry,
+        None,
+        EventBus(),
+        project_root=str(tmp_path),
+    )
+    ctrl.setup_control.new_entry(EntryRequest("synthetic"))
+    target = ctrl.setup_control.new_point(
+        PointCreateRequest("working", "", CommandOrigin("gui"))
+    )
+    ctrl.context_control.set_parameter(target, "general.ext.blocked", 3)
+    tab_id = ctrl.new_tab("blocked-writeback")
+    window = MainWindow(ctrl, templates=lambda: {})
+    ctrl.add_view(window)
+    window.add_tab_widget(tab_id, "blocked-writeback")
+    window.refresh_context_panel()
+    window.show()
+    try:
+        yield window, tab_id
+    finally:
+        ctrl.close()
+        ctrl.close_tab(tab_id)
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+
+
+def test_apply_failure_preserves_edited_draft_and_selection_without_closing_window(
+    blocked_writeback_window: tuple[MainWindow, str], tmp_path: Path
+) -> None:
+    window, tab_id = blocked_writeback_window
+    driver = ComponentDriver(window)
+    images = tmp_path / "apply-failure"
+    driver.screenshot(images / "01-ready.png")
+    driver.click("Run")
+    driver.select_tab("Analysis")
+    qt_until(
+        lambda: driver.observe("Analyze").enabled,
+        label="run result ready for analysis",
+    )
+    driver.click("Analyze")
+    qt_until(
+        lambda: driver.observe(object_name="writebackApply").enabled,
+        label="analysis writeback ready",
+    )
+    driver.screenshot(images / "02-proposal.png")
+    driver.click("Edit")
+    driver.enter_text(object_name="writebackValue", value="7.25", commit=False)
+    driver.screenshot(images / "03-edited.png")
+    driver.click("Save")
+    proposed = driver.observe(object_name="writebackProposed")
+    selected = driver.observe("general.ext.blocked.sigma*")
+    assert proposed.text == "7.25"
+    assert selected.checked is True
+    driver.screenshot(images / "04-draft.png")
+
+    # Exercise the public Qt boundary directly first: a missing exception
+    # barrier fails here without allowing the later real signal to abort pytest.
+    window.apply_tab_writeback(tab_id)
+    qt_until(lambda: bool(driver.dialogs()), label="direct Apply error visible")
+    error = driver.dialogs()[0]
+    assert error.title == "Writeback failed"
+    assert any("not a field container" in text for text in error.texts)
+    driver.screenshot(images / "05-boundary-failure.png")
+    driver.click("OK")
+
+    # This second attempt uses the shipped Apply signal and real mouse input.
+    driver.click("Apply Selected")
+    qt_until(lambda: bool(driver.dialogs()), label="clicked Apply error visible")
+    error = driver.dialogs()[0]
+    assert error.title == "Writeback failed"
+    assert any("not a field container" in text for text in error.texts)
+    driver.screenshot(images / "06-click-failure.png")
+    driver.click("OK")
+    qt_until(
+        lambda: (
+            tuple(
+                widget
+                for widget in driver.visible().widgets
+                if widget.object_name == "writebackProposed"
+            )
+            == (proposed,)
+        ),
+        label="retained proposal row after owner-loop refresh",
+    )
+    assert driver.observe("general.ext.blocked.sigma*") == selected
+    assert driver.observe("Apply Selected").enabled
+    assert "Writeback applied" not in driver.status().text
+    assert driver.tabs("Analysis").current == "Analysis"
+    driver.screenshot(images / "07-retained.png")
 
 
 def _status_bar_labels(window: MainWindow, text: str) -> list[QLabel]:
@@ -2112,7 +2237,7 @@ def test_window_drains_before_persisting_and_stopping_remote(control_factory, qa
     dialogs = RecordingDialogPresenter()
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     effects: list[str] = []
-    ctrl.close.side_effect = lambda: effects.append("drained")
+    ctrl.finish_close.side_effect = lambda: effects.append("drained")
     ctrl.persist_all.side_effect = lambda: effects.append("persisted")
     remote = MagicMock()
     remote.stop.side_effect = lambda: effects.append("remote stopped")
@@ -2135,7 +2260,7 @@ def test_window_timeout_waits_for_decision_and_retries(
     dialogs = _DeferredClosePresenter()
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
-    ctrl.close.side_effect = [
+    ctrl.finish_close.side_effect = [
         TimeoutError("still running"),
         TimeoutError("still running"),
         None,
@@ -2165,13 +2290,13 @@ def test_window_timeout_waits_for_decision_and_retries(
     qapp.processEvents()
     assert window.isVisible()
     assert len(dialogs.destructive_decisions) == 1
-    assert ctrl.close.call_count == 1
+    assert ctrl.finish_close.call_count == 1
 
     dialogs.destructive_decisions.pop(0)(False)
     qapp.processEvents()
     assert window.isVisible()
     assert len(dialogs.destructive_decisions) == 1
-    assert ctrl.close.call_count == 2
+    assert ctrl.finish_close.call_count == 2
     ctrl.persist_all.assert_not_called()
     remote.stop.assert_not_called()
 
@@ -2180,7 +2305,7 @@ def test_window_timeout_waits_for_decision_and_retries(
     assert not window.isVisible()
     ctrl.persist_all.assert_called_once()
     remote.stop.assert_called_once()
-    assert ctrl.close.call_count == 3
+    assert ctrl.finish_close.call_count == 3
 
 
 @pytest.mark.parametrize("programmatic", [False, True])
@@ -2188,7 +2313,7 @@ def test_window_timeout_requires_explicit_force(control_factory, qapp, programma
     dialogs = _DeferredClosePresenter()
     window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
-    ctrl.close.side_effect = TimeoutError("still running")
+    ctrl.finish_close.side_effect = TimeoutError("still running")
     remote = MagicMock()
     window.remote_control_service = remote
     window.show()
@@ -2209,7 +2334,7 @@ def test_window_timeout_requires_explicit_force(control_factory, qapp, programma
     assert not window.isVisible()
     ctrl.persist_all.assert_called_once()
     remote.stop.assert_called_once()
-    assert ctrl.close.call_count == 1
+    assert ctrl.finish_close.call_count == 1
 
 
 def test_tab_close_without_result_closes_immediately(control_factory, qapp):
@@ -2818,10 +2943,10 @@ def test_programmatic_request_shutdown_bypasses_unsaved_guard(control_factory, q
     assert len(dialogs.calls) == 0
     ctrl.begin_shutdown.assert_not_called()
     QCoreApplication.processEvents()
-    ctrl.close.assert_not_called()
+    ctrl.finish_close.assert_not_called()
     ctrl.persist_all.assert_not_called()
     _shutdown_callback(ctrl)()
-    ctrl.close.assert_called_once_with()
+    ctrl.finish_close.assert_called_once_with()
     ctrl.persist_all.assert_called_once_with()
     assert len(dialogs.calls) == 0
 

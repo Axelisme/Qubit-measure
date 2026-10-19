@@ -1,8 +1,10 @@
 # zcu_lab
 
-**Last updated:** 2026-10-18，元件子模組與共用模擬環境
+**Last updated:** 2026-10-20，預設 startup session policy、mux recipes、逐元素來源摘要與 predictor／component 解耦
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
+
+`startup.py` 是 Measure composition 注入的預設腳本。它在 user cache 的 `gui/measure-session.json` 保存自己的 session 紀錄，不使用 repo config 或 cwd。啟動依序嘗試 SoC、各 device、entry／point，再開帶 authored input 的 tabs。每項失敗寫 log，device 失敗保留未連線列，entry／point 失敗就跳過 tabs，不等之後補來源。最後狀態列列出 restored／failed／skipped 數。正常關閉時，腳本在 driver 關閉前讀取當時的狀態並原子寫回。Alias 仍由 entry 的 `aliases.yaml` 擁有，這份 cache 不保存 alias、硬體設定或量測資料。`--clean` 不執行腳本，`--script` 完全取代預設腳本。
 
 `v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬環境、參數檔與離線建庫入口。
 
@@ -10,7 +12,7 @@
 
 `templates.TEMPLATES` 是「新建 module／waveform」的持久範本來源。組合根以 `Registry(templates=TEMPLATES)` 注入一次；Library 新建直接讀 registry 的範本，不另建 catalog。`definitions.register_all` 註冊 adapters，並可用 `components` 傳入共用 ComponentRegistry。Reload 省略此 receiver，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 
-`components/` 擁有具體元件 model、wiring、module 槽與內建角色。`base.py` 放共用欄位與基礎元件；`qubit.py` 放共用 qubit 欄位、wiring 與 predictor 參數轉換。Fluxonium、transmon、resonator、JPA 與 mux 各有獨立子模組。`__init__.py` 提供公開匯出與明確註冊入口。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI 與 MCP 組合根明確 bootstrap；notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
+`components/` 擁有具體元件 model、wiring、module 槽與內建角色。`base.py` 放共用欄位與基礎元件；`qubit.py` 放共用 qubit 欄位與 wiring。Fluxonium、transmon、resonator、JPA 與 mux 各有獨立子模組。`__init__.py` 提供公開匯出與明確註冊入口。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI 與 MCP 組合根明確 bootstrap；notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
 
 `MuxGroupSchema` 以 `group/mux` 註冊於同一 ComponentRegistry。必填 resonators 保存 1 至 8 個有序名稱，取代 members，不留相容讀取。選填 qubits 必須等長且不重複。提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在、kind 正確，並逐項要求 qubits[i].resonator 等於 resonators[i]。錯誤指名欄位、index 與實際值。Resonators 不去重；沒有 qubits 的 onetone 保留手填 readout 與缺來源的既有政策。
 
@@ -33,7 +35,7 @@ Alias 變更不更新既有 input；Open／Reset 才讀新名稱。缺列、未�
 Framework 的 `RecipeTab` 只提供通用 cfg 操作、expression／library／field 讀取與 cached device snapshot。
 `recipes.helpers` 使用這些公開介面，擁有 frequency／flux 的來源順序、校準範圍與 device unit policy。明填 frequency 優先，其次是有效 library leaf，再讀 caller 指定的 calibration。`FrequencySweepCalibration` 明列 frequency／linewidth 路徑與 full-span 倍率。三個 resonator spectrum 的預設倍率為 freq 3、power 3、flux 2，點數沿 GUI 的 301／201／101。Helper 讀目前數值，集中算 span 與 numeric start／stop。無效 linewidth 在 sweep edit／Run 前拒絕，不從 raw expression 抽倍率。Twotone 的 center_mhz／span_mhz／points 與 flux survey 的 flux_range／flux_points 必填且不能為 null。Flux helper 只比 snapshot unit，成功後寫 cfg 的 device identity 與獨立 flux_unit。它不換算 native 座標，也不連裝置。
 
-Recipe 宣告摘要欄位，框架只捕捉其 value／source／unit。回覆 actual 用摘要名稱作平面 key，只列 recipe 代填值。整項 sweep 的來源全為 explicit 才省略，mixed sweep 保留完整值。全部明填時回 {}。Run 使用當前 cfg acceptance，不保存 cfg_ref 或 publication／input 副本。
+Recipe 宣告摘要欄位，框架捕捉其 value／source／unit。Static 摘要的 actual 只列 recipe 代填值，整項 sweep 全為 explicit 時省略，mixed sweep 保留完整值。七個 mux recipes 另用 SummaryElements 單次捕捉完整元素，未記錄來源的 tone leaf 以 default 標示，已記錄來源優先。Actual、native estimates 與候選附作者提供的原始位置／名稱，不從 participants row 推測。操作與來源界線見 [mux recipe guide](recipes/mux-guide.md)。Run 使用當前 cfg acceptance，不保存 cfg_ref 或 publication／input 副本。
 
 [`v2`](v2/README.md) 是實驗的使用者 namespace。每個實驗的 core 與可選 GUI、notebook 附件放在同一資料夾。Core 不依賴 GUI。
 
@@ -41,6 +43,4 @@ Recipe 宣告摘要欄位，框架只捕捉其 value／source／unit。回覆 ac
 
 本套件的實驗定義不寫個別測試。Framework owner 用最小合成 workflow／adapter 驗證 runtime、NotebookAdapter、GUI、MCP 與共用工具，不 import 本套件。刪掉 `zcu_lab/` 後，整套 pytest 仍須通過，包含 slow；實驗定義錯誤由 GUI 啟動或載入直接回報。Import-linter C16 禁止 `zcu_tools` 反向依賴本套件。
 
-`components.params_for(component)` 依 kind 讀 qubit 元件目前值。`qubit/fluxonium` 用 EJ／EC／EL 回 FluxoniumParams，`qubit/transmon` 用 EJmax／EC／d 回 TransmonParams。兩種 schema 共用 `QubitBaseSchema` 的通用欄位，不遷移也不兼容舊的 transmon 資料。
-Notebook 傳入 point.Q1；GUI composition 傳入隔離 capture 的 component model。
-缺項保留 None，ext.flux_bias 不代入預設值。參數與 Calibrate 不會回写元件。
+Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室 component 轉換輸入。

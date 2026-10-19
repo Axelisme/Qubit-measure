@@ -21,8 +21,8 @@ from dataclasses import dataclass, replace
 
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.owner import OwnerThreadGuard
-from zcu_tools.gui.project import ProjectInfo
 
 # VersionTable is the shared optimistic-concurrency mechanism (app-agnostic);
 # re-exported so ``state.VersionTable`` stays resolvable. dispersive's key set

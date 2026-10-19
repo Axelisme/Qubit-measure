@@ -2,10 +2,22 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from platformdirs import user_cache_dir
 
 from zcu_tools.gui.app.measure.artifacts import SaveControlFacet, SaveService
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
+from zcu_tools.gui.app.measure.startup_context import (
+    OwnerCalls,
+    StartupContext,
+    StartupDevices,
+    StartupParameters,
+    StartupSetup,
+    StartupSoc,
+    StartupTabs,
+)
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
@@ -17,7 +29,7 @@ from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
-from zcu_tools.gui.session.services.predictor import ParamsFor, PredictorService
+from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.types import ParameterContext
@@ -34,6 +46,7 @@ from .operation_gate import OperationGate
 from .post_analyze import PostAnalyzeService
 from .run import RunService
 from .run_analyze_control import RunAnalyzeControlFacet
+from .startup import StartupService
 from .tab import TabService
 from .tab_control import TabControlFacet
 from .tab_form import TabFormResources, TabFormSources
@@ -48,6 +61,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import (
         DeviceRegistryPort,
+        DriverFactoryPort,
         OwnerScheduler,
         ProgressTransport,
     )
@@ -76,6 +90,8 @@ class AppServices:
     is shared by run / analyze / post-analyze / device-setup operations.
     """
 
+    startup: StartupService
+    startup_context: StartupContext
     experiment_access: ExperimentAccess
     experiment_reload: ExperimentReloadService
     operation_gate: OperationGate
@@ -121,11 +137,14 @@ def build_app_services(
     owner_scheduler: OwnerScheduler,
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
-    params_for: ParamsFor | None = None,
     alias_presets: AliasPresets | None = None,
     device_registry: DeviceRegistryPort | None = None,
+    driver_factory: DriverFactoryPort | None = None,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
+
+    driver_factory supplies drivers for device_registry. None selects the
+    hardware factory; tests may inject a hardware-free constructor.
 
     ``alias_presets`` maps names to ordered caller-owned rows. Omitted or None
     means no catalog and an empty initial table. A supplied mapping must contain
@@ -152,6 +171,7 @@ def build_app_services(
         state=state,
         bus=bus,
         device_registry=device_registry,
+        driver_factory=driver_factory,
         gate=operation_gate,
         handles=handles,
         background=background,
@@ -160,7 +180,6 @@ def build_app_services(
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
         alias_rows=() if alias_presets is None else alias_presets["default"],
-        params_for=params_for,
     )
     session.device.publish_initial_devices()
     context = session.context
@@ -273,7 +292,23 @@ def build_app_services(
         active_operations=handles.live_count,
         access=access,
     )
+    startup = StartupService(runner, bus, state)
+    calls = OwnerCalls(owner_scheduler, bus)
+    startup_context = StartupContext(
+        soc=StartupSoc(calls, session.soc_connection, handles),
+        devices=StartupDevices(calls, device, handles),
+        setup=StartupSetup(calls, session.setup_control),
+        context=StartupParameters(calls, session.context_control),
+        tabs=StartupTabs(calls, tab_control),
+        calls=calls,
+        register_close=startup.on_close,
+        report_progress=startup.progress,
+        report_summary=startup.summary,
+        cache_root=Path(user_cache_dir("zcu_tools", "zcu_tools")) / "gui",
+    )
     return AppServices(
+        startup=startup,
+        startup_context=startup_context,
         experiment_access=access,
         experiment_reload=reload_service,
         operation_gate=operation_gate,

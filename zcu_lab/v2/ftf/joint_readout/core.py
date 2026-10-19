@@ -77,12 +77,7 @@ class JointReadoutCfg(ProgramV2Cfg, ExpCfgModel):
         """Require independent charge generators and in-range original tones."""
         if self.modules.x180_f1.ch == self.modules.x180_f2.ch:
             raise ValueError("F1/F2 Xπ pulses require different charge generators")
-        if self.roles.tone_count != len(self.modules.readout.tones):
-            raise ValueError("Readout must retain every tone of the captured mux group")
-        if max(self.roles.f1_tone, self.roles.f2_tone) >= len(
-            self.modules.readout.tones
-        ):
-            raise ValueError("Captured F1/F2 tones exceed the complete mux readout")
+        self.roles.validate_readout(self.modules.readout)
         return self
 
 
@@ -154,7 +149,7 @@ def _source_shots(
 
 
 class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]):
-    """Stateless four-branch acquisition, native persistence and offline analysis."""
+    """Measure joint readout outcomes after four thermal I/Xπ preparations."""
 
     AXES_SPEC = AxesSpec(
         axes=(
@@ -172,15 +167,20 @@ class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]
     def run(
         self, config: JointReadoutCfg, *, context: RunContext
     ) -> JointReadoutResult:
-        """Apply thermal I/X branches and retain each completed raw round.
+        """Measure same-shot mux IQ after nominal 00/01/10/11 preparations.
 
-        Schedule owns cancellation/error propagation. Host rounds each run a
-        single-round program, writing explicit (branch,round) slots on every
-        completed hook. The final callback overwrites, never appends. Unacquired
-        slots remain NaN. Caller checks cancel_signal.raise_if_error(); cfg is
-        not mutated, saved, or repaired from hardware/library. No simulator
-        truth or synthetic samples are used by this core.
+        Starting from thermal populations, apply Xπ to neither role, F2, F1,
+        or F1 then F2, respectively, and acquire one full mux read. There is no
+        reset, heralding or post-selection. Return raw IQ shaped
+        (4, rounds*reps, full tones) in original shot/tone order. Analyze counts
+        joint outcomes; its matrix includes preparation and readout effects,
+        not pure-state assignment probabilities.
+
+        Each completed host round overwrites its own slot; missing rounds stay
+        NaN. cfg is unchanged, and the caller checks cancel_signal.raise_if_error()
+        to distinguish an acquisition failure from a stop.
         """
+        # Retain each host round and every original tone instead of averaging IQ.
         cfg = config.model_copy(deep=True, update={"rounds": 1})
         ntones = len(cfg.modules.readout.tones)
         viewer = context.plots.liveplot_1d(
@@ -197,6 +197,8 @@ class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]
         buffer = SignalBuffer(
             (4, config.rounds, cfg.reps, ntones), on_update=update_view
         )
+
+        # Prepare each thermal branch independently, then perform one joint read.
         with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
             for branch, step in sched.scan("branch", list(range(4))):
                 builder = step.prog_builder(context.soc, context.soccfg)
@@ -205,6 +207,8 @@ class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]
                 if branch & 1:
                     builder.add_pulse("x180_f2", cfg.modules.x180_f2)
                 builder.add(MuxReadout("readout", cfg.modules.readout))
+
+                # Reuse this branch sequence and store completed raw rounds separately.
                 prog = builder.build()
                 for _, round_step in step.repeat("round", config.rounds):
                     _ = round_step.prog_builder(
@@ -212,6 +216,8 @@ class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]
                     ).run_program(
                         prog, raw2signal_fn=partial(collect_joint_shots, prog)
                     )
+
+        # Preserve round-major shot order when presenting the result.
         buffer.trigger_update(flush=True)
         return JointReadoutResult(
             np.arange(4, dtype=np.int64),
@@ -227,7 +233,11 @@ class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]
         *,
         plots: Plots,
     ) -> JointReadoutAnalysis:
-        """Count every shot of complete branches using only saved mapping/centers.
+        """Count same-shot joint outcomes and normalize each complete branch row.
+
+        Classify each role by its saved nearest GE center, without a radius cut,
+        then count 00/01/10/11 pairs directly rather than multiplying marginals.
+        Rows are nominal preparations; columns are observed joint outcomes.
 
         A complete branch requires every expected round. Partial raw survives,
         but counts/matrix rows stay NaN, with acquired/analyzed sample counts

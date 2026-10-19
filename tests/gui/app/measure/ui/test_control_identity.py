@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
 from zcu_tools.datafile import StoredRun
+from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import RestoredRun
@@ -61,13 +62,10 @@ from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
-from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.entry import component_registry
-from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
 from zcu_tools.resources.waveform_assets import FormulaRecipe
-from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
@@ -197,6 +195,10 @@ def control_ui(
     registry.register("loadable", ModalLoadAdapter)
     loader = Loader()
     loader.candidate.register("stoppable", StoppableAdapter)
+    devices = None
+    if getattr(request, "param", None) == "published-device":
+        devices = DeviceManager()
+        devices.register_device("bias", FakeDevice(fast_mode=False))
     ctrl = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,
@@ -205,6 +207,8 @@ def control_ui(
         owner_scheduler=QtOwnerScheduler(),
         project_root=str(tmp_path),
         catalog_loader=loader,
+        # Composition publishes injected simulation devices before UI/RPC use.
+        device_registry=devices,
     )
     ctrl.attach_caretaker(
         create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
@@ -233,6 +237,8 @@ def control_ui(
         client.close()
         remote.stop()
         ctrl.close()
+        if devices is not None:
+            devices.close_all_devices()
         ctrl.abort_shutdown()
         for tid in tuple(ctrl.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
@@ -394,22 +400,10 @@ def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
     assert ui.controller.get_running_tab_id() is None
 
 
+@pytest.mark.parametrize("control_ui", ["published-device"], indirect=True)
 def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
     ui = control_ui
     ui.connect()
-    connected = ui.rpc(
-        "device.connect", name="bias", type_name="FakeDevice", address="none"
-    )
-    assert connected["ok"]
-    # The admitted fake connect publishes terminal before setup can start.
-    assert (
-        ui.rpc(
-            "operation.await",
-            timeout=30,
-            operation_id=connected["result"]["operation_id"],
-        )["result"]["status"]
-        == "finished"
-    )
     snapshot = ui.rpc("device.snapshot", name="bias")
     assert snapshot["ok"], snapshot
     cfg = snapshot["result"]["snapshot"]["info"]
@@ -536,43 +530,6 @@ def test_setup_text_return_preserves_entry_input_and_cancel(control_ui, qapp, de
         assert "new-entry" not in entries
         assert ui.controller.setup_control.get_entry_info() == before
     button(setup, "Close").click()
-
-
-@pytest.mark.parametrize("decision", ["local", "cancel"])
-def test_predictor_file_return_preserves_path_and_cancel(
-    control_ui, qapp, tmp_path, decision
-):
-    ui = control_ui
-    path = tmp_path / "params.json"
-    QubitParams(str(path)).set_fluxdep_fit(FluxDepFit(5.0, 1.0, 0.5, 0.0, 1.0, 1.0))
-    ui.window.open_dialog(DialogName.PREDICTOR)
-    predictor = ui.window.findChild(PredictorDialog)
-    assert predictor is not None
-    before = predictor.parameters()
-    before_path = predictor.capture_state().params_path_text
-
-    def choose(dialog: QFileDialog) -> None:
-        dialog.selectFile(str(path))
-        if decision == "cancel":
-            dialog.reject()
-        else:
-            QMetaObject.invokeMethod(
-                dialog, "accept", Qt.ConnectionType.DirectConnection
-            )
-
-    modal_action(
-        qapp, lambda: button(predictor, "Browse").click(), [(QFileDialog, choose)]
-    )
-    after = predictor.parameters()
-    if decision == "local":
-        assert isinstance(after, FluxoniumParams) and after.EJ == 5.0
-        assert any(
-            edit.text() == str(path) for edit in predictor.findChildren(QLineEdit)
-        )
-    else:
-        assert after == before
-        assert predictor.capture_state().params_path_text == before_path
-    button(predictor, "Close").click()
 
 
 @pytest.mark.parametrize("operation", ["rename", "delete", "overwrite"])

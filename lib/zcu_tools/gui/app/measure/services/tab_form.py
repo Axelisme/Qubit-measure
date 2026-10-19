@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
@@ -30,6 +31,7 @@ from zcu_tools.gui.form import (
     FormWritePath,
 )
 from zcu_tools.gui.form_adapter import (
+    ElementsObservation,
     Form,
     FormContext,
     LogicalEdit,
@@ -37,6 +39,8 @@ from zcu_tools.gui.form_adapter import (
     LogicalFieldObservation,
     ModuleValues,
 )
+
+from .tab_input import TabInput
 
 _logger = getLogger(__name__)
 
@@ -86,7 +90,7 @@ class TabFormResource:
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
         mutation_allowed: Callable[[], bool],
         notification_active: Callable[[], bool] = lambda: False,
-        initial: Mapping[str, JsonValue] | None = None,
+        initial: Mapping[str, JsonValue] | TabInput | None = None,
     ) -> None:
         """Prepare default input using one capture before exposing the resource.
 
@@ -95,9 +99,12 @@ class TabFormResource:
         capture accepts one-shot named alias overrides, or None for global rows.
         mutation_allowed is the app busy/control policy; notification_active
         reports notifications in other tab resources. Neither callback may do
-        hardware I/O. initial optionally overlays saved compatible input on fresh
-        defaults; dropped_paths reports discarded leaves. Source captures are not
-        restored. Capture/default failures propagate without a resource.
+        hardware I/O. initial optionally supplies fixed FormInput {data,selections}
+        JSON, either as a detached mapping or opaque TabInput from to_json().
+        The form owner decodes with FormInput.from_json and recursively restores
+        on fresh defaults; dropped_paths reports discarded paths. Malformed JSON
+        raises ValueError. Source captures are not restored. Caller retains its
+        input; capture/default failures propagate without a resource.
         """
         self._capture = capture
         self._make_form = make_form
@@ -107,7 +114,15 @@ class TabFormResource:
         self._form = make_form(FormContext(self._sources.env.parameters))
         self._state = FormState(self._form.default_input(self._sources.env))
         self._dropped_paths = (
-            self._state.write_compatible(initial, self._sources.env)
+            self._state.restore_input(
+                FormInput.from_json(
+                    self._state.input.model,
+                    initial.form_json
+                    if isinstance(initial, TabInput)
+                    else json.dumps(initial),
+                ),
+                self._sources.env,
+            )
             if initial is not None
             else ()
         )
@@ -211,6 +226,16 @@ class TabFormResource:
             self._state.write(batch, self._sources.env)
             self._notify()
 
+    def select(self, path: FormWritePath, selection: JsonValue) -> None:
+        """Select one listed option under the same busy/lifetime/publication guard.
+
+        Only this operation executes the declaring converter. Value writes
+        remain exact raw replacements. Failure installs/publishes nothing.
+        """
+        with self._mutation():
+            self._state.select(path, selection, self._sources.env)
+            self._notify()
+
     def read_recipe_field(self, path: FormWritePath) -> LogicalFieldObservation:
         """Read one logical field using current input and the fixed capture.
 
@@ -296,11 +321,44 @@ class TabFormResource:
             self._notify()
         return candidate.changed
 
-    def read_module_kind(self, path: tuple[str, ...]) -> Literal["ref", "inline"]:
+    def read_elements(
+        self, path: FormWritePath, *, fields: tuple[FormWritePath, ...] = ()
+    ) -> ElementsObservation:
+        """Return all original elements in one readonly turn using fixed sources.
+
+        path is a canonical model-list field. The Form owner returns detached
+        authored input, partial values and directed errors for every element,
+        independent of picker/participants. Busy and notification reads are
+        allowed; revoked handles raise RESOURCE_GONE. Does not capture, convert,
+        lower native cfg, install input, notify or change UI focus.
+        fields requests nonempty relative logical paths, returned per element
+        in request order from this same input and capture. Invalid paths raise
+        FormPathError; unavailable fields retain directed errors and identity.
+        """
+        self._require_open()
+        return self._form.read_elements(
+            self._state.input, path, self._sources.env, fields=fields
+        )
+
+    def use_inline(self, path: FormWritePath) -> None:
+        """Copy one canonical core module from its capture under mutation guards.
+
+        path contains str field names and int original model-list positions.
+        Inline is a guarded no-op, even for invalid drafts. Ref invokes the same
+        to_inline command as the editor. Missing/disabled/nonmodule fields raise
+        ValueError; busy, revoked and reentrant calls reject before inspecting
+        input. Only a successful copy publishes, once. No source refresh occurs.
+        """
+        with self._mutation():
+            if self._form.module_input_kind(self._state.input, path) == "ref":
+                self._state.run_command(path, "to_inline", self._sources.env)
+                self._notify()
+
+    def read_module_kind(self, path: FormWritePath) -> Literal["ref", "inline"]:
         """Read one authored core module's tag without evaluating its draft.
 
-        path contains nonempty core field names, for example ("modules",
-        "qub_pulse"), not inline descendants or extras. Return ref or inline,
+        path contains str core field names and int original model-list indexes,
+        for example ("tones", 1, "drive"), not inline descendants or extras. Return ref or inline,
         even for partial input or invalid expressions. Unknown/nonmodule paths,
         disabled, missing or untagged input raise ValueError naming the field.
         Revocation raises CfgPreconditionError(RESOURCE_GONE). Busy and
@@ -311,11 +369,12 @@ class TabFormResource:
         self._require_open()
         return self._form.module_input_kind(self.input, path)
 
-    def read_module(self, path: tuple[str, ...]) -> ModuleValues:
+    def read_module(self, path: FormWritePath) -> ModuleValues:
         """Read one core module field using the fixed Open/Reset capture.
 
-        path contains nonempty core field names, not inline leaf paths. Unknown
-        or nonmodule paths raise ValueError. Return detached field-local values
+        path contains str core field names and int original model-list indexes,
+        not inline leaf paths. Unknown/inactive paths raise FormPathError;
+        a known nonmodule field raises ValueError. Return detached field-local values
         and origin, not native cfg after to_cfg or extras lowering. Other invalid
         fields do not block reads; this module's errors raise
         CfgPreconditionError(NOT_VALID). Revocation raises RESOURCE_GONE.
@@ -334,7 +393,7 @@ class TabFormResource:
     def run_command(self, path: FormWritePath, name: str) -> None:
         """Execute a current option's named command against the fixed capture.
 
-        path is a tuple of model-field names identifying an active field.
+        path is a typed tuple of field names/model-list indexes identifying an active field.
         name comes from field commands or selected option commands, for example
         run_command(("modules", "qub_pulse"), "to_inline"). The Form owner
         computes the replacement; this host never copies or refreshes sources.
@@ -351,17 +410,40 @@ class TabFormResource:
             self._state.run_command(path, name, self._sources.env)
             self._notify()
 
-    def write_compatible(self, saved: Mapping[str, JsonValue]) -> tuple[FormPath, ...]:
-        """Overlay compatible saved leaves and report discarded input paths.
+    def restore_input(self, saved: FormInput[FormModel]) -> tuple[FormPath, ...]:
+        """Restore saved authored input and report dropped paths using Core rules.
 
-        Preserve expression text and unfinished input. FormState owns branch/type
-        and source compatibility. Mutation guards match write; failures preserve
-        the entire input. No source is recaptured.
+        Preserve expression text, invalid leaf values and accepted explicit
+        selections. Busy/lifetime guards match write, but restoration does not
+        run owner input-change checks. No source is recaptured.
         """
         with self._mutation():
-            dropped = self._state.write_compatible(saved, self._sources.env)
+            dropped = self._state.restore_input(saved, self._sources.env)
             self._notify()
             return dropped
+
+    def refresh_sources(self, *, aliases: Mapping[str, str] | None = None) -> None:
+        """Recapture sources and revalidate without changing any authored input.
+
+        Call on the owner thread. aliases optionally overrides named bindings
+        for this capture only; it never changes the global table. Expression
+        drafts, explicit selections and previously resolved direct defaults stay
+        intact, including invalid input. Subscribers receive one publication
+        and can preview against the new capture. Capture or form-factory failures
+        preserve the previous input, definition and sources. Busy, revoked and
+        notification-reentrant calls raise CfgPreconditionError.
+        """
+        with self._mutation():
+            sources = self._capture(aliases)
+            form = self._make_form(FormContext(sources.env.parameters))
+            current = self._state.input
+            state = FormState(
+                FormInput(form.model, current.data, selections=current.selections)
+            )
+            self._sources = sources
+            self._form = form
+            self._state = state
+            self._notify()
 
     def reset(self, *, aliases: Mapping[str, str] | None = None) -> None:
         """Capture sources once and replace input with fresh authored defaults.
@@ -471,13 +553,14 @@ class TabFormResources:
         make_form: Callable[[FormContext], Form[C]],
         *,
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
-        initial: Mapping[str, JsonValue] | None = None,
+        initial: Mapping[str, JsonValue] | TabInput | None = None,
     ) -> TabFormResource:
         """Prepare one fixed capture and optional compatible restoration before registration.
 
         tab_id is a nonempty new app identity. make_form builds a catalog-bound
         definition; capture reads published sources on Open/Reset only. initial
-        is saved Form input JSON, never an old CfgSchema memento. Duplicate/empty
+        is native Form input JSON or opaque TabInput, never a cfg/result. Owner
+        thread only; caller retains input, pool owns the resource. Duplicate/empty
         identities raise ValueError; preparation failures leave no association.
         Notifications in any pooled resource forbid lifetime mutation.
         """

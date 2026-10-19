@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import time
+from typing import Any
+
 import numpy as np
 import pytest
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
@@ -86,6 +89,115 @@ def test_schedule_repeat_obeys_stop_signal():
         assert sched.outcome.status == "stopped"
 
     assert seen == [0]
+
+
+@pytest.mark.parametrize("stopped", [False, True], ids=["completed", "stopped"])
+def test_schedule_exit_publishes_throttled_final_data(
+    monkeypatch: pytest.MonkeyPatch, stopped: bool
+) -> None:
+    now = 100.0
+    updates: list[np.ndarray[Any, Any]] = []
+
+    def render(data: np.ndarray[Any, Any]) -> None:
+        nonlocal now
+        updates.append(data.copy())
+        # Rendering consumes virtual time; no wall-clock wait or race is needed.
+        now += 1.0
+
+    monkeypatch.setattr(time, "time", lambda: now)
+    buffer = SignalBuffer((2, 2), on_update=render)
+    partial = np.array([[1.0, 2.0], [np.nan, np.nan]])
+    final = np.array([[1.0, 2.0], [3.0, 4.0]])
+    with Schedule(FlowCfg(), buffer, stop=StopSignal()) as sched:
+        buffer.set(partial)
+        buffer.set(final)
+        assert len(updates) == 1  # The second write is still throttled.
+        np.testing.assert_array_equal(updates[-1], partial)
+        if stopped:
+            sched.set_stop()
+
+    np.testing.assert_array_equal(buffer.data, final)
+    np.testing.assert_array_equal(
+        updates[-1], final, err_msg="Schedule exit must publish the final buffer"
+    )
+    assert sched.outcome.status == ("stopped" if stopped else "completed")
+
+
+@pytest.mark.parametrize("delivery", ["flush", "elapsed"])
+def test_schedule_exit_does_not_repeat_delivered_update(
+    monkeypatch: pytest.MonkeyPatch, delivery: str
+) -> None:
+    now = 100.0
+    updates: list[np.ndarray[Any, Any]] = []
+
+    def render(data: np.ndarray[Any, Any]) -> None:
+        nonlocal now
+        updates.append(data.copy())
+        now += 1.0
+
+    monkeypatch.setattr(time, "time", lambda: now)
+    buffer = SignalBuffer((2,), on_update=render)
+    final = np.array([1.0, 2.0])
+    with Schedule(FlowCfg(), buffer, stop=StopSignal()):
+        buffer.set(np.array([1.0, np.nan]))
+        buffer.set(final)
+        assert len(updates) == 1
+        if delivery == "flush":
+            buffer.trigger_update(flush=True)
+        else:
+            now = 200.0
+            buffer.trigger_update()
+        assert len(updates) == 2
+        np.testing.assert_array_equal(updates[-1], final)
+
+    assert len(updates) == 2, "Schedule exit must not repeat delivered data"
+
+
+@pytest.mark.parametrize("interrupted", [False, True], ids=["exception", "interrupt"])
+def test_schedule_body_exception_is_not_replaced_by_final_callback_failure(
+    monkeypatch: pytest.MonkeyPatch, interrupted: bool
+) -> None:
+    now = 100.0
+    fail_render = False
+
+    def render(data: np.ndarray[Any, Any]) -> None:
+        nonlocal now
+        now += 1.0
+        if fail_render:
+            raise RuntimeError("presentation failed")
+
+    monkeypatch.setattr(time, "time", lambda: now)
+    buffer = SignalBuffer((2,), on_update=render)
+    stop = StopSignal()
+    sched = Schedule(FlowCfg(), buffer, stop=stop)
+    error = (
+        KeyboardInterrupt("body interrupted")
+        if interrupted
+        else ValueError("body failed")
+    )
+
+    def run() -> None:
+        nonlocal fail_render
+        with sched:
+            buffer.set(np.array([1.0, np.nan]))
+            buffer.set(np.array([1.0, 2.0]))
+            fail_render = True
+            raise error
+
+    if interrupted:
+        run()
+        assert sched.outcome.status == "interrupted"
+        assert sched.outcome.exception is error
+        with pytest.raises(ScheduleOutcomeError) as caught:
+            stop.raise_if_error()
+        assert caught.value.__cause__ is error
+    else:
+        with pytest.raises(ValueError, match="body failed") as caught_body:
+            run()
+        assert caught_body.value is error
+        assert sched.outcome.status == "completed"
+        assert stop.error is None
+    np.testing.assert_array_equal(buffer.data, [1.0, 2.0])
 
 
 def test_schedule_step_data_operations_require_context() -> None:

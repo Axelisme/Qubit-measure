@@ -19,10 +19,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
-from zcu_tools.gui.project import is_real_project
+from zcu_tools.gui.app.analysis_project.project import is_real_project
+from zcu_tools.gui.app.analysis_project.readonly_handlers import h_project_info
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.readonly_handlers import (
-    h_project_info,
     h_resources_versions,
 )
 

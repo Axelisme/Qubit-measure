@@ -12,13 +12,8 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QSpinBox,
 )
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
-from zcu_tools.gui.app.measure.services.persistence_types import (
-    AppPersistedState,
-    PersistedStartup,
-)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
@@ -33,23 +28,11 @@ from tests.gui.app.measure._app_launch import (
     visible_setup_dialogs,
 )
 
-_SAVED = AppPersistedState(
-    startup=PersistedStartup(
-        entry_name="chipR",
-        ip="10.1.2.3",
-        port=4321,
-    )
-)
-
 
 def _field_texts(dialog: SetupDialog) -> set[str]:
     return {edit.text() for edit in dialog.findChildren(QLineEdit)} | {
         combo.currentText() for combo in dialog.findChildren(QComboBox)
     }
-
-
-def _port_values(dialog: SetupDialog) -> list[int]:
-    return [spin.value() for spin in dialog.findChildren(QSpinBox)]
 
 
 def _button(dialog: SetupDialog, text: str) -> QPushButton:
@@ -73,14 +56,13 @@ def _reopen_setup(app: LaunchedMeasureApp, qapp: QApplication) -> SetupDialog:
 
 
 @pytest.mark.uses_wall_clock
-def test_restored_settings_prefill_one_setup_that_survives_screenshot_and_toolbar(
+def test_setup_survives_screenshot_and_toolbar(
     qapp: QApplication, tmp_path: Path
 ) -> None:
-    with launched_measure_app(qapp, tmp_path, restore=_SAVED) as app:
+    with launched_measure_app(qapp, tmp_path) as app:
         (dialog,) = visible_setup_dialogs(app.window)
-        assert {"chipR", "10.1.2.3"} <= _field_texts(dialog)
-        assert 4321 in _port_values(dialog)
-        # Restoring only prefills: nothing is applied and nothing connects.
+        initial_fields = _field_texts(dialog)
+        # Opening Setup alone does not apply entry or connection changes.
         assert not app.controller.has_project()
         assert not app.controller.has_soc()
 
@@ -112,7 +94,7 @@ def test_restored_settings_prefill_one_setup_that_survives_screenshot_and_toolba
         assert visible_setup_dialogs(app.window) == [dialog]
 
         reopened = _reopen_setup(app, qapp)
-        assert {"chipR", "10.1.2.3"} <= _field_texts(reopened)
+        assert _field_texts(reopened) == initial_fields
         assert not app.controller.has_project()
         assert not app.controller.has_soc()
 

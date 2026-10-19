@@ -1,29 +1,30 @@
-**Last updated:** 2026-10-18，隔離資料 project 啟動
+**Last updated:** 2026-10-20，MCP startup script selection、Writeback destination 摘要與 Predictor filename sources
 
 # `zcu_tools/mcp/measure/`
 
 Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。GUI core 不 import MCP。GUI `RemoteMethodEntry` 擁有 wire schema、exposure、readonly 與 operation policy。MCP 每次連線讀取 live `rpc.catalog`，不複製 policy 表，也不依 catalog 動態建立 tools。
 
-## Startup environment
+## Startup scripts
 
-`connect(..., simulate="/absolute/path/environment.py")` forwards the path only
-when this call launches a new GUI. The Python file is trusted code with a
-zero-argument `build_environment`. Explicit paths on attach, including an
-already-connected early return or `if_missing` finding an existing GUI, fail with
-`environment_requires_new_gui`. The existing GUI is unchanged. Close it and use
-`launch="new"` to select another environment. Attach without a path is unchanged.
-There is no dynamic simulation tool or initialization RPC.
+`connect(..., script="/absolute/path/startup.py")` forwards trusted
+`startup(ctx)` code only when this call launches a new GUI. An explicit script
+replaces the composition-supplied default. Omitting it uses the default;
+`clean=True` skips all scripts and conflicts with an explicit script. Scripts
+may connect hardware; launch only reviewed code with the required authorization.
 
-`connect(launch="new", project_root="/absolute/existing/directory", simulate="...")`
-starts an offline GUI with a separate data root. Omit `project_root` to use the
-repo root. MCP checks only the supplied type and forwards the string unchanged.
-The launcher requires an absolute path to an existing directory before assembling
-the GUI. Entry owners create `result/` and `Database/` when needed. Code, lab
-catalogs, logs and simulation-path resolution keep their existing roots.
-An explicit data root on attach fails with `project_root_requires_new_gui`,
-including repeated connect and `if_missing` finding an existing GUI. No rebind or
-silent ignore occurs. Use `entry.open(name=...)` for a prebuilt entry under that
-root, then explicitly select a point; entry names remain single path segments.
+Explicit paths on attach, including an already-connected early return or
+`if_missing` finding an existing GUI, fail with `script_requires_new_gui`.
+The existing GUI is unchanged and startup never reruns on attach. Close it and
+use `launch="new"` to select another script.
+
+`connect(launch="new", project_root="/absolute/existing/directory", script="...")`
+selects a separate data root. Omit `project_root` to use the repo root. MCP
+forwards path strings unchanged; the launcher validates the data directory
+before assembly. Entry owners create `result/` and `Database/` when needed.
+Code, catalogs, logs and script-path resolution keep their existing roots.
+An explicit data root on attach fails with `project_root_requires_new_gui`.
+The [FTF startup example](../../../../zcu_lab/simulation_envs/FTF/README.md)
+creates its entry, first point and tab without a separate entry CLI or setup RPC.
 
 ## 固定工具與 RPC
 
@@ -45,11 +46,11 @@ Device setup 保留 pre_read、start、wait、post_read、requested、before/aft
 
 日常量測優先 recipe，既有資料分析使用共用分析工具。細部 setup、cfg、保存、writeback 及排查由 RPC 承接。日常／排查是使用指引，不是權限模式。`rpc_call` 接受 catalog 中全部 `rpc` 與 `tool` methods；tool 名稱只提示高層入口。GUI 仍驗證每次操作。公開 method 的參數、回覆及前置條件由 `rpc_describe` 提供。
 
-Predictor 透過 `rpc_call(method="predictor.predict"|"predictor.calibrate"|"predictor.info", params=...)` 查詢。每次恰填一個來源：`qubit="Q2"` 讀目前選定工作點的具體元件，或 `params={"model":"transmon","EJmax":20,"EC":0.25,"d":0.1,"flux_half":0,"flux_period":1,"flux_bias":0}`（SQUID transmon，d 為 junction asymmetry），或 `params={"model":"fluxonium","EJ":5,"EC":1,"EL":0.5,"flux_half":0,"flux_period":1,"flux_bias":0}` 做獨立試算。qubit 不解析 alias 或 path。直接參數不需要工作點，不讀 dialog/cache。能量用 GHz；flux_half、flux_period、flux_bias 與 device_value 用來源的 native device units，不是 flux quanta；frequency_mhz 與預測頻率用 MHz。
+Predictor 透過 `rpc_call(method="predictor.predict"|"predictor.calibrate"|"predictor.info", params=...)` 查詢。每次恰填一個來源：`filename="fitted.json"` 讀 opened entry 的 `predictors/fitted.json`，或 `params={"model":"transmon","EJmax":20,"EC":0.25,"d":0.1,"flux_half":0,"flux_period":1,"flux_bias":0}`（SQUID transmon，d 為 junction asymmetry），或 `params={"model":"fluxonium","EJ":5,"EC":1,"EL":0.5,"flux_half":0,"flux_period":1,"flux_bias":0}` 做獨立試算。filename 必須包含 `.json`，不接受 path、component 或 alias，也不需要選定工作點。直接參數等同 dialog 手動輸入，不需要 entry。兩種來源都不讀 dialog/cache。能量用 GHz；flux_half、flux_period、flux_bias 與 device_value 用來源的 native device units，不是 flux quanta；frequency_mhz 與預測頻率用 MHz。
 
 `predictor.info` 回 `{model, params, missing}`，省略或 null 欄位保持未知。Predict 另填 device_value，Calibrate 另填 device_value 與 frequency_mhz。兩者需要完整有效參數，可填 from_level/to_level，預設 0/1。Calibrate 回 `{flux_bias_before, flux_bias_after, frequency_mhz, clamped}`，不寫元件、dialog 或檔案。兩種模型都選最小絕對 bias 的根，不選最接近目前 bias 的根。frequency_mhz 是實際達到的 MHz。不可達目標回全域最近頻率並標 clamped=true，同距時選最小絕對 bias。可達目標標 clamped=false。無效輸入仍拒絕，數值求解失敗不以 fallback 掩蓋。
 
-來源皆未填或同時填回 `invalid_params/invalid_predictor_source`；無效具體元件名稱回 `invalid_predictor_qubit`；直接參數格式或物理值無效回 `invalid_predictor_params`。計算缺欄位回 `missing_predictor_params`，message 與 data.missing 列出缺項。工具沿 GUI 的 live catalog 描述與錯誤傳遞，不另建參數或寫回邏輯。沒有 target、load/set/clear 或 installed model。
+filename 與 inline params 必須恰一個非 null。省略與 null 都視為未給。皆未給或皆給非 null 回 `invalid_params/invalid_predictor_source`。檔名或內容無效回 `invalid_params/invalid_predictor_file`。檔案無法讀取回 `precondition_failed/predictor_file_unavailable`；未開 entry 回 `precondition_failed/no_entry`。直接參數格式或物理值無效回 `invalid_predictor_params`。計算缺欄位回 `missing_predictor_params`，message 與 data.missing 列出缺項。工具沿 GUI 的 live catalog 描述與錯誤傳遞，不另建參數或寫回邏輯。沒有 target、load/set/clear 或 installed model。
 
 Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.connect` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
 
@@ -59,19 +60,25 @@ Recipe helper 分成「工作步驟」與「交還控制權」。工作步驟以
 
 需要交還控制權做寫回判斷時，作者用 `decision = yield from ask(run.propose_writeback())`，回傳 `WritebackResult`。`decision.status` 為 completed 時，`decision.decision` 是 accepted 或 skipped；cancelled 時為 None。`ask` 只接受已捕捉的 WritebackQuestion，不寫入資料。Opaque operation 不可迭代，也不能直接 yield；driver 會拒絕並提示 helper 寫法。Driver 將具名結果放在 operation.delivery，以 None 推進 generator，原有 completion failure 仍 throw 到作者的 helper 呼叫處。
 
-`RecipeTab` 的欄位、origins 與 summary 宣告使用 logical paths。例如 `modules.readout.freq`、`modules.qub_pulse.waveform.length`。Adapter 只隱藏生成器加入的 wrapper，真實名為 module 的欄位仍保留。Range count 是 n，`set_sweep` 的公開 expts 參數送出時轉為 n。完整 start／stop／expts 以一次 container edit 選 Range + Expts，可覆蓋無效 Center／Step draft；部分設定只編輯 active leaves，不在 caller 換算座標或採樣。細部切換先讀 `tab.describe_cfg` 的 active 數值欄位 commands，再由 `rpc_call` 呼叫 `tab.run_cfg_command`，沒有額外高階 tool。Step 的 input 是 authored 原稿，value／values 明示有效端點，讀取不改 input。
+`RecipeTab` 的欄位、origins 與 summary 宣告使用 typed logical paths。作者傳非空 tuple，例如 `("modules", "readout", "freq")` 或 `("tones", 1, "drive", "gain")`。Str 是原始欄位名，int 是完整 list 的原始位置。數字字串仍是欄位名，不拆 dotted string，不以元素 name 或 participants 順序解讀位置。Adapter 只隱藏生成器加入的 wrapper，真實名為 module 的欄位仍保留。Range count 是 n，`set_sweep` 的公開 expts 參數送出時轉為 n。完整 start／stop／expts 以一次 container edit 選 Range + Expts，可覆蓋無效 Center／Step draft；部分設定只編輯 active leaves，不在 caller 換算座標或採樣。細部切換先讀 `tab.describe_cfg` 的 active 數值欄位 commands，再由 `rpc_call` 呼叫 `tab.run_cfg_command`，沒有額外高階 tool。Step 的 input 是 authored 原稿，value／values 明示有效端點，讀取不改 input。
 
-`read_field` 每次送一次 `tab.read_recipe_field`。同一 owner turn 回傳 metadata、authored input、ordinary value、value_status、selector/source、readonly 與局部 logical errors。Input_present 區分未填與 null。Value_status 區分 available、missing 與 unavailable；available 的 null 是有效觀察。Value 與局部 errors 不證明整份 cfg 有效，get_cfg 與 Run admission 仍檢查 cfg。
+`read_field` 每次送一次 `tab.read_recipe_field`，將同一 owner turn 的回覆投影成公開 `RecipeFormField`。它包含 metadata、authored input、ordinary value、value_status、selector/source、via_ref 與局部 logical errors。MCP 將 owner observation／wire 的 `readonly` 投影為 `RecipeFormField.via_ref`，不改 owner 或 wire 欄位名稱。Input_present 區分未填與 null。Value_status 區分 available、missing 與 unavailable；available 的 null 是有效觀察。Value 與局部 errors 不證明整份 cfg 有效，get_cfg 與 Run admission 仍檢查 cfg。
 
-Mode/key 只來自 owner 的 selector。普通 scalar 不繼承祖先 mode，library key 也不是 scalar 值。Locked 使用 fixed 或 selection_fixed，不從 readonly 或選單數量推導。Fields 是 logical direct children，ref selector 可列 captured Spec 的可讀欄位。穿過 ref 的值沒有 authored input，source 指明最近 supplying selector、actual key、namespace 與 Spec path。讀取不 materialize input、不 refresh capture，也不授權後續寫入。
+Mode/key 只來自 owner 的 selector。普通 scalar 不繼承祖先 mode，library key 也不是 scalar 值。`RecipeFormField.locked` 是 selection_fixed、fixed 與宣告 readonly 三者的 or，不從當次選單數量推導。Core cfg 自有的單值 Literal 仍算固定值。`via_ref` 表示路徑穿過 library 引用，不表示宣告唯讀。Fields 是 logical direct children，ref selector 可列 captured Spec 的可讀欄位。穿過 ref 的值沒有 authored input，source 指明最近 supplying selector、actual key、namespace 與 Spec path。讀取不 materialize input、不 refresh capture，也不授權後續寫入。
 
-`use_library(field, name)` 直接送一次 `tab.select_recipe_module`。Owner 檢查 actual key、family、選單與宣告限制，MCP 不遍歷 Option 或組 ref JSON。Name=None 保留 input，fresh read 檢查現況；required 缺有效 key 回 MissingParameter，不記成功來源。明填成功記 explicit，保留成功記 gui_default。`disable_library` 送 disable，nullable 與 lock 由 owner 檢查，成功記 disabled。
+`use_library(field, name)` 直接送一次 `tab.select_recipe_module`。Owner 檢查 actual key、family、選單與宣告限制，MCP 不遍歷 Option 或組 ref JSON。Name=None 保留 input，fresh read 檢查現況；required 缺有效 key 回 MissingParameter，不記成功來源。明填成功記 explicit，保留成功記 gui_default。`disable_library` 送 disable，nullable 與唯讀限制由 owner 檢查，成功記 disabled。
 
 `use_inline` 送同一 selector RPC 的 use_inline action，從固定 capture 明確複製。先逐層複製 ref 祖先，再改內容。外層 copy 保留 child key，child selector 仍需另行 copy。既有 inline 是 guarded no-op，holder、busy、lifetime 與通知重入仍可拒絕。Missing、disabled 與 unresolved 不建立預設內容。Copy 已成功而下一次 set 失敗時，不回滾 copy。
 
-`set`、`set_fields` 與 `set_sweep` 把 supplied logical edits 一次送 `tab.edit_recipe_fields`，不預讀 canonical mapping。None 保留 input 並記 gui_default，全 None 或空批次不送 mutation。Expression 原文保持不變。Owner 在同一 turn 解析全部 paths、檢查 admission 並提交，結構、來源或 ref 祖先拒絕不留成功前綴。一般 invalid draft 仍會安裝；MCP 回 invalid_cfg 時保留 owner draft，且不記成功 provenance。
+`set_integer_points(field, values)` 以一次完整 List 分支替換 Log／List 整數欄位。values 是整數清單，None 保留 GUI 原稿與分支；方法不產生掃描點、不增加 RPC。非空與正值限制由 Form owner 驗證，invalid_cfg 保留無效 List 原稿。
 
-`RecipeTab.read_module(field)` 保留明確 materialization 的用途，回 detached module values、mode 與 source。它不實作 read_field 或 summary scalar。`retain_module_source(field, summary_field=..., value_path=...)` 要求 summary_field 與 field 加 value_path 指向同一 logical scalar，透過 logical read 記來源，不拆 wrapper 或 materialize。Caller 也可讀 source.key，再用 `retain_source` 記 `library:<key>`。這些 labels 只影響呈現，不改值或寫入權限。
+`set`、`set_fields` 與 `set_sweep` 把 supplied logical edits 一次送 `tab.edit_recipe_fields`，不預讀 canonical mapping。None 保留 input 並記 gui_default，全 None 或空批次不送 mutation。Expression 原文保持不變。Owner 在同一 turn 解析全部 paths、檢查 admission 並提交，結構、來源、宣告唯讀或 ref 祖先拒絕不留成功前綴。一般 invalid draft 仍會安裝；MCP 回 invalid_cfg 時保留 owner draft，且不記成功 provenance。
+
+宣告唯讀由 Form core 統一執行，同值寫入通過，不同值拒絕，父層或批次寫入不能繞過唯讀子欄位。拒絕保留 `error.reason="form_input_rejected"` 與 `error.data.form_path`，唯讀拒絕另帶 `error.data.reason="readonly"` 與目前值的 JSON 形式 `error.data.current`；其他 rejection 不帶這兩個欄位。
+
+子欄位唯讀不限制祖先 module 選 library key。Module 節點本身標唯讀則固定 ref／inline 選擇與全部子欄位，不論初值是 ref 或 inline；它不自動強制 inline，也不另設 selector-only 宣告。
+
+`RecipeTab.read_module(field)` 保留明確 materialization 的用途，回 detached module values、mode 與 source。Field 使用非空 typed tuple，str 是欄位名，int 是完整 model-list 的原始位置，原樣交共同 owner。Wire 的 `tab.read_module` 與專用 `tab.use_inline` 同樣接受 typed array，不轉 dotted string。它不實作 read_field 或 summary scalar。一次觀察全部元素可用 `rpc_call(method="tab.read_elements", params={"tab_id": ..., "path": ["tones"]})`。GUI owner 一次回完整元素的 authored input、可用 canonical preview leaves 與定向錯誤，MCP 不逐元素拼接或保存名稱排序表。`retain_module_source(field, summary_field=..., value_path=...)` 要求 summary_field 與 field 加 value_path 指向同一 logical scalar，透過 logical read 記來源，不拆 wrapper 或 materialize。Caller 也可讀 source.key，再用 `retain_source` 記 `library:<key>`。這些 labels 只影響呈現，不改值或寫入權限。
 
 Run 前仍走 get_cfg 與原有 admission，再 fresh capture summary_parameters 指名的 logical fields。Scalar 使用 ordinary value，selector 摘要才使用 actual key。Missing、unavailable 或有相關 errors 的值不當成成功 null。當次 facts 已 detached，後來 Edit、Reset 或 library 更新不改舊 Run 摘要。
 
@@ -81,7 +88,7 @@ Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核
 
 `twotone_spectrum` 的 center_mhz／span_mhz／points 必填。三個 resonator spectrum 可省略 frequency range，domain helper 讀目前 frequency／linewidth 後寫數字 endpoints。正式 freq／power／flux 的 full-span 倍率為 3／3／2，省略 count 保留 GUI 值。四個 spectrum 摘要只保 sweep，不另計 center／span。Frequency／flux／unit policy 由 zcu_lab.recipes.helpers 擁有。
 
-`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗 carrier 與 label，再以一次 edit_recipe_fields 交 owner 驗證與寫入；None 保留值並標 gui_default。Retain_source 以 fresh logical read 檢查欄位，再記 caller 選好的 scalar/sweep label，不改 Form input。Framework 不解讀 calibration、角色或 linewidth。
+`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields、set_sweep 與 set_integer_points。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗 carrier 與 label，再以一次 edit_recipe_fields 交 owner 驗證與寫入；None 保留值並標 gui_default。Retain_source 以 fresh logical read 檢查欄位，再記 caller 選好的 scalar/sweep label，不改 Form input。Framework 不解讀 calibration、角色或 linewidth。
 
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
 
@@ -101,6 +108,101 @@ Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁
 
 Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。`recipe_execution.py` 擁有 generator、單一 recipe admission、一次性取消、captured question 與 typed snapshot。它以同一 worker 完成 author handles；analysis 共用 driver 的本地 condition 交付進度。Session 與 tool table 使用必填的同一份注入 definitions。Guide 與 analysis-only scalar estimates 也讀 owning registry。單一 recipe 包含 interactive 與 awaiting_answer；terminal 之後才放行下一個呼叫。
 
+## Variable element reporting
+
+同一個 `RecipeDefinition` 可以處理每次 Reset 後不同長度的完整 list。
+`SummaryElements` 在 Run 前以一次 `tab.read_elements` 取得全部元素及指定 logical leaves。
+`field` 是完整 list 的 canonical path，`parameters` 的 paths 相對於每個元素。
+`source` 是作者明訂的 fallback 標籤，只用於尚未記錄 origin 的葉。
+`tab.set`、`set_fields`、`set_sweep` 或 `retain_source` 記錄的逐葉來源優先。
+缺值、invalid observation 或 owner 拒絕仍會失敗，不會變成 default 值。
+
+以下函式可放進作者的 recipe module，傳入既有 definition。
+它保留 run、inputs 與 adapter，只替換 reporting 宣告。
+Form 必須已有 `FixedElements(("tones",), "name", ("participants",))`。
+依實際 cfg 調整 relative leaves，不宣告另一條 name 來源 path。
+
+```python
+from dataclasses import replace
+
+from zcu_tools.mcp.measure.execution_reply import (
+    SummaryElements, SummaryEstimate, SummaryEstimateRows, SummaryParameter,
+)
+from zcu_tools.mcp.measure.recipe import RecipeDefinition
+
+def with_element_reporting(recipe: RecipeDefinition) -> RecipeDefinition:
+    return replace(
+        recipe,
+        summary_parameters=(SummaryElements(
+            "tones", ("tones",),
+            (SummaryParameter("gain", ("drive", "gain")),
+             SummaryParameter("start", ("sweep", "start"), "MHz")),
+            source="default",
+        ),),
+        summary_estimates=(SummaryEstimateRows(
+            "tones", ("tones",),
+            (SummaryEstimate("freq", ("freq",), ("stderr",), "MHz",
+                             element_key=("element",)),),
+        ),),
+    )
+```
+
+`SummaryEstimateRows` 依 captured native summary 的 row 順序展開，不依完整 Form list 排序。
+作者在自己的 summary producer 明確提供共用 `ElementIdentity`。
+以下函式只包裝作者已算好的事實，不計算估值。
+Framework 不會自動把既有 row 的 `position` 與 `name` 變成 identity。
+
+```python
+from collections.abc import Sequence
+from typing import TypedDict
+
+from zcu_tools.core.element import ElementIdentity
+
+class NativeToneRow(TypedDict):
+    position: int  # Original complete-list index supplied by the lab author.
+    name: str
+    freq: float
+    stderr: float | None
+
+class ReportedToneRow(TypedDict):
+    freq: float
+    stderr: float | None
+    element: ElementIdentity
+
+class ToneSummary(TypedDict):
+    tones: list[ReportedToneRow]
+
+def report_tones(rows: Sequence[NativeToneRow]) -> ToneSummary:
+    return {"tones": [
+        {"freq": row["freq"], "stderr": row["stderr"],
+         "element": ElementIdentity(index=row["position"], name=row["name"])}
+        for row in rows
+    ]}
+```
+
+完整 list 為 Q1、Q2、Q3，participants 為 Q3、Q1 時，actual 包含全部三個元素。
+例如 `actual["tones/2/gain"].element` 是 `{index: 2, name: "Q3"}`。
+若 native rows 依序為 Q3、Q1，estimates 的 `tones/0/freq` 帶 identity 2/Q3，
+`tones/1/freq` 帶 identity 0/Q1。`name/index/leaf` 是輸出 label，不是新的路徑 grammar。
+Estimate label 的 index 是 native row offset，只有 `element.index` 代表完整原始位置。
+
+`element_key` 缺席或指向缺值時，回覆不帶 identity。
+Value path 缺值時不產生 estimate，明確 null 則保留 null。
+Framework 不從 row offset、position/name、value path 或 participants 猜 identity。
+Static `SummaryParameter`、`SummaryEstimate` 可與動態宣告並用。
+Analysis-only 只使用注入 definitions，展開後同一 present value path 的宣告不一致會拒絕。
+
+Run actual、native summary 與作者 identity 都已 detached。
+Summary、wait 與 full 查詢不重讀 GUI。Full 保留 native analysis snapshot，
+不把 native rows 改成 summary estimates。Reporting 不更改 candidates 的 stable target、
+destination 或寫回授權。
+
+離線 synthetic 驗證入口：
+
+```bash
+uv run --directory <lane> --no-sync -- pytest -q -n0 tests/mcp/measure/test_recipe_dynamic_reporting.py
+```
+
 ## 分析、互動與寫回
 
 Recipe 以 `yield from ask(run.propose_writeback())` 提出 completed capture 的寫回候選，交還控制權並等待回答。`answer(recipe, decision)` 的 recipe 是 execution ID，decision 為 accepted 或 skipped；它只回答，不寫入也不授權。普通 `tab.accept(items)` 寫 GUI 當前 draft。摘要的 `question_items`／`question_preview` 是 active question，`writeback.receipts` 則列出實際寫入與失敗前綴；兩者不能互相冒充。Query 只讀 local capture。Session close 喚醒並收束 generator finally。
@@ -116,13 +218,15 @@ Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(executi
 
 Framework 原樣傳遞 native analysis summary 與 invalid 路徑，不特別解讀 fit_quality、不重算品質或設定寫回門檻。有擬合的 summary 附 fit_quality 是實驗定義者的約定，見 zcu_lab README。
 
-Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 scalar value_key，完全相同的 name/error_key/unit 宣告可合併。Present key 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。每個 pane 保留完整原生 summary 與 invalid；scalar estimates 不抽掉 summary 的欄位，framework 不投影 quality。
+`SummaryParameter.field`、`SummaryEstimate.value_key` 與 `error_key` 使用同一 typed tuple，公開 name 只作回報 key。Estimate lookup 沿 native dict 的 str key 與 list 的 int 原始位置讀值，不把數字字串當 index。Missing path 不產生 estimate，present null 與 invalid 原樣保留，error_key=None 表示未宣告 uncertainty。`SummaryEstimate.element_key` 可指向 native summary 中作者提供的 `ElementIdentity`；缺少該 fact 時省略 identity，不從 value_key 或公開 name 推導。
+
+Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 value_key typed path，完全相同的 name/error_key/unit 宣告可合併。Present path 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。每個 pane 保留完整原生 summary 與 invalid；scalar estimates 不抽掉 summary 的欄位，framework 不投影 quality。
 
 `tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 的純讀與 command 都要求 holder，已接受的 owner-loop commit 依序生效。沒有來源鎖或自動重試。
 
 Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post scalar estimates、原生 summary 與 invalid、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留同一 ID。沒有捕捉到 report 時才為 null。各 output 的 status/error 表示保存結果。這與 readonly tab snapshot 的 confirmed run_id 不同，後者在尚無持久輸出成功時仍為 null。Execution ID 仍是 session-local。
 
-Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項保 value／source／unit。Scalar source=explicit 或 sweep 三個 component 全為 explicit 時省略，mixed sweep 整項保留；全部明填時回 {}。Recipe/helper 把 agent 明填值標 explicit，通用 API 仍接受 custom label。Summary 與 `status(execution, detail="full")` 使用同一份固定 actual。Run 內部只保宣告摘要 facts，不保存 publication、input 或 source_basis 副本。Cfg commands 不使用 ref，actual 與 candidate 也不顯示它。Full 仍保 captured analysis results 與 writeback proposals。查詢不新增 RPC 或授權。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
+Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項保 value／source／unit。逐元素 actual 另保共同 `ElementIdentity` 的 index／name，來自同次 logical read 的 FixedElements 宣告，不另宣告名稱 path。Explicit、default 與 derived 等來源均保留，sweep 保留每個 component 的來源，明填值不從回報省略。Recipe/helper 把 agent 明填值標 explicit，通用 API 仍接受 custom label。Summary 與 `status(execution, detail="full")` 使用同一份固定 actual。Run 內部只保宣告摘要 facts，不保存 publication、input 或 source_basis 副本。Cfg commands 不使用 ref，actual 與 candidate 也不顯示它。Full 仍保 captured analysis results 與 writeback proposals。查詢不新增 RPC 或授權。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
 
 當次工具回覆可附記憶體中的 MCP image content，不落地 session 暫存 PNG。之後要看圖，用 `tab.get_figure` 取得 GUI 當下圖像，不保證是先前回覆的圖。`status` 不附圖片，也不重新擷取圖像。
 
@@ -130,13 +234,13 @@ Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項�
 
 `apply_writeback(tab, items=None)` 按 preview 的穩定 `target_name` 選擇當前候選。省略 items 或傳 null 寫全部，空陣列寫零項。它不看 GUI 勾選，也不回答 recipe。工具先讀 Primary 與既有 Post 的當前 preview，再檢查未知、重複及跨 stage 同名；全部檢查通過後才用當前 session ID 寫入。寫入順序是 Primary 再 Post，首錯停止，不 retry 或 rollback。收據只列 GUI-confirmed completed，並保留 skipped、failed stage、not_started 及失敗 stage 的不確定性。
 
-摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。Destination 摘要只列 context/project 身分，native context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。Module edits 使用與 tab Form 相同的 path 陣列，回 input／values／errors，只有有效 Spec 可提交。Library 使用 `context.ml_edit`，child key 保持 key，不用 editor handle。`editor.*` 與舊 eval／value_ref wire 已退休，`value.list`／`value.read` 保留。
+摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。`WritebackItem.element` 由作者選填同次 Run／Load 的 `ElementIdentity`，draft 建立時複製，remote 與 MCP 只投影，不改 stable target 或目的地。Destination 摘要只列 context 的 active_label，native paths 與 context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。Module edits 使用與 tab Form 相同的 path 陣列，回 input／values／errors，只有有效 Spec 可提交。Library 使用 `context.ml_edit`，child key 保持 key，不用 editor handle。`editor.*` 與舊 eval／value_ref wire 已退休，`value.list`／`value.read` 保留。
 
 MCP 以 `context.aliases_set` 整表套用 authored rows，以 `context.set_parameter` 寫目前 point 的具體路徑。兩者直接走 owner，不開 Inspect、不切頁或焦點，也不改既有 Form／Run 的固定 capture。Aliases 在 Inspect 第三頁，`dialog.screenshot` 只拍目前頁，不接受 tab selector。
 
 ## 連線與觀察
 
-`connect` 可連既有 GUI 或依 launch 參數啟動，這一步不連硬體。首次 label 預設 `agent`，mode 預設 `owner`；`readonly` 永不取得控制權。Owner 在未鎖定 Local 自動取得。GUI 鎖定或別的在線 holder 不阻止連線，回覆的 `control` 顯示 `{holder, locked, online, me}`。身份初始化在認證與 wire 檢查之後、catalog 之前。省略 label/mode 的重連保留原身份，顯式換身份會重開 socket。
+`connect` 可連既有 GUI 或依 launch 參數啟動。啟動腳本可連硬體，執行前須審閱腳本並取得授權。首次 label 預設 `agent`，mode 預設 `owner`；`readonly` 永不取得控制權。Owner 在未鎖定 Local 自動取得。GUI 鎖定或別的在線 holder 不阻止連線，回覆的 `control` 顯示 `{holder, locked, online, me}`。身份初始化在認證與 wire 檢查之後、catalog 之前。省略 label/mode 的重連保留原身份，顯式換身份會重開 socket。
 
 `rpc_call` 提供 `control.status`、`control.acquire`、`control.release`。重複 connect 同一身份只查詢現在的控制狀態，不自動再 acquire。四種控制拒絕 `not_holder`、`control_locked`、`control_held`、`readonly_connection` 在 MCP `isError` 的文字 content 中保留 JSON `error`，包含原生 code、message、reason、data。GUI 負責每次 dispatch 的權限判定，MCP 不複製 holder 規則。
 

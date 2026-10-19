@@ -20,6 +20,12 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 
+from tests.experiment._grouped_layout_support import (
+    assert_mixed_disk_values,
+    mixed_record,
+    mixed_spec,
+)
+
 
 class _GroupedCfg(ExpCfgModel):
     name: str = "grouped"
@@ -173,6 +179,30 @@ def test_grouped_save_keeps_explicit_source_and_refuses_overwrite(
     np.testing.assert_array_equal(
         grouped.variables[DataVariable("score")].z, first.result.scores
     )
+
+
+@pytest.mark.parametrize(
+    "independent", [True, False], ids=["independent", "default-common"]
+)
+def test_grouped_save_obeys_declared_layout_for_mixed_rank_variables(
+    tmp_path: Path, independent: bool
+) -> None:
+    spec = mixed_spec(independent=independent)
+    destination = tmp_path / "mixed.hdf5"
+    source = mixed_record()
+    if not independent:
+        with pytest.raises(ValueError, match="common grid"):
+            spec.save(source, destination)
+        assert not destination.exists()
+        return
+
+    spec.save(source, destination, comment="mixed rank export")
+    loaded = load_grouped_labber_data(
+        str(destination), required_variables=spec.required_variables
+    )
+    assert_mixed_disk_values(loaded.variables)
+    with pytest.raises(FileExistsError):
+        spec.save(source, destination)
 
 
 def test_grouped_save_requires_cfg(tmp_path: Path) -> None:

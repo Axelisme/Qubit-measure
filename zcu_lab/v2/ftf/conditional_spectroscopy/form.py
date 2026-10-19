@@ -1,0 +1,54 @@
+"""Fixed-capture thermal spectroscopy Form with explicit two-line probe inputs."""
+
+from zcu_tools.cfg_model import Expr, Range, Slot, Template
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from .._measure import captured_roles
+from .core import SpectroscopyCfg
+
+
+def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
+    """Capture roles, preparation/readout and available ordinary CZ pulse slots.
+
+    Existing coupler CZ slots are editable starting points, not assumed weak
+    probes. Without a slot, offer an explicit cosine envelope on the role's
+    captured wiring channel; frequency, gain, duration and Nyquist zone remain
+    required operator inputs. No model truth or safe-drive defaults are supplied.
+    Common frequency scan must also be entered. Optional DC starts disabled.
+    """
+    roles = captured_roles(ctx)
+    drive = {}
+    for role in ("f1", "f2"):
+        slot = f"$coupler.module.cz_{role}"
+        drive[role] = (
+            Slot(slot, copy=True)
+            if ctx.has(slot)
+            else Template(
+                "pulse:blank",
+                set={
+                    "ch": Expr(f"${role}.wiring.ch"),
+                    "nqz": None,
+                    "freq": None,
+                    "gain": None,
+                    "waveform.style": "cosine",
+                    "waveform.length": None,
+                },
+            )
+        )
+    return Form(
+        SpectroscopyCfg,
+        tree={
+            "roles": roles,
+            "modules": {
+                "x180_f1": Slot("$f1.module.x180", copy=True),
+                "x180_f2": Slot("$f2.module.x180", copy=True),
+                "readout": Slot("$mux.module.readout", copy=True)
+                if ctx.has("$mux.module.readout")
+                else Template("readout/mux:blank"),
+            },
+            "drive": drive,
+            "frequency": Range.between(None, None, expts=101),
+            "dc_device": None,
+            "dc_values": Range.between(0, 0, expts=1),
+        },
+    )

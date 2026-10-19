@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -42,7 +43,7 @@ from ._remote_core_support import send as _send
 
 
 @pytest.fixture()
-def fx(qapp):
+def fx(qapp, request: pytest.FixtureRequest):
     before = component_registry.kinds()
     added = []
     for kind, model in (
@@ -52,12 +53,16 @@ def fx(qapp):
         if kind not in before:
             component_registry.register(kind, model)
             added.append(kind)
-    f = _Fixture()
+    manager = DeviceManager()
+    if getattr(request, "param", False):
+        manager.register_device("bias", FakeDevice(fast_mode=True))
+    f = _Fixture(device_registry=manager)
     f.start()
     try:
         yield f
     finally:
         f.stop()
+        manager.close_all_devices()
         for kind in reversed(added):
             component_registry.unregister(kind)
         assert component_registry.kinds() == before
@@ -86,32 +91,26 @@ def _edit_context_as_gui(fx: _Fixture, key: str, value: str | int) -> None:
     )
 
 
-@pytest.mark.parametrize("with_device", [False, True])
+@pytest.mark.parametrize(
+    "fx", [False, True], indirect=True, ids=["no-device", "published-device"]
+)
 def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
-    fx, tmp_path: Path, with_device: bool
+    fx,
+    tmp_path: Path,
 ) -> None:
     _prepare_guarded_context(fx)
+    with_device = fx.ctrl.device_control.get_device_snapshot("bias") is not None
     port = fx.service.port
     bridge, call = _mcp_client(port, tmp_path)
     try:
         assert call("connect", {"port": port})["port"] == port
         if with_device:
-            connected = call(
+            snapshot = call(
                 "rpc_call",
-                {
-                    "method": "device.connect",
-                    "params": {
-                        "name": "bias",
-                        "type_name": "FakeDevice",
-                        "address": "none",
-                    },
-                },
-            )
-            # The admitted synthetic operation must publish terminal; 30s only guards a hang.
-            assert (
-                call("wait", {"op": connected["handle"], "timeout": 30})["status"]
-                == "finished"
-            )
+                {"method": "device.snapshot", "params": {"name": "bias"}},
+            )["snapshot"]
+            assert snapshot["status"] == "connected"
+            assert snapshot["type_name"] == "FakeDevice"
             # A fresh connection must observe the already registered device itself.
             bridge.disconnect()
             call("connect", {"port": port})

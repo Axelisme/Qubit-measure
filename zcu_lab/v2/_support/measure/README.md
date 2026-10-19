@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-18，共用 mux 固定來源綁定驗證
+**Last updated:** 2026-10-19，mux native Forms、captured identity 與 indexed quality summaries
 
 # Measure domain support
 
@@ -7,7 +7,20 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
 
-`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
+`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。Mux caller 指定 `summary.tones[row].fit_quality`，單 qubit 預設維持 `summary.fit_quality`。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
+
+`mux_forms.py` 集中七個 native mux Forms 的固定捕捉名稱與共同 recovery 初值。
+它先要求完整 qubit/resonator 綁定，已設 readout slot 時另外核對 mux family 與完整 tone 數。
+沒有 readout 時由各 Form 提供 blank template，缺少必要欄位仍擋 Run。
+每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
+所有元素共用宣告，不把逐位置 lock 套成共同限制。
+Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
+Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
+
+`mux_results.py` 集中七個 mux qubit adapters 的固定來源身分核對與 position/name summary。目的地只來自同次 Run／Load capture；缺 capture 不產生 proposal。來源 cfg 有完整名稱時，必須與捕捉的完整 qubits 相同。Summary 的名稱只取來源 cfg，缺 cfg 時保留 None，不讀目前 Form 或 library。
+來源名稱可用時，作者附 `ElementIdentity` 給 native summary rows 與候選；原始位置不由
+row offset 推測。直接 NumPy scalar 在 summary 邊界轉為 Python scalar，不改數值、fit
+或 proposal eligibility。
 
 Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitions` 組合 adapters。
 本 package 不 import concrete adapter 或 `zcu_lab.definitions`，也不宣告 experiment order。只屬於

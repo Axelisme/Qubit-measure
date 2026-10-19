@@ -1,10 +1,13 @@
-import atexit
 import os
 import sys
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
-import pytest
+from tests._cache_environment import temporary_cache_root
+
+# Configure the cache before third-party imports or descendant conftests can
+# create persistence/discovery services. Pytest basetemp is cleared mid-session.
+# The bootstrap retains it through process exit. Never restore the user's cache
+# environment during nested pytest.main() teardown.
+os.environ["ZCU_TOOLS_CACHE_DIR"] = temporary_cache_root()
 
 # BLAS thread pinning for xdist workers — must happen BEFORE numpy is imported
 # so that OpenBLAS / MKL / OpenMP size their thread pools from the environment
@@ -20,24 +23,28 @@ if os.environ.get("PYTEST_XDIST_WORKER"):
     os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import numpy as np
-
-# Configure platformdirs before descendant conftests or test modules can create
-# a caretaker. Do not use pytest's basetemp: it is cleared during the session.
-if sys.platform != "linux":
-    raise pytest.UsageError("GUI cache isolation only supports Linux (XDG_CACHE_HOME)")
-_GUI_CACHE = TemporaryDirectory(
-    prefix=".pytest-tmp-cache-", dir=Path(__file__).resolve().parents[1]
-)
-# Keep each imported conftest's cache alive through all pytest cleanup, including
-# nested pytest.main() sessions. Never restore the user's cache environment.
-atexit.register(_GUI_CACHE.cleanup)
-os.environ["XDG_CACHE_HOME"] = _GUI_CACHE.name
-
+import pytest
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LIB_PATH = os.path.join(_REPO_ROOT, "lib")
 if _LIB_PATH not in sys.path:
     sys.path.insert(0, _LIB_PATH)
+
+
+@pytest.fixture(autouse=True, name="_isolated_fake_device_instances")
+def fixture_isolated_fake_device_instances():
+    """Restore the process-wide FakeDevice address scope after every test."""
+    from zcu_tools.device import FakeDevice
+
+    before = FakeDevice.instance_addresses()
+    try:
+        with FakeDevice.isolated_instances():
+            assert FakeDevice.instance_addresses() == ()
+            yield
+    finally:
+        assert FakeDevice.instance_addresses() == before, (
+            "FakeDevice address scope leaked"
+        )
 
 
 @pytest.fixture(autouse=True, name="_np_seed")

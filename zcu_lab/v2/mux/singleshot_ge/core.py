@@ -1,19 +1,18 @@
-"""Simultaneous probe-off/on raw mux acquisition and explicit-source persistence."""
+"""Record simultaneous mux IQ shots with each qubit's probe pulse off and on."""
 
 from __future__ import annotations
 
 import math
-import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictBool, StrictInt, model_validator
+from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Axis, PersistableExperiment, RunRecord, ZSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -29,7 +28,8 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
+from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 
 from .analysis import (
     MuxGEAnalysis,
@@ -55,52 +55,68 @@ def _validate_fixed_pulse(pulse: PulseCfg) -> None:
 
 
 class MuxGEToneCfg(ConfigBase):
-    """One original tone: active flag, probe drive and optional initial pulse.
+    """One named original tone's required probe drive and optional init pulse.
 
-    Only active tones require drive. drive is the probe-on pulse; init_pulse,
-    when present, runs before it in both preparations on the same generator.
-    Pulses are fixed native PulseCfg (MHz, us, degrees, normalized gain), not
-    sweeps. Inactive pulse settings are retained but do not run.
+    name is the nonempty capture-generated qubit identity. drive is probe-on;
+    init_pulse, when present, runs before it in both preparations on the same
+    generator. All pulses are fixed native PulseCfg (MHz, us, degrees, gain),
+    validated even for nonparticipants. Nonparticipant settings do not run.
     """
 
-    active: StrictBool
-    drive: PulseCfg | None
+    name: Annotated[str, FieldMeta(readonly=True)]
+    drive: PulseCfg
     init_pulse: PulseCfg | None = None
 
     @model_validator(mode="after")
     def validate_pulses(self) -> MuxGEToneCfg:
-        """Reject missing active drives, swept values or shared-branch generators."""
-        if self.active:
-            if self.drive is None:
-                raise ValueError("active tone requires drive")
-            _validate_fixed_pulse(self.drive)
-            if self.init_pulse is not None:
-                _validate_fixed_pulse(self.init_pulse)
-                if self.init_pulse.ch != self.drive.ch:
-                    raise ValueError("init_pulse must use the tone's drive generator")
+        """Reject swept values or shared-branch generators for every element."""
+        _validate_fixed_pulse(self.drive)
+        if self.init_pulse is not None:
+            _validate_fixed_pulse(self.init_pulse)
+            if self.init_pulse.ch != self.drive.ch:
+                raise ValueError("init_pulse must use the tone's drive generator")
         return self
 
 
-class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
-    """Full readout, ordered tones and shared single-round GE controls.
+class MuxGECfg(ExpCfgModel):
+    """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules contains common optional reset and complete mux readout (us/MHz).
-    tones must match the full readout count with at least one active; active
-    drives use independent generators distinct from readout. shots is positive.
-    Run copies cfg, warns and forces rounds=1 and reps=shots, following GE.
-    Original requested reps/rounds remain in RunRecord.cfg; they are not the
-    acquired shot count. initial_delay/relax_delay are finite nonnegative us.
+    modules holds optional reset and complete mux readout. tones contains one
+    MuxGEToneCfg per original readout position, with unique nonempty names.
+    participants is a nonempty, duplicate-free list of those names; its order
+    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
+    Every drive is required/validated, including nonparticipants, on independent
+    generators distinct from readout. shots is positive. Run sets program rounds=1
+    and reps=shots; these derived runtime counts are not experiment inputs.
+    initial_delay/relax_delay are finite
+    nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay", unit="us", description="Delay before the first shot."
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Delay after each shot.",
+        ),
+    ] = 1.0
     modules: MuxDriveModuleCfg
-    tones: list[MuxGEToneCfg]
+    tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
+    participants: list[str]
     shots: StrictInt
 
     @model_validator(mode="after")
     def validate_acquisition(self) -> MuxGECfg:
         """Reject invalid counts, full-list length or active channel conflicts."""
-        if self.shots <= 0 or self.reps <= 0 or self.rounds <= 0:
-            raise ValueError("shots, reps and rounds must be positive")
+        if self.shots <= 0:
+            raise ValueError("shots must be positive")
         if any(
             not math.isfinite(v) or v < 0
             for v in (self.initial_delay, self.relax_delay)
@@ -110,12 +126,9 @@ class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
             )
         if len(self.tones) != len(self.modules.readout.tones):
             raise ValueError("tones must match the complete readout tone count")
+        participant_indices([tone.name for tone in self.tones], self.participants)
         channels: set[int] = set()
         for index, tone in enumerate(self.tones):
-            if not tone.active:
-                continue
-            if tone.drive is None:
-                raise ValueError(f"tones[{index}].drive is required")
             if (
                 tone.drive.ch in channels
                 or tone.drive.ch == self.modules.readout.gen_ch
@@ -124,8 +137,6 @@ class MuxGECfg(ProgramV2Cfg, ExpCfgModel):
                     f"tones[{index}].drive requires an independent generator"
                 )
             channels.add(tone.drive.ch)
-        if not channels:
-            raise ValueError("at least one tone must be active")
         return self
 
 
@@ -154,7 +165,7 @@ class MuxGEResult:
 def validate_ge_result(result: MuxGEResult) -> None:
     """Reject malformed source axes/dtypes or broken cross-tone shot availability.
 
-    Require (K,2,S) complex128, K,S>0, unique ascending original nonnegative
+    Require (K,2,S) complex128, K,S>0, unique original nonnegative
     int64 indices, [0,1] preparations and arange(S) shots. Missing preparation
     rows must be wholly NaN across all tones/shots; finite rows stay unfiltered.
     Raises ValueError; no cfg, fitting, mutation or hardware access occurs.
@@ -165,9 +176,11 @@ def validate_ge_result(result: MuxGEResult) -> None:
         or indices.dtype != np.int64
         or not indices.size
         or np.any(indices < 0)
-        or np.any(np.diff(indices) <= 0)
+        or len(np.unique(indices)) != len(indices)
     ):
-        raise ValueError("tone_indices must be ascending unique nonnegative int64")
+        raise ValueError(
+            "tone_indices must be unique nonnegative int64 in participant order"
+        )
     signals = result.signals
     if (
         signals.dtype != np.complex128
@@ -204,7 +217,9 @@ def _validate_source(source: RunRecord[MuxGECfg, MuxGEResult]) -> None:
     validate_ge_result(source.result)
     if source.cfg is not None:
         cfg = MuxGECfg.model_validate(source.cfg.model_dump())
-        indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
+        indices = participant_indices(
+            [tone.name for tone in cfg.tones], cfg.participants
+        )
         if not np.array_equal(indices, source.result.tone_indices) or cfg.shots != len(
             source.result.shot_indices
         ):
@@ -212,7 +227,7 @@ def _validate_source(source: RunRecord[MuxGECfg, MuxGEResult]) -> None:
 
 
 class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
-    """Stateless simultaneous GE acquisition; no GUI registration or proposals."""
+    """Record paired mux IQ clouds and fit each participating qubit's GE separation."""
 
     Options: ClassVar[type[MuxGEAnalyzeOptions]] = MuxGEAnalyzeOptions
     PostOptions: ClassVar[type[MuxGEPostOptions]] = MuxGEPostOptions
@@ -224,13 +239,12 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         *,
         plots: Plots,
     ) -> tuple[MuxGEAnalysis | MuxFitFailure, ...]:
-        """Fit explicit raw source with GE policy and per-original-index options.
+        """Fit each tone's probe-off/on IQ clouds from the supplied raw source.
 
-        Validate shape/axes and any source cfg before fitting. cfg=None works.
-        Return indexed primary calibration/quality or numeric failure reason;
-        incomplete preparation pairs never fit. Publish fit_i to caller-owned
-        plots; caller finishes/releases. Invalid source/options raise. No current
-        cfg, hardware, GUI, bindings or proposals are accessed.
+        options selects GE fitting settings by original tone index. Return each
+        tone's calibration and fit quality, or its failure reason, and draw fit_i
+        in plots. Incomplete pairs do not fit. Source cfg may be absent; malformed
+        axes, mismatched cfg or invalid options raise before fitting.
         """
         _validate_source(source)
         return analyze_ge(source, options, plots=plots)
@@ -243,13 +257,13 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         *,
         plots: Plots,
     ) -> tuple[MuxGEPostAnalysis | MuxFitFailure, ...]:
-        """Apply same-source adopted primary, producing post_i without refitting.
+        """Estimate per-tone radius and 3x3 confusion diagnostics without refitting.
 
-        source may have cfg=None; validate result and any cfg association.
-        primary must be the source's ordered indexed outcomes. Return each GE
-        3x3 diagnostic or retained/numeric failure. Options radii use normalized
-        ADC units. Contract errors raise; caller finishes/releases plots. No
-        hardware, current settings or four-state joint assignment is involved.
+        primary contains the ordered GE fits from source; options selects radii
+        in normalized ADC units. Return diagnostics or each tone's failure reason
+        and draw post_i in plots. These are single-qubit diagnostics, not a joint
+        assignment matrix. Source cfg may be absent; invalid source, primary or
+        options raise.
         """
         _validate_source(source)
         return post_analyze_ge(source, primary, options, plots=plots)
@@ -263,46 +277,41 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=MuxGEResult,
         cfg_type=MuxGECfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="2.0",
         tag="mux/singleshot/ge",
     )
 
     def run(self, config: MuxGECfg, *, context: RunContext) -> MuxGEResult:
-        """Acquire raw (K,2,shots) IQ from simultaneous independent drive branches.
+        """Measure paired probe-off/on IQ shots for config's ordered participants.
 
-        Copy/validate config; lower active indices once. Warn before overriding
-        rounds to 1 and reps to shots, as in single-qubit GE. In each preparation,
-        common reset precedes Join of each tone's optional init and probe pulse
-        (probe only in row 1), then one common mux readout. Short branches wait
-        for the longest; native conversion/timing belongs to program modules.
-        Read 0 from the initialized MuxReadout of that acquire, including every
-        shot without per-tone sorting/filtering. No QICK raw parser or averaging.
-
-        context owns hardware, devices, fresh StopSignal and Plots. Publish
-        measurement_i (original index) magnitude traces. Completed preparations
-        survive stop/error, missing rows remain NaN, no incomplete round is
-        adopted. Errors stay on cancel_signal: call raise_if_error() before
-        reporting success, then is_set() to distinguish cancellation. Build and
-        validation errors propagate. Caller finishes/releases plots, retains
-        completion metadata, pairs the original cfg with Result and closes devices.
+        Each preparation runs common reset, simultaneous optional init pulses
+        followed by probes (on only for the second preparation), then mux readout
+        after the longest branch. Return normalized raw IQ shaped (K,2,shots),
+        without averaging, sorting or classification. K follows participants;
+        the two rows mean probe off/on, not guaranteed pure ground/excited states.
+        Use one round with reps=shots, leaving config unchanged.
+        context supplies hardware, stop signal and live magnitude plots. Missing
+        preparations remain NaN; check context.cancel_signal.raise_if_error()
+        before reporting success. Invalid config or program builds raise.
         """
+        # 1. Use one raw-shot round and preserve the requested participant order.
         cfg = MuxGECfg.model_validate(config.model_dump())
-        if cfg.rounds != 1:
-            warnings.warn(
-                "rounds will be overwritten to 1 for singleshot measurement",
-                stacklevel=2,
-            )
-        if cfg.reps != 1:
-            warnings.warn(
-                "reps will be overwritten by singleshot measurement shots", stacklevel=2
-            )
-        cfg.rounds = 1
-        cfg.reps = cfg.shots
-        indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
+        program_cfg = ProgramV2Cfg(
+            reps=cfg.shots,
+            rounds=1,
+            initial_delay=cfg.initial_delay,
+            relax_delay=cfg.relax_delay,
+        )
+
+        indices = participant_indices(
+            [tone.name for tone in cfg.tones], cfg.participants
+        )
         readout = cfg.modules.readout.with_updates(
             tones=[cfg.modules.readout.tones[i] for i in indices]
         )
         shots = np.arange(cfg.shots, dtype=np.int64)
+
+        # 2. Show both preparations without averaging away their IQ spread.
         viewers = [
             context.plots.liveplot_1d(
                 f"measurement_{i}", "Shot Index", "Magnitude (a.u.)", num_lines=2
@@ -313,10 +322,24 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         def update(data: NDArray[np.complex128]) -> None:
             for row, viewer in enumerate(viewers):
                 viewer.update(shots.astype(np.float64), np.abs(data[:, :, row]))
+            traces = data.transpose(2, 0, 1).reshape(2 * len(indices), cfg.shots)
+            draw_mux_magnitudes(
+                context.plots,
+                np.broadcast_to(shots.astype(np.float64), traces.shape),
+                traces,
+                [
+                    f"{index}: {cfg.tones[index].name}, probe {preparation}"
+                    for index in indices
+                    for preparation in ("off", "on")
+                ],
+                "Shot Index",
+            )
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
         with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
             for with_probe, step in sched.scan("probe on", [False, True]):
+                # 3. Start tone branches together; read out after the longest one.
+                # Init runs in both preparations, probe only in the second.
                 branches = [
                     [
                         Pulse(f"init_{i}", cfg.tones[i].init_pulse),
@@ -325,12 +348,15 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
                     for i in indices
                 ]
                 builder = (
-                    step.prog_builder(context.soc, context.soccfg)
+                    step.prog_builder(context.soc, context.soccfg, cfg=program_cfg)
                     .add_reset("reset", cfg.modules.reset)
                     .add(Join(*branches), MuxReadout("readout", readout))
                 )
                 prog = builder.build()
+                # Read normalized shots from this program's initialized readout.
                 _ = builder.run_program(prog, raw2signal_fn=partial(_raw_signal, prog))
+
+        # 4. Keep completed preparations in participant/preparation/shot order.
         buffer.trigger_update(flush=True)
         return MuxGEResult(
             buffer.array.transpose(2, 0, 1).copy(),

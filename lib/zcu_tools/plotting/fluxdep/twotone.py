@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
+from matplotlib import colormaps
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 
 from zcu_tools.analysis.fluxdep.stroke import BrushPoint
@@ -15,6 +17,7 @@ from zcu_tools.analysis.fluxdep.twotone import (
     TwoTonePickView,
     project_twotone_pick,
 )
+from zcu_tools.plotting.liveplot.segments.plot2d import PlotNonUniform2DSegment
 
 from .brush import BrushBand
 from .palette import (
@@ -27,7 +30,11 @@ from .palette import (
 
 
 class TwoTonePickPlot:
-    """Project numerical views onto a supplied Figure without committing state."""
+    """Project numerical views onto a supplied Figure without committing state.
+
+    Background and mask cells follow native sample coordinates in either scan
+    direction, including nonuniform axes.
+    """
 
     def __init__(self, figure: Figure, inputs: TwoToneInputs) -> None:
         """Create native device/GHz spectrum artists; preserve the Figure canvas.
@@ -43,38 +50,34 @@ class TwoTonePickPlot:
         device_last = float(spectrum.dev_values[-1])
         frequency_first = float(spectrum.freqs[0])
         frequency_last = float(spectrum.freqs[-1])
-        device_step = (device_last - device_first) / (spectrum.dev_values.size - 1)
-        frequency_step = (frequency_last - frequency_first) / (spectrum.freqs.size - 1)
-        # imshow extents are cell edges; signed half-steps keep sample centers aligned.
-        self._extent = (
-            device_first - device_step / 2,
-            device_last + device_step / 2,
-            frequency_first - frequency_step / 2,
-            frequency_last + frequency_step / 2,
-        )
-        # Brush radii use sample endpoint spans, not the padded image extent.
+        # Brush radii use sample endpoint spans, not the padded image limits.
         self._x_span = abs(device_last - device_first)
         self._y_span = abs(frequency_last - frequency_first)
-        self._image = self._axes.imshow(
-            np.zeros(spectrum.signals.T.shape),
-            extent=self._extent,
-            origin="lower",
-            aspect="auto",
-            cmap="gray_r",
-            interpolation="nearest",
+        self._background = PlotNonUniform2DSegment(
+            "Device value (native)", "Frequency (GHz)"
         )
-        self._mask = self._axes.imshow(
-            np.zeros(spectrum.signals.T.shape),
-            extent=self._extent,
-            origin="lower",
-            aspect="auto",
-            cmap="Blues",
-            vmin=0,
-            vmax=1,
-            alpha=0.15,
-            interpolation="nearest",
-            visible=False,
+        self._mask_segment = PlotNonUniform2DSegment(
+            "Device value (native)", "Frequency (GHz)", vmin=0, vmax=1
         )
+        # NonUniformImage does not bake scalar alpha into its Agg raster.
+        # The mask only displays ones, so encode its blue and opacity together.
+        mask_cmap = ListedColormap([colormaps["Blues"](1.0, alpha=0.15)], name="Blues")
+        for segment, cmap in (
+            (self._background, "gray_r"),
+            (self._mask_segment, mask_cmap),
+        ):
+            segment.init_ax(self._axes, cmap=cmap)
+            segment.update(
+                self._axes,
+                spectrum.dev_values,
+                spectrum.freqs,
+                np.zeros(spectrum.signals.shape),
+            )
+        # Freeze limits before overlays can autoscale against placeholder data.
+        self._axes.set_xlim(self._axes.get_xlim())
+        self._axes.set_ylim(self._axes.get_ylim())
+        self._mask = self._axes.get_images()[-1]
+        self._mask.set_visible(False)
         self._current = self._axes.scatter(
             [], [], s=12, color=KEPT_COLOR, label="Current", zorder=4
         )
@@ -103,8 +106,6 @@ class TwoTonePickPlot:
         self._pointer = BrushBand(self._axes, x_span=x_span, y_span=y_span, zorder=7)
         self._axes.set_xlabel("Device value (native)")
         self._axes.set_ylabel("Frequency (GHz)")
-        self._axes.set_xlim(self._extent[:2])
-        self._axes.set_ylim(self._extent[2:])
         self._axes.minorticks_on()
         self._axes.grid(True, alpha=0.25)
         self._axes.legend(loc="upper right", fontsize="small")
@@ -133,15 +134,21 @@ class TwoTonePickPlot:
             if show_origin
             else np.where(state.mask, result.real_signals, np.nan)
         )
-        self._image.set_data(background.T)
         finite = result.real_signals[np.isfinite(result.real_signals)]
         if finite.size:
-            self._image.set_clim(
-                float(np.min(finite)),
-                max(float(np.max(finite)), float(np.min(finite)) + 1e-12),
+            self._background.vmin = float(np.min(finite))
+            self._background.vmax = max(
+                float(np.max(finite)), float(np.min(finite)) + 1e-12
             )
-        self._mask.set_data(
-            np.ma.masked_where(~state.mask.T, np.ones(state.mask.T.shape))
+        spectrum = self._inputs.spectrum
+        self._background.update(
+            self._axes, spectrum.dev_values, spectrum.freqs, background
+        )
+        self._mask_segment.update(
+            self._axes,
+            spectrum.dev_values,
+            spectrum.freqs,
+            np.where(state.mask, 1.0, np.nan),
         )
         self._mask.set_visible(show_mask)
         self._current.set_offsets(np.column_stack((result.dev_values, result.freqs)))

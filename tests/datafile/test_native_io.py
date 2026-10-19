@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -110,7 +111,7 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
 
     with h5.File(destination, "r") as file:
         assert file.attrs["format"] == "zcu.experiment-data"
-        assert file.attrs["format_version"] == "2.0"
+        assert file.attrs["format_version"] == "2.1"
         signal = hdf_dataset(file, "data/readout/signal")
         assert signal.attrs["units"] == "V"
         assert signal.id.get_type().get_member_name(0) == b"r"
@@ -133,6 +134,97 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
             dataset.coords["frequency"].values, recovered.axes[0].values
         )
         assert dataset["signal"].attrs["units"] == "V"
+
+
+@pytest.mark.parametrize("started_at", [None, "2026-10-06T01:00:00Z"])
+@pytest.mark.parametrize("completion", ["complete", "partial", "stopped", "unknown"])
+def test_native_unknown_evidence_round_trips(
+    tmp_path: Path, started_at: str | None, completion: str
+) -> None:
+    metadata = replace(native_metadata(), started_at=started_at, completion=completion)
+    path = tmp_path / "unknown.h5"
+    try:
+        save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+        restored = load_run_data(path)
+    except ValueError as error:
+        pytest.fail(f"Legal historical evidence must round-trip: {error}")
+    assert restored.metadata == metadata
+    with h5.File(path, "r") as file:
+        assert file.attrs["format_version"] == "2.1"
+        assert file.attrs["started_at"] == (started_at or "")
+        assert file.attrs["completion"] == completion
+
+
+@pytest.mark.parametrize("version", ["2.0", "2.1", "2.7"])
+def test_native_reader_preserves_known_evidence_from_supported_minors(
+    tmp_path: Path, version: str
+) -> None:
+    path = tmp_path / "historical.h5"
+    metadata = native_metadata()
+    save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        file.attrs["format_version"] = version
+    assert load_run_data(path).metadata == metadata
+
+
+@pytest.mark.parametrize(
+    "attribute,value", [("started_at", ""), ("completion", "unknown")]
+)
+@pytest.mark.parametrize("version", ["2.0", "2.1", "2.7"])
+def test_native_reader_only_accepts_unknown_evidence_since_2_1(
+    tmp_path: Path, attribute: str, value: str, version: str
+) -> None:
+    path = tmp_path / "historical.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        file.attrs["format_version"] = version
+        file.attrs[attribute] = value
+    if version == "2.0":
+        with pytest.raises(ValueError, match=attribute) as caught:
+            load_run_data(path)
+        assert str(path) in str(caught.value)
+        assert "/" in str(caught.value)
+    else:
+        try:
+            restored = load_run_data(path).metadata
+        except ValueError as error:
+            pytest.fail(f"Native {version} must accept unknown {attribute}: {error}")
+        assert getattr(restored, attribute) == (
+            None if attribute == "started_at" else "unknown"
+        )
+
+
+@pytest.mark.parametrize("attribute", ["started_at", "completion"])
+def test_native_unknown_evidence_does_not_make_attributes_optional(
+    tmp_path: Path, attribute: str
+) -> None:
+    path = tmp_path / "missing.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        del file.attrs[attribute]
+    with pytest.raises(ValueError, match=attribute):
+        load_run_data(path)
+
+
+@pytest.mark.parametrize(
+    "attribute,value",
+    [
+        ("started_at", "unknown"),
+        ("started_at", ""),
+        ("started_at", "2026-10-06T01:00:00"),
+        ("started_at", "2026-10-06T01:00:00+08:00"),
+        ("completion", "finished"),
+        ("completion", None),
+    ],
+)
+def test_native_writer_rejects_invalid_evidence_before_publication(
+    tmp_path: Path, attribute: str, value: str | None
+) -> None:
+    metadata = replace(native_metadata(), **{attribute: value})
+    path = tmp_path / "invalid.h5"
+    with pytest.raises(ValueError, match=attribute):
+        save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_readonly_metadata_mappings_round_trip_through_native_io(
@@ -398,6 +490,55 @@ def test_schema_rejects_malformed_wire_arrays(defect: str) -> None:
     )
     with pytest.raises(ValueError, match="readout"):
         validate_experiment_payload(payload, schema=(schema,))
+
+
+@pytest.mark.parametrize("winerror", [32, 33])
+def test_native_overwrite_recovers_from_windows_lock_after_closing_hdf5(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, winerror: int
+) -> None:
+    path = tmp_path / "run.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    changed = replace(native_metadata(), completion="stopped", finished_at=None)
+
+    class WindowsLockError(OSError):
+        def __init__(self) -> None:
+            super().__init__("native destination temporarily locked")
+            self.winerror = winerror
+
+    original_replace = os.replace
+    attempts = 0
+    elapsed = 0.0
+
+    def monotonic() -> float:
+        return elapsed
+
+    def sleep(seconds: float) -> None:
+        nonlocal elapsed
+        elapsed += seconds
+
+    def replace_closed_file(source: Path, destination: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        # The pending native file must be readable before it can be published.
+        assert load_run_data(source).metadata == changed
+        if attempts == 1:
+            assert load_run_data(destination).metadata == native_metadata()
+            raise WindowsLockError()
+        original_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", replace_closed_file)
+    monkeypatch.setattr(time, "monotonic", monotonic)
+    monkeypatch.setattr(time, "sleep", sleep)
+    failure: OSError | None = None
+    try:
+        save_run_data(path, native_payload(), changed, cfg=native_cfg(), replace=True)
+    except OSError as error:
+        failure = error
+
+    assert failure is None, "a transient Windows lock must not abort native overwrite"
+    assert load_run_data(path).metadata == changed
+    assert attempts == 2
+    assert list(tmp_path.iterdir()) == [path]
 
 
 def test_failed_atomic_publication_preserves_destination_and_cleans_temp(

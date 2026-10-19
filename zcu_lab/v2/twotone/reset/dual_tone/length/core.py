@@ -40,6 +40,8 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class LengthResult:
+    """Pulse1 lengths in us and mean complex IQ (length,)."""
+
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
 
@@ -76,6 +78,16 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
     )
 
     def run(self, cfg: LengthCfg, *, context: RunContext) -> LengthResult:
+        """Measure the dual-tone reset response versus the first pulse length.
+
+        Apply optional reset and initialization, start both tested reset
+        pulses together, then read out after the longer pulse finishes.
+        Sweep pulse1 length while preserving pulse2-minus-pulse1 length.
+        Return pulse1 lengths in us and mean complex IQ shaped (Nlength,).
+        Warn if channel time grids differ; raise ValueError if the derived
+        pulse2 length is negative. The IQ response is not reset fidelity.
+        """
+        # Check both channel grids and keep the configured pulse-duration difference.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -104,6 +116,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             )
         lengths = pulse1_lengths  # Use pulse1 lengths as the x-axis values
 
+        # Retain complex IQ while displaying its common-axis projection.
         viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Amplitude")
         signals_buffer = SignalBuffer(
             (len(lengths),),
@@ -111,6 +124,8 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
                 lengths, reset_length_signal2real(data)
             ),
         )
+
+        # Sweep both durations together before reading out the reset response.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             tested_reset_cfg = modules.tested_reset
@@ -143,6 +158,11 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the projected IQ response versus pulse1 length in us.
+
+        Omit unmeasured NaN points and publish fit without fitting or returning
+        an optimal duration. source.cfg may be None.
+        """
         del options
         result = source.result
 

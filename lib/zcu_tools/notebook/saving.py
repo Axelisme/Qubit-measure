@@ -196,6 +196,7 @@ class SavedRun(Generic[CfgT, ResultT]):
             result_path=self._storage.result_path,
             database_path=self._storage.database_path,
             run_id=self.run_id,
+            experiment=self._metadata.experiment,
             point=self._storage.point,
             saved_at=datetime.now(UTC).astimezone(),
         )
