@@ -2,7 +2,7 @@
 
 from math import isfinite
 
-from zcu_tools.cfg_model import Hidden, Locked, Template
+from zcu_tools.cfg_model import Hidden, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.lookback.core import LookbackCfg
@@ -91,7 +91,6 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
                 ),
             },
             "relax_delay": 0.0,
-            "reps": Locked(1),
             "rounds": 500,
             "initial_delay": Hidden(),
         },

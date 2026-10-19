@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from numbers import Real
@@ -61,7 +60,22 @@ class LenRabiModuleCfg(ConfigBase):
     readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
-class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
+class LenRabiCfg(ExpCfgModel):
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay", unit="us", description="Delay before the first shot."
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Delay after each shot.",
+        ),
+    ] = 1.0
     modules: LenRabiModuleCfg
     sweep: LenRabiSweepCfg
     shots: Annotated[int, FieldMeta(label="Shots")]
@@ -100,7 +114,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=LenRabiResult,
         cfg_type=LenRabiCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/len_rabi",
     )
 
@@ -112,17 +126,12 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
     ) -> LenRabiResult:
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        if cfg.rounds != 1:
-            warnings.warn(
-                "rounds will be overwritten to 1 for singleshot measurement",
-                stacklevel=2,
-            )
-            cfg.rounds = 1
-        if cfg.reps != cfg.shots:
-            warnings.warn(
-                "reps will be overwritten by singleshot measurement shots", stacklevel=2
-            )
-            cfg.reps = cfg.shots
+        program_cfg = ProgramV2Cfg(
+            reps=cfg.shots,
+            rounds=1,
+            initial_delay=cfg.initial_delay,
+            relax_delay=cfg.relax_delay,
+        )
 
         modules = cfg.modules
         assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
@@ -170,7 +179,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 modules = step.cfg.modules
                 modules.qub_pulse.set_param("length", length)
                 program = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(soc, soccfg, cfg=program_cfg)
                     .add_reset("reset", modules.reset)
                     .add_pulse("qubit_pulse", modules.qub_pulse)
                     .add_readout("readout", modules.readout)
