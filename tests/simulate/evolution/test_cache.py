@@ -119,3 +119,53 @@ def test_cache_admits_singleton_whole_allocation_and_preserves_active_reference(
     cache.add(namespace, PreparedPayload(Payload(1), (b"replacement",)))
     assert cache.find(namespace, {b"one"}) == []
     assert active[0].prepared.nbytes == 32
+
+
+def test_exact_extension_replaces_whole_charge_without_invalidating_borrowers():
+    cache = PrepareCache(22)
+    counts = AllocationCounts()
+    old = payload(counts, 10, b"a")
+    other = payload(counts, 10, b"b")
+    cache.add(SPACE, old)
+    cache.add(SPACE, other)
+    active = cache.find(SPACE, {b"a"})[0]
+    extended = payload(counts, 12, b"a")
+    replace_allocation = getattr(cache, "replace", None)
+    assert callable(replace_allocation), "cache must replace exact extension ownership"
+    replace_allocation(SPACE, old, extended)
+    assert cache.bytes == 22
+    assert cache.find(SPACE, {b"a"}) == [extended]
+    assert cache.find(SPACE, {b"b"}) == [other]
+    assert active.prepared.nbytes == 10
+    with pytest.raises(ValueError, match="keys"):
+        replace_allocation(SPACE, extended, payload(counts, 1, b"wrong"))
+    with pytest.raises(ValueError, match="namespace"):
+        replace_allocation(OTHER_SPACE, extended, payload(counts, 12, b"a"))
+    with pytest.raises(ValueError, match="nonnegative"):
+        replace_allocation(SPACE, extended, payload(counts, -1, b"a"))
+    replace_allocation(SPACE, extended, payload(counts, 23, b"a"))
+    assert cache.find(SPACE, {b"a"}) == [extended]
+    assert cache.bytes == 22
+
+
+def test_rejected_extension_grows_only_into_spare_capacity():
+    cache = PrepareCache(22)
+    counts = AllocationCounts()
+    old = payload(counts, 10, b"a")
+    other = payload(counts, 10, b"b")
+    cache.add(SPACE, old, rejected=True)
+    cache.add(SPACE, other)
+    replace_allocation = getattr(cache, "replace", None)
+    assert callable(replace_allocation), (
+        "rejected domain extensions need bounded replacement"
+    )
+    replace_allocation(SPACE, old, payload(counts, 13, b"a"))
+    assert cache.find(SPACE, {b"a"}) == [old]
+    extended = payload(counts, 12, b"a")
+    replace_allocation(SPACE, old, extended)
+    assert cache.is_rejected(extended)
+    assert cache.bytes == 22
+    assert cache.find(SPACE, {b"b"}) == [other]
+    # A stale extension cannot reinsert a predecessor removed by another owner.
+    replace_allocation(SPACE, old, payload(counts, 11, b"a"))
+    assert cache.find(SPACE, {b"a"}) == [extended]

@@ -1,7 +1,6 @@
 """Array QICK-to-engine conversion and distinct DC readout contents."""
 
 from dataclasses import dataclass, replace
-from functools import partial
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,7 +12,13 @@ from zcu_tools.core.simulation import (
     TimelineTemplate,
 )
 from zcu_tools.resources.ftf import FTFSettings
-from zcu_tools.simulate.adc import ReadoutBatch, ReadoutPulse, Receiver, SampleGrid
+from zcu_tools.simulate.adc import (
+    PiecewiseLinearEnvelope,
+    ReadoutBatch,
+    ReadoutPulse,
+    Receiver,
+    SampleGrid,
+)
 from zcu_tools.simulate.evolution import (
     DriveTrack,
     EnvelopeSpec,
@@ -27,8 +32,46 @@ from zcu_tools.simulate.ftf import (
     schedule,
 )
 
+from . import replay
 from .numeric import dc_flux, drive_sources, joint_parameters, resonators
 from .readout import FTFReadoutConfig, readout_configuration
+
+
+class FTFModelFacts:
+    """Physical inputs for one complete settings/snapshot/numeric revision.
+
+    settings is a validated FTF resource and snapshot supplies live DC values.
+    joint owns the fixed-DC projection and its bounded eigen/bath memo. source
+    owns Gibbs density, drive quadratures, flux expansion and secular models.
+    readout is the neutral DC ADC model, without pulse or receiver calibration.
+    These objects must remain unchanged for their lifetime. Invalid DC or bath
+    inputs propagate their numeric errors. No density evolution or sampling runs.
+    Used by FTFSource across acquires and by standalone plan_template calls.
+    """
+
+    def __init__(self, settings: FTFSettings, snapshot: EnvironmentSnapshot) -> None:
+        self._settings_json = settings.model_dump_json()
+        self._snapshot = snapshot
+        self._revision = (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
+        self.joint = JointModel(
+            joint_parameters(settings),
+            dc_flux(settings, snapshot),
+            temperature_k=settings.chip.temperature_k,
+        )
+        resonator_pair = resonators(settings)
+        self.source = model_source(
+            self.joint, drive_sources(settings, self.joint), resonators=resonator_pair
+        )
+        self.readout = readout_model(self.joint, resonator_pair)
+
+    def matches(self, settings: FTFSettings, snapshot: EnvironmentSnapshot) -> bool:
+        """Whether the complete settings, snapshot and current revisions are equal."""
+        return (
+            self._snapshot == snapshot
+            and self._revision
+            == (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
+            and self._settings_json == settings.model_dump_json()
+        )
 
 
 @dataclass(frozen=True)
@@ -59,20 +102,28 @@ class FTFTemplatePlan:
     readouts: tuple[FTFReadoutPlan, ...]
 
 
-def _envelopes(event: EventSlot) -> tuple[EnvelopeSpec, ...]:
-    return tuple(
-        EnvelopeSpec("constant")
-        if envelope is None
-        else EnvelopeSpec(
-            "sampled",
-            samples=np.array(envelope.values, dtype=np.complex128),
-            sample_ns=np.array(envelope.sample_us) * 1000,
-        )
-        for envelope in event.envelopes
-    )
+def _envelopes(
+    event: EventSlot, memo: dict[int, EnvelopeSpec]
+) -> tuple[EnvelopeSpec, ...]:
+    """Reuse immutable specs by identity while the template retains all inputs."""
+    specs = []
+    for envelope in event.envelopes:
+        key = id(envelope)
+        if key not in memo:
+            memo[key] = (
+                EnvelopeSpec("constant")
+                if envelope is None
+                else EnvelopeSpec(
+                    "sampled",
+                    samples=np.array(envelope.values, dtype=np.complex128),
+                    sample_ns=np.array(envelope.sample_us) * 1000,
+                )
+            )
+        specs.append(memo[key])
+    return tuple(specs)
 
 
-def _track(event: EventSlot, port: str) -> DriveTrack:
+def _track(event: EventSlot, port: str, memo: dict[int, EnvelopeSpec]) -> DriveTrack:
     start = event.start_us * 1000
     # Match the old numeric owner's absolute nearest-2-ns support, ties even.
     quantized = 2 * np.rint(start / 2)
@@ -85,7 +136,7 @@ def _track(event: EventSlot, port: str) -> DriveTrack:
         np.deg2rad(event.phase_deg)
         - 2 * np.pi * event.frequency_mhz * event.phase_reference_us,
         event.gain,
-        _envelopes(event),
+        _envelopes(event, memo),
         event.envelope_index,
         event.active,
     )
@@ -96,6 +147,7 @@ def _timeline_batch(
     joint: JointModel,
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
+    memo: dict[int, EnvelopeSpec],
 ) -> TimelineBatch:
     """Map charge/flux drive tracks onto the engine's fixed-DC schedule."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
@@ -105,7 +157,7 @@ def _timeline_batch(
             continue
         if event.gen_ch not in microwave:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
-        drives.append(_track(event, microwave[event.gen_ch]))
+        drives.append(_track(event, microwave[event.gen_ch], memo))
     fixed_dc = schedule(
         (),
         dc_flux=joint.dc_flux,
@@ -121,6 +173,7 @@ def _readout_contents(
     template: TimelineTemplate,
     config: FTFReadoutConfig,
     window: ReadoutSlot,
+    memo: dict[int, EnvelopeSpec],
 ) -> tuple[
     NDArray[np.float64],
     tuple[tuple[ReadoutPulse, ...], ...],
@@ -159,7 +212,7 @@ def _readout_contents(
         values[rows, rank, 5] += np.where(
             event.active, event.envelope_index + len(envelopes), 0
         )
-        envelopes.extend(_envelopes(event))
+        envelopes.extend(_envelopes(event, memo))
     if np.any(values[:, :, 0] != values[:, :1, 0]):
         raise ValueError("FTF mux tones require a common pulse start per point")
     features = np.column_stack(
@@ -210,7 +263,7 @@ def _readout_pulse(
         if np.all(envelope.samples == envelope.samples[0]):
             amplitude *= envelope.samples[0]
         else:
-            callback = partial(_envelope_value, envelope)
+            callback = PiecewiseLinearEnvelope(envelope.sample_ns, envelope.samples)
             corners = tuple(
                 start * 1000 + t for t in envelope.sample_ns if 0 < t < duration * 1000
             )
@@ -250,16 +303,13 @@ def _local_readout_pulses(
     return tuple(local_contents)
 
 
-def _envelope_value(envelope: EnvelopeSpec, local_ns: float) -> complex:
-    return complex(envelope.values(np.array(local_ns)))
-
-
 def plan_template(
     settings: FTFSettings,
     snapshot: EnvironmentSnapshot,
     template: TimelineTemplate,
     *,
     readout: FTFReadoutConfig | None = None,
+    facts: FTFModelFacts | None = None,
 ) -> FTFTemplatePlan:
     """Convert one C1 template to C3 evolution and C6 readout inputs.
 
@@ -270,6 +320,10 @@ def plan_template(
     drive-line controls do not affect the DC readout model. Constant complex
     readout envelopes fold into amplitude, enabling the exact field solution.
     readout supplies detached author capabilities; None adapts current settings.
+    facts optionally shares physical inputs across templates/acquires. It must
+    match the complete settings, snapshot and numeric revision or raises ValueError.
+    None builds physical inputs for this call. Receiver/carrier/content data are
+    always constructed from the current template and readout configuration.
     Mux permits simultaneous coherent tones with independent ADC grids. Program
     common-origin carrier phases convert to pulse-local phases in the first
     carrier's model reference frame; ADC demodulation remains absolute-time.
@@ -283,22 +337,20 @@ def plan_template(
         raise ValueError("FTF requires at least one bound receiver")
     if len({window.channel for window in template.readouts}) != len(template.readouts):
         raise ValueError("duplicate FTF receiver")
+    # Identity lookup is safe: template keeps every input envelope alive for
+    # this call. No memo survives a plan or retains compiled program buffers.
+    memo: dict[int, EnvelopeSpec] = {}
     contents = []
     for window in template.readouts:
         if window.channel not in receivers:
             raise ValueError(f"unbound FTF receiver {window.channel}")
-        contents.append(_readout_contents(settings, template, config, window))
+        contents.append(_readout_contents(settings, template, config, window, memo))
     end_ns = contents[0][0]
-    joint = JointModel(
-        joint_parameters(settings),
-        dc_flux(settings, snapshot),
-        temperature_k=settings.chip.temperature_k,
-    )
-    resonator_pair = resonators(settings)
-    source = model_source(
-        joint, drive_sources(settings, joint), resonators=resonator_pair
-    )
-    physical = readout_model(joint, resonator_pair)
+    if facts is None:
+        facts = FTFModelFacts(settings, snapshot)
+    elif not facts.matches(settings, snapshot):
+        raise ValueError("FTF physical facts do not match settings/snapshot/revision")
+    joint, source, physical = facts.joint, facts.source, facts.readout
     reference_frequency_ghz = contents[0][1][0][0].frequency_ghz
     readouts = []
     for window, (_, pulses, grids, inverse) in zip(
@@ -339,5 +391,7 @@ def plan_template(
             )
         )
     return FTFTemplatePlan(
-        source, _timeline_batch(settings, joint, template, end_ns), tuple(readouts)
+        source,
+        _timeline_batch(settings, joint, template, end_ns, memo),
+        tuple(readouts),
     )

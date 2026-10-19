@@ -34,14 +34,15 @@ def endpoint(spectrum: Spectrum, time: float) -> NDArray[np.complex128]:
     """Reconstruct physical U(time) from a central harmonic input, time in ns."""
     values, vectors, central, modes, frequency = spectrum
     size = central.shape[1]
-    evolved = (vectors * np.exp(-2j * np.pi * values * time)) @ central
-    result = np.zeros((size, size), dtype=np.complex128)
+    # Contract harmonic blocks before the central projection: the GEMM then
+    # has only size output rows instead of (2*modes+1)*size rows.
+    summed = np.zeros((size, len(values)), dtype=np.complex128)
     for index in range(2 * modes + 1):
-        result += (
-            np.exp(2j * np.pi * (index - modes) * frequency * time)
-            * evolved[index * size : (index + 1) * size]
-        )
-    return result
+        phase = np.exp(2j * np.pi * (index - modes) * frequency * time)
+        for row in range(size):
+            for column in range(len(values)):
+                summed[row, column] += phase * vectors[index * size + row, column]
+    return (summed * np.exp(-2j * np.pi * values * time)) @ central
 
 
 @njit(nogil=True, cache=True)

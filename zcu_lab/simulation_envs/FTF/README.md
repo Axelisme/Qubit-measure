@@ -1,6 +1,6 @@
 # 模擬環境
 
-**Last updated:** 2026-10-17，Python 3.12 CPU worker 選擇
+**Last updated:** 2026-10-18，FTF 背景數值預編譯
 
 這裡放 GUI 與 Notebook 共用的可信 Python 環境。`environment.py` 定義無參數的 `build_environment()`，讀取相鄰 `ftf.yaml` 並回傳已組裝的 FTF 環境。
 
@@ -46,6 +46,10 @@ FTF 的 flux drive 只在 DC 附近線性化，不建構大振幅 fast-flux cont
 ## 演化與重播
 
 FTF 預設使用分段引擎的快速算法。共用入口使用 Python 3.12 支援的 `os.cpu_count()`，保留兩核，以 `max(1, (os.cpu_count() or 1) - 2)` 選擇 workers。核心數未知時使用 1 個。八核主機使用 6 個 workers；直接呼叫 `ftf(..., workers=1)` 預設只用 1 個。
+
+共用入口另外傳 `warmup=True`，環境建立後立即用單一背景 worker 預編譯常用數值路徑。這會占用 CPU 與記憶體，不會縮短總編譯成本。GUI 與 Notebook 共用同一個 process 內的 future。直接呼叫 `ftf()` 預設不開啟；要關閉啟動預編譯，可讓自己的 builder 呼叫 `ftf(path, warmup=False)`。
+
+`env.warmup.status` 提供進度與錯誤。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不占用正式引擎的 prepare 快取。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md#startup-preparation)。
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 prepare 快取只保留在記憶體，不需要離線建庫或 GPU，也不保存 exact density records。
 

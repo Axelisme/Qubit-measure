@@ -219,3 +219,37 @@ def test_tight_budget_preserves_complex_density(kernel_case: KernelCase) -> None
     )
     assert_budget(actual, expected, case.budget)
     np.testing.assert_allclose(actual.trace(axis1=1, axis2=2), 1, atol=1e-11)
+
+
+def test_shared_preparation_keeps_concurrent_lab_applies_independent(
+    kernel_case: KernelCase,
+) -> None:
+    """Model-only preparations may be borrowed by two timeline workers."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+    from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
+
+    case = kernel_case
+    prepared, inverse = prepare(case)
+    rows = np.arange(len(case.states))
+    plan = DOP853Plan(np.full(len(rows), "lab"), np.full(len(rows), -1))
+
+    def apply(states: np.ndarray) -> np.ndarray:
+        actual = states.copy()
+        case.kernel.apply(
+            prepared,
+            inverse,
+            case.table,
+            rows,
+            actual,
+            ApplyContext(case.budget, plan),
+        )
+        return actual
+
+    inputs = [case.states, case.states.conj()]
+    expected = [apply(states) for states in inputs]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        actual = list(pool.map(apply, inputs))
+    for serial, concurrent in zip(expected, actual, strict=True):
+        np.testing.assert_array_equal(concurrent, serial)

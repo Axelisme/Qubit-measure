@@ -283,3 +283,61 @@ def test_cached_sideband_domain_requires_every_probe_bin() -> None:
     np.testing.assert_array_equal(admitted.accepted, expected.accepted)
     missing = replace(case.table, tone_frequency_ghz=np.array([[0.13, 0.023]]))
     assert solver.admit_prepared(prepared, missing, rows, context) is None
+
+
+def test_split_guards_keep_probe_bin_admissions_and_density() -> None:
+    """An evolve may discover the same frame through separate row batches."""
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+    from zcu_tools.simulate.evolution.kernels.floquet import FloquetPlan
+
+    case = _adversarial_case("exact-resonance")
+    table = replace(
+        case.table,
+        **{
+            field: np.repeat(getattr(case.table, field), 3, axis=0)
+            for field in case.table.__dataclass_fields__
+            if isinstance(getattr(case.table, field), np.ndarray)
+        },
+    )
+    table = replace(
+        table,
+        timeline=np.arange(3),
+        tone_frequency_ghz=np.array([[0.13, 0.0], [0.13, 0.019], [0.13, 0.023]]),
+    )
+    rows = np.arange(3)
+    solver = FloquetKernel()
+    full = solver.guard_prepared(
+        table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    )
+    np.testing.assert_array_equal(full.accepted, [True, True, False])
+    context = KernelContext(case.source, case.budget, WorkPlan())
+    split = [solver.guard_prepared(table, rows[i : i + 1], context) for i in rows]
+    np.testing.assert_array_equal(
+        np.concatenate([result.accepted for result in split]), full.accepted
+    )
+    assert isinstance(full.plan, FloquetPlan)
+    good = rows[full.accepted]
+    expected = np.repeat(case.states, len(good), axis=0)
+    solver.apply(
+        full.preparations[0].prepared,
+        np.zeros(len(good), dtype=np.int64),
+        table,
+        good,
+        expected,
+        ApplyContext(case.budget, full.plan),
+    )
+    for index, row in enumerate(good):
+        result = split[row]
+        assert isinstance(result.plan, FloquetPlan)
+        assert result.plan.admissions[row].variant == full.plan.admissions[row].variant
+        actual = case.states.copy()
+        solver.apply(
+            result.preparations[0].prepared,
+            np.zeros(1, dtype=np.int64),
+            table,
+            np.array([row]),
+            actual,
+            ApplyContext(case.budget, result.plan),
+        )
+        np.testing.assert_allclose(actual[0], expected[index], atol=1e-13, rtol=0)
+    context.work_plan.close()

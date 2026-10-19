@@ -7,4 +7,4 @@ inputs for independent author diagnostics, not normal GUI/MCP calibration truth.
 from .readout import FTFReadoutConfig, FTFReceiverConfig
 from .replay import replay_round
 from .runtime import FTFAcquire, FTFNumericUse, FTFSource, ftf
-from .template import FTFReadoutPlan, FTFTemplatePlan, plan_template
+from .template import FTFModelFacts, FTFReadoutPlan, FTFTemplatePlan, plan_template

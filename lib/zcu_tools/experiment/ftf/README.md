@@ -1,8 +1,8 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-18, mux carrier phase-origin conversion
+**Last updated:** 2026-10-19, source-scoped ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
 
-`ftf(path_or_settings, *, workers=1)` builds the same `SimulationEnvironment` for GUI startup
+`ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, applies their initial values once and binds the derived channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
@@ -14,9 +14,9 @@ The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adja
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.
 The segment engine's fast algorithms are the default numeric path.
-One source owns one `Engine`, whose 1.5 GiB resident prepare cache survives across
-acquires. This byte budget counts model-only payload arrays, not total process
-memory; workspaces, active references and ADC allocations remain separate.
+One source owns one `Engine`, whose 2 GiB resident/pending prepare budget survives across
+acquires. This shared byte budget counts retained model-only payload arrays, not total
+process memory; workspaces, active references and ADC allocations remain separate.
 The keyword `workers` selects the engine's sole parallel width; direct callers
 use one worker by default. GUI and Notebook use the shared FTF environment entry,
 which selects `max(1, (os.cpu_count() or 1) - 2)` workers. Unknown CPU counts
@@ -28,13 +28,70 @@ Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
 `FTFSource.close()` clears preparations and the engine cache. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
+The source retains at most one snapshot's `FTFModelFacts` across acquires.
+The exact key includes full settings, the entire snapshot and backend/numeric
+revisions. Facts own the joint projection, Gibbs/source, DC eigen/bath memo and
+neutral readout model. All templates share these physical inputs. Evolved densities remain acquire/template data. A source also owns an 8 MiB
+`ReadoutCache` for ADC solvers, ConstantLine facts and exact conditional responses.
+Full numeric model, receiver and solver tolerances select a canonical immutable
+model and solver. Existing pulse/grid keys preserve absolute starts, carrier
+phases, demodulation and opaque callback identity. Different T1 readout starts
+reuse physical facts but compute their own sums. Every round still samples IQ.
+The byte limit counts keys, traces, nested line caches and whole allocations held
+by array views. Oversized solvers are evicted whole after the response returns.
+A changed physical-facts key clears readout residents, including on settings,
+snapshot or numeric revision changes. Close clears them too. No projected
+operators, rates or readout response cross flux points.
+
+## Startup preparation
+
+The shared production GUI/Notebook environment entry opts into `warmup=True`.
+Building that environment immediately starts one process-wide background numeric
+worker. All opted-in environments share its future and terminal result. Direct
+`ftf()` callers keep `warmup=False`, just as they keep `workers=1`, to avoid
+unexpected CPU work. Authors can disable startup work with `ftf(..., warmup=False)`.
+Preparation uses small disposable numeric models, one evolution worker and no
+sampling. It never reads or changes the live environment's devices, binding seed,
+acquire sequence or resident engine cache. Compilation still consumes CPU and
+memory; it overlaps configuration work rather than reducing total compile cost.
+
+`env.warmup` is an `EnvironmentWarmup`, or None when disabled. Its immutable
+`status` reports `state` (pending/running/ready/failed), `completed` item names,
+`current`, `total` and an optional `error`. Poll it for progress.
+`env.warmup.start()` returns the same non-cancellable future on every call;
+callbacks receive the terminal status and must marshal GUI updates to the owner
+thread. `env.wait_ready(timeout=None)` waits for completion and returns the terminal
+status, or None when disabled. A timeout raises `TimeoutError` without cancelling
+work. Failure is logged, retained in status and permits ordinary on-demand
+compilation. The worker exits after completion. Process exit waits for an active
+worker rather than interrupting the compiler. Closing live devices does not cancel
+this independent numeric work.
+
+Acquire automatically waits after binding admission and before consuming its RNG
+sequence or constructing its request. Call `env.wait_ready()` **before starting a
+caller-owned timer** to exclude startup work from that timer. A timer wrapped
+around an immediately invoked blocking acquire necessarily includes its wait.
+No frontend timer or status display is installed by this backend API.
+
+The coverage manifest in `warmup.py` covers shaped carrier families (>9 carriers),
+shaped direct integration, covariant single-tone and simultaneous gate playback,
+Dyson gain batches, dense Floquet periods, t4 and ADC
+integrated/decimated/mux responses. It does not promise every possible signature
+or kernel. New routes require updating the representative inputs and checking
+real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
+
+## Acquisition and numeric composition
 
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's density and
 conditional response when the snapshot is equal. Every round draws a new stream.
-Opening another acquire invalidates the old session and drops its preparations.
+Opening another acquire invalidates the old session and drops its densities and
+assembled channel arrays. Bounded ADC solvers and exact contents remain source-owned.
 The binding serializes calls; direct author callers must do the same.
 
+`plan_template` accepts optional matching `FTFModelFacts` for shared physical
+inputs; standalone calls build their own facts. `FTFSource.model_facts` supplies
+the source-owned latest facts and rejects calls after close.
 `plan_template` converts QICK us/MHz/degrees into ns/GHz/radians with point
 arrays. It preserves signed gains, complex sampled envelopes and the common
 carrier origin for evolution. Readout converts the program's common-origin
@@ -78,7 +135,9 @@ is unchanged; tones are not assigned to individual resonators. Controls evolve
 to the common readout start only. Separate readout blocks are not supported.
 Constant readout envelope values
 fold into amplitude with `envelope=None`, enabling the exact field solution.
-Conditional responses are solved once per distinct content, not per shot.
+Nonconstant samples become ADC `PiecewiseLinearEnvelope` inputs without changing
+knots, interpolation, final-value hold, gain or phase. Conditional responses are
+solved once per distinct content, not per shot.
 
 `plan_template` passes `readout.adc.time_of_flight_ns` to the numeric receiver
 and the ordered r1/r2 `mismatch_phase_rad` values to `ReadoutModel`. All default
@@ -98,8 +157,10 @@ Each batch contains every incident tone and that ADC's grids. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
 the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,
 ringdown and per-receiver offset remain part of ADC's response contract. Shaped
-and decimated mux batches retain the general multi-carrier field solver.
-Single-carrier fast paths and evolution are unchanged.
+mux batches use ADC affine-input convolution propagation for known numeric
+envelopes. Opaque callbacks and unsupported timing retain the field solver. Flat common-start
+decimated batches superpose vacuum-start carrier fields through the same line,
+then calibrate once per receiver. Single-carrier fast paths and evolution are unchanged.
 
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
@@ -121,11 +182,11 @@ receiver noise and the integrated rounding term.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v8`, which identifies common-origin to pulse-local
-mux phase conversion in both integrated and general ODE readout. Archives from
-`ftf-segment-v7` and earlier backends fail explicitly because mux IQ values
-change. Evolution's numeric version and single-carrier results at `f=f_ref`
-are unchanged.
+The backend is `ftf-segment-v10`, which identifies closed-form sampled-envelope
+readout and tiled flat integrated sums, retaining common-origin phase conversion.
+Archives from `ftf-segment-v9` and earlier backends fail explicitly because
+readout floating-point results change. Evolution's numeric version and RNG
+sampling contract are unchanged.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

@@ -14,7 +14,12 @@ from ._gain_plan import plan_gain_groups
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
-from ._shaped_dispatch import preference
+from ._resident import ResidentAdmission
+from ._shaped_dispatch import (
+    populate_single_gate_plan,
+    preference,
+    single_gate_preferred,
+)
 from ._two_tone_dispatch import direct_preferred
 from .cache import PrepareCache, PreparedPayload
 from .engine import PathDiagnostics
@@ -26,8 +31,9 @@ from .kernel import (
     RowPlan,
     SegmentTable,
 )
-from .kernels.floquet import FloquetPlan
+from .kernels.floquet import FloquetKernel, FloquetPlan
 from .kernels.gate_cache import GateCacheKernel
+from .kernels.multitone_gate import populate_gate_inventory
 from .secular import ModelSource
 from .workplan import WorkPlan
 
@@ -42,7 +48,91 @@ def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
     plan = WorkPlan()
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
+    populate_gate_inventory(table, source, plan)
+    populate_single_gate_plan(table, source, plan)
     return plan
+
+
+@dataclass(frozen=True)
+class _CandidateDomain:
+    mask: NDArray[np.bool_]
+    families: tuple[str, ...]
+
+
+def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
+    """Dispatch's structural domains and candidate inventory, before cost/guards.
+
+    Inventory visits every family. Classification uses these same domains and
+    reorders their candidates by acquire-wide cost or skips optional families.
+    """
+    table = geometry.table
+    flux = geometry.flux_drive & (table.tones > 0)
+    ordinary = ~flux
+    constant = table.constant_envelopes(np.arange(len(table.timeline), dtype=np.int64))
+    single = ordinary & (table.tones == 1)
+    return {
+        "idle": _CandidateDomain(table.tones == 0, ("t4",)),
+        "flux": _CandidateDomain(flux, ("flux_dop853",)),
+        "plateau": _CandidateDomain(
+            single & constant, ("dyson", "floquet_period", "t6")
+        ),
+        "shaped": _CandidateDomain(
+            single & ~constant,
+            (
+                "single_tone_gate",
+                "shaped_sambe",
+                "gate_cache",
+                "period_table",
+                "dop853",
+            ),
+        ),
+        "two": _CandidateDomain(
+            ordinary & (table.tones == 2) & constant,
+            ("multitone_rwa", "floquet", "dop853"),
+        ),
+        "multiple": _CandidateDomain(
+            ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)),
+            ("multitone_gate", "multitone_rwa", "dop853"),
+        ),
+    }
+
+
+def resident_inventory(
+    geometry: Geometry,
+    kernels: Mapping[str, Kernel],
+    context: KernelContext,
+    cache: PrepareCache,
+) -> dict[tuple[str, str, float], set[bytes]]:
+    """Find all potentially borrowed resident keys before prefixes or guards.
+
+    Inventory covers every candidate in the complete WorkPlan geometry, not
+    just accepted rows or the current prefix. Only resident families need key
+    computation. Candidate membership never invokes a numerical guard and does
+    not change routing; whole-batch intersections remain eligible for borrowing.
+    """
+    table = geometry.table
+    zero = tuple(0 for _ in range(table.level.shape[1]))
+    identity = context.source.model(zero).identity
+    current = {
+        name
+        for name, model, budget in cache.namespaces
+        if model == identity and budget == context.budget
+    }
+    inventory = {}
+    if current:
+        domains = _candidate_domains(geometry)
+        for domain in domains.values():
+            mask, families = domain.mask, domain.families
+            rows = np.flatnonzero(mask)
+            if not len(rows):
+                continue
+            for name in families:
+                if name in current:
+                    keys = kernels[name].prepare_keys(table, rows, context)
+                    inventory.setdefault(
+                        (name, identity, context.budget), set()
+                    ).update(key.tobytes() for key in keys)
+    return inventory
 
 
 @dataclass(frozen=True)
@@ -97,6 +187,10 @@ class Dispatch:
     diagnostics: counts for decisions resolved so far, refreshed after workers join.
     costs: nonnegative scheduling estimates, including provisional deferred costs.
     preparations: accepted caller guard products, grouped by family.
+    rejected_preparations: model-only handoffs with no accepted rows, never apply
+        bindings. Caller shared guards cap these by spare resident capacity and
+        per-key quotas; Schedule consumes this mutable handoff queue when offering
+        them below actual consumers. Only admission retains unused products then.
     deferred: worker-owned row mask, or None when no rows need worker classification.
     shaped: fixed acquire-wide cost plan, or None when no shaped work exists.
     rejected: caller guard decisions to skip in worker-local fallback chains.
@@ -124,6 +218,9 @@ class Dispatch:
         default_factory=lambda: np.empty(0, dtype=np.int64)
     )
     cached: Mapping[str, tuple[PreparedPayload, ...]] = field(default_factory=dict)
+    rejected_preparations: dict[str, tuple[GuardPreparation, ...]] = field(
+        default_factory=dict
+    )
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -209,6 +306,7 @@ class _Guarded:
     rejected: NDArray[np.int64]
     preparations: tuple[GuardPreparation, ...]
     plan: RowPlan | None = None
+    rejected_preparations: tuple[GuardPreparation, ...] = ()
 
 
 def _guard_key(
@@ -217,7 +315,7 @@ def _guard_key(
     context: KernelContext,
     rows: NDArray[np.int64],
 ) -> _Guarded:
-    """Keep the exact guard product whenever any row accepts this key."""
+    """Separate consumer handoffs from model-only products with no accepted row."""
     result = kernel.guard_prepared(table, rows, context)
     if result is None:
         raise RuntimeError(
@@ -226,7 +324,13 @@ def _guard_key(
     accepted = result.accepted
     selected = rows[accepted]
     preparations = result.preparations if len(selected) else ()
-    return _Guarded(selected, rows[~accepted], preparations, result.plan)
+    return _Guarded(
+        selected,
+        rows[~accepted],
+        preparations,
+        result.plan,
+        result.preparations if not len(selected) else (),
+    )
 
 
 def _guard_cached(
@@ -235,6 +339,7 @@ def _guard_cached(
     context: KernelContext,
     rows: NDArray[np.int64],
     hits: _GuardCacheHits,
+    rejected_limit: int | None = None,
 ) -> tuple[_Guarded, ...]:
     """Admit covered cached rows without building; build only domain misses."""
     remaining = np.ones(len(rows), dtype=bool)
@@ -265,7 +370,21 @@ def _guard_cached(
             )
         )
     if remaining.any():
-        results.append(_guard_key(kernel, table, context, rows[remaining]))
+        built = _guard_key(kernel, table, context, rows[remaining])
+        if rejected_limit is not None and built.rejected_preparations:
+            retained: list[GuardPreparation] = []
+            for preparation in built.rejected_preparations:
+                if preparation.prepared.nbytes <= rejected_limit:
+                    retained.append(preparation)
+                    rejected_limit -= preparation.prepared.nbytes
+            built = _Guarded(
+                built.rows,
+                built.rejected,
+                built.preparations,
+                built.plan,
+                tuple(retained),
+            )
+        results.append(built)
     return tuple(results)
 
 
@@ -300,9 +419,10 @@ class _Classifier:
         context: KernelContext,
         pool: Executor | None = None,
         selection: Selection | None = None,
-        cache: PrepareCache | None = None,
+        admission: ResidentAdmission | None = None,
     ):
-        self.cache = cache
+        self.admission = admission
+        self.cache = admission.cache if admission is not None else None
         self.cached = (
             {
                 name: hits
@@ -318,6 +438,7 @@ class _Classifier:
         self.context = context
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
+        self.domains = _candidate_domains(geometry)
         self.names = np.full(len(self.table.timeline), "", dtype="U16")
         self.costs = np.zeros(len(self.names))
         self.deferred = np.zeros(len(self.names), dtype=bool)
@@ -329,6 +450,7 @@ class _Classifier:
             selection.two_tone_direct if selection is not None else None
         )
         self.preparations: dict[str, list[GuardPreparation]] = {}
+        self.rejected_preparations: dict[str, list[GuardPreparation]] = {}
         self.rejected: dict[str, NDArray[np.bool_]] = {}
         self.guard_plans: dict[str, list[RowPlan]] = {}
         self.plans: dict[str, RowPlan] = {}
@@ -357,6 +479,17 @@ class _Classifier:
                 )
             )
         hits = self.cached.get(kernel.name, _EMPTY_GUARD_HITS)
+        if isinstance(kernel, FloquetKernel) and self.cache is not None and hits:
+            hits = self.extend_floquet_hits(kernel, hits)
+            self.cached[kernel.name] = hits
+        # Bound rejected handoffs even while pooled shared guards are returning.
+        # Equal per-key quotas deliberately decline large non-revisiting scans.
+        rejected_limit = (
+            max(0, self.cache.limit - self.cache.bytes)
+            // max(1, int(np.count_nonzero(groups.shared)))
+            if self.cache is not None
+            else 0
+        )
         local = rows[~groups.shared[groups.inverse]]
         self.deferred[local] = True
         if len(local):
@@ -366,7 +499,9 @@ class _Classifier:
         )
         if self.pool is not None and np.count_nonzero(groups.shared) >= 8:
             batches = self.pool(
-                delayed(_guard_cached)(kernel, self.table, self.context, selected, hits)
+                delayed(_guard_cached)(
+                    kernel, self.table, self.context, selected, hits, rejected_limit
+                )
                 for selected in selections
             )
             results: list[_Guarded] = []
@@ -379,9 +514,37 @@ class _Classifier:
             result
             for selected in selections
             for result in _guard_cached(
-                kernel, self.table, self.context, selected, hits
+                kernel, self.table, self.context, selected, hits, rejected_limit
             )
         )
+
+    def extend_floquet_hits(
+        self, kernel: FloquetKernel, hits: _GuardCacheHits
+    ) -> _GuardCacheHits:
+        """Extend complete cached domains in the caller before workers borrow them.
+
+        Cache ownership is replaced, not added alongside the shared frame. The
+        full-table inventory makes later shared/deferred guards read-only, so
+        worker completion order cannot lose a concurrent bin extension.
+        """
+        if self.cache is None:
+            raise RuntimeError("Floquet extension requires caller cache ownership")
+        dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
+        namespace = kernel.name, dc.identity, self.budget
+        extended: list[PreparedPayload] = []
+        for payload in hits:
+            prepared = kernel.extend_prepared(
+                payload.prepared, self.table, self.context
+            )
+            if prepared is payload.prepared:
+                extended.append(payload)
+                continue
+            replacement = PreparedPayload(prepared, payload.keys)
+            if self.admission is None:
+                raise RuntimeError("Floquet extension requires caller admission")
+            self.admission.replace(namespace, payload, replacement)
+            extended.append(replacement)
+        return _GuardCacheHits(extended)
 
     def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
         """Batch cheap guards in the caller and never retry its rejected rows."""
@@ -407,6 +570,10 @@ class _Classifier:
                 )[result.rejected] = True
             if result.plan is not None:
                 self.guard_plans.setdefault(kernel.name, []).append(result.plan)
+            if result.rejected_preparations:
+                self.rejected_preparations.setdefault(kernel.name, []).extend(
+                    result.rejected_preparations
+                )
             if result.preparations:
                 self.preparations.setdefault(kernel.name, []).extend(
                     result.preparations
@@ -430,9 +597,20 @@ class _Classifier:
                 preference(self.table, rows, self.kernels, self.context),
             )
         plan = self.shaped
-        spectral = self.kernels.get("shaped_sambe")
-        if spectral is not None:
+        families = self.domains["shaped"].families
+        covariant = self.kernels.get(families[0])
+        if covariant is not None:
             selected = plan.rows[self.scope[plan.rows]]
+            preferred = single_gate_preferred(self.table, selected, self.context)
+            if np.any(preferred):
+                self.try_kernel(covariant, selected[preferred])
+        spectral = self.kernels.get(families[1])
+        if spectral is not None:
+            selected = plan.rows[
+                self.scope[plan.rows]
+                & (self.names[plan.rows] == "")
+                & ~self.deferred[plan.rows]
+            ]
             if len(selected):
                 self.try_kernel(spectral, selected)
         pending = (
@@ -440,7 +618,7 @@ class _Classifier:
             & (self.names[plan.rows] == "")
             & ~self.deferred[plan.rows]
         )
-        families = ("gate_cache", "period_table", "dop853")
+        families = families[2:]
         pending_rows, order = plan.rows[pending], plan.order[pending]
         for permutation in np.unique(order, axis=0):
             selected = pending_rows[np.all(order == permutation, axis=1)]
@@ -449,36 +627,32 @@ class _Classifier:
     def classify(self) -> Dispatch:
         table = self.table
         rows = np.flatnonzero(self.scope)
-        self.accept(rows[table.tones[rows] == 0], ("t4",))
-        flux = self.geometry.flux_drive & (table.tones > 0)
-        self.accept(rows[flux[rows]], ("flux_dop853",))
-        ordinary = ~flux
-        constant = table.constant_envelopes(
-            np.arange(len(table.timeline), dtype=np.int64)
-        )
-        single = ordinary & (table.tones == 1)
-        plateau = rows[(single & constant)[rows]]
+        for name in ("idle", "flux"):
+            domain = self.domains[name]
+            self.accept(rows[domain.mask[rows]], domain.families)
+        domain = self.domains["plateau"]
+        plateau = rows[domain.mask[rows]]
         # Distinct inputs cannot share Dyson paths; period propagation is cheaper
         # within the 10 us FTF coverage. Keep Dyson when the period guard rejects.
         distinct_input = _unshared_driven_input(table) & (table.duration_ns <= 10000.0)
-        self.accept(plateau[distinct_input[plateau]], ("floquet_period", "dyson", "t6"))
-        self.accept(
-            plateau[~distinct_input[plateau]], ("dyson", "floquet_period", "t6")
-        )
-        shaped = np.flatnonzero(single & ~constant & self.scope)
-        if np.any(self.scope[shaped]):
+        dyson, period, terminal = domain.families
+        self.accept(plateau[distinct_input[plateau]], (period, dyson, terminal))
+        self.accept(plateau[~distinct_input[plateau]], domain.families)
+        shaped = np.flatnonzero(self.domains["shaped"].mask & self.scope)
+        if len(shaped):
             self.classify_shaped(shaped)
-        two_tone = np.flatnonzero(ordinary & (table.tones == 2) & constant)
+        two_tone = np.flatnonzero(self.domains["two"].mask)
         if len(two_tone):
             self.classify_two_tone(two_tone)
-        self.accept(
-            rows[
-                (ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)))[
-                    rows
-                ]
-            ],
-            ("dop853",),
-        )
+        domain = self.domains["multiple"]
+        multiple = rows[domain.mask[rows]]
+        # A calibrated approximation has its own visible family. Custom
+        # registries can omit this optional fast path, like shaped_sambe.
+        if domain.families[1] in self.kernels:
+            candidates = tuple(name for name in domain.families if name in self.kernels)
+            self.accept(multiple, candidates)
+        else:
+            self.accept(multiple, domain.families[2:])
         return self._result()
 
     def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
@@ -490,8 +664,10 @@ class _Classifier:
             )
         selected = rows[self.scope[rows]]
         direct = self.two_tone_direct[selected]
-        self.accept(selected[direct], ("dop853", "floquet"))
-        self.accept(selected[~direct], ("floquet", "dop853"))
+        rwa, floquet, dop853 = self.domains["two"].families
+        prefix = (rwa,) if rwa in self.kernels else ()
+        self.accept(selected[direct], (*prefix, dop853, floquet))
+        self.accept(selected[~direct], (*prefix, floquet, dop853))
         self.retain_floquet_plan()
 
     def retain_floquet_plan(self) -> None:
@@ -551,6 +727,7 @@ class _Classifier:
             self.plans,
             chain,
             self.cached,
+            {name: tuple(items) for name, items in self.rejected_preparations.items()},
         )
 
 
@@ -561,7 +738,7 @@ def classify(
     pool: Executor | None = None,
     selection: Selection | None = None,
     *,
-    cache: PrepareCache | None = None,
+    admission: ResidentAdmission | None = None,
 ) -> Dispatch:
     """Guard shared candidates now and resolve local candidates in their worker.
 
@@ -569,8 +746,11 @@ def classify(
     Smaller shared selections stay serial. Selection resolves one timeline's
     deferred rows without a nested pool, retaining guard products for apply.
     Both modes use the same acquire-wide cost plan and numerical guards.
-    cache=None means this call does not look up resident payloads. Engine callers
-    supply cache under their call lock; deferred workers borrow strong references
-    through Selection.cached and never access the resident cache themselves.
+    admission=None means this call does not look up resident payloads. Callers
+    supply the evolve-wide admission under their call lock. Deferred workers
+    borrow strong references through Selection.cached and never access the
+    resident cache themselves.
     """
-    return _Classifier(geometry, kernels, context, pool, selection, cache).classify()
+    return _Classifier(
+        geometry, kernels, context, pool, selection, admission
+    ).classify()
