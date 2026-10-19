@@ -556,6 +556,9 @@ def test_window_close_rejects_queued_connect_before_driver_registration(
 
     QTimer.singleShot(0, queued_connect)
     assert app.window.close()
+    # Closing an idle executor need not pump unrelated queued Qt callbacks.
+    # The scheduled request must return or reject on the next owner-loop turn.
+    qt_until(lambda: accepted or rejections, label="queued connect after close")
     assert accepted == [], "queued connect escaped terminal admission"
     assert [type(error).__name__ for error in rejections] == [
         "BackgroundAdmissionClosedError"

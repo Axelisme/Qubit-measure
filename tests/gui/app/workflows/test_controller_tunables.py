@@ -14,6 +14,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.experiment.workflows._engine_fakes import (
     Plan,
     Rig,
@@ -69,7 +70,7 @@ def test_idle_tunables_failure_finishes_once_and_discards_retained_progress(
     journal.unlink()
     journal.mkdir()
     try:
-        with pytest.raises(IsADirectoryError):
+        with pytest.raises(DIRECTORY_OPEN_ERROR):
             controller.apply_tunables(
                 "run", {("value",): 2}, actor=Actor("agent", "test")
             )
@@ -81,7 +82,7 @@ def test_idle_tunables_failure_finishes_once_and_discards_retained_progress(
     assert len(finished) == 2
     assert finished[0][0] is not None and finished[0][0].lifecycle == "paused"
     assert finished[-1][0] == failed and repeated == [failed]
-    assert isinstance(finished[-1][1], IsADirectoryError)
+    assert isinstance(finished[-1][1], DIRECTORY_OPEN_ERROR)
     assert not harness.gate.snapshot()
     assert harness.handles.known_outcome(token) == OperationOutcome(
         "failed", failed.reason
@@ -97,7 +98,7 @@ def test_active_tunables_failure_waits_for_producer_and_preserves_native_outcome
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
-    errors: list[IsADirectoryError] = []
+    errors: list[OSError] = []
     observed: list[tuple[bool, bool, int | None, int]] = []
     binding = create_binding()
     controller = create_controller(
@@ -119,7 +120,7 @@ def test_active_tunables_failure_waits_for_producer_and_preserves_native_outcome
                 controller.apply_tunables(
                     "run", {("value",): 2}, actor=Actor("agent", "test")
                 )
-            except IsADirectoryError as error:
+            except DIRECTORY_OPEN_ERROR as error:
                 errors.append(error)
         finally:
             journal.rmdir()
@@ -176,7 +177,7 @@ def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
-    native_errors: list[IsADirectoryError] = []
+    native_errors: list[OSError] = []
     observed: list[tuple[bool, bool, int]] = []
 
     def completed(status: RunStatus | None, error: Exception | None) -> None:
@@ -216,7 +217,7 @@ def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
             controller.apply_tunables(
                 "run", {("value",): 2}, actor=Actor("agent", "rpc")
             )
-        except IsADirectoryError as error:
+        except DIRECTORY_OPEN_ERROR as error:
             native_errors.append(error)
         controller.stop("run")
         observed.append(

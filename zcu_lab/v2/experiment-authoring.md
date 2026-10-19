@@ -100,7 +100,7 @@ and mean complex IQ per participating tone; the fringe decay measures T2.
 
 本套件的 adapter、workflow 與 recipes 是實驗定義，不寫個別實驗測試。實驗錯誤由 GUI 啟動或載入直接回報，不逐一走過 lab registry 來選取測試材料。
 
-框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開 seam 與對外契約，不 import `zcu_lab`，也不用其 fake 實驗。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。實驗共用 helper 留在本套件，不因可抽成 helper 就新增 pytest；框架共用機制依責任放在 lib，由該 owner 的合成材料測試驗證。
+框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開 seam 與對外契約，不 import `zcu_lab`。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。實驗共用 helper 留在本套件，不因可抽成 helper 就新增 pytest；框架共用機制依責任放在 lib，由該 owner 的合成材料測試驗證。
 
 案例歸屬、fixture 與搬遷規則見 [tests README](../../tests/README.md)。
 
@@ -118,9 +118,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 的數值 Analysis 保存本次 fit_q
 
 `onetone.freq.FreqExp` 的 run 回傳純 freqs／signals，支援 linear 與 homophasal 取樣。同步 analyze 接 explicit source 與 FreqAnalyzeOptions，回傳純 FreqAnalysis，向 Plots 發布 `fit` 圖。`onetone.power_dep.PowerDepExp` 只提供量測及保存／載入，earlystop_snr 歸 typed cfg。兩者都用 explicit context 執行 run，保留 canonical Hz 與 complex data。
 
-`fake.signal.core.FakeExp` 使用 explicit context 產生純 freqs／signals。Acquisition controls 在 typed FakeCfg，measurement 與 abs fit 圖歸本次 Plots。Analyze 接 None options、回傳 None，接受 cfg=None。Save／load 使用 Frequency／Hz 與 complex data 的 canonical record，不再於 load 偽造資料。
-
-一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 先建立 `nb_adapter = zcu_tools.notebook.NotebookAdapter(...)`，再呼叫 `nb_adapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具由 [`singleshot/ge/notebook.py`](singleshot/ge/notebook.py) 擁有。FluxDep 的獨立選線工具由 [`zcu_tools.notebook.flux_dep`](../../lib/zcu_tools/notebook/flux_dep.py) 擁有。FluxDepAnalyzer 明確接收 RunRecord 與 caller 填入的 FluxPickInputs，不讀 NotebookAdapter 的目前來源。相關 Notebook 與 GUI callers 已採用 records 與 explicit context，下方 run 範本使用同一契約。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
+一般 T1、GE 與 OneTone 的 Notebook run／同步 FIT 入口是 先建立 `nb_adapter = zcu_tools.notebook.NotebookAdapter(...)`，再呼叫 `nb_adapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具由 [`singleshot/ge/notebook.py`](singleshot/ge/notebook.py) 擁有。FluxDep 的獨立選線工具由 [`zcu_tools.notebook.flux_dep`](../../lib/zcu_tools/notebook/flux_dep.py) 擁有。FluxDepAnalyzer 明確接收 RunRecord 與 caller 填入的 FluxPickInputs，不讀 NotebookAdapter 的目前來源。相關 Notebook 與 GUI callers 已採用 records 與 explicit context，下方 run 範本使用同一契約。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
 
 T2Echo／T2Ramsey 的 detune 放入 typed cfg，run 回傳純 Result，analyze 使用 explicit source 與 typed options，向 Plots 發布 fit 圖。硬體 rounding 後的 true_activate_detune 是 run-only metadata；canonical axes／complex data 不包含它，load 後值為 None，不推測實際 detune。兩者分析均允許 cfg=None。
 
@@ -291,7 +289,7 @@ matrix的估計流程。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
 
 Schedule／ProgramBuilder 的 buffer、program cfg、retry 與 partial-result 規則見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
-目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback/core.py`、`fake/signal/core.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*` 與 `mist/*`。
+目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback/core.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*` 與 `mist/*`。
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
 `SweepCfg` sweep；`homophasal` 保留同一個 `sweep.freq` 使用者介面，但由已擬合的 resonator

@@ -8,16 +8,12 @@ from zcu_tools.gui.app.measure.services.caretaker import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
 from zcu_tools.gui.app.measure.services.persistence_types import (
-    APP_STATE_VERSION,
     AppPersistedState,
-    PersistedSession,
-    PersistedStartup,
-    PersistedTab,
 )
 
 
 class _FakeOriginator:
-    """A PersistOriginatorPort that just holds a memento in memory."""
+    """A layout SnapshotOriginator that just holds detached dimensions."""
 
     def __init__(self, state: AppPersistedState) -> None:
         self._captured = state
@@ -26,25 +22,12 @@ class _FakeOriginator:
     def capture_persisted_state(self) -> AppPersistedState:
         return self._captured
 
-    def restore_persisted_state(self, state: AppPersistedState):
+    def restore_persisted_state(self, state: AppPersistedState) -> None:
         self.restored = state
-        from zcu_tools.gui.app.measure.services.ports import RestoreReport
-
-        return RestoreReport(restored_tabs=len(state.session.tabs), rejected_tabs=())
 
 
 def _sample_state() -> AppPersistedState:
-    return AppPersistedState(
-        startup=PersistedStartup(chip_name="chip", ip="host", port=1234),
-        session=PersistedSession(
-            tabs=(
-                PersistedTab(
-                    adapter_name="fake", form_input={"data": {"x": 1}, "selections": []}
-                ),
-            ),
-            active_tab_index=0,
-        ),
-    )
+    return AppPersistedState(window_width=1100, window_height=820, left_panel_width=321)
 
 
 def test_flush_then_restore_roundtrip(tmp_path: Path):
@@ -96,50 +79,5 @@ def test_restore_corrupt_file_falls_back_with_error(tmp_path: Path):
 
     outcome = caretaker.restore_all()
 
-    assert outcome.load_error is not None
-    assert receiver.restored == AppPersistedState()
-
-
-def test_raw_only_form_snapshot_opens_defaults_with_visible_error(
-    tmp_path: Path,
-) -> None:
-    receiver = _FakeOriginator(AppPersistedState())
-    caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
-    caretaker.state_path.write_text(
-        f'{{"version": {APP_STATE_VERSION}, "session": {{"tabs": [{{"adapter_name": "fake", "form_input": {{"x": 1}}}}]}}}}'
-    )
-
-    outcome = caretaker.restore_all()
-
-    assert outcome.load_error is not None
-    assert "Failed to read GUI state" in str(outcome.load_error)
-    assert receiver.restored == AppPersistedState()
-
-
-def test_restore_wrong_version_falls_back_with_error(tmp_path: Path):
-    receiver = _FakeOriginator(AppPersistedState())
-    caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
-    caretaker.state_path.parent.mkdir(parents=True, exist_ok=True)
-    caretaker.state_path.write_text(
-        f'{{"version": {APP_STATE_VERSION + 99}, "startup": {{}}, "session": {{}}}}',
-        encoding="utf-8",
-    )
-
-    outcome = caretaker.restore_all()
-
-    assert outcome.load_error is not None
-    assert receiver.restored == AppPersistedState()
-
-
-def test_previous_tab_memento_version_degrades_to_defaults(tmp_path: Path) -> None:
-    receiver = _FakeOriginator(AppPersistedState())
-    caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
-    caretaker.state_path.parent.mkdir(parents=True, exist_ok=True)
-    caretaker.state_path.write_text(
-        '{"version": 1, "startup": {}, "session": {"tabs": '
-        '[{"adapter_name": "retired", "cfg_raw": {"gain": 1.0}}]}}',
-        encoding="utf-8",
-    )
-    outcome = caretaker.restore_all()
     assert outcome.load_error is not None
     assert receiver.restored == AppPersistedState()

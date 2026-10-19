@@ -164,7 +164,6 @@ def test_disconnect_shows_terminal_status_and_allows_reconnect(qapp, tmp_path: P
     runner = OperationRunner(gate, handles, progress, bg, bus)
     driver = FakeDevice(address="synthetic", fast_mode=True)
     manager = DeviceManager()
-    manager.register_device("label_device", driver)
     service = DeviceService(
         bus,
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
@@ -175,7 +174,7 @@ def test_disconnect_shows_terminal_status_and_allows_reconnect(qapp, tmp_path: P
         driver_factory=lambda type_name, address: driver,
         device_registry=manager,
     )
-    service.publish_initial_devices()
+    service.register_device("label_device", driver)
     facet = DeviceControlFacet(bus=bus, device=service, progress=progress)
     dialog = DeviceDialog(facet, parameter_provider=lambda: None)
     try:

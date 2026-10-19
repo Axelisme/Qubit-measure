@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.measure.events.startup import StartupChangedPayload
 from zcu_tools.gui.app.measure.events.tab import (
     TabAddedPayload,
     TabContentChangedPayload,
@@ -138,6 +139,9 @@ class RecordingHost:
 
     def handle_save_data_finished(self, payload: object) -> None:
         self._log.add("host", "handle_save_data_finished", payload)
+
+    def refresh_startup(self, payload: StartupChangedPayload) -> None:
+        self._log.add("host", "refresh_startup", payload)
 
 
 def _coordinator(

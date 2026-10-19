@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，FakeDevice 僅允許模擬發布、連線失敗與重試、未連線改名與重連
+**Last updated:** 2026-10-20，腳本與 entry 保存分界、儀器 adapters、shared user cache、entry-scoped arb 與 predictor 資產
 
 # gui/session/ — 量測 session core
 
@@ -34,10 +34,15 @@ DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，�
 
 `persistence.py` 是 app-neutral、強型別的 single-file caretaker；app 注入 codec 並保留
 schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
+預設存放於 `utils.cache.user_cache_root()/gui`，與 session discovery 共用 user cache 根目錄。
+`ZCU_TOOLS_CACHE_DIR` 指定非空絕對根路徑，空字串或相對路徑會在建立 caretaker 時 raise ValueError。
+顯式 `cache_dir` 仍直接指定保存目錄，不讀取這個 override。
+根目錄的 platformdirs 預設與 tempdir fallback 見 [utils README](../../utils/README.md#user-cache-root)。
 JSON／UTF-8 或 codec 格式錯誤時，caretaker 以 defaults 開啟，透過
 `RestoreOutcome.load_error` 交給 host 顯示。載入不改寫或備份原檔，正常保存時機不變。
-Provider 和其他 restore 故障仍傳播。FormInput 的啟動、RAM 與 source reload
-使用同一遞迴還原，見 ADR-0063、ADR-0079。
+Provider 和其他 restore 故障仍傳播。Measure 的 framework caretaker 只保存 `measure_layout_v1.json` 的視窗尺寸與左面板寬度，不保存、還原或遷移 SoC、devices、entry／point、tabs／input。Session preferences 是目前程序的 Setup 預填值，不負責 domain session 檔案。Workspace 快照與 FormInput reload 只在 RAM 中重建，不是持久 session schema，見 ADR-0063、ADR-0064、ADR-0079。
+
+Measure 的預設 zcu_lab 腳本自行保存 user cache，依序嘗試連線 SoC、devices，再開 entry／point 與帶 input 的 tabs。失敗的 device 可 remember 為未連線列；略過的 tabs 不延後等待來源。Alias 仍屬 entry 的 `aliases.yaml`，開 entry 載入、Inspect Apply 保存，預設腳本不另存或恢復。Session 只提供 live read/build 能力，不選擇保存領域或讀取腳本檔案。腳本選擇與背景 runner 屬 [measure app](../app/measure/README.md)。
 
 ```
 session/
@@ -45,22 +50,23 @@ session/
 ├── aliases.py          — session-only 有序表；原子替換、lazy 名稱 links 與單次 override
 ├── events.py           — SessionEvent enum + SessionPayload base + 11 payload（Md/Ml/ContextSwitched/Soc/Device{Changed,SetupStarted,SetupFinished} + GateChanged/ConnectionFinished/DeviceOperationFinished）
 ├── state.py            — SessionState（session_env+devices/DeviceState+preferences/SessionPreferences+shared VersionTable+device mutators）；DeviceStatus
-├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（production 使用 session-owned DeviceManager，測試注入 in-memory fake，ADR-0066）、ContextReadPort、ProjectContextPort
+├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、DeviceRegistryPort（production 使用 session-owned DeviceManager，測試注入 in-memory fake，ADR-0066）、ContextReadPort、ProjectContextPort
 ├── hardware_gate.py    — RunBlocksHardwareGate：量測硬體互斥矩陣（RUN 擋 RUN/SoC/device mutation；device mutation 依 resource id 互斥；SoC connect 擋 RUN/SoC）；每個lease另保存captured origin、human note與monotonic start，register/release emit `GateChangedPayload`，`snapshot()`只投影active duration、不曝露raw epoch
 ├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0066）+ captured EventOrigin operation record；`create(cancel_hook=, origin=)`要求caller顯式capture，`event_origin(token)`在live/retained-done record上投影string operation id；`has_cancel_hook`/channel.`can_cancel` 提供一般取消能力查詢；cancel hook例外只log，Stop事件仍入列且cancel_all繼續處理其它operation
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0066：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
 ├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0066，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。Figure 使用 operation-owned Plots，不透過 ambient scope
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不提供參數容器讀取
-├── predictor_control.py — Read-only explicit-parameter queries and concrete-qubit prefill for dialog and remote callers
+├── predictor_control.py — Read-only explicit-parameter queries and entry predictor file selection for dialog and remote callers
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
 ├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。Alias 表可在未開 entry 時編輯；set 只改 memory，Apply 才保存 opened entry。
 ├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責
-├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：qubit-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
+├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：entry-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
 ├── setup_control.py    — SetupControlPort + SetupControlFacet：entry open/new、point use/new、cached setup preferences 與獨立 SoC commands；直接公開既有 devices facet 供 cached label 建議，不依賴 app Controller
 ├── controller_mixin.py — SessionControllerMixin：measure 的 session forwards；shared dialog 使用窄 control facet，entry open/new 直接交 SetupControlPort，不經 project identity 或 app Controller
 ├── expression.py       — simpleeval 共用求值引擎，封裝函式／算子白名單、AST／數值大小限制及固定 ParameterContext 查詢。裸 `$alias` 求值為名稱 str，不接受字串算術或插值。數值 `evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs，常數 pi/e；math 函式不自動轉 cmath。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。
 ├── value_lookup.py     — read-only value source lookup（`ValueLookup`/`ValueRegistry`/owner-scoped replace/unregister/`ValueRef` resolve-once helpers）；純 session leaf，provider 來源由 service binder 負責，使用端只見 lookup
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free；worker API 同時支援 incremental `update(delta)` 與 absolute `set_progress(n)`
+├── devices/            — 明確登錄的儀器 adapters；base 定義 driver/panel 契約與 bias_source/user_connectable 能力。各儀器 module 同檔保存 adapter 與專屬 Qt panel，service 和 dialog 共用同一 catalog，未知 type 不建立 driver 或專屬 panel
 ├── adapters/
 │   ├── manual_owner_scheduler.py — ManualOwnerScheduler（headless/test owner queue，由建立它的owner thread明確pump）
 │   ├── thread_pool_background.py — ThreadPoolBackgroundExecutor（純threading worker，terminal delivery經OwnerScheduler回owner；quiesce等待worker與delivery ack）
@@ -70,13 +76,13 @@ session/
 │   └── qt_shutdown_driver.py — QtShutdownDriver（shared QTimer driving adapter，輪詢 ShutdownCoordinator，供 measure closeEvent 使用；QTimer tick/close callback 例外被 adapter 邊界 log 並 guarded close）
 ├── services/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經typed `ConnectionFinishedPayload`，無Qt）
-│   ├── predictor.py — Independent simulator queries; params_for is injected by app composition. params.json is read-only prefill.
+│   ├── predictor.py — Independent simulator queries and entry predictor file listing/loading through resources.predictor_file.
 │   ├── context.py      — ContextService：owner-thread entry/point binding、固定 parameter capture、全域 alias、source facts 與目前 entry 的 ledger capability
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳；connect/disconnect終局用`DeviceOperationFinishedPayload`，setup重用`DeviceSetupFinishedPayload`，無Qt）；`get_device_unit` 讀有效 YOKO／Fake cached Info 的 `value_unit`，分別為 A／V 與 native；缺 Info 的 UI／snapshot 標 none，不按 type 推測單位；strict binding 缺 Info 拋指名 device 的 `DeviceRegistrationError`，這些查詢不讀硬體、不改 connected／offline 狀態；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── project_settings.py — ProjectSettingsService：以明確 result/Database roots 呼叫 ResultEntry.open/create，再交 ContextService.install_entry；記住的 entry/connection/device preferences 不證明來源已開啟
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）
 │   ├── shutdown.py     — ShutdownCoordinator（Qt-free cancel-all + poll state machine，吃 OperationHandles，ADR-0066；QTimer driver 在 adapters/）
-│   ├── arb_waveform.py — ArbWaveformService：只依賴 SessionState，資產根目錄依 session_env 的 database path 與 chip／qubit 名稱；每次成功寫入 bump 共用 `arb_waveforms` version 一次；未設 project 時 list 回空，其他操作拒絕 no_project
+│   ├── arb_waveform.py — ArbWaveformService：只依賴 SessionState，資產根目錄直接使用目前 entry 的 database path 下的 `arb_waveforms`；每次成功寫入 bump 共用 `arb_waveforms` version 一次；未設 project 時 list 回空，其他操作拒絕 no_project
 │   ├── value_sources.py — ValueSourceBinder：訂閱 Context/Device event，把 live SessionState 投影註冊進 `ValueRegistry`；provider 只讀 cached state（device value 只看 `DeviceState.info`，不 poll hardware），並用 owner-level replace/unregister 維護 lifecycle
 │   └── build.py        — SessionServices bundle 與 build_session_services：組裝 owning services/facets（含 arb_waveform），從 project_root 注入 result/Database roots，明確注入 entry-scoped asset binder
 └── ui/                 — 共用 dialog，依賴各 domain 的窄 control facets
@@ -85,7 +91,7 @@ session/
     ├── alias_panel.py — AliasPanel：Inspect 的 Aliases 頁。編輯有序 authored rows，透過 ContextControlPort 原子提交；唯讀解析欄投影已安裝的表。Load preset 選單列出 host 傳入的具名 preset，選一份整張取代草稿、不合併、不提交，Apply 才保存；None 表示無 catalog，選單停用。唯讀時同樣停用。只回報 Unsaved，不自己詢問
     ├── component_tree.py — ComponentTreeWidget：Field／Value／Unit／Metadata 四欄樹，Metadata 以單行 flow YAML 與多行 tooltip 顯示 caller 的 opaque mapping，不解讀 key；依 `component_field_specs` 列出全部欄位（未設定顯示 `(unset)`），Value 就地編輯；父欄位未設定時寫入最淺一層未設定祖先的巢狀 mapping。寫入走 owner，UI 不直接寫文件
     ├── setup_dialog.py — Result entry、Working points 與 Connection 的 shared dialog。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。Clone from 的 `(empty)` 表示新 point 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體
-    ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；per-device panel lazy-import zcu_tools.device.*；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
+    ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；專屬 panel 由 device adapter 建立並按需保留；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. Calibration displays actual MHz and clamped from the shared model result; it changes only dialog bias/cache, never a component. No Apply or session model. Device values and frequency expressions remain optional inputs.
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
     ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口、DialogPresenter 與具名 alias preset catalog（None 表示無 catalog），沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，開啟時讀一次已安裝的表，關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
@@ -95,21 +101,29 @@ session/
 
 共用 Setup、Inspect、Devices 與 ARB 對話框由宿主呼叫 `set_read_only` 決定是否可編輯，不讀控制權或 run 狀態。Setup 唯讀時保留 point 選取、description、paths、查詢刷新與 Close，停用 entry／point 提交及 Connect。連線完成與事件刷新不會解除宿主的唯讀狀態。ARB 唯讀時停用編輯與 Save，保留鎖前草稿；asset 選取、Refresh、預覽與 Close 照常可用。解鎖後 Save 仍受驗證結果限制。Inspect 唯讀時「Arb Waveforms…」入口仍可按，ARB 依宿主規則以唯讀開啟。
 
-Simulation is selected at measure startup with `--simulate <environment.py>`.
-Composition injects the returned manager and calls `DeviceService.publish_initial_devices`
-before preference restore. Live rows win over same-name remembered rows; other
-remembered rows stay MEMORY_ONLY without connecting. `install_startup_soc` publishes
-the bound SoC/config through the connection owner and fixes that pair for this process.
-Composition also injects the environment's device lookup into DeviceService.
-Users cannot manually add FakeDevice in normal or simulated sessions. Only rows
-published by `publish_initial_devices` may reconnect at their stored address,
-including after rename. Remembered preferences do not authorize new FakeDevice.
-The Add Device type menu lists hardware drivers only; published FakeDevice panels
-remain available. Explicit FakeDevice addresses retrieve process-shared instances
-without resetting settings or model bindings. Unsupported simulation types/addresses fail clearly;
-real-mode hardware creation is unchanged. Session has no environment builder,
-second instance cache or dynamic simulation coordinator. The host drains work
-and closes the same manager; Controller close alone does not close drivers.
+`SoCConnectionService.install_soc(soc, soccfg)` 可在 owner thread 替換 board/config，
+`uninstall_soc()` 發布空 pair。兩者走 SOC_CONNECT gate，Run 或 connect 中拒絕。
+Board 自述的 optional `is_mock` 直接轉發，缺旗標時為 False；session 不判斷來源，
+也不對 board 假定 close 契約。建立者保留 board 外部資源的清理責任。
+
+`DeviceService.register_device(name, driver)` 接受已建好的 BaseDevice，先讀 info，
+成功後才接管並發布 cache。Live 同名拒絕，idle MEMORY_ONLY 可替換並保留 remember。
+Run 或同名 mutation 中拒絕；失敗不接管或關閉候選 driver。通用 DriverFactoryPort
+仍服務手動連線；注入 registry 可用 `publish_initial_devices()` 發布既有 drivers。
+Live rows 優先於同名 remembered rows，其他 remembered rows 不自動連線。
+
+Host 在工作 drain 及 caller callbacks 完成後呼叫 `close_all_devices()`。Measure 透過 `finish_close()` 共用此順序，script callbacks 在 owner thread 反序執行一次，單一失敗記 log 後繼續。Drain 逾時不先消耗 callbacks 或關閉硬體。
+每台 driver 各嘗試一次，成功轉 MEMORY_ONLY，失敗保留 CONNECTED 與 error，最後
+拋彙整 ExceptionGroup。Measure 的 `Controller.close()` 只 drain，`close_hardware()`
+才逐台關閉並卸載 SoC。後者記錄關閉錯誤而不阻擋 GUI 結束，重呼不自動重試。
+使用者不能手動新增 FakeDevice。Add Device 類型選單只列硬體 driver，
+已登記 FakeDevice 仍使用專屬 panel。Adapter 的 `user_connectable=False` 只禁止
+手動 Add Device。可信 caller 透過 `register_device()`、`publish_initial_devices()` 或
+`register_remembered_devices()` 建立的既有 row，皆可經已知 adapter 在原 address
+Reconnect，未連線改名後也相同。Reconnect 與手動新增分開 admission；未知 type
+沒有預設 factory。
+顯式 FakeDevice address 取回 process-shared instance，不重設設定或模型綁定。
+Session 不載入 simulation environment，也不組裝模擬資源。
 
 Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提供獨立 `value_unit` 編輯。完整 cfg 的單位由 Info 驗證，snapshot 與 recipe 沿同一儲存事實。
 
@@ -118,7 +132,7 @@ GUI 與 remote 查詢讀取同一個失敗原因。Dialog 保留失敗的名稱�
 
 ## Disconnected device rename
 
-`DeviceService.rename_device(old_name, new_name)` 在 owner loop 同次改名 idle `MEMORY_ONLY` row，提交後刷新 live value sources。Settings owner 從已提交 State 保存新名。連線中或有進行中操作時拒絕，即使新舊名相同。空字串、全空白與名稱衝突也拒絕，不改任何狀態。其他名稱原樣保留，不新增字元限制。DeviceDialog 的 Rename 欄位與按鈕只在未連線且可編輯時啟用。改名不更新 alias、已開 tab 或歷史紀錄，見 ADR-0076。
+`DeviceService.rename_device(old_name, new_name)` 在 owner loop 同次改名 idle `MEMORY_ONLY` row，提交後刷新 live value sources。Live device snapshots 與 value sources 立即反映新名。連線中或有進行中操作時拒絕，即使新舊名相同。空字串、全空白與名稱衝突也拒絕，不改任何狀態。其他名稱原樣保留，不新增字元限制。DeviceDialog 的 Rename 欄位與按鈕只在未連線且可編輯時啟用。改名不更新 alias、已開 tab 或歷史紀錄，見 ADR-0076。
 
 ## Analysis-only operations
 
@@ -188,8 +202,7 @@ Run、WB 與目前 point 的 Inspect Set 都要求先選取或建立工作點。
 
 `simulate.fluxonium.predict.FluxoniumParams` 與 `simulate.transmon.TransmonParams` 保存可未知的具名物理輸入，missing() 指出缺項。
 齊全且有效才建立中性 query model。Service 不持有 installed model，不讀 dialog。
-App 注入使用者的 params_for，把當前 capture 中的具體元件轉成參數。
-Framework 不猜元件欄位，也不 import 使用者套件。查詢與 Calibrate 不寫元件或版本。
-Dialog 的元件選單初始選 alias qubit；Load component 才經注入的 params_for 預填，選取或切換工作點不改 trial。欄位勾選代表已知，取消勾選保留 None；缺項會明示，完整且有效才計算。
-模型選單有 Fluxonium 與 SQUID transmon，各自顯示自己的能量欄位，flux 欄位共用。Fluxonium 顯示頻率與 |n|、|phi| 曲線。Transmon 沒有矩陣元素能力，只顯示頻率曲線。Load component 依元件 kind 選模型；params.json 只預填 fluxonium。
+PredictorService 透過 ContextControlPort 取得 ResultEntry 擁有的 predictors_path。list_files 列出當前 entry 的 predictors/*.json 檔名，load_file 只接受含 .json 的單一檔名，拒絕絕對路徑與路徑片段。resources.predictor_file 擁有 JSON 格式與驗證。未開 entry 時清單為空，load_file 拒絕；開 entry 後不必選工作點就能載入。格式與檔案錯誤向 caller 傳遞，不以預設參數代替。
+Dialog 選檔後按 Load 才預填本地 trial。Refresh files 保留仍存在的選取，不載入參數。沒有檔案時顯示開 entry 或新增 predictor 檔案的提示。選取與重開視窗不改 trial，載入後可手動修改。校準式預設空白。欄位勾選代表已知，取消勾選保留 None；完整且有效才計算。查詢與 Calibrate 不寫元件、來源檔案或版本。
+模型選單有 Fluxonium 與 SQUID transmon，各自顯示自己的能量欄位，flux 欄位共用。載入檔案會依其 model 選模型。Fluxonium 顯示頻率與 |n|、|phi| 曲線。Transmon 沒有矩陣元素能力，只顯示頻率曲線。
 Measure registry 啟用獨立 predictor.json user cache。Dialog 持有 versioned PredictorSnapshot 與 SingleFileCaretaker，保存 model 與 nullable params；每次編輯與關閉保存，重建 dialog 還原。Standalone callers 以 enable_parameter_cache(cache_dir=...) 明確啟用與隔離 cache，啟用時立即還原。Cache decode failure 回空 trial 並顯示錯誤，不讀寫 component DocumentStore。

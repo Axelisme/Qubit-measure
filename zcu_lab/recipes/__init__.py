@@ -3,6 +3,7 @@
 from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
+from .cpmg import DEFINITION as CPMG
 from .lookback import DEFINITION as LOOKBACK
 from .mist_drive_frequency import DEFINITION as MIST_DRIVE_FREQUENCY
 from .mist_flux_dep import DEFINITION as MIST_FLUX_DEP
@@ -34,6 +35,7 @@ RECIPES: tuple[RecipeDefinition, ...] = (
     SINGLESHOT_GE,
     T2RAMSEY,
     T2ECHO,
+    CPMG,
     T1,
     AMPLITUDE_RABI,
     TIME_RABI,

@@ -27,12 +27,12 @@ from qtpy.QtWidgets import (
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.events.startup import StartupChangedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
-from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import (
     DialogPresenter,
@@ -44,6 +44,7 @@ from zcu_tools.gui.widgets import (
     warning_colour,
 )
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.file_dialog import nearest_existing
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
 
@@ -629,16 +630,28 @@ class MainWindow(QMainWindow):
         if restore_result:
             self.refresh_tab_figure(tab_id)
 
-    def current_left_panel_width(self) -> int:
-        """RenderHost impl: the active tab's left-panel width (the single
-        persistence value sourced from the View). Falls back to the default when
-        no tab is open."""
-        from zcu_tools.gui.app.measure.state import DEFAULT_LEFT_PANEL_WIDTH
+    def current_window_size(self) -> tuple[int, int]:
+        """Return this caller-owned window's width and height on the Qt thread."""
+        return self.width(), self.height()
 
+    def resize_window(self, width: int, height: int) -> None:
+        """Resize to positive Qt logical-pixel dimensions on the owner thread.
+
+        Raises ValueError for nonpositive dimensions. Qt retains window ownership.
+        """
+        if width <= 0 or height <= 0:
+            raise ValueError("Window dimensions must be positive")
+        self.resize(width, height)
+
+    def current_left_panel_width(self) -> int:
+        """Return active-tab panel width in logical pixels on the Qt thread.
+
+        Without an open tab use the remembered pure-layout width.
+        """
         current = self._tabs.currentWidget()
         if isinstance(current, ExpTabWidget):
             return current.left_panel_width()
-        return DEFAULT_LEFT_PANEL_WIDTH
+        return self._ctrl.get_left_panel_width()
 
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
         """DiagnosticSink impl (ADR-0068): render a Controller diagnostic the Qt
@@ -647,6 +660,20 @@ class MainWindow(QMainWindow):
             self.show_error_dialog(title or "Error", message)
         else:
             self.show_status_message(message)
+
+    def refresh_startup(self, payload: StartupChangedPayload) -> None:
+        """Render owner-published script progress and failure, without losing tabs.
+
+        payload includes final path/line diagnostics on error. Run availability
+        follows the current startup lease; errors use a non-modal notification.
+        Call on the Qt owner thread only.
+        """
+        self.refresh_run_lock(self._ctrl.get_running_tab_id())
+        self.show_status_message(payload.message)
+        if payload.error is not None:
+            self._dialog_presenter.critical(
+                self, "Startup script failed", payload.error
+            )
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
@@ -1272,7 +1299,7 @@ class MainWindow(QMainWindow):
             return
         self._draining_close = True
         try:
-            self._ctrl.close()
+            self._ctrl.finish_close()
         except TimeoutError:
             self._present_drain_timeout()
             return

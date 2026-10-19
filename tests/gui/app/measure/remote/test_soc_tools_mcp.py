@@ -43,7 +43,7 @@ def test_soc_tools_observe_gui_connection_without_hardware(
         )
         summary = invoke("rpc_call", {"method": "soc.info"})
         assert invoke("status", {})["soc"]["connected"] is True
-        assert summary["is_mock"] is False
+        assert summary["is_mock"] is True
         assert summary["address"] == "192.0.2.1" and summary["port"] == 8888
         assert call(sock, "soc.info", {})["result"]["address"] == "192.0.2.1"
         assert "Generators" in summary["description"]
@@ -64,7 +64,7 @@ def test_soc_tools_observe_gui_connection_without_hardware(
             "entry_id": entry["entry_id"],
             "point": "base",
         }
-        assert invoke("status", {})["soc"] == {"connected": True, "mock": False}
+        assert invoke("status", {})["soc"] == {"connected": True, "mock": True}
     finally:
         bridge.disconnect()
         sock.close()

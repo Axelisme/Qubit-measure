@@ -7,14 +7,12 @@ from unittest.mock import MagicMock
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.events.tab import TabAddedPayload
-from zcu_tools.gui.app.measure.services.caretaker import AppSnapshotCodec
-from zcu_tools.gui.app.measure.services.persistence_types import (
-    AppPersistedState,
-    PersistedSession,
-    PersistedTab,
-)
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
+from zcu_tools.gui.app.measure.services.workspace_types import (
+    WorkspaceSnapshot,
+    WorkspaceTab,
+)
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.form import FormEnv, FormInput
@@ -67,18 +65,16 @@ def test_workspace_roundtrip_keeps_raw_and_independent_selection() -> None:
     )
 
     session = svc.capture_session()
-    encoded = AppSnapshotCodec().encode(AppPersistedState(session=session))
-    decoded = AppSnapshotCodec().decode(json.loads(json.dumps(encoded)))
     restored = TabFormResource(
         lambda _ctx: form,
         capture=lambda _aliases: TabFormSources(FormEnv()),
         mutation_allowed=lambda: True,
-        initial=decoded.session.tabs[0].form_input,
+        initial=session.tabs[0].form_input,
     )
 
     assert restored.input.data == {"mode": "a"}
     assert restored.input.selections == {("mode",): "b"}
-    assert decoded.session.tabs[0].form_input == {
+    assert session.tabs[0].form_input == {
         "data": {"mode": "a"},
         "selections": [{"path": ["mode"], "value": "b"}],
     }
@@ -100,7 +96,7 @@ def test_capture_session_returns_payload_without_disk() -> None:
     add_tab(state, "tab-1", "fake")
     state.active_tab_id = "tab-1"
     session = svc.capture_session()
-    assert isinstance(session, PersistedSession)
+    assert isinstance(session, WorkspaceSnapshot)
     assert session.tabs[0].adapter_name == "fake"
     assert session.tabs[0].form_input == {"data": {"x": 1}, "selections": []}
     assert session.active_tab_index == 0
@@ -125,8 +121,8 @@ def test_reorder_tabs_updates_capture_session_order() -> None:
 def test_apply_invalid_configuration_returns_typed_issue() -> None:
     svc, state, tabs, _ = make_service()
     tabs.new_tab.side_effect = ValueError("bad defaults")
-    session = PersistedSession(
-        tabs=(PersistedTab(adapter_name="fake", form_input={}),), active_tab_index=0
+    session = WorkspaceSnapshot(
+        tabs=(WorkspaceTab(adapter_name="fake", form_input={}),), active_tab_index=0
     )
     report = svc.apply_session(session)
     assert report.restored_tabs == 0

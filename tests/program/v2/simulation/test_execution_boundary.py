@@ -16,6 +16,11 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from tests.program.v2.simulation.support import raw_of, request_of
 
 
+def test_offline_board_declares_mock_identity():
+    env = white_noise(std_adc=0)
+    assert env.soc.is_mock is True
+
+
 class Feedback(Module):
     """Synthetic unsupported operation; compilation itself needs no hardware."""
 

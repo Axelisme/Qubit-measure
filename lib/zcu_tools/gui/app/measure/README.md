@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-20，adapter 宣告 Sample 座標來源
+**Last updated:** 2026-10-20，adapter 宣告 Sample 座標來源、預設腳本所有權、opaque tab input 與關閉順序
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -37,17 +37,68 @@ Artifact 與 Writeback 不直接互相 import，由 app composition 協調。
 `MeasureGuiBehavior` is the process-runtime behavior for the shared
 `gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
 persistence caretaker, and the app-local `RemoteControlAdapter`
-without owning process policy such as logging, rendering initialization,
+without loading board environments or owning process policy such as logging, rendering initialization,
 `QApplication`, control option construction, or exit-code handling. The
 standalone launcher is the process entrypoint; this module does not expose a
-second `run_app` path. After the window is shown, `after_show` opens the same
-Setup dialog through `MainWindow.open_dialog`, so a toolbar click focuses that
-instance instead of building another.
+second `run_app` path. The launcher selects one trusted `startup(ctx)` script.
+`--clean` skips all scripts and conflicts with `--script`. Otherwise an explicit
+script replaces the composition-supplied `zcu_lab/startup.py` Path; custom code
+must import and call the default itself if needed. The framework never imports
+the lab to select it. After showing the window,
+`after_show` queues the selected script for background execution on the Qt loop.
+Without a selected script, it opens the shared Setup dialog.
 
 `build_app_services()` constructs the app-local services and injects their driven
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
+
+`Controller.install_soc` / `uninstall_soc` publish a caller-built board on the
+owner thread. `register_device` adopts a built driver through DeviceService.
+`close()` only drains work, leaving resources available for caller callbacks.
+`finish_close()` drains, runs startup callbacks in reverse order, then calls
+`close_hardware()` to close registered drivers and unpublish the board.
+MainWindow close, programmatic shutdown and the runtime fallback use this same
+ordering. Drain timeout preserves resources and raises for retry. Callback and
+driver failures are logged without skipping the remaining cleanup. Boards remain
+caller-owned and have no required close method.
+
+[`StartupContext`](startup_context.py) exposes typed soc, device, setup, context
+and tab commands. Public signatures, thread restrictions and failure semantics
+live with these facets rather than a separate script API list.
+Each facet calls the existing owner through `OwnerScheduler`. Live `current()`
+queries project remote endpoints, device rows, entry/point and authored tab inputs
+without hardware I/O. Blocking SoC/device connections run through the existing
+async services and wait only on script workers. Owner calls reject before
+admission. `devices.remember` publishes an idle row for adapter Reconnect.
+`tabs.new_tab(adapter, input=TabInput(...))` lets the form owner restore opaque
+`FormInput.to_json()` input on fresh sources. `TabInput(form_json: str)` is an
+opaque authored-input carrier, not a disk session schema; it includes invalid
+drafts and selections, not sources or results. Only the Form owner decodes it.
+Incompatible paths are discarded and logged; malformed JSON and unknown adapters
+raise before tab publication.
+On-close callbacks run on-owner and use nonblocking facets without self-queuing.
+`cache_root` locates the user cache without defining a session schema. Scripts
+own their files and close-time capture. `summary()` sets the successful terminal
+status line; unhandled script errors override it.
+`StartupService` shares the operation runner, handles and background drain.
+Its app-local startup lease blocks Run while allowing script hardware commands.
+Progress and terminal facts update the status bar and Run controls. Owner calls
+carry an app-local system startup origin through existing operation attribution.
+Script-initiated device failures retain their terminal fact, failed handle and
+logs, without a duplicate item dialog. Manual GUI device failures still notify.
+Unhandled script errors report the script path and line while retaining completed work.
+The framework does not load lab environments or own script cache formats.
+
+The [default lab script](../../../../../zcu_lab/startup.py) owns
+`measure-session.json` under `ctx.cache_root`. It attempts SoC, devices,
+entry/point, then tabs with input only when entry/point opened successfully.
+Each failure is logged; failed devices are remembered when possible, and skipped
+tabs are not retried after later source selection. Its on-close callback captures
+then-current state. Aliases are not in that cache: opening the entry loads its
+`aliases.yaml`, and Inspect Apply remains the save path. The current script does
+not read or write component placeholders; their registry/facet and script use
+belong to later framework decoupling work, with no reserved fields or fallback.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.
@@ -55,8 +106,8 @@ receives their catalogs by injection and never imports the user package.
 ## Sources and workflow
 
 `Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
-and captures parameters, library and cached device infos on Open and Reset. Preview, result and Run use that capture until the next Reset.
-Workspace persistence stores each FormInput with the shared `{data,selections}` codec, including explicit choices that differ from raw input. Restore uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data; tab creation from saved state accepts `PersistedTab` instead. Old raw-only persisted forms report a format error and open defaults without backup.
+and captures parameters, library and cached device infos on Open, Refresh and Reset. Preview, result and Run use that capture until the next explicit source action. Refresh preserves all authored data and explicit selections, including expression drafts and previously resolved direct defaults. Reset recaptures sources and computes fresh defaults. Capture and factory failures preserve the previous form.
+Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Entry aliases remain owned by the entry's `aliases.yaml` and Inspect Apply.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.
 

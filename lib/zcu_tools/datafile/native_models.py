@@ -130,9 +130,11 @@ class RunMetadata:
 
     run_id is the UTC timestamp plus six-character random identity.
     experiment is the declaring spec tag, never derived from a filename.
-    started_at is UTC ISO; finished_at is UTC ISO or absent evidence None.
-    completion is complete, partial or stopped measurement progress, not a
-    transaction status. labber_path is the last successful Labber path or None.
+    started_at and finished_at are UTC ISO or None when historical evidence
+    is absent. Normal acquisition always supplies started_at.
+    completion is complete, partial, stopped or unknown measurement progress, not
+    a transaction status. unknown means no historical completion evidence.
+    labber_path is the last successful Labber path or None.
     snapshot is caller-captured entry state; provenance is historical environment
     evidence. device_snapshot maps device names to detached finite JSON settings
     captured for this Run. Empty means no devices; None means not recorded.
@@ -142,9 +144,9 @@ class RunMetadata:
 
     run_id: str
     experiment: str
-    started_at: str
+    started_at: str | None
     finished_at: str | None
-    completion: Literal["complete", "partial", "stopped"]
+    completion: Literal["complete", "partial", "stopped", "unknown"]
     labber_path: str | None
     snapshot: RunSnapshot
     provenance: SoftwareProvenance

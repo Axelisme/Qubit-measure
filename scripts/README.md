@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-18，量測 GUI 隔離資料 project root
+**Last updated:** 2026-10-20，量測 GUI startup scripts
 
 這裡只放使用者自己執行的入口。Agent MCP 組合根在 [mcp_servers/](../mcp_servers/README.md)，repo 品質檢查在 [tools/](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
@@ -11,30 +11,37 @@
 ## GUI 與板端 server
 
 - `run_workflows_gui.py`：工作站 workflows GUI，將 `zcu_lab.workflows.registry`、alias preset 與 source loader 注入 lib 宿主。模擬驗證在這個 GUI 的模擬模式完成，不另用 agent 專用模擬腳本。控制、保存與 reload 分工見 [workflows 宿主](../lib/zcu_tools/gui/app/workflows/README.md)。
-- `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。讀取可恢復的 session 與實驗設定；正常關閉會寫回 GUI state，預設在 repo `logs/gui/measure/` 建立 session log。預設啟動 loopback remote-control socket；允許外部連線的選項會改變網路曝露範圍。`--clean` 不恢復先前 session，但不阻止關閉時寫回。量測 GUI 可透過 QICK 連接硬體；啟動器本身只組合 GUI 與 runtime。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
+- `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。啟動後在背景執行選定的 `startup(ctx)`；框架只保存 Qt 視窗外觀，預設在 repo `logs/gui/measure/` 建立 session log。預設啟動 loopback remote-control socket；允許外部連線的選項會改變網路曝露範圍。`--clean` 不執行任何啟動腳本。未給 `--script` 時使用 `zcu_lab/startup.py`；給了就只跑指定腳本，且不能與 `--clean` 並用。量測 GUI 可透過 QICK 連接硬體；啟動器本身只組合 GUI 與 runtime。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
 - `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑；傳入的 project 與 repo root 交給 GUI runtime。預設各開 remote-control TCP socket（預設 port 8766、8767，未指定時占用會回退到臨時 port）；GUI 的分析或存檔由各自 app 負責，啟動器不直接改寫原始資料。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
 - 三個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔；repo root 仍由入口檔的 parent 定位。
 - `start_server.py`、`start_server.ipynb`：ZCU 板端 PYNQ Python 3.8 啟動 QICK Pyro nameserver 與 proxy server。Python 腳本接收 daemon port、nameserver port、SoC 版本與網卡；它由自身位置將 repo root 加入 `sys.path`，`lib` 仍需由板端環境提供。Notebook 在 `scripts/` 執行，使用相對路徑 `../`、`../lib/` 與 `../qick/qick_lib/`。兩者均需能 import repo-root [`bitfiles`](../bitfiles/README.md) 與 [`zcu_tools.qick_remote`](../lib/zcu_tools/qick_remote/README.md)，會開網路服務並連接板端 SoC；板端需自行安裝或放置 QICK。板端部署、啟動與資產版本相容性**待核實**，尚未在硬體上測試。不要用工作站 Python 執行。
 
-## 量測 GUI 模擬
+## 量測 GUI 啟動腳本
 
-`--simulate` 必須接可信 Python 環境檔路徑，不是單獨的開關。在 repo root 執行：
+`--script` 接可信 Python 檔案，檔案提供 `startup(ctx)`。腳本可建立資源、
+開 entry／point、設定 aliases 及建立 tab。FTF 範例在一份新資料專案中執行：
 
 ```bash
+cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
+mkdir -p /absolute/new-ftf-project
 uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
-  --simulate zcu_lab/simulation_envs/FTF/environment.py
+  --project-root /absolute/new-ftf-project \
+  --script zcu_lab/simulation_envs/FTF/startup.py
 ```
 
-如需隔離資料，先建立目錄，再加上 `--project-root /absolute/existing/directory`。
-指定值必須是絕對路徑且為既存目錄，否則 launcher 在 GUI 組裝前報錯並非零結束。
-省略時仍使用 repo root。Entry owner 按需建立 `result/` 與 `Database/`，不需預建。
-這個選項不改 code、lab catalog、log 或 `--simulate` 路徑的解析。
+`--project-root` 必須是絕對路徑且為既存目錄，否則 launcher 在 GUI 組裝前報錯。
+省略時使用 repo root。Entry owner 按需建立 `result/` 與 `Database/`。
+這個選項不改 code、lab catalog、log 或腳本路徑的解析。
 
-[FTF 範例環境](../zcu_lab/simulation_envs/FTF/README.md) 與 Notebook 共用 `build_environment()`，相鄰的 `ftf.yaml`（由 `default.yaml` 複製）提供模型與接線參數。環境檔會執行 Python，只載入可信檔案。修改環境或 YAML 後須重啟；載入失敗會中止，不會回退正常模式。
+[FTF 範例](../zcu_lab/simulation_envs/FTF/README.md) 從相鄰 entry template 建立
+`ftf-demo/initial`，安裝離線資源並開 tab，不需先執行 entry CLI 或手動 Setup。
+它拒絕覆寫既有 entry，使用一個 worker，且不預編譯數值路徑。
+一般腳本可以連硬體，執行前須審閱並取得授權。
+腳本失敗保留已完成部分，GUI 顯示錯誤後仍可使用，不改跑其他腳本。
 
 ## 資料作業
 
-- `transfer_results.py`：唯一的結果傳輸入口，取代已移除的 upload/download 腳本。首次 `setup` 用官方 rclone GUI 授權、瀏覽雲端父資料夾、按 Refresh，再回終端機核對路徑並按 Enter 保存；之後 `upload <name>`／`download <name>` 直接走非互動 CLI，agent 可透過 Bash 使用。固定版 rclone 自動下載並驗證，`status --json`、`--dry-run`、`--all`、多 entry 與跨平台命令見 [結果傳輸教學](../docs/result-transfer.md)。預設本地根目錄是 checkout 的 `results/`，使用 copy 保留目的地多出的檔案。Google 共用 OAuth client 有 2026 停用警告；實際帳號授權與其他桌面平台仍待驗證。
+- `transfer_results.py`：唯一的結果傳輸入口，取代已移除的 upload/download 腳本。首次 `setup` 用官方 rclone GUI 授權、瀏覽雲端父資料夾、按 Refresh，再回終端機核對路徑並按 Enter 保存；之後 `upload <name>`／`download <name>` 直接走非互動 CLI，agent 可透過 Bash 使用。固定版 rclone 自動下載並驗證，`status --json`、`--dry-run`、`--all`、多 entry 與跨平台命令見 [結果傳輸教學](../docs/result-transfer.md)。本地根目錄統一為 checkout 的 `result/`，傳輸命令明填 `--local-root`，使用 copy 保留目的地多出的檔案。Google 共用 OAuth client 有 2026 停用警告；實際帳號授權與其他桌面平台仍待驗證。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。
 
 ## 模擬資料庫產生

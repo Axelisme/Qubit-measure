@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 from zcu_tools.resources.entry import ResultEntry
 
+from tests._filesystem import symlink_or_skip
+
 
 def test_samples_append_preserves_history_and_reads_last_complete_row(
     entry: ResultEntry,
@@ -140,7 +142,7 @@ def test_samples_export_rejects_own_history_without_changing_bytes(
     destination = source
     if kind == "symlink":
         destination = tmp_path / "sample-link.csv"
-        destination.symlink_to(source)
+        symlink_or_skip(destination, source)
     elif kind == "hardlink":
         destination = tmp_path / "sample-hardlink.csv"
         destination.hardlink_to(source)

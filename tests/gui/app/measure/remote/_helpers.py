@@ -83,7 +83,6 @@ def make_ctx() -> SessionEnv:
             parameters=None,
             soc=MagicMock(),
             soccfg=make_mock_soccfg(),
-            res_name="fake_res",
         )
     )
     context = ContextService(state, EventBus(), bind_assets=ArbWaveformDatabase.info_at)

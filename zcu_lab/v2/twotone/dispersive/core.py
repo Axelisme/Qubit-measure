@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -16,7 +16,7 @@ from zcu_tools.analysis.fitting.resonance import (
     normalize_signal,
 )
 from zcu_tools.analysis.fitting.resonance.base import remove_background
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     MHZ_TO_HZ,
@@ -63,14 +63,14 @@ def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class DispersiveModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    qub_pulse: PulseCfg
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Initial pulse")] = None
+    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qubit preparation pulse")]
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class DispersiveSweepCfg(ConfigBase):
-    freq: SweepCfg
+    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
 
 
 class DispersiveCfg(ProgramV2Cfg, ExpCfgModel):

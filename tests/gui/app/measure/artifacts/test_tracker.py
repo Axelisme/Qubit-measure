@@ -12,6 +12,8 @@ from zcu_tools.gui.app.measure.artifacts import (
 )
 from zcu_tools.resources.entry import ArtifactKey, Output, SaveLayout
 
+from tests._filesystem import symlink_or_skip
+
 RUN = ArtifactRef("run", "measurement_data")
 PRIMARY = ArtifactRef("analysis", "results")
 POST = ArtifactRef("post_analysis", "results")
@@ -211,7 +213,7 @@ def test_path_planning_failure_preserves_section(
     outside = tmp_path / "outside"
     outside.mkdir()
     (tmp_path / "Database").mkdir()
-    (tmp_path / "Database" / "runs").symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(tmp_path / "Database" / "runs", outside, target_is_directory=True)
     with pytest.raises(ValueError, match="escapes"):
         tracker.replace_section(
             "analysis", (ArtifactDeclaration(PRIMARY, (JSON,)),), layout=layout

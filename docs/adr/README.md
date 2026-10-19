@@ -20,8 +20,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## GUI Service Architecture
 
 - [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：driver 記錄兩項活動狀態、DeviceManager 具名快照、GUI 定時讀取與標記、單 driver 單名稱及 closing driver 登記拒絕，以及獨立於 acquisition snapshot 的 run 後 cache 讀回。
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、interactive 與單層 undo、owner、capability、domain fact、前端反應與 explicit plotting；Artifact／Writeback 子模組、opaque Run／Load 與 adapter 內容交接。
-- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、rendering 初始化與 remote 的責任分界。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session 與腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組與 explicit plotting。
+- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher／runtime／composition、可信 startup(ctx) 的 default／custom／clean 選擇、背景執行、on_close 與預設腳本的 session 保存責任。
 
 ## Cfg / Value Model
 
@@ -29,8 +29,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建與表單路徑。
 
-- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、共用初值政策的 domain helper 邊界、持久範本、具名裝置欄位與 sweep 四種座標／採樣表示。
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、固定來源與共用 Inspect Aliases 頁。
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、共用初值政策的 domain helper 邊界、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、固定來源、Refresh 保留 input／Reset 重算初值、腳本的 opaque TabInput 與共用 Inspect Aliases 頁。
 - [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 的宿主所有權、opaque writeback draft、ModuleSpec proposal 與 selected Apply 的成功前綴。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：已被 [[0065]]、[[0073]] 的 Form／持久 Spec 取代，保留歷史設計。
 - [0010 — Complete value tree](0010-value-tree-complete-none-for-empty.md)：已被 [[0065]] 的 Form input／result 取代，保留歷史設計。
@@ -46,11 +46,11 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、recipe 推導 owner、generator 工作步驟／提問與取消結果。Workflow 的 agent yield 仍是方向，不等同現行 Engine effects。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、獨立 workflows app 的同一 GUI/MCP run。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、launch-only startup 選擇、script-origin device 錯誤呈現、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、獨立 workflows app 的同一 GUI/MCP run。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；SaveLayout 計算位置，Labber 檔名含實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。Native 2.1 保存未知歷史時間與完成狀態，保真寫回不降 minor。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；SaveLayout 計算位置，Labber 檔名含實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
 
 ## Experiment runtime／Workflows
 
@@ -77,7 +77,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、FTF 快速分段引擎與重算式單 round 重播。離線 U 表與持久 exact records 已移除。Prepare 快取預算不是 process RAM 上限。Python environment 固定啟動，FTF 用具名 YAML 調參。現行 backend 為 `ftf-segment-v6`，支援 pulse／mux readout。F1／F2 與 conditional Ramsey 的歷史證據不代表現行版本的精度或效能。
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、FTF 快速分段引擎與重算式單 round 重播。離線 U 表與持久 exact records 已移除。Prepare 快取預算不是 process RAM 上限。可信 startup 腳本組裝並交付資源，GUI 不載入 environment；FTF 從 template 建 entry／point 並用具名 YAML 調參。現行 backend 為 `ftf-segment-v6`，支援 pulse／mux readout。F1／F2 與 conditional Ramsey 的歷史證據不代表現行版本的精度或效能。
 
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。

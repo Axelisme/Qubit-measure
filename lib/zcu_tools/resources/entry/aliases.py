@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 from ruamel.yaml import YAML
 
 from zcu_tools.format_version import FormatVersion, YamlMap, validate_header
+from zcu_tools.utils import atomic_replace
 
 
 class EntryAliases(BaseModel):
@@ -86,7 +87,7 @@ def save_entry_aliases(destination: Path, aliases: EntryAliases) -> None:
         ) as stream:
             temporary = Path(stream.name)
             YAML(typ="rt").dump(document, stream)
-        temporary.replace(destination)
+        atomic_replace(temporary, destination)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

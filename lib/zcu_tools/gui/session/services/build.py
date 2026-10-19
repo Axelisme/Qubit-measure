@@ -25,7 +25,7 @@ from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
-from zcu_tools.gui.session.services.predictor import ParamsFor, PredictorService
+from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.setup_control import SetupControlFacet
@@ -112,7 +112,6 @@ def build_session_services(
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
     alias_rows: tuple[AliasRow, ...] = (),
-    params_for: ParamsFor | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
@@ -134,8 +133,6 @@ def build_session_services(
     are authoritative, including empty rows. Explicit Apply saves to the entry;
     ordinary set_alias_rows remains memory-only. Empty defaults enable no aliases.
     Syntax/order errors propagate at construction.
-    params_for is the user-owned read-only component-to-simulator parameter
-    conversion; None disables component prefill, not explicit-parameter queries.
     """
     value_registry = ValueRegistry()
     device = DeviceService(
@@ -158,15 +155,13 @@ def build_session_services(
         alias_rows=alias_rows,
     )
     context_control = ContextControlFacet(context=context)
-    predictor = PredictorService(context_control, params_for)
+    predictor = PredictorService(context_control)
     predictor_control = PredictorControlFacet(predictor)
     device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
-    # ProjectSettingsService bridges the two session services it commands through
-    # their ports (project context + remembered-device registration) + State prefs.
+    # Entry composition uses the context owner and live dialog preferences.
     settings = ProjectSettingsService(
         context,
-        device,
         state,
         result_root=Path(project_root) / "result",
         database_root=Path(project_root) / "Database",

@@ -124,7 +124,11 @@ class SignalBuffer:
         update_interval: float | None = 0.1,
     ) -> None:
         self.array = _make_nan_array(shape, dtype)
-        self._throttled_update = min_interval(on_update, update_interval)
+        self._on_update = on_update
+        self._pending_update = False
+        self._throttled_update = min_interval(
+            self._notify_update if on_update is not None else None, update_interval
+        )
 
     @property
     def data(self) -> NDArray[Any]:
@@ -148,10 +152,21 @@ class SignalBuffer:
         self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
     ) -> None:
         if self._throttled_update is not None:
+            self._pending_update = True
             if flush and isinstance(self._throttled_update, MinIntervalFunc):
                 self._throttled_update.flush(self.array)
             else:
                 self._throttled_update(self.array)
+
+    def flush_pending_update(self) -> None:
+        """Deliver a throttled update, without repeating an already delivered one."""
+        if self._pending_update:
+            self.trigger_update(flush=True)
+
+    def _notify_update(self, data: NDArray[Any]) -> None:
+        if self._on_update is not None:
+            self._on_update(data)
+        self._pending_update = False
 
 
 @dataclass(frozen=True)
@@ -204,12 +219,22 @@ class Schedule(Generic[T_Cfg, T_Env]):
     ) -> bool:
         """Close the scope using Python's exception type, value and traceback.
 
+        Flush pending SignalBuffer updates on normal exit, including a requested
+        stop. Other BufferProtocol implementations keep caller-owned flushing.
+        Callback errors propagate, but the scope still closes. Skip the flush
+        when the body raises so a callback cannot replace the body exception.
         Suppress KeyboardInterrupt and record interrupted on the shared stop
         signal, preserving buffered data for the caller's partial-result return.
         Do not suppress other exceptions or change their existing outcome.
         """
-        self._is_active = False
-        self._is_closed = True
+        try:
+            if exc is None:
+                for buffer in self._buffers:
+                    if isinstance(buffer, SignalBuffer):
+                        buffer.flush_pending_update()
+        finally:
+            self._is_active = False
+            self._is_closed = True
         if isinstance(exc, KeyboardInterrupt):
             # Let the caller return buffered partial data after a Notebook stop.
             self._mark_interrupted(exc)
