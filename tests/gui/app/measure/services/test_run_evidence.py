@@ -132,6 +132,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     assert metadata.device_snapshot == {
         "flux": FakeDeviceInfo(address="none", value=1.25).model_dump(mode="json")
     }
+    assert metadata.started_at is not None
     assert before_run <= datetime.fromisoformat(metadata.started_at) <= after_admission
     assert (
         datetime.fromisoformat(metadata.started_at)
