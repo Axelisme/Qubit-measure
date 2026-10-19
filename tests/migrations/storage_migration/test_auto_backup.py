@@ -4,7 +4,7 @@ import hashlib
 import json
 import shutil
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 
 import pytest
@@ -56,7 +56,8 @@ def test_complete_backup_precedes_cleanup_and_resume_needs_no_sources(
     hashes = json.loads((records / "result.sha256").read_text())["hashes"]
     assert (records / "Database.sha256").is_file()
     assert (
-        hashes["result/chip/qubit/unknown.bin"] == hashlib.sha256(b"legacy artifact").hexdigest()
+        hashes["result/chip/qubit/unknown.bin"]
+        == hashlib.sha256(b"legacy artifact").hexdigest()
     )
     assert not old.exists()
     assert not database.exists()
@@ -68,7 +69,8 @@ def test_complete_backup_precedes_cleanup_and_resume_needs_no_sources(
     manifest = json.loads((entry_records / "migration-state.json").read_text())
     assert manifest["report_path"] == str(report_path)
     assert any(
-        row["source"] == str(backup / "result/chip/qubit/unknown.bin") for row in report["pending"]
+        row["source"] == str(backup / "result/chip/qubit/unknown.bin")
+        for row in report["pending"]
     )
     migrate(replace(request_data, resume=True), mapping)
     assert (backup / "result/chip/qubit/unknown.bin").read_bytes() == b"legacy artifact"
@@ -245,9 +247,7 @@ def test_shared_backup_accumulates_independent_sources_and_resumes_each(
         ("chip", "second", "second-entry"),
         ("other-chip", "qubit", "third-entry"),
     ):
-        request = replace(
-            request_data, source_chip=chip, source_qubit=qubit, name=name
-        )
+        request = replace(request_data, source_chip=chip, source_qubit=qubit, name=name)
         for root in (request.result_root, request.database_root):
             (root / chip / qubit).mkdir(parents=True)
         requests.append(request)
@@ -297,15 +297,27 @@ def test_resume_rejects_changed_hash_list_without_replacing_it(
 def test_report_path_is_fixed_on_resume_and_copied_only_after_completion(
     request_data: MigrationRequest,
     mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     migrate(replace(request_data, part="parameters"), mapping)
     records = backup_path(request_data) / "migration-records/chip/qubit"
     reports = list(records.glob("migration-report-*.json"))
     assert len(reports) == 1, "the automatic report belongs beside the hash lists"
     path = reports[0]
+    entry_records = request_data.results_root / request_data.name / "records"
+    assert list(entry_records.glob("migration-report-*.json")) == []
+
+    class LaterDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:
+            return super().now(tz).replace(year=2040, month=1, day=1)
+
+    monkeypatch.setattr(
+        "migrations.storage_migration.bootstrap.datetime", LaterDatetime
+    )
     migrate(replace(request_data, part="data", resume=True), mapping)
     assert list(records.glob("migration-report-*.json")) == [path]
-    entry_copy = request_data.results_root / request_data.name / "records" / path.name
+    entry_copy = entry_records / path.name
     assert entry_copy.read_bytes() == path.read_bytes()
 
 
@@ -369,7 +381,10 @@ def test_custom_source_roots_keep_logical_mirrors(
         (source / "empty").mkdir()
         (source / "source.bin").write_bytes(root.name.encode())
     migrate(request, mapping)
-    for label, root in (("result", request.result_root), ("Database", request.database_root)):
+    for label, root in (
+        ("result", request.result_root),
+        ("Database", request.database_root),
+    ):
         mirror = backup_path(request) / label / "chip/qubit"
         assert mirror.is_dir(), "custom roots use the same logical mirror paths"
         assert (mirror / "source.bin").read_bytes() == root.name.encode()
