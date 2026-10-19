@@ -21,15 +21,20 @@ from ._secular import secular_operators
 
 
 @dataclass(frozen=True, eq=False)
-class _TableIdentity:
-    # Keep the table alive so a later representative cannot reuse its object id.
+class TableIdentity:
+    """Object-identity fact key retaining its SegmentTable for the plan lifetime.
+
+    table is the exact row-indexed input, not a structural copy. Retaining it
+    prevents a later representative from reusing its object id.
+    """
+
     table: SegmentTable
 
     def __hash__(self) -> int:
         return id(self.table)
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, _TableIdentity) and self.table is other.table
+        return isinstance(other, TableIdentity) and self.table is other.table
 
 
 @dataclass(frozen=True)
@@ -43,7 +48,7 @@ class EnvelopeBounds:
 
 def envelope_bounds(table: SegmentTable, work_plan: WorkPlan) -> EnvelopeBounds:
     """Resolve envelope bounds once per table, including prefix representatives."""
-    key = FactKey(("envelope-bounds", _TableIdentity(table)), EnvelopeBounds)
+    key = FactKey(("envelope-bounds", TableIdentity(table)), EnvelopeBounds)
 
     def build() -> EnvelopeBounds:
         peaks = np.ones(len(table.envelopes))
@@ -273,7 +278,7 @@ def packed_segments(
     Prefix representatives have their own table identity and row numbering.
     Solver history and density workspaces never enter these immutable facts.
     """
-    key = FactKey(("dop853-segments", _TableIdentity(table), include_flux), Segments)
+    key = FactKey(("dop853-segments", TableIdentity(table), include_flux), Segments)
     return work_plan.fact(key, lambda: pack_segments(table, include_flux=include_flux))
 
 

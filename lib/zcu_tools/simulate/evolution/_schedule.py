@@ -171,6 +171,7 @@ class Schedule:
                 payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
+                    array_bytes=preparation.nbytes,
                 )
                 reusable = available.intersection(payload.keys)
                 if not reusable:
@@ -266,6 +267,7 @@ class Schedule:
                 payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
+                    array_bytes=preparation.nbytes,
                 )
                 self.resident.offer_rejected(
                     (name, self.dc_identity, self.budget), payload
@@ -472,6 +474,7 @@ class Schedule:
                 payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
+                    array_bytes=preparation.nbytes,
                 )
                 self.retain_local(entry.kernel, payload)
                 bindings.append(

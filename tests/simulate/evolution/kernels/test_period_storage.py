@@ -8,7 +8,11 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
 )
-from zcu_tools.simulate.evolution.cache import PrepareCache, PreparedPayload
+from zcu_tools.simulate.evolution.cache import (
+    RESIDENT_METADATA_BYTES,
+    PrepareCache,
+    PreparedPayload,
+)
 from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels._period_table import (
     PeriodEntry,
@@ -54,7 +58,8 @@ def test_period_payload_charges_each_retained_array_allocation_once(view: bool) 
     assert prepared.nbytes == expected, (
         "charge retained owners, not entries or view extents"
     )
-    cache = PrepareCache(expected)
+    # Retention includes one metadata charge; bytes still counts only array owners.
+    cache = PrepareCache(expected + RESIDENT_METADATA_BYTES)
     payload = PreparedPayload(prepared, (b"rise", b"fall"))
     cache.add(("shaped_sambe", "storage", 1e-3), payload)
     assert cache.bytes == expected
@@ -93,7 +98,8 @@ def test_shaped_guard_payload_fits_compact_resident_budget() -> None:
         # One dense polynomial alone is 8192 bytes. The complete compact
         # two-key payload (including fallback models/maps/keys) fits in 4 KiB.
         assert handoff.prepared.nbytes <= 4096, "resident storage must omit zero planes"
-        cache = PrepareCache(4096)
+        # Keep the 4 KiB compact-array allowance plus one allocation's metadata.
+        cache = PrepareCache(4096 + RESIDENT_METADATA_BYTES)
         keys = tuple(key.tobytes() for key in handoff.keys)
         payload = PreparedPayload(handoff.prepared, keys)
         cache.add((kernel.name, "storage", 1e-3), payload)

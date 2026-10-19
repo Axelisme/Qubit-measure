@@ -21,7 +21,7 @@ from ._shaped_dispatch import (
     single_gate_preferred,
 )
 from ._two_tone_dispatch import direct_preferred
-from .cache import PrepareCache, PreparedPayload
+from .cache import RESIDENT_METADATA_BYTES, PrepareCache, PreparedPayload
 from .engine import PathDiagnostics
 from .kernel import (
     GuardPreparation,
@@ -38,18 +38,20 @@ from .secular import ModelSource
 from .workplan import WorkPlan
 
 
-def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
+def create_work_plan(
+    table: SegmentTable, source: ModelSource, budget: float = 1e-3
+) -> WorkPlan:
     """Create ownership for the complete evolve before prefix/worker planning.
 
     table is the full immutable geometry and source owns model identity.
     Algorithm-specific group planners populate this plan before workers start;
-    no numerical routing or expensive candidate graph is constructed here.
+    budget is the numerical admission budget for cold mixed gate plans.
     """
     plan = WorkPlan()
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)
-    populate_single_gate_plan(table, source, plan)
+    populate_single_gate_plan(table, source, plan, budget)
     return plan
 
 
@@ -113,11 +115,7 @@ def resident_inventory(
     table = geometry.table
     zero = tuple(0 for _ in range(table.level.shape[1]))
     identity = context.source.model(zero).identity
-    current = {
-        name
-        for name, model, budget in cache.namespaces
-        if model == identity and budget == context.budget
-    }
+    current = cache.families(identity, context.budget)
     inventory = {}
     if current:
         domains = _candidate_domains(geometry)
@@ -374,9 +372,10 @@ def _guard_cached(
         if rejected_limit is not None and built.rejected_preparations:
             retained: list[GuardPreparation] = []
             for preparation in built.rejected_preparations:
-                if preparation.prepared.nbytes <= rejected_limit:
+                charge = preparation.nbytes + RESIDENT_METADATA_BYTES
+                if charge <= rejected_limit:
                     retained.append(preparation)
-                    rejected_limit -= preparation.prepared.nbytes
+                    rejected_limit -= charge
             built = _Guarded(
                 built.rows,
                 built.rejected,
@@ -485,7 +484,12 @@ class _Classifier:
         # Bound rejected handoffs even while pooled shared guards are returning.
         # Equal per-key quotas deliberately decline large non-revisiting scans.
         rejected_limit = (
-            max(0, self.cache.limit - self.cache.bytes)
+            max(
+                0,
+                self.cache.limit
+                - self.cache.charged_bytes
+                + self.cache.reclaimable_bytes,
+            )
             // max(1, int(np.count_nonzero(groups.shared)))
             if self.cache is not None
             else 0

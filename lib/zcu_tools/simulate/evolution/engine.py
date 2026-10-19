@@ -283,7 +283,8 @@ class Engine:
     """Segment engine with inline or threaded execution and persistent prepare LRU.
 
     workers: positive sole parallel width; kernels remain single-threaded.
-    cache_bytes: nonnegative unified resident/pending array byte limit, not a
+    cache_bytes: nonnegative unified resident/pending array and estimated metadata
+        byte limit (4608 metadata bytes per whole allocation), not a
         process RAM cap. Active nonretained products and scratch are separate.
         Exact final results use a separate LRU capped at min(64 MiB, cache_bytes),
         including metadata. Zero disables both caches. No ADC/sampling is cached.
@@ -413,7 +414,7 @@ class Engine:
                 else 1
             )
             # Drain workers before releasing evolve-local ownership.
-            with closing(create_work_plan(geometry.table, source)) as work_plan:
+            with closing(create_work_plan(geometry.table, source, budget)) as work_plan:
                 context = KernelContext(source, budget, work_plan)
                 kernels = self._kernels
                 inventory = resident_inventory(geometry, kernels, context, self._cache)
