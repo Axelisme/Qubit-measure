@@ -7,6 +7,7 @@ from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeSession,
@@ -146,9 +147,13 @@ def cpmg(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
 
     # 3. Set counts, the shared total-time window and averaging.
     tab.set_integer_points(("sweep", "times"), counts)
-    tab.set(("extras", "min_length_us"), min_length_us)
-    tab.set(("extras", "max_length_us"), max_length_us)
-    tab.set(("extras", "length_points"), length_points)
+    tab.set_fields(
+        (
+            RecipeFieldEdit(("extras", "min_length_us"), min_length_us),
+            RecipeFieldEdit(("extras", "max_length_us"), max_length_us),
+            RecipeFieldEdit(("extras", "length_points"), length_points),
+        )
+    )
     tab.set(("detune_ratio",), detune_ratio)
     tab.set(("reps",), reps)
     tab.set(("rounds",), rounds)
