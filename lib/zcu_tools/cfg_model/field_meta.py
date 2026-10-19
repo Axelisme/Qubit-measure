@@ -13,7 +13,8 @@ class FieldMeta:
 
     Attach with ``Annotated[T, FieldMeta(...)]``. All attributes are optional;
     None leaves a hint unspecified, except group where it means no group.
-    readonly defaults to False and never enforces a write restriction.
+    readonly defaults to False. Form consumers enforce it against the current
+    input; cfg validation and serialized values remain unchanged.
 
     Attributes
     ----------
@@ -30,7 +31,11 @@ class FieldMeta:
         Presentation group name, such as "Advanced", or None for no group.
         An empty string raises ValueError at construction.
     readonly:
-        Request non-editable presentation; does not restrict writes or validation.
+        Preserve the current field subtree in ordinary Form mutations. Equal
+        values are allowed; different values are rejected by Form core, including
+        ancestor/batch writes. Ancestor branch choices remain editable. Restore
+        keeps saved values instead of recomputing them from the declaration.
+        Does not change cfg validation or serialize a fixed Literal value.
     element_label:
         Name of a string field used to label model-list elements, or None to
         display their original indexes. Does not change identity or ordering.

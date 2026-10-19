@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic_core import PydanticCustomError
@@ -74,13 +74,29 @@ class FormInputRejected(ValueError):
 
     path is the original typed write/command path, or the affected field for
     direct install_input. The message is safe to display in widgets and RPC.
+    reason is "readonly" for a core readonly refusal and None for owner
+    refusals. current is the detached raw JSON value of the readonly field
+    (None for missing/null input); it is meaningful only for reason="readonly".
+    For an ancestor write, path remains the request path and current belongs
+    to the affected readonly descendant named in the message.
     This is not value validation: invalid values remain editable drafts.
     """
 
-    def __init__(self, path: FormWritePath, message: str) -> None:
-        """Record the refused canonical path and a user-facing explanation."""
+    def __init__(
+        self,
+        path: FormWritePath,
+        message: str,
+        *,
+        reason: Literal["readonly"] | None = None,
+        current: JsonValue = None,
+    ) -> None:
+        """Record a refusal, optionally with its readonly reason/current value."""
+        from ._json import copy_json
+
         super().__init__(message)
         self.path = path
+        self.reason: Literal["readonly"] | None = reason
+        self.current = copy_json(current)
 
 
 class FormPathError(ValueError):
@@ -150,7 +166,7 @@ class InputPolicy:
 
 @dataclass(frozen=True)
 class Display:
-    """Presentation metadata carried by Annotated fields.
+    """Display and readonly metadata carried by Annotated fields.
 
     label overrides the field title (a model section's default title is its
     field name, e.g. ro_cfg -> "Ro cfg"). description explains the input; unit
@@ -170,9 +186,12 @@ class Display:
     selector=False hides the dropdown, retaining its description and active
     branch. Explicit commands then provide the editing action.
     element_label names a model-list element field to use as picker text;
-    None uses the index. readonly requests a non-editable scalar control. Both
-    are display hints, not validation or mutation admission. Any enforcement
-    belongs to the declaring owner.
+    None uses the index. readonly=True makes the field's current raw subtree
+    non-editable in every ordinary Form mutation, including ancestor writes,
+    commands and selection changes. Equal values remain admissible. It does
+    not freeze ancestor branch choices. Restore keeps saved values rather
+    than recalculating them; reset establishes a new current value. readonly
+    does not change Pydantic validation or imply an annotation-fixed value.
     Declaration order sets order; nested models set sections. No layout registry.
     """
 
@@ -577,8 +596,10 @@ class FormState[F: FormModel]:
         models create only the necessary objects, not static defaults. Explicit
         null sections require object activation before child edits.
         Ordinary invalid values remain editable; result reports their errors.
-        Used-source checks and root check_input_change run before installation.
-        Owner refusal raises FormInputRejected with the original request path.
+        Used-source checks, core readonly admission and root check_input_change
+        run before installation. Readonly fields admit equal raw values only;
+        ancestor and batch replacements cannot bypass readonly descendants.
+        Readonly/owner refusal raises FormInputRejected with the original request path.
         Rejection preserves input, base, selections and notifications. A changed
         batch notifies once. This method performs no Engine update or I/O.
         """
@@ -587,7 +608,7 @@ class FormState[F: FormModel]:
     def prepare_write(
         self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv
     ) -> FormInput[F]:
-        """Build an isolated candidate using write's structural/source admission.
+        """Build a candidate using write's structural, source and readonly admission.
 
         Ordinary model-invalid values remain editable. Structural ValueError or
         directed source errors leave state untouched. No subscribers run and
@@ -608,8 +629,8 @@ class FormState[F: FormModel]:
         model selections preserve their branch and authored raw input. Scalar
         selections write the listed value and retain an explicit override for
         later options-membership validation. Unavailable options or failed
-        conversion raise FormConversionError; owner refusal retains path in
-        FormInputRejected. Source failures remain directed. Use the candidate
+        conversion raise FormConversionError; readonly or owner refusal retains
+        the request path in FormInputRejected. Source failures remain directed. Use the candidate
         in the same guarded turn/current input/env as prepare_write.
         """
         from ._transitions import prepare_selection
@@ -627,15 +648,19 @@ class FormState[F: FormModel]:
     def install_input(self, candidate: FormInput[F]) -> None:
         """Install a same-model prepared input, preserving base.
 
-        A different model raises TypeError. Declaration check_input_change
-        runs on detached copies, raising FormInputRejected on refusal. This
-        rechecks prepared candidates against current input. Changed content notifies subscribers
-        once after installation; equal content is a no-op. Hosts guard the whole
+        A different model raises TypeError. Core readonly and declaration
+        check_input_change run on detached copies, raising FormInputRejected
+        on refusal. A readonly refusal includes reason="readonly" and current.
+        This rechecks prepared candidates against current input. Changed content
+        notifies subscribers once after installation; equal content is a no-op.
+        Hosts guard the whole
         prepare/install turn. This does not repeat validation or source checks.
         """
         if candidate.model is not self._model:
             raise TypeError("Cannot install a different form model class")
-        self._model.check_input_change(self.input.data, candidate.data)
+        from ._admission import check_change
+
+        check_change(self.input, candidate, ())
         self._install(candidate)
 
     def describe(self, path: FormWritePath, env: FormEnv) -> FormDescription:
@@ -675,7 +700,8 @@ class FormState[F: FormModel]:
         commands raise ValueError, never silently do nothing. Other failures
         keep their original exception types. The callable returns a complete
         replacement for path; install it atomically and notify once.
-        Callable/source/structural failures leave state unchanged; ordinary
+        Callable/source/structural failures leave state unchanged. Readonly or
+        owner refusal raises FormInputRejected before installation; ordinary
         validation failures remain drafts for result/preview. No refresh,
         library semantics, I/O policy or separate state is introduced.
         """
@@ -799,14 +825,16 @@ class FormState[F: FormModel]:
 
         saved may use an older declaration. Start with current captured input as
         defaults, recurse by current field names and list positions, and keep
-        leaf raw values for general validation. Return unique dropped paths for
-        removed fields, incompatible shapes and no-longer-allowed selections.
+        leaf raw values, including readonly fields, for general validation.
+        Readonly saved values replace captured defaults without recomputation.
+        Return unique dropped paths for removed fields, incompatible shapes
+        and no-longer-allowed selections.
         No converter, options hook, source check or expression evaluation runs.
         Defaults/provider failures propagate before installation.
 
         On success install once, preserve base and notify once only if the
         complete draft changed. Restoration is not an ordinary mutation and
-        bypasses owner input-change checks. saved is never modified. Hosts
+        bypasses readonly and owner input-change checks. saved is never modified. Hosts
         restore into fresh defaults for startup, reload and RAM switching.
         """
         from ._restore import restore

@@ -128,7 +128,10 @@ class FormFieldDescription:
     A list[Model] field has kind "elements", can_expand and its element models
     as children; elements lists current indices and display labels. A child
     element path ends in its index. elements is None for every other field.
-    readonly is Display's presentation hint, never mutation authorization.
+    readonly reflects Display's core-enforced current-value restriction and
+    requests non-editable presentation. It does not imply fixed/fixed_value:
+    separate list positions and restored inputs can hold different values.
+    Readonly applies to this field's subtree, not its ancestor selectors.
     """
 
     path: FormWritePath
