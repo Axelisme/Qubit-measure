@@ -25,6 +25,7 @@ token.json
 /measure_knowledge
 Database/
 result/
+/results/
 logs/
 scratch/
 .agent_state/

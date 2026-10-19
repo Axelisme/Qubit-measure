@@ -21,6 +21,9 @@ from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
 from zcu_lab.v2.lookback.gui import LookbackAdapter
+from zcu_lab.v2.mist.flux_dep.gui import MistFluxDepAdapter
+from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAdapter
+from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
 from zcu_lab.v2.mux.freq.gui import MuxFreqAdapter
 from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
@@ -40,6 +43,7 @@ from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAdapter
 from zcu_lab.v2.singleshot.mist.freq.gui import MistFreqAdapter
 from zcu_lab.v2.singleshot.mist.power.gui import MistPowerAdapter
 from zcu_lab.v2.singleshot.mist.power_freq.gui import MistPowerFreqAdapter
+from zcu_lab.v2.singleshot.mist.pre_freq.gui import MistPreFreqAdapter
 from zcu_lab.v2.singleshot.reset_check.gui import SsResetCheckAdapter
 from zcu_lab.v2.singleshot.t1.t1.gui import SsT1Adapter
 from zcu_lab.v2.singleshot.t1.t1_with_tone.gui import SsT1ToneAdapter
@@ -90,6 +94,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/local_z": LocalZAdapter,
     "ftf/rb": TwoQubitRBAdapter,
     "lookback": LookbackAdapter,
+    "mist/power_dep/single_trace": MistTraceAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,
@@ -140,9 +145,12 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "singleshot/t1_tone_sweep_gain": SsT1ToneSweepGainAdapter,
     "singleshot/t1_tone_sweep_freq": SsT1ToneSweepFreqAdapter,
     "singleshot/ac_stark": SsAcStarkAdapter,
+    "mist/flux_dep": MistFluxDepAdapter,
+    "mist/power_dep/drive_freq": DriveFreqAdapter,
     "singleshot/mist/freq": MistFreqAdapter,
     "singleshot/mist/power": MistPowerAdapter,
     "singleshot/mist/power_freq": MistPowerFreqAdapter,
+    "singleshot/mist/pre_freq": MistPreFreqAdapter,
     "jpa/freq": JpaFreqAdapter,
     "jpa/flux": JpaFluxAdapter,
     "jpa/power": JpaPowerAdapter,
