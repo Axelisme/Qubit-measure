@@ -88,8 +88,8 @@ def _parser(
             "-j",
             "--jobs",
             type=int,
-            default=4,
-            help="Parallel file transfers (default: 4)",
+            default=8,
+            help="Parallel file transfers (default: 8)",
         )
     return parser
 
@@ -115,6 +115,61 @@ def _status(
     return 0 if configured else 1
 
 
+def build_copy_arguments(
+    remote_parent: str,
+    local_root: Path,
+    entries: list[str],
+    *,
+    action: str,
+    jobs: int,
+    dry_run: bool,
+) -> list[str]:
+    """Return rclone copy arguments (after the binary) for all named entries.
+
+    The caller prepends the rclone binary and --config.
+
+    action is "upload" (local_root -> remote_parent) or "download" (reverse).
+    entries are already-validated folder names; a filter list selects them, so
+    one process lists the tree once and reuses its folder-ID cache across
+    entries. --fast-list and a relaxed Drive pacer cut per-directory API
+    latency; rclone backs off on rate-limit replies. Empty source directories
+    are not created. Unknown action raises ValueError.
+    """
+    if action == "upload":
+        source, destination = str(local_root), remote_parent
+    elif action == "download":
+        source, destination = remote_parent, str(local_root)
+    else:
+        raise ValueError(f"Unknown transfer action: {action!r}")
+    command = [
+        "copy",
+        source,
+        destination,
+        "--ask-password=false",
+        "--update",
+        "--fast-list",
+        "--checkers",
+        "16",
+        "--transfers",
+        str(jobs),
+        "--drive-pacer-min-sleep",
+        "10ms",
+        "--drive-pacer-burst",
+        "200",
+        "--stats",
+        "10s",
+        "--stats-one-line",
+        "--filter",
+        "- *.lock",
+    ]
+    for entry in entries:
+        command += ["--filter", f"+ /{entry}/**"]
+    command += ["--filter", "- **"]
+    if dry_run:
+        command.append("--dry-run")
+    return command
+
+
 def _transfer(
     binary: Path,
     config_dir: Path,
@@ -122,46 +177,30 @@ def _transfer(
     local_root: Path,
     args: argparse.Namespace,
 ) -> int:
-    parent = selection.remote_parent
-    separator = "" if parent.endswith(":") else "/"
-    for entry in args.entries:
-        local = str(local_root / entry)
-        remote = parent + separator + entry
-        source, destination = (
-            (local, remote) if args.action == "upload" else (remote, local)
-        )
-        command = [
-            str(binary),
-            "copy",
-            source,
-            destination,
-            "--config",
-            str(config_dir / "rclone.conf"),
-            "--ask-password=false",
-            "--update",
-            "--exclude",
-            "*.lock",
-            "--create-empty-src-dirs",
-            "--transfers",
-            str(args.jobs),
-        ]
-        if args.dry_run:
-            command.append("--dry-run")
-        print(f"{args.action}: {entry}", flush=True)
-        with subprocess.Popen(command, stdin=subprocess.DEVNULL) as process:
-            try:
-                result = process.wait()
-            finally:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
-        if result != 0:
-            return result
-    return 0
+    command = [
+        str(binary),
+        "--config",
+        str(config_dir / "rclone.conf"),
+    ] + build_copy_arguments(
+        selection.remote_parent,
+        local_root,
+        args.entries,
+        action=args.action,
+        jobs=args.jobs,
+        dry_run=args.dry_run,
+    )
+    print(f"{args.action}: {' '.join(args.entries)}", flush=True)
+    with subprocess.Popen(command, stdin=subprocess.DEVNULL) as process:
+        try:
+            return process.wait()
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
 
 
 def _interrupt(_signum: int, _frame: object) -> None:

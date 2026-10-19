@@ -119,9 +119,9 @@ Rclone 的傳輸輸出直接送到終端機，可由 Bash 正常重導向。
 
 ## 比較與刪除規則
 
-上下傳皆使用 rclone **copy**，帶 `--update --exclude '*.lock' --create-empty-src-dirs`：
+上下傳皆使用 rclone **copy**，一次命令處理所有指定 entry（以 `--filter` 選取，`*.lock` 排除），帶 `--update --fast-list --checkers 16`，並放寬 Google Drive 的請求間隔（`--drive-pacer-min-sleep 10ms --drive-pacer-burst 200`，遇速率限制 rclone 會自動退避重試）；`-j` 預設 8 個平行傳輸，每 10 秒印一行進度：
 
-- 複製新檔、更新來源較新的檔案，保留空資料夾。
+- 複製新檔、更新來源較新的檔案；不建立空資料夾（程式寫檔時會自行建立目錄）。
 - 保留目的地較新的同名檔案，以及目的地獨有的檔案。
 - 不傳輸 `*.lock`，不刪除目的地多出的檔案，也不刪除來源。
 
