@@ -49,6 +49,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
 )
 from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
+from zcu_lab.v2.twotone.dispersive.gui import DispersiveAdapter
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
 from zcu_lab.v2.twotone.freq.gui import FreqAdapter
 from zcu_lab.v2.twotone.irb.gui import IRBAdapter
@@ -103,6 +104,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "mux/singleshot_ge": MuxGEAdapter,
     "twotone/freq": FreqAdapter,
     "twotone/ckp": CKPAdapter,
+    "twotone/dispersive": DispersiveAdapter,
     "twotone/power_dep": PowerDepAdapter,
     "twotone/flux_dep": FluxDepAdapter,
     "twotone/rabi/amp_rabi": AmpRabiAdapter,
