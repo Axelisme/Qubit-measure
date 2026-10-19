@@ -11,7 +11,12 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickParam, QickRawParam
 
-from zcu_tools.core.simulation import EventSlot, ReadoutSlot, TimelineTemplate
+from zcu_tools.core.simulation import (
+    EventSlot,
+    PulseEnvelope,
+    ReadoutSlot,
+    TimelineTemplate,
+)
 
 from ..modular import ModularProgramV2
 from ..modules.base import Module
@@ -43,6 +48,16 @@ class _Register:
     words: BoolArray
     valid: BoolArray
     depends_reps: bool | BoolArray = False
+
+
+@dataclass(frozen=True)
+class _PulseMetadata:
+    duration: FloatArray
+    frequency: FloatArray
+    phase: FloatArray
+    gain: FloatArray
+    envelopes: tuple[PulseEnvelope | None, ...]
+    block_length: Time | None
 
 
 @dataclass
@@ -105,6 +120,8 @@ class VectorInterpreter:
         self._events: list[tuple[EventSlot, BoolArray]] = []
         self._reads: dict[int, list[_Read]] = {ch: [] for ch in prog.ro_chs}
         self._iterations: list[tuple[str, int]] = []
+        # Module identity is valid only within this compiled interpretation.
+        self._pulse_metadata: dict[Pulse, _PulseMetadata] = {}
         self._structures: list[IntArray] = []
         self.flat_tops = FlatTopEnvelopes()
 
@@ -377,24 +394,42 @@ class VectorInterpreter:
         cfg = module.cfg
         if cfg is None:
             return t
-        prog = self._prog
-        if duration is None:
-            duration = self._scalar(
-                prog.get_pulse_param(module.pulse_id, "total_length")
-            )
-        envelope = self._diagnostic.envelope(module, float(duration[0]))
-        if isinstance(cfg.waveform, FlatTopWaveformCfg) and envelope is not None:
-            self.flat_tops.record(envelope)
+        # Runtime table lengths can reuse a Pulse with different durations, so
+        # neither read nor populate the static cache for explicit durations.
+        reusable = duration is None and bool(self._iterations)
+        metadata = self._pulse_metadata.get(module) if reusable else None
+        if metadata is None:
+            prog = self._prog
+            if duration is None:
+                duration = self._scalar(
+                    prog.get_pulse_param(module.pulse_id, "total_length")
+                )
+            envelope = self._diagnostic.envelope(module, float(duration[0]))
+            if isinstance(cfg.waveform, FlatTopWaveformCfg) and envelope is not None:
+                self.flat_tops.record(envelope)
+            frequency = self._scalar(prog.get_pulse_param(module.pulse_id, "freq"))
+            phase = self._scalar(prog.get_pulse_param(module.pulse_id, "phase"))
+            gain = self._scalar(prog.get_pulse_param(module.pulse_id, "gain"))
+            envelopes = (envelope,)
+            block_length = module.total_length(prog) if module.block_mode else None
+            if reusable:
+                self._pulse_metadata[module] = _PulseMetadata(
+                    duration, frequency, phase, gain, envelopes, block_length
+                )
+        else:
+            duration = metadata.duration
+            frequency, phase, gain = metadata.frequency, metadata.phase, metadata.gain
+            envelopes, block_length = metadata.envelopes, metadata.block_length
         slot = EventSlot(
             cfg.ch,
             module.name,
             tuple(self._iterations),
             self._ref + self._tick(t + cfg.pre_delay),
             duration.copy(),
-            self._scalar(prog.get_pulse_param(module.pulse_id, "freq")),
-            self._scalar(prog.get_pulse_param(module.pulse_id, "phase")),
-            self._scalar(prog.get_pulse_param(module.pulse_id, "gain")),
-            (envelope,),
+            frequency,
+            phase,
+            gain,
+            envelopes,
             np.zeros(self._size, dtype=np.int64),
             self._active.copy(),
         )
@@ -402,7 +437,7 @@ class VectorInterpreter:
         self._gen_end[cfg.ch] = np.where(
             self._active, slot.start_us + duration, self._gen_end[cfg.ch]
         )
-        return t + module.total_length(prog) if module.block_mode else t
+        return t + block_length if block_length is not None else t
 
     def _table_length(self, module: TableLengthPulse, t: Time) -> float:
         index = self._index(module.idx_reg, len(module.lengths))
