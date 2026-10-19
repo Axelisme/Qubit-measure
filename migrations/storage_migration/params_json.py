@@ -1,7 +1,6 @@
 """Offline conversion of legacy analysis handoffs into entry-scoped resources."""
 
 from dataclasses import dataclass, replace
-from datetime import datetime
 from math import isfinite
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from zcu_tools.resources.entry import (
     snapshot,
 )
 
+from .analysis_files import convert_analysis_files, proven_created_at
 from .errors import MigrationInputError
 from .models import KeyMappingItem, MigrationMapping
 from .paths import contained_path
@@ -79,18 +79,6 @@ def _flux_unit(values: JsonObject, fit: JsonObject) -> tuple[str | None, str | N
     if not isinstance(unit, str) or unit not in ("A", "mA", "V", "mV"):
         return None, "Missing or unsupported explicit flux_unit (A/mA/V/mV)"
     return unit, None
-
-
-def _created_at(value: object) -> str | None:
-    if not isinstance(value, str) or "T" not in value.upper():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return (
-        value if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
-    )
 
 
 def _write_predictor(path: Path, document: JsonObject) -> None:
@@ -173,7 +161,7 @@ def _project_fit(
             )
         )
     unit, unit_error = _flux_unit(values, fit)
-    created_at = _created_at(fit.get("timestamp"))
+    created_at = proven_created_at(fit.get("timestamp"))
     backup = session.manifest.report.backup_path
     original = (
         backup
@@ -252,7 +240,7 @@ def convert_params_json(
     entry: ResultEntry | None,
     mapping: MigrationMapping,
 ) -> None:
-    """Preserve setup metadata and publish an entry predictor from legacy params.
+    """Preserve metadata and publish entry predictor/dispersive/T1 fit files.
 
     session owns baselines and report; entry is its destination handle or None in
     dry-run. mapping supplies seeds with exactly one qubit/* kind; otherwise the
@@ -265,7 +253,10 @@ def convert_params_json(
     without conversion. Source run_id is unknown; only a timezone-aware ISO 8601
     timestamp supplies created_at. Preserve full raw sections and metadata in
     component.ext.legacy_params with located pending. Predictors remain entry
-    resources and never participate in setup/point inheritance. Dry-run reports
+    resources and never participate in setup/point inheritance. Dispersive and T1
+    file owners validate partial data and source evidence; invalid content stays
+    pending with its original ext copy. plot_transitions joins the dispersive
+    file without inventing fit values. Dry-run reports
     the same plan without writes. The parameters owner checkpoints completion;
     input/I/O failures propagate and sources are never changed here.
     """
@@ -296,6 +287,7 @@ def convert_params_json(
     fields = set(component_registry.get(kind).model_fields)
     context = _setup_context(session, entry, mapping, name)
     rows = _project_fit(session, source, name, values)
+    rows.extend(convert_analysis_files(session, entry, source, name, values))
     rows.extend(
         _preserve_sections(context, source, name, values, has_ext="ext" in fields)
     )

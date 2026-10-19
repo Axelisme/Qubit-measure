@@ -134,6 +134,30 @@ class ResultEntry:
         """Return this entry's exact Database directory, not the parent root."""
         return self._database_path
 
+    @property
+    def dispersive_path(self) -> Path:
+        """Return the entry's dispersive directory without creating it.
+
+        File names and content belong to resources.dispersive_file. A symlink
+        escaping this entry raises ValueError; no component or ledger is read.
+        """
+        path = self._result_path / "dispersive"
+        if not path.resolve().is_relative_to(self._result_path.resolve()):
+            raise ValueError(f"{path}: dispersive directory escapes its entry")
+        return path
+
+    @property
+    def t1_curve_path(self) -> Path:
+        """Return the entry's T1 curve directory without creating it.
+
+        File names and content belong to resources.t1_curve_file. A symlink
+        escaping this entry raises ValueError; no component or ledger is read.
+        """
+        path = self._result_path / "t1_curve"
+        if not path.resolve().is_relative_to(self._result_path.resolve()):
+            raise ValueError(f"{path}: t1_curve directory escapes its entry")
+        return path
+
     def load_aliases(self) -> EntryAliases | None:
         """Read the entry-authored table, or None only when its file is absent.
 
