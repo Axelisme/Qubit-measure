@@ -129,13 +129,13 @@ def test_fit_fields_and_lossless_sections_reach_named_qubit(
     before = source.read_bytes()
     report = migrate(request_data, analysis_mapping)
     doc = snapshot(open_entry(request_data).setup)
-    assert document_value(doc, "Qlegacy.EJ") == 6.27
+    assert doc.components["Qlegacy"].model_dump()["EJ"] == 6.27
     assert document_value(doc, "Qlegacy.EC") == 1.41
     assert document_value(doc, "Qlegacy.EL") == 0.8
     assert document_value(doc, "Qlegacy.ext.keep") == 7
     assert document_value(doc, "Qlegacy.ext.legacy_params.dispersive") == dispersive
     assert document_value(doc, "Qlegacy.ext.legacy_params.fluxdep_fit") == fit
-    assert document_value(doc, "Qlegacy.flux_half") is None
+    assert doc.components["Qlegacy"].model_dump()["flux_half"] is None
     assert any(
         item.source == source and item.location == "fluxdep_fit.flux_half"
         for item in report.pending
@@ -160,7 +160,7 @@ def test_meta_values_win_per_context_and_params_fill_other_fields(
     )
     report = migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
-    assert document_value(snapshot(entry.setup), "Qlegacy.EC") == 1.41
+    assert snapshot(entry.setup).components["Qlegacy"].model_dump()["EC"] == 1.41
     assert document_value(snapshot(entry.setup), "Qlegacy.EJ") == 9.0
     assert document_value(snapshot(entry.use_point("bias")), "Qlegacy.EJ") == 11.0
     assert document_value(snapshot(entry.use_point("bias")), "Qlegacy.EC") == 1.41
@@ -202,7 +202,8 @@ def test_no_unique_qubit_keeps_whole_handoff_pending(
         for item in report.pending
     )
     assert all(
-        document_value(snapshot(open_entry(request_data).setup), f"{name}.EJ") is None
+        snapshot(open_entry(request_data).setup).components[name].model_dump()["EJ"]
+        is None
         for name in components
     )
 
@@ -231,7 +232,7 @@ def test_explicit_flux_unit_is_kept_in_each_context(
     entry = open_entry(request_data)
     for view in (entry.setup, entry.use_point("bias")):
         doc = snapshot(view)
-        assert document_value(doc, "Qlegacy.flux_half") == 0.2
+        assert doc.components["Qlegacy"].model_dump()["flux_half"] == 0.2
         assert document_value(doc, "Qlegacy.flux_int") == -0.3
         assert document_value(doc, "Qlegacy.flux_period") == 1.0
         assert document_value(doc, "general.ext.flux_unit") == (root_unit or fit_unit)
@@ -251,7 +252,9 @@ def test_disagreeing_source_units_leave_flux_pending(
         for item in report.pending
     )
     assert (
-        document_value(snapshot(open_entry(request_data).setup), "Qlegacy.flux_half")
+        snapshot(open_entry(request_data).setup)
+        .components["Qlegacy"]
+        .model_dump()["flux_half"]
         is None
     )
 
@@ -264,7 +267,7 @@ def test_completed_resume_preserves_user_edits(
     write_params(request_data, {"fluxdep_fit": {"params": {"EJ": 6.27}}})
     migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
-    assert document_value(snapshot(entry.setup), "Qlegacy.EJ") == 6.27
+    assert snapshot(entry.setup).components["Qlegacy"].model_dump()["EJ"] == 6.27
     entry.setup.Qlegacy.EJ = 12.0
     entry.use_point("bias").Qlegacy.EJ = 13.0
     paths = [
@@ -310,10 +313,10 @@ def test_point_unit_conflict_does_not_reinterpret_params_flux(
     )
     report = migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
-    assert document_value(snapshot(entry.setup), "Qlegacy.flux_half") == 0.2
+    assert snapshot(entry.setup).components["Qlegacy"].model_dump()["flux_half"] == 0.2
     point = snapshot(entry.use_point("bias"))
     assert document_value(point, "general.ext.flux_unit") == "V"
-    assert document_value(point, "Qlegacy.flux_half") is None
+    assert point.components["Qlegacy"].model_dump()["flux_half"] is None
     assert any(
         item.source == source
         and str(meta) in item.reason
@@ -336,5 +339,8 @@ def test_non_numeric_fit_fields_remain_located_pending(
         for item in report.pending
     )
     assert (
-        document_value(snapshot(open_entry(request_data).setup), "Qlegacy.EJ") is None
+        snapshot(open_entry(request_data).setup)
+        .components["Qlegacy"]
+        .model_dump()["EJ"]
+        is None
     )
