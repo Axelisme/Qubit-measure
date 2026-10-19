@@ -416,6 +416,14 @@ def test_native_overwrite_recovers_from_windows_lock_after_closing_hdf5(
 
     original_replace = os.replace
     attempts = 0
+    elapsed = 0.0
+
+    def monotonic() -> float:
+        return elapsed
+
+    def sleep(seconds: float) -> None:
+        nonlocal elapsed
+        elapsed += seconds
 
     def replace_closed_file(source: Path, destination: Path) -> None:
         nonlocal attempts
@@ -428,7 +436,8 @@ def test_native_overwrite_recovers_from_windows_lock_after_closing_hdf5(
         original_replace(source, destination)
 
     monkeypatch.setattr(os, "replace", replace_closed_file)
-    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(time, "monotonic", monotonic)
+    monkeypatch.setattr(time, "sleep", sleep)
     failure: OSError | None = None
     try:
         save_run_data(path, native_payload(), changed, cfg=native_cfg(), replace=True)
