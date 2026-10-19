@@ -206,7 +206,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             xlabel = r"$\phi$ (a.u.)"
         else:
             xs = dev_values
-            xlabel = r"$A$ (mA)"
+            xlabel = "Flux device value"
 
         amp_diff = mist_signal2real(signals)
         if options.ac_coeff is None:
