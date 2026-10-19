@@ -22,6 +22,7 @@ from zcu_tools.resources.entry import (
     ResultEntry,
 )
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.gui.app.workflows._start_fakes import StartHarness
 
 from ._reload_source import InjectedCatalog
@@ -280,7 +281,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = run_attachment
-    native_errors: list[IsADirectoryError] = []
+    native_errors: list[OSError] = []
     observed: list[tuple[bool, bool]] = []
 
     def init(_env: InitEnv[Context], _plan: Plan) -> None:
@@ -317,7 +318,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
             window.apply_tunables(
                 "failed-read", {("sample", "value"): 45.0}, actor=Actor("agent", "rpc")
             )
-        except IsADirectoryError as error:
+        except DIRECTORY_OPEN_ERROR as error:
             native_errors.append(error)
         observed.append(
             (form_editable(window.plan_panel), controller.has_pending_segment)

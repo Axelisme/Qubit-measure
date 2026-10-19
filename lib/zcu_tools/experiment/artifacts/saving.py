@@ -30,6 +30,7 @@ from zcu_tools.resources.entry import (
     SaveLayout,
 )
 from zcu_tools.resources.entry.ledger_models import validate_origin
+from zcu_tools.utils import atomic_replace
 
 from .items import (
     AnalysisItem,
@@ -260,6 +261,6 @@ def _replace_file(destination: Path, content: bytes) -> None:
             stream.write(content)
             stream.flush()
             stream.close()
-            temporary.replace(destination)
+            atomic_replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)

@@ -11,6 +11,7 @@ from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel
 from zcu_tools.resources.entry import ResultEntry
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.app.workflows._synthetic import TunablesForm
 from tests.gui.widgets.form._text_input import commit_text
@@ -125,7 +126,7 @@ def test_journal_failure_propagates_without_accepting_input_or_clearing_local_te
     journal.unlink()
     journal.mkdir()
     try:
-        with pytest.raises(IsADirectoryError) as caught:
+        with pytest.raises(DIRECTORY_OPEN_ERROR) as caught:
             widget.apply_external(
                 {("sample", "value"): 45.0}, actor=Actor("agent", "rpc")
             )

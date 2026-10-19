@@ -10,6 +10,7 @@ import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
 from zcu_tools.format_version import FormatError, FormatVersion, validate_header
+from zcu_tools.utils import atomic_replace
 
 from .models import DataVariable, LabberMetadata, LabberPayload
 from .native_metadata import (
@@ -81,7 +82,7 @@ def save_run_data(
             write_metadata(file, metadata, cfg)
             _write_payload(file, payload, labber_json)
         if replace:
-            os.replace(temp, destination)
+            atomic_replace(temp, destination)
         else:
             # link publishes without overwriting a destination created after validation.
             os.link(temp, destination)

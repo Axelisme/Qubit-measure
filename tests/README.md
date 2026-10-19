@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-17，runtime 測試按公開契約分組與測試成本規則
+**Last updated:** 2026-10-19，跨平台 GUI cache 隔離
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -101,11 +101,13 @@ Qt GUI 子套件可選 `tests/gui tests/gui/app/fluxdep tests/gui/app/dispersive
 
 ### GUI cache 隔離
 
-GUI cache 隔離只支援 Linux，其它平台在 root conftest 載入時直接報錯。
-`tests/conftest.py` 在子目錄 conftest 與產品模組 import 前設定 `XDG_CACHE_HOME`，
-指向 worktree 內獨立的暫存目錄。每個 xdist worker 各自建立目錄，不使用會被 pytest
-清掉的 basetemp。這些目錄保留到 process 結束，再由 `atexit` 清理。
-巢狀 `pytest.main()` session 的 teardown 不還原 `XDG_CACHE_HOME`，後續 cleanup 仍使用隔離目錄。
+`tests/conftest.py` 在第三方套件、子目錄 conftest 與產品模組 import 前設定
+`ZCU_TOOLS_CACHE_DIR`，指向 worktree 內獨立的暫存目錄。
+建立與退出清理由可在第三方 import 前載入的 `tests/_cache_environment.py` 負責。
+GUI persistence 與 session discovery 在 Linux、Windows 和 macOS 都使用這個根目錄。
+每個 xdist worker 各自建立目錄，不使用會被 pytest 清掉的 basetemp。
+這些目錄保留到 process 結束，再由 `atexit` 清理。
+巢狀 `pytest.main()` session 的 teardown 不還原 `ZCU_TOOLS_CACHE_DIR`，後續 cleanup 仍使用隔離目錄。
 
 ### Background work — 測試 teardown 必要模式
 
