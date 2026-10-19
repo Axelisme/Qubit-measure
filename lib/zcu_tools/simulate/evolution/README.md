@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA and unified omission admission
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention and shared omission admission
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -151,8 +151,15 @@ detuning, or the reversed second detuning when only that edge is removed.
 Distinct orders and intermediate states are summed; identical carriers are not
 duplicated. With effective coupling `g` and detuning `delta`, every omission uses
 `P = min(4*abs(g)**2/(4*abs(g)**2+delta**2), 4*abs(g)**2*duration_ns**2)`.
-Zero coupling contributes zero. Any `P > 5.8e-3` rejects the row, including
-when no edges are retained. This calibrated proxy is not an error certificate.
+Zero coupling contributes zero. Distinct-port dual constants reject any
+`P > 5.8e-3`, including when no edges are retained. Single constant rows instead
+start at the 50 MHz window, restore over-threshold one-photon edges and the
+omitted first-order edges in over-threshold two-photon paths, then recompute
+until all remaining estimates pass. The resolved set determines Fourier terms,
+virtual shifts, graph facts and prepare identities. Strength, phase, explicit
+pruning and the 64-dimensional real-block cap still apply. Multitone and shaped
+policies do not perform this iteration. This calibrated proxy is not an error
+certificate.
 
 The cap halves the smallest failing combination-channel proxy (0.0116496) in
 the existing 25-point strict-lab scan. A 96-point single-constant scan covering
