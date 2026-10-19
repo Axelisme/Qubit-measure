@@ -211,7 +211,8 @@ def validate_run_evidence(
     """Validate and merge caller evidence against the session's stored document.
 
     Reject typed/raw disagreement and changed planned entries, including unknown
-    fields, with MigrationInputError. Unplanned entries may supplement the returned
+    fields, with MigrationInputError. A durable run assignment already fixes the
+    evidence, even before its first file publication is planned. Unplanned entries may supplement the returned
     document. Return stored evidence when incoming evidence is omitted, or None
     when neither exists. Do not access legacy sources, change the session or write
     checkpoints. Cleanup-only resume uses this validation without adopting new
@@ -252,11 +253,10 @@ def validate_run_evidence(
                 ),
                 None,
             )
+            source = session.manifest.report.source.database_path / entry.source
             planned = any(
-                item.source
-                == (session.manifest.report.source.database_path / entry.source)
-                for item in session.manifest.files
-            )
+                item.source == source for item in session.manifest.files
+            ) or any(item.source == source for item in session.manifest.runs)
             if old_index is not None:
                 if planned and not json_values_equal(
                     old_entries[old_index], new_entries[index]
