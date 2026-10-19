@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.schedule import (
     AcquireOptions,
@@ -92,6 +93,35 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
 
     assert [bar.leave for bar in progress_bars] == [True, False]
     assert all(bar.closed for bar in progress_bars)
+
+
+@pytest.mark.parametrize("progress_leave", [None, True, False])
+def test_step_program_progress_closes_with_default_or_explicit_leave(
+    progress_leave: bool | None,
+) -> None:
+    progress_bars: list[RecordingProgressBar] = []
+    signals_buffer = SignalBuffer((1, 1), dtype=np.float64)
+
+    with (
+        use_pbar_factory(recording_pbar_factory(progress_bars)),
+        Schedule(_cfg(rounds=2), signals_buffer, stop=StopSignal()) as sched,
+    ):
+        for _, step in sched.scan("host", [0]):
+            step.prog_builder(
+                "soc", "soccfg", program_cls=FakeProgram, marker="kw"
+            ).add(FakeModule("readout")).build_and_acquire(
+                raw2signal_fn=identity_array,
+                options=AcquireOptions(progress_leave=progress_leave),
+            )
+            rounds_bar = next(bar for bar in progress_bars if bar.desc == "rounds")
+            assert rounds_bar.leave is (
+                False if progress_leave is None else progress_leave
+            )
+            assert rounds_bar.closed
+            assert not progress_bars[0].closed
+
+    assert all(bar.closed for bar in progress_bars)
+    np.testing.assert_allclose(signals_buffer.array, [[2.0]])
 
 
 def test_run_program_reuses_caller_owned_program_cache():

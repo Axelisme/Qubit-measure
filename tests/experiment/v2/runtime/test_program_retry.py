@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 from zcu_tools.experiment.v2.runtime.schedule import (
     AcquireOptions,
     Schedule,
     SignalBuffer,
 )
-from zcu_tools.program.v2 import Module
+from zcu_tools.program.acquisition import CancelFlagProtocol
+from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.experiment.v2.runtime._flow_cfg import FlowCfg
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -47,6 +50,84 @@ def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
     assert result is not None
     np.testing.assert_allclose(result, np.array([2.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
+
+
+@pytest.mark.parametrize("decimated", [False, True])
+def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
+    decimated: bool,
+) -> None:
+    result = None
+    produced_rounds: list[int] = []
+    checked_signals: list[NDArray[np.float64]] = []
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+    run_stop = StopSignal()
+
+    class CooperativeProgram:
+        cfg_model = ProgramV2Cfg(rounds=3)
+
+        def acquire(
+            self,
+            soc: object,
+            *,
+            progress: bool,
+            round_hook: Callable[
+                [int, NDArray[np.float64], CancelFlagProtocol], object
+            ],
+            cancel_flag: CancelFlagProtocol,
+            **_kwargs: object,
+        ) -> NDArray[np.float64]:
+            raw = np.array([np.nan])
+            for ir in range(1, self.cfg_model.rounds + 1):
+                if cancel_flag.is_set():
+                    break
+                produced_rounds.append(ir)
+                raw = np.array([float(ir)])
+                round_hook(ir, raw, cancel_flag)
+            return raw
+
+        def acquire_decimated(
+            self,
+            soc: object,
+            *,
+            progress: bool,
+            round_hook: Callable[
+                [int, NDArray[np.float64], CancelFlagProtocol], object
+            ],
+            cancel_flag: CancelFlagProtocol,
+            **kwargs: object,
+        ) -> NDArray[np.float64]:
+            return self.acquire(
+                soc,
+                progress=progress,
+                round_hook=round_hook,
+                cancel_flag=cancel_flag,
+                **kwargs,
+            )
+
+    def stop_after_written_round() -> bool:
+        checked_signals.append(signals_buffer.array.copy())
+        return True
+
+    with Schedule(_cfg(rounds=3), signals_buffer, stop=run_stop) as sched:
+        builder = sched.prog_builder("soc", "soccfg")
+        runner = builder.run_program_decimated if decimated else builder.run_program
+        result = runner(
+            CooperativeProgram(),
+            raw2signal_fn=identity_array,
+            options=AcquireOptions(stop_condition=stop_after_written_round),
+        )
+        assert sched.outcome.status == "completed"
+        assert sched.outcome.reason is None
+        assert sched.outcome.exception is None
+        assert not run_stop.is_set()
+        assert run_stop.error is None
+        run_stop.raise_if_error()
+
+    assert result is not None
+    assert produced_rounds == [1]
+    np.testing.assert_allclose(checked_signals, [[1.0]])
+    np.testing.assert_allclose(result, [1.0])
+    np.testing.assert_allclose(signals_buffer.array, [1.0])
 
 
 def test_build_and_acquire_rebuilds_program_on_retry():
