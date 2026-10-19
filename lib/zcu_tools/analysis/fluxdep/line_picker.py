@@ -7,7 +7,9 @@ from dataclasses import replace
 from typing import Any, Literal
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.image import NonUniformImage
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 
@@ -61,7 +63,9 @@ class TwoLinePicker:
         """Draw the spectrum and the two lines into the empty figure.
 
         signals is shaped (device, frequency) over the dev_values and freqs
-        axes. flux_half / flux_int seed the lines (folded into the axis when
+        axes. Monotonic axes may be nonuniform or descending; background cells
+        follow nearest sample centers while limits retain the scan direction.
+        flux_half / flux_int seed the lines (folded into the axis when
         None or outside it); force_magnitude starts in magnitude-only mode.
         onetone marks a OneTone resonator spectrum: the main image then shows
         ``onetone_background`` (dark dip on white,
@@ -140,15 +144,8 @@ class TwoLinePicker:
             background, vmin, vmax = shown.values, shown.vmin, shown.vmax
         else:
             background, vmin, vmax = self._real_signals, None, None
-        self._main_im = self._ax_main.imshow(
-            background.T,
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            extent=self._extent(),
-            cmap="gray_r",
-            vmin=vmin,
-            vmax=vmax,
+        self._main_im = self._make_background(
+            self._ax_main, background, vmin=vmin, vmax=vmax
         )
         self._ax_main.set_xlim(self._dev_values[0], self._dev_values[-1])
         self._ax_main.set_ylim(self._freqs[0], self._freqs[-1])
@@ -162,14 +159,7 @@ class TwoLinePicker:
             x=self.flux_int, color=INTEGER_FLUX_COLOR, linestyle="--"
         )
 
-        self._loss_im = self._ax_loss.imshow(
-            self._real_signals.T,
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            extent=self._extent(),
-            cmap="gray_r",
-        )
+        self._loss_im = self._make_background(self._ax_loss, self._real_signals)
         self._ax_loss.set_xlabel("Device value")
         self._ax_loss.set_ylabel("Frequency (GHz)")
         self._ax_loss.set_title("mirror loss: -")
@@ -179,6 +169,37 @@ class TwoLinePicker:
         )[0]
 
         self._figure.tight_layout()
+
+    def _make_background(
+        self,
+        axes: Axes,
+        values: NDArray[np.float64],
+        *,
+        vmin: float | None = None,
+        vmax: float | None = None,
+    ) -> NonUniformImage:
+        image = NonUniformImage(axes, cmap="gray_r", interpolation="nearest")
+        image.set_clip_path(axes.patch)
+        image.set_clim(vmin=vmin, vmax=vmax)
+        image.set_extent(self._extent())
+        self._set_background_data(image, values)
+        if vmin is None and vmax is None:
+            image.autoscale()
+        axes.add_image(image)
+        axes.set_aspect("auto")
+        return image
+
+    def _set_background_data(
+        self, image: NonUniformImage, values: NDArray[np.float64]
+    ) -> None:
+        dev, freqs = self._dev_values, self._freqs
+        # NonUniformImage searches ascending centers; reverse data with each axis,
+        # independently of the scan-order limits and the projection/loss values.
+        if dev[-1] < dev[0]:
+            dev, values = dev[::-1], values[::-1, :]
+        if freqs[-1] < freqs[0]:
+            freqs, values = freqs[::-1], values[:, ::-1]
+        image.set_data(dev, freqs, values.T)
 
     def _extent(self) -> tuple[float, float, float, float]:
         dev = self._dev_values
@@ -198,7 +219,7 @@ class TwoLinePicker:
 
     def _update_loss_view(self, x: float, y: float) -> None:
         loss, mean_loss = mirror_loss_at(self._dev_values, self._real_signals, x)
-        self._loss_im.set_data(loss.T)
+        self._set_background_data(self._loss_im, loss)
         self._loss_im.autoscale()
 
         dev = self._dev_values
@@ -324,7 +345,7 @@ class TwoLinePicker:
             self._signals, use_phase=not magnitude_only
         )
         if not self._onetone:
-            self._main_im.set_data(self._real_signals.T)
+            self._set_background_data(self._main_im, self._real_signals)
             self._main_im.autoscale()
 
     def swap(self) -> None:
