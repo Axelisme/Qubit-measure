@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
 
 import pytest
 from qtpy.QtWidgets import QDialog
@@ -38,7 +37,7 @@ def test_dialog_ref_store_cleans_up_on_destroyed_only() -> None:
     store = DialogRefStore()
     dialog = _Dialog()
 
-    store.open_named("setup", cast(QDialog, dialog))
+    store.open_named("setup", dialog)
 
     assert store.get("setup") is dialog
     assert len(store) == 1
@@ -55,9 +54,9 @@ def test_dialog_ref_store_duplicate_key_fast_fails() -> None:
     first = _Dialog()
     second = _Dialog()
 
-    store.open_named("setup", cast(QDialog, first))
+    store.open_named("setup", first)
     with pytest.raises(RuntimeError, match="dialog key is already retained"):
-        store.open_named("setup", cast(QDialog, second))
+        store.open_named("setup", second)
 
     assert second.open_count == 0
 
@@ -71,7 +70,7 @@ def test_dialog_ref_store_retains_without_opening_and_reports_release() -> None:
         nonlocal releases
         releases += 1
 
-    store.retain_named("startup", cast(QDialog, dialog), on_released=on_released)
+    store.retain_named("startup", dialog, on_released=on_released)
     dialog.destroyed.emit(object())
 
     assert dialog.open_count == 0
