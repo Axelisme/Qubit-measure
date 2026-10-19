@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from zcu_tools.gui.form import FormInput, FormModel
 from zcu_tools.gui.session.persistence import (
     RestoreOutcome,
     SingleFileCaretaker,
@@ -13,12 +11,17 @@ from zcu_tools.gui.session.persistence import (
 )
 
 from .persistence_types import APP_STATE_VERSION, AppPersistedState
-from .ports import RestoreReport
 
-_STATE_FILENAME = "gui_state_v1.json"
+_STATE_FILENAME = "measure_layout_v1.json"
 
 
 class AppSnapshotCodec:
+    """Pure Qt layout codec; validation/version failures raise ValueError.
+
+    Values are detached and require no Qt owner thread. No session domain state
+    or legacy file migration belongs to this codec.
+    """
+
     def default(self) -> AppPersistedState:
         return AppPersistedState()
 
@@ -29,8 +32,6 @@ class AppSnapshotCodec:
                 f"Unsupported GUI state version {state.version!r} "
                 f"(expected {APP_STATE_VERSION})"
             )
-        for tab in state.session.tabs:
-            FormInput.from_json(FormModel, json.dumps(tab.form_input))
         return state
 
     def encode(self, state: AppPersistedState) -> object:
@@ -38,10 +39,17 @@ class AppSnapshotCodec:
 
 
 def create_persistence_caretaker(
-    originator: SnapshotOriginator[AppPersistedState, RestoreReport],
+    originator: SnapshotOriginator[AppPersistedState, None],
     *,
     cache_dir: Path | None = None,
-) -> SingleFileCaretaker[AppPersistedState, RestoreReport]:
+) -> SingleFileCaretaker[AppPersistedState, None]:
+    """Build the layout-only caretaker for an owner-thread originator.
+
+    cache_dir is an optional caller-owned cache root; None uses the user cache.
+    The returned caretaker owns atomic file I/O, not the originator or its view.
+    Its restore returns no domain report. File/codec failures follow the shared
+    SingleFileCaretaker error contract. No file is read during construction.
+    """
     return SingleFileCaretaker(
         originator,
         codec=AppSnapshotCodec(),

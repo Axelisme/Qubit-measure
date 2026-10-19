@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.services.experiment_reload import (
 )
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.plotting import FigureContainer
@@ -61,7 +60,6 @@ from .services import (
     AppPersistedState,
     LoadTabResultOutcome,
     PersistenceError,
-    RestoreReport,
     TabSnapshot,
     build_app_services,
 )
@@ -182,9 +180,16 @@ class RenderHost(Protocol):
     def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None: ...
     def discard_interactive_preview(self, tab_id: str) -> None: ...
 
-    # The View's current left-panel width — the only persistence value sourced
-    # from the View (the splitter widget); captured at flush time.
+    # Pure Qt appearance is captured from the View at layout flush time.
     def current_left_panel_width(self) -> int: ...
+
+    def current_window_size(self) -> tuple[int, int]:
+        """Return current width and height in Qt logical pixels on the owner thread."""
+        ...
+
+    def resize_window(self, width: int, height: int) -> None:
+        """Resize the caller-owned window to positive logical-pixel dimensions."""
+        ...
 
 
 class ViewSnapshot(TypedDict):
@@ -361,9 +366,7 @@ class Controller(SessionControllerMixin):
         # App-level PersistenceCaretaker, injected by runtime behavior via
         # attach_caretaker (None in bare-Controller tests that don't exercise
         # persistence).
-        self._caretaker: (
-            SingleFileCaretaker[AppPersistedState, RestoreReport] | None
-        ) = None
+        self._caretaker: SingleFileCaretaker[AppPersistedState, None] | None = None
         # Lazily built on first begin_shutdown so the Controller stays importable
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
@@ -605,7 +608,7 @@ class Controller(SessionControllerMixin):
         return self._writeback_control
 
     def attach_caretaker(
-        self, caretaker: SingleFileCaretaker[AppPersistedState, RestoreReport]
+        self, caretaker: SingleFileCaretaker[AppPersistedState, None]
     ) -> None:
         """Wire the app-level PersistenceCaretaker.
 
@@ -613,31 +616,45 @@ class Controller(SessionControllerMixin):
         """
         self._caretaker = caretaker
 
-    # -- Memento Originator (PersistOriginatorPort) --------------------------
+    # -- Layout SnapshotOriginator -----------------------------------------
 
     def capture_persisted_state(self) -> AppPersistedState:
-        """Snapshot the whole app state into a memento (no disk). Composes the
-        remembered settings + device projection + view's left-panel width and the
-        live tabs into one immutable ``AppPersistedState``."""
-        settings = self._settings_svc.capture_settings(
-            left_panel_width=self._capture_left_panel_width()
+        """Capture only Qt appearance on the owner thread, without disk I/O.
+
+        The returned dimensions and panel width are detached values. Without a
+        view use default window dimensions. Session resources and drafts have
+        their own live owners and are not part of this layout snapshot.
+        """
+        width, height = (
+            (1280, 750)
+            if self._render_host is None
+            else self._render_host.current_window_size()
         )
-        session = self._workspace_svc.capture_session()
-        return AppPersistedState(startup=settings, session=session)
+        return AppPersistedState(
+            window_width=width,
+            window_height=height,
+            left_panel_width=self._capture_left_panel_width(),
+        )
 
-    def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
-        """Dispatch a memento back to the sub-owners: seed remembered settings +
-        register remembered devices, then rebuild tabs. Returns the session's
-        per-tab restore report (presented to the user by ``restore_all``)."""
-        with self._bus.origin(EventOrigin(kind="system")):
-            self._settings_svc.restore_settings(state.startup)
-            report = self._workspace_svc.apply_session(state.session)
-            self._present_restore_report(report)
-            return report
+    def restore_persisted_state(self, state: AppPersistedState) -> None:
+        """Apply a layout-only snapshot on the owner thread, without disk I/O.
 
-    # -- lifecycle façade (runtime startup / MainWindow close) ---------------
+        state supplies positive Qt logical-pixel dimensions. Panel width seeds
+        subsequently created tabs; an attached render host resizes immediately.
+        This method does not create tabs, connect drivers or change sources.
+        The caller retains ownership of the snapshot. Host failures propagate.
+        """
+        self._settings_svc.restore_left_panel_width(state.left_panel_width)
+        if self._render_host is not None:
+            self._render_host.resize_window(state.window_width, state.window_height)
 
     def restore_all(self, *, load: bool = True) -> None:
+        """Load pure Qt appearance on the owner thread using the attached caretaker.
+
+        load=False uses fresh default dimensions without reading disk. Present
+        load/codec errors through diagnostic sinks; unexpected failures propagate.
+        No domain session state is restored. Attach a caretaker before calling.
+        """
         assert self._caretaker is not None, "caretaker not attached"
         outcome = self._caretaker.restore_all(load=load)
         if outcome.load_error is not None:
@@ -659,17 +676,6 @@ class Controller(SessionControllerMixin):
         if host is None:
             return DEFAULT_LEFT_PANEL_WIDTH
         return host.current_left_panel_width()
-
-    def _present_restore_report(self, report: RestoreReport) -> None:
-        if report.rejected_tabs:
-            self._notify(
-                "error",
-                "Some session tabs were not restored",
-                "\n".join(
-                    f"{issue.subject}: {issue.message}"
-                    for issue in report.rejected_tabs
-                ),
-            )
 
     # ------------------------------------------------------------------
     # ExpTab operations (TabService)

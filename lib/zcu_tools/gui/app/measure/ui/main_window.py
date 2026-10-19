@@ -629,16 +629,28 @@ class MainWindow(QMainWindow):
         if restore_result:
             self.refresh_tab_figure(tab_id)
 
-    def current_left_panel_width(self) -> int:
-        """RenderHost impl: the active tab's left-panel width (the single
-        persistence value sourced from the View). Falls back to the default when
-        no tab is open."""
-        from zcu_tools.gui.app.measure.state import DEFAULT_LEFT_PANEL_WIDTH
+    def current_window_size(self) -> tuple[int, int]:
+        """Return this caller-owned window's width and height on the Qt thread."""
+        return self.width(), self.height()
 
+    def resize_window(self, width: int, height: int) -> None:
+        """Resize to positive Qt logical-pixel dimensions on the owner thread.
+
+        Raises ValueError for nonpositive dimensions. Qt retains window ownership.
+        """
+        if width <= 0 or height <= 0:
+            raise ValueError("Window dimensions must be positive")
+        self.resize(width, height)
+
+    def current_left_panel_width(self) -> int:
+        """Return active-tab panel width in logical pixels on the Qt thread.
+
+        Without an open tab use the remembered pure-layout width.
+        """
         current = self._tabs.currentWidget()
         if isinstance(current, ExpTabWidget):
             return current.left_panel_width()
-        return DEFAULT_LEFT_PANEL_WIDTH
+        return self._ctrl.get_left_panel_width()
 
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
         """DiagnosticSink impl (ADR-0068): render a Controller diagnostic the Qt

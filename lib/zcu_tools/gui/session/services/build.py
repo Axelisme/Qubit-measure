@@ -162,11 +162,9 @@ def build_session_services(
     predictor_control = PredictorControlFacet(predictor)
     device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
-    # ProjectSettingsService bridges the two session services it commands through
-    # their ports (project context + remembered-device registration) + State prefs.
+    # Entry composition uses the context owner and live dialog preferences.
     settings = ProjectSettingsService(
         context,
-        device,
         state,
         result_root=Path(project_root) / "result",
         database_root=Path(project_root) / "Database",

@@ -16,7 +16,6 @@ from zcu_tools.gui.app.measure.services.caretaker import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
 from zcu_tools.gui.app.measure.services.persistence_types import AppPersistedState
-from zcu_tools.gui.app.measure.services.ports import RestoreReport
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.operation_handles import (
@@ -71,8 +70,8 @@ def test_operation_settle_success_logs_info(caplog) -> None:
 
 def test_caretaker_load_failure_logs_warning(tmp_path: Path, caplog) -> None:
     class _Originator:
-        def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
-            return RestoreReport(restored_tabs=0, rejected_tabs=())
+        def restore_persisted_state(self, state: AppPersistedState) -> None:
+            pass
 
         def capture_persisted_state(self) -> AppPersistedState:  # pragma: no cover
             raise AssertionError

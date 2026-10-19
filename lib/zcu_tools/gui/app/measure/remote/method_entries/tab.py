@@ -218,6 +218,28 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
+        "tab.refresh_sources",
+        "tab:h_tab_refresh_sources",
+        MethodSpec(
+            5.0,
+            "Capture current sources once, optionally overriding named aliases "
+            "for this Refresh only. Preserve all input, expression drafts and "
+            "explicit selections; return revalidated input, values and errors. "
+            "Overrides do not change global aliases. Busy, revoked and "
+            "notification-reentrant mutations are rejected. Capture/factory "
+            "failure preserves the previous form. Does not reset defaults or results.",
+            (
+                required_string("tab_id"),
+                ParamSpec(
+                    "aliases",
+                    JsonType.OBJECT,
+                    required=False,
+                    description="Single Refresh alias-name to component-name capture overrides",
+                ),
+            ),
+        ),
+    ),
+    method_entry(
         "tab.reset_cfg",
         "tab:h_tab_reset_cfg",
         MethodSpec(
