@@ -148,8 +148,12 @@ class LegacyRunEvidence:
     declared tag, not a filename inference. cfg is the complete historical cfg,
     or None when cfg/cfg_type evidence is missing; the converter keeps it pending
     and the document retains the complete unresolved JSON in raw.
-    started_at is a UTC ISO acquisition time; finished_at is UTC ISO or None.
-    completion is the historical complete/partial/stopped state.
+    started_at is a UTC ISO acquisition time, or None when unproven. Missing
+    time fields default to None; completion defaults to unknown. With no start,
+    native metadata uses None/unknown/None, retaining all original evidence here.
+    Otherwise completion preserves complete/partial/stopped/unknown evidence.
+    run_id is an explicit trusted historical native-format identity, or None when
+    missing. Only missing IDs receive a new migration-assigned identity.
     snapshot holds historical entry/point/parameter evidence. provenance holds
     historical software evidence; its None values mean missing evidence.
     Source containment, hash and existing metadata agreement are checked by the
@@ -160,11 +164,12 @@ class LegacyRunEvidence:
     source_hash: str
     experiment: str
     cfg: CfgSnapshot | None
-    started_at: str
-    finished_at: str | None
-    completion: Literal["complete", "partial", "stopped"]
+    started_at: str | None = None
+    finished_at: str | None = None
+    completion: Literal["complete", "partial", "stopped", "unknown"] = "unknown"
     snapshot: LegacySnapshotEvidence
     provenance: SoftwareProvenance
+    run_id: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -376,10 +381,11 @@ class MigrationFileState:
 
 @dataclass(frozen=True, kw_only=True)
 class RunAssignment:
-    """Persisted new run identity, assigned before any native publication.
+    """Persisted run identity, fixed before any native publication.
 
-    source is absolute; source_hash is baseline SHA256; run_id is opaque.
-    assigned_at is timezone-aware assignment time, never acquisition evidence.
+    source is absolute; source_hash is baseline SHA256; run_id is the trusted
+    historical ID or a migration-assigned opaque ID. assigned_at is the
+    timezone-aware migration assignment time, never acquisition evidence.
     """
 
     source: Path
