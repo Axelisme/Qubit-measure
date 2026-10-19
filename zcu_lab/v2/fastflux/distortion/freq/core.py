@@ -108,6 +108,15 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     )
 
     def run(self, config: FreqCfg, *, context: RunContext) -> FreqResult:
+        """Probe the qubit resonance at different times during a flux transient.
+
+        After reset, run flux, wait→frequency-swept qubit probe, and readout_t
+        in parallel. Read out after the longest branch: readout_t sets a minimum
+        duration in us, not an exact read time. Return probe waits in us,
+        frequencies in MHz and mean complex IQ shaped (wait, frequency).
+        Resonance fits in analyze trace the flux-induced frequency response.
+        """
+        # Quantize probe timing and frequency on the configured hardware.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -122,6 +131,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": qub_pulse.ch}
         )
 
+        # Keep the delayed spectroscopy map in wait-major order.
         viewer = context.plots.liveplot_2d(
             "measurement", "Time (us)", "Frequency (MHz)"
         )
@@ -131,12 +141,15 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                 lengths, freqs, freq_signal2real(data)
             ),
         )
+
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             length_param = sweep2param("length", sched.cfg.sweep.length)
             modules.qub_pulse.set_param(
                 "freq", sweep2param("freq", sched.cfg.sweep.freq)
             )
+
+            # Probe while flux is scheduled independently; read after all branches.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -165,6 +178,12 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
+        """Fit each finite spectroscopy row to obtain resonance versus time.
+
+        Return probe-center times in us and Lorentzian centers in MHz, skipping
+        rows containing NaN. Require source.cfg for probe/flux timing, otherwise
+        raise ValueError; the ideal curve is only a timing reference.
+        """
         del options  # This analysis has no configurable options.
         result = source.result
 

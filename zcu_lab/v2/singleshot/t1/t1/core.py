@@ -98,6 +98,8 @@ class T1AnalyzeOptions:
 
 
 class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
+    """Measure I/pi-prepared relaxation and fit G/E/Other transition rates."""
+
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
 
     AXES_SPEC = AxesSpec(
@@ -124,12 +126,6 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         cfg_schema_version="2.0",
         tag="singleshot/t1",
     )
-
-    """T1 relaxation time measurement.
-
-    Applies a π pulse and then waits for a variable time before readout
-    to measure the qubit's energy relaxation.
-    """
 
     def _make_viewers(self, plots: Plots) -> tuple[LinePlot, LinePlot]:
         def configure_axes(ax: Axes) -> None:
@@ -161,132 +157,95 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             ),
         )
 
-    def _run_uniform(
-        self,
-        cfg: T1Cfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
-        *,
-        context: RunContext,
-    ) -> T1Result:
-        soc, soccfg = context.soc, context.soccfg
-
-        length_sweep = cfg.sweep.length
-        assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
-        lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
-
-        init_g, init_e = self._make_viewers(context.plots)
-
-        def plot_fn(data: NDArray[np.float64]) -> None:
-            populations = calc_populations(data)  # (N, 2, 3)
-            init_g.update(lengths, populations[:, 0].T)
-            init_e.update(lengths, populations[:, 1].T)
-
-        buffer = SignalBuffer(
-            (len(lengths), 2, 2),
-            dtype=np.float64,
-            on_update=plot_fn,
-        )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
-            run_cfg = sched.cfg
-            modules = run_cfg.modules
-            inner_length_sweep = run_cfg.sweep.length
-            assert isinstance(inner_length_sweep, SweepCfg), (
-                "uniform mode requires SweepCfg"
-            )
-            length_param = sweep2param("length", inner_length_sweep)
-            _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                    Delay("t1_delay", delay=length_param),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("length", inner_length_sweep)
-                .declare_sweep("ge", 2)
-                .build_and_acquire(
-                    raw2signal_fn=raw_population_signal,
-                    g_center=g_center,
-                    e_center=e_center,
-                    ge_radius=radius,
-                )
-            )
-        populations = buffer.array
-
-        return T1Result(lengths=lengths, signals=populations)
-
-    def _run_non_uniform(
-        self,
-        cfg: T1Cfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
-        *,
-        context: RunContext,
-    ) -> T1Result:
-        soc, soccfg = context.soc, context.soccfg
-
-        delay_table = materialize_nonuniform_t1_delays(
-            cfg.sweep.length,
-            soccfg=soccfg,
-        )
-        length_cycles = delay_table.cycles
-        lengths = delay_table.times_us
-
-        init_g, init_e = self._make_viewers(context.plots)
-
-        def plot_fn(data: NDArray[np.float64]) -> None:
-            populations = calc_populations(data)  # (N, 2, 3)
-            init_g.update(lengths, populations[:, 0].T)
-            init_e.update(lengths, populations[:, 1].T)
-
-        buffer = SignalBuffer(
-            (len(lengths), 2, 2),
-            dtype=np.float64,
-            on_update=plot_fn,
-        )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
-            run_cfg = sched.cfg
-            modules = run_cfg.modules
-            _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    LoadValue(
-                        "load_t1_delay",
-                        values=list(length_cycles),
-                        idx_reg="length_idx",
-                        val_reg="t1_delay_cycle",
-                        auto_compress=False,
-                    ),
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                    DelayAuto("t1_delay", t="t1_delay_cycle"),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("length_idx", len(length_cycles))
-                .declare_sweep("ge", 2)
-                .build_and_acquire(
-                    raw2signal_fn=raw_population_signal,
-                    g_center=g_center,
-                    e_center=e_center,
-                    ge_radius=radius,
-                )
-            )
-        populations = buffer.array
-
-        return T1Result(lengths=lengths, signals=populations)
-
     def run(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        """Measure relaxation from both the unflipped and pi-prepared states.
+
+        Reset, apply I or pi, wait a variable delay, then classify readout shots
+        using cfg's IQ centers and radius. Return quantized delays in us and
+        G/E populations with shape (delay, initial state, population state).
+        Uniform sampling requires a SweepCfg; nonuniform sampling also accepts
+        an explicit delay list and rejects collisions on the hardware time grid.
+        """
+        # 1. Prepare the delay axis on the hardware grid without changing cfg.
         cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        delay_table = None
         if cfg.uniform:
-            return self._run_uniform(
-                cfg, cfg.g_center, cfg.e_center, cfg.radius, context=context
+            length_sweep = cfg.sweep.length
+            assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
+            lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
+        else:
+            delay_table = materialize_nonuniform_t1_delays(
+                cfg.sweep.length,
+                soccfg=soccfg,
             )
-        return self._run_non_uniform(
-            cfg, cfg.g_center, cfg.e_center, cfg.radius, context=context
+            lengths = delay_table.times_us
+
+        # 2. Display both preparations; keep only G/E in the population buffer.
+        init_g, init_e = self._make_viewers(context.plots)
+
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            populations = calc_populations(data)  # (N, 2, 3), including Other
+            init_g.update(lengths, populations[:, 0].T)
+            init_e.update(lengths, populations[:, 1].T)
+
+        buffer = SignalBuffer(
+            (len(lengths), 2, 2),
+            dtype=np.float64,
+            on_update=plot_fn,
         )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            run_cfg = sched.cfg
+            modules = run_cfg.modules
+
+            # 3. Sweep delay outside the I/pi branch, then read out each state.
+            if delay_table is None:
+                inner_length_sweep = run_cfg.sweep.length
+                assert isinstance(inner_length_sweep, SweepCfg), (
+                    "uniform mode requires SweepCfg"
+                )
+                length_param = sweep2param("length", inner_length_sweep)
+                builder = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Delay("t1_delay", delay=length_param),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", inner_length_sweep)
+                    .declare_sweep("ge", 2)
+                )
+            else:
+                length_cycles = delay_table.cycles
+                builder = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        LoadValue(
+                            "load_t1_delay",
+                            values=list(length_cycles),
+                            idx_reg="length_idx",
+                            val_reg="t1_delay_cycle",
+                            auto_compress=False,
+                        ),
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        DelayAuto("t1_delay", t="t1_delay_cycle"),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length_idx", len(length_cycles))
+                    .declare_sweep("ge", 2)
+                )
+
+            # 4. Classify shots and average rounds, preserving cancelled partial data.
+            _ = builder.build_and_acquire(
+                raw2signal_fn=raw_population_signal,
+                g_center=cfg.g_center,
+                e_center=cfg.e_center,
+                ge_radius=cfg.radius,
+            )
+
+        return T1Result(lengths=lengths, signals=buffer.array)
 
     def analyze(
         self,
@@ -295,6 +254,14 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot relaxation fits and T1/T1_b from both preparation populations.
+
+        source supplies delay times in us and G/E populations. Skip the first
+        options.skip points, optionally correct readout with the supplied
+        confusion matrix, and fit the two traces together. Publish the fit in
+        plots; fitting errors propagate.
+        """
+        # 1. Select delays and reconstruct Other before readout correction.
         result = source.result
         skip, confusion_matrix = options.skip, options.confusion_matrix
 
@@ -310,6 +277,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
 
+        # 2. Fit shared transition rates from the two initial-state traces.
         fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
         lambdas, _ = calc_lambdas(fit_result.rates)
@@ -319,6 +287,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         t1 = 1.0 / lambdas[2]
         t1_b = 1.0 / lambdas[1]
 
+        # 3. Show both preparations with the fitted populations and time scales.
         fig, _ = plots.subplots("fit", nrows=1, ncols=2, figsize=(12, 6), sharey=True)
         ax1, ax2 = fig.axes
 

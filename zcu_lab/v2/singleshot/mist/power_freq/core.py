@@ -108,6 +108,19 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
         *,
         context: RunContext,
     ) -> FreqPowerResult:
+        """Map MIST populations versus probe gain and frequency.
+
+        At each host-side probe gain, apply optional reset and init, play the
+        frequency-swept probe, then read out. Return rounded gains (a.u.),
+        frequencies (MHz), and classified G/E fractions shaped (Ngain, Nfreq, 2),
+        averaged over shots and rounds.
+
+        cfg supplies distinct finite IQ centers and a positive finite radius.
+        Other is 1-G-E, not calibrated leakage. Gain remains a drive amplitude,
+        not a photon number; optional confusion correction is analysis-only.
+        """
+
+        # Prepare host gain points and the board frequency grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -127,6 +140,7 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
+        # Display all classification regions while storing only G/E fractions.
         figure, _ = context.plots.subplots(
             "measurement", nrows=3, ncols=1, figsize=(12, 6)
         )
@@ -161,6 +175,8 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
             for gain, step in sched.scan("gain", gains.tolist()):
                 modules = step.cfg.modules
                 modules.probe_pulse.set_param("gain", gain)
+
+                # Fix gain for this row and sweep probe frequency after preparation.
                 _ = (
                     step.prog_builder(soc, soccfg)
                     .add_reset("reset", modules.reset)
@@ -169,12 +185,15 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
                     .add_readout("readout", modules.readout)
                     .declare_sweep("freq", step.cfg.sweep.freq)
                     .build_and_acquire(
+                        # Classify individual shots before averaging populations.
                         raw2signal_fn=raw_population_signal,
                         g_center=cfg.g_center,
                         e_center=cfg.e_center,
                         ge_radius=cfg.radius,
                     )
                 )
+
+        # Preserve gain/frequency/G-E axis order; Other is derived on demand.
         signals = buffer.array
 
         return FreqPowerResult(gains=gains, freqs=freqs, signals=signals)

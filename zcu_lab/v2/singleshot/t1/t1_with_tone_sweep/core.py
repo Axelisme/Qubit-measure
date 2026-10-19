@@ -277,34 +277,46 @@ class T1WithToneSweepExp(
         )
         return (*heatmaps, current_g, current_e)
 
-    def _run_uniform(
-        self,
-        cfg: T1WithToneSweepCfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
-        *,
-        context: RunContext,
+    def run(
+        self, cfg: T1WithToneSweepCfg, *, context: RunContext
     ) -> T1WithToneSweepResult:
+        """Measure tone-driven relaxation versus probe gain or frequency.
+
+        For each outer sweep value, prepare without/with a pi pulse, apply
+        the probe for each table-driven length, then read out. Return classified
+        g/e fractions with axes (outer value, initial g/e, length, measured g/e).
+        Lengths are in us; missing acquisitions remain NaN.
+
+        Uniform sampling requires a SweepCfg. Non-uniform sampling accepts
+        a SweepCfg or explicit lengths; invalid or non-positive lengths fail
+        before acquisition. Classification uses cfg.g_center/e_center/radius.
+        """
+        # 1. Resolve the outer scan and quantize positive probe durations.
+        cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
-
-        length_sweep = cfg.sweep.length
-        assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
-
-        sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
-
-        lengths = sweep2array(
-            length_sweep,
-            "time",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
-        )
+        if cfg.uniform:
+            length_sweep = cfg.sweep.length
+            assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
+            sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
+            lengths = sweep2array(
+                length_sweep,
+                "time",
+                {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            )
+        else:
+            sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
+            lengths = materialize_nonuniform_t1_pulse_lengths(
+                cfg.sweep.length,
+                soccfg=soccfg,
+                gen_ch=modules.probe_pulse.ch,
+            )
         _require_positive_lengths(lengths)
 
+        # 2. Display populations for both preparations and the current scan row.
         gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
             context.plots, sweep_name
         )
-
         current_index = 0
 
         def plot_fn(data: NDArray[np.float64]) -> None:
@@ -325,17 +337,22 @@ class T1WithToneSweepExp(
             dtype=np.float64,
             on_update=plot_fn,
         )
+
+        # 3. Scan gain/frequency on the host; GE and length loops run on-board.
         with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
             for value_idx, (value, step) in enumerate(
                 sched.scan(sweep_name, xs.tolist())
             ):
                 modules = step.cfg.modules
-                inner_length_sweep = step.cfg.sweep.length
-                assert isinstance(inner_length_sweep, SweepCfg), (
-                    "uniform mode requires SweepCfg"
-                )
+                if cfg.uniform:
+                    inner_length_sweep = step.cfg.sweep.length
+                    assert isinstance(inner_length_sweep, SweepCfg), (
+                        "uniform mode requires SweepCfg"
+                    )
                 modules.probe_pulse.set_param(sweep_name, value)
                 current_index = value_idx
+
+                # Read out at each actual probe end, without longest-point padding.
                 _ = (
                     step.prog_builder(soc, soccfg)
                     .add(
@@ -353,103 +370,14 @@ class T1WithToneSweepExp(
                     .declare_sweep("length", len(lengths))
                     .build_and_acquire(
                         raw2signal_fn=raw_population_signal,
-                        g_center=g_center,
-                        e_center=e_center,
-                        ge_radius=radius,
+                        g_center=cfg.g_center,
+                        e_center=cfg.e_center,
+                        ge_radius=cfg.radius,
                     )
                 )
-        populations = buffer.array
 
-        return T1WithToneSweepResult(xs=xs, lengths=lengths, signals=populations)
-
-    def _run_non_uniform(
-        self,
-        cfg: T1WithToneSweepCfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
-        *,
-        context: RunContext,
-    ) -> T1WithToneSweepResult:
-        soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
-
-        sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
-        lengths = materialize_nonuniform_t1_pulse_lengths(
-            cfg.sweep.length,
-            soccfg=soccfg,
-            gen_ch=modules.probe_pulse.ch,
-        )
-        _require_positive_lengths(lengths)
-
-        gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
-            context.plots, sweep_name
-        )
-
-        current_index = 0
-
-        def plot_fn(data: NDArray[np.float64]) -> None:
-            i = current_index
-            populations = calc_populations(data)
-
-            gg_2d.update(xs, lengths, populations[:, 0, :, 0])
-            ge_2d.update(xs, lengths, populations[:, 0, :, 1])
-            go_2d.update(xs, lengths, populations[:, 0, :, 2])
-            g_1d.update(lengths, populations[i, 0].T)
-            eg_2d.update(xs, lengths, populations[:, 1, :, 0])
-            ee_2d.update(xs, lengths, populations[:, 1, :, 1])
-            eo_2d.update(xs, lengths, populations[:, 1, :, 2])
-            e_1d.update(lengths, populations[i, 1].T)
-
-        buffer = SignalBuffer(
-            (len(xs), 2, len(lengths), 2),
-            dtype=np.float64,
-            on_update=plot_fn,
-        )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
-            for value_idx, (value, x_step) in enumerate(
-                sched.scan(sweep_name, xs.tolist())
-            ):
-                modules = x_step.cfg.modules
-                modules.probe_pulse.set_param(sweep_name, value)
-                current_index = value_idx
-                _ = (
-                    x_step.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                        TableLengthPulse(
-                            "probe_pulse",
-                            modules.probe_pulse,
-                            lengths=lengths,
-                            idx_reg="length",
-                        ),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .declare_sweep("length", len(lengths))
-                    .build_and_acquire(
-                        raw2signal_fn=raw_population_signal,
-                        g_center=g_center,
-                        e_center=e_center,
-                        ge_radius=radius,
-                    )
-                )
-        populations = buffer.array
-
-        return T1WithToneSweepResult(xs=xs, lengths=lengths, signals=populations)
-
-    def run(
-        self, cfg: T1WithToneSweepCfg, *, context: RunContext
-    ) -> T1WithToneSweepResult:
-        cfg = deepcopy(cfg)
-        if cfg.uniform:
-            return self._run_uniform(
-                cfg, cfg.g_center, cfg.e_center, cfg.radius, context=context
-            )
-        return self._run_non_uniform(
-            cfg, cfg.g_center, cfg.e_center, cfg.radius, context=context
-        )
+        # 4. Keep round-averaged fractions, including partial rows, in saved-axis order.
+        return T1WithToneSweepResult(xs=xs, lengths=lengths, signals=buffer.array)
 
     def analyze(
         self,
@@ -458,6 +386,15 @@ class T1WithToneSweepExp(
         *,
         plots: Plots,
     ) -> None:
+        """Plot three-state transition rates from both initial-state decays.
+
+        Use complete outer-sweep rows from source, apply the optional confusion
+        matrix, and fit rates in inverse us. options.ac_coeff converts the outer
+        axis to photon number as ac_coeff * xs**2; options.xlabel overrides its
+        label. Publish population maps and rate panels to plots; return no value.
+        Fitting failures propagate.
+        """
+        # 1. Keep complete rows and correct their measured state populations.
         result = source.result
         ac_coeff, confusion_matrix, xlabel = (
             options.ac_coeff,
@@ -475,6 +412,7 @@ class T1WithToneSweepExp(
 
         populations = correct_populations(populations, confusion_matrix)
 
+        # 2. Fit both preparations together, then choose the displayed outer axis.
         rates, rate_Covs = _fit_transition_rates(Ts, populations)
 
         if ac_coeff is not None:
@@ -485,6 +423,7 @@ class T1WithToneSweepExp(
         if not xlabel:
             xlabel = r"$\bar n$" if ac_coeff is not None else "probe gain (a.u.)"
 
+        # 3. Show the six population maps above the transition-rate panels.
         fig = Figure(figsize=(12, 8))
         plots.adopt("fit", fig)
         grid_spec = fig.add_gridspec(3, 3)

@@ -29,7 +29,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
-    Module,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -94,26 +93,6 @@ class ResetCheckAnalysis:
     analyzed_reset_points: int
 
 
-def _reset_check_sequence(
-    modules: ResetCheckModuleCfg, gain_sweep: SweepCfg
-) -> tuple[Module, ...]:
-    modules.rabi_pulse.set_param("gain", sweep2param("gain", gain_sweep))
-    return (
-        Reset("reset", modules.reset),
-        Pulse("rabi_pulse", modules.rabi_pulse),
-        Branch(
-            "reset_sel",
-            [],
-            Reset("tested_reset_1", modules.tested_reset),
-            [
-                Reset("tested_reset_2", modules.tested_reset),
-                Pulse("rabi_pulse_after_reset", modules.rabi_pulse),
-            ],
-        ),
-        Readout("readout", modules.readout),
-    )
-
-
 def _population_line_kwargs() -> list[dict[str, str]]:
     return [
         {"label": f"{label}: {state}", "color": color, "linestyle": style}
@@ -149,6 +128,16 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
         *,
         context: RunContext,
     ) -> ResetCheckResult:
+        """Compare classified populations before and after the tested reset.
+
+        Each independent branch starts with optional reset and a gain-swept
+        Rabi pulse, then applies no tested reset, tested reset alone, or tested
+        reset followed by the same Rabi pulse, before readout. Return quantized
+        gains and mean G/E fractions in (gain, branch, population) order.
+        These populations are not paired trajectories or reset-channel fidelity.
+        Invalid classification centers or radius raise ValueError.
+        """
+        # 1. Validate classification and prepare hardware-quantized gain points.
         soc, soccfg = context.soc, context.soccfg
         g_center, e_center, radius = cfg.g_center, cfg.e_center, cfg.radius
         classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, radius)
@@ -159,6 +148,7 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.modules.rabi_pulse.ch},
         )
 
+        # 2. Show G/E/Other for all three independent preparations.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(-0.02, 1.02)
             for line, kwargs in zip(ax.lines, _population_line_kwargs(), strict=True):
@@ -180,17 +170,37 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
             ),
         )
         with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
-            (
+            # 3. Sweep gain outside the three-way hardware branch loop.
+            modules = sched.cfg.modules
+            modules.rabi_pulse.set_param(
+                "gain", sweep2param("gain", sched.cfg.sweep.gain)
+            )
+            builder = (
                 sched.prog_builder(soc, soccfg)
-                .add(*_reset_check_sequence(sched.cfg.modules, sched.cfg.sweep.gain))
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("rabi_pulse", modules.rabi_pulse),
+                    Branch(
+                        "reset_sel",
+                        [],  # Before tested reset.
+                        Reset("tested_reset_1", modules.tested_reset),
+                        [
+                            Reset("tested_reset_2", modules.tested_reset),
+                            Pulse("rabi_pulse_after_reset", modules.rabi_pulse),
+                        ],
+                    ),
+                    Readout("readout", modules.readout),
+                )
                 .declare_sweep("gain", sched.cfg.sweep.gain)
                 .declare_sweep("reset_sel", 3)
-                .build_and_acquire(
-                    raw2signal_fn=raw_population_signal,
-                    g_center=g_center,
-                    e_center=e_center,
-                    ge_radius=radius,
-                )
+            )
+
+            # 4. Average classified fractions over reps/rounds, preserving partial data.
+            builder.build_and_acquire(
+                raw2signal_fn=raw_population_signal,
+                g_center=g_center,
+                e_center=e_center,
+                ge_radius=radius,
             )
             sched.trigger_update(flush=True)
         return ResetCheckResult(
@@ -206,6 +216,14 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
         *,
         plots: Plots,
     ) -> ResetCheckAnalysis:
+        """Summarize reset-only excited and Other populations across sampled gains.
+
+        Apply options.confusion_matrix when supplied, otherwise use classified
+        fractions from source.result. Return corrected G/E/Other fractions and
+        reset-only mean/worst sampled populations, and plot all three branches.
+        Invalid axes or no finite reset-only samples raise ValueError.
+        """
+        # 1. Check population axes before optional readout-confusion correction.
         result = source.result
         confusion_matrix = options.confusion_matrix
         if (
@@ -217,6 +235,8 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
         populations = correct_populations(
             calc_populations(result.signals), confusion_matrix
         )
+
+        # 2. Summarize finite reset-only samples, not reset-channel fidelity.
         reset_e = populations[:, 1, 1]
         valid = np.isfinite(result.gains) & np.isfinite(populations[:, 1]).all(axis=-1)
         if not valid.any():
@@ -230,6 +250,8 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
             float(result.gains[worst]),
             int(valid.sum()),
         )
+
+        # 3. Compare the independent preparations on the same gain axis.
         _, ax = plots.subplots("populations", figsize=(10, 6))
         order = np.argsort(result.gains)
         for values, kwargs in zip(
