@@ -4,6 +4,7 @@ from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
 from .lookback import DEFINITION as LOOKBACK
+from .mist_flux_dep import DEFINITION as MIST_FLUX_DEP
 from .mux_amp_rabi import DEFINITION as MUX_AMP_RABI
 from .mux_freq import DEFINITION as MUX_FREQ
 from .mux_len_rabi import DEFINITION as MUX_LEN_RABI
@@ -33,6 +34,7 @@ RECIPES: tuple[RecipeDefinition, ...] = (
     AMPLITUDE_RABI,
     TIME_RABI,
     TWOTONE_SPECTRUM,
+    MIST_FLUX_DEP,
     MUX_FREQ,
     MUX_AMP_RABI,
     MUX_LEN_RABI,
