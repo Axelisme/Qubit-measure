@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.datafile import DataVariable, JsonObject, RunMetadata, load_run_data
 from zcu_tools.experiment import (
     AxesSpec,
@@ -20,6 +21,7 @@ from zcu_tools.experiment import (
 from migrations.storage_migration import (
     MigrationInputError,
     MigrationMapping,
+    MigrationReport,
     MigrationRequest,
     load_run_evidence,
     migrate_storage,
@@ -31,6 +33,53 @@ from tests.migrations.storage_migration.fakes import (
 )
 
 pytestmark = pytest.mark.usefixtures("registry_guard")
+
+
+@pytest.fixture
+def allocated_run(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[MigrationRequest, MigrationReport]:
+    """Interrupt filesystem lookup of native output after identity allocation.
+
+    The public report identifies the allocated output. No manifest is fabricated
+    or modified, and native publication has not yet started.
+    """
+    request, source = write_run(
+        replace(
+            request_data,
+            part="data",
+            report_path=request_data.results_root.parent / "history-report.json",
+        )
+    )
+    request = history_request(request, {"started_at": None, "run_id": None})
+    native_root = request.database_root / request.name / "runs"
+    exists = Path.exists
+
+    def interrupt_native_lookup(path: Path) -> bool:
+        if path.name == "data.h5" and path.is_relative_to(native_root):
+            raise OSError("native lookup interrupted")
+        return exists(path)
+
+    with monkeypatch.context() as fault:
+        fault.setattr(Path, "exists", interrupt_native_lookup)
+        with pytest.raises(OSError, match="native lookup interrupted"):
+            migrate_storage(
+                request,
+                mapping=mapping,
+                validate_cfg=validate_cfg,
+                validate_native=lambda path, tag, cfg_type: (
+                    read_history(path, tag, cfg_type) and None
+                ),
+            )
+    assert source.is_file()
+    assert not tuple(native_root.rglob("data.h5"))
+    assert request.report_path is not None
+    report = TypeAdapter(MigrationReport).validate_json(
+        request.report_path.read_bytes()
+    )
+    return request, report
 
 
 class SyntheticCfg(ExpCfgModel):
@@ -252,3 +301,82 @@ def test_unknown_history_does_not_relax_other_required_evidence(
     assert any(item.source == source for item in report.pending)
     assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
     assert not tuple((request.database_root / request.name).rglob("data.h5"))
+
+
+@pytest.mark.parametrize("claim", ["different_id", "assigned_id_as_history"])
+def test_allocated_identity_rejects_changed_evidence_before_any_resume_writes(
+    allocated_run: tuple[MigrationRequest, MigrationReport],
+    mapping: MigrationMapping,
+    claim: str,
+) -> None:
+    request, allocated = allocated_run
+    identity = next(item for item in allocated.key_mappings if item.old_key == "run_id")
+    assert identity.new_file is not None
+    assigned_id = identity.new_file.parent.name
+    claimed_id = "20251001T000000Z-abc123" if claim == "different_id" else assigned_id
+    request = history_request(request, {"run_id": claimed_id})
+    # Observe all owned artifacts, including byte-identical replacements, without
+    # relying on manifest internals or an implementation's checkpoint count.
+    before = {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for root in (
+            allocated.destination.result_path,
+            allocated.destination.database_path,
+        )
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+    assert request.report_path is not None
+    report_before = (
+        request.report_path.read_bytes(),
+        request.report_path.stat().st_mtime_ns,
+    )
+    with pytest.raises(MigrationInputError, match="planned source cannot change"):
+        migrate_storage(
+            replace(request, resume=True),
+            mapping=mapping,
+            validate_cfg=validate_cfg,
+            validate_native=lambda path, tag, cfg_type: (
+                read_history(path, tag, cfg_type) and None
+            ),
+        )
+    after = {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for root in (
+            allocated.destination.result_path,
+            allocated.destination.database_path,
+        )
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    assert (
+        request.report_path.read_bytes(),
+        request.report_path.stat().st_mtime_ns,
+    ) == report_before
+
+
+def test_allocated_identity_resume_keeps_original_id_and_assignment_origin(
+    allocated_run: tuple[MigrationRequest, MigrationReport], mapping: MigrationMapping
+) -> None:
+    request, allocated = allocated_run
+    identity = next(item for item in allocated.key_mappings if item.old_key == "run_id")
+    assert "遷移賦值" in identity.reason
+    assert identity.new_file is not None
+    report = migrate_storage(
+        replace(request, resume=True),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=lambda path, tag, cfg_type: (
+            read_history(path, tag, cfg_type) and None
+        ),
+    )
+    assert report.converted_files[0].destination == identity.new_file
+    metadata = load_run_data(identity.new_file).metadata
+    assert metadata.run_id == identity.new_file.parent.name
+    assert metadata.started_at is None
+    assert (
+        next(item for item in report.key_mappings if item.old_key == "run_id")
+        == identity
+    )
+    assert len(report.moved_labber_files) == 1
