@@ -146,6 +146,14 @@ class ResultEntry:
         return self._result_path
 
     @property
+    def predictors_path(self) -> Path:
+        """Return this entry\'s Result predictors directory without creating it.
+
+        The read-only binding does not list, load or validate predictor files.
+        """
+        return self._result_path / "predictors"
+
+    @property
     def database_path(self) -> Path:
         """Return this entry's exact Database directory, not the parent root."""
         return self._database_path

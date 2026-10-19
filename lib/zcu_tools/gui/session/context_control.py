@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
     from zcu_tools.format_version import YamlMap, YamlValue
     from zcu_tools.gui.session.aliases import AliasRow
@@ -183,6 +185,10 @@ class ContextControlPort(Protocol):
         """
         ...
 
+    def get_predictors_path(self) -> Path | None:
+        """Return the opened entry predictor directory, or None; no I/O or creation."""
+        ...
+
     def get_entry_info(self) -> EntryInfo | None:
         """Read cached entry identity/paths, or None without an entry."""
         ...
@@ -347,6 +353,10 @@ class ContextControlFacet(ContextControlPort):
     ) -> None:
         """Apply the structure command using ContextControlPort's target policy."""
         self._context.apply_library_change(parameters, change)
+
+    def get_predictors_path(self) -> Path | None:
+        """Return the opened entry predictor directory, or None; no I/O or creation."""
+        return self._context.get_predictors_path()
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()

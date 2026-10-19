@@ -62,13 +62,10 @@ from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
-from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.entry import component_registry
-from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
 from zcu_tools.resources.waveform_assets import FormulaRecipe
-from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
@@ -533,43 +530,6 @@ def test_setup_text_return_preserves_entry_input_and_cancel(control_ui, qapp, de
         assert "new-entry" not in entries
         assert ui.controller.setup_control.get_entry_info() == before
     button(setup, "Close").click()
-
-
-@pytest.mark.parametrize("decision", ["local", "cancel"])
-def test_predictor_file_return_preserves_path_and_cancel(
-    control_ui, qapp, tmp_path, decision
-):
-    ui = control_ui
-    path = tmp_path / "params.json"
-    QubitParams(str(path)).set_fluxdep_fit(FluxDepFit(5.0, 1.0, 0.5, 0.0, 1.0, 1.0))
-    ui.window.open_dialog(DialogName.PREDICTOR)
-    predictor = ui.window.findChild(PredictorDialog)
-    assert predictor is not None
-    before = predictor.parameters()
-    before_path = predictor.capture_state().params_path_text
-
-    def choose(dialog: QFileDialog) -> None:
-        dialog.selectFile(str(path))
-        if decision == "cancel":
-            dialog.reject()
-        else:
-            QMetaObject.invokeMethod(
-                dialog, "accept", Qt.ConnectionType.DirectConnection
-            )
-
-    modal_action(
-        qapp, lambda: button(predictor, "Browse").click(), [(QFileDialog, choose)]
-    )
-    after = predictor.parameters()
-    if decision == "local":
-        assert isinstance(after, FluxoniumParams) and after.EJ == 5.0
-        assert any(
-            edit.text() == str(path) for edit in predictor.findChildren(QLineEdit)
-        )
-    else:
-        assert after == before
-        assert predictor.capture_state().params_path_text == before_path
-    button(predictor, "Close").click()
 
 
 @pytest.mark.parametrize("operation", ["rename", "delete", "overwrite"])

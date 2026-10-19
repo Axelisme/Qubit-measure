@@ -1,10 +1,11 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-20，entry dispersive 與 T1 curve 格式檔
+**Last updated:** 2026-10-20，entry dispersive、T1 curve 與 predictor JSON 格式 owner
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
+- `predictor_file.py` 擁有 `zcu.predictor` v1 JSON 的具名讀寫。它依模型名稱使用 simulate 的 nullable 參數型別，驗證欄名、有限數值與來源 metadata。完整性與物理約束由 `params.build_predictor()` 驗證。它不讀 component、alias 或舊 `params.json`。
 - `simulation_replay.py` owns opt-in private FTF input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit

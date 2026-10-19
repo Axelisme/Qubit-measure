@@ -50,7 +50,7 @@
 使用者於 2026-10-19 裁定：「不要把依賴放在scripts, 後者的每個檔案都該被理解為獨立腳本入口，需要用到的內容可以放lib裡」。
 
 - `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
-- tests 不依賴 `zcu_lab`，不 import、不使用其 fake 實驗、不綁定實驗流程或預設值。
+- tests 不依賴 `zcu_lab`，不 import、不綁定實驗流程或預設值。
 
 框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。實驗定義錯誤由 GUI 啟動或載入時回報，不另維護個別實驗測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
 
@@ -191,12 +191,11 @@ ResultScopeManager、project CLI 與 RPC 投影，保留既有 chip／qubit 資�
 | 債務 | 移除方式 | 記帳位置 |
 |---|---|---|
 | `program → resources` | `program` 改依賴 `cfg_model` 的 Protocol | C10 `ignore_imports`：`program.v2.modules*` → `resources.context` |
-| `simulate → resources` | `predict` 改由呼叫端傳入數值 | C10、C12 `ignore_imports`：`simulate.fluxonium.predict` → `resources.qubit_params` |
 | `notebook/analysis` | 通用分析移到 `analysis`；實驗專屬 helpers 已由 `zcu_lab` 附件擁有 | 尚未搬移 |
 | `utils` 的 `shot_classification`、`tomography` | 移到 `analysis` | 尚未搬移 |
 | `analysis/fluxdep/io.py` 直接用 h5py | 檔案讀寫移到 `datafile` | 尚未搬移 |
 
-已清除的債務不再列出：`resources → program`、`experiment/base.py` 的 Labber 格式處理（已改用 `datafile`）、`utils/datasaver/`、`mcp → gui.logging_setup`。
+已清除的債務不再列出：`simulate → resources`、`resources → program`、`experiment/base.py` 的 Labber 格式處理（已改用 `datafile`）、`utils/datasaver/`、`mcp → gui.logging_setup`。
 
 ## 後果
 

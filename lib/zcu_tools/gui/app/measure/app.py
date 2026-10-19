@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.session.services.predictor import ParamsFor
 
 RegistryFactory = Callable[[], tuple["Registry", "ExperimentCatalogLoader"]]
 
@@ -41,7 +40,7 @@ def _make_empty_ctx() -> SessionEnv:
 
 
 class MeasureGuiBehavior(GuiRuntimeBehavior):
-    """measure-gui wiring; params_for optionally injects user-owned component prefill.
+    """measure-gui wiring for user catalogs and shared session services.
 
     registry_factory supplies catalogs after runtime setup. clean skips preference
     restore; project_root anchors entry roots. Predictor queries never depend on
@@ -60,7 +59,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         *,
         clean: bool = False,
         project_root: str | None = None,
-        params_for: ParamsFor | None = None,
         alias_presets: AliasPresets | None = None,
         simulate: str | Path | None = None,
     ) -> None:
@@ -91,7 +89,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         self._registry, self._catalog_loader = registry_factory()
         self._clean = clean
         self._project_root = project_root
-        self._params_for = params_for
         self.alias_presets: AliasPresets | None = alias_presets
         self._simulate = simulate
         self._environment: SimulationEnvironment | None = None
@@ -210,7 +207,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             bus=bus,
             project_root=project_root,
             catalog_loader=self._catalog_loader,
-            params_for=self._params_for,
             alias_presets=self.alias_presets,
             device_registry=None
             if self._environment is None
