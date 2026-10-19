@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -195,19 +196,34 @@ def test_retired_view_stops_authority_projection(
 @pytest.mark.slow
 def test_application_quit_stops_authority_projection(tmp_path: Path) -> None:
     """Exercise real Qt process exit without mutating the suite's QApplication."""
-    completed = subprocess.run(
+    with subprocess.Popen(
         [
             sys.executable,
             "-m",
             "tests.gui.app.measure.ui._quit_authority",
             str(tmp_path),
         ],
-        capture_output=True,
+        env={
+            **os.environ,
+            "QT_QPA_PLATFORM": "offscreen",
+            "QT_QPA_PLATFORMTHEME": "generic",
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    assert "application quit retired authority projection" in completed.stdout
+    ) as child:
+        try:
+            stdout, stderr = child.communicate(timeout=30)
+            assert child.returncode == 0, stderr
+            assert "application quit retired authority projection" in stdout
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=5)
 
 
 def test_interactive_widget_lifecycle_is_owned_by_tab(

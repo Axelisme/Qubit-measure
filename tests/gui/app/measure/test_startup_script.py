@@ -20,6 +20,7 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
+    PointUseRequest,
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -200,6 +201,39 @@ def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
     probe.release.set()
     behavior.close(assembly)
     assert probe.calls == ["worker finished", "callback", "hardware"]
+
+
+def test_startup_creates_entry_seed_aliases_and_first_point(startup_app, tmp_path):
+    _behavior, _assembly, ctrl, _window, _probe = startup_app
+    before = registry_state()
+    try:
+        component_registry.register("startup/qubit", QubitSchema)
+        path = write_script(
+            tmp_path,
+            "    from zcu_tools.gui.session.aliases import AliasRow\n"
+            "    ctx.setup.new_entry('created')\n"
+            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, setup=True)\n"
+            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n"
+            "    ctx.setup.new_point('initial')\n",
+        )
+        token = ctrl.start_startup(path)
+        qt_until(
+            lambda: (
+                ctrl.operation_control.await_operation(token, 0).reason == "completed"
+            ),
+            label="entry creation startup",
+        )
+        outcome = ctrl.operation_control.await_operation(token, 0).outcome
+        assert outcome is not None and outcome.status == "finished"
+        assert ctrl.context_control.current_point_label() == "initial"
+        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+        ctrl.setup_control.open_entry(EntryRequest("synthetic"))
+        ctrl.setup_control.open_entry(EntryRequest("created"))
+        ctrl.setup_control.use_point(PointUseRequest("initial"))
+        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+    finally:
+        restore_registry(before)
+        assert registry_state() == before
 
 
 def test_component_and_alias_facets_commit_through_context_owner(startup_app, tmp_path):
