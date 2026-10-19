@@ -374,17 +374,9 @@ def _candidate(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _destination(native: dict[str, Any] | None) -> dict[str, Any]:
-    if native is None:
+    if native is None or "active_label" not in native:
         return {}
-    destination = {}
-    for section, keys in (
-        ("context", ("active_label",)),
-        ("project", ("chip_name", "qub_name", "res_name")),
-    ):
-        facts = {key: native[key] for key in keys if key in native}
-        if facts:
-            destination[section] = facts
-    return destination
+    return {"context": {"active_label": native["active_label"]}}
 
 
 def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
