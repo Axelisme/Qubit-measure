@@ -213,3 +213,96 @@ def test_engine_carrier_results_are_stable_across_warm_cache_and_worker_width(
     assert first.paths.segments_by_kernel == {"floquet_period": count}
     assert warm.paths.segments_by_kernel == cold.paths.segments_by_kernel
     np.testing.assert_array_equal(warm.densities, cold.densities)
+
+
+def spectral_source(source, geometry):
+    model = source.model((0,))
+    if geometry == "degenerate":
+        drive = replace(
+            model.drives[0],
+            in_phase_ghz=np.diag([0.0, 0.0, 0.02]).astype(complex),
+            quadrature_ghz=np.zeros((3, 3), dtype=complex),
+        )
+        model = replace(model, energies_ghz=np.array([0.0, 0.0, 1.8]), drives=(drive,))
+    elif geometry == "grid-boundary":
+        drive = model.drives[0]
+        # The narrow carrier inventory straddles the 56/64 coarse-grid boundary.
+        span = 56 * 0.0502 / 1.5 - 2 * 0.003 * (
+            np.linalg.norm(drive.in_phase_ghz) + np.linalg.norm(drive.quadrature_ghz)
+        )
+        model = replace(model, energies_ghz=np.array([0.0, 0.9, span]))
+    return ModelSource(source.initial_density, lambda level: model)
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+@pytest.mark.parametrize("geometry", ["ordinary", "degenerate", "grid-boundary"])
+def test_carrier_coarse_guard_preserves_density_bitwise(source, sign, geometry):
+    from hashlib import sha256
+
+    source = spectral_source(source, geometry)
+    table = scan(sign * np.linspace(0.05, 0.0504, 16))
+    context = KernelContext(source, 1e-3, create_work_plan(table, source))
+    actual = playback(table, context)
+    # Characterize the original Padé guard's accepted predictions and fallbacks.
+    # Coherent inputs and phase-translated fractional tails make this sensitive
+    # to a changed interpolation admission, not just to population conservation.
+    expected = {
+        (
+            "ordinary",
+            1.0,
+        ): "b75ac730091debd31b638ccba89278218f634b30995d0cd7cefc04b34d542227",
+        (
+            "ordinary",
+            -1.0,
+        ): "d7abb23390d49e8b8619f804d5396d1e2e628019d47924f860b37ba13a325725",
+        (
+            "degenerate",
+            1.0,
+        ): "5956ff7500cfa1a274da68a865d4bd5fc4c8667d565f90e46c74a57bafc4ba9a",
+        (
+            "degenerate",
+            -1.0,
+        ): "a9f639a2678e59567e6edf1d61815f0674533580120bbae7fef99c181cad21c0",
+        (
+            "grid-boundary",
+            1.0,
+        ): "ef62fe92cddf4b4002d1a3930e4cf49083c036c405c7174323ec1650c55088e6",
+        (
+            "grid-boundary",
+            -1.0,
+        ): "90057d7cfaf52298d4c8e2a2e696f160a2922dad9e99a426a902ddbbdec2e501",
+    }
+    assert sha256(actual.tobytes()).hexdigest() == expected[geometry, sign]
+    np.testing.assert_allclose(np.trace(actual, axis1=1, axis2=2), 1, atol=1e-12)
+    context.work_plan.close()
+
+
+def test_carrier_coarse_nodes_are_built_once_for_concurrent_consumers(
+    source, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    table = scan(np.linspace(0.05, 0.0504, 16))
+    context = KernelContext(source, 1e-3, create_work_plan(table, source))
+    batches = []
+    eigh = np.linalg.eigh
+
+    def observe(nodes, *args, **kwargs):
+        if nodes.ndim == 4:
+            batches.append(nodes.shape)
+        return eigh(nodes, *args, **kwargs)
+
+    def consume(rows):
+        return playback(table, context, order=[rows])[rows]
+
+    with monkeypatch.context() as patch:
+        patch.setattr(np.linalg, "eigh", observe)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(consume, [np.arange(8), np.arange(8, 16)]))
+    assert len(batches) == 1, "one single-flight node eigensystem per phase grid"
+    assert batches[0][1:] == (2, 3, 3)
+    reference = playback(
+        table, KernelContext(source, 1e-3, create_work_plan(table, source))
+    )
+    np.testing.assert_array_equal(np.concatenate(results), reference)
+    context.work_plan.close()
