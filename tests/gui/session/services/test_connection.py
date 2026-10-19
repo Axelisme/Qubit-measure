@@ -254,6 +254,59 @@ def test_gui_async_remote_connect_updates_the_successful_endpoint(qapp, monkeypa
     assert svc.connected_endpoint() == {"address": "192.0.2.3", "port": 8000}
 
 
+def test_runtime_soc_replacement_and_uninstall_forward_board_identity(monkeypatch):
+    """Board identity belongs to the installed SoC, not its acquisition path."""
+    import zcu_tools.qick_remote as remote
+
+    class Board:
+        def __init__(self, is_mock: bool) -> None:
+            self.is_mock = is_mock
+
+        def get_cfg(self) -> dict[str, object]:
+            return {}
+
+    state = _make_state()
+    bus = EventBus()
+    svc, _background, _handles = _make_svc(state=state, bus=bus)
+    facts: list[SocChangedPayload] = []
+    bus.subscribe(SocChangedPayload, facts.append)
+    remote_board = Board(is_mock=True)
+    config = MagicMock()
+    monkeypatch.setattr(remote, "make_soc_proxy", lambda *_: (remote_board, config))
+
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    assert svc.is_mock_soc() is True
+    assert facts[-1].is_mock is True
+
+    context_version = state.version.get("context")
+    soc_version = state.version.get("soc")
+    local_board = Board(is_mock=False)
+    svc.install_soc(local_board, config)
+    assert state.session_env.soc is local_board
+    assert svc.get_soccfg() is config
+    assert svc.is_mock_soc() is False
+    assert svc.connected_endpoint() == {"address": None, "port": None}
+    assert state.version.get("soc") == soc_version + 1
+    assert state.version.get("context") == context_version
+    assert facts[-1].soc is local_board
+    assert facts[-1].is_mock is False
+
+    svc.uninstall_soc()
+    assert svc.has_soc() is False
+    assert svc.get_soccfg() is None
+    assert svc.is_mock_soc() is False
+    assert state.version.get("soc") == soc_version + 2
+    assert state.version.get("context") == context_version
+    assert facts[-1].soc is None
+    assert facts[-1].soccfg is None
+    assert facts[-1].is_mock is False
+
+    # Uninstalling does not permanently lock the connection owner.
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
+    assert svc.has_soc() is True
+    assert svc.is_mock_soc() is True
+
+
 def test_connect_sync_rejects_concurrent_calls(qapp):
     """connect_sync holds the same SOC_CONNECT lease as the async path, so a
     concurrent connect (or the GUI button) fast-fails."""
