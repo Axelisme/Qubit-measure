@@ -1,5 +1,7 @@
 """Environment-owned snapshot/execution collaborators and per-call admission."""
 
+import math
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Lock
@@ -85,6 +87,7 @@ class SimulationBinding:
         backend_version: str,
         seed: int | None = None,
         wait_ready: Callable[[], object] | None = None,
+        min_round_duration_s: float = 0.0,
     ) -> None:
         """Bind synchronous environment callbacks and choose the root seed once.
 
@@ -99,7 +102,12 @@ class SimulationBinding:
         before consuming sequence or constructing requests. Its result is ignored;
         errors release admission and propagate. It must not reenter acquisition.
 
-        Raises ValueError for a boolean, non-int or negative seed, and TypeError
+        min_round_duration_s is finite, nonnegative wall time in seconds. Each
+        successful sample_round includes snapshot/execution time and waits only
+        for the remainder. Zero (default) disables pacing and clock reads.
+        Failures propagate without waiting. Waiting is synchronous, not cancellable.
+
+        Raises ValueError for an invalid duration or boolean/non-int/negative seed, and TypeError
         if NumPy returns non-integer entropy. Callback execution is deferred to
         sample_round; this constructor does not validate their returned records.
         """
@@ -107,6 +115,9 @@ class SimulationBinding:
             isinstance(seed, bool) or type(seed) is not int or seed < 0
         ):
             raise ValueError("seed must be a nonnegative integer or None")
+        if not math.isfinite(min_round_duration_s) or min_round_duration_s < 0:
+            raise ValueError("min_round_duration_s must be finite and nonnegative")
+        self._min_round_duration_s = min_round_duration_s
         self.envelope_pool = EnvelopePool()
         self._wait_ready = wait_ready
         self.capture_snapshot = capture_snapshot
@@ -172,13 +183,21 @@ class SimulationBinding:
         Callback exceptions propagate. Snapshot failure appends nothing; execute
         failure leaves the captured input in rounds. A mode/result mismatch
         raises ValueError. It does not normalize, average, round signals or
-        update last_request.
+        update last_request. Successful calls wait until min_round_duration_s
+        has elapsed since entry, including snapshot and execute. Slow rounds do
+        not wait; zero disables pacing. Failures never add a delay.
         """
+        started = time.monotonic() if self._min_round_duration_s > 0 else 0.0
         round_request = RoundRequest(request, self.capture_snapshot(), index)
         self.rounds += (round_request,)
         result = self.execute(round_request)
-        if request.mode == "integrated" and isinstance(result, RoundStatistics):
-            return result
-        if request.mode == "decimated" and isinstance(result, RoundSignals):
-            return result
-        raise ValueError(f"backend result does not match {request.mode} mode")
+        if not (
+            (request.mode == "integrated" and isinstance(result, RoundStatistics))
+            or (request.mode == "decimated" and isinstance(result, RoundSignals))
+        ):
+            raise ValueError(f"backend result does not match {request.mode} mode")
+        if self._min_round_duration_s > 0:
+            remaining = self._min_round_duration_s - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(remaining)
+        return result
