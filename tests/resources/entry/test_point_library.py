@@ -21,6 +21,25 @@ def library_assets() -> InMemoryWaveformAsset:
     )
 
 
+def test_setup_library_is_initialized_independently_of_new_points(
+    entry: ResultEntry,
+) -> None:
+    assert (entry.result_path / "module_cfg.yaml").is_file()
+    library = entry.module_library()
+    with library.edit() as draft:
+        draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
+    reopened = ResultEntry.open(
+        entry.result_path.name,
+        result_root=entry.result_path.parent,
+        database_root=entry.database_path.parent,
+    )
+    assert reopened.module_library().snapshot().waveform_keys() == (
+        "Q1.waveforms.base",
+    )
+    entry.new_point("a")
+    assert entry.module_library("a").snapshot().waveform_keys() == ()
+
+
 def test_point_local_library_uses_entry_scope_without_reading_point_or_assets(
     entry: ResultEntry,
     library_assets: InMemoryWaveformAsset,

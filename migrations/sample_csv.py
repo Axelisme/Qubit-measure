@@ -129,6 +129,98 @@ def _convert_row(
     )
 
 
+@dataclass(frozen=True)
+class SampleCsvRow:
+    """One validated synthetic sample ready for JSONL append.
+
+    run_id is legacy-<source stem>-<1-based data row>, not a historical run ID.
+    dev_value is finite and expressed in dev_unit (A/V/native). fields holds
+    renamed measurements with original working units and optional coordinates.
+    """
+
+    run_id: str
+    dev_value: float
+    dev_unit: str
+    fields: dict[str, JsonValue]
+
+
+@dataclass(frozen=True)
+class SampleCsvPlan:
+    """Read-only conversion outcome shared by append and storage publication.
+
+    rows contains accepted rows in source order. pending contains every omitted
+    row with source and 1-based data row location. Planning writes nothing.
+    """
+
+    rows: tuple[SampleCsvRow, ...]
+    pending: tuple[PendingRow, ...]
+
+
+def plan_sample_csv(
+    sources: Sequence[str | Path],
+    *,
+    dev_value_column: str | None = None,
+    source_unit: LegacyDeviceValueUnit | None = None,
+) -> SampleCsvPlan:
+    """Read CSVs and validate conversions without acquiring a destination.
+
+    v2 CSV declares dev_value/dev_unit (A/V/native). Legacy input requires the
+    literal coordinate header and A/mA/V/mV source_unit; no unit inference.
+    Missing declarations, unknown columns, invalid coordinates/measurements and
+    width mismatches omit that row and produce located pending. Empty sources,
+    duplicate stems, invalid unit or malformed headers raise ValueError before
+    writing anything. CSV syntax and I/O errors propagate. Uses the same
+    sample-table validation and renaming contract as convert_sample_csv.
+    """
+    paths = [Path(source) for source in sources]
+    if not paths:
+        raise ValueError("at least one source CSV is required")
+    if source_unit is not None and source_unit not in ("A", "mA", "V", "mV"):
+        raise ValueError(f"unsupported source_unit {source_unit!r}")
+    stems: set[str] = set()
+    for path in paths:
+        if path.stem in stems:
+            raise ValueError(f"duplicate input stem {path.stem!r}")
+        stems.add(path.stem)
+    rows: list[SampleCsvRow] = []
+    pending: list[PendingRow] = []
+    for path in paths:
+        with path.open(encoding="utf-8", newline="") as stream:
+            reader = csv.reader(stream, strict=True)
+            header = next(reader, [])
+            if (
+                not header
+                or any(not name for name in header)
+                or len(set(header)) != len(header)
+            ):
+                raise ValueError(f"{path}: CSV headers must be nonempty and unique")
+            for number, values in enumerate(reader, start=1):
+                if len(values) != len(header):
+                    pending.append(
+                        PendingRow(path, number, "CSV row does not match header width")
+                    )
+                    continue
+                row: dict[str, str | None] = dict(zip(header, values, strict=True))
+                try:
+                    sample = _convert_row(
+                        row,
+                        dev_value_column=dev_value_column,
+                        source_unit=source_unit,
+                    )
+                except ValueError as exc:
+                    pending.append(PendingRow(path, number, str(exc)))
+                    continue
+                rows.append(
+                    SampleCsvRow(
+                        run_id=_synthetic_key(path, number),
+                        dev_value=sample.dev_value,
+                        dev_unit=sample.dev_unit,
+                        fields=sample.fields,
+                    )
+                )
+    return SampleCsvPlan(tuple(rows), tuple(pending))
+
+
 def convert_sample_csv(
     sources: Sequence[str | Path],
     *,
@@ -160,57 +252,22 @@ def convert_sample_csv(
     Repeating a conversion appends history with the same synthetic keys.
     """
     paths = [Path(source) for source in sources]
-    if not paths:
-        raise ValueError("at least one source CSV is required")
-    if source_unit is not None and source_unit not in ("A", "mA", "V", "mV"):
-        raise ValueError(f"unsupported source_unit {source_unit!r}")
-    stems: set[str] = set()
-    for path in paths:
-        if path.stem in stems:
-            raise ValueError(f"duplicate input stem {path.stem!r}")
-        stems.add(path.stem)
     table = entry.samples(component)
     output = table.path
     for path in paths:
         if output.exists() and path.exists() and path.samefile(output):
             raise ValueError(f"{path}: source aliases sample output {output}")
-    converted = 0
-    pending: list[PendingRow] = []
-    for path in paths:
-        with path.open(encoding="utf-8", newline="") as stream:
-            reader = csv.reader(stream, strict=True)
-            header = next(reader, [])
-            if (
-                not header
-                or any(not name for name in header)
-                or len(set(header)) != len(header)
-            ):
-                raise ValueError(f"{path}: CSV headers must be nonempty and unique")
-            for number, values in enumerate(reader, start=1):
-                if len(values) != len(header):
-                    pending.append(
-                        PendingRow(path, number, "CSV row does not match header width")
-                    )
-                    continue
-                row: dict[str, str | None] = dict(zip(header, values, strict=True))
-                try:
-                    sample = _convert_row(
-                        row,
-                        dev_value_column=dev_value_column,
-                        source_unit=source_unit,
-                    )
-                except ValueError as exc:
-                    # This boundary isolates invalid source rows for operator review.
-                    pending.append(PendingRow(path, number, str(exc)))
-                    continue
-                table.append(
-                    run_id=_synthetic_key(path, number),
-                    point=point,
-                    source="manual",
-                    at=None,
-                    dev_value=sample.dev_value,
-                    dev_unit=sample.dev_unit,
-                    **sample.fields,
-                )
-                converted += 1
-    return MigrationReport(converted, tuple(pending), output)
+    plan = plan_sample_csv(
+        paths, dev_value_column=dev_value_column, source_unit=source_unit
+    )
+    for sample in plan.rows:
+        table.append(
+            run_id=sample.run_id,
+            point=point,
+            source="manual",
+            at=None,
+            dev_value=sample.dev_value,
+            dev_unit=sample.dev_unit,
+            **sample.fields,
+        )
+    return MigrationReport(len(plan.rows), plan.pending, output)

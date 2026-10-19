@@ -17,6 +17,7 @@ from .errors import MigrationInputError
 from .models import (
     FailureItem,
     FileMigrationItem,
+    KeyMappingItem,
     MigrationFileState,
     MigrationManifest,
     MigrationReport,
@@ -199,7 +200,7 @@ class MigrationSession:
         return current
 
     def state(self, source: Path, operation: str) -> MigrationFileState | None:
-        """Find absolute source plus copy/move_labber/native operation, or return None."""
+        """Find source plus copy/move_labber/native/samples operation, or return None."""
         return next(
             (
                 item
@@ -258,6 +259,8 @@ class MigrationSession:
             if operation == "native"
             else "move_labber"
             if operation == "move_labber"
+            else "samples"
+            if operation == "samples"
             else "copy",
             source=source,
             destination=destination,
@@ -287,7 +290,8 @@ class MigrationSession:
             build(state.temp_path)
         destination_hash = file_hash(state.temp_path)
         if self.baseline(state.source) != state.source_hash or (
-            state.operation != "native" and destination_hash != state.source_hash
+            state.operation in ("copy", "move_labber")
+            and destination_hash != state.source_hash
         ):
             raise MigrationInputError(
                 f"{state.source}: source/copy hash changed during publication"
@@ -318,13 +322,13 @@ class MigrationSession:
     ) -> MigrationFileState:
         """Recover or publish one owned exact destination and return durable state.
 
-        operation is copy/move_labber/native. build writes native temp bytes;
+        operation is copy/move_labber/native/samples. build writes converted temp bytes;
         None copies source bytes. Verify hashes at every publication/removal
         window. A move only removes source after published destination verification.
         Conflicts raise MigrationInputError/FileExistsError; execution failures
         persist diagnostic/recovery state and propagate. dry_run only plans.
         """
-        if operation not in ("copy", "move_labber", "native"):
+        if operation not in ("copy", "move_labber", "native", "samples"):
             raise ValueError(f"Invalid publication operation {operation!r}")
         state = self.state(source, operation)
         if state is None:
@@ -354,7 +358,7 @@ class MigrationSession:
             raise
 
     def completed(self, state: MigrationFileState) -> None:
-        """Record completed copy, validated native or removed Labber and checkpoint.
+        """Record a completed copy/sample conversion, validated native or removed Labber.
 
         dry_run and incomplete/unvalidated states add no success report item.
         """
@@ -365,7 +369,7 @@ class MigrationSession:
         report = self.manifest.report
         status = (
             "converted"
-            if state.operation == "native"
+            if state.operation in ("native", "samples")
             else "moved"
             if state.operation == "move_labber"
             else "preserved"
@@ -395,6 +399,22 @@ class MigrationSession:
             )
             report = replace(report, preserved_files=(*items, item))
         self.report(report)
+
+
+def record_key_mapping(session: MigrationSession, item: KeyMappingItem) -> None:
+    """Upsert one typed source-key decision and checkpoint the cumulative report.
+
+    Library kind distinguishes same-name module/waveform keys. No source or
+    destination file is changed; dry-run only changes in-memory report state.
+    """
+    report = session.manifest.report
+    retained = tuple(
+        old
+        for old in report.key_mappings
+        if (old.old_file, old.old_key, old.library_kind)
+        != (item.old_file, item.old_key, item.library_kind)
+    )
+    session.report(replace(report, key_mappings=(*retained, item)))
 
 
 def record_pending(

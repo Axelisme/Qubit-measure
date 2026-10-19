@@ -54,6 +54,8 @@ def preserve_result_files(session: MigrationSession) -> None:
 
     session identifies the old result and new Database entry. Preserve relative
     paths and hashes, leave originals intact and report unproven associations.
+    Images outside exps/workflow archives publish to entry figures with source
+    relative paths intact. samples.csv is owned by parameter conversion.
     exps/<point>/image/*.png publishes to that point's result figures instead of
     an archive. Missing points stay pending until parameters then data resume.
     dry_run plans only; collision/hash/I/O failures propagate with recovery state."""
@@ -65,6 +67,21 @@ def preserve_result_files(session: MigrationSession) -> None:
         if _publish_point_figure(session, path):
             continue
         relative = path.relative_to(source)
+        if (
+            "image" in relative.parts[:-1]
+            and "exps" not in relative.parts[:-1]
+            and "autofluxdep_runs" not in relative.parts[:-1]
+        ):
+            target = (
+                session.manifest.report.destination.result_path / "figures" / relative
+            )
+            state = session.publish(
+                contained_path(path, source),
+                contained_path(target, session.manifest.report.destination.result_path),
+                operation="copy",
+            )
+            session.completed(state)
+            continue
         archive = next(
             (
                 part
@@ -73,7 +90,7 @@ def preserve_result_files(session: MigrationSession) -> None:
             ),
             None,
         )
-        if archive is None and relative != Path("samples.csv"):
+        if archive is None:
             continue
         target = (
             destination / relative
@@ -87,13 +104,7 @@ def preserve_result_files(session: MigrationSession) -> None:
         )
         session.completed(state)
         if archive != "arb_waveforms":
-            reason = (
-                "Archive preserved; point/run association is unproven"
-                if archive is not None
-                else (
-                    "No proven component/sample/point association; not a runtime v2 SampleTable"
-                )
-            )
+            reason = "Archive preserved; point/run association is unproven"
             record_pending(session, path.resolve(), "association", reason)
 
 

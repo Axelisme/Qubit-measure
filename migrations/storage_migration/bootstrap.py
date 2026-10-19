@@ -23,6 +23,7 @@ from .backup import (
 from .errors import MigrationInputError
 from .evidence import validate_run_evidence
 from .models import (
+    MigrationDeclarations,
     MigrationDestination,
     MigrationIdentity,
     MigrationManifest,
@@ -167,6 +168,8 @@ def _resume_session(
     if not path.is_file():
         raise MigrationInputError(f"{path}: resume requires this tool's manifest")
     manifest = read_manifest(path)
+    if manifest.report.declarations != _declarations(request):
+        raise MigrationInputError(f"{path}: operator declarations changed on resume")
     backup = manifest.backup
     if backup is None or backup.path != backup_location(request, source):
         raise MigrationInputError(
@@ -284,6 +287,7 @@ def _new_session(
         entry_id=entry_id,
         part=request.part,
         backup_path=backup_path,
+        declarations=_declarations(request),
     )
     manifest = MigrationManifest(
         identity=_identity(request, entry_id),
@@ -362,6 +366,27 @@ def _recover_first_report(manifest: MigrationManifest) -> MigrationManifest:
     return manifest
 
 
+def _declarations(request: MigrationRequest) -> MigrationDeclarations:
+    if (
+        request.assume_jpa_flux_unit is not None
+        and request.assume_jpa_flux_unit not in ("A", "V")
+    ):
+        raise MigrationInputError(
+            f"Unsupported JPA assumed unit: {request.assume_jpa_flux_unit!r}"
+        )
+    for unit in (request.assume_flux_unit, request.sample_source_unit):
+        if unit is not None and unit not in ("A", "mA", "V", "mV"):
+            raise MigrationInputError(f"Unsupported declared unit: {unit!r}")
+    if request.sample_value_column is not None and not request.sample_value_column:
+        raise MigrationInputError("sample_value_column must be nonempty")
+    return MigrationDeclarations(
+        assume_flux_unit=request.assume_flux_unit,
+        assume_jpa_flux_unit=request.assume_jpa_flux_unit,
+        sample_value_column=request.sample_value_column,
+        sample_source_unit=request.sample_source_unit,
+    )
+
+
 def prepare_session(
     request: MigrationRequest, mapping: MigrationMapping
 ) -> tuple[MigrationSession, ResultEntry | None]:
@@ -374,6 +399,7 @@ def prepare_session(
     operations. Complete and verify the external backup before creating any entry;
     resume verifies that backup independently of removed old sources. Bootstrap
     does not delete sources; I/O/schema failures propagate."""
+    _declarations(request)
     source, destination = _locations(request)
     path = destination.result_path / "records" / "migration-state.json"
     if request.resume:

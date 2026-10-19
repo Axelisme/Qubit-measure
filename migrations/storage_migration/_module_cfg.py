@@ -1,4 +1,4 @@
-"""Point-local typed legacy library conversion in the parameter migration step."""
+"""Typed setup/point legacy library conversion in the parameter migration step."""
 
 from dataclasses import replace
 from pathlib import Path
@@ -95,7 +95,6 @@ def _prepare_library(
     values: JsonObject,
     mapping: MigrationMapping,
     target: Path | None,
-    label: str | None,
 ) -> LibrarySnapshot:
     candidate = LibrarySnapshot(
         ModuleLibraryDocument(
@@ -125,9 +124,10 @@ def _prepare_library(
                 ),
                 None,
             )
-            reason = _pending_reason(raw, rule, label)
+            reason = _pending_reason(raw, rule)
             if reason is None and rule is not None:
                 candidate, reason = _convert_spec(candidate, raw, rule, mapping)
+            converted = reason is None
             if reason is not None:
                 record_pending(session, source, location, reason)
             else:
@@ -141,20 +141,14 @@ def _prepare_library(
                     library_kind=kind,
                     new_file=target,
                     new_path=rule.target_path if rule is not None else None,
-                    action="module"
-                    if rule is not None and label is not None
-                    else "pending",
+                    action="module" if converted else "pending",
                     reason=reason,
                 ),
             )
     return candidate
 
 
-def _pending_reason(
-    raw: JsonValue, rule: ModuleRule | None, label: str | None
-) -> str | None:
-    if label is None:
-        return "Root library has no point destination; explicit point ownership is required"
+def _pending_reason(raw: JsonValue, rule: ModuleRule | None) -> str | None:
     if rule is None:
         return "No explicit library mapping"
     if has_legacy_expression(raw):
@@ -163,13 +157,14 @@ def _pending_reason(
 
 
 def _set_slots(
-    entry: ResultEntry, label: str, values: JsonObject, mapping: MigrationMapping
+    entry: ResultEntry, label: str | None, values: JsonObject, mapping: MigrationMapping
 ) -> None:
     modules = values.get("modules")
     if not isinstance(modules, dict):
         return
     slots: set[str] = set()
-    with entry.use_point(label).edit() as draft:
+    view = entry.setup if label is None else entry.use_point(label)
+    with view.edit() as draft:
         for rule in mapping.module_rules:
             if (
                 rule.kind == "module"
@@ -190,16 +185,16 @@ def convert_module_cfg(
     source: Path,
     mapping: MigrationMapping,
 ) -> None:
-    """Prepare/report one legacy library and commit a point's complete Spec file.
+    """Prepare/report one legacy library and commit its complete typed Spec file.
 
     session owns report, source baselines and manifest checkpoints. source is
     the absolute legacy module_cfg.yaml under its result root; an absent file is
     a no-op. label is the validated point label, or None for root metadata with
-    no point destination. entry is the matching handle, or None only in dry-run.
+    setup destination. entry is the matching handle, or None only in dry-run.
     mapping supplies explicit module/waveform source keys and canonical targets.
     The legacy envelope requires modules and waveforms mappings; malformed
     envelopes raise MigrationInputError and retain a module-step failure diagnostic.
-    Root entries remain located pending with new_file=None and do not set slots.
+    Root entries use the setup library and set setup slots through the entry owner.
     Child slots retain first-present module-rule priority. Unsupported expressions,
     Specs and unmapped child references remain located pending without evaluation.
     Document/schema or I/O commit failures are recorded then propagate.
@@ -230,16 +225,16 @@ def convert_module_cfg(
                 f"{source}: expected waveforms/modules mapping envelope"
             )
         values = _JSON.validate_python(envelope, strict=True)
-        if label is None or session.dry_run:
+        if session.dry_run:
             # No destination handle has been acquired; point dry-runs still
             # validate candidates and retain their canonical key decisions.
-            _prepare_library(session, source, values, mapping, None, label)
+            _prepare_library(session, source, values, mapping, None)
             return
         if entry is None:
-            raise ValueError("A point library commit requires its ResultEntry handle")
+            raise ValueError("A library commit requires its ResultEntry handle")
         library = entry.module_library(label)
         candidate = _prepare_library(
-            session, source, values, mapping, library.source_path, label
+            session, source, values, mapping, library.source_path
         )
         _set_slots(entry, label, values, mapping)
         with library.edit() as draft:

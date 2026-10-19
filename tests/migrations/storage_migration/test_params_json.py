@@ -5,13 +5,15 @@ Remove with the offline migrations package once legacy entries are converted.
 
 import importlib
 import json
+import os
 import shutil
 from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 import pytest
-from pydantic import ConfigDict, Field, TypeAdapter
+from pydantic import ConfigDict, Field, JsonValue, TypeAdapter
 from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.document_store import YamlMap
 from zcu_tools.resources.entry import (
@@ -22,6 +24,7 @@ from zcu_tools.resources.entry import (
     snapshot,
 )
 
+from migrations.storage_mapping import build_mapping
 from migrations.storage_migration import (
     KeyRule,
     MigrationInputError,
@@ -45,16 +48,25 @@ class AnalysisQubit(ComponentSchema):
     model_config = ConfigDict(extra="forbid")
     EJ: float | None = None
     ext: YamlMap = Field(default_factory=dict)
+    wiring: dict[str, int] = Field(default_factory=dict)
+    module: dict[str, str] = Field(default_factory=dict)
+    flux_unit: Literal["A", "V"] | None = None
+    flux_half: float | None = None
+    flux_period: float | None = None
+    flux_int: float | None = None
+    flux: float | None = None
 
 
 @pytest.fixture(scope="module", autouse=True)
 def analysis_kind() -> Generator[None]:
     before = registry_state()
     component_registry.register("qubit/migration_analysis", AnalysisQubit)
+    component_registry.register("amplifier/migration_analysis", AnalysisQubit)
     try:
         yield
     finally:
         component_registry.unregister("qubit/migration_analysis")
+        component_registry.unregister("amplifier/migration_analysis")
         assert registry_state() == before
 
 
@@ -139,6 +151,464 @@ def backup_path(request: MigrationRequest) -> Path:
 def predictor_params(request: MigrationRequest) -> JsonObject:
     """Return the public predictor parameters as a typed JSON object."""
     return TypeAdapter(JsonObject).validate_python(read_predictor(request)["params"])
+
+
+@pytest.fixture
+def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
+    concrete = build_mapping(
+        qubit_kind="qubit/fluxonium", data_schemas={}, native_tags={}
+    )
+    return replace(
+        concrete,
+        components={
+            "Q1": {"kind": "qubit/migration_analysis"},
+            "J1": {"kind": "amplifier/migration_analysis"},
+        },
+        roles={"qubit": "Q1"},
+    )
+
+
+def test_missing_units_drive_alias_and_module_scalars_remain_observable(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {**adapter.dump_python(request_data), "assume_flux_unit": "mA"}
+    )
+    write_meta(request, "", {"qub_ch": 3, "pi_gain": 0.2, "flx_half": 0.5})
+    write_meta(request, "bias", {"qub_ch": 4, "qub_0_1_ch": 2, "pi2_len": 0.03})
+    report = migrate(request, metadata_mapping)
+    setup = snapshot(open_entry(request).setup)
+    assert document_value(setup, "Q1.wiring") == {"ch": 3}
+    assert document_value(setup, "Q1.ext.pi_gain") == 0.2
+    assert document_value(setup, "Q1.flux_half") == 0.5
+    assert document_value(setup, "general.ext.flux_unit") == "mA"
+    point = snapshot(open_entry(request).use_point("bias"))
+    assert document_value(point, "Q1.wiring.ch") == 2
+    assert document_value(point, "Q1.ext.pi2_len") == 0.03
+    assert any("假設單位" in row.reason for row in report.key_mappings)
+
+
+def test_unbound_pi_scalars_are_saved_in_component_extensions(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    write_meta(request_data, "", {"pi_gain": 0.2, "pi_len": 0.05})
+    migrate(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
+    assert document_value(setup, "Q1.ext") == {"pi_gain": 0.2, "pi_len": 0.05}
+
+
+def test_assumption_supplies_missing_metadata_evidence_without_changing_values(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {**adapter.dump_python(request_data), "assume_flux_unit": "mA"}
+    )
+    write_meta(request, "", {"flx_half": 0.5, "cur_A": 0.7})
+    report = migrate(request, metadata_mapping)
+    setup = snapshot(open_entry(request).setup)
+    assert document_value(setup, "general.ext") == {
+        "flux_unit": "mA",
+        "flux_value": 0.7,
+    }
+    assert document_value(setup, "Q1.flux_half") == 0.5
+    assert document_value(setup, "general.ext.flux_value") == 0.7
+    assert any("假設單位" in row.reason for row in report.key_mappings)
+
+
+@pytest.mark.parametrize("unit_source", ["meta_info.json", "params.json"])
+def test_entry_explicit_unit_beats_assumption_and_reports_its_file(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    unit_source: str,
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {**adapter.dump_python(request_data), "assume_flux_unit": "mA"}
+    )
+    root = request.result_root / "chip/qubit"
+    (root / unit_source).write_text('{"flux_unit": "V"}', encoding="utf-8")
+    write_meta(request, "bias", {"flx_half": 0.3})
+    report = migrate(request, metadata_mapping)
+    point = snapshot(open_entry(request).use_point("bias"))
+    assert document_value(point, "general.ext.flux_unit") == "V"
+    assert document_value(point, "Q1.flux_half") == 0.3
+    assert any(
+        row.old_key == "flx_half" and str(root / unit_source) in row.reason
+        for row in report.key_mappings
+    )
+
+
+def test_point_unit_override_clears_only_unreplaced_inherited_group_values(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    metadata_mapping = replace(
+        metadata_mapping,
+        rules=(
+            *metadata_mapping.rules,
+            KeyRule(
+                old_key="period_error",
+                target_path="Q1.flux_period",
+                action="stderr",
+                reason="Synthetic uncertainty in the value working unit",
+            ),
+        ),
+    )
+    write_meta(
+        request_data,
+        "",
+        {
+            "flux_unit": "V",
+            "local_flux_unit": "A",
+            "flx_half": 0.2,
+            "flx_period": 0.4,
+            "period_error": 0.02,
+            "flx_int": 0.1,
+            "cur_A": 0.5,
+            "flux_bias": 0.6,
+            "jpa_flux_unit": "V",
+            "best_jpa_flux": 1.0,
+        },
+    )
+    point_meta = write_meta(
+        request_data,
+        "bias",
+        {"flux_unit": "A", "flx_half": 0.3, "local_flux_unit": "V"},
+    )
+    report = migrate(request_data, metadata_mapping)
+    point = snapshot(open_entry(request_data).use_point("bias"))
+    assert document_value(point, "Q1.flux_half") == 0.3
+    assert document_value(point, "Q1.flux_period") is None
+    assert open_entry(request_data).setup.meta("Q1.flux_period") == {"stderr": 0.02}
+    assert open_entry(request_data).use_point("bias").meta("Q1.flux_period") == {}
+    assert document_value(point, "Q1.flux_int") is None
+    assert document_value(point, "general.ext") == {"flux_unit": "A"}
+    assert document_value(point, "Q1.ext") == {}
+    assert document_value(point, "Q1.flux_unit") == "V"
+    assert document_value(point, "J1.flux") == 1.0
+    assert document_value(point, "J1.flux_unit") == "V"
+    assert not any(item.source == point_meta for item in report.pending)
+
+
+def migrate_with_unit_pending(
+    request: MigrationRequest, mapping: MigrationMapping
+) -> MigrationReport:
+    """Unit incompatibility is located pending, not an entry-wide schema abort."""
+    try:
+        return migrate(request, mapping)
+    except ValueError as exc:
+        pytest.fail(f"Unit incompatibility must become located pending: {exc}")
+
+
+def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    write_params(request_data, {"flux_unit": "A"})
+    source = write_meta(
+        request_data,
+        "",
+        {
+            "best_jpa_flux": 0.2,
+            "local_flux_unit": "mA",
+            "flx_half": 0.3,
+        },
+    )
+    report = migrate_with_unit_pending(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
+    assert any(
+        item.source == source and item.location == "best_jpa_flux"
+        for item in report.pending
+    )
+    assert any(
+        item.source == source and item.location == "local_flux_unit"
+        for item in report.pending
+    )
+    assert document_value(setup, "Q1.flux_half") == 0.3
+    assert getattr(open_entry(request_data).setup.J1, "flux", None) is None
+
+
+def test_invalid_jpa_unit_keeps_whole_group_pending_without_conversion(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    source = write_meta(
+        request_data,
+        "",
+        {
+            "jpa_flux_unit": "mA",
+            "best_jpa_flux": 2.0,
+        },
+    )
+    report = migrate_with_unit_pending(request_data, metadata_mapping)
+    assert {item.location for item in report.pending if item.source == source} >= {
+        "jpa_flux_unit",
+        "best_jpa_flux",
+    }
+    assert getattr(open_entry(request_data).setup.J1, "flux", None) is None
+
+
+def test_conflicting_entry_units_block_values_instead_of_using_assumption(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {**adapter.dump_python(request_data), "assume_flux_unit": "mA"}
+    )
+    write_params(request, {"flux_unit": "A"})
+    source = write_meta(request, "", {"flux_unit": "V", "flx_half": 0.2})
+    report = migrate(request, metadata_mapping)
+    setup = snapshot(open_entry(request).setup)
+    assert document_value(setup, "general.ext") == {}
+    assert any(
+        item.source == source
+        and item.location == "flx_half"
+        and "params.json" in item.reason
+        for item in report.pending
+    )
+
+
+def declare_request(
+    request: MigrationRequest, **declarations: JsonValue
+) -> MigrationRequest:
+    """Apply operator input through the request's typed boundary."""
+    adapter = TypeAdapter(MigrationRequest)
+    return adapter.validate_python({**adapter.dump_python(request), **declarations})
+
+
+def test_jpa_never_borrows_global_assumption(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    request = declare_request(request_data, assume_flux_unit="A")
+    source = write_meta(request, "", {"cur_A": 0.4, "best_jpa_flux": 0.2})
+    report = migrate(request, metadata_mapping)
+    assert any(
+        item.source == source and item.location == "best_jpa_flux"
+        for item in report.pending
+    )
+    assert getattr(open_entry(request).setup.J1, "flux", None) is None
+    assert document_value(snapshot(open_entry(request).setup), "general.ext") == {
+        "flux_unit": "A",
+        "flux_value": 0.4,
+    }
+
+
+def test_independent_jpa_assumption_publishes_v_without_changing_global_ma(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    request = declare_request(
+        request_data, assume_flux_unit="mA", assume_jpa_flux_unit="V"
+    )
+    write_meta(request, "", {"cur_A": 0.4, "best_jpa_flux": 0.2})
+    report = migrate(request, metadata_mapping)
+    assert getattr(open_entry(request).setup.J1, "flux", None) == 0.2
+    setup = snapshot(open_entry(request).setup)
+    assert document_value(setup, "J1.flux_unit") == "V"
+    assert document_value(setup, "general.ext") == {
+        "flux_unit": "mA",
+        "flux_value": 0.4,
+    }
+    assert any(
+        row.old_key == "jpa_flux_unit" and "假設單位" in row.reason
+        for row in report.key_mappings
+    )
+
+
+@pytest.mark.parametrize("explicit", ["A", "mA", None])
+def test_jpa_assumption_never_replaces_explicit_or_invalid_evidence(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    explicit: str | None,
+) -> None:
+    request = declare_request(request_data, assume_jpa_flux_unit="V")
+    source = write_meta(request, "", {"jpa_flux_unit": explicit, "best_jpa_flux": 0.2})
+    report = migrate_with_unit_pending(request, metadata_mapping)
+    if explicit == "A":
+        assert (
+            document_value(snapshot(open_entry(request).setup), "J1.flux_unit") == "A"
+        )
+        assert not any(item.source == source for item in report.pending)
+    else:
+        assert getattr(open_entry(request).setup.J1, "flux", None) is None
+        assert any(
+            item.source == source and item.location == "best_jpa_flux"
+            for item in report.pending
+        )
+
+
+def test_resume_rejects_changed_jpa_assumption_before_writes(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    request = declare_request(request_data, assume_jpa_flux_unit="V")
+    write_meta(request, "", {"best_jpa_flux": 0.2})
+    migrate(request, metadata_mapping)
+    before = (request.results_root / request.name / "setup.yaml").read_bytes()
+    changed = declare_request(request, assume_jpa_flux_unit="A", resume=True)
+    with pytest.raises(MigrationInputError, match="declarations"):
+        migrate(changed, metadata_mapping)
+    assert (request.results_root / request.name / "setup.yaml").read_bytes() == before
+
+
+@pytest.mark.parametrize("unit", ["mA", "unknown", "", True])
+def test_invalid_jpa_assumption_is_rejected_before_any_entry_or_backup(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping, unit: JsonValue
+) -> None:
+    with pytest.raises(ValueError, match="assume_jpa_flux_unit"):
+        migrate(
+            declare_request(request_data, assume_jpa_flux_unit=unit), metadata_mapping
+        )
+    assert not (request_data.results_root / request_data.name).exists()
+    assert not backup_path(request_data).exists()
+
+
+def test_sample_declarations_publish_runtime_rows_and_resume_once(
+    request_data: MigrationRequest, analysis_mapping: MigrationMapping
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {
+            **adapter.dump_python(request_data),
+            "sample_value_column": "calibrated mA",
+            "sample_source_unit": "mA",
+        }
+    )
+    source = request.result_root / "chip/qubit/samples.csv"
+    source.write_text("calibrated mA,T1 (us)\n2,50\nbad,60\n", encoding="utf-8")
+    dry = migrate(replace(request, dry_run=True), analysis_mapping)
+    assert not (request.results_root / request.name).exists()
+    report = migrate(request, analysis_mapping)
+    table = open_entry(request).samples("Qlegacy")
+    assert len(table.read()) == 1
+    row = table.latest("legacy-samples-1")
+    assert row is not None
+    assert row["dev_value"] == 0.002
+    assert row["dev_unit"] == "A"
+    assert row["t1_us"] == 50
+    assert any(item.location == "row 2" for item in report.pending)
+    assert dry.pending == report.pending
+    before = table.path.read_bytes()
+    migrate(replace(request, resume=True), analysis_mapping)
+    assert table.path.read_bytes() == before
+
+
+def test_sample_prepared_publication_resumes_without_duplicate_rows(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {
+            **adapter.dump_python(request_data),
+            "sample_value_column": "calibrated mA",
+            "sample_source_unit": "mA",
+        }
+    )
+    source = request.result_root / "chip/qubit/samples.csv"
+    source.write_text("calibrated mA,T1 (us)\n2,50\n", encoding="utf-8")
+    output = request.results_root / request.name / "samples/Qlegacy.jsonl"
+    link = os.link
+
+    def fail_sample_publish(src: Path, dst: Path) -> None:
+        if dst == output:
+            raise OSError("sample publish interrupted")
+        link(src, dst)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", fail_sample_publish)
+        with pytest.raises(OSError, match="sample publish interrupted"):
+            migrate(request, analysis_mapping)
+    migrate(replace(request, resume=True), analysis_mapping)
+    table = open_entry(request).samples("Qlegacy")
+    assert len(table.read()) == 1
+    assert len(output.read_text().splitlines()) == 1
+
+
+def test_resume_refuses_changed_sample_declarations_before_writes(
+    request_data: MigrationRequest, analysis_mapping: MigrationMapping
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {
+            **adapter.dump_python(request_data),
+            "sample_value_column": "calibrated mA",
+            "sample_source_unit": "mA",
+        }
+    )
+    source = request.result_root / "chip/qubit/samples.csv"
+    source.write_text("calibrated mA,T1 (us)\n2,50\n", encoding="utf-8")
+    migrate(request, analysis_mapping)
+    changed = adapter.validate_python(
+        {
+            **adapter.dump_python(request),
+            "sample_source_unit": "A",
+            "resume": True,
+        }
+    )
+    with pytest.raises(MigrationInputError, match="declarations"):
+        migrate(changed, analysis_mapping)
+
+
+def test_sample_missing_declarations_are_located_without_using_flux_assumption(
+    request_data: MigrationRequest, analysis_mapping: MigrationMapping
+) -> None:
+    request = declare_request(
+        request_data, assume_flux_unit="mA", assume_jpa_flux_unit="V"
+    )
+    source = request.result_root / "chip/qubit/samples.csv"
+    source.write_text("calibrated mA,T1 (us)\n2,50\n", encoding="utf-8")
+    report = migrate(request, analysis_mapping)
+    assert any(
+        item.source == source and item.location == "row 1" for item in report.pending
+    )
+    assert open_entry(request_data).samples("Qlegacy").read().empty
+
+
+def test_assumed_unit_fills_only_missing_predictor_evidence(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {**adapter.dump_python(request_data), "assume_flux_unit": "mA"}
+    )
+    write_params(request, {"fluxdep_fit": legacy_fit})
+    report = migrate(request, analysis_mapping)
+    assert read_predictor(request)["flux_unit"] == "mA"
+    assert any(
+        row.new_path == "flux_unit" and "假設單位" in row.reason
+        for row in report.key_mappings
+    )
+    assert not any(item.location == "fluxdep_fit.flux_unit" for item in report.pending)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"flux_unit": "V"},
+        {"flux_unit": "A", "fluxdep_fit": {"flux_unit": "V"}},
+        {"flux_unit": None},
+        {"flux_unit": "unsupported"},
+    ],
+)
+def test_assumption_never_replaces_explicit_predictor_units(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    values: JsonObject,
+) -> None:
+    adapter = TypeAdapter(MigrationRequest)
+    request = adapter.validate_python(
+        {**adapter.dump_python(request_data), "assume_flux_unit": "mA"}
+    )
+    fit = values.pop("fluxdep_fit", {})
+    legacy_fit.update(TypeAdapter(JsonObject).validate_python(fit))
+    values["fluxdep_fit"] = legacy_fit
+    write_params(request, values)
+    migrate(request, analysis_mapping)
+    assert read_predictor(request)["flux_unit"] == (
+        "V" if values.get("flux_unit") == "V" else None
+    )
 
 
 @pytest.fixture
@@ -260,12 +730,13 @@ def test_analysis_file_resume_validates_unfinished_and_preserves_completed_edits
     kind: str,
     conflict: bool,
 ) -> None:
-    source = write_params(request_data, analysis_sections)
+    write_params(request_data, analysis_sections)
+    write_meta(request_data, "bias", {})
     destination = request_data.results_root / request_data.name
     copyfile = shutil.copyfile
 
     def interrupt(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
-        if src == source and dst.parent == destination:
+        if src == destination / "setup.yaml" and dst.name == "point.yaml":
             raise OSError("analysis checkpoint interrupted")
         return copyfile(src, dst, follow_symlinks=follow_symlinks)
 
@@ -299,11 +770,13 @@ def test_unfinished_t1_resume_rejects_new_active_null_channel(
     analysis_sections: JsonObject,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = write_params(request_data, analysis_sections)
+    write_params(request_data, analysis_sections)
+    write_meta(request_data, "bias", {})
+    destination = request_data.results_root / request_data.name
     copyfile = shutil.copyfile
 
     def interrupt(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
-        if src == source:
+        if src == destination / "setup.yaml" and dst.name == "point.yaml":
             raise OSError("T1 checkpoint interrupted")
         return copyfile(src, dst, follow_symlinks=follow_symlinks)
 
@@ -617,12 +1090,13 @@ def interrupted_predictor(
     legacy_fit: JsonObject,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
-    source = write_params(request_data, {"flux_unit": "mV", "fluxdep_fit": legacy_fit})
+    write_params(request_data, {"flux_unit": "mV", "fluxdep_fit": legacy_fit})
+    write_meta(request_data, "bias", {})
     destination = request_data.results_root / request_data.name
     copyfile = shutil.copyfile
 
     def interrupted_copy(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
-        if src == source and dst.parent == destination:
+        if src == destination / "setup.yaml" and dst.name == "point.yaml":
             raise OSError("parameter copy interrupted")
         return copyfile(src, dst, follow_symlinks=follow_symlinks)
 
@@ -685,7 +1159,6 @@ def test_unfinished_resume_accepts_same_predictor_without_rewriting(
     before = interrupted_predictor.read_bytes()
     migrate(replace(request_data, resume=True), analysis_mapping)
     assert interrupted_predictor.read_bytes() == before
-    assert (request_data.results_root / request_data.name / "params.json").is_file()
     document["flux_unit"] = "V"
     interrupted_predictor.write_text(json.dumps(document), encoding="utf-8")
     edited = interrupted_predictor.read_bytes()

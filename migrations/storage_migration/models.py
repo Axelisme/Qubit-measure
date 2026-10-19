@@ -207,6 +207,12 @@ class MigrationRequest:
     checkout. backup_parent is an external directory, or None for repo_root.parent;
     the tool accumulates chip/qubit mirrors in its <repo-name>-backup child.
     Either existing source mirror is refused before migration writes.
+    assume_flux_unit supplies A/mA/V/mV only when flux unit keys are absent;
+    explicit invalid/conflicting evidence stays pending. assume_jpa_flux_unit
+    independently supplies A/V only for absent JPA unit evidence; it never uses
+    assume_flux_unit. sample_value_column and
+    sample_source_unit declare the legacy CSV coordinate column and A/mA/V/mV
+    unit independently of flux assumptions. All four are fixed on resume.
     """
 
     result_root: Path
@@ -222,6 +228,10 @@ class MigrationRequest:
     run_evidence: MigrationRunEvidenceDocument | None = None
     repo_root: Path | None = None
     backup_parent: Path | None = None
+    assume_flux_unit: Literal["A", "mA", "V", "mV"] | None = None
+    assume_jpa_flux_unit: Literal["A", "V"] | None = None
+    sample_value_column: str | None = None
+    sample_source_unit: Literal["A", "mA", "V", "mV"] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -246,7 +256,7 @@ class KeyMappingItem:
 
     old_file is an absolute source file; old_key is its literal legacy key.
     new_file is the absolute target file, or None when no destination handle is
-    acquired (including library dry-run/root rows) or the key is removed/pending.
+    acquired (including library dry-run rows) or the key is removed/pending.
     new_path is the proposed dotted target path, or None without a declared target.
     A library dry-run may have new_path with new_file=None; this alone is not pending.
     action selects the explicit rule operation. reason explains conversion, deferral
@@ -299,6 +309,24 @@ class FailureItem:
 
 
 @dataclass(frozen=True, kw_only=True)
+class MigrationDeclarations:
+    """Operator declarations, immutable across parts/resume of one migration.
+
+    assume_flux_unit is A/mA/V/mV or None; it fills absent flux unit evidence,
+    never explicit null/invalid/conflicting values. assume_jpa_flux_unit is A/V
+    or None and fills only absent JPA evidence, independently of global flux.
+    sample_value_column is the
+    literal legacy CSV coordinate header or None. sample_source_unit is its
+    explicit A/mA/V/mV unit or None, never inherited from assume_flux_unit.
+    """
+
+    assume_flux_unit: Literal["A", "mA", "V", "mV"] | None = None
+    assume_jpa_flux_unit: Literal["A", "V"] | None = None
+    sample_value_column: str | None = None
+    sample_source_unit: Literal["A", "mA", "V", "mV"] | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
 class MigrationReport:
     """Cumulative report of attempted parts, not a claim that pending is empty.
 
@@ -310,6 +338,7 @@ class MigrationReport:
     document's unknown fields; an empty raw denotes a newly constructed report.
     backup_path is the external verified backup, or its planned path in dry_run;
     None is reserved for reports loaded without the backup extension.
+    declarations records the operator inputs shared with the typed manifest.
     """
 
     source: MigrationSource
@@ -323,6 +352,7 @@ class MigrationReport:
     pending: tuple[PendingItem, ...] = ()
     failures: tuple[FailureItem, ...] = ()
     backup_path: Path | None = None
+    declarations: MigrationDeclarations = field(default_factory=MigrationDeclarations)
     format: str = "zcu.migration-report"
     format_version: str = "1.0"
     raw: JsonObject = field(default_factory=dict)
@@ -332,7 +362,8 @@ class MigrationReport:
 class MigrationFileState:
     """Manifest-owned file publication state; paths are absolute and resolved.
 
-    operation is copy, move_labber or native. source_hash is baseline SHA256.
+    operation is copy, move_labber, native or samples (CSV to JSONL).
+    source_hash is baseline SHA256; samples/native output need not equal it.
     destination_hash is None while planned, then SHA256 of prepared temp bytes.
     temp_path names only this action's owned same-directory temporary file.
     phase is planned/prepared/published, or source_removed for move_labber only.
@@ -340,7 +371,7 @@ class MigrationFileState:
     A published native is not removable-source evidence until validation passes.
     """
 
-    operation: Literal["copy", "move_labber", "native"]
+    operation: Literal["copy", "move_labber", "native", "samples"]
     source: Path
     destination: Path
     temp_path: Path
@@ -431,7 +462,7 @@ class MigrationManifest:
     means an existing path must match that exact initial report before recovery.
     format/format_version identify zcu.storage-migration 1.x. raw retains loaded
     unknown fields; an empty raw denotes a new manifest. module_files records
-    completed point-local library commits; pending entries may remain in report.
+    completed setup/point library commits; pending entries may remain in report.
     Module files and manifest are not a cross-file atomic transaction.
     backup binds the verified external inventory; None is invalid for execution.
     cleanup_phase is pending before full completion, cleaning after verified

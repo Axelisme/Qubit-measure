@@ -10,7 +10,7 @@ import pytest
 from pydantic import TypeAdapter
 from zcu_tools.cfg_model import FlatTopWaveformCfg, PulseCfg, PulseReadoutCfg, PulseSpec
 from zcu_tools.resources.document_store import YamlMap
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.views import FieldView
 
 from migrations.storage_migration import (
@@ -212,7 +212,7 @@ def test_parameters_keep_arb_asset_key_without_reading_or_moving_assets(
     assert source.read_bytes() == original
 
 
-def test_root_library_has_no_point_destination_or_setup_slot(
+def test_root_library_populates_setup_slots_without_a_point(
     request_data: MigrationRequest,
     library_mapping: MigrationMapping,
 ) -> None:
@@ -224,20 +224,16 @@ def test_root_library_has_no_point_destination_or_setup_slot(
     entry = _entry(request)
     assert not entry.list_points()
     assert entry.setup.C1.frequency == 12.5
-    module = entry.setup.C1.module
-    assert isinstance(module, FieldView)
-    with pytest.raises(AttributeError):
-        _ = module.chosen
-    rows = [item for item in report.key_mappings if item.old_file == source]
-    assert len(rows) == 5
-    assert all(item.new_file is None for item in rows)
-    assert {item.location for item in report.pending if item.source == source} == {
-        "modules.same",
-        "modules.readout",
-        "waveforms.same",
-        "waveforms.ramp",
-        "waveforms.flat",
+    assert any(item.source == source for item in report.converted_files)
+    assert document_value(snapshot(entry.setup), "C1.module.chosen") == "C1.pulses.pi"
+    library = entry.module_library()
+    assert library.snapshot().module_keys() == ("C1.pulses.pi", "C1.readout.main")
+    assert set(library.snapshot().waveform_keys()) == {
+        "C1.waveforms.base",
+        "C1.waveforms.ramp",
+        "C1.waveforms.flat",
     }
+    assert not any(item.source == source for item in report.pending)
     assert source.read_bytes() == original
 
 
