@@ -163,7 +163,9 @@ def test_source_rejection_is_a_field_error_not_an_unhandled_qt_exception(
 ) -> None:
     state = new_state()
     unhandled: list[BaseException] = []
-    monkeypatch.setattr(sys, "excepthook", lambda _kind, error, _tb: unhandled.append(error))
+    monkeypatch.setattr(
+        sys, "excepthook", lambda _kind, error, _tb: unhandled.append(error)
+    )
 
     def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
         if batch.get(("note",)) == "missing":
