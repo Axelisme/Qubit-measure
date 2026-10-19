@@ -19,7 +19,7 @@ Reset 會捨棄目前編輯並重新取初值，改 alias 不會更新已開啟�
 - Flux pulse 使用共用 `flux_pulse` role，channel 初值來自 `$qubit.wiring.lo_flux_ch`。
   缺 channel 時保持 Invalid，不改用其他 channel。
   Role 的初值為 const waveform、gain 1.0、frequency 0.0 MHz、Nyquist zone 2。
-  此表單將 waveform length 初設為 1.0 us，role 本身不指定長度。
+  Role 與此表單的 waveform length 初值均為 1.0 us。
   這些初值不是校準。使用者必須設定 flux gain 範圍，核對頻率、長度與接線。
 
 兩個 gain sweep 的首次範圍都是 0 到 0.1，共 101 點，這不是硬體安全範圍。
