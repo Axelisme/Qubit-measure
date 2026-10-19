@@ -67,13 +67,11 @@ Dialog 保留 cache、device 訂閱、calibration、tracked table 與生命週�
 
 ## Experiment figure area
 
-2026-10-19，使用者裁決：「ruling(baseline-cleanup): 採 B（ExperimentFigureArea），照你列的硬邊界。之後同類情況不必再問：拆超過 1000 行的 Qt UI class 時，若能指出一組真實的控件與局部 state 協調，可新增一個具體的 owned child QWidget 來持有它，硬邊界同 Predictor/本題（不新增 Protocol/factory/mixin/registry、公開行為與外觀不變、callers/tests 同票、ComponentDriver＋PNG 親看）。在票裡寫明它隱藏的複雜度，完成後 notify 即可。找不到這種切面就原地容忍，不為行數硬拆。」
-
 Measure 的 `ExpTabWidget` 持有具體 child QWidget `ExperimentFigureArea`。Child 集中 Run、Analysis 與 Post 的 canvas hosts、兩個具名圖 selectors 與 cache、interactive presentation、Data gallery 和右側頁切換。它隱藏切圖時的 signal blocking、具名 collection identity、前景預覽刷新及 canvas cleanup 次序。清除 canvas 不銷毀 caller 保留的 Figure。
 
 Root 保留左側表單與 ledger、動作、訂閱、progress、splitter 寬度與 State 投影。既有 ledger 與其 builders 留在同一 ui package。Root 的公開 figure/container 方法委派給 child。Data gallery 經 typed callback 呼叫 root 當時的公開 figure-reader，保留覆寫語意及逐 pane 失敗隔離。Data 啟用先刷新、再切頁、最後 reflow。Child 不取得整個 tab、Controller 或 State，root 不保留搬走控件的 aliases，也不跨 owner 讀 private state。Controller、State、TabActions、capabilities、Save、Writeback 與 Progress 的責任不變。這是同一 Qt frontend 內的持有關係，不新增跨 package 架構邊界。
 
-同類 Qt UI class 超過 1000 行時，只有真實控件與局部 state 協調構成切面，才適用此一具體 owned child 的授權。不能以 Protocol、factory、mixin、registry 或額外轉接層代替控件 owner。公開行為、同步例外、外觀與時序必須保持，callers/tests 同次修改，ComponentDriver 逐步 PNG 由執行者與 parent 親看。找不到切面就寫出原地容忍的理由。拆分後仍超標時先核對剩餘責任，不再為行數增加 owner。這項授權不涵蓋業務規則、依賴、設定或跨 package 邊界變更。
+`ExperimentFigureArea` 是具體控件 owner，不引入 Protocol、factory、mixin、registry 或額外轉接層。原公開行為、同步例外、外觀與時序保持不變。Run、Analyze、Load、admission 與持久化規則仍由既有 owner 負責。MainWindow close-flow 不變。這個分工不改依賴、設定或跨 package 邊界。
 
 ## Adapter capability 與事件
 

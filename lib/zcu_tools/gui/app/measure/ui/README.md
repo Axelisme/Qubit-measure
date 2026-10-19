@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-19，experiment figure area owner
+**Last updated:** 2026-10-19，experiment figure area ownership boundaries
 
 Views project controller snapshots and submit commands through control facets.
 They do not own result data or Save policy. See the [Measure README](../README.md)
@@ -18,8 +18,8 @@ policy stay with their existing owners. The existing foldable ledger and matchin
 form/action builders live in `experiment_ledger.py`.
 
 [ADR-0067](../../../../../../docs/adr/0067-gui-application.md#experiment-figure-area)
-records the 2026-10-19 decision and the conditions for similar Qt child ownership
-extractions. This is presentation ownership, not a second application controller.
+describes how `ExpTabWidget` and `ExperimentFigureArea` divide presentation
+responsibilities. `ExperimentFigureArea` is not a second application controller.
 
 For every adapter, `MainWindow` projects the current tab's cfg invalid reason to the bottom status on interaction refresh and tab selection, while Run stays disabled.
 A valid cfg clears only that cfg diagnostic; background tabs and valid refreshes do not clear unrelated status messages.
