@@ -1,7 +1,7 @@
 """Constant RWA blocks at the Engine and density-array seams."""
 
 from contextlib import closing
-from dataclasses import replace
+from dataclasses import fields, replace
 from threading import Event
 
 import numpy as np
@@ -163,6 +163,110 @@ def test_omitted_resonances_decline_and_retain_original_route(kind):
             shifts = rwa_coefficients(src.model((0,)), (0,), (f,)).diagonal[0]
             f = float((2 + shifts[2] - shifts[0]) / 2)
         table = table_for(f, 1.0, 250.0)
+    kernel = family()
+    assert kernel.guard(
+        table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
+    ).tolist() == [False]
+    original = tuple(k for k in REGISTRY if k.name != kernel.name)
+    with closing(Engine(1, 1000000, kernels=original)) as engine:
+        expected = engine.evolve(src, (batch_for(table),), cancel=Event())
+    with closing(Engine(1, 1000000)) as engine:
+        result = engine.evolve(src, (batch_for(table),), cancel=Event())
+    assert result.paths.segments_by_kernel == expected.paths.segments_by_kernel
+    np.testing.assert_array_equal(result.densities, expected.densities)
+
+
+@pytest.mark.parametrize("detuning", [0.07, 0.11])
+def test_unomittable_single_photon_is_retained_beyond_initial_window(detuning):
+    src = source_for([0.0, 7.0 + detuning], [[0, 0.012], [0.012, 0]])
+    table = table_for(7.0, 1.0, 30.0)
+    kernel = family()
+    assert kernel.guard(
+        table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
+    ).tolist() == [True]
+    with closing(Engine(1, 1000000)) as engine:
+        result = engine.evolve(src, (batch_for(table),), cancel=Event())
+    assert result.paths.segments_by_kernel == {"single_tone_rwa": 1}
+    with closing(Engine(1, 1000000)) as engine:
+        reference = engine.evolve(src, (batch_for(table),), budget=1e-7, cancel=Event())
+    np.testing.assert_allclose(
+        result.densities, reference.densities, atol=0.002, rtol=0
+    )
+
+
+def test_unomittable_two_photon_path_restores_its_first_order_edges():
+    src = source_for([0.0, 7.4, 14.0], [[0, 0.02, 0], [0.02, 0, 0.02], [0, 0.02, 0]])
+    table = table_for(7.0, 1.0, 200.0)
+    kernel = family()
+    assert kernel.guard(
+        table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
+    ).tolist() == [True]
+    with closing(Engine(1, 1000000)) as engine:
+        result = engine.evolve(src, (batch_for(table),), cancel=Event())
+    assert result.paths.segments_by_kernel == {"single_tone_rwa": 1}
+    with closing(Engine(1, 1000000)) as engine:
+        reference = engine.evolve(src, (batch_for(table),), budget=1e-7, cancel=Event())
+    np.testing.assert_allclose(
+        result.densities, reference.densities, atol=0.002, rtol=0
+    )
+
+
+def test_prepare_identity_tracks_final_edges_not_duration_itself():
+    src = source_for([0.0, 7.11], [[0, 0.012], [0.012, 0]])
+    kernel = family()
+    context = KernelContext(src, 0.001, WorkPlan())
+    rows = np.array([0])
+    short = table_for(7.0, 1.0, 2.0)
+    restored = table_for(7.0, 1.0, 30.0)
+    same_edges = table_for(7.0, 1.0, 40.0)
+    for table in (short, restored, same_edges):
+        assert kernel.guard(table, rows, context).tolist() == [True]
+    short_key = kernel.prepare_keys(short, rows, context)
+    restored_key = kernel.prepare_keys(restored, rows, context)
+    assert short_key[0] != restored_key[0]
+    np.testing.assert_array_equal(
+        restored_key, kernel.prepare_keys(same_edges, rows, context)
+    )
+
+
+def test_retained_inventory_is_row_local_and_split_order_independent():
+    src = source_for([0.0, 7.11], [[0, 0.012], [0.012, 0]])
+    base = table_for(7.0, 1.0, 30.0)
+    arrays = {
+        field.name: np.repeat(value, 2, axis=0)
+        for field in fields(base)
+        if isinstance(value := getattr(base, field.name), np.ndarray)
+    }
+    table = replace(base, **arrays)
+    table = replace(table, duration_ns=np.array([2.0, 30.0]))
+    kernel = family()
+    context = KernelContext(src, 0.001, WorkPlan())
+    rows = np.array([1, 0])
+    assert kernel.guard(table, rows, context).tolist() == [True, True]
+    keys = kernel.prepare_keys(table, rows, context)
+    assert keys[0] != keys[1], "one row must not promote another row's edges"
+    prepared = kernel.prepare(keys, table, rows, context)
+    states = np.repeat(src.initial_density[None], 2, axis=0)
+    kernel.apply(prepared, np.array([0, 1]), table, rows, states, ApplyContext(0.001))
+    for index, row in enumerate(rows):
+        split = np.array([row])
+        split_context = KernelContext(src, 0.001, WorkPlan())
+        assert kernel.guard(table, split, split_context).tolist() == [True]
+        split_keys = kernel.prepare_keys(table, split, split_context)
+        np.testing.assert_array_equal(split_keys, keys[index : index + 1])
+        split_prepared = kernel.prepare(split_keys, table, split, split_context)
+        expected = src.initial_density[None].copy()
+        kernel.apply(
+            split_prepared, np.array([0]), table, split, expected, ApplyContext(0.001)
+        )
+        np.testing.assert_array_equal(states[index], expected[0])
+
+
+def test_restored_graph_over_block_limit_keeps_original_route():
+    size = 9
+    x = 0.012 * (np.eye(size, k=1) + np.eye(size, k=-1))
+    src = source_for(np.arange(size) * 7.07, x)
+    table = table_for(7.0, 1.0, 10.0)
     kernel = family()
     assert kernel.guard(
         table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
