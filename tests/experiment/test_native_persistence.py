@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from zcu_tools.datafile import (
     CfgSnapshot,
     DataVariable,
+    LabberMetadata,
     LabberPayload,
     StoredRun,
     decode_labber_comment,
@@ -471,6 +472,35 @@ def test_full_metadata_load_preserves_historical_evidence(
     np.testing.assert_allclose(loaded.result.signal, old_loaded.result.signal)
     with pytest.raises(ValueError, match="experiment"):
         load_run_with_metadata(path, spec=replace(SINGLE, tag="wrong"))
+
+
+@pytest.mark.parametrize("entry", ["load_run", "load_run_with_metadata", "from_stored"])
+def test_typed_readers_keep_labber_metadata(
+    tmp_path: Path, entry: str
+) -> None:
+    record = RunRecord(
+        cfg=NativeCfg(), result=SingleResult(np.array([4000.0]), np.array([1j]))
+    )
+    prepared = prepare_run_data(record, spec=SINGLE)
+    labber = LabberMetadata(
+        comment="original handwritten note",
+        tags=["calibration", "offline"],
+        project="synthetic project",
+        user="synthetic user",
+        creation_time=1759276800.0,
+    )
+    path = tmp_path / "native.h5"
+    save_run_data(
+        path, replace(prepared.payload, metadata=labber),
+        native_metadata(SINGLE.tag), cfg=prepared.cfg,
+    )
+    if entry == "load_run":
+        loaded, _snapshot = load_run(path, spec=SINGLE)
+    elif entry == "load_run_with_metadata":
+        loaded, _metadata = load_run_with_metadata(path, spec=SINGLE)
+    else:
+        loaded = SingleExperiment().from_stored(load_run_data(path)).record
+    assert getattr(loaded, "labber_metadata", None) == labber
 
 
 def test_persistence_tag_returns_declared_tag_without_an_instance() -> None:

@@ -270,6 +270,26 @@ def test_resume_rejects_changed_identity(
         )
 
 
+def test_native_links_to_preserved_labber_relative_to_entry_database(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    request_data, source = write_run(request_data)
+    original = source.read_bytes()
+    report = migrate_storage(
+        request_data, mapping=mapping, validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    native = next(
+        (request_data.database_root / request_data.name / "runs").glob("*/data.h5")
+    )
+    stored = load_run_data(native)
+    assert stored.metadata.labber_path == "Labber/2025/10/scan.hdf5"
+    assert (
+        request_data.database_root / request_data.name / stored.metadata.labber_path
+    ).read_bytes() == original
+    assert not report.failures
+
+
 def test_native_is_readable_and_validated_before_source_removal(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
