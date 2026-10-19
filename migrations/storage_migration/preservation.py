@@ -3,11 +3,50 @@
 from dataclasses import replace
 from pathlib import Path
 
-from .paths import contained_path, source_removed
+from .paths import contained_path, source_removed, validate_segment
 from .state import (
     MigrationSession,
+    clear_pending,
     record_pending,
 )
+
+
+def _publish_point_figure(session: MigrationSession, path: Path) -> bool:
+    source = session.manifest.report.source.result_path
+    relative = path.relative_to(source)
+    parts = relative.parts
+    if (
+        len(parts) != 4
+        or parts[0] != "exps"
+        or parts[2] != "image"
+        or path.suffix.lower() != ".png"
+    ):
+        return False
+    label = parts[1]
+    validate_segment(label, "point label")
+    destination = session.manifest.report.destination.result_path
+    point = contained_path(destination / "points" / label, destination)
+    point_exists = (point / "point.yaml").is_file() and (
+        point / "module_cfg.yaml"
+    ).is_file()
+    if not point_exists and not (
+        session.dry_run and session.manifest.parameters_complete
+    ):
+        record_pending(
+            session,
+            contained_path(path, source),
+            "point figures",
+            f"Point {label!r} is not created; run parameters then resume data",
+        )
+        return True
+    state = session.publish(
+        contained_path(path, source),
+        contained_path(point / "figures" / path.name, destination),
+        operation="copy",
+    )
+    session.completed(state)
+    clear_pending(session, path.resolve(), "point figures")
+    return True
 
 
 def preserve_result_files(session: MigrationSession) -> None:
@@ -15,11 +54,15 @@ def preserve_result_files(session: MigrationSession) -> None:
 
     session identifies the old result and new Database entry. Preserve relative
     paths and hashes, leave originals intact and report unproven associations.
+    exps/<point>/image/*.png publishes to that point's result figures instead of
+    an archive. Missing points stay pending until parameters then data resume.
     dry_run plans only; collision/hash/I/O failures propagate with recovery state."""
     source = session.manifest.report.source.result_path
     destination = session.manifest.report.destination.database_path
     for path in sorted(source.rglob("*")):
         if not path.is_file():
+            continue
+        if _publish_point_figure(session, path):
             continue
         relative = path.relative_to(source)
         archive = next(
