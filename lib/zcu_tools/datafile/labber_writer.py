@@ -36,11 +36,11 @@ def write_labber(
     promised. cfg identity/version remains native-only metadata.
 
     grouped_layout='common' preserves canonical one-shot grouped v2. Explicit
-    'independent' is only for grouped workflow artifacts with 1D/2D variables:
+    'independent' is for explicitly declared grouped data with 1D/2D variables:
     it uses the existing marker-qualified heterogeneous streaming v1 layout,
     writes all rows and marks the file finalized. The public grouped reader
     retains each variable's axes, values and per-trace timestamps. This is not
-    a canonical single Experiment Result or a format fallback. Unknown options,
+    canonical common-grid output or an automatic format fallback. Unknown options,
     single representation with independent layout, and independent variables
     above rank two raise ValueError before creating the destination.
     """
