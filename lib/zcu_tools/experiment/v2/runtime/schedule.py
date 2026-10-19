@@ -204,12 +204,19 @@ class Schedule(Generic[T_Cfg, T_Env]):
     ) -> bool:
         """Close the scope using Python's exception type, value and traceback.
 
+        Flush the root buffer on normal exit, including a requested stop.
+        Callback errors propagate, but the scope still closes. Skip the flush
+        when the body raises so a callback cannot replace the body exception.
         Suppress KeyboardInterrupt and record interrupted on the shared stop
         signal, preserving buffered data for the caller's partial-result return.
         Do not suppress other exceptions or change their existing outcome.
         """
-        self._is_active = False
-        self._is_closed = True
+        try:
+            if exc is None:
+                self.trigger_update(flush=True)
+        finally:
+            self._is_active = False
+            self._is_closed = True
         if isinstance(exc, KeyboardInterrupt):
             # Let the caller return buffered partial data after a Notebook stop.
             self._mark_interrupted(exc)
