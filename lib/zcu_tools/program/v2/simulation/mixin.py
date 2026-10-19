@@ -1,6 +1,7 @@
 """Single synchronous simulation entry ahead of the original acquisition mixins."""
 
-from inspect import signature
+from collections.abc import Callable
+from inspect import Signature, signature
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -15,6 +16,10 @@ from .soc import SimulationSoc
 
 if TYPE_CHECKING:
     from ..modular import ModularProgramV2
+
+
+# One unbound callable and its metadata, never an acquiring program instance.
+_acquire_signature: tuple[Callable[..., object], Signature] | None = None
 
 
 class SimulationAcquireMixin(ImproveAcquireMixin):
@@ -33,7 +38,13 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             return super()._acquire_configured(soc, *args, **kwargs)
         # Bind against QICK so its positional API and invalid-argument errors
         # remain intact; processing modifiers have already populated extra_args.
-        bound = signature(AcquireMixin.acquire).bind(self, soc, *args, **kwargs)
+        global _acquire_signature
+        acquire = AcquireMixin.acquire
+        cached = _acquire_signature
+        if cached is None or cached[0] is not acquire:
+            cached = (acquire, signature(acquire))
+            _acquire_signature = cached
+        bound = cached[1].bind(self, soc, *args, **kwargs)
         options = dict(bound.arguments)
         del options["self"], options["soc"]
         return self._acquire_integrated(soc, **options)
