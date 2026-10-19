@@ -15,6 +15,7 @@ from .populations import (
 from .readout_batch import (
     ChannelReadout,
     ConditionalSums,
+    PreparedStatistics,
     ReadoutBatch,
     round_statistics,
     sample_traces,
