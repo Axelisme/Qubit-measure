@@ -8,6 +8,7 @@ import numpy as np
 import yaml
 from qtpy.QtWidgets import QDialog
 from zcu_tools.datafile import load_run_data
+from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
@@ -69,18 +70,12 @@ class FTFAcquisitionAdapter(SavingAdapter):
 
 
 def test_ftf_yaml_environment_runs_and_saves_only_public_iq(qapp, tmp_path):
-    path = tmp_path / "environment.py"
-    path.write_text(
-        "from pathlib import Path\nfrom zcu_tools.experiment.ftf import ftf\ndef build_environment():\n    return ftf(Path(__file__).with_name('ftf.yaml'))\n",
-        encoding="utf-8",
-    )
     (tmp_path / "ftf.yaml").write_text(yaml.safe_dump(ftf_document()), encoding="utf-8")
     registry = Registry()
     registry.register("ftf", FTFAcquisitionAdapter)
     old_hook = sys.excepthook
     behavior = MeasureGuiBehavior(
         lambda: (registry, Loader()),
-        simulate=path,
         clean=True,
         project_root=str(tmp_path),
     )
@@ -97,7 +92,9 @@ def test_ftf_yaml_environment_runs_and_saves_only_public_iq(qapp, tmp_path):
     ):
         raise AssertionError("registered FTF run needs actual Window/RPC owners")
     sock = None
+    env = ftf(tmp_path / "ftf.yaml", workers=1, warmup=False)
     try:
+        ctrl.install_soc(env.soc, env.soccfg)
         ctrl.setup_control.new_entry(EntryRequest("offline"))
         ctrl.setup_control.new_point(
             PointCreateRequest("point", "", CommandOrigin("gui"))
@@ -128,7 +125,11 @@ def test_ftf_yaml_environment_runs_and_saves_only_public_iq(qapp, tmp_path):
     finally:
         if sock is not None:
             sock.close()
-        behavior.close(assembly)
+        try:
+            behavior.close(assembly)
+        finally:
+            # The board and its source resources remain caller-owned.
+            env.devices.close_all_devices()
         for dialog in window.findChildren(QDialog):
             dialog.reject()
         window.dispose_control_watches()
