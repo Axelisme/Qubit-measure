@@ -131,6 +131,11 @@ class ResultEntry:
         return self._result_path
 
     @property
+    def predictors_path(self) -> Path | None:
+        """Return the predictor-directory binding without creating it."""
+        return None
+
+    @property
     def database_path(self) -> Path:
         """Return this entry's exact Database directory, not the parent root."""
         return self._database_path
