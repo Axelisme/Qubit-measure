@@ -50,7 +50,14 @@ from ._seeds import persistent_input
 from ._types import members as _members
 from ._types import union_type
 from .fixed_elements import FixedElementsForm
-from .log_points import ExplicitIntegerPoints, IntegerPointsInput, LogIntegerPoints
+from .log_points import (
+    ExplicitIntegerPoints,
+    IntegerPointsInput,
+    LogIntegerPoints,
+    PositiveExplicitIntegerPoints,
+    PositiveIntegerPointsInput,
+    PositiveLogIntegerPoints,
+)
 from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
 
@@ -322,8 +329,20 @@ class Section:
             result.update(
                 {
                     (name,): (
-                        Option("Log", {"kind": "log"}, fields=LogIntegerPoints),
-                        Option("List", {"kind": "list"}, fields=ExplicitIntegerPoints),
+                        Option(
+                            "Log",
+                            {"kind": "log"},
+                            fields=LogIntegerPoints
+                            if node.include_zero
+                            else PositiveLogIntegerPoints,
+                        ),
+                        Option(
+                            "List",
+                            {"kind": "list"},
+                            fields=ExplicitIntegerPoints
+                            if node.include_zero
+                            else PositiveExplicitIntegerPoints,
+                        ),
                     )
                     for name, node in section.tree.items()
                     if isinstance(node, LogPoints)
@@ -380,7 +399,9 @@ class Section:
                 get_args(info.annotation)[0]
             ) != (int,):
                 raise TypeError(f"{(*self.path, name)!r}: LogPoints requires list[int]")
-            return IntegerPointsInput
+            return (
+                IntegerPointsInput if node.include_zero else PositiveIntegerPointsInput
+            )
         if module_specs(info.annotation):
             field = ModuleField(
                 info.annotation,

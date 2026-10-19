@@ -3,6 +3,9 @@
 from copy import deepcopy
 
 import pytest
+from zcu_tools.cfg_model import ConfigBase, LogPoints
+from zcu_tools.gui.form import FormErrors
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
@@ -29,6 +32,51 @@ def test_missing_parameter_rejects_empty_name_or_reason(parameter, reason):
         match="^missing parameters must contain non-empty names and reasons$",
     ):
         MissingParameter(parameter, reason)
+
+
+class IntegerControls(ConfigBase):
+    depths: list[int]
+
+
+class IntegerGui(LookbackGui):
+    cfg_cls = IntegerControls
+
+    def make_form(self):
+        return Form(
+            IntegerControls,
+            {"depths": LogPoints(max=16, points=5, include_zero=False)},
+        )
+
+
+def test_author_integer_points_replaces_the_complete_log_branch_with_a_list(tmp_path):
+    gui = IntegerGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.set_integer_points(("depths",), [7])
+        assert tab.read_field(("depths",)).input == {"kind": "list", "values": [7]}
+        cfg = gui.owner.result()
+        assert not isinstance(cfg, FormErrors), cfg
+        assert cfg.model_dump()["depths"] == [7]
+
+
+def test_author_omitted_integer_points_preserves_unfinished_gui_draft(tmp_path):
+    gui = IntegerGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        gui.owner.write({("depths", "points"): 0})
+        before = deepcopy(tab.read_field(("depths",)).input)
+        tab.set_integer_points(("depths",), None)
+        assert tab.read_field(("depths",)).input == before
+
+
+def test_author_integer_points_reports_owner_errors_and_retains_invalid_list(tmp_path):
+    gui = IntegerGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        with pytest.raises(GuiRpcError, match="Invalid") as raised:
+            tab.set_integer_points(("depths",), [0])
+        assert raised.value.reason == "invalid_cfg"
+        assert tab.read_field(("depths",)).input == {"kind": "list", "values": [0]}
 
 
 def test_author_edits_preserve_defaults(tmp_path):
