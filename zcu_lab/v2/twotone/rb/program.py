@@ -1,9 +1,9 @@
-"""Module and depth-sweep settings shared by reference and interleaved RB."""
+"""Module settings shared by reference and interleaved RB."""
 
 from typing import Annotated
 
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.program.v2 import PulseCfg, ReadoutCfg, ResetCfg, SweepCfg
+from zcu_tools.program.v2 import PulseCfg, ReadoutCfg, ResetCfg
 
 
 class RBModuleCfg(ConfigBase):
@@ -12,9 +12,3 @@ class RBModuleCfg(ConfigBase):
     X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
     X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
     readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
-
-
-class RBSweepCfg(ConfigBase):
-    depth: Annotated[
-        SweepCfg | list[int], FieldMeta(label="Clifford depth", decimals=0)
-    ]
