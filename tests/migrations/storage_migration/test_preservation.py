@@ -94,6 +94,19 @@ def test_writes_overlapping_sources_are_refused(
         for path in root.rglob("*")
         if path.is_file()
     }
+    destinations = (
+        request.results_root / request.name,
+        request.database_root / request.name,
+    )
+    existed = tuple(path.exists() for path in destinations)
+    destination_bytes = tuple(
+        {
+            path.relative_to(target): path.read_bytes()
+            for path in target.rglob("*")
+            if path.is_file()
+        }
+        for target in destinations
+    )
     with pytest.raises(MigrationInputError, match="source"):
         migrate_storage(
             request,
@@ -106,8 +119,18 @@ def test_writes_overlapping_sources_are_refused(
         for path in root.rglob("*")
         if path.is_file()
     } == before
-    assert not (request.results_root / request.name).exists()
-    assert not (request.database_root / request.name).exists()
+    assert tuple(path.exists() for path in destinations) == existed
+    assert (
+        tuple(
+            {
+                path.relative_to(target): path.read_bytes()
+                for path in target.rglob("*")
+                if path.is_file()
+            }
+            for target in destinations
+        )
+        == destination_bytes
+    )
 
 
 @pytest.mark.parametrize("resume", [False, True])
