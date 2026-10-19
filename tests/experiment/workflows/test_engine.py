@@ -31,6 +31,8 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
+
 from ._engine_fakes import START, Cfg, Plan, RecordingBar, Rig, State, Tunables
 
 
@@ -560,7 +562,7 @@ def test_update_journal_failure_keeps_revision_and_fails_idle_run(rig: Rig) -> N
     journal = rig.paths.metadata_root / "journal.jsonl"
     journal.unlink()
     journal.mkdir()
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(DIRECTORY_OPEN_ERROR):
         rig.engine.update_tunables(
             "run",
             Tunables.model_construct(value=2),
@@ -570,7 +572,7 @@ def test_update_journal_failure_keeps_revision_and_fails_idle_run(rig: Rig) -> N
     status = rig.engine.status()
     assert status is not None and status.lifecycle == "failed"
     assert status.revision == 0
-    assert "IsADirectoryError" in str(status.reason)
+    assert DIRECTORY_OPEN_ERROR.__name__ in str(status.reason)
     assert rig.engine.tunables("run").values == {"value": 1}
     assert rig.initialized == []
     with pytest.raises(InvalidRunState):
@@ -798,7 +800,7 @@ def test_commit_journal_failure_does_not_publish_record_or_next_state(rig: Rig) 
     rig.start(step)
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"
-    assert "IsADirectoryError" in str(status.reason)
+    assert DIRECTORY_OPEN_ERROR.__name__ in str(status.reason)
     assert status.committed_seq == 0
     assert rig.engine.records("run") == ()
 

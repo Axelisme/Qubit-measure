@@ -17,6 +17,8 @@ from zcu_tools.resources.entry import (
     workflow_roots,
 )
 
+from tests._filesystem import symlink_or_skip
+
 SAVED_AT = datetime(2026, 10, 6, 0, 30, tzinfo=timezone(timedelta(hours=8)))
 
 
@@ -408,7 +410,7 @@ def test_outputs_reject_resolved_parent_escape_without_publishing(
     (outside / "evidence").write_bytes(b"untouched")
     link = tmp_path / root / "entry" / relative_link
     link.parent.mkdir(parents=True)
-    link.symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(link, outside, target_is_directory=True)
     before = tree_bytes(tmp_path)
     with pytest.raises(ValueError, match="escapes"):
         save_layout.outputs(key)
@@ -536,7 +538,7 @@ def test_workflow_roots_reject_symlink_escape_without_publishing(
     (outside / "evidence").write_bytes(b"untouched")
     link = tmp_path / root / "entry" / relative_link
     link.parent.mkdir(parents=True)
-    link.symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(link, outside, target_is_directory=True)
     before_names = {path.relative_to(tmp_path) for path in tmp_path.rglob("*")}
     before_contents = tree_bytes(tmp_path)
     with pytest.raises(ValueError, match="escapes"):

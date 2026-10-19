@@ -3,7 +3,8 @@
 from collections.abc import Generator, Mapping
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
-from typing import Literal, Self
+from typing import IO, Literal, Self
+from unittest.mock import patch
 
 import h5py
 import numpy as np
@@ -809,8 +810,9 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
     assert snapshot(bound) == before_point
 
 
+@pytest.mark.parametrize("failure_type", [IsADirectoryError, PermissionError])
 def test_accept_ledger_error_propagates_without_point_writes(
-    point: PointView, tmp_path: Path
+    point: PointView, tmp_path: Path, failure_type: type[OSError]
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
@@ -819,8 +821,28 @@ def test_accept_ledger_error_propagates_without_point_writes(
     path = tmp_path / "results" / "entry" / "records" / "ledger.jsonl"
     path.unlink()
     path.mkdir()
-    with pytest.raises(IsADirectoryError):
+    failure = failure_type("ledger cannot be opened")
+    original_open = Path.open
+
+    def open_path(
+        file: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> IO[str] | IO[bytes]:
+        if file == path:
+            raise failure
+        return original_open(file, mode, buffering, encoding, errors, newline)
+
+    # The filesystem reports EISDIR on POSIX and EACCES on Windows.
+    with (
+        patch.object(Path, "open", open_path),
+        pytest.raises(failure_type) as caught,
+    ):
         saved.accept(parameter={"general.description": "candidate"})
+    assert caught.value is failure
     point.refresh()
     assert point.description == "save-time context"
     assert snapshot(point) == before_point

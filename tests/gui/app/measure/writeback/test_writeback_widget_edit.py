@@ -39,6 +39,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
@@ -701,7 +702,7 @@ def test_controller_apply_propagates_unexpected_storage_error(module_host):
     ledger.mkdir()
     try:
         # The application propagates storage failures; the Qt host presents them.
-        with pytest.raises(IsADirectoryError):
+        with pytest.raises(DIRECTORY_OPEN_ERROR):
             ctrl.apply_writeback_for_pane(tab_id, pane)
         assert presenter.calls == []
         assert (
