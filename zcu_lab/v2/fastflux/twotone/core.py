@@ -78,11 +78,19 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
     )
 
     def run(self, config: TwotoneCfg, *, context: RunContext) -> TwoToneResult:
+        """Map qubit spectroscopy versus flux pulse gain.
+
+        After reset, start flux and frequency-swept qubit-probe branches
+        together, then read out after both finish. Return flux gains in a.u.,
+        probe frequencies in MHz and mean complex IQ shaped (gain, frequency).
+        The map locates spectral features; it does not fit a transition or
+        calibrate gain to physical flux.
+        """
+        # Quantize flux gain and probe frequency for their own generators.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
 
-        # uniform in square space
         gains = sweep2array(
             cfg.sweep.gain,
             "gain",
@@ -94,6 +102,7 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
+        # Keep one averaged spectrum per flux gain.
         viewer = context.plots.liveplot_2d(
             "measurement", "Flux Pulse Gain (a.u.)", "Frequency (MHz)"
         )
@@ -103,6 +112,7 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
                 gains, freqs, twotone_signal2real(data)
             ),
         )
+
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.flux_pulse.set_param(
@@ -111,6 +121,8 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
             modules.qub_pulse.set_param(
                 "freq", sweep2param("freq", sched.cfg.sweep.freq)
             )
+
+            # Schedule flux and spectroscopy in parallel, then acquire mean IQ.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -135,6 +147,7 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the projected IQ spectroscopy map without a resonance fit."""
         del options  # This analysis has no configurable options.
         result = source.result
 

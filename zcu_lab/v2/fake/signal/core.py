@@ -35,7 +35,7 @@ def fake_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FakeExp(PersistableExperiment[FakeResult, FakeCfg]):
-    """Hardware-free Gaussian acquisition using explicit operation plots."""
+    """Generate and average a noisy Gaussian spectrum without hardware pulses."""
 
     AXES_SPEC = AxesSpec(
         axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
@@ -46,6 +46,14 @@ class FakeExp(PersistableExperiment[FakeResult, FakeCfg]):
     )
 
     def run(self, config: FakeCfg, *, context: RunContext) -> FakeResult:
+        """Generate a Gaussian centered at 5 MHz on the requested frequency grid.
+
+        Each round adds one complex Gaussian offset shared by the whole trace,
+        then updates the running mean. Return frequencies in MHz and mean
+        complex signals, not a fitted resonance. Cancellation keeps the mean
+        of completed rounds; no acquisition leaves the signal buffer as NaN.
+        """
+        # Prepare a synthetic frequency axis and a live view of its mean magnitude.
         cfg = deepcopy(config)
         freqs = np.linspace(cfg.sweep.start, cfg.sweep.stop, cfg.sweep.expts)
         viewer = context.plots.liveplot_1d(
@@ -55,6 +63,8 @@ class FakeExp(PersistableExperiment[FakeResult, FakeCfg]):
             (len(freqs),),
             on_update=lambda data: viewer.update(freqs, fake_signal2real(data)),
         )
+
+        # Average independent noisy traces, with a cancellable pause between rounds.
         signal_buffer = []
         for _ in range(cfg.rounds):
             if context.cancel_signal.is_set():
@@ -68,6 +78,8 @@ class FakeExp(PersistableExperiment[FakeResult, FakeCfg]):
             signal_buffer.append(raw_signal)
             signals_buffer.set(np.mean(signal_buffer, axis=0))
             context.cancel_signal.event.wait(cfg.round_delay)
+
+        # Publish the last mean even when the requested rounds were interrupted.
         signals_buffer.trigger_update(flush=True)
         return FakeResult(freqs=freqs, signals=signals_buffer.array)
 
@@ -78,6 +90,7 @@ class FakeExp(PersistableExperiment[FakeResult, FakeCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the mean spectrum magnitude; no fit or calibration is inferred."""
         del options
         _, ax = plots.subplots("fit")
         ax.plot(

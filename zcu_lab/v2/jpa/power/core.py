@@ -40,6 +40,8 @@ from zcu_tools.program.v2 import (
 
 @dataclass(frozen=True)
 class PowerResult:
+    """Pump powers in dBm and moment-based GE SNR in acquisition order."""
+
     powers: NDArray[np.float64]
     signals: NDArray[np.float64]
 
@@ -91,6 +93,17 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
     )
 
     def run(self, cfg: PowerCfg, *, context: RunContext) -> PowerResult:
+        """Measure qubit readout SNR versus JPA pump power.
+
+        At each power, reset, select no pulse or a pi pulse, then read out
+        both preparation branches. IQ moments give one real SNR per power,
+        with the configured skew penalty, not an assignment fidelity.
+        Return powers in dBm and SNR in the same acquisition order.
+
+        Interior powers are randomized; endpoints stay in place.
+        ``jpa_rf_dev`` must name the pump device in ``context.devices``.
+        """
+        # 1. Prepare pump powers without imposing a monotonic acquisition order.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         jpa_powers = sweep2array(cfg.sweep.jpa_power, allow_array=True)
@@ -100,6 +113,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             ax.lines[0].set_linestyle("None")
             ax.lines[0].set_marker("o")
 
+        # Show independent points rather than connecting randomized settings.
         viewer = context.plots.liveplot_1d(
             "measurement",
             "Power (dBm)",
@@ -111,9 +125,13 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(jpa_powers, np.abs(data)),
         )
+
+        # 2. Set the external pump power for each host-side point.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
                 set_rf_power(context.devices[step.cfg.jpa_rf_dev], jpa_power)
+
+                # 3. Compare reset-only and pi-prepared readout in one GE sweep.
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (
@@ -135,6 +153,8 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
                         trackers=[tracker],
                     )
                 )
+
+        # 4. Keep SNR paired with the randomized power coordinates.
         signals = signals_buffer.array
 
         return PowerResult(powers=jpa_powers, signals=signals)
@@ -142,6 +162,11 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
     def analyze(
         self, source: RunRecord[PowerCfg, PowerResult], options: None, *, plots: Plots
     ) -> PowerAnalysis:
+        """Plot measured SNR and return the sampled power with peak SNR in dBm.
+
+        Use only ``source`` data, with no fit or interpolation; ``options``
+        is None. All-NaN SNR fails rather than selecting a power.
+        """
         del options
         result = source.result
 
