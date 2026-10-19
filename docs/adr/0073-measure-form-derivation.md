@@ -78,7 +78,10 @@ Module 子欄位唯讀時仍可選 library key。Module 節點本身標唯讀則
 
 FTF roles 的 f1、f2、coupler、mux、tone index 與 tone_count 供驗證、離線 analysis 與 writeback 使用，不屬於只為組 cfg 存在的固定值。這些欄位保留唯讀，初值仍來自 captured group，cfg／result／保存契約不變。
 
-Bath reset freq 的 `tested_reset.pi2_cfg.phase` 是固定的 tomography offset，保留可見唯讀，初值為 90。現有 Template 沒有 nested Hidden 作者入口，且只有這一處需要，不為它新增公開作者 API。`run()` 組 program 時仍明寫 `phase=+90`，並註解固定 tomography offset 的原因。不複製共用 module 型別，也不另建局部 cfg 型別。
+Bath reset freq 的 `tested_reset.pi2_cfg.phase` 移除舊 lock，由 Template 的 `set` 給初值 90，欄位可編輯。
+`run()` 組 program 時使用 cfg 的 phase，不覆寫為固定值。Guide 註明 90 是建議的 tomography offset。
+現有 Template 沒有 nested Hidden／readonly 作者入口，且只有這一處需要，因此不新增 nested metadata API。
+不複製共用 module 型別，也不另建局部 cfg 型別。
 
 缺 Slot 來源時，optional 欄位停用且有效，required 欄位留空且 Invalid。
 沒有 Slot fallback 或 init 模式。需要選來源時，make_form 明寫 if／else。
