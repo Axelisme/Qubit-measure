@@ -12,7 +12,15 @@ from threading import Event, Lock
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    ChannelStatistics,
+    ReadoutWindow,
+    RoundStatistics,
+    SamplingIdentity,
+)
 from zcu_tools.experiment.warmup import EnvironmentWarmup
+from zcu_tools.program.v2.simulation.signals import StatisticsCopier
 from zcu_tools.simulate.adc import (
     ConditionalReadout,
     PiecewiseLinearEnvelope,
@@ -44,6 +52,7 @@ COVERAGE = (
     "multitone_direct",
     "multitone_gate",
     "single_tone_gate",
+    "single_tone_gate_adaptive",
     "single_tone_rwa",
     "floquet_probe_windows",
     "dyson_gain_batch",
@@ -56,6 +65,7 @@ COVERAGE = (
     "readout_decimated",
     "readout_mux",
     "readout_sampled",
+    "statistics_copy",
 )
 
 _lock = Lock()
@@ -121,6 +131,9 @@ def _batch(
 
 
 def _prepare(name: str) -> None:
+    if name == "statistics_copy":
+        _statistics_copy()
+        return
     if name.startswith("readout_"):
         _readout(name)
         return
@@ -150,8 +163,12 @@ def _single_track(name: str) -> None:
         )
     elif name == "single_tone_rwa":
         duration = 200.0
-        gains = np.array([0.5])
-    elif name == "single_tone_gate":
+        # Keep the ordinary window and restore an off-window edge as well.
+        # Nonempty retained graphs pass a bool4 mask to the coefficient builder,
+        # a distinct compiled signature from the default-window None variant.
+        frequencies = np.array([5.0, 4.89])
+        gains = np.array([0.5, 1.0])
+    elif name in ("single_tone_gate", "single_tone_gate_adaptive"):
         duration = 128.0
         times = np.linspace(0.0, duration, 129)
         envelope = EnvelopeSpec(
@@ -190,6 +207,10 @@ def _single_track(name: str) -> None:
             batch, tracks=(prefix, probe), end_ns=np.full(len(gains), duration + 6)
         )
     source = _source()
+    if name == "single_tone_gate_adaptive":
+        model = source.model((0,))
+        model = replace(model, rates_per_ns=model.rates_per_ns * 20_000)
+        source = ModelSource(source.initial_density, lambda _: model)
     if name in ("floquet_low_carrier", "floquet_cf4"):
         # A remote spectator makes spectral construction cheaper than CF4;
         # the narrow spectrum independently exercises the CF4 builder.
@@ -332,6 +353,39 @@ def _readout(name: str) -> None:
                 include_traces=traces,
             )
         )
+
+
+def _statistics_copy() -> None:
+    request = AcquireRequest(
+        "integrated",
+        (2, 4),
+        1,
+        (ReadoutWindow(0, 0, 8, 100.0, (0.0,)),),
+        0,
+        0,
+        "startup",
+        reps=4,
+    )
+    counts = np.array([[1, 3], [2, 2]], dtype=np.int64)
+    sums = np.zeros((2, 1, 2), dtype=np.float64)
+    result = RoundStatistics(
+        counts,
+        (
+            ChannelStatistics(
+                0,
+                sums,
+                np.zeros((2, 1, 2, 2), dtype=np.float64),
+                np.eye(2, dtype=np.float64),
+            ),
+        ),
+        SamplingIdentity(0, (0, 0, 1)),
+    )
+    copier = StatisticsCopier()
+    # Borrowed results can be writable or readonly; Numba specializes on both.
+    for writable in (True, False):
+        counts.setflags(write=writable)
+        sums.setflags(write=writable)
+        copier.copy(request, result)
 
 
 def _joint_gate() -> None:

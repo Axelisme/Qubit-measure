@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone omitted-channel retention
+**Last updated:** 2026-10-19, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone omitted-channel retention
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -21,7 +21,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Fixed-coordinate model records | `NumericModel`, `DriveSource` |
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 
-`Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=6)` owns a
+`Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=None)` owns a
 prepare cache and a separate exact-result memo. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
@@ -60,7 +60,7 @@ tries the next candidate in the following graph.
 | Driven continuous flux | `flux_dop853`, continuous Hamiltonian evaluation from `FluxExpansion`, with baths switching at quantized segment boundaries. |
 | One constant tone, unshared driven input, duration at most 10 us | `single_tone_rwa` → `floquet_period` → `dyson` → `t6`. |
 | Other single constant tone | `dyson` → `single_tone_rwa` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
-| One shaped tone | Try `single_tone_gate` when complete-acquire cold build plus playback is at least 20% cheaper than Sambe. Rejected or unamortized rows try `shaped_sambe`, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
+| One shaped tone | Choose canonical `single_tone_gate` keys in the lowest estimated complete-acquire mixed gate/Sambe cold plan. Rejected or unamortized rows try `shaped_sambe`, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
 | Two constant tones | Try `multitone_rwa` first for distinct ports. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order, cheaper family first. |
 | Shaped two-tone or three-or-more-tone row | `multitone_gate` → `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated carriers with acceptable omitted-channel estimates with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
 
@@ -81,8 +81,8 @@ application and certificates that require their intermediate data.
 | `gate_cache` | Dispatch sends a key-aligned builder mask. Positive durations up to 30 ns first try six phase nodes with two independent probes; failed convergence uses sixteen nodes. Other keys directly use sixteen nodes. Both builders produce four closed-system subsegments with secular Strang dissipation and the same phase-Fourier representation. |
 | `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. |
 | `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. A cached sideband frame extends to missing probe bins without rebuilding the frame or existing certificates. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
-| `single_tone_gate` | Dispatch compares summed canonical-key four-U builds, playback and guard/key work against carrier/shape-domain Sambe construction, period/envelope playback and fractional tails. Estimates use joint dimension, duration, retained drive strength, shape motion and carrier frequency. A 20% cold-cost margin selects this candidate before numerical admission. The kernel requires exactly one smooth real sampled tone and shares RWA, phase-graph pruning and secular split admission with simultaneous gates. Sliced support, nonzero envelope offsets and final sample hold are allowed. Rejection retains Sambe. |
-| `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared RWA admission, coextensive real sampled support, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and a four-way secular split proxy at most 0.01. Builds four joint Hilbert propagators using the same `RWACoefficients.diagonal` window-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
+| `single_tone_gate` | Dispatch compares numerically admitted canonical-key builds and n-step playback against shared spectral-family Sambe construction, subperiod playback, phase contraction, polar iterations and fractional tails. It chooses the cheapest all-Sambe, mixed or all-gate cold plan. Estimates use joint dimension, duration, retained drive strength, shape motion, carrier frequency and actual subdivisions. The kernel requires exactly one smooth real sampled tone and shares RWA, phase-graph pruning and secular split admission with simultaneous gates. Sliced support, nonzero envelope offsets and final sample hold are allowed. Rejection retains Sambe. |
+| `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared real-envelope RWA admission, row-bounded sampled playback including slices and final hold, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and adaptive secular splitting with proxy at most 0.01. Builds n joint Hilbert propagators using the same `RWACoefficients.diagonal` window-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
 | `single_tone_rwa` | After Dyson, single constant rows try a constant rotating-frame Lindbladian built from the shared retained graph, coefficient diagonal and full secular bath. All populations and within-component coherences form a real block of dimension at most 64. Cross-component coherences use small complex exponentials or scalar closed forms. Apply skips only exact-zero cross-block RHS, preserves arbitrary complex residuals and restores both phase endpoints. Admission shares the constant-only omission rule below, the 0.06 rad phase cap and explicit graph-pruning bound. Rejection keeps the original period/Dyson/T6 order. |
 | `multitone_rwa` | Starts with joint-basis Fourier edges satisfying `abs(Ei-Ej±f) < 0.05 GHz`, restores channels with excessive omitted transfer or phase, obtains final-mask-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 16 ns adaptive ceiling for dual constant rows and 4 ns otherwise. Sampled and dual constant admission share iterative omitted one/two-photon retention with single constant RWA, with separate residual-phase and real-block dimension limits. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the interaction picture only for independent, single-tone, nonzero-gain rows. Chains and other ordinary rows use the lab frame. Flux DOP853 has its own chain plan. |
@@ -106,7 +106,8 @@ and subdivided playback retain sequential updates with reusable buffers.
 Fractional tails keep their existing endpoint and bath steps. Power matrices
 are worker-local scratch, not retained prepare-cache products.
 
-The shaped and two-tone cost estimates are fixed before numerical guards.
+The single-tone mixed cold plan uses numerical gate admission before fixing costs.
+Other shaped and two-tone estimates are fixed before numerical guards.
 Timeline workers borrow them without recounting subset reuse. Cache warmth,
 worker width, chunking and apply-call composition do not change these choices.
 Cost coefficients and numerical thresholds live in
@@ -201,7 +202,12 @@ origins retain the ordinary SegmentTable contract.
 ### Covariant RWA gates
 
 The named `single_tone_gate` and `multitone_gate` approximations share the
-four-U builder and D-U-D playback in [kernels/_rwa_gate.py](kernels/_rwa_gate.py).
+adaptive Hilbert builder and D-U-D playback in [kernels/_rwa_gate.py](kernels/_rwa_gate.py).
+Keys already inside the four-step split threshold retain the original fixed-four
+playback loop and single-tone compiled builder. Both families evaluate envelopes
+only over the segment interval, using the same pulse-local offsets, interpolation
+and final sample hold as direct integration. The last DAC sample need not coincide
+with segment end; a quantized segment may end before or after that sample.
 Their numerical guards share the calibrated RWA policy and the
 `RWACoefficients` builder with `multitone_rwa`. All integrators call the same
 `interaction_hamiltonian` assembly. All driven diagonal terms come from that
@@ -220,27 +226,33 @@ RB sequence or the RWA-vs-lab approximation. Strong incompatible cycles fall
 back to ordinary RWA. Shared `phase_graph`, `pruning_bound` and
 `pruning_admitted` are also available to constant-frame algorithms.
 
-Simultaneous gates require every active envelope to be sampled and to
-cover the same complete row support. Complex, partially overlapping and sliced
-supports retain fallback. The four-way secular split uses the existing gate
-proxy `duration**3*Gamma*V**2/16 <= 0.01`, with V the sum of retained joint
+Simultaneous gates require real envelopes and at least one sampled tone;
+constant companions are allowed. Each tone uses its own row-bounded slice,
+offset and final hold; supports need not be coextensive. Complex envelopes
+retain fallback. Secular splitting chooses the least integer n >= 4
+with `duration**3*Gamma*V**2/n**2 <= 0.01`, with V the sum of retained joint
 operator peak strengths. Diagonal shifts commute with the secular dissipator
 and do not enter V. This is calibrated admission, not a strict splitting
-certificate. Each quarter integrates a joint Hilbert propagator at
+certificate. Each equal subsegment integrates a joint Hilbert propagator at
 `rtol=1e-9`, `atol=1e-11`, with a 4 ns ceiling, in an interaction picture.
 Population rates and pure dephasing remain joint and unchanged.
 
 Keys include source/model identity, level, bath arrays, signed ordered carriers,
 ports, gains, envelope identities, offsets, duration, graph policy, budget and
-numerical controls. Only guard-admitted covariance permits reuse without theta
+numerical controls, including the selected subsegment count. Only guard-admitted covariance permits reuse without theta
 or absolute start. Playback uses actual row-start theta and both frame boundary
-rotations. Four U, half-step secular maps and compact active-tone charges are read-only
-owned arrays charged to the existing resident budget. There is no phase grid or global memo.
-Whole-acquire choices are fixed before guards. Warm cache, worker width and
+rotations. The n U, half-step secular maps, per-key counts and compact active-tone
+charges are read-only owned arrays charged to the existing resident budget.
+Batches pad U to their largest n and include that storage in the byte account.
+There is no phase grid or global memo. The count has no numerical cap;
+single-tone cold costs charge the full build duration and n-step playback.
+Whole-acquire choices are fixed before worker classification. Warm cache, worker width and
 chunking do not change simultaneous gates' threshold of 20, above the measured
 3–19-row break-even range. Single-tone gates instead compare cold costs in
-`_shaped_dispatch.py`; a small inventory stays on Sambe even when a matching
-gate is resident. No planner predicts later acquires or recognizes RB labels.
+`_shaped_dispatch.py`. Each physical Sambe family shares one cold spectral build.
+Unsupported keys retain Sambe without charging a rejected gate build to usable
+keys. Small or expensive long-support gate inventories stay on Sambe even when
+a matching gate is resident. No planner predicts later acquires or recognizes RB labels.
 Single-tone covariance and the secular split are approximations relative to
 full-drive Sambe, not exact fidelity certificates. Only cost-selected,
 numerically admitted shaped rows change numerical results.
@@ -387,12 +399,16 @@ Accepted guard products are reused even when only a subset of timelines accepts.
 Before prefix evaluation or numerical guards, dispatch inventories every
 candidate family's prepare keys in the complete WorkPlan geometry. The caller
 keeps intersecting whole resident batches protected, including hits used only
-by a later prefix or suffix. It transfers other residents to an LRU stale queue
-without dropping their ownership. Resident and pending allocations share one
-byte account across all prefix and timeline schedules.
+by a later prefix or suffix. Key and model/family indexes locate those hits
+without scanning historical residents. Other residents stay in the reclaimable
+LRU until capacity is needed. Array bytes and retention charges update only on
+admission and eviction. Each immutable payload wrapper measures its array charge
+once. Resident and pending allocations share one byte account across all prefix
+and timeline schedules.
 
-Workers offer model-only products through a locked collector, never through the
-caller LRU. An accepted offer reclaims pending failed guards and stale residents
+Workers offer model-only products through a locked collector. They never perform
+caller lookups or LRU touches; the collector may remove reclaimable stale
+ownership under its admission lock. An accepted offer reclaims pending failed guards and stale residents
 only when capacity is needed. Failed stale residents yield before ordinary LRU
 residents. An impossible or oversize offer leaves existing ownership unchanged
 and streams without retention. Current whole-batch hits cannot be evicted by
@@ -402,14 +418,19 @@ extensions replace their predecessor's whole charge; rejected extensions grow
 only into idle capacity and retain their low priority.
 
 After each schedule joins, the caller publishes pending products for later
-prefix/suffix lookups. After the evolve pool drains, it restores surviving stale
-residents as older than current work, even on failure or cancellation. Fully
+prefix/suffix lookups. After the evolve pool drains, it releases current protection as newer than
+surviving stale residents, even on failure or cancellation. This visits current
+hits and products only, not the historical stale inventory. Fully
 rejected guard handoffs stay separate from apply bindings and fill only idle
 capacity. Schedule consumes Dispatch's rejected handoff queue on offer, so declined
 or evicted products have no remaining Dispatch owner. Current row, probe-bin,
 domain and budget checks still run on every
-evolve. The unified account bounds retained arrays, not transient builders,
-active nonretained/oversize bindings, input-bound data or process RSS.
+evolve. The unified account bounds retained arrays plus an estimated 4608 metadata bytes
+per whole allocation. The estimate covers Python/NumPy headers, keys and cache
+indexes, with headroom above the measured wide-scan mean of 3998 bytes. It does
+not bound transient builders, active nonretained/oversize bindings, input-bound
+data or process RSS. `PrepareCache.bytes` reports arrays only;
+`PrepareCache.charged_bytes` includes the metadata estimate used for admission.
 
 [PrepareCache](cache.py) namespaces whole model-only payload batches by family,
 whole-source model identity and budget. The zero-level identity must describe the
@@ -429,8 +450,9 @@ raises without a partial result, and cached exceedances still warn per call.
 
 The result LRU charges arrays and metadata up to `min(64 MiB, cache_bytes)` in
 addition to the prepare budget; zero disables both caches. `close()` clears both.
-FTF production uses a 2 GiB unified resident/pending budget, plus at most 64 MiB for
-results. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
+All Engines include the same per-allocation metadata estimate in retention
+charges. FTF production uses a 2 GiB unified resident/pending budget for arrays
+and estimated metadata, plus at most 64 MiB for results. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
 active payload references and ADC preparations are separate allocations. The
 process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
 4 GB ceiling. Numba's compilation cache is independent of the prepare LRU.
@@ -478,7 +500,12 @@ partial results.
 Calls on one Engine serialize. Joblib threading is the only parallel layer;
 kernels are single-threaded and do not open pools. Multi-timeline calls with
 multiple workers create and close a pool per evolve; empty work, one timeline
-and one worker run inline. Cancellation is checked at chunk boundaries.
+and one worker run inline. By default, complete-acquire row density and the
+fraction of cheap gate/no-drive rows select one or six timeline chunks per
+worker. Prepare retains six chunks per worker to spread cold key builds.
+An explicit `chunks_per_worker` fixes both stages. This choice occurs after
+classification and does not change admission, WorkPlan facts or RNG.
+Cancellation is checked at chunk and preparation boundaries, and before return.
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.

@@ -1,6 +1,8 @@
 """Constant two-tone cost routing at the Engine/Kernel boundary."""
 
+from contextlib import closing
 from dataclasses import replace
+from threading import Event
 
 import numpy as np
 import pytest
@@ -9,7 +11,7 @@ from zcu_tools.simulate.evolution.kernel import GuardResult, KernelContext
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetAdmission, FloquetPlan
 
-from ._engine import RecordingKernel, batch, run, track
+from ._engine import RecordingKernel, batch, run, source, track
 from .contract.kernel_suite import synthetic_model
 
 
@@ -49,6 +51,67 @@ def route(batches, *, workers=1, chunks=1, reject=None):
         Engine(workers, 0, chunks_per_worker=chunks, kernels=kernels), src, batches
     )
     return result, attempts
+
+
+def multitone_batch(shaped):
+    envelope = (
+        EnvelopeSpec("sampled", np.array([0.2, 1.0]), np.array([0.0, 20.0]))
+        if shaped
+        else EnvelopeSpec("constant")
+    )
+    pulse = track(1, envelope, duration=20.0)
+    frequencies = (0.1, 0.3) if shaped else (0.1, 0.3, 0.5)
+    return replace(
+        batch(1, duration=20.0),
+        tracks=tuple(
+            replace(pulse, frequency_ghz=np.array([frequency]))
+            for frequency in frequencies
+        ),
+    )
+
+
+@pytest.mark.parametrize("shaped", [False, True])
+@pytest.mark.parametrize(
+    ("optional", "accepts", "expected"),
+    [
+        ("multitone_gate", True, "multitone_gate"),
+        ("multitone_gate", False, "dop853"),
+        ("multitone_rwa", True, "multitone_rwa"),
+        (None, True, "dop853"),
+    ],
+)
+def test_multitone_optional_families_are_independent(
+    shaped, optional, accepts, expected
+):
+    attempts = []
+    kernels = [GuardRecorder("dop853", attempts)]
+    if optional is not None:
+        kernels.insert(0, GuardRecorder(optional, attempts, accepts=accepts))
+    src = source()
+    result = run(Engine(1, 0, kernels=kernels), src, (multitone_batch(shaped),))
+    expected_attempts = [] if optional is None else [(optional, 20.0)]
+    if expected == "dop853":
+        expected_attempts.append(("dop853", 20.0))
+    assert attempts == expected_attempts
+    assert result.paths.segments_by_kernel == {expected: 1}
+    np.testing.assert_array_equal(result.densities[0], src.initial_density)
+
+
+@pytest.mark.parametrize(
+    "optional",
+    [(), ("multitone_gate",), ("multitone_rwa",), ("multitone_gate", "multitone_rwa")],
+)
+def test_multitone_missing_terminal_keeps_required_family_error(optional):
+    attempts = []
+    kernels = tuple(GuardRecorder(name, attempts, accepts=False) for name in optional)
+    with (
+        closing(Engine(1, 0, kernels=kernels)) as engine,
+        pytest.raises(
+            RuntimeError,
+            match=r"segment 0 \(timeline 0, start 0.0 ns\) requires kernel dop853",
+        ),
+    ):
+        engine.evolve(source(), (multitone_batch(False),), cancel=Event())
 
 
 class PlannedFloquet(RecordingKernel):

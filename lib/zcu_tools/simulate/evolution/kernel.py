@@ -6,6 +6,7 @@ opaque prepared payloads; the engine only sees their resident array byte size.
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
 from types import MappingProxyType
 from typing import Protocol
 
@@ -291,6 +292,11 @@ class GuardPreparation:
     keys: NDArray[np.void]
     prepared: Prepared
 
+    @cached_property
+    def nbytes(self) -> int:
+        """Array charge read once for transfer into whole-payload ownership."""
+        return self.prepared.nbytes
+
     def __post_init__(self) -> None:
         keys = self.keys.copy()
         if keys.ndim != 1 or keys.dtype.kind != "V":
@@ -416,6 +422,9 @@ class Kernel(Protocol):
         context shares immutable workload facts with guard and preparation.
         Keys include the model identity and exclude apply-only parameters;
         the exact algorithm determines which parameters belong in each half.
+        Resident inventory calls this before guard on structural candidates.
+        Numerically ineligible rows may use inventory-only identities disjoint
+        from preparable keys. Only guard-accepted rows reach prepare and apply.
         """
         ...
 

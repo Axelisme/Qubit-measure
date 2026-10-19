@@ -15,17 +15,30 @@ from .readout import FTFReadoutConfig
 
 T = TypeVar("T")
 
+_ENVELOPE_FIELDS = fields(PulseEnvelope)
+_BUILTIN_ENVELOPE_LAYOUT = tuple(field.name for field in _ENVELOPE_FIELDS) == (
+    "sample_us",
+    "values",
+)
+_ENVELOPE_FIELD_BYTES = sum(getsizeof(field.name) for field in _ENVELOPE_FIELDS)
+_FLOAT_BYTES = getsizeof(0.0)
+_COMPLEX_BYTES = getsizeof(0j)
+
 
 class EnvelopeEncoder:
-    """Source-scoped byte-bounded LRU of exact immutable envelope encodings.
+    """Source-scoped byte-bounded LRU of immutable envelope SHA256 fingerprints.
 
     encode accepts core-owned immutable PulseEnvelope tuples, retaining a strong
     reference so object identities cannot be recycled while resident. No request
     or borrowed ndarray is retained. max_bytes is adjustable between serialized
     calls; zero disables residency. resident_bytes includes full envelope tuples,
-    numeric objects, encoded bytes, entry metadata and the Python LRU container.
-    Shared objects across entries are conservatively charged again. builds/hits
-    count encodings/reuses cumulatively, including across clear().
+    numeric objects, fingerprint bytes, entry metadata and the Python LRU container.
+    Shared objects across entries are conservatively charged again. Exact builtin
+    PulseEnvelope records with builtin float/complex tuples use arithmetic charges
+    per scalar and tuple occurrence, including shared scalars and empty tuples.
+    This can overestimate ownership and evict earlier, but never underestimates
+    the generic object walk. Other layouts/types retain generic accounting.
+    builds/hits count full-content hashes/reuses cumulatively, even across clear().
     """
 
     def __init__(self, max_bytes: int = 32 * 1024**2) -> None:
@@ -41,13 +54,19 @@ class EnvelopeEncoder:
         self._entry_bytes = 0
 
     def clear(self) -> None:
-        """Release every encoding and envelope, preserving cumulative counters."""
+        """Release every fingerprint and envelope, preserving cumulative counters."""
         self._entries.clear()
         self._entry_bytes = 0
         self.resident_bytes = 0
 
     def encode(self, envelope: PulseEnvelope) -> bytes:
-        """Return the original preparation stream for one immutable envelope."""
+        """Return a content-only 32-byte fingerprint of one immutable envelope.
+
+        SHA256 covers a domain separator and the complete binary stream: envelope
+        type, ndarray types, dtypes, shapes, sample times and complex values.
+        Object identity only selects resident reuse; it never enters the digest.
+        A miss (including disabled residency) serializes and hashes all samples.
+        """
         if self.resident_bytes > self.max_bytes:
             self._trim()
         identity = id(envelope)
@@ -73,11 +92,13 @@ class EnvelopeEncoder:
             frame(array.dtype.str.encode())
             frame(repr(array.shape).encode())
             frame(array.tobytes())
-        encoded = bytes(payload)
+        digest = sha256(b"PulseEnvelopeContent-v1")
+        digest.update(payload)
+        encoded = digest.digest()
         if self.max_bytes == 0:
             return encoded
         size = (
-            _owned_bytes(envelope)
+            _envelope_bytes(envelope)
             + getsizeof(encoded)
             + getsizeof(identity)
             + getsizeof((envelope, encoded, 0))
@@ -111,8 +132,10 @@ def preparation_key(
     which clears the cache before lookup on any generation change. Borrowed C1
     arrays are read on every lookup; no program or array identity is trusted.
     Numeric envelopes use bulk binary encoding rather than per-sample recursion.
-    Optional source-owned encoder reuses only immutable envelope byte streams;
-    omitting it computes the same digest without retaining any encodings.
+    Optional source-owned encoder reuses only immutable envelope fingerprints;
+    omitting it computes the same digest without retaining any envelopes. Each
+    outer occurrence hashes only a domain tag and the 32-byte fingerprint. These
+    keys serve process-local preparation reuse, not replay or disk persistence.
     """
     digest = sha256()
     envelope_encoder = EnvelopeEncoder(0) if encoder is None else encoder
@@ -123,7 +146,8 @@ def preparation_key(
 
     def visit(value: object) -> None:
         if isinstance(value, PulseEnvelope):
-            digest.update(envelope_encoder.encode(value))
+            frame(b"PulseEnvelopeFingerprint-v1")
+            frame(envelope_encoder.encode(value))
             return
         frame(type(value).__qualname__.encode())
         if isinstance(value, np.ndarray):
@@ -209,6 +233,31 @@ class PreparationCache(Generic[T]):
             )
         if not self._entries:
             self.resident_bytes = 0
+
+
+def _envelope_bytes(envelope: PulseEnvelope) -> int:
+    """Charge admitted builtin tuples arithmetically, otherwise walk ownership."""
+    if (
+        not _BUILTIN_ENVELOPE_LAYOUT
+        or type(envelope) is not PulseEnvelope
+        or type(envelope.sample_us) is not tuple
+        or type(envelope.values) is not tuple
+        or not all(type(value) is float for value in envelope.sample_us)
+        or not all(type(value) is complex for value in envelope.values)
+    ):
+        return _owned_bytes(envelope)
+    # Tuple sizes include item pointers. Repeated scalar identities and a shared
+    # empty tuple are charged per occurrence rather than deduplicated, so this
+    # remains an upper bound without a recursive walk or per-scalar getsizeof.
+    return (
+        getsizeof(envelope)
+        + (getsizeof(vars(envelope)) if hasattr(envelope, "__dict__") else 0)
+        + _ENVELOPE_FIELD_BYTES
+        + getsizeof(envelope.sample_us)
+        + len(envelope.sample_us) * _FLOAT_BYTES
+        + getsizeof(envelope.values)
+        + len(envelope.values) * _COMPLEX_BYTES
+    )
 
 
 def _owned_bytes(root: object) -> int:

@@ -52,13 +52,34 @@ def repeated_program(env, case):
             length=QickParam(0.1078125, {"axis": 0.015625}),
             raise_waveform=GaussWaveformCfg(length=0.1, sigma=0.02),
         )
-    if case in ("computed", "dynamic", "branch", "nonblocking"):
+    if case.startswith("computed") or case in ("dynamic", "branch", "nonblocking"):
         cfg.pre_delay = 0.013
         cfg.waveform = ConstWaveformCfg(length=0.1)
     pulse: Module = Pulse("drive", cfg, block_mode=case != "nonblocking")
-    if case == "computed":
+    if case.startswith("computed"):
         shaped = cfg.with_updates(waveform=GaussWaveformCfg(length=0.1, sigma=0.02))
-        pulse = ComputedPulse("gate", val_reg="axis", pulses=[cfg, shaped, cfg])
+        candidates = [cfg, shaped, cfg]
+        if case != "computed":
+            candidates = [
+                cfg,
+                cfg.with_updates(waveform=GaussWaveformCfg(length=0.27, sigma=0.04)),
+                cfg.with_updates(waveform=ConstWaveformCfg(length=0.055)),
+            ]
+        if case == "computed_flat_top":
+            candidates = [
+                cfg.with_updates(
+                    waveform=FlatTopWaveformCfg(
+                        length=length,
+                        raise_waveform=GaussWaveformCfg(length=0.05, sigma=0.01),
+                    )
+                )
+                for length in (0.06, 0.15, 0.23)
+            ]
+        pulse = ComputedPulse(
+            "gate",
+            val_reg="axis" if case == "computed" else "selected",
+            pulses=candidates,
+        )
     elif case == "dynamic":
         cfg.waveform = FlatTopWaveformCfg(
             length=0.1,
@@ -71,14 +92,22 @@ def repeated_program(env, case):
         pulse = Branch(
             "choice", pulse, cfg.build("other"), cfg.build("third"), compare_by="axis"
         )
+    body: list[Module] = [
+        SoftDelay(
+            "before",
+            QickParam(0.017, {"axis": 0.019})
+            if case == "computed_qick_time"
+            else 0.017,
+        ),
+        pulse,
+        SoftDelay("after", 0.009),
+    ]
+    if case.startswith("computed_"):
+        body.insert(0, LoadValue("selection", [2, 0], "inner", "selected"))
+    if case == "computed_tables":
+        body.append(ComputedPulse("second_gate", val_reg="inner", pulses=[cfg, cfg]))
     repeated = Repeat("outer", "count", range_hint=(0, 2)).add_content(
-        Repeat("inner", 2).add_content(
-            [
-                SoftDelay("before", 0.017),
-                pulse,
-                SoftDelay("after", 0.009),
-            ]
-        )
+        Repeat("inner", 2).add_content(body)
     )
     readout = PulseReadoutCfg(
         gen_ch=0,
@@ -140,6 +169,22 @@ def request_digest(request):
             "computed",
             "61e2c12493fa3cc761475eac4587e9817212103ba88f71c234289d990d838cfa",
         ),
+        (
+            "computed_selection",
+            "3240022eff6fb4b38a35122acc0bacec1a5e5aca8359293e94c71ab002a38622",
+        ),
+        (
+            "computed_tables",
+            "4299fe9767ee06e0dee1ac10c5f08819983b791de04f02718b532b910c670258",
+        ),
+        (
+            "computed_qick_time",
+            "6d2b3d2f2cd9daa7d707a44ac13b1fdcf0d09fe9f0575e48c4e6035537a2962a",
+        ),
+        (
+            "computed_flat_top",
+            "f0131f43bad6c34ba461d0ec82b795c5a1f6a364b8829dbc060820d7ec5be3e2",
+        ),
         ("dynamic", "5c8ff7cf8fc0c241104b71511ccc609f209b192d980a95cb0491ee66d1c80f89"),
         ("branch", "43cbdc689aed6890279f10dd2ff84ab66ccfea41d5abd40dec7ab55ef0a2c0a9"),
     ],
@@ -159,11 +204,45 @@ def test_repeated_request_preserves_all_numeric_content(environment, case, expec
             np.testing.assert_array_equal(
                 slot.active, np.asarray([0, 2, 1])[template.points] > outer[1]
             )
+    if case.startswith("computed_"):
+        assert not any(
+            event.source == "gate" for event in request.materialize_point(0).events
+        )
+        for point in (1, 2):
+            gates = [
+                event
+                for event in request.materialize_point(point).events
+                if event.source == "gate"
+            ]
+            for event in gates:
+                # The register changes on every inner iteration, not every point.
+                inner = dict(event.iterations)["inner"]
+                gain = -0.25 if point == 1 else -0.2
+                if case == "computed_flat_top":
+                    assert any(
+                        event.gain == pytest.approx(value, abs=1e-4)
+                        for value in (gain, gain / 2)
+                    )
+                else:
+                    assert event.gain == pytest.approx(gain, abs=1e-4)
+                if case != "computed_flat_top":
+                    assert event.duration_us == pytest.approx(
+                        0.055 if inner == 0 else 0.1, abs=0.003
+                    )
+            if case == "computed_tables":
+                second = [
+                    event
+                    for event in request.materialize_point(point).events
+                    if event.source == "second_gate"
+                ]
+                assert len(second) == len(gates)
+                assert second[0].start_us > gates[0].start_us + gates[0].duration_us
     assert request_digest(request) == expected
 
 
-def test_next_request_reads_current_compiled_pulse_content(environment):
-    prog = repeated_program(environment, "computed")
+@pytest.mark.parametrize("case", ["computed", "computed_selection"])
+def test_next_request_reads_current_compiled_pulse_content(environment, case):
+    prog = repeated_program(environment, case)
     first = build_request(prog, "integrated", environment.soc.binding, 0)
     original = request_digest(first)
     table = prog.envelopes[1]["envs"]

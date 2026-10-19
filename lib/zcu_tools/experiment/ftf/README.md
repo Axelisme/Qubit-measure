@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-19, source-scoped immutable envelope encoding, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission
+**Last updated:** 2026-10-19, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -76,10 +76,12 @@ No frontend timer or status display is installed by this backend API.
 The coverage manifest in `warmup.py` covers shaped carrier families (>9 carriers),
 shaped direct integration, covariant single-tone and simultaneous gate playback,
 Dyson gain batches, constant-tone block RWA, sampled and dual-constant multitone
-RWA, dense Floquet periods, t4 and ADC integrated/decimated/mux responses.
+RWA, dense Floquet periods, t4, ADC integrated/decimated/mux responses and compact
+statistics validation for writable and readonly borrowed arrays.
 Multitone inputs exercise immutable model data and owned mutable Fourier/mask
-working arrays, so admission coverage follows array signatures as well as routes. It does not promise every possible signature
-or kernel. New routes require updating the representative inputs and checking
+working arrays, so admission coverage follows array signatures as well as routes.
+It does not promise every possible signature or kernel. New routes require
+updating the representative inputs and checking
 real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 
 ## Acquisition and numeric composition
@@ -100,15 +102,22 @@ Its `max_bytes` can be adjusted between calls; zero disables residency. The budg
 counts Python containers/keys and whole ndarray allocations, including bases of
 views. Active/caller references are separate from resident budgets. Bounded ADC
 solvers and exact contents also remain source-owned. A separate source-owned
-32 MiB `envelope_encoder` retains the exact SHA256 input stream for immutable
-`PulseEnvelope` objects. Its budget includes retained tuples, numeric objects,
-encoded bytes and Python containers. It reports cumulative `builds`/`hits` and
-`resident_bytes`; `max_bytes` is adjustable between calls and zero disables
+32 MiB `envelope_encoder` retains a domain-separated SHA256 fingerprint for each
+resident immutable `PulseEnvelope`. The full binary content (types, dtypes,
+shapes, sample times and complex values) is hashed once on a miss. Each outer key
+occurrence hashes only a domain tag and the 32-byte fingerprint. Equal content
+produces equal keys with or without an encoder; identities only select resident
+reuse. These keys stay in process-local caches, not replay or disk. The budget
+includes the full retained envelope, numeric objects, fingerprints and Python
+containers. It reports cumulative `builds`/`hits` and `resident_bytes`;
+`max_bytes` is adjustable between calls and zero disables
 residency. The capacity covers the full 101-length Gaussian host-scan working set,
 not just a short scan. Borrowed request arrays are reread on every key lookup.
-Generation changes still invalidate preparations; immutable encodings contain no
-generation data. Source close releases the encodings too. Every round still captures a
-live snapshot and samples the original stream. The binding serializes calls;
+Generation changes still invalidate preparations; immutable fingerprints contain
+no generation data. Eviction or disabled residency recomputes the complete
+fingerprint without changing keys. Source close releases the fingerprints and
+envelopes too. Every round still captures a live snapshot and samples the
+original stream. The binding serializes calls;
 direct author callers must do the same.
 
 `plan_template` accepts optional matching `FTFModelFacts` for shared physical

@@ -17,7 +17,11 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
@@ -162,6 +166,80 @@ def kernel_case():
 
 class TestMultitoneGate(KernelContract):
     pass
+
+
+@pytest.mark.parametrize("duration", [254.0, 256.0])
+@pytest.mark.parametrize("bath_scale", [1.0, 200.0])
+def test_native_sample_support_and_adaptive_split_match_lab_density(
+    kernel_case, duration, bath_scale, monkeypatch
+):
+    from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
+
+    # The finite pulse support, not the last DAC sample, ends playback. A
+    # 254 ns row slices the grid; a 256 ns row holds the final sample.
+    times = np.linspace(0.0, 255.045573, 257)
+    env = EnvelopeSpec(
+        "sampled", np.exp(-0.5 * ((times - 128.0) / 64.0) ** 2).astype(complex), times
+    )
+    table = replace(
+        kernel_case.table,
+        duration_ns=np.full(24, duration),
+        tone_amplitude=np.full((24, 2), 0.5),
+        envelopes=(env,),
+    )
+    src = source()
+    model = src.model((0,))
+    model = replace(
+        model,
+        identity=f"native-pair-bath-{bath_scale}",
+        rates_per_ns=model.rates_per_ns * bath_scale,
+        dephasing_per_ns=model.dephasing_per_ns * bath_scale,
+    )
+    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
+    rows = np.arange(3, dtype=np.int64)
+    intervals = []
+    solve = scipy.integrate.solve_ivp
+
+    def observed(*args, **kwargs):
+        intervals.append(args[1])
+        return solve(*args, **kwargs)
+
+    monkeypatch.setattr(scipy.integrate, "solve_ivp", observed)
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+        kernel = family()
+        assert kernel.guard(table, rows, context).all(), (
+            "native sample endpoints must not veto complete pulse playback"
+        )
+        keys = kernel.prepare_keys(table, rows[:1], context)
+        prepared = kernel.prepare(keys, table, rows[:1], context)
+        if bath_scale == 1.0:
+            assert len(intervals) == 4, "small split proxy keeps the four-step path"
+        else:
+            assert len(intervals) > 4, "large split proxy must refine, not reject"
+        states = np.repeat(src.initial_density[None], len(rows), axis=0)
+        kernel.apply(
+            prepared,
+            np.zeros(3, dtype=np.int64),
+            table,
+            rows,
+            states,
+            ApplyContext(1e-3),
+        )
+        direct = next(k for k in REGISTRY if k.name == "dop853")
+        reference = np.repeat(src.initial_density[None], len(rows), axis=0)
+        direct_keys = direct.prepare_keys(table, rows, context)
+        direct.apply(
+            direct.prepare(direct_keys, table, rows, context),
+            rows,
+            table,
+            rows,
+            reference,
+            ApplyContext(
+                1e-8, DOP853Plan(np.full(3, "lab"), np.full(3, -1, dtype=np.int64))
+            ),
+        )
+    np.testing.assert_allclose(states, reference, atol=1e-2, rtol=0)
 
 
 def test_keys_remove_only_covariant_phase_and_start(kernel_case):

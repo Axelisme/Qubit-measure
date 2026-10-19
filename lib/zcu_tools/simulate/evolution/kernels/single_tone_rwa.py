@@ -310,18 +310,17 @@ class SingleToneRWAKernel:
 
         Duration affects the retained set, not identity within a resolved set.
         Start/phase affect playback only; no input density enters this model-only
-        key. Rows must already satisfy guard before prepare.
+        key. Rows without a retention receive inventory-only keys, disjoint
+        from retained-set keys. Only guard-accepted rows may prepare or apply.
         """
         keys = np.empty(len(rows), dtype="V32")
         retentions = constant_retentions(table, context)
         for index, row in enumerate(rows):
             model = context.source.model(tuple(int(v) for v in table.level[row]))
             retention = retentions.rows[row]
-            if retention is None:
-                raise ValueError("constant RWA keys require single constant carriers")
             identity = (
                 _POLICY,
-                retention.edges,
+                retention.edges if retention is not None else None,
                 model.identity,
                 model.level,
                 context.budget,
@@ -346,8 +345,9 @@ class SingleToneRWAKernel:
     ) -> Prepared:
         """Build immutable block generators aligned with representative keys.
 
-        Raises ValueError for misaligned keys/rows. Arrays are fully charged to
-        nbytes; no density-dependent data enters resident preparation.
+        Raises ValueError for misaligned keys/rows or rows without a retention.
+        Arrays are fully charged to nbytes; no density-dependent data enters
+        resident preparation.
         """
         if len(keys) != len(rows):
             raise ValueError("constant RWA keys and rows must align")
