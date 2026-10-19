@@ -123,6 +123,36 @@ def test_schedule_exit_publishes_throttled_final_data(
     assert sched.outcome.status == ("stopped" if stopped else "completed")
 
 
+@pytest.mark.parametrize("delivery", ["flush", "elapsed"])
+def test_schedule_exit_does_not_repeat_delivered_update(
+    monkeypatch: pytest.MonkeyPatch, delivery: str
+) -> None:
+    now = 100.0
+    updates: list[np.ndarray[Any, Any]] = []
+
+    def render(data: np.ndarray[Any, Any]) -> None:
+        nonlocal now
+        updates.append(data.copy())
+        now += 1.0
+
+    monkeypatch.setattr(time, "time", lambda: now)
+    buffer = SignalBuffer((2,), on_update=render)
+    final = np.array([1.0, 2.0])
+    with Schedule(FlowCfg(), buffer, stop=StopSignal()):
+        buffer.set(np.array([1.0, np.nan]))
+        buffer.set(final)
+        assert len(updates) == 1
+        if delivery == "flush":
+            buffer.trigger_update(flush=True)
+        else:
+            now = 200.0
+            buffer.trigger_update()
+        assert len(updates) == 2
+        np.testing.assert_array_equal(updates[-1], final)
+
+    assert len(updates) == 2, "Schedule exit must not repeat delivered data"
+
+
 @pytest.mark.parametrize("interrupted", [False, True], ids=["exception", "interrupt"])
 def test_schedule_body_exception_is_not_replaced_by_final_callback_failure(
     monkeypatch: pytest.MonkeyPatch, interrupted: bool
