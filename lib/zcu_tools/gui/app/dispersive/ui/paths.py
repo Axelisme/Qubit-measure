@@ -8,7 +8,8 @@ even before any file exists there.
 
 from __future__ import annotations
 
-from zcu_tools.gui.project import ProjectInfo, nearest_existing
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+from zcu_tools.gui.widgets.file_dialog import nearest_existing
 
 
 def raw_onetone_dir(project: ProjectInfo) -> str:

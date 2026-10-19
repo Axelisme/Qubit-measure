@@ -35,7 +35,7 @@ class _FakeOriginator:
 
 def _sample_state() -> AppPersistedState:
     return AppPersistedState(
-        startup=PersistedStartup(chip_name="chip", ip="host", port=1234),
+        startup=PersistedStartup(entry_name="entry", ip="host", port=1234),
         session=PersistedSession(
             tabs=(
                 PersistedTab(

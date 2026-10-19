@@ -46,6 +46,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.analysis.dispersive.models import PreprocessResult
+from zcu_tools.gui.app.analysis_project.project_dialog import ProjectDialog
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.services.viz import (
     SampleArtists,
@@ -58,7 +59,6 @@ from zcu_tools.gui.app.dispersive.services.viz import (
     update_sample_dots,
 )
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .error_messages import friendly_fit_message, friendly_io_message

@@ -32,12 +32,15 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.project import (
+from zcu_tools.gui.app.analysis_project.project import (
     ProjectInfo,
     default_database_root,
     default_result_dir,
 )
-from zcu_tools.gui.result_scope import ResultScope, ResultScopeManager
+from zcu_tools.gui.app.analysis_project.result_scope import (
+    ResultScope,
+    ResultScopeManager,
+)
 
 logger = logging.getLogger(__name__)
 
