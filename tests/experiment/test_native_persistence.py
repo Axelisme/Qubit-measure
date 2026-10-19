@@ -481,7 +481,7 @@ def test_typed_readers_keep_labber_metadata(
     record = RunRecord(
         cfg=NativeCfg(), result=SingleResult(np.array([4000.0]), np.array([1j]))
     )
-    prepared = prepare_run_data(record, spec=SINGLE)
+    prepared = prepare_run_data(record, spec=SINGLE, comment="")
     labber = LabberMetadata(
         comment="original handwritten note",
         tags=["calibration", "offline"],
