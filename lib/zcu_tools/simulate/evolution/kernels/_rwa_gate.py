@@ -12,18 +12,21 @@ from scipy.linalg import expm
 
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
-from ..secular import ModelSource
 from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._secular import coherence_decay, population_generator, split_step
 from ._workload_facts import TableIdentity, envelope_bounds, fixed_flux
 from .multitone_rwa import (
+    MULTITONE_RETENTION_POLICY,
     RWA_POLICY,
     RWACoefficients,
+    RWARetention,
     admit_rows,
     admit_single_rows,
     interaction_hamiltonian,
+    multitone_retention,
+    retained_mask,
     rwa_coefficients,
 )
 
@@ -41,6 +44,12 @@ GATE_POLICY = (
     _MAX_STEP_NS,
     _RTOL,
     _ATOL,
+)
+
+SINGLE_GATE_POLICY = (
+    "single-gate-omission-v1",
+    GATE_POLICY,
+    MULTITONE_RETENTION_POLICY,
 )
 
 
@@ -74,16 +83,24 @@ class GatePrepared:
         )
 
 
-def canonical_key(table: SegmentTable, row: int, source: ModelSource) -> bytes:
+def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> bytes:
     """Hash canonical gate physics, omitting only covariant start and theta.
 
     Model identity, level, bath, ordered carriers, gains, waveform, offsets,
-    duration and graph/integration policy distinguish numerical products.
+    duration, final retained mask and graph/integration policy distinguish products.
     Guard admission is required before using this equivalence for playback.
     """
     count = table.tones[row]
-    model = source.model(tuple(int(v) for v in table.level[row]))
-    digest = sha256(repr((GATE_POLICY, model.identity, model.level)).encode())
+    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    retention = _row_retention(table, row, context)
+    policy = SINGLE_GATE_POLICY if retention is not None else GATE_POLICY
+    digest = sha256(repr((policy, model.identity, model.level)).encode())
+    if retention is not None:
+        digest.update(
+            retained_mask(
+                model, tuple(table.tone_frequency_ghz[row, :count]), retention
+            ).tobytes()
+        )
     # Identity must describe the complete source; explicit bath bytes also make
     # the numerical product's dependence visible in its canonical key.
     for a in (model.energies_ghz, model.rates_per_ns, model.dephasing_per_ns):
@@ -138,14 +155,24 @@ def canonical_keys(table: SegmentTable, context: KernelContext) -> tuple[bytes, 
         _, representatives, inverse = np.unique(
             records, return_index=True, return_inverse=True
         )
-        hashes = [
-            canonical_key(table, int(rows[i]), context.source) for i in representatives
-        ]
+        hashes = [canonical_key(table, int(rows[i]), context) for i in representatives]
         for row, index in zip(rows, inverse, strict=True):
             result[row] = hashes[index]
         return tuple(result)
 
     return context.work_plan.fact(key, build)
+
+
+def _row_retention(
+    table: SegmentTable, row: int, context: KernelContext
+) -> RWARetention | None:
+    """Keep simultaneous gate policy unchanged; resolve only single shaped rows."""
+    if (
+        table.tones[row] == 1
+        and table.envelopes[table.tone_envelope[row, 0]].kind == "sampled"
+    ):
+        return multitone_retention(table, row, context)
+    return None
 
 
 def _row_graph(table: SegmentTable, row: int, context: KernelContext) -> PhaseGraph:
@@ -155,6 +182,7 @@ def _row_graph(table: SegmentTable, row: int, context: KernelContext) -> PhaseGr
         tuple(int(v) for v in table.tone_port[row, :count]),
         tuple(float(v) for v in table.tone_frequency_ghz[row, :count]),
         context.work_plan,
+        _row_retention(table, row, context),
     )
 
 
@@ -376,6 +404,7 @@ def _build_unitaries(
         model,
         tuple(int(v) for v in table.tone_port[row, :count]),
         tuple(float(v) for v in table.tone_frequency_ghz[row, :count]),
+        _row_retention(table, row, context),
     )
     coefficients = RWACoefficients(
         graph.positive,

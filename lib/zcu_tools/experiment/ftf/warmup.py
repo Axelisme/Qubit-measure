@@ -53,6 +53,7 @@ COVERAGE = (
     "multitone_gate",
     "single_tone_gate",
     "single_tone_gate_adaptive",
+    "single_tone_gate_retained",
     "single_tone_rwa",
     "floquet_probe_windows",
     "dyson_gain_batch",
@@ -168,14 +169,23 @@ def _single_track(name: str) -> None:
         # a distinct compiled signature from the default-window None variant.
         frequencies = np.array([5.0, 4.89])
         gains = np.array([0.5, 1.0])
-    elif name in ("single_tone_gate", "single_tone_gate_adaptive"):
+    elif name in (
+        "single_tone_gate",
+        "single_tone_gate_adaptive",
+        "single_tone_gate_retained",
+    ):
         duration = 128.0
         times = np.linspace(0.0, duration, 129)
         envelope = EnvelopeSpec(
             "sampled", np.exp(-0.5 * ((times - 64) / 32) ** 2).astype(complex), times
         )
-        frequencies = np.full(1024, 5.0)
-        gains = np.full(1024, 0.08)
+        # Restored masks select the bool4 coefficient specialization, not
+        # the default-window None variant of ordinary single-tone gates.
+        frequency, gain = {"single_tone_gate_retained": (4.89, 1.0)}.get(
+            name, (5.0, 0.08)
+        )
+        frequencies = np.full(1024, frequency)
+        gains = np.full(1024, gain)
     elif name == "shaped_direct":
         envelope = EnvelopeSpec(
             "sampled",

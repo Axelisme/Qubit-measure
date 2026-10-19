@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-19, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission
+**Last updated:** 2026-10-19, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission, restored single-tone gate signatures
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -74,7 +74,8 @@ around an immediately invoked blocking acquire necessarily includes its wait.
 No frontend timer or status display is installed by this backend API.
 
 The coverage manifest in `warmup.py` covers shaped carrier families (>9 carriers),
-shaped direct integration, covariant single-tone and simultaneous gate playback,
+shaped direct integration, covariant single-tone (including restored-mask
+coefficients) and simultaneous gate playback,
 Dyson gain batches, constant-tone block RWA, sampled and dual-constant multitone
 RWA, dense Floquet periods, t4, ADC integrated/decimated/mux responses and compact
 statistics validation for writable and readonly borrowed arrays.
