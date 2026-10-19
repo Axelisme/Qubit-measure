@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0076 — Device 活動快照與 run 後讀回
 
-**Last updated:** 2026-10-18
+**Last updated:** 2026-10-19，未連線 device 改名與 FakeDevice address 身分
 
 關聯 [[0062]] 的 acquisition capture、[[0067]] 的 Session／State 分工，以及 [[0066]] 的 operation 生命週期。保存權威見 [[0063]]，分層見 [[0072]]。
 
@@ -35,6 +35,12 @@ Dialog Apply、experiment、MCP 與 workflow 經由公開 driver 操作時，都
 不同 driver 的登記與同名 overwrite 契約不變。與 alias 無關的並行 close claims、失敗保留與重試、批次部分成功、成功清理、同名 replacement 保護及鎖外硬體 I/O 仍保留。
 
 顧問於 2026-10-18 細化 register 的拒絕條件。Register 使用既有 close claims，遇到正在 close 的 driver 時在入口 raise，即使原名字已被 drop 或 overwrite。這不新增 registry、鎖或追蹤結構，也不恢復 alias 掃描。`register_device` 的 docstring 寫明此契約。這是顧問對並行 close 邊界的細化，不是使用者原話。
+
+### 未連線 device 改名
+
+使用者於 2026-10-19 裁定：「1可以，2不用」。此裁決採用只允許未連線 device 改名的方案，並明確不自動更新 alias。DeviceDialog 提供改名入口。DeviceService 只接受沒有進行中操作的 `MEMORY_ONLY` row，連線中必須先斷線。同名請求也先檢查這些前置條件，符合後不做任何修改。
+
+名稱沿用建立／連線時接受的範圍，拒絕空字串、全空白和既有名稱衝突，不另加字元語法限制，也不自動刪除前後空白。Owner 同次提交新舊鍵後發布集合變更，live value sources 與後續 preferences 保存使用新名。`MEMORY_ONLY` 沒有已登記 driver，不需要 DeviceManager 換鍵或新的 MCP rename RPC。改名不更新 `aliases.yaml`、已開 tab 或歷史 snapshot、samples、ledger。使用者自行調整 alias，已開 tab 保留固定輸入。
 
 ## FakeDevice 的 address 身分
 
