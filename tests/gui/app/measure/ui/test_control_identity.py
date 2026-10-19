@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
 from zcu_tools.datafile import StoredRun
+from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import RestoredRun
@@ -197,6 +198,10 @@ def control_ui(
     registry.register("loadable", ModalLoadAdapter)
     loader = Loader()
     loader.candidate.register("stoppable", StoppableAdapter)
+    devices = None
+    if getattr(request, "param", None) == "published-device":
+        devices = DeviceManager()
+        devices.register_device("bias", FakeDevice(fast_mode=False))
     ctrl = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,
@@ -205,6 +210,8 @@ def control_ui(
         owner_scheduler=QtOwnerScheduler(),
         project_root=str(tmp_path),
         catalog_loader=loader,
+        # Composition publishes injected simulation devices before UI/RPC use.
+        device_registry=devices,
     )
     ctrl.attach_caretaker(
         create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
@@ -233,6 +240,8 @@ def control_ui(
         client.close()
         remote.stop()
         ctrl.close()
+        if devices is not None:
+            devices.close_all_devices()
         ctrl.abort_shutdown()
         for tid in tuple(ctrl.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
@@ -394,22 +403,10 @@ def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
     assert ui.controller.get_running_tab_id() is None
 
 
+@pytest.mark.parametrize("control_ui", ["published-device"], indirect=True)
 def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
     ui = control_ui
     ui.connect()
-    connected = ui.rpc(
-        "device.connect", name="bias", type_name="FakeDevice", address="none"
-    )
-    assert connected["ok"]
-    # The admitted fake connect publishes terminal before setup can start.
-    assert (
-        ui.rpc(
-            "operation.await",
-            timeout=30,
-            operation_id=connected["result"]["operation_id"],
-        )["result"]["status"]
-        == "finished"
-    )
     snapshot = ui.rpc("device.snapshot", name="bias")
     assert snapshot["ok"], snapshot
     cfg = snapshot["result"]["snapshot"]["info"]
