@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
 import numpy as np
 
+from .telemetry import RoutingCollector
+
 
 @dataclass(frozen=True)
 class FactKey[T]:
@@ -296,6 +298,7 @@ class WorkPlan:
     """
 
     def __init__(self) -> None:
+        self.routing = RoutingCollector()
         self._facts: dict[Hashable, _Resource] = {}
         self._resources: dict[Hashable, _Resource] = {}
         self._carrier_workspace: CarrierWorkspace | None = None

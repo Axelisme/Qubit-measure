@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Mapping, Sequence
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from threading import Event, Lock
 from types import MappingProxyType
@@ -21,6 +21,7 @@ from ._envelope import sample_values
 from ._parallel import execution_pool, native_limit
 from ._validation import integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource
+from .telemetry import FamilyRouting
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
 SEGMENT_NUMERIC_VERSION = "segment-engine-v4"
@@ -211,6 +212,8 @@ class PathDiagnostics:
     max_trace_error: maximum absolute complex trace-minus-one of final
         readout densities; zero for an empty evolve. Report-only, with no
         correction, rejection or readout-specific tolerance comparison.
+    routing: optional family work reports, empty when telemetry is disabled.
+        Timings describe this call only, never the call that populated a cache.
     All mappings default empty, own immutable copies and reject empty names
     or negative counts with ValueError. A point may participate in several
     path classes.
@@ -220,8 +223,26 @@ class PathDiagnostics:
     points_by_class: Mapping[str, int] = field(default_factory=dict)
     exceeded_by_kernel: Mapping[str, int] = field(default_factory=dict)
     max_trace_error: float = 0.0
+    routing: Mapping[str, FamilyRouting] = field(default_factory=dict)
+
+    def for_reuse(self, *, telemetry: bool) -> PathDiagnostics:
+        """Preserve routes but report no kernel calls for an exact-result hit.
+
+        Enabled reports count each logical segment as a cache hit, with zero
+        CPU, rejections and estimated work. Disabled reports have no routing.
+        """
+        return replace(
+            self,
+            routing={
+                name: FamilyRouting(rows=count, cache_hits=count, estimated_cpu_s=0.0)
+                for name, count in self.segments_by_kernel.items()
+            }
+            if telemetry
+            else {},
+        )
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "routing", MappingProxyType(dict(self.routing)))
         if not np.isfinite(self.max_trace_error) or self.max_trace_error < 0:
             raise ValueError("max_trace_error must be finite and nonnegative")
         for name, counts in (
@@ -366,6 +387,7 @@ class Engine:
         *,
         budget: float = 1e-3,
         cancel: Event,
+        telemetry: bool = False,
     ) -> EvolutionResult:
         """Evolve all batches to readout, forwarding per-segment budget to kernels.
 
@@ -373,6 +395,8 @@ class Engine:
         template batches for the acquire. budget: positive absolute population
         and low-four error allowance. cancel: event checked between chunks;
         when set, raises Cancelled, without returning partial results.
+        telemetry enables per-family calling-thread CPU and routing accounting
+        without I/O; False avoids CPU clock reads and returns empty routing.
         Model ValueErrors propagate; numerical failure raises RuntimeError
         naming the point and segment. Results do not depend on chunking or
         worker width except for floating-point rounding. Classification may
@@ -409,7 +433,7 @@ class Engine:
             if key is not None:
                 # Only inventories without cumulative gate candidates use the
                 # raw input key. Their routes are independent of source history.
-                cached = self._cached_result(key, cancel)
+                cached = self._cached_result(key, cancel, telemetry=telemetry)
                 if cached is not None:
                     return cached
             geometry = plan(source, batches)
@@ -419,11 +443,13 @@ class Engine:
                 else 1
             )
             # Drain workers before releasing evolve-local ownership.
-            with closing(create_work_plan(geometry.table, source, budget)) as work_plan:
+            with closing(
+                create_work_plan(geometry.table, source, budget, telemetry=telemetry)
+            ) as work_plan:
                 context = KernelContext(source, budget, work_plan)
                 if key is not None:
                     key = route_key(key, geometry.table, context)
-                    cached = self._cached_result(key, cancel)
+                    cached = self._cached_result(key, cancel, telemetry=telemetry)
                     if cached is not None:
                         return cached
                 kernels = self._kernels
@@ -457,9 +483,11 @@ class Engine:
                 self._memo.add(key, result)
             return result
 
-    def _cached_result(self, key: bytes, cancel: Event) -> EvolutionResult | None:
+    def _cached_result(
+        self, key: bytes, cancel: Event, *, telemetry: bool
+    ) -> EvolutionResult | None:
         """Look up an exact result and preserve cancellation/warning semantics."""
-        cached = self._memo.find(key)
+        cached = self._memo.find(key, telemetry=telemetry)
         if cached is not None:
             if cancel.is_set():
                 raise Cancelled()

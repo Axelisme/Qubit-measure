@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-19, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission, restored single-tone gate signatures, per-round pacing
+**Last updated:** 2026-10-20, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission, restored single-tone gate signatures, per-round pacing and local routing telemetry
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -28,6 +28,45 @@ settings, RNG streams, density, readout or routes. Alternatively set
 `numerics.min_round_duration_s: 0` in the caller-owned YAML. With the default
 `min_round_duration_s=None`, the builder uses the YAML value. Wait for startup
 preparation with `env.wait_ready()` before starting a benchmark timer too.
+
+## Routing telemetry
+
+`numerics.telemetry.enabled` defaults to **True**. Each admitted acquire writes
+one JSON line, including all software rounds and partial work after a failure.
+`numerics.telemetry.directory` defaults to `null`, selecting
+`<project root>/.sim_telemetry/routing-YYYYMMDD.jsonl`. Dates and timestamps use
+UTC. Relative explicit directories resolve at environment startup. The GUI and
+experiment acquisition calls need no changes.
+
+Use `ftf(settings.with_telemetry(enabled=False), min_round_duration_s=0)` for
+profiles and benchmarks. The public settings method returns a copy, disabling
+routing timers and all telemetry I/O without changing the original settings.
+No directory is created. `settings.with_telemetry(enabled=True, directory=Path(...))`
+selects another directory; omitted directory preserves the current setting.
+The YAML form is `numerics: {telemetry: {enabled: false}}`. Routing and
+density/readout results are unchanged bitwise.
+
+Each line contains `timestamp`, `points` (request grid, excluding shots),
+`rounds` (captured attempts), `wall_s` (admitted acquire time including pacing,
+excluding telemetry I/O), `estimated_cost_unit` and `families`. Failed calls
+before a captured request have zero points and empty families. Family values are
+`rows`, `prepare_cpu_s`, `apply_cpu_s`, `actual_cpu_s`, `cache_hits`,
+`rejected_rows`, `estimated_cost` and nullable `estimated_cpu_s`; see the
+[evolution report contract](../../simulate/evolution/README.md#routing-telemetry).
+Rows and hits sum across rounds. Noiseless reuse contributes logical rows and
+cache hits but zero kernel CPU, rejections and estimated work. Actual CPU excludes
+ADC, sampling and routing bookkeeping; wall includes those operations.
+Numeric templates contain no program/experiment identifier, so `experiment` is
+omitted rather than guessed from controls or caller frames.
+
+The writer caps its `routing-*.jsonl` files at **50 MiB**. Before each append it
+deletes oldest files by modification time, breaking ties by filename, until the
+line fits. Today's file can be removed and recreated. Unrelated files remain.
+A filesystem or serialization failure emits at most one warning per environment
+and never aborts acquire, even with warnings configured as errors. Local files
+are gitignored. `tools/analyze_routing_telemetry.py <directory or files...>` reports
+family usage shares, rejection counts, CPU per relative cost unit, and weighted
+`(actual - estimated) / estimated` error where CPU estimates exist.
 
 ## Numeric source
 

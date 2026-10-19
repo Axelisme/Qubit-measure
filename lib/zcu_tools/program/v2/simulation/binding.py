@@ -1,8 +1,11 @@
 """Environment-owned snapshot/execution collaborators and per-call admission."""
 
+import logging
 import math
 import time
+import warnings
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from threading import Lock
 from uuid import uuid4
@@ -42,6 +45,21 @@ class SimulationProvenance:
     identifier: str
     backend_version: str
     rng_version: str
+
+
+@dataclass(frozen=True)
+class SimulationCallbacks:
+    """Optional acquire lifecycle observers, owned by the environment.
+
+    wait_ready: no-argument startup wait after admission, before request creation;
+        errors release admission and propagate. on_end: completed-acquire observer
+        receiving all captured rounds and elapsed admitted wall seconds, including
+        failed rounds/pacing. Its exceptions warn once, without masking execution
+        errors. Both default None and must not reenter acquisition.
+    """
+
+    wait_ready: Callable[[], object] | None = None
+    on_end: Callable[[tuple[RoundRequest, ...], float], None] | None = None
 
 
 class SimulationBinding:
@@ -86,7 +104,7 @@ class SimulationBinding:
         *,
         backend_version: str,
         seed: int | None = None,
-        wait_ready: Callable[[], object] | None = None,
+        callbacks: SimulationCallbacks | None = None,
         min_round_duration_s: float = 0.0,
     ) -> None:
         """Bind synchronous environment callbacks and choose the root seed once.
@@ -98,7 +116,7 @@ class SimulationBinding:
         resources; neither callback should perform QICK averaging or rounding.
         backend_version is an author-defined private implementation version
         string. seed is a nonnegative built-in int, or None for fresh entropy.
-        wait_ready optionally waits for environment startup after admission and
+        callbacks.wait_ready optionally waits for environment startup after admission and
         before consuming sequence or constructing requests. Its result is ignored;
         errors release admission and propagate. It must not reenter acquisition.
 
@@ -106,6 +124,14 @@ class SimulationBinding:
         successful sample_round includes snapshot/execution time and waits only
         for the remainder. Zero (default) disables pacing and clock reads.
         Failures propagate without waiting. Waiting is synchronous, not cancellable.
+
+        callbacks.on_end optionally observes one completed admitted acquire, including
+        failed/partial calls. It receives all captured rounds (possibly empty)
+        and elapsed monotonic seconds since begin, including pacing. It runs
+        before releasing admission and must not reenter. Exceptions emit at most
+        one warning and never mask an acquisition error, even under -W error.
+        callbacks=None supplies no lifecycle hooks. on_end=None avoids
+        acquire-level clock reads and completion notifications.
 
         Raises ValueError for an invalid duration or boolean/non-int/negative seed, and TypeError
         if NumPy returns non-integer entropy. Callback execution is deferred to
@@ -117,9 +143,13 @@ class SimulationBinding:
             raise ValueError("seed must be a nonnegative integer or None")
         if not math.isfinite(min_round_duration_s) or min_round_duration_s < 0:
             raise ValueError("min_round_duration_s must be finite and nonnegative")
+        hooks = SimulationCallbacks() if callbacks is None else callbacks
+        self._on_end = hooks.on_end
+        self._observer_warned = False
+        self._acquire_started = 0.0
         self._min_round_duration_s = min_round_duration_s
         self.envelope_pool = EnvelopePool()
-        self._wait_ready = wait_ready
+        self._wait_ready = hooks.wait_ready
         self.capture_snapshot = capture_snapshot
         self.execute = execute
         entropy = np.random.SeedSequence(seed).entropy
@@ -156,6 +186,8 @@ class SimulationBinding:
         sequence = self._sequence
         self._sequence += 1
         self.rounds = ()
+        if self._on_end is not None:
+            self._acquire_started = time.monotonic()
         return sequence
 
     def end(self) -> None:
@@ -164,8 +196,26 @@ class SimulationBinding:
         The caller must invoke this once in its finally block, after round work
         ends. No replay inputs or callback resources are cleared. Returns None;
         releasing an unlocked admission lock raises RuntimeError.
+        The optional on_end observer runs once, including after failed rounds;
+        observer exceptions cannot mask acquisition failures or leak admission.
         """
-        self._admission.release()
+        try:
+            if self._on_end is not None:
+                self._on_end(self.rounds, time.monotonic() - self._acquire_started)
+        except Exception as error:
+            if not self._observer_warned:
+                self._observer_warned = True
+                logging.getLogger(__name__).exception(
+                    "simulation acquire observer failed"
+                )
+                with suppress(Warning):
+                    warnings.warn(
+                        f"simulation acquire observer failed: {error}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+        finally:
+            self._admission.release()
 
     def sample_round(
         self, request: AcquireRequest, index: int

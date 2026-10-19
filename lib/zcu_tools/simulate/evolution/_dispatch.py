@@ -41,15 +41,21 @@ from .workplan import WorkPlan
 
 
 def create_work_plan(
-    table: SegmentTable, source: ModelSource, budget: float = 1e-3
+    table: SegmentTable,
+    source: ModelSource,
+    budget: float = 1e-3,
+    *,
+    telemetry: bool = False,
 ) -> WorkPlan:
     """Create ownership for the complete evolve before prefix/worker planning.
 
     table is the full immutable geometry and source owns model identity.
     Algorithm-specific group planners populate this plan before workers start;
     budget is the numerical admission budget for cold mixed gate plans.
+    telemetry enables calling-thread CPU accounting before those plans build.
     """
     plan = WorkPlan()
+    plan.routing.enabled = telemetry
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)
@@ -271,11 +277,14 @@ def prepare(
     build. Other families use their ordinary prepare entry point unchanged.
     Keys, representatives, budget and failure semantics follow Kernel.prepare.
     """
-    if isinstance(kernel, GateCacheKernel):
-        duration = keys["duration"]
-        phase_adaptive = (duration > 0) & (duration <= 30.0)
-        return kernel.prepare(keys, table, rows, context, phase_adaptive=phase_adaptive)
-    return kernel.prepare(keys, table, rows, context)
+    with context.work_plan.routing.measure(kernel.name, "prepare"):
+        if isinstance(kernel, GateCacheKernel):
+            duration = keys["duration"]
+            phase_adaptive = (duration > 0) & (duration <= 30.0)
+            return kernel.prepare(
+                keys, table, rows, context, phase_adaptive=phase_adaptive
+            )
+        return kernel.prepare(keys, table, rows, context)
 
 
 class _GuardCacheHits(tuple[PreparedPayload, ...]):
@@ -317,7 +326,8 @@ def _guard_key(
     rows: NDArray[np.int64],
 ) -> _Guarded:
     """Separate consumer handoffs from model-only products with no accepted row."""
-    result = kernel.guard_prepared(table, rows, context)
+    with context.work_plan.routing.measure(kernel.name, "prepare"):
+        result = kernel.guard_prepared(table, rows, context)
     if result is None:
         raise RuntimeError(
             f"kernel {kernel.name} declares guard_builds without a handoff"
@@ -357,11 +367,15 @@ def _guard_cached(
         if not len(covered):
             continue
         selected = rows[covered]
-        result = kernel.admit_prepared(hits[index].prepared, table, selected, context)
+        with context.work_plan.routing.measure(kernel.name, "prepare"):
+            result = kernel.admit_prepared(
+                hits[index].prepared, table, selected, context
+            )
         if result is None:
             continue
         remaining[covered] = False
         accepted = result.accepted
+        context.work_plan.routing.hit(kernel.name, table, selected[accepted])
         results.append(
             _Guarded(
                 selected[accepted],
@@ -540,9 +554,10 @@ class _Classifier:
         namespace = kernel.name, dc.identity, self.budget
         extended: list[PreparedPayload] = []
         for payload in hits:
-            prepared = kernel.extend_prepared(
-                payload.prepared, self.table, self.context
-            )
+            with self.context.work_plan.routing.measure(kernel.name, "prepare"):
+                prepared = kernel.extend_prepared(
+                    payload.prepared, self.table, self.context
+                )
             if prepared is payload.prepared:
                 extended.append(payload)
                 continue
@@ -565,12 +580,14 @@ class _Classifier:
         if kernel.guard_builds:
             results = self.guard_keys(kernel, eligible)
         else:
-            accepted = kernel.guard(self.table, eligible, self.context)
+            with self.context.work_plan.routing.measure(kernel.name, "prepare"):
+                accepted = kernel.guard(self.table, eligible, self.context)
             results = (_Guarded(eligible[accepted], eligible[~accepted], ()),)
         for result in results:
             if result is None:
                 raise RuntimeError("guard job returned no decision")
             self.names[result.rows] = kernel.name
+            self.context.work_plan.routing.reject(kernel.name, len(result.rejected))
             if len(result.rejected):
                 self.rejected.setdefault(
                     kernel.name, np.zeros(len(self.names), dtype=bool)

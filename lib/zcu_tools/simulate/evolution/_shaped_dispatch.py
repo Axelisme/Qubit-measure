@@ -110,7 +110,8 @@ def _cold_key_cost(
         abs(table.tone_amplitude[row, 0]) * peak * 2 * np.linalg.norm(retained, 2)
     )
     kernel = SingleToneGateKernel()
-    admitted = kernel.guard(table, np.array([row], dtype=np.int64), context)[0]
+    with context.work_plan.routing.measure(kernel.name, "prepare"):
+        admitted = kernel.guard(table, np.array([row], dtype=np.int64), context)[0]
     gate = np.inf
     if admitted:
         segments = gate_segments(table, row, context)

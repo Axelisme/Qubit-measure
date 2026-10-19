@@ -1,11 +1,11 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-19，SoC-owned statistics validation certificates and optional round pacing
+**Last updated:** 2026-10-20，SoC-owned statistics validation certificates, optional round pacing and acquire completion observer
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
 and supplies numeric round data to the existing QICK acquisition pipeline.
-`SimulationBinding` optionally accepts a `wait_ready` callback. Admission calls
+`SimulationBinding` optionally accepts `SimulationCallbacks(wait_ready=callback)`. Admission calls
 it before consuming the acquire sequence or constructing a request. Failure
 releases admission and propagates; the environment callback owns any optional
 startup-compilation fallback. External timers must wait at the environment's
@@ -15,6 +15,13 @@ successful round using monotonic wall time, including snapshot and execution.
 It waits only for a positive remainder and propagates failures without waiting.
 Zero disables pacing and clock reads; generic bindings remain unpaced by default.
 The environment builder owns the policy (FTF defaults to 0.2 seconds), not the GUI.
+`SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
+acquire after all software rounds, including partial or failed acquisitions.
+The callback receives captured `RoundRequest` records and admitted wall seconds,
+including pacing. It runs before admission releases. Observer errors warn at
+most once and cannot mask acquisition failures, even under warning-as-error
+filters. An omitted on_end avoids this observer and its acquire-level clocks. FTF uses the
+callback to persist its own local routing reports; program knows no file format.
 Other SoC objects use the original path. Integrated simulation configures the
 compiled program and readouts without serializing DAC/weight arrays for no-op
 transport. Requested uploads still validate int16 envelope and weight dtypes;
