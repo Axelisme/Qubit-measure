@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from math import prod
 
 import numpy as np
+from numba import njit
 from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
@@ -50,6 +51,36 @@ def pack_signals(
     return accumulated, decimated
 
 
+@njit(cache=True, nogil=True)
+def _valid_counts(counts: NDArray[np.int64], states: int, reps: int) -> bool:
+    """Check nonnegative counts and int64 row totals in one C-order pass."""
+    for start in range(0, counts.size, states):
+        total = np.int64(0)
+        for state in range(states):
+            value = counts[start + state]
+            if value < 0:
+                return False
+            # Match NumPy's int64 reduction, including wraparound on overflow.
+            total += value
+        if total != reps:
+            return False
+    return True
+
+
+@njit(cache=True, nogil=True)
+def _sums_validity(values: NDArray[np.float64], reps: int) -> tuple[bool, bool]:
+    """Check finiteness and nearest-even per-shot int64 range in one pass."""
+    finite = True
+    representable = True
+    for value in values:
+        if not np.isfinite(value):
+            finite = False
+        rounded = np.rint(value / reps)
+        if not np.isfinite(rounded) or rounded < -(2.0**63) or rounded >= 2.0**63:
+            representable = False
+    return finite, representable
+
+
 @dataclass(frozen=True, slots=True)
 class _StatisticsContent:
     conditional_shape: tuple[int, ...]
@@ -89,13 +120,17 @@ class StatisticsCopier:
             n for axis, n in enumerate(request.loop_dims) if axis != request.avg_level
         )
         counts = result.state_counts
+        compiled_reps = 0 < request.reps <= np.iinfo(np.int64).max
         if (
             counts.ndim != len(point_dims) + 1
             or counts.shape[:-1] != point_dims
             or counts.shape[-1] < 1
             or counts.dtype != np.int64
-            or np.any(counts < 0)
-            or np.any(counts.sum(axis=-1) != request.reps)
+            or (
+                not _valid_counts(counts.ravel(), counts.shape[-1], request.reps)
+                if compiled_reps
+                else np.any(counts < 0) or np.any(counts.sum(axis=-1) != request.reps)
+            )
         ):
             raise ValueError(
                 "backend state_counts do not match request point layout/reps"
@@ -114,13 +149,27 @@ class StatisticsCopier:
                 ch.sums.shape != shape
                 or ch.conditional_sums.shape != conditional_shape
                 or ch.shot_covariance.shape != (2, 2)
-                or not np.all(np.isfinite(ch.sums))
             ):
                 raise ValueError(
                     f"invalid ADC {window.channel} statistics shape or finite values"
                 )
+            # Exceptional reps/dtypes keep NumPy's original arithmetic semantics.
+            compiled_sums = compiled_reps and ch.sums.dtype == np.float64
+            finite, representable = (
+                _sums_validity(ch.sums.ravel(), request.reps)
+                if compiled_sums
+                else (np.all(np.isfinite(ch.sums)), True)
+            )
+            if not finite:
+                raise ValueError(
+                    f"invalid ADC {window.channel} statistics shape or finite values"
+                )
             self._validate_conditional_statistics(ch)
-            rounded_sums(ch.sums / request.reps)
+            # Static errors precede dynamic range errors, even on a cache miss.
+            if not representable:
+                raise ValueError("ADC sums must be finite and representable as int64")
+            if not compiled_sums:
+                rounded_sums(ch.sums / request.reps)
             channels.append(
                 ChannelStatistics(
                     ch.channel,

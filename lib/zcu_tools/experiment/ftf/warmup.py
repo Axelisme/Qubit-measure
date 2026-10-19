@@ -12,7 +12,15 @@ from threading import Event, Lock
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    ChannelStatistics,
+    ReadoutWindow,
+    RoundStatistics,
+    SamplingIdentity,
+)
 from zcu_tools.experiment.warmup import EnvironmentWarmup
+from zcu_tools.program.v2.simulation.signals import StatisticsCopier
 from zcu_tools.simulate.adc import (
     ConditionalReadout,
     PiecewiseLinearEnvelope,
@@ -55,6 +63,7 @@ COVERAGE = (
     "readout_decimated",
     "readout_mux",
     "readout_sampled",
+    "statistics_copy",
 )
 
 _lock = Lock()
@@ -120,6 +129,9 @@ def _batch(
 
 
 def _prepare(name: str) -> None:
+    if name == "statistics_copy":
+        _statistics_copy()
+        return
     if name.startswith("readout_"):
         _readout(name)
         return
@@ -329,6 +341,39 @@ def _readout(name: str) -> None:
                 include_traces=traces,
             )
         )
+
+
+def _statistics_copy() -> None:
+    request = AcquireRequest(
+        "integrated",
+        (2, 4),
+        1,
+        (ReadoutWindow(0, 0, 8, 100.0, (0.0,)),),
+        0,
+        0,
+        "startup",
+        reps=4,
+    )
+    counts = np.array([[1, 3], [2, 2]], dtype=np.int64)
+    sums = np.zeros((2, 1, 2), dtype=np.float64)
+    result = RoundStatistics(
+        counts,
+        (
+            ChannelStatistics(
+                0,
+                sums,
+                np.zeros((2, 1, 2, 2), dtype=np.float64),
+                np.eye(2, dtype=np.float64),
+            ),
+        ),
+        SamplingIdentity(0, (0, 0, 1)),
+    )
+    copier = StatisticsCopier()
+    # Borrowed results can be writable or readonly; Numba specializes on both.
+    for writable in (True, False):
+        counts.setflags(write=writable)
+        sums.setflags(write=writable)
+        copier.copy(request, result)
 
 
 def _joint_gate() -> None:
