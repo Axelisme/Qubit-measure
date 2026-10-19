@@ -110,6 +110,20 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         *,
         context: RunContext,
     ) -> LenRabiResult:
+        """Measure Rabi oscillations versus pulse length with raw single-shot IQ.
+
+        At each host-side length, apply optional reset, the qubit pulse, then
+        readout for cfg.shots repetitions in one round. Return rounded lengths
+        in us and complex IQ shaped (Nlength, shots), not averaged populations.
+        Later analysis jointly fits Rabi dynamics and readout distributions.
+
+        Only const and flat_top waveforms are supported. cfg supplies distinct
+        finite G/E centers and a positive finite radius for the live preview.
+        Acquisition requires exactly one readout channel and raises on an
+        unexpected shot-buffer shape.
+        """
+
+        # Set up one raw-shot cloud per length without changing the caller cfg.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         if cfg.rounds != 1:
@@ -135,6 +149,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         )
         expected_shape = (len(lengths), cfg.shots)
 
+        # Preview classified populations while keeping raw IQ as the result.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
             for line, label in zip(
@@ -169,6 +184,8 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             for length, step in sched.scan("length", lengths.tolist()):
                 modules = step.cfg.modules
                 modules.qub_pulse.set_param("length", length)
+
+                # Acquire one length at a time to bound the board raw-buffer size.
                 program = (
                     step.prog_builder(soc, soccfg)
                     .add_reset("reset", modules.reset)
@@ -182,6 +199,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                     step.set_stop()
                     break
 
+                # Write a full shot cloud only after this point finishes.
                 raw_iq = raw_shots_to_signal(program)
                 expected_point_shape = (cfg.shots,)
                 if raw_iq.shape != expected_point_shape:
@@ -190,6 +208,8 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                         f"expected {expected_point_shape}, got {raw_iq.shape}"
                     )
                 buffer[step].set(raw_iq)
+
+        # Completed rows survive cancellation; unacquired lengths remain NaN.
         signals = buffer.array
         update_view(signals)
 
