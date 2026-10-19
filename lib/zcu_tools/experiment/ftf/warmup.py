@@ -161,7 +161,11 @@ def _single_track(name: str) -> None:
         )
     elif name == "single_tone_rwa":
         duration = 200.0
-        gains = np.array([0.5])
+        # Keep the ordinary window and restore an off-window edge as well.
+        # Nonempty retained graphs pass a bool4 mask to the coefficient builder,
+        # a distinct compiled signature from the default-window None variant.
+        frequencies = np.array([5.0, 4.89])
+        gains = np.array([0.5, 1.0])
     elif name == "single_tone_gate":
         duration = 128.0
         times = np.linspace(0.0, duration, 129)
