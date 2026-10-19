@@ -12,10 +12,15 @@ class IntegerPlan(cfg_model.ConfigBase):
     other: float = 1
 
 
-def make_state(maximum: int = 128, points: int = 9):
+def make_state(maximum: int = 128, points: int = 9, *, include_zero: bool = True):
     env = FormEnv()
     form = Form(
-        IntegerPlan, {"depths": cfg_model.LogPoints(max=maximum, points=points)}
+        IntegerPlan,
+        {
+            "depths": cfg_model.LogPoints(
+                max=maximum, points=points, include_zero=include_zero
+            )
+        },
     )
     return form, FormState(form.default_input(env)), env
 
@@ -108,6 +113,49 @@ def test_native_list_constraints_apply_after_lowering_not_to_input_model():
     )
     state = FormState(form.default_input(env))
     assert cfg_result(form, state, env).depths == [0, 1, 2, 3]
+
+
+@pytest.mark.parametrize(
+    ("maximum", "points", "expected"),
+    [
+        (256, 9, [1, 2, 4, 8, 16, 32, 64, 128, 256]),
+        (3, 9, [1, 2, 3]),
+        (9, 4, [1, 2, 4, 9]),
+        (1, 1, [1]),
+        (1, 9, [1]),
+    ],
+)
+def test_positive_log_points_lower_without_zero_and_project_unique_count(
+    maximum, points, expected
+):
+    form, state, env = make_state(maximum, points, include_zero=False)
+    authored = state.input.to_json()
+    assert cfg_result(form, state, env).depths == expected
+    assert state.preview(env).values[("depths", "points")] == len(expected)
+    assert state.input.to_json() == authored
+
+
+def test_positive_log_list_conversion_preserves_policy_and_allows_list_singleton():
+    form, state, env = make_state(3, 9, include_zero=False)
+    state.select(("depths",), {"kind": "list"}, env)
+    assert cfg_result(form, state, env).depths == [1, 2, 3]
+    state.write({("depths", "values"): [7]}, env)
+    assert cfg_result(form, state, env).depths == [7]
+    state.select(("depths",), {"kind": "log"}, env)
+    assert isinstance(state.result(env), FormErrors)
+    state.write({("depths", "points"): 2}, env)
+    assert cfg_result(form, state, env).depths == [1, 7]
+    state.select(("depths",), {"kind": "list"}, env)
+    assert cfg_result(form, state, env).depths == [1, 7]
+
+
+def test_positive_inputs_reject_zero_and_requests_that_cannot_keep_both_endpoints():
+    _, state, env = make_state(3, 9, include_zero=False)
+    state.write({("depths",): {"kind": "list", "values": [0, 1]}}, env)
+    assert isinstance(state.result(env), FormErrors)
+    for maximum, points in ((0, 2), (7, 1), (1, 0)):
+        _, state, env = make_state(maximum, points, include_zero=False)
+        assert isinstance(state.result(env), FormErrors)
 
 
 def test_plain_integer_list_remains_a_whole_leaf():
