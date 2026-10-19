@@ -131,6 +131,27 @@ def load_run_data(source: Path, *, preserve_unknown: bool = False) -> StoredRun:
         )
 
 
+def read_run_metadata(source: Path) -> RunMetadata:
+    """Read and close native metadata/cfg without reading measurement arrays.
+
+    Return historical RunMetadata, including unknown times and completion.
+    Validate the header and metadata/cfg envelopes with load_run_data semantics:
+    invalid values raise located ValueError (including existing FormatError
+    subtypes), and I/O errors propagate. Known metadata nodes must be local.
+    This does not validate the data payload or prove a run is loadable, complete
+    or suitable for analysis. No ledger, registry or live devices are consulted.
+    """
+    with h5.File(source, "r") as file:
+        try:
+            version = _validate_header(file, source)
+            metadata, _cfg = read_metadata(file, source, minor_version=version.minor)
+        except ValueError as error:
+            if isinstance(error, FormatError):
+                raise
+            raise ValueError(f"{source}: {error}") from error
+        return metadata
+
+
 _LABBER_METADATA = TypeAdapter(LabberMetadata)
 
 
