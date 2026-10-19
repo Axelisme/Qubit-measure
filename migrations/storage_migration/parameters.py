@@ -22,6 +22,7 @@ from .models import (
     KeyRule,
     MigrationMapping,
 )
+from .params_json import convert_params_json, reconcile_params_meta
 from .paths import contained_path, validate_segment
 from .state import MigrationSession, clear_pending, record_pending
 
@@ -210,6 +211,7 @@ def _convert_context(
             else entry.new_point(label)
         )
     _map_parameters(session, source, target, values, mapping, view)
+    reconcile_params_meta(session, source, view)
     convert_module_cfg(
         session,
         entry=entry,
@@ -236,6 +238,7 @@ def convert_parameters(
     destination_root = session.manifest.report.destination.result_path
     if entry is not None and not session.dry_run:
         _seed_components(entry, mapping)
+    convert_params_json(session, entry, mapping)
     sources = sorted(source_root.glob("*/meta_info.json"))
     root_meta = source_root / "meta_info.json"
     if root_meta.is_file():
