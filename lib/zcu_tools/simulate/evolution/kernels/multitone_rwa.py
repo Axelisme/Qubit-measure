@@ -11,10 +11,16 @@ from numpy.typing import NDArray
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
-from ..workplan import FactKey
+from ..workplan import FactKey, WorkPlan
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
-from ._workload_facts import envelope_bounds, fixed_flux, packed_segments
+from ._workload_facts import (
+    envelope_bounds,
+    fixed_flux,
+    packed_model,
+    packed_segments,
+    quadrature_norms,
+)
 
 # Calibrated on 128--512 ns Gaussian simultaneous gates in the 16-level
 # joint model: 50 MHz edges + 4 ns ceiling gave <= 1.76e-3 population change
@@ -477,11 +483,11 @@ def _retained_norm(
         (
             "multitone-rwa-retained-norm",
             RWA_POLICY,
-            None if retention is None else retention.edges,
+            ADAPTIVE_RWA_POLICY,
             model.identity,
             model.level,
             port,
-            frequency,
+            retained_mask(model, (frequency,), retention).tobytes(),
         ),
         float,
     )
@@ -687,7 +693,7 @@ def _admit_rows(
         phase = 0.0
         for tone, env in enumerate(envs):
             port = int(table.tone_port[row, tone])
-            drive = model.drives[port]
+            norms = quadrature_norms(model, port, context.work_plan)
             retained = _retained_norm(
                 model,
                 port,
@@ -701,10 +707,7 @@ def _admit_rows(
             ratio += (
                 abs(table.tone_amplitude[row, tone])
                 * bounds.peaks[env]
-                * (
-                    np.linalg.norm(drive.in_phase_ghz, 2)
-                    + np.linalg.norm(drive.quadrature_ghz, 2)
-                )
+                * (norms.in_phase + norms.quadrature)
                 / frequencies[tone]
             )
         phase_limit = (
@@ -715,6 +718,29 @@ def _admit_rows(
             and 2 * np.pi * table.duration_ns[row] * phase <= phase_limit
         )
     return accepted
+
+
+def retained_mask(
+    model: SecularModel,
+    frequencies: tuple[float, ...],
+    retention: RWARetention | None = None,
+) -> NDArray[np.bool_]:
+    """Return the exact final (tones,signs,M,M) Fourier-edge mask.
+
+    Start with each signed 50 MHz window and union all adaptively restored
+    positive edges and their adjoints. Equal masks permit graph sharing, but
+    never sharing of frequency-dependent virtual diagonals or row admission.
+    Misaligned retained sets raise ValueError. The caller owns the result.
+    """
+    mask = _window_mask(model.energies_ghz, np.array(frequencies))
+    if retention is not None:
+        if len(retention.edges) != len(frequencies):
+            raise ValueError("RWA retention must align with carriers")
+        for tone, edges in enumerate(retention.edges):
+            for i, j in edges:
+                mask[tone, 0, i, j] = True
+                mask[tone, 1, j, i] = True
+    return mask
 
 
 def retained_edges(
@@ -746,6 +772,8 @@ def rwa_coefficients(
     ports: tuple[int, ...],
     frequencies: tuple[float, ...],
     retention: RWARetention | None = None,
+    *,
+    work_plan: WorkPlan | None = None,
 ) -> RWACoefficients:
     """Build all joint drive coefficients for ordered signed carriers.
 
@@ -757,6 +785,7 @@ def rwa_coefficients(
     retention overrides the initial window in both Fourier terms and virtual
     diagonal, so restored edges are never counted twice. Graph pruning may
     replace the Fourier operators but retains the diagonal.
+    work_plan shares only model packing, never frequency-dependent diagonals.
     Returned arrays are owned and mutable. Misaligned/empty carriers raise
     ValueError; ports must index the supplied model's validated drives.
     """
@@ -764,15 +793,9 @@ def rwa_coefficients(
         raise ValueError("RWA coefficients require aligned nonempty carriers")
     retained = None
     if retention is not None and any(retention.edges):
-        if len(retention.edges) != len(ports):
-            raise ValueError("RWA retention must align with carriers")
-        retained = _window_mask(model.energies_ghz, np.array(frequencies))
-        for tone, edges in enumerate(retention.edges):
-            for i, j in edges:
-                retained[tone, 0, i, j] = True
-                retained[tone, 1, j, i] = True
+        retained = retained_mask(model, frequencies, retention)
     positive, negative, diagonal = _coefficients(
-        pack_models([model]),
+        pack_models([model]) if work_plan is None else packed_model(model, work_plan),
         np.array([ports], dtype=np.int64),
         np.array([frequencies], dtype=np.float64),
         np.array([len(ports)], dtype=np.int64),

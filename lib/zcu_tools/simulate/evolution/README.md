@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention and shared omission admission
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -307,8 +307,16 @@ The registry kernels retain no evolve-local data.
 ### Facts and algorithm groups
 
 WorkPlan publishes each lazy fact once, including concurrent requests for the
-same key. WorkPlan copies builder results and publishes read-only arrays. The
-shared facts include envelope peak/slope/real flags, period split rates, packed
+same key. WorkPlan copies builder results and publishes read-only arrays.
+RWA graphs share only within a complete model identity, level, ordered ports,
+policy and exact final Fourier-edge mask, including adaptively restored edges.
+The same mask can serve different carriers, but Stark diagonals remain carrier-local.
+Constant RWA guards and preparation reuse graph topology and labels. Port quadrature
+norms, packed models and full secular baths are also evolve-local facts. RWA uses
+the sum of quadrature norms; shaped admission uses their maximum. Fact hits never
+replace row-local fixed-flux, budget, strength, phase, omission, pruning or dimension
+checks. Resident constant-RWA payloads still own and charge their array copies.
+The shared facts include envelope peak/slope/real flags, period split rates, packed
 DOP853 samples, covariant gate admissions and small Floquet probe-bin certificate
 extensions. Gate admission facts use full canonical physics, budget and numerical
 policies. Each row still checks its own continuous flux support before borrowing an

@@ -7,11 +7,10 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
-from scipy.sparse.csgraph import connected_components
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ._rwa_graph import RWA_GRAPH_POLICY, phase_graph, pruning_admitted
-from ._secular import secular_operators
+from ._workload_facts import rwa_topology, secular_bath
 from .multitone_rwa import (
     ADAPTIVE_RWA_POLICY,
     RWACoefficients,
@@ -118,7 +117,9 @@ def _build(
         float(table.tone_frequency_ghz[row, 0]),
     )
     graph = phase_graph(model, (port,), (frequency,), context.work_plan, retention)
-    original = rwa_coefficients(model, (port,), (frequency,), retention)
+    original = rwa_coefficients(
+        model, (port,), (frequency,), retention, work_plan=context.work_plan
+    )
     coefficients = RWACoefficients(
         graph.positive,
         graph.positive.conj().transpose(0, 2, 1).copy(),
@@ -129,22 +130,15 @@ def _build(
     h = np.diag(energies).astype(np.complex128) + interaction_hamiltonian(
         0.0, energies, coefficients, np.array([complex(table.tone_amplitude[row, 0])])
     )
-    _, labels = connected_components(
-        np.abs(graph.positive[0]) + np.abs(graph.positive[0].T), directed=False
-    )
-    components = tuple(np.flatnonzero(labels == label) for label in sorted(set(labels)))
-    # All populations and within-component coherences are closed under the
-    # full secular population bath. Cross-component coherences close separately.
-    coords = [(i, i, 0) for i in range(len(energies))]
-    for i in range(len(energies)):
-        for j in range(i + 1, len(energies)):
-            if labels[i] == labels[j]:
-                coords.extend(((i, j, 1), (i, j, 2)))
-    a, b, kind = np.array(coords, dtype=np.int64).T.copy()
-    population, decay = secular_operators(model)
-    generator = _generator(h, population, decay, a, b, kind)
+    topology = rwa_topology(graph, context.work_plan)
+    # Resident payloads own and charge their arrays even when facts are shared.
+    components = tuple(component.copy() for component in topology.components)
+    a, b, kind = (v.copy() for v in (topology.a, topology.b, topology.kind))
+    bath = secular_bath(model, context.work_plan)
+    decay = bath.decay.copy()
+    generator = _generator(h, bath.population, decay, a, b, kind)
     charges = graph.charges[:, 0].copy()
-    labels = labels.astype(np.int64)
+    labels = topology.labels.copy()
     for array in (h, decay, generator, a, b, kind, labels, charges, *components):
         array.setflags(write=False)
     return _Block(h, decay, generator, a, b, kind, components, labels, charges)
@@ -304,11 +298,8 @@ class SingleToneRWAKernel:
             )
             # Keep the advertised small-block route out of dense full-space
             # exponentials on strongly connected large joint models.
-            _, labels = connected_components(
-                np.abs(graph.positive[0]) + np.abs(graph.positive[0].T), directed=False
-            )
-            sizes = np.bincount(labels)
-            accepted[index] &= int(np.sum(sizes**2)) <= _MAX_BLOCK_DIMENSION
+            topology = rwa_topology(graph, context.work_plan)
+            accepted[index] &= len(topology.a) <= _MAX_BLOCK_DIMENSION
         return accepted
 
     def prepare_keys(
