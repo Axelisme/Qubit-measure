@@ -46,6 +46,26 @@ def test_log_points_lower_to_rounded_unique_integer_list(maximum, points, expect
     assert state.input.to_json() == authored
 
 
+@pytest.mark.parametrize(("maximum", "expected"), [(128, [0, 128]), (1, [0, 1]), (0, [0])])
+def test_two_points_keep_zero_and_the_configured_maximum(maximum, expected):
+    form, state, env = make_state(maximum, 2)
+    assert cfg_result(form, state, env).depths == expected
+
+
+@pytest.mark.parametrize("maximum", [0, 128])
+def test_fewer_than_two_requested_points_are_invalid_even_for_zero_maximum(maximum):
+    _, state, env = make_state(maximum, 1)
+    assert isinstance(state.result(env), FormErrors)
+
+
+def test_single_value_list_to_log_installs_invalid_draft_without_inventing_points():
+    _, state, env = make_state()
+    state.write({("depths",): {"kind": "list", "values": [5]}}, env)
+    state.select(("depths",), {"kind": "log"}, env)
+    assert state.input.data["depths"] == {"kind": "log", "max": 5, "points": 1}
+    assert isinstance(state.result(env), FormErrors)
+
+
 def test_log_list_conversion_evaluates_only_participants_and_uses_actual_count():
     form, state, env = make_state(3, 9)
     state.write({("other",): {"expr": "1 / 0"}}, env)
@@ -81,7 +101,9 @@ class ConstrainedIntegerPlan(cfg_model.ConfigBase):
 
 def test_native_list_constraints_apply_after_lowering_not_to_input_model():
     env = FormEnv()
-    form = Form(ConstrainedIntegerPlan, {"depths": cfg_model.LogPoints(max=3, points=9)})
+    form = Form(
+        ConstrainedIntegerPlan, {"depths": cfg_model.LogPoints(max=3, points=9)}
+    )
     state = FormState(form.default_input(env))
     assert cfg_result(form, state, env).depths == [0, 1, 2, 3]
 
