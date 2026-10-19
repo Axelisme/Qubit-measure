@@ -96,7 +96,9 @@ def _validated_capabilities(value: object, adapter_name: str) -> AdapterCapabili
     return value
 
 
-class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
+class BaseAdapter(
+    ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams, T_PostAnalyzeResult]
+):
     """Shared implementation for experiment adapters.
 
     Concrete adapters subclass this and fill in the experiment-specific knowledge
@@ -104,9 +106,12 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     ``get_analyze_params``/``analyze``). Run delegation and persistence payload
     preparation are provided here once.
 
-    The class is generic over the four experiment types. Adapters without analysis
-    omit the last two parameters (PEP 696 defaults fill in ``NoAnalysisResult`` /
-    ``NoAnalyzeParams``) and inherit the raising no-op analysis below; they declare
+    The first four generic parameters describe the experiment's cfg, result,
+    analysis result and analysis params. The optional fifth parameter types the
+    post-analysis writeback result and defaults to ``NoAnalysisResult``.
+    Adapters without analysis omit the analysis parameters (PEP 696 defaults fill
+    in ``NoAnalysisResult`` / ``NoAnalyzeParams``) and inherit the raising no-op
+    analysis below; they declare
     ``capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)`` so the
     framework never routes analysis to them.
 

@@ -478,6 +478,8 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         g_signals, e_signals = signals
         g_center, e_center = primary.g_center, primary.e_center
         fig, raw_axes = plots.subplots("post", nrows=2, ncols=2, figsize=(8, 8))
+        # tolerated(cast): Native 2x2 subplots return Axes | object ndarray;
+        # the array type encodes neither this shape nor its Axes elements.
         ((ax1, ax4), (ax2, ax3)) = cast(
             "tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes
         )
