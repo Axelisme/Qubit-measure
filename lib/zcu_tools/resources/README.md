@@ -1,10 +1,11 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-20，entry dispersive 與 T1 curve 格式檔
+**Last updated:** 2026-10-20，entry dispersive、T1 curve 與 predictor JSON 格式 owner
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
+- `predictor_file.py` 擁有 `zcu.predictor` v1 JSON 的具名讀寫。它依模型名稱使用 simulate 的 nullable 參數型別，驗證欄名、有限數值與來源 metadata。完整性與物理約束由 `params.build_predictor()` 驗證。它不讀 component、alias 或舊 `params.json`。
 - `simulation_replay.py` owns opt-in private FTF input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit
@@ -28,7 +29,7 @@ SyncFile 與舊 CSV SampleTable 已退休。現行樣本歷史使用 JSONL，舊
 
 `dispersive_file.py` 擁有 `zcu.dispersive` v1，公開 `DispersiveFile`、`DispersiveParams`、`PlotTransitions` 與 `load_dispersive_file`／`save_dispersive_file`。`t1_curve_file.py` 擁有 `zcu.t1-curve` v1，公開 `T1CurveFile`、`T1CurveParams`、`T1NoiseParams` 與 `load_t1_curve_file`／`save_t1_curve_file`。兩者共用 `analysis_source.AnalysisSource`。Resources root 不 re-export 這些名稱。
 
-兩種 JSON 都必須含 `format`、嚴格整數 `version: 1`、`params` 與 `source`。Envelope 與 source 不接受額外欄位。`source.run_id` 與 `source.created_at` 必填，未知寫 null。Run ID 是非空字串。Created_at 只接受含時區的 ISO 8601 字串，讀寫保留原文，不改成 UTC，也不補目前時間。
+兩種 JSON 都必須含 `format`、嚴格整數 `version: 1`、`params` 與 `source`。Envelope 與 source 不接受額外欄位。`source.run_id` 與 `source.created_at` 必填，未知寫 null。Run ID 是非空字串。Created_at 只接受 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`。日期須為有效的 extended calendar date，分隔字元須為大寫 `T`，小數秒可有一至六位。Basic、week-date、ordinal、其他分隔字元、無時區與無效日期時間都拒絕。讀寫共用驗證並保留原文，不改成 UTC，也不補目前時間。
 
 Dispersive 的 `params.g` 與 `params.bare_rf` 是 GHz，可省略或 null。`params.plot_transitions.r_f` 是 GHz 的 resonator seed，可省略或 null。其餘 transition keys 保留原始 JsonValue，不解釋躍遷名稱。T1 的 `params.params` 保存 `Q_cap`、`x_qp`、`Q_ind` 與 `Temp`。前三者無量綱，Temp 是 K。整個 noise params 可省略或 null；個別欄位也可省略或 null。已知數值須有限，拒絕 bool 和數字字串。
 

@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-20，未支援檔原樣位置、完整備份與可續跑發布
+**Last updated:** 2026-10-20，未支援檔原樣位置、完整備份、可續跑發布與分析來源時間
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
@@ -12,8 +12,8 @@
 - `preservation.py` 在首次備份及 entry 建立前預檢所有原樣目的，resume 在 checkpoint／report 寫入前再檢查。新格式保留檔／目錄、來源路由互撞、目的既有檔及祖先／後代佔用都會列出來源與目的並停止。不覆寫、不改名、不認領任意既有檔。只有同 manifest 的發布且 hash 一致才可重用；prepared publication 的既有復原協定不變。
 - `params.json` 以本次建立的唯一 qubit component 為對象，找不到唯一對應就整份 pending。Converter 先將原文區塊與 metadata 存入 setup 的 `component.ext.legacy_params`，再建 points，讓 points 繼承完整 YAML。根層與各 point 的 meta_info 值優先，params 只補缺；衝突保留 meta_info 值，並報告兩來源與 pending。
 - `fluxdep_fit` 寫入 entry 的 `predictors/<component名>.json`，不寫 component fit 欄位，也不複製到 points。Predictor 格式 owner 是 `resources.predictor_file`。此 converter 在該 owner API 可用前直接寫契約規定的 JSON。檔案使用 `format=zcu.predictor`、整數 `version=1`，params 的欄名與有限數值遵循 simulate Params.from_mapping，完整性與物理限制交給 build_predictor。
-- 舊 EJ/EC/EL fit 寫 `model=fluxonium`、`flux_bias=0.0`，`flux_int` 只作 alignment，不寫 predictor。舊 owner 未定義的 transmon 或明示 model fit 保持 pending。predictor 單位只讀 params 根層或 fit 的明示 `flux_unit`。兩處都沒有時才可用 `assume_flux_unit`，報告標「假設單位」。未提供假設，或明示值衝突、不合法時，單位寫 null 並列 pending。meta_info 不能作 predictor 單位證據，也不換算數字。`source.run_id` 固定 null；`source.created_at` 只接受可證實且含時區的 ISO 8601，否則 null 並列 pending。這三個 nullable 欄位仍必須存在；報告保留備份內原文定位。
-- `dispersive` 與 `fluxdep_fit.plot_transitions` 經 resources owner 寫入 entry 的 `dispersive/<component名>.json`，`t1_curve_fit` 寫入 `t1_curve/<component名>.json`。只有 transition seed 時也產生 dispersive 檔，不補 g 或 bare_rf。兩檔保留缺項、null 與 active T1 名稱的差異，source 時間只採各自 section 的含時區 timestamp。無法驗證的內容保持 located pending，原文、未知欄位與 metadata 仍留在 setup ext 並由 points 繼承。Parameters 未完成時 resume 經 owner load 比對欄位存在性與內容，衝突就拒絕；完成後保留使用者編輯。Dry-run 列出相同檔案但不寫入。
+- 舊 EJ/EC/EL fit 寫 `model=fluxonium`、`flux_bias=0.0`，`flux_int` 只作 alignment，不寫 predictor。舊 owner 未定義的 transmon 或明示 model fit 保持 pending。predictor 單位只讀 params 根層或 fit 的明示 `flux_unit`。兩處都沒有時才可用 `assume_flux_unit`，報告標「假設單位」。未提供假設，或明示值衝突、不合法時，單位寫 null 並列 pending。meta_info 不能作 predictor 單位證據，也不換算數字。`source.run_id` 固定 null；`source.created_at` 由公開 `proven_created_at` 重用 `resources.analysis_source.AnalysisSource` 驗證，只接受有效的 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`，小數秒為一至六位，接受時保留原文。其他形式或無效日期時間回傳 None，寫 null 並列 pending。這三個 nullable 欄位仍必須存在；報告保留備份內原文定位。
+- `dispersive` 與 `fluxdep_fit.plot_transitions` 經 resources owner 寫入 entry 的 `dispersive/<component名>.json`，`t1_curve_fit` 寫入 `t1_curve/<component名>.json`。只有 transition seed 時也產生 dispersive 檔，不補 g 或 bare_rf。兩檔保留缺項、null 與 active T1 名稱的差異，source 時間只採各自 section 的 timestamp，沿用上述窄形式與原文保真規則。無法驗證的內容保持 located pending，原文、未知欄位與 metadata 仍留在 setup ext 並由 points 繼承。Parameters 未完成時 resume 經 owner load 比對欄位存在性與內容，衝突就拒絕；完成後保留使用者編輯。Dry-run 列出相同檔案但不寫入。
 - Parameters 與 data 可分開執行。第二部分明確 resume 同一 manifest，不合併任意既有條目。完成的 setup／point 仍可編輯；resume 驗證當前文件，不恢復舊值。
 - Legacy evidence 1.x 的 params 與來源稽核使用本 package 的 `LegacyParameterSnapshot`、
   `LegacyParameterSource`、`LegacyCloneOrigin`。Wire shape 不變，完整 raw evidence 留在 manifest。

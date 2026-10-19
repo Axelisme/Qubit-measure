@@ -137,15 +137,89 @@ def test_save_revalidates_and_retains_existing_file_on_invalid_input(
 
 
 @pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
-def test_owner_preserves_proven_source_text(tmp_path: Path, kind: str) -> None:
+@pytest.mark.parametrize(
+    "created_at",
+    [
+        "2026-10-20T08:00Z",
+        "2026-10-20T08:00:00Z",
+        "2026-10-20T08:00:00.1Z",
+        "2026-10-20T08:00:00.123456Z",
+        "2026-10-20T16:00+08:00",
+        "2026-10-20T16:00:00+08:00",
+        "2026-10-20T01:30:00.123456-06:30",
+        "2026-10-20T08:00:00+00:00",
+    ],
+)
+def test_owner_preserves_proven_source_text(
+    tmp_path: Path, kind: str, created_at: str
+) -> None:
     owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
     raw = document(kind)
     raw["source"] = {
         "run_id": "historical-run",
-        "created_at": "2020-07-07T16:30:00+08:00",
+        "created_at": created_at,
     }
     file = tmp_path / "fit.json"
     file.write_text(json.dumps(raw), encoding="utf-8")
     loaded = getattr(owner, f"load_{kind}_file")(file)
     getattr(owner, f"save_{kind}_file")(file, loaded)
+    assert loaded.source.created_at == created_at
     assert json.loads(file.read_text(encoding="utf-8"))["source"] == raw["source"]
+
+
+@pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
+@pytest.mark.parametrize("operation", ["load", "save"])
+@pytest.mark.parametrize(
+    "created_at",
+    [
+        "20261020T08:00:00Z",
+        "2026-W43-2T08:00:00Z",
+        "2026W432T08:00:00Z",
+        "2026-293T08:00:00Z",
+        "2026-10-20t08:00:00Z",
+        "2026-10-20X08:00:00Z",
+        "2026-10-20 08:00:00Z",
+        "2026-10-20T08:00:00",
+        "2026-10-20T08:00:00z",
+        "2026-02-30T08:00:00Z",
+        "2026-10-20T24:00:00Z",
+        "2026-10-20T08:60:00Z",
+        "2026-10-20T08:00:60Z",
+        "2026-10-20T080000Z",
+        "2026-10-20T08Z",
+        "2026-10-20T08:00.1Z",
+        "2026-10-20T08:00:00,1Z",
+        "2026-10-20T08:00:00.1234567Z",
+        "2026-10-20T08:00:00+0800",
+        "2026-10-20T08:00:00+08",
+        "2026-10-20T08:00:00+08:00:00",
+        "2026-10-20T08:00:00+08:60",
+        "2026-10-20T08:00:00+24:00",
+        "2026-10-20T08:00:00Z\n",
+    ],
+)
+def test_owner_rejects_unproven_created_at_on_load_and_save(
+    tmp_path: Path, kind: str, operation: str, created_at: str
+) -> None:
+    owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
+    file = tmp_path / "fit.json"
+    raw = document(kind)
+    file.write_text(json.dumps(raw), encoding="utf-8")
+    load = getattr(owner, f"load_{kind}_file")
+    save = getattr(owner, f"save_{kind}_file")
+    valid = load(file)
+    before = file.read_bytes()
+    if operation == "load":
+        raw["source"] = {"run_id": None, "created_at": created_at}
+        file.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(ValueError, match="created_at"):
+            load(file)
+    else:
+        invalid = valid.model_copy(
+            update={
+                "source": valid.source.model_copy(update={"created_at": created_at})
+            }
+        )
+        with pytest.raises(ValueError, match="created_at"):
+            save(file, invalid)
+        assert file.read_bytes() == before

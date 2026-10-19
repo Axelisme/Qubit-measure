@@ -15,7 +15,6 @@ from zcu_tools.experiment import (
     native_schemas,
 )
 
-from zcu_lab.v2.fake.signal import core as fake_signal
 from zcu_lab.v2.fastflux.distortion.acc_phase import (
     core as fastflux_distortion_acc_phase,
 )
@@ -177,7 +176,6 @@ def _declaration(
 # import of GUI definitions, mutable registry or kind registration occurs here.
 # Changes to this declaration surface also bump the concrete mapping revisions.
 MIGRATION_EXPERIMENTS = (
-    _declaration(fake_signal.FakeExp.AXES_SPEC),
     _declaration(fastflux_distortion_acc_phase.AccPhaseExp.AXES_SPEC),
     _declaration(fastflux_distortion_freq.FreqExp.AXES_SPEC),
     _declaration(fastflux_distortion_phase.PhaseExp.AXES_SPEC),
