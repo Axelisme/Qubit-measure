@@ -205,8 +205,13 @@ PY
    Q、R、J 是已確認的實際 component 名。缺 R 或 J 的實體對應時，相關欄位列 pending，不新增虛構元件。
    未列出的 key 原文保全並列 pending；歷史 key 全表在 [storage_mapping.py](../migrations/storage_mapping.py)。
 
-2. **單位照抄，不換算。** 頻率 MHz、時間 us、能量 GHz。磁通數字必須有同一份 meta 明寫的單位：`flux_unit` 管 `cur_A` 與 `flx_*`，`jpa_flux_unit` 管 `best_jpa_flux`。
-   沒有明寫單位時，使用者可以宣告一個假設單位（本專案的資料用 `mA`）。用假設單位寫入的每個值，在報告標「假設單位」。使用者沒有宣告時，數字不寫入，列 pending。
+2. **單位照抄，不換算。** 頻率 MHz、時間 us、能量 GHz。`flux_unit` 管 `cur_A` 與 `flx_*`，`jpa_flux_unit` 管 `best_jpa_flux`。磁通數字依序取單位：
+   1. 同一份 meta 明寫的單位。
+   2. entry 已知的明寫單位：根層 meta_info 的單位；沒有時用 `params.json` 根層的 `flux_unit`。
+   3. 使用者宣告的假設單位（本專案的資料用 `mA`），報告標「假設單位」。
+   4. 以上都沒有：數字不寫入，列 pending。
+
+   明寫的單位互相衝突時列 pending，不擇一。報告記下實際採用的是哪份檔的單位。
 
 3. **params 原文 → `legacy_params`。** `params.json` 的每個區塊連同內含 metadata 原文寫進 `components.<Q>.ext.legacy_params.<區塊名>`。
    第 5 步轉成格式檔的區塊也照樣保留原文。`project`、`name`、`schema_version` 等識別資料也原文保留，不冒充 entry UUID。
@@ -262,7 +267,7 @@ metadata:
 | `fluxdep_fit.flux_half`、`flux_period` | `params.flux_half`、`params.flux_period`，不換算 |
 | （舊 predictor 的預設） | `params.flux_bias: 0.0` |
 | `fluxdep_fit.flux_int` | 不寫入；它只用於舊 alignment，原文留在 `legacy_params` |
-| params 根層 `flux_unit` 或 `fluxdep_fit.flux_unit` | `flux_unit`。只有一處時用該值；兩處相同時用該值；都沒有或衝突時用使用者宣告的假設單位並標「假設單位」，沒有宣告就寫 `null` 並列 pending |
+| params 根層 `flux_unit` 或 `fluxdep_fit.flux_unit` | `flux_unit`。只有一處時用該值；兩處相同時用該值；兩處衝突時寫 `null` 並列 pending；兩處都沒有時用使用者宣告的假設單位並標「假設單位」，沒有宣告就寫 `null` 並列 pending |
 | `fluxdep_fit.timestamp` | `source.created_at`，規則見上 |
 
 `cur_A` 這類欄名、meta_info 的單位、目前裝置的單位都不能當 predictor 的單位證據。
@@ -339,7 +344,8 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 1. 刪除 `general.entry_id`，因為目前的 point loader 不接受這個欄位。setup 的 UUID 保持不變。
 2. `general.created_at` 改成剛印出的時間，也就是新 point 的建立時間。
 3. 套用 `exps/<sub>/meta_info.json`：用第 4 步的對照表，point meta 有的值覆蓋 setup 繼承的值。
-4. point meta 的 `flux_unit` 與 setup 不同時，移除從 setup 繼承的 `flx_half`、`flx_int`、`flx_period` 及其 metadata，只寫 point meta 有單位證據的數字。同一個 point 裡的數字和單位必須來自同一份 meta。
+4. 單位依第 4 步的順序決定。point meta 沒寫單位時，沿用從 setup 繼承的單位，報告記「unit from root meta_info.json」。
+   point meta 寫了與 setup 不同的單位時，移除從 setup 繼承的 `flx_half`、`flx_int`、`flx_period` 及其 metadata，只留 point meta 自己的數字，不讓 setup 的數字配上 point 的單位。
 
 完成條件：每個 `exps/<sub>` 對應一個 point，各自有完整 components、metadata 與正確的 flux 單位。
 `entry.list_points()` 只列出 `point.yaml`、`module_cfg.yaml` 兩檔都在的目錄，所以另外用 `find "$NEW_R/points" -mindepth 1 -maxdepth 2` 檢查未完成的骨架。
