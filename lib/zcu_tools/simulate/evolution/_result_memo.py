@@ -141,14 +141,20 @@ class ResultMemo:
         self._entries: OrderedDict[bytes, tuple[EvolutionResult, int]] = OrderedDict()
         self._bytes = 0
 
-    def find(self, key: bytes) -> EvolutionResult | None:
-        """Touch a matching entry and return its owned copy, or None on miss."""
+    def find(self, key: bytes, *, telemetry: bool = False) -> EvolutionResult | None:
+        """Return one owned copy, with optional zero-CPU exact-hit routing.
+
+        Telemetry is per lookup, not part of the stored numeric result. Disabled
+        lookups retain no routing work; neither mode adds another array copy.
+        """
         entry = self._entries.get(key)
         if entry is None:
             return None
         self._entries.move_to_end(key)
         result, _ = entry
-        return EvolutionResult(result.points, result.densities, result.paths)
+        return EvolutionResult(
+            result.points, result.densities, result.paths.for_reuse(telemetry=telemetry)
+        )
 
     def add(self, key: bytes, result: EvolutionResult) -> None:
         """Copy and admit a successful result if its full charge fits the LRU."""
@@ -161,7 +167,9 @@ class ResultMemo:
         while self._bytes + size > self._limit:
             _, (_, evicted_size) = self._entries.popitem(last=False)
             self._bytes -= evicted_size
-        stored = EvolutionResult(result.points, result.densities, result.paths)
+        stored = EvolutionResult(
+            result.points, result.densities, result.paths.for_reuse(telemetry=False)
+        )
         self._entries[key] = stored, size
         self._bytes += size
 

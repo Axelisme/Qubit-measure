@@ -224,7 +224,9 @@ class Schedule:
         for key in payload.keys:
             if key in key_positions:
                 eligible[key_positions[key]] = True
-        return _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+        binding = _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+        self.context.work_plan.routing.hit(entry.kernel.name, self.table, binding.rows)
+        return binding
 
     def _admit_gain_builds(
         self,
@@ -301,14 +303,17 @@ class Schedule:
                     overlap = model.eigenvectors.conj().T @ dc.eigenvectors
                     initial = overlap @ initial @ overlap.conj().T
                 initial.setflags(write=False)
-                payload = binding.kernel.bind_input(
-                    binding.payload.prepared,
-                    key,
-                    self.table,
-                    rows,
-                    initial,
-                    self.context,
-                )
+                with self.context.work_plan.routing.measure(
+                    binding.kernel.name, "prepare"
+                ):
+                    payload = binding.kernel.bind_input(
+                        binding.payload.prepared,
+                        key,
+                        self.table,
+                        rows,
+                        initial,
+                        self.context,
+                    )
                 if payload is not None:
                     bound.append(
                         _Binding(
@@ -419,6 +424,9 @@ class Schedule:
         self, output: NDArray[np.complex128], exceeded: Counter[str]
     ) -> PathDiagnostics:
         """Count suffix work plus actual prefix paths once per adopting timeline."""
+        self.context.work_plan.routing.planned(
+            self.table, self.dispatch.names, self.dispatch.costs
+        )
         paths = dispatch_diagnostics(self.table, self.dispatch.names)
         segments = Counter(paths.segments_by_kernel)
         points = {
@@ -443,6 +451,7 @@ class Schedule:
             {name: len(timelines) for name, timelines in points.items()},
             exceeded,
             float(np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))),
+            routing=self.context.work_plan.routing.snapshot(segments),
         )
 
     def resolve_deferred(
@@ -493,6 +502,7 @@ class Schedule:
         # Workers write disjoint row slices; only the caller reads all names
         # after the pool joins. Entries and bindings never read this array.
         self.dispatch.names[rows] = dispatch.names[rows]
+        self.dispatch.costs[rows] = dispatch.costs[rows]
         return bindings, dispatch
 
     def chunk(
@@ -668,16 +678,21 @@ class _Chunk:
         # neither chain expansion nor a second density copy.
         states = self.states[state_slots]
         try:
-            exceeded = binding.kernel.apply(
-                binding.payload.prepared,
-                self.key[rows],
-                self.table,
-                rows,
-                states,
-                ApplyContext(
-                    self.schedule.budget, binding.plan, self.schedule.context.work_plan
-                ),
-            )
+            with self.schedule.context.work_plan.routing.measure(
+                binding.kernel.name, "apply"
+            ):
+                exceeded = binding.kernel.apply(
+                    binding.payload.prepared,
+                    self.key[rows],
+                    self.table,
+                    rows,
+                    states,
+                    ApplyContext(
+                        self.schedule.budget,
+                        binding.plan,
+                        self.schedule.context.work_plan,
+                    ),
+                )
         except RuntimeError as error:
             raise RuntimeError(
                 f"point {self.schedule.geometry.points[self.points[slots[0]]]} segment {rows[0]}: {error}"

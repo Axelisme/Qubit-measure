@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, documented dispatch contracts and shared Floquet policies, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone and single shaped-gate omitted-channel retention, close-carrier multitone admission
+**Last updated:** 2026-10-20, documented dispatch contracts and shared Floquet policies, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone and single shaped-gate omitted-channel retention, close-carrier multitone admission and optional routing CPU reports
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -13,7 +13,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 
 | Purpose | Exports |
 | --- | --- |
-| Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
+| Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
 | Engine model source | `ModelSource`, `SecularModel`, `SecularDrive` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
 | Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec` |
@@ -38,6 +38,30 @@ The environment explicitly converts them to populations, then calls ADC's
 normalization and sampling tools. Evolution neither imports ADC nor produces
 I/Q. ADC owns its probability tolerance and readout sums; see the
 [ADC README](../adc/README.md).
+
+## Routing telemetry
+
+`Engine.evolve(..., telemetry=True)` adds immutable `FamilyRouting` values to
+`result.paths.routing`. The default is False, with no thread CPU clock reads and
+an empty mapping. Evolution never writes files. Telemetry does not change guards,
+routes, cache admission, densities or cancellation.
+
+Each family reports logical segment `rows`, `prepare_cpu_s`, `apply_cpu_s`,
+`actual_cpu_s` (their sum), `cache_hits`, `rejected_rows`, `estimated_cost` and
+nullable `estimated_cpu_s`. Calling-thread CPU measures guards/certificates,
+prepare, cached admission, extension, input binding and apply, in the thread
+performing each call. It excludes geometry, dispatch bookkeeping, ADC and I/O.
+Rejections count actual numerical guard refusals, not cost-based skips or planner
+feasibility probes. Cache hits count persistent preparation consumers once per
+physical segment; a shared prefix executes once although logical rows include
+all adopting timelines. Exact-result hits report logical rows as cache hits,
+with zero CPU, rejected rows and estimated work, never replayed timings.
+
+`estimated_cost` uses **relative scheduling units**, not seconds. The existing
+constant two-tone plan supplies seconds estimates for selected Floquet/DOP853
+rows. Other rows have `estimated_cpu_s=None`; mixed-plan totals are not assigned
+to a single family. Costs and CPU describe physical execution, so prefix costs
+are counted once. A family with only rejected work can have zero selected cost.
 
 ## Decision graph
 

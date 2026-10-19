@@ -14,6 +14,16 @@ stdout。`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_
 檢查。各支檢查**判斷什麼**仍各自獨立，共用的只有這些。它假設 `tools/` 在 `sys.path` 上，這在三種
 情況下都成立：直接執行某支檢查、`load_tool` 載入另一支、以及 pytest 的 `pythonpath`。
 
+## Routing telemetry analysis
+
+`uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetry.py .sim_telemetry/`
+reads local routing JSONL files and prints aggregate family rows, usage shares,
+cache hits, rejections and measured prepare/apply CPU seconds. It reports CPU
+seconds per relative scheduling cost unit. For records with seconds estimates,
+it also reports weighted `(actual - estimated) / estimated`; unknown estimates
+remain excluded. Malformed lines produce file/line warnings and a skipped count.
+Files and directories can be mixed; nothing is rewritten.
+
 ## 怎麼跑
 
 ```bash

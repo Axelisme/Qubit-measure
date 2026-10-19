@@ -22,7 +22,11 @@ from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import EnvironmentWarmup, SimulationEnvironment
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
-from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
+from zcu_tools.program.v2.simulation import (
+    SimulationBinding,
+    SimulationCallbacks,
+    SimulationSoc,
+)
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
 from zcu_tools.simulate.adc import (
@@ -44,6 +48,7 @@ from zcu_tools.simulate.evolution import (
 from .preparation import EnvelopeEncoder, PreparationCache, preparation_key
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
+from .telemetry import RoutingTelemetry
 from .template import FTFModelFacts, plan_template
 
 
@@ -91,11 +96,13 @@ class FTFAcquire:
         self.request = request
         self._snapshot: EnvironmentSnapshot | None = None
         self._prepared: _Prepared | None = None
+        self.routing: list[PathDiagnostics] = []
 
     def invalidate(self) -> None:
         """Release deterministic arrays and reject further rounds; safe to repeat."""
         self._active = False
         self._prepared = None
+        self.routing.clear()
 
     def sample_round(
         self, snapshot: EnvironmentSnapshot, index: int
@@ -122,6 +129,8 @@ class FTFAcquire:
                 self._snapshot = None
                 raise
             self._prepared, self._snapshot = prepared, snapshot
+        elif owner.telemetry is not None:
+            self.routing.append(self._prepared.paths.for_reuse(telemetry=True))
         prepared = self._prepared
         acquire = self.request
         arguments = dict(
@@ -175,6 +184,8 @@ class FTFAcquire:
             prepared = self._prepare(snapshot, index)
             owner.preparation_cache.put(key, prepared)
         else:
+            if owner.telemetry is not None:
+                self.routing.append(prepared.paths.for_reuse(telemetry=True))
             facts.source.record_gate_usage(dict(prepared.gate_inventory))
             owner.evaluations = (
                 FTFNumericUse(self.request.sequence, index, prepared.paths),
@@ -204,8 +215,13 @@ class FTFAcquire:
         )
         before = facts.source.gate_usage
         evolved = owner.engine.evolve(
-            plans[0].source, tuple(plan.batch for plan in plans), cancel=Event()
+            plans[0].source,
+            tuple(plan.batch for plan in plans),
+            cancel=Event(),
+            telemetry=owner.telemetry is not None,
         )
+        if owner.telemetry is not None:
+            self.routing.append(evolved.paths)
         # Retain solve diagnostics even when ADC preparation rejects a row.
         owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
         state_count = evolved.densities.shape[-1]
@@ -272,7 +288,11 @@ class FTFAcquire:
             if count > before.get(key, 0)
         )
         return _Prepared(
-            probabilities, tuple(channels), evolved.paths, sampler, inventory
+            probabilities,
+            tuple(channels),
+            evolved.paths.for_reuse(telemetry=False),
+            sampler,
+            inventory,
         )
 
 
@@ -313,6 +333,10 @@ class FTFSource:
     are always reread. Fingerprints contain no physical generation data and
     survive generation changes; preparation invalidation is unchanged. Close
     releases all fingerprints and retained envelopes.
+    telemetry optionally supplies an already configured local routing writer.
+    Enabled sources collect calling-thread routing CPU and expose finish_acquire
+    for the binding completion callback. None (default) creates no directory,
+    reads no telemetry CPU clocks, and retains no routing reports.
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
@@ -324,6 +348,7 @@ class FTFSource:
         engine: Engine | None = None,
         private_replay: Path | None = None,
         readout: FTFReadoutConfig | None = None,
+        telemetry: RoutingTelemetry | None = None,
     ) -> None:
         if private_replay is not None and not private_replay.is_absolute():
             raise ValueError("private replay requires an explicit absolute root")
@@ -338,6 +363,7 @@ class FTFSource:
         self.devices = devices
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
         self.private_replay = private_replay
+        self.telemetry = telemetry
         self.engine = Engine(1, 2 * 1024**3) if engine is None else engine
         self.evaluations: tuple[FTFNumericUse, ...] = ()
         self._session: FTFAcquire | None = None
@@ -414,6 +440,30 @@ class FTFSource:
             raise RuntimeError("FTF acquire was not opened")
         return session.sample_round(request.snapshot, request.index)
 
+    def finish_acquire(self, rounds: tuple[RoundRequest, ...], wall_s: float) -> None:
+        """Write one best-effort summary at the binding's completion boundary.
+
+        rounds includes failed captured attempts, and may be empty if request
+        construction failed. wall_s is admitted acquire wall time including
+        pacing. Only the matching current session contributes routing work.
+        Direct execute users may call this explicitly after their final round.
+        """
+        if self.telemetry is None:
+            return
+        request = rounds[0].acquire if rounds else None
+        session = self._session
+        paths = (
+            session.routing
+            if session is not None and session.request is request
+            else ()
+        )
+        self.telemetry.write(
+            points=prod(request.point_dims) if request is not None else 0,
+            rounds=len(rounds),
+            wall_s=wall_s,
+            paths=paths,
+        )
+
     def close(self) -> None:
         """Release preparations, model/source usage and Engine; safe to repeat."""
         if self._session is not None:
@@ -460,6 +510,12 @@ def ftf(
     settings; finite nonnegative values override them. Zero disables pacing for
     profiling/benchmarks without changing numeric settings or sampling. Slow rounds
     and failed calls do not wait. Invalid durations raise ValueError.
+    numerics.telemetry.enabled defaults to True. Use
+    settings.with_telemetry(enabled=False) for profiles/benchmarks without routing
+    timers or I/O. numerics.telemetry.directory defaults to None, selecting
+    <project root>/.sim_telemetry. Relative paths resolve at startup.
+    Each admitted acquire writes one bounded JSONL summary;
+    persistence errors warn once without changing acquisition or RNG results.
     """
     settings = (
         parse_ftf(configuration)
@@ -481,11 +537,18 @@ def ftf(
                 ),
                 progress=False,
             )
+        telemetry = None
+        if settings.numerics.telemetry.enabled:
+            directory = settings.numerics.telemetry.directory
+            if directory is None:
+                directory = Path(__file__).resolve().parents[4] / ".sim_telemetry"
+            telemetry = RoutingTelemetry(directory.absolute())
         coordinator = FTFSource(
             settings,
             devices,
             engine=Engine(workers, 2 * 1024**3),
             private_replay=private_replay,
+            telemetry=telemetry,
         )
         gens = (
             settings.readout.drive.gen_ch,
@@ -519,7 +582,12 @@ def ftf(
                 if min_round_duration_s is None
                 else min_round_duration_s
             ),
-            wait_ready=None if preparation is None else preparation.wait_ready,
+            callbacks=SimulationCallbacks(
+                wait_ready=None if preparation is None else preparation.wait_ready,
+                on_end=coordinator.finish_acquire
+                if coordinator.telemetry is not None
+                else None,
+            ),
         )
         soc = SimulationSoc(
             soccfg,

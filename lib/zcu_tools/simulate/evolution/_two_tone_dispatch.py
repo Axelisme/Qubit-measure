@@ -105,5 +105,7 @@ def direct_preferred(
             1.05 * bin_count * scale**6 * certificate_fraction * (1 + 3.1 * dual_work)
         )
         floquet = 0.07 * scale**6 + (frame + certificates) / len(selected)
+        context.work_plan.routing.expect("dop853", table, selected, direct)
+        context.work_plan.routing.expect("floquet", table, selected, floquet)
         preferred[positions] = direct < floquet
     return preferred
