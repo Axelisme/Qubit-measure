@@ -27,7 +27,6 @@ from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.workflows.server import build_workflow_tools
@@ -190,14 +189,9 @@ def sweep_window(
 def run_attachment(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
 ) -> tuple[WorkflowWindow[Context], StartHarness, ResultEntry]:
-    """Connect a real FakeDevice through the session-owned operation runtime."""
+    """Publish a real FakeDevice through the session startup owner."""
     _window, harness, _entry = attachment
-    token = harness.services.device.start_connect_device(
-        ConnectDeviceRequest("FakeDevice", "flux", "none")
-    )
-    harness.complete_segment()
-    outcome = harness.handles.known_outcome(token)
-    assert outcome is not None and outcome.status == "finished"
+    harness.publish_devices("flux")
     return attachment
 
 

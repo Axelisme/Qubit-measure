@@ -43,6 +43,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
+from zcu_tools.gui.session.ports import DeviceRegistryPort, DriverFactoryPort
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
@@ -165,6 +166,8 @@ class Fixture:
         templates: Mapping[str, TemplateDef] | None = None,
         empty_project: bool = False,
         headless: bool = False,
+        device_registry: DeviceRegistryPort | None = None,
+        driver_factory: DriverFactoryPort | None = None,
     ) -> None:
         self.state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         # templates is the caller-owned persistent catalog for library creation.
@@ -182,6 +185,8 @@ class Fixture:
             view=self.view,
             bus=self.bus,
             project_root=fixture_root,
+            device_registry=device_registry,
+            driver_factory=driver_factory,
         )
         if not empty_project:
             self.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
