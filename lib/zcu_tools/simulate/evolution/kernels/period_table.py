@@ -82,9 +82,12 @@ class PeriodTableKernel:
     Keys contain flux level, port, signed carrier and a power-of-two amplitude
     band. The engine namespaces keys by ModelSource identity. Phase, gain,
     envelope and duration can vary at apply. Eight Chebyshev nodes cover [0, 2**band]; sixteen Fourier samples
-    cover phase. Zero drives use the DC direct-integration path. Model-only
-    guards limit envelope motion, table bandwidth and secular splitting; their
-    calibrated allowance is 1e-2 rather than the general per-segment budget.
+    cover phase. Zero carrier uses a kernel-local DC direct-integration path,
+    retained for standalone and injected-registry callers. Default Engine costs
+    put terminal DOP853 before period_table for DC, so it is not an Engine fast
+    path. Model-only guards limit envelope motion, bandwidth and secular
+    splitting; their calibrated allowance is 1e-2 rather than the general
+    per-segment budget.
     """
 
     name = "period_table"

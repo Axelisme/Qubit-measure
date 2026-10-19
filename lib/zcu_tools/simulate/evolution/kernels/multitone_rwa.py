@@ -975,8 +975,9 @@ def rwa_coefficients(
 
     This is the shared coefficient owner for ordinary RWA and covariant gates.
     Each tone contributes sum_j,s |C_s[i,j]|²/(Ei-Ej+s*f) to the diagonal
-    in GHz/gain², restricted to abs(Ei-Ej+s*f)>=0.05 GHz. Retained edges
-    evolve explicitly, with no zero division or double counting. The common
+    in GHz/gain², summed over the final omitted Fourier mask. Without adaptive
+    retention this is abs(Ei-Ej+s*f)>=0.05 GHz. Retained edges evolve explicitly,
+    with no zero division or double counting. The common
     compiled builder also serves batched ordinary RWA preparation.
     retention overrides the initial window in both Fourier terms and virtual
     diagonal, so restored edges are never counted twice. Graph pruning may

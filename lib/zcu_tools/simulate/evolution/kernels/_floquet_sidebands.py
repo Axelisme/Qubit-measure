@@ -14,6 +14,8 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
+from ._floquet_policy import PROBE_BIN_HALF_WIDTH_GHZ, probe_bin_center
+
 Complex = NDArray[np.complex128]
 Real = NDArray[np.float64]
 Integer = NDArray[np.int64]
@@ -203,7 +205,7 @@ def _certify(
         coefficient = frame.coefficients[index]
         sign = frame.signs[index]
         slot = int(port >= 0)
-        width = 2 * np.pi * 0.001 if slot else 0.0
+        width = 2 * np.pi * PROBE_BIN_HALF_WIDTH_GHZ if slot else 0.0
         divisor = 1j * (nu + sign * 2 * np.pi * center) - lam[:, None] + lam[None, :]
         keep = np.abs(divisor) <= 0.1 + width
         retained = np.where(keep, coefficient, 0.0)
@@ -314,7 +316,7 @@ def prepare(
     basis = (modes, inverse, condition)
     bath = _certify(frame, lam, basis, 0.0, -1)
     certificates = []
-    centers = np.round(parameters[:, 3] / 0.002) * 0.002
+    centers = probe_bin_center(parameters[:, 3])
     for port_value in np.unique(parameters[:, -1]):
         port = int(port_value)
         probe_transforms: dict[int, tuple[Complex, float]] = {}
@@ -337,13 +339,16 @@ def plan(
     """Return sparse retained edges and a finite-Fourier omission bound.
 
     Eigensystem and the single parameter row follow prepare's units/layout.
-    Missing bins are computed without mutating frame. Exact zero divisors are
-    retained directly, never inverted. For Q'=AQ-QA+E the bound is q*(1+exp(r*T)) +
+    Missing bins are computed without mutating frame for standalone helper use.
+    Production admission supplies covered bins: cold guards prepare certificates
+    first, and resident admission returns a domain miss for missing bins.
+    Exact zero divisors are retained directly, never inverted.
+    For Q'=AQ-QA+E the bound is q*(1+exp(r*T)) +
     ((e+h+2*r)*q+h)*integral(exp(r*t)). Base/full trace contractivity and exact
     Fourier/eigen data are assumptions, not certified by this calibrated guard.
     """
     port = int(parameters[-1])
-    center = float(np.round(parameters[3] / 0.002) * 0.002)
+    center = float(probe_bin_center(parameters[3]))
     selected = next(
         (c for p, c in frame.certificates if p == port and c.center == center), None
     )

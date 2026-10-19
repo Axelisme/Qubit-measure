@@ -60,6 +60,12 @@ from ..kernel import (
 from ..secular import SecularModel
 from ..workplan import FactKey
 from . import _floquet_sidebands as sb
+from ._floquet_policy import (
+    MAX_PHASE_SAMPLES,
+    MAX_SAMPLING_RATIO,
+    phase_sample_count,
+    probe_bin_center,
+)
 from ._secular import coherence_decay
 
 
@@ -133,7 +139,7 @@ def _extend_entry(
     bins = {(port, certificate.center) for port, certificate in frame.certificates}
     missing = np.array(
         [
-            use and (int(p[-1]), float(np.round(p[3] / 0.002) * 0.002)) not in bins
+            use and (int(p[-1]), float(probe_bin_center(p[3]))) not in bins
             for p, use in zip(parameters, eligible, strict=True)
         ],
         dtype=bool,
@@ -360,12 +366,12 @@ def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
     return bath, x, y, convergence
 
 
-def _sampling_ratio(model: SecularModel, key: np.void) -> float:
-    drive = model.drives[int(key["port"])]
-    extent = float(np.ptp(model.energies_ghz)) + 2 * abs(float(key["gain"])) * (
+def _sampling_extent(model: SecularModel, port: int, amplitude: float) -> np.float64:
+    drive = model.drives[port]
+    extent = float(np.ptp(model.energies_ghz)) + 2 * abs(amplitude) * (
         np.linalg.norm(drive.in_phase_ghz, 2) + np.linalg.norm(drive.quadrature_ghz, 2)
     )
-    return float(extent / float(key["frequency"]))
+    return np.float64(extent)
 
 
 def _build(
@@ -378,12 +384,8 @@ def _build(
 ) -> _Entry:
     if frequency <= 0:
         raise ValueError("Floquet Stark frequency must be positive")
-    drive = model.drives[port]
-    span = np.ptp(model.energies_ghz) + 2 * abs(amplitude) * (
-        np.linalg.norm(drive.in_phase_ghz, 2) + np.linalg.norm(drive.quadrature_ghz, 2)
-    )
-    count = 2 ** int(np.ceil(np.log2(max(128, 32 * span / frequency))))
-    if count > 4096:
+    count = int(phase_sample_count(_sampling_extent(model, port, amplitude), frequency))
+    if count > MAX_PHASE_SAMPLES:
         raise RuntimeError("Floquet frame exceeds phase sampling limit")
     energies, rotations, residual, overlap = _frame_samples(
         model, (port, frequency, amplitude), count
@@ -1025,7 +1027,7 @@ class FloquetKernel:
                     return None
                 bins = {(port, c.center) for port, c in entry.sidebands.certificates}
                 if any(
-                    (int(p[-1]), float(np.round(p[3] / 0.002) * 0.002)) not in bins
+                    (int(p[-1]), float(probe_bin_center(p[3]))) not in bins
                     for p in parameters[members[eligible]]
                 ):
                     return None
@@ -1070,7 +1072,11 @@ class FloquetKernel:
         for key_index, representative in enumerate(representatives):
             level = tuple(int(v) for v in keys[key_index]["level"])
             model = source.model(level)
-            if _sampling_ratio(model, keys[key_index]) > 128:
+            key = keys[key_index]
+            ratio = _sampling_extent(
+                model, int(key["port"]), float(key["gain"])
+            ) / float(key["frequency"])
+            if ratio > MAX_SAMPLING_RATIO:
                 continue
             prepared = self.prepare(
                 keys[key_index : key_index + 1],

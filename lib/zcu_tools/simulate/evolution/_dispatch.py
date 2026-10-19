@@ -1,4 +1,4 @@
-"""Cross-family decision graph; numerical guards remain kernel-owned."""
+"""Cross-family order and costs; kernels own numerical guards and family-local reuse."""
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -170,7 +170,7 @@ class Selection:
 
 @dataclass(frozen=True)
 class Dispatch:
-    """Call-local legacy single-interval execution plan, consumed by Schedule.
+    """Call-local interval execution plan, consumed by Schedule.
 
     Within the classified scope, every pending interval is covered exactly once:
     all Geometry.pending rows for an acquire, or Selection.rows for one worker.
@@ -672,6 +672,8 @@ class _Classifier:
         direct = self.two_tone_direct[selected]
         rwa, floquet, dop853 = self.domains["two"].families
         prefix = (rwa,) if rwa in self.kernels else ()
+        # Production DOP853 accepts every valid row and is terminal here.
+        # Keep the Floquet tail for injected same-name kernels that may reject.
         self.accept(selected[direct], (*prefix, dop853, floquet))
         self.accept(selected[~direct], (*prefix, floquet, dop853))
         self.retain_floquet_plan()
