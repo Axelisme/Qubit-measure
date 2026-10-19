@@ -34,7 +34,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result-root", required=True, type=Path)
     parser.add_argument("--database-root", required=True, type=Path)
-    parser.add_argument("--results-root", required=True, type=Path)
+    parser.add_argument(
+        "--entry-result-root",
+        required=True,
+        type=Path,
+        help="Root for the new result entry; --result-root selects legacy sources",
+    )
     parser.add_argument("--source-chip", required=True)
     parser.add_argument("--source-qubit", required=True)
     parser.add_argument("--name", required=True)
@@ -109,7 +114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         request = MigrationRequest(
             result_root=args.result_root,
             database_root=args.database_root,
-            results_root=args.results_root,
+            results_root=args.entry_result_root,
             source_chip=args.source_chip,
             source_qubit=args.source_qubit,
             name=args.name,
