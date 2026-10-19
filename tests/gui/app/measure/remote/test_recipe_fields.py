@@ -352,7 +352,7 @@ def test_recipe_tab_uses_real_rpc_for_nested_captured_refs_and_copy(
     owner.subscribe(lambda: notices.append("changed"))
     context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.9))
     field = prepared.read_field(("pulse", "waveform", "length"))
-    assert field.value == 0.1 and field.readonly
+    assert field.value == 0.1 and field.via_ref
     assert field.source is not None
     assert field.source["key"] == "Q1.waveforms.seed"
     assert field.source["selector_path"] == ["pulse", "waveform"]
