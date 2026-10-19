@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import logging
 import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
@@ -14,9 +16,10 @@ from typing import (
 
 from zcu_tools.device import DeviceActivity, DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
-from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
+from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
@@ -187,7 +190,6 @@ class _InflightOp:
 
 
 _DEVICE_TYPE_REGISTRY: dict[str, tuple[str, bool]] = {
-    "FakeDevice": ("zcu_tools.device.fake.FakeDevice", False),
     "YOKOGS200": ("zcu_tools.device.yoko.YOKOGS200", True),
     "RohdeSchwarzSGS100A": ("zcu_tools.device.sgs100a.RohdeSchwarzSGS100A", True),
 }
@@ -212,8 +214,6 @@ def list_supported_device_types() -> list[str]:
 def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     if type_name not in _DEVICE_TYPE_REGISTRY:
         raise DeviceRegistrationError(f"Unknown device type: {type_name!r}")
-    if type_name == "FakeDevice":
-        return FakeDevice(address=address)
     class_path, requires_address = _DEVICE_TYPE_REGISTRY[type_name]
     module_path, cls_name = class_path.rsplit(".", 1)
     cls = getattr(importlib.import_module(module_path), cls_name)
@@ -241,6 +241,7 @@ class DeviceService:
     ) -> None:
         self._bus = bus
         self._state = state
+        self._owner_guard = OwnerThreadGuard()
         # Device composes both leaves (ADR-0066): Exclusion (device mutation vs
         # run / another mutation of the same device) + a Handle (operation_id +
         # await + cancel for setup). OperationRunner owns the mechanism (ADR-0066);
@@ -263,11 +264,111 @@ class DeviceService:
         # of the same device. ProgressService owns per-operation setup progress.
         self._inflight: dict[str, _InflightOp] = {}
 
+    def register_device(self, name: str, driver: BaseDevice[Any]) -> None:
+        """Adopt an already built driver and publish its current info on owner thread.
+
+        ``name`` is a nonblank session name, preserved verbatim. ``driver`` must
+        be a BaseDevice; its info supplies type and address. Replace only an idle
+        MEMORY_ONLY row, preserving its remember flag, or create a nonremembered
+        row. Reject live names with FailedPreconditionError, invalid inputs with
+        InvalidInputError, and Run or same-device mutation with
+        OperationConflictError. Info/registry failures propagate without changing
+        the cache. Ownership transfers to this service only on success; rejected
+        candidates remain caller-owned and are not closed. No driver is rebuilt.
+        """
+        self._owner_guard.assert_owner()
+        if not name.strip():
+            raise InvalidInputError("Device name must not be empty or all whitespace")
+        with self._device_lease(name, OperationKind.DEVICE_CONNECT):
+            prior = self._state.get_device(name)
+            if (
+                prior is not None and prior.is_live()
+            ) or name in self._registry.get_all_devices():
+                raise FailedPreconditionError(f"Device {name!r} is already registered")
+            info = driver.get_info()
+            self._registry.register_device(name, driver)
+            self._state.put_device(
+                DeviceState(
+                    name=name,
+                    type_name=info.type,
+                    address=info.address,
+                    status=DeviceStatus.CONNECTED,
+                    remember=prior.remember if prior is not None else False,
+                    info=info,
+                )
+            )
+            self._emit_device_changed(name)
+
+    def close_all_devices(self) -> None:
+        """Try every registered driver once, publishing each result on owner thread.
+
+        Call after app work drains. Run or a device mutation rejects the whole
+        call before any close. Successful closes remove registry entries and
+        publish MEMORY_ONLY rows; failures retain CONNECTED rows with error.
+        Raise ExceptionGroup containing all close failures after every attempt.
+        No RF/output changes or retries are implied. Remaining drivers stay
+        service-owned; another explicit call may retry them. GUI teardown must
+        isolate/log this aggregate rather than prevent window closure.
+        """
+        self._owner_guard.assert_owner()
+        names = tuple(self._registry.get_all_devices())
+        for name in names:
+            self._gate.ensure_can_start(
+                OperationKind.DEVICE_DISCONNECT, resource_id=name
+            )
+        errors: list[Exception] = []
+        for name in names:
+            prior = self._state.get_device(name)
+            with self._device_lease(name, OperationKind.DEVICE_DISCONNECT):
+                try:
+                    self._registry.close_device(name)
+                except Exception as exc:
+                    errors.append(exc)
+                    logger.exception("Failed to close registered device %r", name)
+                    if prior is not None:
+                        self._state.put_device(
+                            replace(
+                                prior, status=DeviceStatus.CONNECTED, error=str(exc)
+                            )
+                        )
+                else:
+                    if prior is not None:
+                        self._state.put_device(
+                            replace(prior, status=DeviceStatus.MEMORY_ONLY, error=None)
+                        )
+                if prior is not None:
+                    self._emit_device_changed(name)
+        if errors:
+            raise ExceptionGroup("Failed to close registered devices", errors)
+
+    @contextmanager
+    def _device_lease(self, name: str, kind: OperationKind) -> Generator[None]:
+        self._gate.ensure_can_start(kind, resource_id=name)
+        origin = self._bus.current_origin
+        token = self._handles.create(cancel_hook=None, origin=origin)
+        self._gate.register(
+            token,
+            kind,
+            owner_id=name,
+            origin_kind=origin.kind,
+            note=f"{kind.value}: {name}",
+            resource_id=name,
+        )
+        try:
+            yield
+        except Exception as exc:
+            self._handles.settle(token, OperationOutcome("failed", str(exc)))
+            raise
+        else:
+            self._handles.settle(token, OperationOutcome("finished"))
+        finally:
+            self._gate.release(token)
+
     def publish_initial_devices(self) -> None:
         """Publish injected live drivers before preference restore, on owner loop.
 
-        No drivers are reconstructed or connected. Read failure aborts startup;
-        the composition host retains cleanup responsibility for the same manager.
+        No drivers are reconstructed or connected. Read failure propagates;
+        the caller must drain work and close the service's registered drivers.
         Existing published rows are rejected rather than overwritten.
         """
         entries = self._registry.get_all_devices()
@@ -1007,9 +1108,7 @@ class DeviceService:
 
     def _disconnect(self, name: str) -> object:
         # Was @staticmethod; now instance method so it can use self._registry.
-        device = cast(DeviceProtocol, self._registry.get_device(name))
-        device.close()
-        self._registry.drop_device(name)
+        self._registry.close_device(name)
         return None
 
     def _restore_prior_device_from(

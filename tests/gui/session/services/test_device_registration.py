@@ -7,12 +7,18 @@ from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
-from zcu_tools.gui.session.adapters.thread_pool_background import ThreadPoolBackgroundExecutor
+from zcu_tools.gui.session.adapters.thread_pool_background import (
+    ThreadPoolBackgroundExecutor,
+)
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.ports import DeviceMemoryInfo, OperationConflictError, OperationKind
+from zcu_tools.gui.session.ports import (
+    DeviceMemoryInfo,
+    OperationConflictError,
+    OperationKind,
+)
 from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import DeviceStatus, SessionState
@@ -40,8 +46,12 @@ def session():
     progress = ProgressService(DirectProgressTransport())
     registry = DeviceManager()
     service = DeviceService(
-        bus, state, gate, background,
-        OperationRunner(gate, handles, progress, background, bus), handles,
+        bus,
+        state,
+        gate,
+        background,
+        OperationRunner(gate, handles, progress, background, bus),
+        handles,
         device_registry=registry,
     )
     facts: list[DeviceChangedPayload] = []
@@ -53,7 +63,9 @@ def session():
         registry.close_all_devices()
 
 
-def test_register_publishes_live_cache_and_replaces_remembered_row(session: DeviceSession):
+def test_register_publishes_live_cache_and_replaces_remembered_row(
+    session: DeviceSession,
+):
     svc = session.service
     svc.register_remembered_devices([DeviceMemoryInfo("YOKOGS200", "bias", "old")])
     session.facts.clear()
@@ -67,7 +79,8 @@ def test_register_publishes_live_cache_and_replaces_remembered_row(session: Devi
     assert row.status is DeviceStatus.CONNECTED
     assert row.type_name == "FakeDevice"
     assert row.address == "none"
-    assert row.remember is True
+    remembered = session.state.get_device("bias")
+    assert remembered is not None and remembered.remember is True
     assert row.info == driver.get_info()
     assert session.registry.get_all_devices() == {"bias": driver}
     assert [fact.name for fact in session.facts] == ["bias"]
@@ -78,7 +91,9 @@ def test_register_publishes_live_cache_and_replaces_remembered_row(session: Devi
 
 
 @pytest.mark.parametrize("kind", ["run", OperationKind.DEVICE_CONNECT])
-def test_register_rejects_active_hardware_work_without_publishing(session: DeviceSession, kind: str):
+def test_register_rejects_active_hardware_work_without_publishing(
+    session: DeviceSession, kind: str
+):
     session.gate.register(
         42, kind, owner_id="bias", origin_kind="user", note="busy", resource_id="bias"
     )
@@ -99,7 +114,9 @@ class UnreadableDevice(FakeDevice):
         raise RuntimeError("unreadable candidate")
 
 
-def test_failed_registration_keeps_prior_row_and_caller_ownership(session: DeviceSession):
+def test_failed_registration_keeps_prior_row_and_caller_ownership(
+    session: DeviceSession,
+):
     svc = session.service
     svc.register_remembered_devices([DeviceMemoryInfo("YOKOGS200", "bias", "old")])
     before = svc.get_device_snapshot("bias")
@@ -116,10 +133,8 @@ def test_failed_registration_keeps_prior_row_and_caller_ownership(session: Devic
 class FailingCloseDevice(FakeDevice):
     info_model = FakeDeviceInfo
 
-    def __init__(self) -> None:
-        super().__init__(fast_mode=True)
-        self.fail_close = True
-        self.close_attempts = 0
+    fail_close = True
+    close_attempts = 0
 
     def close(self) -> None:
         self.close_attempts += 1
@@ -128,7 +143,9 @@ class FailingCloseDevice(FakeDevice):
         super().close()
 
 
-def test_close_all_attempts_every_driver_and_publishes_partial_failure(session: DeviceSession):
+def test_close_all_attempts_every_driver_and_publishes_partial_failure(
+    session: DeviceSession,
+):
     bad = FailingCloseDevice()
     good = FakeDevice(fast_mode=True)
     session.registry.register_device("bad", bad)
