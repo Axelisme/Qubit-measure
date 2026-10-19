@@ -413,6 +413,29 @@ class TabFormResource:
             self._notify()
             return dropped
 
+    def refresh_sources(self, *, aliases: Mapping[str, str] | None = None) -> None:
+        """Recapture sources and revalidate without changing any authored input.
+
+        Call on the owner thread. aliases optionally overrides named bindings
+        for this capture only; it never changes the global table. Expression
+        drafts, explicit selections and previously resolved direct defaults stay
+        intact, including invalid input. Subscribers receive one publication
+        and can preview against the new capture. Capture or form-factory failures
+        preserve the previous input, definition and sources. Busy, revoked and
+        notification-reentrant calls raise CfgPreconditionError.
+        """
+        with self._mutation():
+            sources = self._capture(aliases)
+            form = self._make_form(FormContext(sources.env.parameters))
+            current = self._state.input
+            state = FormState(
+                FormInput(form.model, current.data, selections=current.selections)
+            )
+            self._sources = sources
+            self._form = form
+            self._state = state
+            self._notify()
+
     def reset(self, *, aliases: Mapping[str, str] | None = None) -> None:
         """Capture sources once and replace input with fresh authored defaults.
 
