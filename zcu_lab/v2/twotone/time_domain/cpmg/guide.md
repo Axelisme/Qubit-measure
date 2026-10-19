@@ -4,7 +4,7 @@ CPMG measures coherence decay for several pi-pulse counts. Each sequence applies
 
 ## Configure the scan
 
-Pi pulse counts accepts Log or List input. Log uses a maximum count and requested point count. It starts at 1, rounds geometrically spaced values to integers and removes duplicates. The resulting list may have fewer points than requested. List accepts a nonempty JSON array of positive integers, such as `[1, 2, 4, 8]`. Zero, negative counts and fractional counts are invalid.
+Pi pulse counts accepts Log or List input. Log uses a maximum count and requested point count. With two or more requested points, it starts at 1 and retains the maximum count. It rounds geometrically spaced values to integers and removes duplicates. One requested point returns only the maximum count. The resulting list may have fewer points than requested. List accepts a nonempty JSON array of positive integers, such as `[1, 2, 4, 8]`. Zero, negative counts and fractional counts are invalid.
 
 Minimum time and Maximum time define one shared total-time window in us for every pulse count. Time points sets the samples per row. The initial values are 1 us, 100 us and 101 points. Increase the minimum time when a large pulse count leaves too little spacing between pulses. The GUI converts these three inputs to the core's shared length_range and length_expts. Notebook callers may instead provide one length_range per count.
 
