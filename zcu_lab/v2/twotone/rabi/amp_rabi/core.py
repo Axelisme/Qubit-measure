@@ -35,6 +35,8 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class AmpRabiResult:
+    """Drive gains (amps) and mean complex readout IQ, both shaped (Ngain,)."""
+
     amps: NDArray[np.float64]
     signals: NDArray[np.complex128]
 
@@ -91,6 +93,13 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         *,
         context: RunContext,
     ) -> AmpRabiResult:
+        """Measure Rabi oscillations versus qubit drive gain at fixed duration.
+
+        Reset, apply the optional init pulse, play the gain-swept qubit
+        pulse, then read out. Return gains and mean complex IQ; subsequent
+        analysis uses the oscillation period to infer pi and pi/2 gains.
+        """
+        # Prepare the hardware gain grid and display the mean IQ projection.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -107,6 +116,8 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             (len(gains),),
             on_update=lambda data: viewer.update(gains, rabi_signal2real(data)),
         )
+
+        # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             cfg = sched.cfg
             modules = cfg.modules
@@ -133,6 +144,13 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         *,
         plots: Plots,
     ) -> AmpRabiAnalysis:
+        """Fit a nondecaying Rabi oscillation and return pi/pi2 gains and errors.
+
+        Skip the first ``options.skip`` points and project IQ onto a real
+        contrast axis. The point nearest zero gain fixes the phase to 0 or
+        180 degrees. Publish ``fit`` and report fit quality; these are pulse
+        amplitude calibrations, not gate fidelities. Source cfg may be None.
+        """
         result = source.result
 
         gains, signals = result.amps, result.signals

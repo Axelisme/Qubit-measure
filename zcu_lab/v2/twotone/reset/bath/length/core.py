@@ -43,6 +43,8 @@ def _default_phase_values() -> NDArray[np.float64]:
 
 @dataclass(frozen=True)
 class LengthResult:
+    """Qubit-tone lengths in us and mean IQ (length, absolute pi/2 phase in degrees)."""
+
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
     phases: NDArray[np.float64] = dataclass_field(default_factory=_default_phase_values)
@@ -91,6 +93,17 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         *,
         context: RunContext,
     ) -> LengthResult:
+        """Measure bath-reset tomography contrast versus qubit-tone duration.
+
+        After optional reset and initialization, start cavity and qubit tones
+        together, then apply the pi/2 pulse after the cavity tone and read
+        out. Use absolute pi/2 phases of 0, 90, 180 and 270 degrees.
+        Host-scan qubit-tone length in us while
+        preserving the configured cavity-minus-qubit length difference.
+        Return lengths and round-averaged complex IQ shaped (Nlength, 4).
+        Opposite-phase contrast is not a calibrated reset fidelity.
+        """
+        # Prepare qubit-tone lengths while preserving the cavity-tone duration offset.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -122,6 +135,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
             return mean_signals  # (lengths, 4)
 
+        # Show tomography contrast, but retain phase-resolved IQ for round averaging.
         viewer = context.plots.liveplot_1d(
             "measurement", "Length (us)", "Signal (a.u.)"
         )
@@ -131,6 +145,8 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
                 lengths, bathreset_signal2real(average_signals(data))
             ),
         )
+
+        # Repeat the host length scan; each program sweeps the four pi/2 phases.
         with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
             length_values = lengths.tolist()
             for _, rep in sched.repeat("rounds", rounds):
@@ -176,6 +192,11 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the four-phase contrast versus qubit-tone length in us.
+
+        Use opposite-phase IQ differences from source.result and publish fit.
+        No duration is fitted or returned; source.cfg may be None.
+        """
         del options
         result = source.result
 
