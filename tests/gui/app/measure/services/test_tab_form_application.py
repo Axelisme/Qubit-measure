@@ -146,10 +146,14 @@ class FactoryCfg(ConfigBase):
     amount: float = 1.0
 
 
-@pytest.mark.parametrize("failure", ["template", "factory"])
+@pytest.mark.parametrize(
+    ("command", "failure"),
+    [("reset", "template"), ("reset", "factory"), ("refresh_sources", "factory")],
+)
 def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
     qapp: QApplication,
     failure: str,
+    command: str,
 ) -> None:
     assert hasattr(ExpAdapterProtocol, "make_form"), (
         "Missing adapter factory contract for Open/Reset"
@@ -188,18 +192,20 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
         resource.subscribe(
             lambda: notifications.append(resource.preview().values[("amount",)])
         )
+        recapture = resource.reset if command == "reset" else resource.refresh_sources
         broken = True
         with pytest.raises(error, match=match):
-            resource.reset()
+            recapture()
         assert resource.editor_state is state
         assert resource.env is env
         assert resource.input.data == authored
         assert resource.result() == FactoryCfg(amount=7.0)
         assert notifications == []
         broken = False
-        resource.reset()
-        assert resource.result() == FactoryCfg(amount=3.0)
-        assert notifications == [3.0]
+        recapture()
+        expected = 3.0 if command == "reset" else 7.0
+        assert resource.result() == FactoryCfg(amount=expected)
+        assert notifications == [expected]
     finally:
         application.stop()
         for tab_id in tuple(application.ctrl.list_tab_ids()):
