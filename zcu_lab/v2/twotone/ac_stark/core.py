@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fitlor
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     US_TO_S,
@@ -124,20 +124,20 @@ def get_resonance_freq(
 
 class AcStarkModuleCfg(ConfigBase):
     reset: ResetCfg | None = None
-    stark_pulse1: PulseCfg
-    stark_pulse2: PulseCfg
+    stark_pulse1: Annotated[PulseCfg, FieldMeta(label="Stark resonator tone")]
+    stark_pulse2: Annotated[PulseCfg, FieldMeta(label="Qubit spectroscopy probe")]
     readout: ReadoutCfg
 
 
 class AcStarkSweepCfg(ConfigBase):
-    gain: SweepCfg
-    freq: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
 
 
 class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AcStarkModuleCfg
     sweep: AcStarkSweepCfg
-    earlystop_snr: float | None = None
+    earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
 class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
@@ -352,21 +352,21 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 
 class AcStarkRamseyModuleCfg(ConfigBase):
     reset: ResetCfg | None = None
-    pi2_pulse: PulseCfg
-    stark_pulse: PulseCfg
+    pi2_pulse: Annotated[PulseCfg, FieldMeta(label="Ramsey pi/2 pulse")]
+    stark_pulse: Annotated[PulseCfg, FieldMeta(label="Stark resonator tone")]
     readout: ReadoutCfg
 
 
 class AcStarkRamseySweepCfg(ConfigBase):
-    gain: SweepCfg
-    length: SweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
+    length: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
 
 
 class AcStarkRamseyCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AcStarkRamseyModuleCfg
-    wait_delay: float
+    wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
     sweep: AcStarkRamseySweepCfg
-    detune: float = 0.0
+    detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
 
 class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
