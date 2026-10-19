@@ -12,9 +12,11 @@ def build_environment() -> SimulationEnvironment:
 
     The host closes the returned device manager after acquisition has drained.
     YAML/binding errors abort startup without selecting another environment.
+    Background numeric preparation starts immediately; acquire waits for it.
+    Use ftf(path, warmup=False) directly to opt out of startup CPU work.
     """
     path = Path(__file__).with_name("ftf.yaml")
     # ftf.yaml is the user's ignored working copy of the tracked default.yaml.
     if not path.is_file():
         raise FileNotFoundError(f"{path} is missing; copy default.yaml to ftf.yaml")
-    return ftf(path, workers=max(1, (os.cpu_count() or 1) - 2))
+    return ftf(path, workers=max(1, (os.cpu_count() or 1) - 2), warmup=True)

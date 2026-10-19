@@ -35,14 +35,15 @@ class PersistedTab(BaseModel):
     """One experiment name and authored Form input, without captured sources.
 
     adapter_name identifies the registry entry at restore time. form_input is
-    detached JSON input, including expressions; compatible restore reports drops.
+    the fixed FormInput {data,selections} JSON object, including expressions
+    and explicit choices. Core recursive restoration reports dropped paths.
     """
 
     model_config = ConfigDict(frozen=True)
 
     adapter_name: str
-    # Authored Form input JSON, including expression envelopes and missing fields.
-    # Workspace restores compatible leaves; source snapshots are never persisted.
+    # Shared FormInput JSON; Workspace preserves it without interpreting its tree.
+    # Source snapshots are never persisted.
     form_input: dict[str, JsonValue]
 
 

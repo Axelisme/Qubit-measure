@@ -148,7 +148,7 @@ def test_waveform_options_keep_all_inline_kinds_with_branch_fields() -> None:
         (options[1], {"length"}),
         (options[-1], {"length", "raise_waveform"}),
     ):
-        state.write({("waveform",): option.value}, env)
+        state.select(("waveform",), option.value, env)
         children = state.describe(("waveform",), env).children
         assert {field.path[-1] for field in children} == names
 
@@ -183,7 +183,7 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
     }
     cfg = result_spec(form, state, waveform_env(0.9))
     assert isinstance(cfg.waveform, ConstWaveformCfg) and cfg.waveform.length == 0.1
-    with pytest.raises(ValueError, match="Unavailable option command"):
+    with pytest.raises(ValueError, match="Unavailable field command"):
         state.run_command(("waveform",), "to_inline", env)
     assert notifications == ["changed"]
 
@@ -213,7 +213,7 @@ def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None
     before = state.input.data
 
     with pytest.raises(OSError, match="Cannot read captured waveform"):
-        key.commands[0].run(broken)
+        state.run_command(("waveform",), "to_inline", broken)
     with pytest.raises(OSError, match="Cannot read captured waveform"):
         state.run_command(("waveform",), "to_inline", broken)
 
@@ -361,14 +361,18 @@ def test_tagged_waveform_name_is_key_only_in_description_result_defaults_and_res
     state = FormState(form.input_from_spec(spec, env))
     assert state.input.data["waveform"] == {"kind": "ref", "name": "$missing.value"}
     assert result_spec(form, state, env).waveform == "$missing.value"
-    state.write({("waveform", "name"): {"expr": "1 / 0"}}, env)
+    state.write({("waveform",): {"kind": "ref", "name": {"expr": "1 / 0"}}}, env)
     assert expect_object(state.input.data["waveform"])["name"] == {"expr": "1 / 0"}
     errors = state.result(env)
     assert isinstance(errors, FormErrors)
     assert errors.messages == {("waveform", "name"): "Input should be a valid string"}
     restored = FormState(form.input_from_spec(spec, env))
-    assert restored.write_compatible(state.input.data, env) == (("waveform", "name"),)
-    assert result_spec(form, restored, env).waveform == "$missing.value"
+    assert (
+        restored.restore_input(FormInput(restored.input.model, state.input.data), env)
+        == ()
+    )
+    assert restored.input.data == state.input.data
+    assert isinstance(restored.result(env), FormErrors)
 
 
 @pytest.mark.parametrize("missing", ["gen_ch", "ro_ch"])
@@ -446,7 +450,7 @@ def test_unsupported_pulse_fields_cannot_be_written_and_use_spec_defaults(
     env = FormEnv()
     state = FormState(form.default_input(env))
 
-    with pytest.raises(ValueError, match="Unknown field path"):
+    with pytest.raises(ValueError, match="Unknown.*field path"):
         state.write({(name,): 1}, env)
     batch: dict[FormWritePath, JsonValue] = {
         **PULSE_LEAVES,
@@ -765,7 +769,7 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
 
     def choose(kind: str) -> None:
         value = next(item.value for item in options if item.label == f"Inline: {kind}")
-        state.write({(child,): value}, env)
+        state.select((child,), value, env)
 
     assert (
         expect_object(expect_object(state.input.data[child])["module"])["length"]
@@ -775,12 +779,12 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
     choose(other_kind)
     assert expect_object(state.input.data[child]) == {
         "kind": "inline",
-        "module": {"style": other_kind},
+        "module": {"style": other_kind, "length": 1.7},
     }
     choose(authored_kind)
     assert (
         expect_object(expect_object(state.input.data[child])["module"]).get("length")
-        == length
+        == 1.7
     )
 
 

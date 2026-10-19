@@ -12,6 +12,9 @@ from .workplan import CarrierFamilyPlan, FactKey, RampFamilyPlan, WorkPlan
 
 type _RampCoordinate = tuple[str, tuple[int, ...], int, float, float, int]
 
+# At +0.3 GHz a zero crossing with m=2 had frozen-envelope error 0.01243 > 0.01.
+_COMPLEX_MOTION_LIMIT = 0.0025
+
 
 @dataclass(frozen=True)
 class _RampRows:
@@ -64,7 +67,7 @@ def subdivisions(
     from .kernels._shaped import drive_bounds
     from .kernels._workload_facts import envelope_bounds
 
-    strength, gamma = drive_bounds(table, rows, source)
+    strength, gamma = drive_bounds(table, rows, source, work_plan)
     bounds = envelope_bounds(table, work_plan)
     peaks, slopes = bounds.peaks, bounds.slopes
     envelope = table.tone_envelope[rows, 0]
@@ -76,7 +79,10 @@ def subdivisions(
         * gamma
         * (gain * peaks[envelope] * strength / frequency) ** 2
     )
-    counts = np.maximum(1, np.ceil(np.sqrt(np.maximum(motion / 0.01, split / 0.01))))
+    motion_limit = np.where(bounds.real[envelope], 0.01, _COMPLEX_MOTION_LIMIT)
+    counts = np.maximum(
+        1, np.ceil(np.sqrt(np.maximum(motion / motion_limit, split / 0.01)))
+    )
     # Unrepresentable counts saturate above the guard's 32-subperiod limit.
     result = np.full(len(rows), np.iinfo(np.int64).max, dtype=np.int64)
     representable = counts < 2.0**63

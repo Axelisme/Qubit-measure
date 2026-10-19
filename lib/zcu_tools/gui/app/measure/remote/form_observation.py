@@ -1,7 +1,9 @@
 """Measure Form wire projection, using each Form owner's fixed capture."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from pydantic import JsonValue, TypeAdapter
 
@@ -15,21 +17,16 @@ from zcu_tools.gui.session.library_entry import (
     WaveformEntryForm,
 )
 
+from .form_description import RecipeFieldObservation, recipe_field_wire
+from .form_errors import FormError
 from .handlers._wire_values import context_wire_value
 
 
 class FormWrite(TypedDict):
-    """One ordinary leaf: path contains model field names; value is encoded JSON."""
-
-    path: list[str]
-    value: JsonValue
-
-
-class FormError(TypedDict):
-    """One validation error; path may contain model fields and sequence indexes."""
+    """One ordinary leaf: path has field names/FixedList indexes; value is JSON."""
 
     path: list[str | int]
-    message: str
+    value: JsonValue
 
 
 class FormObservation(TypedDict):
@@ -52,6 +49,74 @@ def observe_form(resource: TabFormResource) -> FormObservation:
         resource.preview(),
         resource.result(),
     )
+
+
+class ElementObservationWire(TypedDict):
+    """One original element with canonical input, preview and directed errors.
+
+    fields, when requested, contains same-turn logical observations in relative
+    path request order. Each observation carries the owner-captured identity.
+    """
+
+    index: int
+    name: str
+    path: list[str | int]
+    input: dict[str, JsonValue]
+    selections: list[FormWrite]
+    values: list[FormWrite]
+    errors: list[FormError]
+    fields: NotRequired[list[RecipeFieldObservation]]
+
+
+class ElementsObservationWire(TypedDict):
+    """The owner's model-list aggregate and complete Form errors, in one turn."""
+
+    path: list[str | int]
+    elements: list[ElementObservationWire]
+    errors: list[FormError]
+
+
+def observe_elements(
+    resource: TabFormResource,
+    path: FormWritePath,
+    *,
+    fields: tuple[FormWritePath, ...] = (),
+) -> ElementsObservationWire:
+    """Serialize the owner's single aggregate; never assemble per-element reads.
+
+    path is the canonical model-list path. All rows retain original indexes,
+    authored input, available preview leaves and directed errors. Reads do not
+    lower cfg, capture sources, mutate state or focus a widget. fields optionally
+    requests nonempty relative logical paths in each element, in request order.
+    Invalid paths propagate owner errors; refs use only fixed captured sources.
+    """
+    observed = resource.read_elements(path, fields=fields)
+    rows: list[ElementObservationWire] = [
+        {
+            "index": item.index,
+            "name": item.name,
+            "path": list(item.path),
+            "input": item.input,
+            "selections": [
+                {"path": list(key), "value": value}
+                for key, value in item.selections.items()
+            ],
+            "values": [
+                {"path": list(key), "value": context_wire_value(value)}
+                for key, value in item.values.items()
+            ],
+            "errors": _error_rows(item.errors.messages) if item.errors else [],
+        }
+        for item in observed.elements
+    ]
+    if fields:
+        for row, item in zip(rows, observed.elements, strict=True):
+            row["fields"] = [recipe_field_wire(field) for field in item.fields]
+    return {
+        "path": list(observed.path),
+        "elements": rows,
+        "errors": _error_rows(observed.errors.messages) if observed.errors else [],
+    }
 
 
 def observe_entry(entry: ModuleEntryForm | WaveformEntryForm) -> FormObservation:
@@ -120,11 +185,14 @@ def form_writes(raw: object) -> Mapping[FormWritePath, JsonValue]:
         raw_path = edit["path"]
         if not isinstance(raw_path, list) or not raw_path:
             raise RemoteError(ErrorCode.INVALID_PARAMS, "path must be a nonempty array")
-        segments: list[str] = []
+        segments: list[str | int] = []
         for segment in raw_path:
-            if not isinstance(segment, str) or not segment:
+            if not isinstance(segment, (str, int)) or (
+                isinstance(segment, str) and not segment
+            ):
                 raise RemoteError(
-                    ErrorCode.INVALID_PARAMS, "path segments must be nonempty strings"
+                    ErrorCode.INVALID_PARAMS,
+                    "path segments must be field names or integer indexes",
                 )
             segments.append(segment)
         path = tuple(segments)

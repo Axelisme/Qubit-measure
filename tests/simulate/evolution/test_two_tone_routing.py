@@ -159,3 +159,38 @@ def test_two_tone_cost_order_independent_of_workers_chunks_and_row_order(
     )
     assert result.paths.segments_by_kernel == {"dop853": 4, "floquet": 4}
     assert sorted(attempts) == [("dop853", 16.0)] * 4 + [("floquet", 512.0)] * 4
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_balanced_strong_distinct_ports_charge_cold_guard_work(workers):
+    model = synthetic_model(16)
+    drive = replace(
+        model.drives[0],
+        in_phase_ghz=model.drives[0].in_phase_ghz * 0.1,
+        quadrature_ghz=model.drives[0].quadrature_ghz * 0.1,
+    )
+    model = replace(model, drives=(drive, replace(drive, name="other")))
+    src = ModelSource(np.eye(16, dtype=np.complex128) / 16, lambda level: model)
+    timelines = []
+    for point in range(11):
+        timeline = two_tone_batch(512, 0.2, point)
+        strong, probe = timeline.tracks
+        timelines.append(
+            replace(
+                timeline,
+                tracks=(
+                    strong,
+                    replace(
+                        probe,
+                        port="other",
+                        amplitude=np.array([0.2]),
+                        frequency_ghz=np.array([0.424 + 0.0002 * point]),
+                    ),
+                ),
+            )
+        )
+    attempts = []
+    kernels = tuple(GuardRecorder(name, attempts) for name in ("floquet", "dop853"))
+    result = run(Engine(workers, 0, kernels=kernels), src, tuple(timelines))
+    assert result.paths.segments_by_kernel == {"dop853": 11}
+    assert attempts == [("dop853", 512.0)] * 11

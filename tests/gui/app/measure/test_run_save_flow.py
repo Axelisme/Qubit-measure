@@ -125,7 +125,12 @@ def measure_window(qapp, tmp_path: Path) -> Generator[QWidget]:
         app.controller.restore_persisted_state(
             AppPersistedState(
                 session=PersistedSession(
-                    tabs=(PersistedTab(adapter_name="synthetic", form_input={}),),
+                    tabs=(
+                        PersistedTab(
+                            adapter_name="synthetic",
+                            form_input={"data": {}, "selections": []},
+                        ),
+                    ),
                     active_tab_index=0,
                 )
             )

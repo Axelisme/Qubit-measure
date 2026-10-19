@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-18, WorkPlan and cache ownership
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives, simultaneous and single-tone covariant gate reuse, unified resident/pending budget, long-period playback and guarded CF4 carrier anchors
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -22,7 +22,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 
 `Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=6)` owns a
-prepare cache. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
+prepare cache and a separate exact-result memo. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
@@ -58,13 +58,13 @@ tries the next candidate in the following graph.
 | Driven continuous flux | `flux_dop853`, continuous Hamiltonian evaluation from `FluxExpansion`, with baths switching at quantized segment boundaries. |
 | One constant tone, unshared driven input, duration at most 10 us | `floquet_period` → `dyson` → `t6`. |
 | Other single constant tone | `dyson` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
-| One shaped tone | Try `shaped_sambe` on every eligible row, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
-| Two constant tones | Compare acquire-wide DOP853 and Floquet costs before either guard. Try the cheaper family first, then the other if rejected. |
-| Shaped two-tone or three-or-more-tone row | `dop853`, summing all drives. |
+| One shaped tone | Try `single_tone_gate` when complete-acquire cold build plus playback is at least 20% cheaper than Sambe. Rejected or unamortized rows try `shaped_sambe`, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
+| Two constant tones | Try `multitone_rwa` first for distinct ports. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order, cheaper family first. |
+| Shaped two-tone or three-or-more-tone row | `multitone_gate` → `multitone_rwa` → `dop853`. RWA admits only fixed-flux, separated weak carriers with smooth real envelopes and at least one sampled envelope. Other rows retain the full-drive fallback. |
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
 no-tone or single constant-tone row respectively. They have no DOP853 fallback.
-The internal [registry](kernels/__init__.py) contains ten families. T7 is the
+The internal [registry](kernels/__init__.py) contains thirteen families. T7 is the
 single-tone `dyson` family; the two-tone `floquet` family has its own modal
 second-order Dyson implementation.
 
@@ -75,11 +75,33 @@ application and certificates that require their intermediate data.
 
 | Family | Decision and certificate handoff |
 | --- | --- |
-| `floquet_period` | The period guard admits a single constant tone at `abs(f) >= 0.03 GHz` when its secular split bound passes. Dispatch selects dense Hilbert DOP853 at `abs(f) >= 1 GHz`. Below that, it compares Sambe work with CF4 coarse/fine work. A declined Sambe certificate uses standalone CF4, not gain anchors. For CF4 keys, dispatch fixes gain anchors from the complete gain group; the kernel checks interpolation and refines or builds independently when needed. |
+| `floquet_period` | The period guard admits a single constant tone at `abs(f) >= 0.03 GHz` when its secular split bound passes. Dispatch selects dense Hilbert DOP853 at `abs(f) >= 1 GHz`. Below that, it compares Sambe work with CF4 coarse/fine work. A declined Sambe certificate uses standalone CF4, not gain anchors. For CF4 keys, dispatch fixes gain anchors from the complete gain group. Constant-CF4 inventories with at least sixteen same-sign carriers and a magnitude ratio at most 1.01 can instead use four real carrier anchors at fixed gain. Gain groups take precedence, so a key never expands both axes. Carrier prediction interpolates interaction-picture prefixes, restores the target carrier's lab frame and checks the original nine coarse-grid probes. Rejection refines the already-built coarse grid; incompatible anchor grids build independently. Prepare keys and row admission do not change. |
 | `gate_cache` | Dispatch sends a key-aligned builder mask. Positive durations up to 30 ns first try six phase nodes with two independent probes; failed convergence uses sixteen nodes. Other keys directly use sixteen nodes. Both builders produce four closed-system subsegments with secular Strang dissipation and the same phase-Fourier representation. |
-| `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for real envelopes. Each family owns its guards and build. They share period playback and direct fractional tails. |
-| `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. Dispatch merges these admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
+| `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. |
+| `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. A cached sideband frame extends to missing probe bins without rebuilding the frame or existing certificates. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
+| `single_tone_gate` | Dispatch compares summed canonical-key four-U builds, playback and guard/key work against carrier/shape-domain Sambe construction, period/envelope playback and fractional tails. Estimates use joint dimension, duration, retained drive strength, shape motion and carrier frequency. A 20% cold-cost margin selects this candidate before numerical admission. The kernel requires exactly one smooth real sampled tone and shares RWA, phase-graph pruning and secular split admission with simultaneous gates. Sliced support, nonzero envelope offsets and final sample hold are allowed. Rejection retains Sambe. |
+| `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared RWA admission, coextensive real sampled support, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and a four-way secular split proxy at most 0.01. Builds four joint Hilbert propagators using the same `RWACoefficients.diagonal` window-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
+| `multitone_rwa` | Revision `joint-rwa-v3` retains joint-basis Fourier edges with `abs(Ei-Ej±f) < 0.05 GHz`, obtains window-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 16 ns adaptive ceiling for dual constant rows and 4 ns otherwise. Dual constant admission also checks omitted two-carrier sum/difference paths. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the interaction picture only for independent, single-tone, nonzero-gain rows. Chains and other ordinary rows use the lab frame. Flux DOP853 has its own chain plan. |
+
+For the same whole source, budget and Stark key, moving a probe window reuses
+cached Fourier candidates. Before shared/deferred guards split, the caller
+computes only missing complete-bin certificates from the full table inventory.
+WorkPlan single-flights the small new certificate publication. The immutable
+union borrows the original frame arrays and existing certificates. Cache
+replacement charges the union once instead of retaining two whole-frame charges;
+active references to the old payload remain valid. Current phases, gains and
+durations still receive fresh admission and sparse plans. A legacy-only frame
+without Fourier candidates uses the ordinary rebuild if sidebands become needed,
+so no FFT reconstruction or approximate frame reuse changes rounding.
+
+Constant-tone period playback uses real-matrix binary powering of the complete
+secular `D/2 → UρU† → D/2` channel for unsubdivided 16-level rows with at least
+4096 complete periods. It preserves the existing splitting and complex density
+residuals, but changes floating-point rounding. Shorter rows, other dimensions
+and subdivided playback retain sequential updates with reusable buffers.
+Fractional tails keep their existing endpoint and bath steps. Power matrices
+are worker-local scratch, not retained prepare-cache products.
 
 The shaped and two-tone cost estimates are fixed before numerical guards.
 Timeline workers borrow them without recounting subset reuse. Cache warmth,
@@ -87,6 +109,122 @@ worker width, chunking and apply-call composition do not change these choices.
 Cost coefficients and numerical thresholds live in
 [_shaped_dispatch.py](_shaped_dispatch.py),
 [_two_tone_dispatch.py](_two_tone_dispatch.py) and the family modules.
+
+Multi-tone RWA admission is explicit in
+[kernels/multitone_rwa.py](kernels/multitone_rwa.py). Every active carrier has
+`abs(f) >= 0.05 GHz`, and pairwise carrier magnitudes differ by at least
+0.1 GHz. The sum over tones of
+`peak(abs(envelope))*abs(gain)*(norm(X,2)+norm(Y,2))/abs(f)` is at most 0.25.
+Envelopes are real. Their piecewise-linear slopes divided by peak magnitude
+are at most 0.025/ns. Differences between adjacent slopes divided by their
+midpoint spacing and peak magnitude are at most 0.003/ns². Zero envelopes and
+constant companion envelopes pass the smoothness check. Either at least one
+envelope is sampled, or the row has exactly two constant envelopes on distinct
+ports. Same-port constant Stark/probe spectra retain Floquet/DOP853 because
+small population errors can still shift a narrow resonance peak. Continuous
+flux must be constant over the complete row.
+Budgets below 1e-3 decline this approximation. Admission also requires
+`2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad`, where
+`V_ret = (X-iY)/2` after the positive-frequency edge mask. This row-local
+counter-rotating phase proxy accounts for long pulses even at small
+strength/carrier ratios; it does not bound accumulated sequence error. In the integer 256 ns amplitude sweep, gain 0.4184
+had proxy 0.063 rad and population error above 1e-2. The 0.06 rad limit
+returns those high-gain rows to lab DOP853. This proxy is calibrated, not a
+rigorous Stark-shift bound. Its limit enters the policy identity and keys.
+
+Dual constant rows also check every signed carrier sum and difference against
+all dressed energy gaps, which include conditional ZZ shifts. The shared Fourier
+coefficient builder supplies both tone orders of each two-step path. Admission
+excludes paths with both edges retained because the joint RHS already evolves
+them. Every remaining path divides its coefficient product by an omitted-edge
+detuning, then sums over intermediate states and tone orders to estimate `g2`.
+The first omitted detuning supplies the denominator. When only the second edge
+is omitted, its denominator uses the reversed endpoint convention.
+Coefficients include `abs(gain)*envelope_peak` for each tone. With dressed
+detuning `delta`, the transfer proxy is
+`P = min((2*abs(g2))**2 / ((2*abs(g2))**2 + delta**2), (2*abs(g2)*duration_ns)**2)`.
+Any `P > 5.8e-3` rejects the row. This threshold halves the smallest
+proxy with population error above 0.1 on a 25-point strict-lab calibration
+around the integer +84/-52 MHz combination resonance. Zero coupling contributes zero transfer. The
+finite-time cap handles vanishing detuning without dividing by it. This proxy
+is a calibrated omission estimate, not a certificate. An empty retained graph
+does not bypass it. Shaped rows do not use this additional check.
+
+Dual constant integration retains the adaptive solver and its error estimator,
+with a 16 ns ceiling. Constant envelopes have no sampled internal features.
+The larger ceiling reduces work after the fast carrier phase has been removed;
+it does not relax the 0.06 rad phase limit or drop the joint dissipator.
+
+The 50 MHz edge window and 4 ns ceiling come from simultaneous 128–512 ns
+Gaussian gate measurements on a 16-level joint model. The prototype's maximum
+population difference against lab DOP853 was 1.76e-3 through depth 16.
+The calibrated half-flux pair has summed full-operator/carrier ratio 0.217.
+The sampled 128 ns Gaussian with sigma 32 ns has normalized slope 0.0192/ns
+and curvature 0.00231/ns², including DAC quantization. Admission uses 0.25,
+0.025/ns and 0.003/ns² to leave margin around those measured pulses, rather
+than treating arbitrary samples as smooth. The strength and carrier-separation
+limits restrict use to weak, spectrally separated drives. They are admission limits, not rigorous omission-error
+bounds. Preparation also computes one float64 coefficient per key, tone and
+joint state: `sum(j,s, abs(C_s[i,j])**2/(Ei-Ej+s*f))`, restricted to
+`abs(Ei-Ej+s*f) >= 0.05 GHz`, with `C_+=(X-iY)/2` and `C_-=C_+†`.
+The Hamiltonian multiplies this diagonal shift by the actual
+`gain**2 * abs(envelope(t))**2`, including ramps and envelope offsets.
+Retained edges are excluded before division, so exact resonances are not
+divided by zero or counted twice. The shift is phase independent and applies
+to every joint state. It preserves phase covariance and adds no density,
+rate or state-space reduction. Mixed-tone terms, micromotion and higher orders
+remain omitted. The existing admission limits remain necessary; the diagonal
+correction does not repair integer strong-drive plateaus.
+Full policy revision, budget, level, timing, every active carrier,
+port, gain, phase and envelope content enter RWA prepare keys. Tone phase
+origins retain the ordinary SegmentTable contract.
+
+### Covariant RWA gates
+
+The named `single_tone_gate` and `multitone_gate` approximations share the
+four-U builder and D-U-D playback in [kernels/_rwa_gate.py](kernels/_rwa_gate.py).
+Their numerical guards share the calibrated RWA policy and the
+`RWACoefficients` builder with `multitone_rwa`. All integrators call the same
+`interaction_hamiltonian` assembly. All driven diagonal terms come from that
+coefficient record; the gate cache does not assemble a separate drive RHS. It does not multiply independent qubit maps.
+The model-only [phase graph](kernels/_rwa_graph.py) publishes integer dressed
+charges satisfying `q[i]-q[j]=e[k]` for every retained edge of tone k. It orders
+constraints by decreasing coefficient magnitude, with deterministic index ties.
+Inconsistent cycles and coefficients at or below `1e-12 GHz/gain` are explicit
+omissions. Their positive-operator spectral norms remain in the fact.
+
+The named pruning policy admits only
+`4*pi*duration*sum(abs(gain)*envelope_peak*omitted_norm) <= min(budget,1e-3)`.
+This state-independent Duhamel/trace-distance bound controls the additional
+edge removal relative to ordinary RWA for one row. It does not certify a whole
+RB sequence or the RWA-vs-lab approximation. Strong incompatible cycles fall
+back to ordinary RWA. Shared `phase_graph`, `pruning_bound` and
+`pruning_admitted` are also available to constant-frame algorithms.
+
+Simultaneous gates require every active envelope to be sampled and to
+cover the same complete row support. Complex, partially overlapping and sliced
+supports retain fallback. The four-way secular split uses the existing gate
+proxy `duration**3*Gamma*V**2/16 <= 0.01`, with V the sum of retained joint
+operator peak strengths. Diagonal shifts commute with the secular dissipator
+and do not enter V. This is calibrated admission, not a strict splitting
+certificate. Each quarter integrates a joint Hilbert propagator at
+`rtol=1e-9`, `atol=1e-11`, with a 4 ns ceiling, in an interaction picture.
+Population rates and pure dephasing remain joint and unchanged.
+
+Keys include source/model identity, level, bath arrays, signed ordered carriers,
+ports, gains, envelope identities, offsets, duration, graph policy, budget and
+numerical controls. Only guard-admitted covariance permits reuse without theta
+or absolute start. Playback uses actual row-start theta and both frame boundary
+rotations. Four U, half-step secular maps and compact active-tone charges are read-only
+owned arrays charged to the existing resident budget. There is no phase grid or global memo.
+Whole-acquire choices are fixed before guards. Warm cache, worker width and
+chunking do not change simultaneous gates' threshold of 20, above the measured
+3–19-row break-even range. Single-tone gates instead compare cold costs in
+`_shaped_dispatch.py`; a small inventory stays on Sambe even when a matching
+gate is resident. No planner predicts later acquires or recognizes RB labels.
+Single-tone covariance and the secular split are approximations relative to
+full-drive Sambe, not exact fidelity certificates. Only cost-selected,
+numerically admitted shaped rows change numerical results.
 
 [DOP853 planning](_dop853_dispatch.py) operates across prepared-payload
 boundaries. The scheduler groups chain members by ID in chronological order;
@@ -113,7 +251,7 @@ additional package integration entry points.
   calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
   and the family's plan. Floquet and both direct solvers require their own plan;
   a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
-  Families without plans reject a non-`None` plan with `ValueError`.
+  Families without plans, including all three RWA families, reject a non-`None` plan with `ValueError`.
 
 Dispatch returns at most one plan per family and a separate global-row chain
 array. [Scheduling](_schedule.py) keeps the originating plan through preparation
@@ -149,18 +287,25 @@ The registry kernels retain no evolve-local data.
 
 WorkPlan publishes each lazy fact once, including concurrent requests for the
 same key. WorkPlan copies builder results and publishes read-only arrays. The
-shared facts are envelope peak/slope/real flags, period split rates and packed
-DOP853 samples. Model facts
-include the full physical coordinates in their identity. Table-indexed facts
+shared facts include envelope peak/slope/real flags, period split rates, packed
+DOP853 samples and small Floquet probe-bin certificate extensions. Floquet consumes
+full Fourier averages during frame construction. Its compact frames and optional
+sideband candidates belong only to active preparations or budget-admitted cache
+ownership, never evolve-long facts. Model facts include the full
+physical coordinates in their identity. Table-indexed facts
 also include table identity, so renumbered prefix representatives cannot alias
 the complete table. DOP853 packing also distinguishes flux-inclusive samples.
-Densities and adaptive solver history are not facts.
+Densities and adaptive solver history are not facts. Lab-frame DOP853 gives each
+row its own Hamiltonian, matrix-product and derivative buffers. These mutable
+buffers never enter shared preparations or WorkPlan facts.
 
 The planner publishes immutable algorithm-named records from the complete
 candidate inventory, before numerical admission:
 
 - `GainGroupPlan` and `GainBuildPlan` fix period builders, work limits and gain
-  anchors. Cache warmth and rejected rows do not change anchor coordinates.
+  anchors. `CF4CarrierGroupPlan` fixes narrow constant-CF4 carrier inventories and
+  four carrier anchors. Cache warmth and rejected rows do not change either
+  axis's anchor coordinates.
 - `CarrierFamilyPlan` fixes physical carrier groups. More than nine unique,
   nonzero, same-sign carriers qualify when the largest magnitude is at most
   1.1 times the smallest.
@@ -173,7 +318,9 @@ actual key builds. Gain anchors use single-flight immutable resources. Cache
 hits and rejected rows are not actual consumers. Caller-only groups seal before
 building; the last actual handoff then releases the product. Groups with deferred
 consumers stay open until WorkPlan closes. Prefix preparation cannot seal a
-group needed by later timeline work.
+group needed by later timeline work. Gain and constant-CF4 carrier anchors share
+this admission and handoff mechanism. Carrier interaction-picture prefixes belong
+only to the evolve-local anchor resource, not to resident period payloads.
 
 Carrier interpolation uses a mutable `CarrierWorkspace`, separate from immutable
 facts and resource products. WorkPlan creates it lazily from published carrier
@@ -198,13 +345,32 @@ one timeline at a time; single-use ordinary keys prepare at their apply wave.
 All classified keys, including singletons, can reuse the persistent LRU.
 Accepted guard products are reused even when only a subset of timelines accepts.
 
-The caller protects current cache hits and new shared payloads by their whole
-allocation sizes. Workers submit model-only local products to a thread-safe
-collector bounded by the remaining resident budget. After workers join, the
-caller admits these products through the LRU. This can evict old workloads, but
-streaming singletons cannot displace this evolve's protected allocations.
-Oversize products stream without admission. Pending products and old residents
-can coexist until the join; the resident limit is not a bound on that peak.
+Before prefix evaluation or numerical guards, dispatch inventories every
+candidate family's prepare keys in the complete WorkPlan geometry. The caller
+keeps intersecting whole resident batches protected, including hits used only
+by a later prefix or suffix. It transfers other residents to an LRU stale queue
+without dropping their ownership. Resident and pending allocations share one
+byte account across all prefix and timeline schedules.
+
+Workers offer model-only products through a locked collector, never through the
+caller LRU. An accepted offer reclaims pending failed guards and stale residents
+only when capacity is needed. Failed stale residents yield before ordinary LRU
+residents. An impossible or oversize offer leaves existing ownership unchanged
+and streams without retention. Current whole-batch hits cannot be evicted by
+worker offers. Capacity left idle preserves products for alternating experiments.
+Caller shared builds and exact domain extensions use the same account. Exact
+extensions replace their predecessor's whole charge; rejected extensions grow
+only into idle capacity and retain their low priority.
+
+After each schedule joins, the caller publishes pending products for later
+prefix/suffix lookups. After the evolve pool drains, it restores surviving stale
+residents as older than current work, even on failure or cancellation. Fully
+rejected guard handoffs stay separate from apply bindings and fill only idle
+capacity. Schedule consumes Dispatch's rejected handoff queue on offer, so declined
+or evicted products have no remaining Dispatch owner. Current row, probe-bin,
+domain and budget checks still run on every
+evolve. The unified account bounds retained arrays, not transient builders,
+active nonretained/oversize bindings, input-bound data or process RSS.
 
 [PrepareCache](cache.py) namespaces whole model-only payload batches by family,
 whole-source model identity and budget. The zero-level identity must describe the
@@ -212,8 +378,20 @@ entire source, including absolute DC flux and model parameters; row keys also
 include quantized levels. A cache hit never replaces the row's guard. Eviction
 releases cache ownership, not references already held by active work.
 
-FTF production uses a 1.5 GiB resident budget. The resident-byte limit is not a
-process RAM cap. Models, output densities, solver scratch, WorkPlan products,
+Exact-input repeats bypass geometry, planning and every kernel call. The
+Engine-local result LRU retains owned densities, points and diagnostics, not
+ADC or random samples. Its key covers the whole-source DC model identity,
+initial density, optional flux expansion, budget and complete batch content,
+including envelopes and continuous flux samples. Kernel collections and numerical
+implementations stay fixed for the Engine's process-local lifetime. Custom and
+production kernels must be deterministic and pure for identical inputs, as with
+prepare reuse. Returned copies cannot mutate memo entries. Cancellation still
+raises without a partial result, and cached exceedances still warn per call.
+
+The result LRU charges arrays and metadata up to `min(64 MiB, cache_bytes)` in
+addition to the prepare budget; zero disables both caches. `close()` clears both.
+FTF production uses a 2 GiB unified resident/pending budget, plus at most 64 MiB for
+results. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
 active payload references and ADC preparations are separate allocations. The
 process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
 4 GB ceiling. Numba's compilation cache is independent of the prepare LRU.
@@ -267,9 +445,10 @@ process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
 `close()` waits for active work, clears the prepare cache and is idempotent.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v3`. `experiment.ftf` owns private
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v4`. `experiment.ftf` owns private
 replay and checks backend, model, numerical, RNG and dependency versions before
-recomputing a round. Evolution does not persist densities or offline tables.
+recomputing a round. Evolution does not persist densities or offline tables
+across processes or Engine lifetimes.
 
 ## Research records
 

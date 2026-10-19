@@ -248,6 +248,14 @@ class _TextInput(QLineEdit):
             self.editingFinished.emit()
 
 
+@dataclass(frozen=True)
+class RowActions:
+    """Explicit row operations, separate from parsed value input."""
+
+    command: Callable[[FormWritePath, str], None]
+    select: Callable[[FormWritePath, JsonValue], None]
+
+
 class FieldRow:
     """Keep one described row stable while publication values change.
 
@@ -291,14 +299,14 @@ class FieldRow:
         changed: Callable[[FormWritePath, Mapping[FormWritePath, JsonValue]], None],
         unparsed: Callable[[FormWritePath, LocalText], None],
         folds: dict[FormWritePath, bool],
-        command: Callable[[FormWritePath, str], None],
+        actions: RowActions,
     ) -> None:
-        """Build under parent; call changed(path, batch), unparsed(path, text)
-        or command(path, name).
+        """Build under parent with synchronous edit callbacks.
 
-        path is this row's field path. batch maps write paths to JSON input:
-        one entry at path (an option row writes its chosen option's value).
-        command receives the name of a triggered option command.
+        changed(path, batch) writes parsed input; batch contains the row path.
+        unparsed(path, text) reports view-local drafts. select(path, value) sends
+        the declared option value, separately from raw value writes.
+        command(path, name) sends a triggered option command.
         Callbacks run synchronously for user input, never during display:
         for text, on Enter or focus loss while the row is editable, and not
         for text that already shows state's input.
@@ -311,20 +319,25 @@ class FieldRow:
         self._changed = changed
         self._unparsed = unparsed
         self._folds = folds
-        self._command = command
+        self._command = actions.command
+        self._select = actions.select
         # The selected option's command actions on the dropdown, in order.
         self._commands: list[QAction] = []
+        self._field_actions: list[QAction] = []
         self._displaying = False
+        self._picked: Callable[[], None] = lambda: None
         # The view-local input this row shows instead of state's, if any.
         self._local: LocalText | None = None
         self._error = ""
         self.widget = QWidget(parent)
+        self.widget.setObjectName(self._name("row"))
         # Installed on this row's dropdowns and checkboxes; display sets it.
         self._block = _UserInputBlock(self.widget)
         self.layout = QVBoxLayout(self.widget)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(_HEADER_SPACING)
         self.input: QWidget | None = None
+        self.picker: QComboBox | None = None
         self.mode: QAction | None = None
         self.enabled: QCheckBox | None = None
         self.group: QGroupBox | None = None
@@ -332,16 +345,8 @@ class FieldRow:
         header = QHBoxLayout()
         self.layout.addLayout(header)
         self.label = self._build_label(header)
-        if field.options is not None:
-            self._build_options(header)
-        elif field.kind == "model":
-            # A nullable option row lists None instead of an Enabled box.
-            if field.nullable:
-                self._build_enabled(header)
-        elif field.fixed:
-            self._build_fixed(header)
-        else:
-            self._build_input(header)
+        self._sync_field_commands(editable=True)
+        self._build_control(header)
         if field.unit:
             header.addWidget(_tight_label(field.unit, self.widget))
         self.value = QLabel(self.widget)
@@ -349,7 +354,7 @@ class FieldRow:
         self.value.setObjectName(self._name("value"))
         self.value.hide()
         header.addWidget(self.value)
-        if field.kind == "model" and field.options is None:
+        if field.kind in ("model", "elements") and field.options is None:
             # Keep the Enabled box and unit beside the title instead of
             # stretching them.
             header.addStretch()
@@ -373,6 +378,18 @@ class FieldRow:
         """
         if isinstance(self.label, FoldTitle):
             self.label.fold_changed.connect(callback)
+
+    def connect_pick(self, callback: Callable[[], None]) -> None:
+        """Call callback after the user picks another element, if this is a picker row.
+
+        The callback takes no arguments and runs on the GUI thread; connecting
+        never calls it. Display refreshes never call it.
+        """
+        self._picked = callback
+
+    def picked(self) -> int:
+        """Return the picked element index, or -1 on a row without a picker."""
+        return -1 if self.picker is None else self.picker.currentIndex()
 
     def set_children_available(self, *, available: bool) -> None:
         """Hide an empty model body's fold marker, or restore it for children.
@@ -459,7 +476,7 @@ class FieldRow:
         self.value.hide()
 
     def _name(self, kind: str) -> str:
-        return f"form.{kind}." + ".".join(self.field.path)
+        return f"form.{kind}." + ".".join(str(part) for part in self.field.path)
 
     def _build_label(self, header: QHBoxLayout) -> QLabel:
         """Add the row's name label to header and return it.
@@ -484,6 +501,44 @@ class FieldRow:
         self.layout.addWidget(self.group)
         return title
 
+    def _sync_field_commands(self, *, editable: bool) -> None:
+        """Keep the mounted row's context actions aligned with its description."""
+        listed = self.field.commands
+        if [(a.objectName(), a.text()) for a in self._field_actions] != [
+            (f"{self._name('command')}.{item.name}", item.label) for item in listed
+        ]:
+            for action in self._field_actions:
+                self.label.removeAction(action)
+                action.setObjectName("")
+                action.deleteLater()
+            self._field_actions = []
+            for item in listed:
+                action = QAction(item.label, self.label)
+                action.setObjectName(f"{self._name('command')}.{item.name}")
+                action.triggered.connect(partial(self._command_triggered, item.name))
+                self.label.addAction(action)
+                self._field_actions.append(action)
+        if listed:
+            self.label.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
+        for action in self._field_actions:
+            action.setEnabled(editable)
+
+    def _build_control(self, header: QHBoxLayout) -> None:
+        """Build the input or navigation control selected by this row's metadata."""
+        field = self.field
+        if field.options is not None:
+            self._build_options(header)
+        elif field.kind == "elements":
+            self._build_picker(header)
+        elif field.kind == "model":
+            # A nullable option row lists None instead of an Enabled box.
+            if field.nullable:
+                self._build_enabled(header)
+        elif field.fixed:
+            self._build_fixed(header)
+        else:
+            self._build_input(header)
+
     def _build_enabled(self, header: QHBoxLayout) -> None:
         self.enabled = QCheckBox("Enabled", self.widget)
         self.enabled.setObjectName(self._name("enabled"))
@@ -505,6 +560,32 @@ class FieldRow:
         self.input = widget
         header.addWidget(widget)
 
+    def _build_picker(self, header: QHBoxLayout) -> None:
+        # Navigation only: choosing an element writes nothing and never reads
+        # the picked element's text, so it stays usable on a read-only row.
+        widget = QComboBox(self.widget)
+        widget.setObjectName(self._name("picker"))
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        widget.currentIndexChanged.connect(self._pick_changed)
+        self.picker = widget
+        header.addWidget(widget)
+
+    def _pick_changed(self) -> None:
+        if not self._displaying:
+            self._picked()
+
+    def _display_picker(self) -> None:
+        """Show each element as "index: name", keeping the user's pick."""
+        widget = self.picker
+        if widget is None:
+            return
+        labels = [f"{item.index}: {item.name}" for item in self.field.elements or ()]
+        if [widget.itemText(i) for i in range(widget.count())] != labels:
+            previous = max(widget.currentIndex(), 0)
+            widget.clear()
+            widget.addItems(labels)
+            widget.setCurrentIndex(min(previous, len(labels) - 1))
+
     def _build_fixed(self, header: QHBoxLayout) -> None:
         # One legal value: nothing to choose or compute, so no mode and no
         # value signal. Without a frame or base color it reads as plain text,
@@ -523,8 +604,7 @@ class FieldRow:
         # The missing item (after the options) writes nothing.
         if self._displaying or not 0 <= index < len(options):
             return
-        # The core switches branches to fresh defaults; nothing is carried over.
-        self._write(options[index].value)
+        self._select(self.field.path, options[index].value)
 
     def _command_triggered(self, name: str) -> None:
         if not self._displaying:
@@ -552,12 +632,6 @@ class FieldRow:
         header.addWidget(widget)
         if self.field.expression and isinstance(widget, QLineEdit):
             self.mode = self._build_mode(widget)
-            for item in self.field.commands:
-                action = QAction(item.label, widget)
-                action.setObjectName(f"{self._name('command')}.{item.name}")
-                action.triggered.connect(partial(self._command_triggered, item.name))
-                widget.addAction(action)
-                self._commands.append(action)
         # Text commits on Enter or focus loss, not per keystroke; a checkbox
         # commits each toggle.
         connect_committed_value_widget(widget, self._input_changed)
@@ -693,12 +767,14 @@ class FieldRow:
         fold stays as built or as the user last set it.
         """
         self.field = field
+        self._sync_field_commands(editable=editable)
         for action in self._commands:
             action.setEnabled(editable)
         self._local = local
         self._displaying = True
         try:
             self._display_input(local, editable=editable)
+            self._display_picker()
             shown = ""
             effective = (
                 field.kind in ("integer", "number", "complex")
@@ -723,8 +799,8 @@ class FieldRow:
     ) -> None:
         """Show options and select the input's; list its commands as actions.
 
-        A present input that matches no option gets a selected missing item;
-        an unfilled one selects nothing.
+        A present selection that matches no option gets a selected missing
+        item; an unfilled one selects nothing. Raw child input is independent.
         """
         widget = self.input
         if not isinstance(widget, QComboBox):
@@ -734,8 +810,8 @@ class FieldRow:
             (option.label, option.value) for option in options
         ]
         selected = -1 if field.selected is None else field.selected
-        if field.selected is None and field.present:
-            items.append((_missing_text(field.raw), field.raw))
+        if field.selected is None and field.selection_present:
+            items.append((_missing_text(field.selection), field.selection))
             selected = len(items) - 1
         shown = [
             (widget.itemText(i), widget.itemData(i)) for i in range(widget.count())
@@ -825,7 +901,9 @@ class GroupBlock:
         """
         self.members = members
         self.widget = QWidget(parent)
-        self.widget.setObjectName("form.group." + ".".join((*path, name)))
+        self.widget.setObjectName(
+            "form.group." + ".".join(str(part) for part in (*path, name))
+        )
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(_HEADER_SPACING)
@@ -836,7 +914,7 @@ class GroupBlock:
             folds,
             (path, name),
             label=name,
-            name="form.fold.group." + ".".join((*path, name)),
+            name="form.fold.group." + ".".join(str(part) for part in (*path, name)),
             expanded=False,
         )
         self.label.fold_changed.connect(toggled)

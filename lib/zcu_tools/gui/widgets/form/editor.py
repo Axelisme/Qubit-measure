@@ -15,9 +15,11 @@ from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from zcu_tools.gui.form import (
     FormCommandError,
+    FormConversionError,
     FormEnv,
     FormErrors,
     FormFieldDescription,
+    FormInputRejected,
     FormModel,
     FormPath,
     FormPreview,
@@ -27,7 +29,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
-from ._controls import FieldRow, GroupBlock, LocalText
+from ._controls import FieldRow, GroupBlock, LocalText, RowActions
 from ._fold import ROW_SPACING
 from ._view import FieldView, project_field
 
@@ -75,7 +77,7 @@ class FormEditor[F: FormModel](QWidget):
     defaults and model validation belong to state.
     No Engine update, revision check, source capture, persistence or I/O occurs.
 
-    Public child object names use model-field paths joined by dots:
+    Public child object names use model-field paths and indexes joined by dots:
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
     whole-container input; a QCheckBox for bool; or a non-editable QComboBox
     for a field whose core description lists options.
@@ -107,15 +109,16 @@ class FormEditor[F: FormModel](QWidget):
     tagged unions, and the module and waveform selections a Form generator
     declares) shows one dropdown, form.input.<path>, and nothing else
     decides its items: each option's label in declaration order, with the
-    option's value as item data. The first option matching the input by the
-    core's Option rule is selected. A present input no option matches is
-    kept: a last item shows it, a nonempty string as itself and other JSON
-    as its JSON text, plus " (missing)", with the input as data; it is
-    selected, the state is not changed and the field's errors still show.
+    option's value as item data. The core's selected index reflects an explicit
+    selection override, or raw input when there is no override. An unmatched
+    selection is kept: a last item shows it, a nonempty string as itself and
+    other JSON as its JSON text, plus " (missing)", with the selection as data.
+    This item is selected, state is unchanged and the field's errors still show.
     An unfilled field selects nothing. Choosing an option writes its value
-    at the field as one batch; the core starts a new branch from its own
-    defaults. While the selected option has fields, their rows show below
-    the dropdown (tags its value fixes have no rows); such a row has no
+    at the field as one batch; the core's converter, when declared, decides
+    the new child input. Rows follow the actual branch independently of the
+    selection and show below the dropdown (tags its value fixes have no rows).
+    Such a row has no
     Enabled box, since a nullable field lists None as an option. The
     dropdown's right-click menu lists the selected option's commands as
     QActions form.command.<path>.<name> with the declared label as text, also
@@ -158,14 +161,20 @@ class FormEditor[F: FormModel](QWidget):
     tint and gets a red border. The coloured widget has formError=True while
     invalid, False otherwise. Errors add no row height. form.error displays
     model-wide errors and is hidden while empty.
-    Mapping-key/index errors appear at their container field.
+    Mapping-key/index errors appear at their container field, except within a
+    FixedList where the original index addresses each model element.
     Only current active, instantiated fields have input controls. Model and
     group descendants are described and built on first expansion, or during
     initial construction when expanded. Collapsing retains the same widgets
     and their uncommitted text without writing state. Changing an option or
     nullable activation replaces only that subtree, not unrelated rows.
-    Sequences and typed mappings
-    use JSON text for the whole leaf; they do not expose key/index write paths.
+    A FixedList has form.picker.<path>, a navigation-only QComboBox listing
+    "index: name". It draws the picked element below the list row and keeps
+    other elements mounted but hidden. Switching never writes state or commits
+    hidden text, and preserves drafts and parse errors. The list row marks
+    hidden errors with their element name in its tooltip. Participants remain
+    a separate JSON list input. Other sequences and typed mappings use JSON
+    text for the whole leaf; they do not expose key/index write paths.
     Complex direct text uses Python complex-number notation, not an expression.
 
     set_editing_enabled(enabled=False) makes the form read-only but readable;
@@ -178,7 +187,7 @@ class FormEditor[F: FormModel](QWidget):
     a wheel turn over them scrolls an enclosing scroll area instead. Option
     command actions stay listed but disabled. Fold titles still take Tab
     focus and fold and unfold on a click, Space, Return or Enter, without
-    writing state.
+    writing state. Model-list pickers also remain usable for navigation.
 
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
@@ -204,6 +213,7 @@ class FormEditor[F: FormModel](QWidget):
         *,
         write: Callable[[Mapping[FormWritePath, JsonValue]], None] | None = None,
         run_command: Callable[[FormWritePath, str], None] | None = None,
+        select: Callable[[FormWritePath, JsonValue], None] | None = None,
     ) -> None:
         """Build controls for state using env, then subscribe to state changes.
 
@@ -237,13 +247,19 @@ class FormEditor[F: FormModel](QWidget):
         the command on state; the callable runs it on this same state, for
         example through the host's guarded entry. It refuses with
         WriteRejected(message) before changing state, which the field shows
-        like a rejected write; any other exception propagates. write and
-        run_command are passed together or not at all: a host that guards
-        writes must also route commands, so passing only one raises
-        ValueError before any subscription.
+        like a rejected write.
+
+        select receives (path, option.value) for dropdown changes. Without host
+        callbacks, the editor calls state.select(path, selection, env); it never
+        infers selection from a value write. A host callback must run selection
+        through its same busy/owner guard before publishing to this state.
+        write, select and run_command are all supplied or all omitted; a partial
+        set raises ValueError before subscribing. FormConversionError and
+        FormInputRejected show recoverable row errors and preserve state.
+        Other exceptions propagate.
         """
-        if (write is None) != (run_command is None):
-            raise ValueError("FormEditor needs both write and run_command, or neither")
+        if len({write is None, run_command is None, select is None}) != 1:
+            raise ValueError("FormEditor needs write, select and run_command together")
         app = QApplication.instance()
         if not isinstance(app, QApplication) or app.thread() != QThread.currentThread():
             raise RuntimeError("FormEditor requires the QApplication GUI thread")
@@ -252,6 +268,7 @@ class FormEditor[F: FormModel](QWidget):
         self._env: FormEnv | None = env
         self._host_write = write
         self._host_command = run_command
+        self._host_select = select
         self._unsubscribe: Callable[[], None] | None = None
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
@@ -511,8 +528,9 @@ class FormEditor[F: FormModel](QWidget):
                     self._clear_level(child)
                 self._local.pop(path, None)
                 self._retire(level.rows.pop(path).widget)
+        selections = self._require_state().input.selections
         for index, item in enumerate(metadata):
-            field = project_field(item, data, preview)
+            field = project_field(item, data, preview, selections)
             row = level.rows.get(field.path)
             fresh = row is None or _shape(row.field) != _shape(field)
             if fresh:
@@ -527,15 +545,16 @@ class FormEditor[F: FormModel](QWidget):
                     self._write,
                     self._unparsed,
                     self._model_expanded,
-                    self._run_command,
+                    RowActions(command=self._run_command, select=self._select),
                 )
                 row.connect_fold(self._fold_changed)
+                row.connect_pick(self._pick_changed)
                 level.rows[field.path] = row
                 level.layout.insertWidget(index, row.widget)
                 row.widget.show()
             # The new-row branch always assigns row.
             assert row is not None
-            if row.field.selected != field.selected:
+            if row.field.branch != field.branch:
                 child = level.children.pop(field.path, None)
                 if child is not None:
                     self._clear_level(child)
@@ -572,6 +591,16 @@ class FormEditor[F: FormModel](QWidget):
         fields = self._require_state().describe(path, self._require_env()).children
         row.set_children_available(available=any(not field.hidden for field in fields))
         self._sync_level(child, fields, data, preview, redraw=redraw)
+        if row.picker is not None:
+            _show_picked(row, child.rows)
+
+    def _pick_changed(self) -> None:
+        # Navigation only: hidden element rows keep their widgets, so local
+        # text and errors survive, and nothing is written or committed.
+        for row in self._rows.values():
+            if row.picker is not None:
+                _show_picked(row, self._rows)
+        self._show_errors()
 
     def _index_level(self, level: _Level) -> None:
         self._rows.update(level.rows)
@@ -588,17 +617,34 @@ class FormEditor[F: FormModel](QWidget):
         state = self._require_state()
         publication = self._publication_count
         self._local.pop(path, None)
-        if self._host_write is None:
-            state.write(batch, self._require_env())
-        else:
-            try:
+        try:
+            if self._host_write is None:
+                state.write(batch, self._require_env())
+            else:
                 self._host_write(batch)
-            except WriteRejected as exc:
-                # The host installed nothing: keep this input local, like
-                # unparseable text; the publish below redraws state around it.
-                self._local[path] = self._rows[path].rejected_input(exc.message)
+        except (WriteRejected, FormConversionError, FormInputRejected) as exc:
+            # Both routes installed nothing. Redraw the committed selector,
+            # retaining unrelated local text; never retry a refused conversion.
+            message = exc.message if isinstance(exc, WriteRejected) else str(exc)
+            self._local[path] = self._rows[path].rejected_input(message)
         # A changed write already rendered synchronously in the subscriber.
         # Unchanged/rejected writes still need to update view-local errors.
+        if self._publication_count == publication:
+            self._publish()
+
+    def _select(self, path: FormWritePath, selection: JsonValue) -> None:
+        """Dispatch dropdown selection through the same owner guard as value writes."""
+        state = self._require_state()
+        publication = self._publication_count
+        self._local.pop(path, None)
+        try:
+            if self._host_select is None:
+                state.select(path, selection, self._require_env())
+            else:
+                self._host_select(path, selection)
+        except (WriteRejected, FormConversionError, FormInputRejected) as exc:
+            message = exc.message if isinstance(exc, WriteRejected) else str(exc)
+            self._local[path] = self._rows[path].rejected_input(message)
         if self._publication_count == publication:
             self._publish()
 
@@ -615,31 +661,43 @@ class FormEditor[F: FormModel](QWidget):
         )
         if command is not None and any(key in self._local for key in command.inputs):
             return
-        saved = dict(self._local) if command is not None else {}
+        self._dispatch_command(
+            path, name, command.inputs if command is not None else None
+        )
+
+    def _dispatch_command(
+        self,
+        path: FormWritePath,
+        name: str,
+        inputs: tuple[FormWritePath, ...] | None,
+    ) -> None:
+        """Keep local drafts across a guarded command and its state publication.
+
+        inputs names participating paths for a field command; None denotes an
+        option action, whose row-local error is cleared before dispatch.
+        """
+        saved = dict(self._local) if inputs is not None else {}
         publication = self._publication_count
-        if command is None:
+        if inputs is None:
             self._local.pop(path, None)
         try:
             if self._host_command is None:
-                state.run_command(path, name, self._require_env())
+                self._require_state().run_command(path, name, self._require_env())
             else:
                 self._host_command(path, name)
-        except WriteRejected as exc:
-            self._local[path] = self._rows[path].rejected_input(exc.message)
+        except (WriteRejected, FormInputRejected) as exc:
+            message = exc.message if isinstance(exc, WriteRejected) else str(exc)
+            self._local[path] = self._rows[path].rejected_input(message)
         except FormCommandError:
-            if command is None:
+            if inputs is None:
                 raise
             # State preview already reports the participating expression/missing
             # error. Do not create a local parse error on a valid peer field.
             self._local.update(saved)
         else:
-            if command is not None:
+            if inputs is not None:
                 self._local.update(
-                    {
-                        key: local
-                        for key, local in saved.items()
-                        if key not in command.inputs
-                    }
+                    {key: local for key, local in saved.items() if key not in inputs}
                 )
         if self._publication_count == publication or saved:
             self._publish()
@@ -656,6 +714,10 @@ class FormEditor[F: FormModel](QWidget):
         for path, message in messages.items():
             target = self._error_target(path)
             if target is not None:
+                row = self._rows[target]
+                if row.picker is not None and len(path) > len(target):
+                    # The picked element is not drawn: name it in this row.
+                    message = f"{_element_text(row, path)}: {message}"
                 by_row.setdefault(target, []).append(message)
             else:
                 root = self._root_error.text()
@@ -690,6 +752,24 @@ class FormEditor[F: FormModel](QWidget):
                 ):
                     return candidate
         return None
+
+
+def _show_picked(row: FieldRow, rows: Mapping[FormWritePath, FieldRow]) -> None:
+    """Draw only the element row the picker selects."""
+    picked = row.picked()
+    for path, element in rows.items():
+        if len(path) == len(row.field.path) + 1 and path[:-1] == row.field.path:
+            element.widget.setVisible(path[-1] == picked)
+
+
+def _element_text(row: FieldRow, path: FormPath) -> str:
+    """Name the element and field a path below a picker row addresses."""
+    index = path[len(row.field.path)]
+    name = next(
+        (item.name for item in row.field.elements or () if item.index == index),
+        str(index),
+    )
+    return ".".join((name, *(str(part) for part in path[len(row.field.path) + 1 :])))
 
 
 def _align_labels(labels: list[QLabel]) -> None:

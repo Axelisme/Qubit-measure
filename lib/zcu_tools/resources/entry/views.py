@@ -9,6 +9,7 @@ from collections.abc import Collection, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
+from operator import is_
 from pathlib import Path
 from typing import TYPE_CHECKING, overload
 
@@ -494,12 +495,18 @@ def _set_document_value(
         edit_root = stage_component(draft, parts[0])
     with edit_root as root:
         node: FieldNode = root
+        freeform = False
         for index, name in enumerate(parts[1:-1], start=1):
             parent_path = ".".join(parts[:index])
             if isinstance(node, BaseModel):
                 child = read_field(node, name, parent_path)
+                field = type(node).model_fields.get(name)
+                # Pydantic's annotation type omits runtime PEP 695 aliases.
+                freeform = field is not None and is_(field.annotation, YamlMap)
                 node.model_fields_set.add(name)
             else:
+                if freeform and name not in node:
+                    node[name] = {}
                 child = node[name]
             if not isinstance(child, (BaseModel, dict)):
                 raise AttributeError(f"{parent_path}.{name}: not a field container")
@@ -544,8 +551,10 @@ class EditView:
 
         Native complex scalars encode through the core codec before the original
         schema validation; the stored value remains a YAML tag. Containers
-        replace their whole value. Invalid paths or schema values raise before
-        changing the draft. Metadata at every path is kept unchanged, including
+        replace their whole value. Inside declared YamlMap fields, missing
+        intermediate keys become empty mappings. Existing non-container values
+        and unknown typed paths raise without changing the draft, as do invalid
+        schema values. Metadata at every path is kept unchanged, including
         for same-value writes. Empty or dotted mapping keys cannot be addressed
         through this dotted syntax.
         """

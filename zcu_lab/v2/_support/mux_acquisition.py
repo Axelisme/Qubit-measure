@@ -11,6 +11,7 @@ from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
 
 from .mux import MuxPulseScan, MuxSweepResult
+from .mux_liveplot import draw_mux_magnitudes
 from .mux_sweep_cfg import MuxDriveModuleCfg
 
 
@@ -32,6 +33,7 @@ def acquire_mux_scan(
     *,
     context: RunContext,
     coordinate_label: str,
+    tone_names: Sequence[str],
 ) -> MuxSweepResult:
     """Acquire a prepared host zip scan with independent drives and common readout.
 
@@ -44,7 +46,9 @@ def acquire_mux_scan(
     Native pulse timing and parameter conversion remain program-owned.
 
     context supplies compatible soc/soccfg, caller-owned Plots and a fresh shared
-    StopSignal. Publish measurement_i magnitude plots for original tone indices.
+    StopSignal. tone_names is the complete source cfg name list. Publish
+    measurement_i figures and combined measurement with each tone's own x grid
+    and original index/name legend, never current Form/library names.
     Return complex128 ADC-length-normalized average IQ (K,P), with each drive's
     own coordinates. The program averages reps/rounds; completed-round hooks
     preserve a partially averaged point on cancellation. Unwritten points remain
@@ -66,6 +70,13 @@ def acquire_mux_scan(
     def update(data: NDArray[np.complex128]) -> None:
         for row, viewer in enumerate(viewers):
             viewer.update(scan.coordinates[row], np.abs(data[:, row]))
+        draw_mux_magnitudes(
+            context.plots,
+            scan.coordinates,
+            data.T,
+            [f"{index}: {tone_names[index]}" for index in scan.indices],
+            coordinate_label,
+        )
 
     # Point-major storage lets Schedule write one whole tone vector per step.
     signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)

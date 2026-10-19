@@ -16,27 +16,28 @@ from ._structure import (
     branch_tags,
     expression_allowed,
     fixed_tag,
+    list_model,
     model_types,
 )
 from .description import (
     FormCommandDescription,
     FormConstraints,
     FormDescription,
+    FormElementDescription,
     FormFieldDescription,
     FormFieldKind,
     FormOptionDescription,
 )
 from .model import Display, FormEnv, FormModel, FormWritePath
 from .options import Option
-from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
 
 def _kind(target: Field) -> FormFieldKind:
     members = tuple(
         item for item in alternatives(target.info.annotation) if item is not type(None)
     )
-    if model_types(target.info.annotation):
-        return "model"
+    if list_model(target.info) is not None or model_types(target.info.annotation):
+        return "elements" if list_model(target.info) is not None else "model"
     if literal_values(target.info.annotation) is not None:
         return (
             "enum"
@@ -159,7 +160,7 @@ def _fixed_value(target: Field) -> tuple[bool, JsonValue]:
     and declaration-fixed complete option values. An unfixed field returns
     (False, None); a fixed null returns (True, None).
     """
-    if target.pinned:
+    if target.pinned and isinstance(target.name, str):
         return True, target.level.pinned[target.name]
     values = literal_values(target.info.annotation)
     if values is not None and len(values) == 1:
@@ -182,12 +183,15 @@ def _metadata(
         raise ValueError(f"{target.path!r}: Display decimals requires a float field")
     fixed, fixed_value = _fixed_value(target)
     hidden_tag = fixed_tag(target.level.model, tags) == target.name
-    text = target.name.replace("_", " ")
+    name = target.name if isinstance(target.name, str) else target.element_name
+    text = name.replace("_", " ")
     return FormFieldDescription(
         path=target.path,
-        name=target.name,
+        name=name,
         kind=_kind(target),
-        title=display.label or info.title or text[:1].upper() + text[1:],
+        title=display.label
+        or info.title
+        or (name if isinstance(target.name, int) else text[:1].upper() + text[1:]),
         description=display.description
         if display.description is not None
         else info.description,
@@ -210,15 +214,46 @@ def _metadata(
         fixed_value=copy_json(fixed_value),
         constraints=_constraints(target),
         selector=display.selector,
+        readonly=display.readonly,
+        branch=target.branch_option.value if target.branch_option is not None else None,
         commands=tuple(
             FormCommandDescription(
                 item.name,
                 item.label,
-                target.level.prefix,
-                tuple((*target.level.prefix, name) for name in item.inputs),
+                target.path,
+                tuple((*target.path, *path) for path in item.inputs),
             )
             for item in target.input_commands
         ),
+        elements=_elements(target),
+    )
+
+
+def _elements(target: Field) -> tuple[FormElementDescription, ...] | None:
+    """Describe model-list positions and optional declaration-supplied labels."""
+    if list_model(target.info) is None:
+        return None
+    raw = target.level.value(target.name)
+    items = raw if isinstance(raw, list) else []
+    label = next(
+        (
+            item.element_label
+            for item in reversed(target.info.metadata)
+            if isinstance(item, Display)
+        ),
+        None,
+    )
+    return tuple(
+        FormElementDescription(
+            index,
+            name
+            if label is not None
+            and isinstance(item, dict)
+            and isinstance(name := item.get(label), str)
+            else str(index),
+            (*target.path, index),
+        )
+        for index, item in enumerate(items)
     )
 
 
@@ -227,18 +262,13 @@ def _children(
 ) -> tuple[FormFieldDescription, ...]:
     return tuple(
         _metadata(target, tags)
-        for name in level.model.model_fields
+        for name in level.names
         if not (target := level.field(name)).pinned
     )
 
 
 def _description_tags(roots: tuple[object, ...]) -> dict[type[BaseModel], str]:
-    tags = branch_tags(roots)
-    tags[LinRange] = "kind"
-    tags[CenterSpan] = "kind"
-    tags[StepRange] = "kind"
-    tags[StepCenter] = "kind"
-    return tags
+    return branch_tags(roots)
 
 
 def describe_field(target: Field, *, roots: tuple[object, ...]) -> FormFieldDescription:
@@ -259,6 +289,7 @@ def describe(
     data: Mapping[str, JsonValue],
     path: FormWritePath,
     env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> FormDescription:
     """Return target and one layer, resolving only active model ancestry.
 
@@ -270,9 +301,9 @@ def describe(
     tags = _description_tags((model,))
     if not path:
         return FormDescription(
-            path, None, _children(root_level(model, data, env), tags)
+            path, None, _children(root_level(model, data, env, selections), tags)
         )
-    target = resolve(model, data, path, env)
+    target = resolve(model, data, path, env, selections)
     metadata = describe_field(target, roots=(model,))
     level = target.children(env)
     if level is None:

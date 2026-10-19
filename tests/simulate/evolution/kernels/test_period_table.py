@@ -152,3 +152,87 @@ def test_shaped_sambe_cached_convergence_admission(kernel_case: KernelCase) -> N
     np.testing.assert_array_equal(admitted.accepted, built.accepted[::-1])
     changed = replace(case.table, duration_ns=case.table.duration_ns + 1)
     assert solver.admit_prepared(prepared, changed, rows, context) is None
+
+
+@pytest.mark.parametrize("family", ["period_table", "shaped_sambe"])
+def test_fractional_tails_pack_only_playing_envelopes(
+    kernel_case: KernelCase, family: str
+) -> None:
+    from unittest.mock import patch
+
+    from zcu_tools.simulate.evolution.kernels.period_table import PeriodTableKernel
+    from zcu_tools.simulate.evolution.kernels.shaped_sambe import ShapedSambeKernel
+
+    case = kernel_case
+    solver = PeriodTableKernel() if family == "period_table" else ShapedSambeKernel()
+    # Multiple independent tails include DRAG, signed gain/carrier, a second
+    # physical port and a nonzero envelope offset. Padding is not a playing ID.
+    rows = np.array([2, 3, 4, 7], dtype=np.int64)
+    table = replace(
+        case.table,
+        duration_ns=case.table.duration_ns + 0.031,
+        tone_port=np.pad(case.table.tone_port, ((0, 0), (0, 1)), constant_values=-1),
+        tone_frequency_ghz=np.pad(case.table.tone_frequency_ghz, ((0, 0), (0, 1))),
+        tone_amplitude=np.pad(case.table.tone_amplitude, ((0, 0), (0, 1))),
+        tone_theta_rad=np.pad(case.table.tone_theta_rad, ((0, 0), (0, 1))),
+        tone_envelope=np.pad(
+            case.table.tone_envelope, ((0, 0), (0, 1)), constant_values=-1
+        ),
+        tone_envelope_offset_ns=np.pad(
+            case.table.tone_envelope_offset_ns, ((0, 0), (0, 1))
+        ),
+    )
+    context = KernelContext(case.source, case.budget, WorkPlan())
+    assert solver.guard(table, rows, context).all()
+    keys, representatives, inverse = np.unique(
+        solver.prepare_keys(table, rows, context),
+        return_index=True,
+        return_inverse=True,
+    )
+    prepared = solver.prepare(keys, table, rows[representatives], context)
+    expected = case.states[rows].copy()
+    solver.apply(prepared, inverse, table, rows, expected, ApplyContext(case.budget))
+
+    # Put the actual envelopes at sparse, reversed inventory IDs. Extra entries
+    # must not increase the amount of sample data copied by a fractional tail.
+    unused = EnvelopeSpec(
+        "sampled", np.ones(257, dtype=np.complex128), np.linspace(0, 10, 257)
+    )
+    inventory = (unused,) * 19 + table.envelopes[::-1] + (unused,) * 23
+    ids = table.tone_envelope.copy()
+    playing = ids >= 0
+    ids[playing] = 19 + len(table.envelopes) - 1 - ids[playing]
+    inflated = replace(table, envelopes=inventory, tone_envelope=ids)
+    actual = case.states[rows].copy()
+    with patch.object(np, "concatenate", wraps=np.concatenate) as concatenate:
+        solver.apply(
+            prepared, inverse, inflated, rows, actual, ApplyContext(case.budget)
+        )
+
+    assert actual.tobytes() == expected.tobytes()
+    independent = case.states[rows].copy()
+    for local in range(len(rows)):
+        solver.apply(
+            prepared,
+            inverse[local : local + 1],
+            inflated,
+            rows[local : local + 1],
+            independent[local : local + 1],
+            ApplyContext(case.budget),
+        )
+    assert independent.tobytes() == expected.tobytes()
+    sample_copies = [
+        call.args[0]
+        for call in concatenate.call_args_list
+        if any(
+            array is envelope.samples
+            for array in call.args[0]
+            for envelope in inflated.envelopes
+        )
+    ]
+    assert sample_copies, "the high-carrier fractional tails must exercise packing"
+    assert all(
+        array is not unused.samples for arrays in sample_copies for array in arrays
+    ), "tail packing must not copy unused program envelopes"
+    # Each apply group here has just one physical envelope, even for many rows.
+    assert all(len(arrays) == 1 for arrays in sample_copies)

@@ -1,8 +1,10 @@
 """Validate handwritten recipe inputs and detach typed keyword arguments.
 
 JSON Schema validation belongs to jsonschema. This adapter adds the recipe's
-finite scalar boundary and existing number-to-float normalization; it does not
-derive schemas from Python signatures or interpret experiment-specific rules.
+finite leaf boundary. JSON ints stay ints when the schema admits integer;
+otherwise numeric inputs normalize to float when the schema admits number.
+It does not derive schemas from Python signatures or interpret
+experiment-specific rules.
 """
 
 from collections.abc import Mapping
@@ -14,6 +16,7 @@ from jsonschema.exceptions import SchemaError, ValidationError
 
 from zcu_tools.mcp.measure.recipe import (
     RecipeInputSchema,
+    RecipeInputValue,
     RecipeParameter,
     RecipePropertySchema,
     RecipeScalar,
@@ -22,20 +25,42 @@ from zcu_tools.mcp.measure.recipe import (
 _SCALAR_TYPES = frozenset({"string", "number", "integer", "boolean", "null"})
 
 
-def _types(schema: RecipePropertySchema) -> tuple[str, ...]:
+def _types(schema: RecipeInputSchema | RecipePropertySchema) -> tuple[str, ...]:
     declared = schema["type"]
     return (declared,) if isinstance(declared, str) else tuple(declared)
 
 
-def _validate_property(schema: RecipePropertySchema, name: str) -> None:
+def _validate_property(
+    schema: RecipeInputSchema | RecipePropertySchema, name: str
+) -> None:
     types = _types(schema)
-    if not types or not set(types) <= _SCALAR_TYPES | {"array"}:
+    if not types or not set(types) <= _SCALAR_TYPES | {"array", "object"}:
         raise ValueError(f"Invalid recipe schema for {name}: unsupported types")
     items = schema.get("items")
-    if items is not None and (
-        not _types(items) or not set(_types(items)) <= _SCALAR_TYPES
-    ):
-        raise ValueError(f"Invalid recipe schema for {name}: items must be scalars")
+    if items is not None:
+        if "array" in _types(items):
+            raise ValueError(
+                f"Invalid recipe schema for {name}: items must be scalars or objects"
+            )
+        _validate_property(items, f"{name}[]")
+    if "object" not in types:
+        return
+    additional = schema.get("additionalProperties")
+    if "properties" not in schema and not isinstance(additional, dict):
+        raise ValueError(
+            f"Invalid recipe schema for {name}: object needs declared fields"
+        )
+    properties = schema.get("properties", {})
+    for field, child in properties.items():
+        if not field:
+            raise ValueError(f"Invalid recipe schema for {name}: empty parameter name")
+        _validate_property(child, f"{name}.{field}")
+    if isinstance(additional, dict):
+        _validate_property(additional, f"{name}.*")
+    if not set(schema.get("required", ())) <= properties.keys():
+        raise ValueError(
+            f"Invalid recipe schema for {name}: required names must be declared"
+        )
 
 
 def _number(value: int | float, name: str) -> float:
@@ -58,10 +83,12 @@ def _scalar(
     if isinstance(value, float) and not isfinite(value):
         raise ValueError(f"{name} must be a finite number")
     types = _types(schema) if schema is not None else ()
+    if "integer" in types and isinstance(value, int):
+        return value
     if "number" in types:
         return _number(value, name)
     # Keep the existing integer-input contract: integral floats are not integers.
-    if "integer" in types and not isinstance(value, int):
+    if "integer" in types:
         raise ValueError(f"{name} must be an integer")
     return value
 
@@ -75,7 +102,7 @@ def copy_recipe_parameters(
     Names are the mapping's string keys. Raise ValueError for unsupported values;
     nested arrays/models are not accepted. Preserve scalar types, detach lists
     and do not inject defaults. Recipe inputs and analysis updates share this
-    value contract; definition-specific normalization belongs to RecipeInputs.
+    scalar value contract; nested invocation inputs belong only to RecipeInputs.
     """
     copied: dict[str, RecipeParameter] = {}
     for name, value in parameters.items():
@@ -89,13 +116,47 @@ def copy_recipe_parameters(
     return copied
 
 
+def _input_value(
+    value: object, name: str, schema: RecipePropertySchema | None
+) -> RecipeInputValue:
+    """Detach a declared input, preserving the flat contract for undeclared extras."""
+    if isinstance(value, dict):
+        if schema is None or "object" not in _types(schema):
+            raise ValueError(f"{name} must not contain undeclared objects")
+        properties = schema.get("properties", {})
+        additional = schema.get("additionalProperties")
+        extra_schema = additional if isinstance(additional, dict) else None
+        copied: dict[str, RecipeInputValue] = {}
+        for field, child in value.items():
+            if not isinstance(field, str):
+                raise ValueError(f"{name} must contain only string keys")
+            copied[field] = _input_value(
+                child, f"{name}.{field}", properties.get(field, extra_schema)
+            )
+        return copied
+    if isinstance(value, list):
+        items = schema.get("items") if schema is not None else None
+        if items is None:
+            # Undeclared array elements retain the flat scalar boundary.
+            return [
+                _scalar(element, f"{name}[{index}]", None)
+                for index, element in enumerate(value)
+            ]
+        return [
+            _input_value(element, f"{name}[{index}]", items)
+            for index, element in enumerate(value)
+        ]
+    return _scalar(value, name, schema)
+
+
 class RecipeInputs:
     """One definition's detached handwritten schema and keyword-input codec.
 
-    schema uses Draft 7 object validation with scalar or one-level scalar-array
-    properties. Invalid JSON Schema, unsupported property types and undeclared
-    required names raise ValueError at construction. The schema is copied, so
-    later author mutations do not change the admitted input contract.
+    schema uses Draft 7 validation with scalars, explicitly declared nested
+    objects and arrays of scalars or declared objects. Direct arrays of arrays,
+    invalid schemas, unsupported types and undeclared required names raise
+    ValueError at construction. The schema is copied, so later author mutations
+    do not change the admitted input contract.
 
     normalize validates the schema's constraints, rejects non-finite numbers,
     preserves integer inputs and normalizes number inputs/elements to float.
@@ -111,44 +172,32 @@ class RecipeInputs:
         if schema["type"] != "object":
             raise ValueError("Invalid recipe schema: root must be an object")
         self._schema = deepcopy(schema)
-        for name, property_schema in self._schema["properties"].items():
-            if not name:
-                raise ValueError("Invalid recipe schema: empty parameter name")
-            _validate_property(property_schema, name)
-        if (
-            not set(self._schema.get("required", ()))
-            <= self._schema["properties"].keys()
-        ):
-            raise ValueError("Invalid recipe schema: required names must be declared")
+        _validate_property(self._schema, "<arguments>")
         self._validator = Draft7Validator(self._schema)
 
-    def normalize(self, arguments: Mapping[str, object]) -> dict[str, RecipeParameter]:
+    def normalize(self, arguments: Mapping[str, object]) -> dict[str, RecipeInputValue]:
         """Return detached typed keywords, or raise ValueError without side effects.
 
         arguments contains the caller's explicit tool keywords. Omitted optional
         keys stay omitted; explicit null stays None. Unknown keys follow the
-        authored additionalProperties flag, but every value must still be a
-        RecipeParameter. All numbers must be finite and integer fields require
-        Python ints, excluding bool. Errors name the rejected parameter or rule.
-        Neither arguments nor any nested array is mutated or retained.
+        authored additionalProperties policy. Nested objects require a declared
+        object schema, including array items; undeclared extras remain
+        scalar/scalar-array only. Paths are ordinary declared data: string
+        segments stay strings and integer segments stay ints. All
+        numbers must be finite and integer fields require Python ints, excluding
+        bool. Errors name the rejected path or rule. Neither arguments nor any
+        nested container is mutated or retained.
         """
-        copied = copy_recipe_parameters(arguments)
+        copied = dict(arguments)
         try:
+            # Check authored constraints before number-to-float rounding.
             self._validator.validate(copied)
         except ValidationError as error:
             path = ".".join(str(part) for part in error.absolute_path)
             raise ValueError(
                 f"Invalid recipe argument {path or '<arguments>'}: {error.message}"
             ) from error
-        normalized: dict[str, RecipeParameter] = {}
-        for name, value in copied.items():
-            schema = self._schema["properties"].get(name)
-            if isinstance(value, list):
-                items = schema.get("items") if schema is not None else None
-                normalized[name] = [
-                    _scalar(element, f"{name}[{index}]", items)
-                    for index, element in enumerate(value)
-                ]
-            else:
-                normalized[name] = _scalar(value, name, schema)
-        return normalized
+        return {
+            name: _input_value(value, name, self._schema["properties"].get(name))
+            for name, value in copied.items()
+        }

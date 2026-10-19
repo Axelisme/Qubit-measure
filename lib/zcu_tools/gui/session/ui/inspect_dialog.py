@@ -470,7 +470,7 @@ class InspectDialog(QDialog):
             return False
         return (
             self._name_edit.text() != key[1]
-            or entry.state.input.data != entry.state.base.data
+            or entry.state.is_dirty
             or editor.local_parse_errors() is not None
         )
 

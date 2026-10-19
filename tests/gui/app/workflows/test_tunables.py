@@ -12,7 +12,6 @@ from zcu_tools.experiment.workflows import (
     RunIdentity,
     RunMismatch,
     Step,
-    TunableChange,
     WorkflowEnv,
     workflow,
 )
@@ -26,6 +25,9 @@ class ValueForm(FormModel):
     """Input counterpart of the native example's single positive tunable."""
 
     value: int = Field(default=1, ge=1)
+
+    def to_cfg(self) -> Tunables:
+        return Tunables(value=self.value)
 
 
 def finish(
@@ -42,7 +44,9 @@ def host(tmp_path: Path) -> tuple[TunablesHost[ValueForm, int], Rig]:
     rig.start(finish)
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    binding: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "run", to_cfg=ValueForm.to_cfg
+    )
     binding.accept(rig.engine)
     return binding, rig
 
@@ -120,7 +124,7 @@ def test_apply_submits_complete_defaults_even_when_input_has_no_changed_leaves(
     editor, rig = host
     rig.engine.update_tunables(
         "run",
-        (TunableChange("value", 4),),
+        Tunables.model_construct(value=4),
         expected_revision=0,
         actor=Actor("agent", "native"),
     )
@@ -152,7 +156,9 @@ def test_native_lifecycle_failure_retains_draft_and_accepted_input(
 def test_pending_binding_rejects_apply_before_draft_writes(external: bool) -> None:
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "pending")
+    binding: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "pending", to_cfg=ValueForm.to_cfg
+    )
     before = state.input
     base = state.base
     if external:
@@ -175,7 +181,9 @@ def test_native_acceptance_preserves_unique_draft_and_submitted_base(
     rig = Rig(tmp_path)
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    binding: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "run", to_cfg=ValueForm.to_cfg
+    )
     submitted = binding.accepted_input
     state.write({("value",): {"expr": "2 + 3"}}, env)
     rig.start(finish)
@@ -197,13 +205,17 @@ def test_wrong_or_repeated_native_acceptance_does_not_replace_binding(
     rig.start(finish)
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    wrong: TunablesHost[ValueForm, int] = TunablesHost(state, env, "wrong")
+    wrong: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "wrong", to_cfg=ValueForm.to_cfg
+    )
     with pytest.raises(RunMismatch) as caught:
         wrong.accept(rig.engine)
     assert caught.value.expected == "wrong"
     assert caught.value.actual == "run"
     assert wrong.engine is None
-    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    binding: TunablesHost[ValueForm, int] = TunablesHost(
+        state, env, "run", to_cfg=ValueForm.to_cfg
+    )
     binding.accept(rig.engine)
     with pytest.raises(RuntimeError, match="already has native acceptance"):
         binding.accept(rig.engine)
@@ -222,6 +234,9 @@ class ArrayForm(FormModel):
     """Tuple input counterpart, submitted as JSON array values."""
 
     values: tuple[int, ...] = (1, 2)
+
+    def to_cfg(self) -> ArrayTunables:
+        return ArrayTunables(values=self.values)
 
 
 def test_whole_tuple_leaf_is_submitted_as_json_array(tmp_path: Path) -> None:
@@ -262,7 +277,9 @@ def test_whole_tuple_leaf_is_submitted_as_json_array(tmp_path: Path) -> None:
     )
     env = FormEnv()
     state = FormState(ArrayForm.default_input(env))
-    editor: TunablesHost[ArrayForm, int] = TunablesHost(state, env, "arrays")
+    editor: TunablesHost[ArrayForm, int] = TunablesHost(
+        state, env, "arrays", to_cfg=ArrayForm.to_cfg
+    )
     editor.accept(rig.engine)
     state.write({("values",): [3, 4, 5]}, env)
     applied = editor.apply(actor=Actor("user", "gui"))

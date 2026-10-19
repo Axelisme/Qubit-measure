@@ -12,6 +12,7 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormModel,
     FormPath,
+    InputConverter,
     Option,
 )
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
@@ -85,6 +86,14 @@ class OvernightPlanForm(FormModel):
                 for key in env.library.module_keys()
                 if isinstance(env.library.module_spec(key), PulseReadoutSpec)
             ),
+        }
+
+    @classmethod
+    def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+        """Bind each generated field's converter to the host's fixed capture."""
+        return {
+            ("qub_pulse",): DRIVE_MODULE_FIELD.converter(env),
+            ("readout",): READOUT_MODULE_FIELD.converter(env),
         }
 
     @classmethod

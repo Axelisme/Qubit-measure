@@ -115,19 +115,6 @@ def _bind(
     )
 
 
-def _resident_admission(
-    limit: int, cached: Mapping[str, tuple[PreparedPayload, ...]]
-) -> ResidentAdmission:
-    """Protect caller-looked-up guard allocations before any local offers."""
-    resident = ResidentAdmission(limit)
-    # Deferred guards borrow whole allocations before they have entries.
-    # Their row-specific handoffs must not re-admit resident subset metadata.
-    for payloads in cached.values():
-        for payload in payloads:
-            resident.protect(payload)
-    return resident
-
-
 class Schedule:
     """One acquire's grouped prepare stage and independent timeline chunks."""
 
@@ -137,10 +124,12 @@ class Schedule:
         dispatch: Dispatch,
         context: KernelContext,
         cancel: Event,
+        resident: ResidentAdmission,
         initial_density: NDArray[np.complex128] | None = None,
     ):
         self.geometry, self.dispatch, self.cancel = geometry, dispatch, cancel
         self.context = context
+        self.resident = resident
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
         self.initial_density = (
@@ -163,7 +152,6 @@ class Schedule:
         bindings: list[_Binding] = []
         local_products: list[tuple[tuple[str, str, float], PreparedPayload]] = []
         jobs: list[tuple[_Entries, NDArray[np.int64], tuple[str, str, float]]] = []
-        self.resident = _resident_admission(cache.limit, self.dispatch.cached)
         dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
         self.dc_identity = dc.identity
         for entry in entries:
@@ -173,7 +161,8 @@ class Schedule:
             key_set = {key.tobytes() for key in entry.keys[shared]}
             namespace = entry.kernel.name, dc.identity, self.budget
             for payload in cache.find(namespace, available):
-                self.resident.protect(payload)
+                if cache.is_rejected(payload):
+                    cache.add(namespace, payload)
                 bindings.append(self._bind_hit(entry, payload, key_positions))
                 key_set.difference_update(payload.keys)
                 available.difference_update(payload.keys)
@@ -193,8 +182,7 @@ class Schedule:
                     _bind(entry, payload, eligible[entry.inverse], self.dispatch)
                 )
                 if shared_keys.intersection(payload.keys):
-                    cache.add(namespace, payload)
-                    self.resident.protect(payload)
+                    self.resident.retain_shared(namespace, payload)
                 else:
                     local_products.append((namespace, payload))
                 key_set.difference_update(payload.keys)
@@ -218,13 +206,13 @@ class Schedule:
         for (entry, _, namespace), payload in zip(jobs, built, strict=True):
             if payload is None:
                 raise RuntimeError("prepare job returned no payload")
-            cache.add(namespace, payload)
-            self.resident.protect(payload)
+            self.resident.retain_shared(namespace, payload)
             bindings.append(
                 _bind(entry, payload, entry.shared[entry.inverse], self.dispatch)
             )
         for namespace, payload in local_products:
             self.resident.offer(namespace, payload)
+        self.retain_rejected(self.dispatch)
         return self.bind_inputs(bindings)
 
     def _bind_hit(
@@ -265,6 +253,23 @@ class Schedule:
             if open_gain_rows
             else np.empty(0, dtype=np.int64),
         )
+
+    def retain_rejected(self, dispatch: Dispatch) -> None:
+        """Transfer unused handoffs to admission, releasing declined/evicted data.
+
+        Dispatch must not remain a second owner after an offer: these products
+        have no apply consumers to justify retaining them outside the byte account.
+        """
+        for name in tuple(dispatch.rejected_preparations):
+            preparations = dispatch.rejected_preparations.pop(name)
+            for preparation in preparations:
+                payload = PreparedPayload(
+                    preparation.prepared,
+                    tuple(key.tobytes() for key in preparation.keys),
+                )
+                self.resident.offer_rejected(
+                    (name, self.dc_identity, self.budget), payload
+                )
 
     def retain_local(self, kernel: Kernel, payload: PreparedPayload) -> None:
         """Submit model-only worker products without touching the caller's LRU."""
@@ -443,6 +448,7 @@ class Schedule:
                 payload = _build(entry, unique, self.table, self.context, self.cancel)
                 self.retain_local(entry.kernel, payload)
                 bindings.append(_bind(entry, payload, missing, dispatch))
+        self.retain_rejected(dispatch)
         # Workers write disjoint row slices; only the caller reads all names
         # after the pool joins. Entries and bindings never read this array.
         self.dispatch.names[rows] = dispatch.names[rows]

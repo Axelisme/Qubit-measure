@@ -35,10 +35,12 @@ def t1_initial_time(
     *,
     multiplier: float,
     with_tone: bool = False,
+    qubit: str = "$qubit",
 ) -> float | None:
     """Choose an editable T1-derived time in microseconds from a fixed capture.
 
     parameters is the Open/Reset capture, or None when no capture exists.
+    qubit is a direct component name or captured alias (default $qubit).
     multiplier must be finite and positive and scales the selected T1.
     Normally select $qubit.t1. With with_tone=True, first select
     $qubit.ext.t1_with_tone and consult ordinary T1 only if tone T1 is absent
@@ -52,7 +54,9 @@ def t1_initial_time(
     """
     if not isfinite(multiplier) or multiplier <= 0:
         raise ValueError("T1 multiplier must be finite and positive")
-    paths = ("$qubit.ext.t1_with_tone", "$qubit.t1") if with_tone else ("$qubit.t1",)
+    paths = (
+        (f"{qubit}.ext.t1_with_tone", f"{qubit}.t1") if with_tone else (f"{qubit}.t1",)
+    )
     if parameters is not None:
         for path in paths:
             result = parameters.lookup(path)

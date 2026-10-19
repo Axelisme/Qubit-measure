@@ -7,8 +7,11 @@ from .floquet import FloquetKernel
 from .floquet_period import FloquetPeriodKernel
 from .flux_dop853 import FluxDOP853Kernel
 from .gate_cache import GateCacheKernel
+from .multitone_gate import MultitoneGateKernel
+from .multitone_rwa import MultitoneRWAKernel
 from .period_table import PeriodTableKernel
 from .shaped_sambe import ShapedSambeKernel
+from .single_tone_gate import SingleToneGateKernel
 from .t4 import T4
 from .t6 import T6Kernel
 
@@ -23,4 +26,7 @@ REGISTRY: tuple[Kernel, ...] = (
     PeriodTableKernel(),
     ShapedSambeKernel(),
     FloquetKernel(),
+    MultitoneRWAKernel(),
+    MultitoneGateKernel(),
+    SingleToneGateKernel(),
 )

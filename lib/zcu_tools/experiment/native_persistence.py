@@ -4,7 +4,7 @@ import warnings
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import numpy as np
 from pydantic import TypeAdapter, ValidationError
@@ -64,6 +64,8 @@ class PreparedRunData:
     payload contains SI/discrete arrays, ordered variable identities and the
     original user comment; representation preserves single/grouped semantics.
     cfg contains the same record's complete JSON values and declaration identity.
+    labber_layout carries the grouped spec's explicit 'common' or 'independent'
+    export layout; single specs use 'common'. It does not alter the native payload.
     Construction isolates cfg JSON, variable mappings and metadata containers,
     without copying large arrays. Callers must not modify arrays during saving.
     Format-specific constraints and I/O remain the respective writer's concern.
@@ -71,6 +73,7 @@ class PreparedRunData:
 
     payload: ExperimentPayload
     cfg: CfgSnapshot
+    labber_layout: Literal["common", "independent"] = "common"
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -101,6 +104,7 @@ def prepare_run_data(
     spec.result_type. Validate declared variables, shapes, units and an optional
     grouped result validator. Preserve single/grouped representation, including
     a one-member group, and retain comment as raw text for the writer's codec.
+    Carry the grouped spec's declared Labber layout without changing native data.
     Invalid cfg/result/comment raises TypeError or ValueError; missing Result
     fields raise AttributeError. Do not require Labber-compatible common grids
     or axes, choose paths, capture metadata or mutate the source record.
@@ -133,7 +137,13 @@ def prepare_run_data(
         cfg_type=spec.cfg_type.__name__,
         schema_version=spec.cfg_schema_version,
     )
-    return PreparedRunData(payload=payload, cfg=cfg)
+    return PreparedRunData(
+        payload=payload,
+        cfg=cfg,
+        labber_layout=spec.labber_layout
+        if isinstance(spec, GroupedAxesSpec)
+        else "common",
+    )
 
 
 def native_schemas(

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from pydantic import model_validator
 from qick import QickConfig
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -21,6 +22,7 @@ from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
+    participant_indices,
     validate_mux_scan,
 )
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
@@ -29,24 +31,26 @@ from .analysis import MuxFreqFit, analyze_frequency
 
 
 class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
-    """Full ordered tones and one shared acquisition/reset/readout configuration.
+    """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules contains optional reset and full mux readout. tones has exactly one
-    active/drive/sweep element per full readout tone. At least one is active;
-    only active drives are required, on independent generators distinct from
-    readout. Active sweeps are finite MHz ranges with equal point counts.
-    reps/rounds are positive shared counts; initial_delay/relax_delay are finite
-    nonnegative us, with defaults inherited from ProgramV2Cfg. No identity,
-    component capture or writeback destination is stored in numeric cfg.
+    modules holds optional reset and complete mux readout. tones contains one
+    MuxToneCfg per original readout position, with unique nonempty names.
+    participants is a nonempty, duplicate-free list of those names; its order
+    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
+    Every drive is required/validated, including nonparticipants, on independent
+    generators distinct from readout. Independent finite MHz sweeps have equal point counts across all tones.
+    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
     modules: MuxDriveModuleCfg
-    tones: list[MuxToneCfg]
+    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
+    participants: list[str]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxFreqCfg:
         """Reject invalid full length, drive channels and zip counts at admission."""
-        validate_mux_scan(self, self.modules, self.tones)
+        validate_mux_scan(self, self.modules, self.tones, self.participants)
         return self
 
 
@@ -62,14 +66,12 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxPulseSc
     bindings are accessed. Program construction is left to acquire_mux_scan.
     """
     cfg = MuxFreqCfg.model_validate(cfg.model_dump())
-    indices = [i for i, tone in enumerate(cfg.tones) if tone.active]
+    indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     coordinates = []
     points = [[] for _ in range(cfg.tones[indices[0]].sweep.expts)]
     for index in indices:
         tone = cfg.tones[index]
         drive = tone.drive
-        if drive is None:
-            raise ValueError(f"tones[{index}].drive is required")
         nominal = sweep2array(tone.sweep, "none")
         actual = round_zcu_freq(nominal, soccfg, drive.ch, mixer_freq=drive.mixer_freq)
         coordinates.append(actual)
@@ -116,6 +118,7 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
             scan,
             context=context,
             coordinate_label="Drive frequency (MHz)",
+            tone_names=[tone.name for tone in cfg.tones],
         )
 
     def analyze(

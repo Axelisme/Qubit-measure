@@ -107,7 +107,7 @@ class PeriodTableKernel:
         keys = self.prepare_keys(table, rows, context)
         frequencies = np.abs(keys["frequency"])
         period = 1 / np.where(frequencies > 0, frequencies, 1)
-        strength, gamma = drive_bounds(table, rows, source)
+        strength, gamma = drive_bounds(table, rows, source, context.work_plan)
         bounds = envelope_bounds(table, context.work_plan)
         peaks, slopes = bounds.peaks, bounds.slopes
         envelopes = table.tone_envelope[rows, 0]
@@ -265,7 +265,7 @@ class PeriodTableKernel:
                     ),
                     UnitaryTable(
                         entry.bound,
-                        entry.coefficients,
+                        entry.expanded_coefficients(),
                         entry.subdivisions,
                         entry.block_cycles,
                         entry.project_unitary,

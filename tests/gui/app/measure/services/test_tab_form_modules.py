@@ -15,7 +15,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionReason,
 )
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, FormPath, FormPathError, Option
+from zcu_tools.gui.form import FormEnv, FormPath, FormPathError, InputConverter, Option
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -233,7 +233,7 @@ def test_option_command_rejection_is_atomic(path: tuple[str, ...], name: str) ->
             resource.run_command(path, name)
         assert invalid_path.value.path == path
     else:
-        with pytest.raises(ValueError, match="Unavailable option command"):
+        with pytest.raises(ValueError, match="Unavailable field command"):
             resource.run_command(path, name)
     assert resource.input.data == before
     assert notifications == []
@@ -375,6 +375,10 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
         @classmethod
         def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
             return {("reference",): field.options(env)}
+
+        @classmethod
+        def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+            return {("reference",): field.converter(env)}
 
     extras = create_model(
         "ExtraSelectorFields",

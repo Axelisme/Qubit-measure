@@ -1,5 +1,6 @@
 """Measure composition uses one fixed form authority through Run and restoration."""
 
+import json
 from typing import ClassVar
 
 import pytest
@@ -16,7 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
-from zcu_tools.gui.form import FormValue
+from zcu_tools.gui.form import FormInput, FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui._qt_waits import qt_until
@@ -156,7 +157,10 @@ def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
         assert resource.result() == TraceCfg(amount=5.0)
         resource.write({("amount",): {"expr": "unfinished +"}})
         saved = application.ctrl.capture_persisted_state()
-        assert saved.session.tabs[0].form_input == {"amount": {"expr": "unfinished +"}}
+        assert saved.session.tabs[0].form_input == {
+            "data": {"amount": {"expr": "unfinished +"}},
+            "selections": [],
+        }
         application.ctrl.close_tab(tab_id)
         with pytest.raises(CfgPreconditionError):
             resource.result()
@@ -182,7 +186,13 @@ def test_public_restore_reports_dropped_inputs_and_keeps_compatible_values(
         resource = application.ctrl.cfg_resources.lookup(tab_id)
         resource.write({("amount",): 7.0})
         saved = application.ctrl.capture_persisted_state()
-        saved.session.tabs[0].form_input["retired"] = 9.0
+        saved.session.tabs[0].form_input.update(
+            json.loads(
+                FormInput(
+                    resource.input.model, {**resource.input.data, "retired": 9.0}
+                ).to_json()
+            )
+        )
         application.ctrl.close_tab(tab_id)
         report = application.ctrl.restore_persisted_state(saved)
         assert report.restored_tabs == 1

@@ -12,16 +12,44 @@ from pydantic.fields import FieldInfo
 
 from ._json import default_json
 from ._sources import local_choices
-from ._structure import alternatives, discriminator, intrinsic_tags, model_types
+from ._structure import (
+    alternatives,
+    discriminator,
+    intrinsic_tags,
+    list_model,
+    model_types,
+)
 from .model import (
+    Display,
     FormEnv,
     FormModel,
     FormPath,
     FormPathError,
     FormWritePath,
     InputCommand,
+    InputConverter,
 )
 from .options import Option
+
+
+def option_errors(
+    model: type[FormModel],
+    data: Mapping[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue],
+) -> dict[FormPath, str]:
+    """Validate current option membership without changing authored branches.
+
+    Hooks use the normal fixed env. Only explicit overrides are checked;
+    raw branches retain their annotation/value contract. An unavailable choice
+    is a field value error, not a conversion or restoration failure.
+    """
+    errors: dict[FormPath, str] = {}
+    for path in selections:
+        target = resolve(model, data, path, env, selections)
+        if target.options is None or target.selected is None:
+            errors[path] = "Selection is not among current options"
+    return errors
 
 
 def literal_values(annotation: object) -> tuple[JsonValue, ...] | None:
@@ -120,6 +148,9 @@ class Level:
     models use an empty mapping without generating defaults. pinned carries
     the enclosing selected option's partial value for structural-tag omission.
     variants retains enclosing annotation branches for command-result admission.
+    A model-list level has raw items and fields addressed by element index.
+    Its model is shared by every element. element_label is a Display hint for
+    picker text, passed from the list level to its elements; None elsewhere.
     """
 
     model: type[BaseModel]
@@ -129,9 +160,46 @@ class Level:
     options: Mapping[FormPath, tuple[Option, ...]]
     pinned: Mapping[str, JsonValue] = field(default_factory=dict)
     variants: tuple[type[BaseModel], ...] = ()
+    selections: Mapping[FormWritePath, JsonValue] = field(default_factory=dict)
+    converters: Mapping[FormPath, InputConverter] = field(default_factory=dict)
+    items: tuple[JsonValue, ...] | None = None
+    element_label: str | None = None
 
-    def field(self, name: str) -> Field:
-        """Resolve a declared direct field; undeclared names raise KeyError."""
+    @property
+    def names(self) -> tuple[str | int, ...]:
+        """Declared field names, or the indexes of a model-list level."""
+        if self.items is not None:
+            return tuple(range(len(self.items)))
+        return tuple(self.model.model_fields)
+
+    def has(self, name: str | int) -> bool:
+        """Whether name is a declared field or an in-range element index."""
+        if self.items is not None:
+            return (
+                isinstance(name, int)
+                and not isinstance(name, bool)
+                and 0 <= name < len(self.items)
+            )
+        return isinstance(name, str) and name in self.model.model_fields
+
+    def value(self, name: str | int) -> JsonValue:
+        """Raw input at name, or None when missing."""
+        if self.items is not None:
+            return (
+                self.items[name] if self.has(name) and isinstance(name, int) else None
+            )
+        return self.data.get(name) if isinstance(name, str) else None
+
+    def field(self, name: str | int) -> Field:
+        """Resolve a declared direct field or element; undeclared names raise KeyError."""
+        if self.items is not None:
+            if not self.has(name):
+                raise KeyError(name)
+            return Field(
+                self, name, FieldInfo.from_annotation(self.model), None, None, None
+            )
+        if not isinstance(name, str):
+            raise KeyError(name)
         info = self.model.model_fields[name]
         choices = self.choices.get((name,))
         options = self.options.get((name,))
@@ -141,7 +209,10 @@ class Level:
             (
                 index
                 for index, option in enumerate(options or ())
-                if name in self.data and option.matches(self.data[name])
+                if (name in self.data or (*self.prefix, name) in self.selections)
+                and option.matches(
+                    self.selections.get((*self.prefix, name), self.data.get(name))
+                )
             ),
             None,
         )
@@ -153,7 +224,7 @@ class Field:
     """A resolved field; describe and command execution share this selection."""
 
     level: Level
-    name: str
+    name: str | int
     info: FieldInfo
     choices: tuple[JsonValue, ...] | None
     options: tuple[Option, ...] | None
@@ -165,17 +236,52 @@ class Field:
         return (*self.level.prefix, self.name)
 
     @property
+    def element_name(self) -> str:
+        """Display label of a model-list element; its index text when unspecified."""
+        item = self.level.value(self.name)
+        key = self.level.element_label
+        name = item.get(key) if isinstance(item, dict) and key is not None else None
+        return name if isinstance(name, str) and name else str(self.name)
+
+    @property
+    def converter(self) -> InputConverter | None:
+        """One effective local converter; hooks override Annotated metadata."""
+        return self.level.converters.get((self.name,)) or next(
+            (item for item in self.info.metadata if isinstance(item, InputConverter)),
+            None,
+        )
+
+    @property
+    def branch_option(self) -> Option | None:
+        """Option describing raw children, independently of current selection."""
+        return next(
+            (
+                option
+                for option in self.options or ()
+                if self.name in self.level.data
+                and option.matches(self.level.value(self.name))
+            ),
+            None,
+        )
+
+    @property
     def input_commands(self) -> tuple[InputCommand, ...]:
-        """Actions whose declared result branch the enclosing annotation accepts."""
+        """Mounted actions whose result branch the field annotation accepts."""
+        model = self.active_model
+        declared = (
+            model.input_commands
+            if model is not None and issubclass(model, FormModel)
+            else ()
+        )
         return tuple(
             item
-            for item in self.info.metadata
+            for item in (*self.info.metadata, *declared)
             if isinstance(item, InputCommand)
             and (
                 item.result_tag is None
                 or any(
                     item.result_tag[1] in intrinsic_tags(model, item.result_tag[0])
-                    for model in self.level.variants
+                    for model in model_types(self.info.annotation)
                 )
             )
         )
@@ -229,16 +335,19 @@ class Field:
         """Return the structurally reachable child model without running hooks.
 
         Ordinary missing/invalid models retain their declared shape. Nullable
-        models require an object; selectors require a matching option with
-        fields. A reachable model may have no displayed fields after expansion.
+        models require an object; selectors use the raw child branch's matching
+        option fields, independently of an overridden selection. A reachable model may have no displayed fields after expansion.
         """
+        if (element := list_model(self.info)) is not None:
+            return element
         models = model_types(self.info.annotation)
         if not models:
             return None
         if self.options is not None:
-            return None if self.selected is None else self.options[self.selected].fields
+            option = self.branch_option
+            return None if option is None else option.fields
         if type(None) in alternatives(self.info.annotation) and not isinstance(
-            self.level.data.get(self.name), dict
+            self.level.value(self.name), dict
         ):
             return None
         return models[0] if len(models) == 1 else None
@@ -253,20 +362,38 @@ class Field:
         model = self.active_model
         if model is None:
             return None
-        value = self.level.data.get(self.name)
-        pinned = self.level.pinned.get(self.name)
-        if self.options is not None and self.selected is not None:
-            pinned = self.options[self.selected].value
-        choices = {
-            path[1:]: values
-            for path, values in self.level.choices.items()
-            if len(path) > 1 and path[0] == self.name
-        }
-        options = {
-            path[1:]: values
-            for path, values in self.level.options.items()
-            if len(path) > 1 and path[0] == self.name
-        }
+        value = self.level.value(self.name)
+        pinned = (
+            self.level.pinned.get(self.name) if isinstance(self.name, str) else None
+        )
+        if self.branch_option is not None:
+            pinned = self.branch_option.value
+        element = self.level.items is not None
+        choices = _child_declarations(self.level.choices, self.name, element=element)
+        options = _child_declarations(self.level.options, self.name, element=element)
+        converters = _child_declarations(
+            self.level.converters, self.name, element=element
+        )
+        if list_model(self.info) is not None:
+            return Level(
+                model,
+                self.path,
+                {},
+                choices,
+                options,
+                variants=(model,),
+                selections=self.level.selections,
+                converters=converters,
+                items=tuple(value) if isinstance(value, list) else (),
+                element_label=next(
+                    (
+                        item.element_label
+                        for item in reversed(self.info.metadata)
+                        if isinstance(item, Display)
+                    ),
+                    None,
+                ),
+            )
         return Level(
             model,
             self.path,
@@ -275,17 +402,54 @@ class Field:
             {**options, **_local_options(model, env)},
             pinned if isinstance(pinned, dict) else {},
             model_types(self.info.annotation),
+            self.level.selections,
+            {**converters, **_local_converters(model, env)},
+            element_label=self.level.element_label if element else None,
         )
 
 
+def _child_declarations[T](
+    declarations: Mapping[FormPath, T], name: str | int, *, element: bool
+) -> dict[FormPath, T]:
+    """Rebase descendant declarations, or retain shared element-relative paths."""
+    if element:
+        # A model-list declaration already addresses fields within every element.
+        return dict(declarations)
+    return {
+        path[1:]: value
+        for path, value in declarations.items()
+        if len(path) > 1 and path[0] == name
+    }
+
+
 def validate_path(path: object) -> None:
-    """Reject non-tuple paths and non-string components with ValueError."""
-    if not isinstance(path, tuple) or any(not isinstance(part, str) for part in path):
+    """Reject non-tuple paths and components that are neither str nor int."""
+    if not isinstance(path, tuple) or any(
+        not isinstance(part, (str, int)) for part in path
+    ):
         raise ValueError(f"Expected a model-field tuple: {path!r}")
 
 
+def _local_converters(
+    model: type[BaseModel], env: FormEnv
+) -> Mapping[FormPath, InputConverter]:
+    metadata = {
+        (name,): item
+        for name, info in model.model_fields.items()
+        for item in info.metadata
+        if isinstance(item, InputConverter)
+    }
+    return {
+        **metadata,
+        **(model.converters(env) if issubclass(model, FormModel) else {}),
+    }
+
+
 def root_level(
-    model: type[FormModel], data: Mapping[str, JsonValue], env: FormEnv
+    model: type[FormModel],
+    data: Mapping[str, JsonValue],
+    env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> Level:
     """Read only root hooks; nested declarations are read when reached."""
     return Level(
@@ -295,6 +459,8 @@ def root_level(
         local_choices(model, env),
         _local_options(model, env),
         variants=(model,),
+        selections={} if selections is None else selections,
+        converters=_local_converters(model, env),
     )
 
 
@@ -303,6 +469,7 @@ def resolve(
     data: Mapping[str, JsonValue],
     path: FormWritePath,
     env: FormEnv,
+    selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> Field:
     """Resolve one nonroot canonical path through active children only.
 
@@ -313,9 +480,9 @@ def resolve(
     validate_path(path)
     if not path:
         raise ValueError(f"Expected a nonroot model-field tuple: {path!r}")
-    level = root_level(model, data, env)
+    level = root_level(model, data, env, selections)
     for index, name in enumerate(path):
-        if name not in level.model.model_fields:
+        if not level.has(name):
             raise FormPathError(path, f"Unknown form field path: {path!r}")
         target = level.field(name)
         if index == len(path) - 1:

@@ -7,6 +7,7 @@ from pydantic import TypeAdapter
 from zcu_tools.cfg_model import ConfigBase, ModuleSpec
 from zcu_tools.gui.form import (
     FormEnv,
+    InputConverter,
     Option,
 )
 
@@ -57,7 +58,7 @@ class ModuleInputField:
     ModuleRef | ModuleInline is their nominal value view, not a persistent Spec.
     options(env) supplies the same field's S1 key/inline/None selections and
     explicit copy command. A handwritten model declares them at its field path
-    in its options hook. Existing most-local choices semantics still apply.
+    in its options hook, and converter(env) at the same path in converters(env). Existing most-local choices semantics still apply.
 
     Obtain values through FormState.result with the fixed captured FormEnv. For
     example a model with selection=(field.annotation, ...) and options returning
@@ -84,6 +85,16 @@ class ModuleInputField:
             if nullable
             else self._field.annotation
         )
+
+    def converter(self, env: FormEnv) -> InputConverter:
+        """Bind the field's conversion policy to this fixed host capture.
+
+        Declare {('field_name',): field.converter(env)} in the handwritten
+        FormModel.converters(env) hook alongside options(env). Paths are relative
+        to that model occurrence. The callable is synchronous and valid only
+        within the capture lifetime; binding does not read sources.
+        """
+        return self._field.converter(env)
 
     def options(self, env: FormEnv) -> tuple[Option, ...]:
         """Return this field's S1 options against a fixed captured environment.

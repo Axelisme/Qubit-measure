@@ -1,5 +1,6 @@
 """Convert core metadata and preview values to one layer of Qt row data."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -7,6 +8,7 @@ from pydantic import JsonValue
 
 from zcu_tools.gui.form import (
     FormCommandDescription,
+    FormElementDescription,
     FormFieldDescription,
     FormOptionDescription,
     FormPreview,
@@ -15,7 +17,15 @@ from zcu_tools.gui.form import (
 )
 
 type _Kind = Literal[
-    "text", "integer", "number", "complex", "boolean", "json", "model", "choice"
+    "text",
+    "integer",
+    "number",
+    "complex",
+    "boolean",
+    "json",
+    "model",
+    "choice",
+    "elements",
 ]
 
 
@@ -29,11 +39,15 @@ class FieldView:
     can_expand is the core's active child capability, controlling fold titles.
     expression permits explicit Expr input. options/selected are the core's
     detached selector list and matching index (None for no list/no match).
+    branch identifies the actual child structure independently of selection.
+    selection/selection_present describe the explicit selector override, falling
+    back to raw input only when no override exists.
     raw/present describe authored input; a missing fixed leaf displays its
     fixed value without writing it. value/has_value identify a preview leaf.
     decimals rounds display only. fixed marks a declaration-fixed scalar or
     option value, not read-only children or commands. group is the same-level
-    display group name, or None for an ungrouped row.
+    display group name, or None for an ungrouped row. elements lists a
+    FixedList row's picker entries by original index and name, else None.
     """
 
     path: FormWritePath
@@ -49,6 +63,9 @@ class FieldView:
     expression: bool
     options: tuple[FormOptionDescription, ...] | None
     selected: int | None
+    selection: JsonValue
+    selection_present: bool
+    branch: JsonValue
     raw: JsonValue
     present: bool
     value: FormValue
@@ -57,6 +74,7 @@ class FieldView:
     fixed: bool
     group: str | None
     commands: tuple[FormCommandDescription, ...]
+    elements: tuple[FormElementDescription, ...] | None = None
 
 
 def _control_presentation(
@@ -68,9 +86,11 @@ def _control_presentation(
     explicit commands. Only a fixed scalar without actions is plain text.
     No branch matching or annotation interpretation occurs here.
     """
+    if field.kind == "elements":
+        return "elements", None
     options = field.options if field.selector else None
     if (
-        field.fixed
+        (field.fixed or field.readonly)
         and field.kind != "model"
         and not field.can_expand
         and (options is None or not any(option.commands for option in options))
@@ -88,11 +108,16 @@ def _control_presentation(
 
 
 def project_field(
-    field: FormFieldDescription, data: dict[str, JsonValue], preview: FormPreview
+    field: FormFieldDescription,
+    data: dict[str, JsonValue],
+    preview: FormPreview,
+    selections: Mapping[FormWritePath, JsonValue],
 ) -> FieldView:
     """Translate field's core metadata to controls using current data and preview.
 
-    data is the full detached input tree, preview the owner's full evaluation.
+    data is the full detached input tree, preview the owner's full evaluation,
+    and selections the detached explicit selector overrides. Unmatched selectors
+    display the override rather than the independently preserved raw child input.
     No validation, option matching, annotation resolution or defaulting occurs.
     Hidden metadata must be filtered by the caller. Only display categories
     are translated; the core decides active children and selected options.
@@ -100,11 +125,19 @@ def project_field(
     current: JsonValue = data
     present = True
     for name in field.path:
-        if not isinstance(current, dict) or name not in current:
+        if isinstance(current, dict) and isinstance(name, str) and name in current:
+            value = current.get(name)
+        elif (
+            isinstance(current, list)
+            and isinstance(name, int)
+            and 0 <= name < len(current)
+        ):
+            value = current[name]
+        else:
             current = None
             present = False
             break
-        current = current[name]
+        current = value
     kind, options = _control_presentation(field)
     return FieldView(
         path=field.path,
@@ -117,15 +150,19 @@ def project_field(
         nullable=field.nullable,
         active=not field.nullable or (present and current is not None),
         can_expand=field.can_expand,
-        expression=field.expression and not field.fixed,
+        expression=field.expression and not (field.fixed or field.readonly),
         options=options,
         selected=field.selected,
+        selection=selections.get(field.path, current),
+        selection_present=field.path in selections or present,
+        branch=field.branch,
         raw=current if present or not field.fixed else field.fixed_value,
         present=present,
         value=preview.values.get(field.path),
         has_value=field.path in preview.values,
         decimals=field.decimals,
-        fixed=field.fixed,
+        fixed=field.fixed or field.readonly,
         group=field.group,
         commands=field.commands,
+        elements=field.elements,
     )

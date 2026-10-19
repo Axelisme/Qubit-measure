@@ -13,10 +13,11 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormModel,
     FormPath,
+    InputConverter,
     Option,
-    SweepInput,
     field_error,
 )
+from zcu_tools.gui.form_adapter import SweepInput
 from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.workflows.coherence_fluxdep.t1_form import T1TunablesForm
@@ -174,6 +175,14 @@ class CoherencePlanForm(FormModel):
         requires the core ModuleRef source check; no live lookup or fallback.
         """
         return calibration_choices(env)
+
+    @classmethod
+    def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+        """Bind each generated field's converter to the host's fixed capture."""
+        return {
+            ("qub_pulse",): DRIVE_MODULE_FIELD.converter(env),
+            ("readout",): READOUT_MODULE_FIELD.converter(env),
+        }
 
     @classmethod
     def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:

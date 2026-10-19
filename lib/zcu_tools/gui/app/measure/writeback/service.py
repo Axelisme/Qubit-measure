@@ -376,7 +376,9 @@ class WritebackService:
 
         The input is a proposal collection, not an adapter or stage. Items are
         shallow-copied so draft-local ``session_id``, selection, target and value
-        edits cannot mutate the adapter's proposal objects. Each module proposal
+        edits cannot mutate the adapter's proposal objects. Author element
+        identities are detached at creation and never resolved against aliases.
+        Each module proposal
         is projected into a library entry Form (ModuleEntryForm): child library
         keys stay keys, and the optional hardware fields the shared Form
         generator leaves out return to Spec defaults. A proposal that is not a
@@ -787,6 +789,7 @@ class WritebackService:
     @staticmethod
     def _copy_item(item: WritebackItem) -> WritebackItem:
         copied = copy.copy(item)
+        copied.element = copy.deepcopy(item.element)
         copied.session_id = ""
         copied.selected = True
         return copied

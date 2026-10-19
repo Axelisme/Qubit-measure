@@ -26,6 +26,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
+    InputConverter,
     Option,
 )
 from zcu_tools.gui.form_adapter import ModuleInline, ModuleInput
@@ -64,6 +65,10 @@ def selection_model(field: form_adapter.ModuleInputField) -> type[SelectionForm]
         def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
             del cls
             return {("selection",): field.options(env)}
+
+        @classmethod
+        def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+            return {("selection",): field.converter(env)}
 
     return create_model(
         "GeneratedSelection", __base__=Consumer, selection=(field.annotation, ...)

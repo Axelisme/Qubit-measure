@@ -9,7 +9,8 @@ from zcu_tools.gui.form import Display
 def field_display(info: FieldInfo, *, locked: bool) -> Display | None:
     """Translate the field's FieldMeta to form Display metadata, or None without one.
 
-    label, unit, description and group copy unchanged. decimals copies unless
+    label, unit, description, group, readonly and element_label copy unchanged.
+    decimals copies unless
     locked is True: a locked field becomes a single-value Literal, which has no
     float precision to show. The field is not modified; Display rejects
     negative decimals, and describe rejects decimals on a non-float field.
@@ -23,4 +24,6 @@ def field_display(info: FieldInfo, *, locked: bool) -> Display | None:
         decimals=None if locked else meta.decimals,
         description=meta.description,
         group=meta.group,
+        readonly=meta.readonly,
+        element_label=meta.element_label,
     )

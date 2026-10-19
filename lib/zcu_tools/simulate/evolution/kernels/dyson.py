@@ -561,11 +561,19 @@ class _Entry:
     vectors: NDArray[np.complex128]
     inverse: NDArray[np.complex128]
     couplings: tuple[NDArray[np.complex128], ...]
+    conjugates: NDArray[np.int64]
 
     @property
     def nbytes(self) -> int:
         return sum(
-            v.nbytes for v in (self.values, self.vectors, self.inverse, *self.couplings)
+            v.nbytes
+            for v in (
+                self.values,
+                self.vectors,
+                self.inverse,
+                *self.couplings,
+                self.conjugates,
+            )
         )
 
 
@@ -607,13 +615,19 @@ class _BoundInput:
 
 
 @njit(nogil=True, cache=True)
-def _restore_bound_modes(
-    modes: NDArray[np.complex128], vectors: NDArray[np.complex128]
+def _transform_modes(
+    modes: NDArray[np.complex128],
+    transform: NDArray[np.complex128],
+    size: int,
 ) -> NDArray[np.complex128]:
-    """Use fixed-size matrix-vector products independent of worker batch size."""
-    result = np.empty_like(modes)
+    """Transform populations rowwise; secular coherence coordinates are unchanged."""
+    stride = size + 1
+    population_block = np.ascontiguousarray(transform[::stride, ::stride])
+    result = modes.copy()
     for row in range(len(modes)):
-        result[row] = vectors @ modes[row]
+        populations = np.ascontiguousarray(modes[row, ::stride])
+        # Fixed-size products keep rounding independent of worker batch size.
+        result[row, ::stride] = population_block @ populations
     return result
 
 
@@ -636,7 +650,7 @@ def _advance_bound(
             shared=True,
         ),
     )
-    return _restore_bound_modes(modes, entry.vectors).reshape(shape)
+    return _transform_modes(modes, entry.vectors, shape[-1]).reshape(shape)
 
 
 def _prepare_model(model: SecularModel) -> _Entry:
@@ -651,9 +665,14 @@ def _prepare_model(model: SecularModel) -> _Entry:
         q, rotation = np.linalg.eig(free[np.ix_(populations, populations)])
         values[populations] = q
         vectors[np.ix_(populations, populations)] = rotation
-        if np.linalg.cond(vectors) > 1e10:
+        # Normalized eigenvector columns imply sigma_min <= 1 <= sigma_max,
+        # so the coherence identity blocks cannot change this condition number.
+        if np.linalg.cond(rotation) > 1e10:
             raise RuntimeError("Dyson population modes are ill-conditioned")
-        inverse = np.linalg.inv(vectors).astype(np.complex128)
+        inverse = np.eye(size**2, dtype=np.complex128)
+        inverse[np.ix_(populations, populations)] = np.linalg.inv(
+            rotation.astype(np.complex128)
+        )
     except np.linalg.LinAlgError as error:
         raise RuntimeError("Dyson modal decomposition failed") from error
     couplings = []
@@ -669,7 +688,15 @@ def _prepare_model(model: SecularModel) -> _Entry:
             ]
         )
         couplings.append(freeze(pair))
-    return _Entry(freeze(values), freeze(vectors), freeze(inverse), tuple(couplings))
+    # Adjoint each column of W, then express it in modal coordinates. Unlike
+    # nearest-eigenvalue matching, this handles repeated coherence roots and
+    # complex-conjugate population eigenmodes of a real rate generator.
+    adjoints = vectors.reshape(size, size, -1).conj().swapaxes(0, 1)
+    conjugates = np.argmax(abs(inverse @ adjoints.reshape(size**2, -1)), axis=0)
+    conjugates.setflags(write=False)
+    return _Entry(
+        freeze(values), freeze(vectors), freeze(inverse), tuple(couplings), conjugates
+    )
 
 
 def _advance(
@@ -679,12 +706,16 @@ def _advance(
     states: NDArray[np.complex128],
     budget: float,
 ) -> NDArray[np.complex128]:
-    modes = states.reshape(len(states), -1) @ entry.inverse.T
+    modes = _transform_modes(
+        states.reshape(len(states), -1), entry.inverse, states.shape[-1]
+    )
     pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
     evolved = evaluate_dyson(
         params, entry.values, modes, entry.couplings[port], pruning
     )
-    return (evolved @ entry.vectors.T).reshape(states.shape)
+    return _transform_modes(evolved, entry.vectors, states.shape[-1]).reshape(
+        states.shape
+    )
 
 
 def _free_populations(
@@ -853,14 +884,7 @@ class DysonKernel:
         modes = source_initial.ravel() @ entry.inverse.T
         pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
         params = parameters(table, rows)
-        size = len(source_initial)
-        # Adjoint each column of W, then express it in modal coordinates. Unlike
-        # nearest-eigenvalue matching, this handles repeated coherence roots and
-        # complex-conjugate population eigenmodes of a real rate generator.
-        adjoints = entry.vectors.reshape(size, size, -1).conj().swapaxes(0, 1)
-        conjugates = np.argmax(
-            abs(entry.inverse @ adjoints.reshape(size**2, -1)), axis=0
-        )
+        conjugates = entry.conjugates
         path_modes, spent = modes, 0.0
         if np.any(source_initial != np.diag(np.diag(source_initial))):
             # Reserve half the omission budget for modes, half for path pruning.

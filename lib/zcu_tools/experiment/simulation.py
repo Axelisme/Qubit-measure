@@ -23,6 +23,8 @@ from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
 
+from .warmup import EnvironmentWarmup, WarmupStatus
+
 
 @dataclass(frozen=True)
 class SimulationEnvironment:
@@ -32,12 +34,27 @@ class SimulationEnvironment:
     Notebook owners close it themselves. description is public, not model truth.
     Builder failures must close their resources before raising; host installation
     failures close these devices, preserving both startup and cleanup exceptions.
+    warmup optionally exposes process-shared numeric preparation; None disables
+    startup work. It owns no live resources. Poll warmup.status for progress or
+    call wait_ready before starting acquisition timing.
     """
 
     soc: SimulationSoc
     soccfg: QickConfig
     devices: DeviceManager
     description: str
+    warmup: EnvironmentWarmup | None = None
+
+    def wait_ready(self, timeout: float | None = None) -> WarmupStatus | None:
+        """Wait before starting caller-owned acquisition timing.
+
+        Return None when startup preparation is disabled, otherwise its terminal
+        status. Failure is reported in the status and allows on-demand compiling.
+        timeout is seconds or None; TimeoutError does not cancel preparation.
+        warmup is the optional shared preparation controller; polling its status
+        never blocks. The environment does not own a second worker or future.
+        """
+        return None if self.warmup is None else self.warmup.wait_ready(timeout)
 
     def __post_init__(self) -> None:
         if self.soc.get_cfg() != self.soccfg.get_cfg():

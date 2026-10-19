@@ -133,7 +133,8 @@ class WorkflowAttachment[
     are its current plan/tunables form classes. plan_to_cfg(form, env, snapshot)
     converts an FP instance using only the fixed FormEnv and historical
     RunSnapshot; return native P or consuming-field FormErrors. knobs_to_cfg(form)
-    converts validated FT into native T. seed(native_plan, plan_form) returns C or
+    converts validated FT into native T for both Start and every Apply.
+    seed(native_plan, plan_form) returns C or
     None for a context-independent workflow. Converters and seed must not read
     live sources or acquire resources; their failures propagate at prepare/preview.
     These fields must all describe one coherent source revision. Constructor does
@@ -166,6 +167,11 @@ class WorkflowAttachment[
         if not isinstance(form, self.plan_model):
             raise TypeError("Plan form does not belong to this attachment")
         return self.plan_to_cfg(form, env, snapshot)
+
+    def _knobs(self, form: FormModel) -> T:
+        if not isinstance(form, self.knobs_model):
+            raise TypeError("Tunables form does not belong to this attachment")
+        return self.knobs_to_cfg(form)
 
     def plan_panel(self, env: FormEnv, parent: QWidget | None) -> WorkflowPlanPanel:
         """Build plan_model defaults in fixed env with its native preview converter.
@@ -215,7 +221,7 @@ class WorkflowAttachment[
         native_plan = self.plan_to_cfg(plan, env, snapshot)
         if isinstance(native_plan, FormErrors):
             return native_plan
-        native_tunables = self.knobs_to_cfg(knobs)
+        native_tunables = self._knobs(knobs)
         context = self.seed(native_plan, plan)
 
         def submit(
@@ -232,7 +238,7 @@ class WorkflowAttachment[
             Native/admission failures propagate without retry or new capture.
             """
             binding = TunablesHost[FormModel, C](
-                FormState(accepted_input), capture, identity.run_id
+                FormState(accepted_input), capture, identity.run_id, to_cfg=self._knobs
             )
             return controller.start(
                 self.step,

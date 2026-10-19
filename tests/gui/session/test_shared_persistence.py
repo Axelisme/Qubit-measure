@@ -79,6 +79,56 @@ def test_read_or_decode_failure_restores_default_with_error(
     assert isinstance(outcome.load_error, PersistenceError)
 
 
+@pytest.mark.parametrize("payload", [b"{", b'{"value": "bad"}', b"\\xff"])
+def test_bad_snapshot_opens_defaults_and_leaves_file_until_normal_save(
+    tmp_path: Path, payload: bytes
+) -> None:
+    originator = _Originator(_State(7))
+    caretaker = _caretaker(originator, tmp_path)
+    caretaker.state_path.write_bytes(payload)
+
+    outcome = caretaker.restore_all()
+
+    assert outcome.report == "restored:0"
+    assert originator.restored == _State()
+    assert "using defaults" in str(outcome.load_error)
+    assert caretaker.state_path.is_file()
+    assert caretaker.state_path.read_bytes() == payload
+    caretaker.flush()
+    assert json.loads(caretaker.state_path.read_text()) == {"value": 7}
+
+
+@pytest.mark.parametrize("stage", ["decode", "restore"])
+def test_unexpected_provider_failures_propagate_without_backup_or_defaults(
+    tmp_path: Path, stage: str
+) -> None:
+    expected = RuntimeError("provider unavailable")
+
+    class ProviderCodec(_Codec):
+        def decode(self, raw: object) -> _State:
+            if stage == "decode":
+                raise expected
+            return super().decode(raw)
+
+    class ProviderOriginator(_Originator):
+        def restore_persisted_state(self, state: _State) -> str:
+            raise expected
+
+    originator = ProviderOriginator()
+    caretaker = SingleFileCaretaker(
+        originator, codec=ProviderCodec(), filename="state.json", cache_dir=tmp_path
+    )
+    payload = b'{"value": 9}'
+    caretaker.state_path.write_bytes(payload)
+
+    with pytest.raises(RuntimeError) as raised:
+        caretaker.restore_all()
+
+    assert raised.value is expected
+    assert originator.restored is None
+    assert caretaker.state_path.read_bytes() == payload
+
+
 def test_missing_file_restores_default_without_error(tmp_path: Path) -> None:
     originator = _Originator(_State(9))
 

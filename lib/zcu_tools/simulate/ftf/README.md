@@ -1,11 +1,16 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-18, readout solver routing
+**Last updated:** 2026-10-18, bounded exact physical memo
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their
 product space with all g1c/g2c/g12 terms, then selects the lowest M joint states.
-Dynamic Hamiltonians stay in this fixed basis. Native n² is formed before local
+Dynamic Hamiltonians stay in this fixed basis. Each joint retains up to eight
+exact-input eigensystems and bath-rate results as read-only arrays, within its own
+fixed projection. Native fluxonium operators use a separate eight-entry cache
+keyed by exact EC, EL and oscillator cutoff; projected operators never enter that
+cross-joint cache. Neither memo changes the numerical operation order.
+Native n² is formed before local
 and joint projection; squared truncated n is not a substitute.
 
 `charge_operator(subsystem)` returns full dimensionless n in the retained basis.

@@ -1,12 +1,24 @@
 """Persistence and isolation through the public form input envelope."""
 
+import json
 import re
 from collections.abc import Callable
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import BaseModel, Field, JsonValue
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+from pydantic import BaseModel, Field, JsonValue, create_model
+from zcu_tools.gui.form import (
+    FormCommandContext,
+    FormCommandSnapshot,
+    FormConversionResult,
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormState,
+    FormWritePath,
+    InputConverter,
+)
+from zcu_tools.gui.form.commands import ReadonlyFormInput
 
 
 class InlineTone(BaseModel):
@@ -81,6 +93,31 @@ def test_form_entry_rejects_untagged_string_or_model_with_field_path(
         operation()
 
 
+@pytest.mark.parametrize("with_override", [False, True])
+def test_json_codec_keeps_raw_fields_and_typed_selection_paths(
+    with_override: bool,
+) -> None:
+    raw: dict[str, JsonValue] = {
+        "data": {"expr": "unbound"},
+        "selections": [1, 2],
+        "tones": [{"shape": {"style": "ramp", "length": "unfinished"}}],
+    }
+    selections: dict[FormWritePath, JsonValue] = (
+        {("tones", 0, "shape"): {"style": "flat"}} if with_override else {}
+    )
+    original = FormInput(FormModel, raw, selections=selections)
+
+    text = original.to_json()
+
+    assert json.loads(text) == {
+        "data": raw,
+        "selections": [{"path": ["tones", 0, "shape"], "value": {"style": "flat"}}]
+        if with_override
+        else [],
+    }
+    assert FormInput.from_json(FormModel, text).same_as(original)
+
+
 class InputForm(FormModel):
     """Ordinary values used to observe incomplete saved input."""
 
@@ -121,6 +158,89 @@ def test_saved_input_rejects_invalid_json_envelopes(text: str) -> None:
 def test_input_rejects_nonfinite_json_numbers(value: float) -> None:
     with pytest.raises(ValueError, match="finite|JSON|json"):
         FormInput(InputForm, {"required": value})
+
+
+class DraftForm(FormModel):
+    shape: InlineShape
+    optional: float | None = None
+    required: float
+
+
+def test_saved_selection_and_branch_restore_the_authored_invalid_draft() -> None:
+    env = FormEnv()
+    original = FormState(
+        FormInput(
+            DraftForm,
+            {
+                "shape": {"style": "ramp", "length": {"expr": "unbound + 2"}},
+                "optional": None,
+            },
+        )
+    )
+    original.select(("shape",), {"style": "flat"}, env)
+    restored = FormState(FormInput.from_json(DraftForm, original.input.to_json()))
+    assert restored.input.same_as(original.input)
+    target = restored.describe(("shape",), env).target
+    assert target is not None
+    assert target.selected == 1
+    assert target.branch == {"style": "ramp"}
+    assert restored.input.data["optional"] is None
+    assert "required" not in restored.input.data
+    restored.write({("shape", "length"): "not a number"}, env)
+    invalid = FormInput.from_json(DraftForm, restored.input.to_json())
+    assert invalid.same_as(restored.input)
+
+
+def test_restore_uses_current_trusted_declaration_without_running_converter() -> None:
+    def forbidden(
+        old: FormCommandSnapshot,
+        selection: ReadonlyFormInput,
+        context: FormCommandContext,
+    ) -> FormConversionResult:
+        raise AssertionError("Restore must not execute a converter")
+
+    def declaration() -> type[FormModel]:
+        return create_model(
+            "RegeneratedDraft",
+            __base__=DraftForm,
+            shape=(
+                Annotated[InlineShape, InputConverter(forbidden)],
+                Field(discriminator="style"),
+            ),
+        )
+
+    previous = declaration()
+    trusted = declaration()
+    original = FormInput(
+        previous,
+        {"shape": {"style": "ramp", "length": -3}},
+        selections={("shape",): {"style": "flat"}},
+    )
+    restored = FormInput.from_json(trusted, original.to_json())
+    assert restored.model is trusted
+    assert restored.data == original.data
+    assert restored.selections == original.selections
+    target = FormState(restored).describe(("shape",), FormEnv()).target
+    assert target is not None and target.selected == 1
+
+
+def test_untagged_model_union_draft_restores_without_guessing_a_branch() -> None:
+    class Left(BaseModel):
+        left: float
+
+    class Right(BaseModel):
+        right: float
+
+    class Other(BaseModel):
+        other: float
+
+    model = create_model("UnionDraft", __base__=FormModel, branch=(Left | Right, ...))
+    original = FormInput(model, {"branch": {"left": "unfinished"}})
+    restored = FormInput.from_json(model, original.to_json())
+    assert restored.same_as(original)
+    assert FormState(restored).preview(FormEnv()).errors is not None
+    changed = create_model("UnionDraft", __base__=FormModel, branch=(Left | Other, ...))
+    assert FormInput.from_json(changed, original.to_json()).data == original.data
 
 
 def test_input_keeps_unknown_fields_and_invalid_values_for_restoration() -> None:
