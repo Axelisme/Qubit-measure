@@ -598,19 +598,18 @@ def test_recipe_cancel_after_analysis_admission_joins_the_true_outcome(
 
 
 @pytest.mark.parametrize("selector", ["execution", "run_op", "op"])
-def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
-    tmp_path, monkeypatch, selector
-):
+def test_recipe_cancel_delegates_to_the_existing_analysis_owner(tmp_path, selector):
     gui = ExecutionGui()
     analyzing = Event()
     stopped = Event()
+    release_completion = Event()
 
     def respond(method, params):
         if method == "operation.await" and params["operation_id"] == 93:
             analyzing.set()
             return (
                 {"reason": "completed", "status": "cancelled"}
-                if stopped.is_set()
+                if stopped.is_set() and release_completion.is_set()
                 else {"reason": "timeout"}
             )
         if method == "operation.cancel":
@@ -636,6 +635,9 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["gui_cancel"]["status"] == "requested"
         client.call("cancel", {"execution": execution})
+        # Keep the intent pending until both control receipts are observed.
+        # Native completion consumes it, so it is not a historical cancel flag.
+        release_completion.set()
         terminal = full_execution_reply(
             # Released work must reach a handoff; timeout only guards deadlock.
             client,
@@ -651,6 +653,7 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
         assert "tab.writeback_preview" not in methods
     finally:
         stopped.set()
+        release_completion.set()
         client.context.session.close()
 
 

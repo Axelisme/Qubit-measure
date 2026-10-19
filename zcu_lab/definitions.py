@@ -5,6 +5,12 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
+from zcu_lab.v2.fastflux.distortion.acc_phase.gui import AccPhaseAdapter
+from zcu_lab.v2.fastflux.distortion.freq.gui import FastFluxFreqAdapter
+from zcu_lab.v2.fastflux.distortion.phase.gui import PhaseAdapter
+from zcu_lab.v2.fastflux.mist.gui import MistAdapter
+from zcu_lab.v2.fastflux.t1.gui import T1Adapter as FastFluxT1Adapter
+from zcu_lab.v2.fastflux.twotone.gui import TwoToneAdapter
 from zcu_lab.v2.ftf.chevron.gui import ChevronAdapter
 from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
 from zcu_lab.v2.ftf.conditional_spectroscopy.gui import SpectroscopyAdapter
@@ -74,6 +80,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq.gui import RoOptFreqAdapter
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.gui import RoOptFreqGainAdapter
 from zcu_lab.v2.twotone.ro_optimize.length.gui import RoOptLengthAdapter
 from zcu_lab.v2.twotone.ro_optimize.power.gui import RoOptPowerAdapter
+from zcu_lab.v2.twotone.time_domain.cpmg.gui import CPMGAdapter
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAdapter
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAdapter
@@ -84,6 +91,10 @@ from zcu_lab.v2.twotone.zigzag_sweep.gui import (
 )
 
 ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
+    "fastflux/distortion/acc_phase": AccPhaseAdapter,
+    "fastflux/distortion/freq": FastFluxFreqAdapter,
+    "fastflux/mist": MistAdapter,
+    "fastflux/t1": FastFluxT1Adapter,
     "ftf/joint_readout": JointReadoutAdapter,
     "ftf/idle_zz": IdleZZAdapter,
     "ftf/conditional_spectroscopy": SpectroscopyAdapter,
@@ -93,6 +104,8 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/conditional_phase": ConditionalPhaseAdapter,
     "ftf/local_z": LocalZAdapter,
     "ftf/rb": TwoQubitRBAdapter,
+    "fastflux/twotone": TwoToneAdapter,
+    "fastflux/distortion/phase": PhaseAdapter,
     "lookback": LookbackAdapter,
     "mist/power_dep/single_trace": MistTraceAdapter,
     "onetone/freq": OneToneFreqAdapter,
@@ -129,6 +142,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/t1": T1Adapter,
     "twotone/t2ramsey": T2RamseyAdapter,
     "twotone/t2echo": T2EchoAdapter,
+    "twotone/cpmg": CPMGAdapter,
     "twotone/zigzag": ZigZagAdapter,
     "twotone/zigzag_scan/gain": ZigZagScanGainAdapter,
     "twotone/zigzag_scan/freq": ZigZagScanFreqAdapter,
