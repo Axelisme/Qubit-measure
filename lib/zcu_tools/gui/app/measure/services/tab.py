@@ -18,7 +18,6 @@ from zcu_tools.gui.session.types import ParameterContext
 
 from ..adapter import AdapterGuide, AnalysisMode
 from ..writeback import WritebackDraft
-from .persistence_types import PersistedTab
 from .plot_lifecycle import release_retired_plots
 from .ports import (
     AnalysisPaneSnapshot,
@@ -27,6 +26,7 @@ from .ports import (
     SavePaneSnapshot,
     TabSnapshot,
 )
+from .workspace_types import WorkspaceTab
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +118,8 @@ class TabService:
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
-        populated). cfg_input is raw live data. Persistence/restore uses the
-        separate PersistedTab FormInput JSON contract."""
+        populated). cfg_input is raw live data. RAM reload uses the
+        separate WorkspaceTab FormInput JSON contract."""
         tab = self._state.get_tab(tab_id)
         ctx = self._state.session_env
         is_running = self._state.is_tab_running(tab_id)
@@ -196,13 +196,13 @@ class TabService:
     def new_tab(
         self,
         adapter_name: str,
-        from_dict: PersistedTab | None = None,
+        from_dict: WorkspaceTab | None = None,
     ) -> str:
         """Create a tab form with one fixed source snapshot and fresh defaults.
 
         Defaults use current global aliases. Unresolved consumed fields may make
         the form Invalid without blocking tab creation. from_dict optionally
-        supplies PersistedTab shared FormInput JSON for recursive restore; dropped
+        supplies caller-owned RAM WorkspaceTab FormInput JSON for reload; dropped
         paths are available through dropped_input_paths. Source captures and pane
         results are not restored. Failed preparation publishes no partial tab.
         """

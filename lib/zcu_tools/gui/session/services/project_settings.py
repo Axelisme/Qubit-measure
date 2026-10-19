@@ -1,8 +1,8 @@
 """Explicit entry composition and remembered session settings.
 
 Entry commands use ResultEntry with injected roots before asking the context
-owner to leave point unselected. Memento capture/restore only projects preferences and
-remembered devices; it never opens an entry or connects hardware.
+owner to leave point unselected. Preferences are live dialog prefill, not
+persistent session state.
 """
 
 from __future__ import annotations
@@ -12,52 +12,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
-
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.result_scope import ResultScopeManager
 from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
-from zcu_tools.gui.session.ports import DeviceMemoryInfo
-from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH, SessionPreferences
 from zcu_tools.resources.entry import ResultEntry
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.ports import ProjectContextPort, RememberedDevicePort
+    from zcu_tools.gui.session.ports import ProjectContextPort
     from zcu_tools.gui.session.state import SessionState
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Session persistence memento slice (P-c): the remembered settings + devices.
-# Pydantic v2 frozen models — the app's Caretaker writes/reads them as part of its
-# combined on-disk snapshot; pure data, no I/O. The slice keeps its on-disk name
-# ``startup`` (``AppPersistedState.startup``) so existing files stay readable.
-# ---------------------------------------------------------------------------
-
-
-class PersistedDeviceEntry(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    type_name: str
-    name: str
-    address: str
-
-
-class PersistedStartup(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    entry_name: str = ""
-    chip_name: str = ""
-    qub_name: str = ""
-    res_name: str = ""
-    scope_id: str = ""
-    result_dir: str = ""
-    database_path: str = ""
-    ip: str = "192.168.10.1"
-    port: int = 8887
-    devices: tuple[PersistedDeviceEntry, ...] = ()
-    left_panel_width: int = DEFAULT_LEFT_PANEL_WIDTH
 
 
 def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str, str]:
@@ -117,8 +81,7 @@ class ResolvedProject:
 class SetupPreferences:
     """What the setup dialog prefills — not the active project or connection.
 
-    A narrow read model: the setup dialog neither sees the persistence memento nor
-    the remembered devices / panel width it carries.
+    A narrow live read model; these values are not a disk session memento.
     """
 
     entry_name: str
@@ -142,14 +105,13 @@ class ProjectSettingsService:
     """Own entry discovery/open/create and remembered settings on the owner thread.
 
     ResultEntry owns filesystem/name validation. ContextService owns binding
-    publication. Preferences change only after installation succeeds. Memento
-    capture/restore does not open entries; the app caretaker writes that memento.
+    publication. Entry preferences change only after installation succeeds.
+    This service does not capture or restore domain state from disk.
     """
 
     def __init__(
         self,
         context: ProjectContextPort,
-        devices: RememberedDevicePort,
         state: SessionState,
         *,
         result_root: str | Path,
@@ -157,8 +119,8 @@ class ProjectSettingsService:
     ) -> None:
         """Use explicit resource roots for owner-thread entry commands.
 
-        context installs prepared entry handles; devices restores remembered
-        device preferences. ResultEntry owns name/path/file validation. roots
+        context installs prepared entry handles; state owns live dialog
+        preferences. ResultEntry owns name/path/file validation. roots
         never default to a singleton or depend on GUI selection.
         """
         self._owner = OwnerThreadGuard()
@@ -166,7 +128,6 @@ class ProjectSettingsService:
         self._database_root = Path(database_root)
         self._entry_names: tuple[str, ...] | None = None
         self._context = context
-        self._devices = devices
         self._state = state
 
     def list_entries(self, *, refresh: bool = False) -> tuple[str, ...]:
@@ -241,57 +202,13 @@ class ProjectSettingsService:
         prefs.ip = req.ip
         prefs.port = req.port
 
-    def capture_settings(self, *, left_panel_width: int) -> PersistedStartup:
-        """Project the remembered prefs (+ current remember-device set from
-        State) into a memento. The device set is re-derived here (deferred to
-        flush time — replaces the old DEVICE_CHANGED eager projection)."""
-        devices = tuple(
-            PersistedDeviceEntry(
-                type_name=dev.type_name, name=dev.name, address=dev.address
-            )
-            for dev in self._state.list_devices()
-            if dev.remember
-        )
-        prefs = self._state.preferences
-        return PersistedStartup(
-            entry_name=prefs.entry_name,
-            chip_name=prefs.chip_name,
-            qub_name=prefs.qub_name,
-            res_name=prefs.res_name,
-            scope_id=prefs.scope_id,
-            result_dir=prefs.result_dir,
-            database_path=prefs.database_path,
-            ip=prefs.ip,
-            port=prefs.port,
-            devices=devices,
-            left_panel_width=left_panel_width,
-        )
+    def restore_left_panel_width(self, width: int) -> None:
+        """Seed pure Qt panel width in logical pixels on the owner thread.
 
-    def restore_settings(self, data: PersistedStartup) -> None:
-        """Seed the remembered prefs from the memento + register remembered
-        devices. The project is NOT applied to the active context (the user
-        applies it via the setup dialog) — the instrument never auto-connects."""
-        self._state.set_preferences(
-            SessionPreferences(
-                entry_name=data.entry_name,
-                chip_name=data.chip_name,
-                qub_name=data.qub_name,
-                res_name=data.res_name,
-                scope_id=data.scope_id,
-                result_dir=data.result_dir,
-                database_path=data.database_path,
-                ip=data.ip,
-                port=data.port,
-                left_panel_width=data.left_panel_width,
-            )
-        )
-        self._devices.register_remembered_devices(
-            [
-                DeviceMemoryInfo(
-                    type_name=entry.type_name,
-                    name=entry.name,
-                    address=entry.address,
-                )
-                for entry in data.devices
-            ]
-        )
+        New tabs use this width. Reject nonpositive values with ValueError.
+        This command changes only in-memory presentation preferences, without I/O.
+        """
+        self._owner.assert_owner()
+        if width <= 0:
+            raise ValueError("Panel width must be positive")
+        self._state.preferences.left_panel_width = width

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，device 連線失敗與重試、未連線改名、模擬 device address lookup 與重連
+**Last updated:** 2026-10-20，live preferences 與 app layout persistence 分工
 
 # gui/session/ — 量測 session core
 
@@ -36,8 +36,7 @@ DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，�
 schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
 JSON／UTF-8 或 codec 格式錯誤時，caretaker 以 defaults 開啟，透過
 `RestoreOutcome.load_error` 交給 host 顯示。載入不改寫或備份原檔，正常保存時機不變。
-Provider 和其他 restore 故障仍傳播。FormInput 的啟動、RAM 與 source reload
-使用同一遞迴還原，見 ADR-0063、ADR-0079。
+Provider 和其他 restore 故障仍傳播。Measure 的 framework caretaker 只保存 Qt 外觀。Session preferences 是目前程序的 Setup 預填值，不負責 domain session 檔案。FormInput 的 RAM reload 使用共用遞迴還原，見 ADR-0063、ADR-0079。
 
 ```
 session/
@@ -45,7 +44,7 @@ session/
 ├── aliases.py          — session-only 有序表；原子替換、lazy 名稱 links 與單次 override
 ├── events.py           — SessionEvent enum + SessionPayload base + 11 payload（Md/Ml/ContextSwitched/Soc/Device{Changed,SetupStarted,SetupFinished} + GateChanged/ConnectionFinished/DeviceOperationFinished）
 ├── state.py            — SessionState（session_env+devices/DeviceState+preferences/SessionPreferences+shared VersionTable+device mutators）；DeviceStatus
-├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（production 使用 session-owned DeviceManager，測試注入 in-memory fake，ADR-0066）、ContextReadPort、ProjectContextPort
+├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、DeviceRegistryPort（production 使用 session-owned DeviceManager，測試注入 in-memory fake，ADR-0066）、ContextReadPort、ProjectContextPort
 ├── hardware_gate.py    — RunBlocksHardwareGate：量測硬體互斥矩陣（RUN 擋 RUN/SoC/device mutation；device mutation 依 resource id 互斥；SoC connect 擋 RUN/SoC）；每個lease另保存captured origin、human note與monotonic start，register/release emit `GateChangedPayload`，`snapshot()`只投影active duration、不曝露raw epoch
 ├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0066）+ captured EventOrigin operation record；`create(cancel_hook=, origin=)`要求caller顯式capture，`event_origin(token)`在live/retained-done record上投影string operation id；`has_cancel_hook`/channel.`can_cancel` 提供一般取消能力查詢；cancel hook例外只log，Stop事件仍入列且cancel_all繼續處理其它operation
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0066：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
@@ -114,7 +113,7 @@ GUI 與 remote 查詢讀取同一個失敗原因。Dialog 保留失敗的名稱�
 
 ## Disconnected device rename
 
-`DeviceService.rename_device(old_name, new_name)` 在 owner loop 同次改名 idle `MEMORY_ONLY` row，提交後刷新 live value sources。Settings owner 從已提交 State 保存新名。連線中或有進行中操作時拒絕，即使新舊名相同。空字串、全空白與名稱衝突也拒絕，不改任何狀態。其他名稱原樣保留，不新增字元限制。DeviceDialog 的 Rename 欄位與按鈕只在未連線且可編輯時啟用。改名不更新 alias、已開 tab 或歷史紀錄，見 ADR-0076。
+`DeviceService.rename_device(old_name, new_name)` 在 owner loop 同次改名 idle `MEMORY_ONLY` row，提交後刷新 live value sources。Live device snapshots 與 value sources 立即反映新名。連線中或有進行中操作時拒絕，即使新舊名相同。空字串、全空白與名稱衝突也拒絕，不改任何狀態。其他名稱原樣保留，不新增字元限制。DeviceDialog 的 Rename 欄位與按鈕只在未連線且可編輯時啟用。改名不更新 alias、已開 tab 或歷史紀錄，見 ADR-0076。
 
 ## Analysis-only operations
 

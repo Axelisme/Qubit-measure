@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-18，固定具名元素 picker 與逐元素草稿保留
+**Last updated:** 2026-10-20，來源拒絕顯示為欄位錯誤
 
 `FormEditor` 借用 caller-owned `FormState` 與 host 捕捉的 `FormEnv`。Editor 直接讀 `state.describe(path, env)` 與完整 `preview`，不產生 JSON Schema，也不解析 annotation、union 或選項匹配。Core 擁有 choices、active option、固定欄位與 lone ordinary wrapper 攤平規則。攤平只改版面，controls 的完整 path 仍含 wrapper。
 

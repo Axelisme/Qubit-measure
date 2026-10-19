@@ -1,7 +1,5 @@
 """Measure composition uses one fixed form authority through Run and restoration."""
 
-import json
-from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -17,12 +15,8 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
-from zcu_tools.gui.app.measure.services.caretaker import create_persistence_caretaker
-from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
-from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.form import FormInput, FormValue
+from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
-from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -54,89 +48,6 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
         context: RunContext,
     ) -> TraceCfg:
         return cfg
-
-
-def test_deferred_restore_preserves_pending_until_point_is_ready(
-    qapp: QApplication,
-) -> None:
-    application = Fixture(headless=True)
-    application.registry.register("trace", TraceAdapter)
-    try:
-        tab_id = application.ctrl.new_tab("trace")
-        application.ctrl.cfg_resources.lookup(tab_id).write({("amount",): 7.0})
-        saved = application.ctrl.capture_persisted_state()
-        application.ctrl.close_tab(tab_id)
-        application.ctrl.setup_control.open_entry(EntryRequest("fake_qubit"))
-        report = application.ctrl.restore_persisted_state(saved)
-        assert report.restored_tabs == 0, "Startup must wait for a selected point"
-        assert application.ctrl.list_tab_ids() == []
-        assert application.ctrl.capture_persisted_state().session == saved.session
-        with pytest.raises(FailedPreconditionError) as rejected:
-            application.ctrl.restore_session()
-        assert rejected.value.reason_code == "no_context"
-        assert application.ctrl.capture_persisted_state().session == saved.session
-        application.ctrl.context_control.use_point(PointUseRequest("ctx001"))
-        restored_ids = application.ctrl.list_tab_ids()
-        assert len(restored_ids) == 1
-        assert application.ctrl.cfg_resources.lookup(
-            restored_ids[0]
-        ).result() == TraceCfg(amount=7.0)
-        assert application.ctrl.restore_session().restored_tabs == 0
-        application.ctrl.context_control.use_point(PointUseRequest("ctx001"))
-        assert application.ctrl.list_tab_ids() == restored_ids
-        application.ctrl.close_tab(restored_ids[0])
-        assert application.ctrl.capture_persisted_state().session.tabs == ()
-    finally:
-        application.stop()
-
-
-@pytest.mark.parametrize("adopt", ["restore", "clean"])
-def test_script_mode_preserves_original_until_explicit_adoption(
-    qapp: QApplication, tmp_path: Path, adopt: str
-) -> None:
-    application = Fixture(headless=True)
-    application.registry.register("trace", TraceAdapter)
-    try:
-        tab_id = application.ctrl.new_tab("trace")
-        application.ctrl.cfg_resources.lookup(tab_id).write({("amount",): 7.0})
-        saved = application.ctrl.capture_persisted_state()
-        caretaker = create_persistence_caretaker(application.ctrl, cache_dir=tmp_path)
-        application.ctrl.attach_caretaker(caretaker)
-        caretaker.flush()
-        application.ctrl.close_tab(tab_id)
-        assert callable(getattr(application.ctrl, "finish_startup_script", None)), (
-            "Script completion must explicitly adopt current tabs"
-        )
-        application.ctrl.restore_all(auto_restore_tabs=False)
-        application.ctrl.context_control.use_point(PointUseRequest("ctx001"))
-        assert application.ctrl.list_tab_ids() == []
-        # Script may already have opened new tabs; interrupted startup retains disk tabs.
-        live_id = application.ctrl.new_tab("trace")
-        application.ctrl.cfg_resources.lookup(live_id).write({("amount",): 9.0})
-        application.ctrl.persist_all()
-        assert json.loads(caretaker.state_path.read_text())[
-            "session"
-        ] == saved.session.model_dump(mode="json")
-        if adopt == "restore":
-            assert application.ctrl.restore_session().restored_tabs == 1
-        application.ctrl.finish_startup_script()
-        application.ctrl.finish_startup_script()
-        application.ctrl.persist_all()
-        amounts = [
-            tab.form_input["data"]
-            for tab in application.ctrl.capture_persisted_state().session.tabs
-        ]
-        assert amounts == (
-            [{"amount": 9.0}, {"amount": 7.0}]
-            if adopt == "restore"
-            else [{"amount": 9.0}]
-        )
-        assert application.ctrl.restore_session().restored_tabs == 0
-        assert json.loads(caretaker.state_path.read_text())[
-            "session"
-        ] == application.ctrl.capture_persisted_state().session.model_dump(mode="json")
-    finally:
-        application.stop()
 
 
 class FactoryCfg(ConfigBase):
@@ -212,7 +123,7 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
             application.ctrl.close_tab(tab_id)
 
 
-def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
+def test_open_edit_run_and_reset_use_public_form_authority(
     qapp: QApplication,
 ) -> None:
     application = Fixture(headless=True)
@@ -249,52 +160,6 @@ def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
         resource.reset()
         assert resource.result() == TraceCfg(amount=5.0)
         resource.write({("amount",): {"expr": "unfinished +"}})
-        saved = application.ctrl.capture_persisted_state()
-        assert saved.session.tabs[0].form_input == {
-            "data": {"amount": {"expr": "unfinished +"}},
-            "selections": [],
-        }
-        application.ctrl.close_tab(tab_id)
-        with pytest.raises(CfgPreconditionError):
-            resource.result()
-        report = application.ctrl.restore_persisted_state(saved)
-        assert report.restored_tabs == 1
-        restored_id = application.ctrl.list_tab_ids()[0]
-        assert restored_id != tab_id
-        restored = application.ctrl.cfg_resources.lookup(restored_id)
-        assert restored.input.data == {"amount": {"expr": "unfinished +"}}
-    finally:
-        application.stop()
-        for tab_id in tuple(application.ctrl.list_tab_ids()):
-            application.ctrl.close_tab(tab_id)
-
-
-def test_public_restore_reports_dropped_inputs_and_keeps_compatible_values(
-    qapp: QApplication,
-) -> None:
-    application = Fixture(headless=True)
-    application.registry.register("trace", TraceAdapter)
-    try:
-        tab_id = application.ctrl.new_tab("trace")
-        resource = application.ctrl.cfg_resources.lookup(tab_id)
-        resource.write({("amount",): 7.0})
-        saved = application.ctrl.capture_persisted_state()
-        saved.session.tabs[0].form_input.update(
-            json.loads(
-                FormInput(
-                    resource.input.model, {**resource.input.data, "retired": 9.0}
-                ).to_json()
-            )
-        )
-        application.ctrl.close_tab(tab_id)
-        report = application.ctrl.restore_persisted_state(saved)
-        assert report.restored_tabs == 1
-        assert report.dropped_inputs[0].adapter_name == "trace"
-        assert report.dropped_inputs[0].paths == (("retired",),)
-        restored = application.ctrl.cfg_resources.lookup(
-            application.ctrl.list_tab_ids()[0]
-        )
-        assert restored.result() == TraceCfg(amount=7.0)
     finally:
         application.stop()
         for tab_id in tuple(application.ctrl.list_tab_ids()):

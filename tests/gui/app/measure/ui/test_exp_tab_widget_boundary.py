@@ -54,9 +54,10 @@ def test_result_focus_and_panel_width_are_owned_by_tab(
 def test_window_dimensions_roundtrip_through_layout_caretaker(
     live_ui: tuple[NativeSaveSession, Controller, MainWindow, str], tmp_path: Path
 ) -> None:
-    _session, ctrl, window, original_tab = live_ui
+    _session, ctrl, window, _original_tab = live_ui
     ctrl.add_view(window)
     ctrl.attach_caretaker(create_persistence_caretaker(ctrl, cache_dir=tmp_path))
+    original_ids = set(ctrl.list_tab_ids())
     window.resize(1100, 820)
     ctrl.persist_all()
     window.resize(900, 650)
@@ -65,7 +66,7 @@ def test_window_dimensions_roundtrip_through_layout_caretaker(
         assert (window.width(), window.height()) == (1100, 820)
     finally:
         for tab_id in tuple(ctrl.list_tab_ids()):
-            if tab_id != original_tab:
+            if tab_id not in original_ids:
                 ctrl.close_tab(tab_id)
 
 

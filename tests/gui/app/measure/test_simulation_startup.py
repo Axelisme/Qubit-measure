@@ -13,11 +13,6 @@ from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.persistence_types import (
-    AppPersistedState,
-    PersistedDeviceEntry,
-    PersistedStartup,
-)
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
@@ -61,9 +56,7 @@ def behavior_with_environment(tmp_path, monkeypatch, env):
     )
 
 
-def test_startup_publishes_same_live_manager_before_remembered_devices(
-    qapp, tmp_path, monkeypatch
-):
+def test_startup_publishes_same_live_manager(qapp, tmp_path, monkeypatch):
     env = white_noise(std_adc=0, seed=1)
     driver = FakeDevice(fast_mode=True)
     env.devices.register_device("bias", driver)
@@ -84,21 +77,6 @@ def test_startup_publishes_same_live_manager_before_remembered_devices(
         info = ctrl.device_control.get_device_info("bias")
         assert isinstance(info, FakeDeviceInfo)
         assert info.value == driver.get_value()
-        # The owner API preserves existing live rows during preference restore.
-        ctrl.restore_persisted_state(
-            AppPersistedState(
-                startup=PersistedStartup(
-                    devices=(
-                        PersistedDeviceEntry(
-                            name="bias", type_name="YOKOGS200", address="GPIB::1"
-                        ),
-                        PersistedDeviceEntry(
-                            name="old_bias", type_name="YOKOGS200", address="GPIB::2"
-                        ),
-                    )
-                )
-            )
-        )
         snapshots = {
             entry.name: ctrl.device_control.get_device_snapshot(entry.name)
             for entry in ctrl.device_control.list_devices()
@@ -106,10 +84,6 @@ def test_startup_publishes_same_live_manager_before_remembered_devices(
         assert (
             snapshots["bias"] is not None
             and snapshots["bias"].status is DeviceStatus.CONNECTED
-        )
-        assert (
-            snapshots["old_bias"] is not None
-            and snapshots["old_bias"].status is DeviceStatus.MEMORY_ONLY
         )
         assert env.devices.get_all_devices() == {"bias": driver}
         ctrl.close()
