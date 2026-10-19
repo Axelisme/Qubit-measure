@@ -4,6 +4,7 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any, Literal
 
 from . import math, process, tomography
+from .cache import user_cache_root
 
 
 def deepupdate(
@@ -84,4 +85,5 @@ __all__ = [
     # utils
     "deepupdate",
     "format_obj",
+    "user_cache_root",
 ]

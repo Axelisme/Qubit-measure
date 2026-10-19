@@ -1,6 +1,6 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-16，optional parameter omission
+**Last updated:** 2026-10-19，shared user cache root
 
 This package owns NDJSON framing, typed envelopes, authentication, socket queues,
 owner-scheduler dispatch and lazy event delivery. Apps supply methods, serializers
@@ -34,6 +34,15 @@ ranges and provide the same constants to schemas, including dependent limits
 in descriptions. Undeclared-field behavior stays unchanged.
 
 `ParamSpec.omit_when_missing=True` 讓 optional、default=None 的欄位在 absent 時不進 handler params，explicit null 仍以 None 傳入。Handler 可用 membership 判斷有沒有提供該欄位。Required 或帶非 None default 的宣告在建構時拒絕此設定。預設 False 保持原有 absent/null/default 行為，schema requiredness 仍由 required 決定。
+
+Session discovery stores one `<app>.json` per running GUI under
+`utils.cache.user_cache_root()/sessions`. GUI writers and MCP readers must use
+the same user and cache-root environment on the same host. Set
+`ZCU_TOOLS_CACHE_DIR` to a non-empty absolute root path to isolate both discovery
+and GUI persistence. Empty or relative overrides raise ValueError.
+Platform defaults and the tempdir fallback are documented in the
+[utils README](../../utils/README.md#user-cache-root). Discovery does not read the
+old `~/.cache/zcu-tools/sessions` location.
 
 Wire details live in the [measure remote README](../app/measure/remote/README.md).
 App composition and error boundaries are in

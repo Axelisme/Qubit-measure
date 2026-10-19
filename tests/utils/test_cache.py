@@ -13,7 +13,7 @@ def _cache_root() -> Path:
     # individual assertion failure, not a collection failure.
     resolver = getattr(utils, "user_cache_root", None)
     assert callable(resolver), "user_cache_root must provide cache root resolution"
-    return resolver()
+    return utils.user_cache_root()
 
 
 def test_cache_root_uses_override_and_rechecks_environment(

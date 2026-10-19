@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-10-19 — result transfer implementation ownership
+**Last updated:** 2026-10-19，shared user cache root 與 result transfer ownership
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 資料檔格式、讀寫與 streaming 見 `zcu_tools.datafile`。
@@ -10,6 +10,13 @@
 
 Package 初始化不載入 QICK。`format_obj` 在 caller 呼叫時才載入 QickParam，保留其
 既有字串轉換；通用數值 helper 與 `deepupdate` 不要求 QICK。
+
+## User cache root
+
+`cache.user_cache_root()` 提供 GUI persistence 與 session discovery 共用的根目錄。
+`ZCU_TOOLS_CACHE_DIR` 可指定非空的絕對路徑，空字串或相對路徑會 raise ValueError。
+未設定時使用 `platformdirs.user_cache_dir("zcu_tools", "zcu_tools")`。
+平台查詢失敗時改用 `<tempdir>/.zcu_tools`。函式不建立目錄，也不快取環境變數。
 
 ## fitting helpers
 
