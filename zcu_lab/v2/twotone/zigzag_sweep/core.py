@@ -39,6 +39,12 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class ZigZagScanResult:
+    """Mean complex IQ with shape (repetition count, sweep value).
+
+    times counts pi rotations, with two X90 pulses per count when selected.
+    values is the hardware-rounded gain in a.u. or frequency in MHz.
+    """
+
     times: NDArray[np.int64]
     values: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -112,6 +118,19 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
     )
 
     def run(self, cfg: ZigZagScanCfg, *, context: RunContext) -> ZigZagScanResult:
+        """Scan repeated-gate errors versus pulse gain or frequency.
+
+        After optional reset and a fixed X90 preparation, repeat the selected
+        pulse and read out. Each count adds one X180 or two X90 pulses, from
+        zero through n_times. Only the repeated pulse uses the swept parameter;
+        the preparation keeps its original settings.
+
+        cfg must provide the selected repeat_on pulse and a gain or frequency
+        sweep, or ValueError is raised. Frequency takes precedence if both
+        sweeps are present. Return counts, rounded sweep values and mean IQ.
+        analyze selects the value with least signal variation across counts.
+        """
+        # 1. Select the repeated pulse and round its gain or frequency sweep.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         repeat_on = cfg.repeat_on
@@ -150,6 +169,7 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
                 x_sweep, "gain", {"soccfg": soccfg, "gen_ch": repeat_pulse.ch}
             )
 
+        # 2. Track mean IQ on the count-by-parameter grid.
         viewer = context.plots.liveplot_2d("measurement", "Times", x_info["name"])
         signals_buffer = SignalBuffer(
             (len(times), len(values)),
@@ -162,6 +182,7 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
 
+            # Preserve the preparation pulse before changing the repeated pulse.
             X90_pulse = deepcopy(modules.X90_pulse)
             repeat_pulse = getattr(modules, repeat_on)
             if repeat_pulse is None:
@@ -172,12 +193,13 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
             x_param = sweep2param(x_info["param_key"], x_sweep)
             repeat_pulse.set_param(x_info["param_key"], x_param)
 
-            # Convert to plain int list: LoadValue.values expects Sequence[int],
-            # and numpy 2.x scalar types (int_) are not considered int by pyright.
+            # X90 repeats in pairs so both choices add one pi rotation per count.
+            # LoadValue needs plain Python ints rather than NumPy scalar types.
             loop_n: list[int] = [
                 int(x) for x in (2 * times if repeat_on == "X90_pulse" else times)
             ]
 
+            # 3. Load the count on the board, prepare X90, repeat, then read out.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -213,6 +235,15 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         *,
         plots: Plots,
     ) -> ZigZagScanAnalysis:
+        """Choose the swept value with least count-dependent IQ variation.
+
+        Sum absolute changes between adjacent counts after projecting IQ onto
+        its signal axis, then smooth that loss over sweep values. find_range
+        optionally bounds the search in the same units as result.values.
+        Return the minimum-loss value and plot the map and loss. This is an
+        error-amplification tuning criterion, not a gate-fidelity estimate.
+        Fewer than two valid counts or an all-NaN search range raises ValueError.
+        """
         result = source.result
         find_range = options.find_range
 
@@ -220,6 +251,7 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         values = result.values
         signals = result.signals
 
+        # Compare every sweep value over the same acquired count range.
         real_signals = zigzag_signal2real(signals)  # (times , values)
         valid_cutoff = np.min(np.sum(~np.isnan(real_signals), axis=0))
 
@@ -229,6 +261,7 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         times = times[:valid_cutoff]
         real_signals = real_signals[:valid_cutoff]
 
+        # Minimize smoothed count-to-count variation within the requested bounds.
         val_diff = np.sum(np.abs(np.diff(real_signals, axis=0)), axis=0)
         loss = gaussian_filter1d(val_diff, sigma=1)
 
