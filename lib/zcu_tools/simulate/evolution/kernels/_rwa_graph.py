@@ -1,5 +1,6 @@
 """Shared joint-RWA phase-charge facts and explicit weak-cycle admission."""
 
+from collections.abc import Hashable
 from dataclasses import dataclass
 
 import numpy as np
@@ -7,7 +8,13 @@ from numpy.typing import NDArray
 
 from ..secular import SecularModel
 from ..workplan import FactKey, WorkPlan
-from .multitone_rwa import RWA_POLICY, RWARetention, retained_edges
+from .multitone_rwa import (
+    ADAPTIVE_RWA_POLICY,
+    RWA_POLICY,
+    RWARetention,
+    retained_edges,
+    retained_mask,
+)
 
 ZERO_GHZ = 1e-12
 PRUNE_LIMIT = 1e-3
@@ -18,12 +25,14 @@ RWA_GRAPH_POLICY = ("joint-phase-graph-pruned-v1", RWA_POLICY, ZERO_GHZ, PRUNE_L
 class PhaseGraph:
     """Model-only phase reduction with charged omissions, never an admission.
 
+    identity: complete model/levels/ports/policy/final-mask fact key.
     charges: (M,tones) integer diagonal rotation coordinates in dressed ordering.
     positive: (tones,M,M) compatible retained Fourier coefficients, GHz/gain.
     omitted: (tones,) spectral norm of all removed positive edges, including
         numerical zeros. Multiplying by gain, peak and duration gives the bound.
     """
 
+    identity: Hashable
     charges: NDArray[np.int64]
     positive: NDArray[np.complex128]
     omitted: NDArray[np.float64]
@@ -40,8 +49,8 @@ def phase_graph(
 
     ports/frequencies name each ordered carrier; negative frequencies work too.
     retention supplies resolved Fourier edges instead of the initial window;
-    its final edge coordinates enter the fact identity. For a fixed retained set
-    this model-only fact is independent of gains, shape, duration and phase.
+    its final window-union-additions mask enters the fact identity. For a fixed
+    retained set this fact is independent of gains, shape, duration and phase.
     It uses the shared RWA retained operator, then strongest-first integer
     constraints q[i]-q[j]=e[k]. Incompatible cycles are omitted, not silently
     declared covariant. Consumers MUST apply pruning_admitted before use.
@@ -56,8 +65,8 @@ def phase_graph(
         model.identity,
         model.level,
         ports,
-        frequencies,
-        None if retention is None else retention.edges,
+        ADAPTIVE_RWA_POLICY,
+        retained_mask(model, frequencies, retention).tobytes(),
     )
 
     def build() -> PhaseGraph:
@@ -98,7 +107,7 @@ def phase_graph(
             [np.linalg.norm(a - b, 2) for a, b in zip(original, positive, strict=True)],
             dtype=np.float64,
         )
-        return PhaseGraph(charges, positive, omitted)
+        return PhaseGraph(identity, charges, positive, omitted)
 
     return plan.fact(FactKey(identity, PhaseGraph), build)
 

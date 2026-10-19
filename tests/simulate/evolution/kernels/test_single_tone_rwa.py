@@ -1,5 +1,7 @@
 """Constant RWA blocks at the Engine and density-array seams."""
 
+from collections import Counter
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import fields, replace
 from threading import Event
@@ -24,7 +26,7 @@ from zcu_tools.simulate.evolution.kernel import (
 )
 from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.kernels.multitone_rwa import rwa_coefficients
-from zcu_tools.simulate.evolution.workplan import WorkPlan
+from zcu_tools.simulate.evolution.workplan import FactKey, WorkPlan
 
 
 def source_for(energies, x):
@@ -91,6 +93,108 @@ def family():
     result = next((k for k in REGISTRY if k.name == "single_tone_rwa"), None)
     assert result is not None, "constant RWA must have a visible registered family"
     return result
+
+
+class CountingWorkPlan(WorkPlan):
+    """Observe lazy numerical builds through the public fact publication seam."""
+
+    def __init__(self):
+        super().__init__()
+        self.builds: Counter[str] = Counter()
+
+    def fact[T](self, key: FactKey[T], build: Callable[[], T]) -> T:
+        def observed() -> T:
+            value = build()
+            name = key.name
+            if isinstance(name, tuple):
+                self.builds[str(name[0])] += 1
+            return value
+
+        return super().fact(key, observed)
+
+
+def play_with_plan(src, table, plan):
+    kernel = family()
+    rows = np.array([0])
+    context = KernelContext(src, 0.001, plan)
+    assert kernel.guard(table, rows, context).tolist() == [True]
+    keys = kernel.prepare_keys(table, rows, context)
+    prepared = kernel.prepare(keys, table, rows, context)
+    states = src.initial_density[None].copy()
+    kernel.apply(prepared, rows, table, rows, states, ApplyContext(0.001))
+    return states
+
+
+def test_carriers_share_exact_graph_and_topology_but_keep_their_stark_shifts():
+    src = source_for([0.0, 0.3, 0.91], [[0, 0.01, 0], [0.01, 0, 0.002], [0, 0.002, 0]])
+    with closing(CountingWorkPlan()) as plan:
+        outputs = []
+        for frequency in (0.3, 0.301):
+            table = table_for(frequency)
+            actual = play_with_plan(src, table, plan)
+            with closing(WorkPlan()) as isolated:
+                expected = play_with_plan(src, table, isolated)
+            np.testing.assert_array_equal(actual, expected)
+            outputs.append(actual)
+        assert plan.builds["joint-rwa-phase-graph"] == 1
+        assert plan.builds["rwa-topology"] == 1
+        assert plan.builds["multitone-rwa-retained-norm"] == 1
+        assert plan.builds["model-quadrature-norms"] == 1
+        assert plan.builds["packed-model"] == 1
+        assert plan.builds["secular-bath"] == 1
+    assert not np.allclose(outputs[0], outputs[1], atol=1e-8, rtol=0)
+
+
+@pytest.mark.parametrize("changed", ["window", "retained", "model", "level", "port"])
+def test_graph_sharing_separates_final_masks_and_full_physics(changed):
+    src = source_for([0.0, 7.11], [[0, 0.012], [0.012, 0]])
+    model = src.model((0,))
+    drive = model.drives[0]
+    model = replace(model, drives=(drive, replace(drive, name="other")))
+    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
+    table = table_for(7.0, 1.0, 2.0)
+    if changed == "window":
+        other_table = table_for(7.1, 1.0, 2.0)
+    elif changed == "retained":
+        other_table = table_for(7.0, 1.0, 30.0)
+    elif changed == "level":
+        other_table = replace(table, level=np.array([[1]]))
+    elif changed == "port":
+        other_table = replace(table, tone_port=np.array([[1]]))
+    else:
+        other_table = table
+    other_source = src
+    if changed == "model":
+        other = replace(
+            model, identity="other-physics", rates_per_ns=model.rates_per_ns * 2
+        )
+        other_source = ModelSource(
+            src.initial_density, lambda level: replace(other, level=level)
+        )
+    with closing(CountingWorkPlan()) as plan:
+        play_with_plan(src, table, plan)
+        actual = play_with_plan(other_source, other_table, plan)
+        with closing(WorkPlan()) as isolated:
+            expected = play_with_plan(other_source, other_table, isolated)
+        np.testing.assert_array_equal(actual, expected)
+        assert plan.builds["joint-rwa-phase-graph"] == 2
+        assert plan.builds["rwa-topology"] == 2
+        assert plan.builds["multitone-rwa-retained-norm"] == 2
+
+
+def test_graph_fact_hits_do_not_skip_strength_phase_or_budget_admission():
+    src = source_for([0.0, 0.3], [[0, 0.01], [0.01, 0]])
+    table = table_for()
+    rows = np.array([0])
+    kernel = family()
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 0.001, plan)
+        assert kernel.guard(table, rows, context).tolist() == [True]
+        for other in (table_for(gain=5.0), table_for(duration=10000.0)):
+            assert kernel.guard(other, rows, context).tolist() == [False]
+        assert kernel.guard(table, rows, replace(context, budget=1e-5)).tolist() == [
+            False
+        ]
 
 
 def test_constant_resonant_probe_uses_block_family():
