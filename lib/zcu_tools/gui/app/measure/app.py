@@ -124,7 +124,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
 
         self._controller = ctrl
         if self._environment is not None:
-            ctrl.install_startup_soc(self._environment.soc, self._environment.soccfg)
+            ctrl.install_soc(self._environment.soc, self._environment.soccfg)
 
         adapter = None
         if control is not None:

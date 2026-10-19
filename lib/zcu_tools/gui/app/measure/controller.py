@@ -708,9 +708,21 @@ class Controller(SessionControllerMixin):
     def get_running_tab_id(self) -> str | None:
         return self._tab_control.get_running_tab_id()
 
-    def install_startup_soc(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
-        """Publish a bound startup SoC; later connection mutations are rejected."""
-        self._soc_svc.install_startup_soc(soc, soccfg)
+    def install_soc(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
+        """Install or replace a caller-owned board/config on the Qt owner thread.
+
+        Clear the remote endpoint and publish the new pair. Run/connect conflicts
+        raise OperationConflictError. The caller retains board cleanup ownership.
+        """
+        self._soc_svc.install_soc(soc, soccfg)
+
+    def uninstall_soc(self) -> None:
+        """Clear the board/config on the Qt owner thread without closing it.
+
+        Publish the empty connection. Run/connect conflicts raise
+        OperationConflictError; external resource cleanup stays with the caller.
+        """
+        self._soc_svc.uninstall_soc()
 
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()
