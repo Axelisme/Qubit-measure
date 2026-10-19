@@ -22,6 +22,11 @@ from zcu_tools.gui.control_identity import ControlIdentity
 
 from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.ui._figure_presentation_support import (
+    gallery,
+    right_page,
+    right_stack,
+)
 from tests.gui.app.measure.ui._preview_gallery_support import (
     FAKE_PNG_BYTES,
     assert_aspect_fit,
@@ -119,21 +124,9 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
 
 
 @pytest.fixture
-def exp_tab_widget(qapp, monkeypatch, make_ctrl):
+def exp_tab_widget(qapp, make_ctrl):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    def mock_attach(fig, container):
-        from qtpy.QtWidgets import QWidget
-
-        w = QWidget()
-        # tolerated: The minimal QWidget canvas fixture supplies the figure/draw surface consumed by this tab.
-        w.figure = fig  # pyright: ignore[reportAttributeAccessIssue]
-        container.attach_canvas(w)
-        # tolerated: The minimal QWidget canvas fixture supplies the figure/draw surface consumed by this tab.
-        w.draw = lambda: None  # pyright: ignore[reportAttributeAccessIssue]
-        return w
-
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     owned_tabs: list[mod.ExpTabWidget] = []
 
     def create_tab(tab_id, ctrl, capabilities, *, preview_renderer=None):
@@ -166,12 +159,12 @@ def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctr
     assert any(left_tabs.tabText(i) == "Data" for i in range(left_tabs.count()))
     # Switch to Data
     tab_none.select_pane("data")
-    assert tab_none._right_stack.currentWidget() is tab_none._data_gallery
-    assert tab_none._data_gallery.has_card("run")
-    assert not tab_none._data_gallery.has_card("analysis")
-    assert tab_none._data_gallery.card_state("run") == "empty"
-    assert "No figure" in tab_none._data_gallery.card_text("run")
-    assert isinstance(tab_none._data_gallery.findChild(QScrollArea), QScrollArea)
+    assert right_stack(tab_none).currentWidget() is gallery(tab_none)
+    assert gallery(tab_none).has_card("run")
+    assert not gallery(tab_none).has_card("analysis")
+    assert gallery(tab_none).card_state("run") == "empty"
+    assert "No figure" in gallery(tab_none).card_text("run")
+    assert isinstance(gallery(tab_none).findChild(QScrollArea), QScrollArea)
     tab_none.detach()
 
     # FIT + post
@@ -180,10 +173,10 @@ def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctr
     tab_both = exp_tab_widget("t2", ctrl, caps_both)
     tab_both.attach(snap_both, MagicMock())
     tab_both.select_pane("data")
-    assert tab_both._data_gallery.has_card("run")
-    assert tab_both._data_gallery.has_card("analysis")
-    assert tab_both._data_gallery.has_card("post_analysis")
-    assert tab_both._data_gallery.card_count() == 3
+    assert gallery(tab_both).has_card("run")
+    assert gallery(tab_both).has_card("analysis")
+    assert gallery(tab_both).has_card("post_analysis")
+    assert gallery(tab_both).card_count() == 3
     tab_both.detach()
 
 
@@ -196,16 +189,16 @@ def test_exp_data_routing_a4(qapp, exp_tab_widget, make_ctrl):
 
     # Run
     tab.select_pane("run")
-    assert tab._right_stack.currentWidget() is tab._run_stack
+    assert right_stack(tab).currentWidget() is right_page(tab, "run")
     # Analysis
     tab.select_pane("analysis")
-    assert tab._right_stack.currentWidget() is tab._analysis_panel_right
+    assert right_stack(tab).currentWidget() is right_page(tab, "analysis")
     # Post
     tab.select_pane("post_analysis")
-    assert tab._right_stack.currentWidget() is tab._post_panel_right
+    assert right_stack(tab).currentWidget() is right_page(tab, "post_analysis")
     # Data -> gallery
     tab.select_pane("data")
-    assert tab._right_stack.currentWidget() is tab._data_gallery
+    assert right_stack(tab).currentWidget() is gallery(tab)
     # Guide -> placeholder
     left_tabs = tab.findChild(QTabWidget)
     assert left_tabs is not None
@@ -213,7 +206,7 @@ def test_exp_data_routing_a4(qapp, exp_tab_widget, make_ctrl):
         i for i in range(left_tabs.count()) if left_tabs.tabText(i) == "Guide"
     )
     left_tabs.setCurrentIndex(guide_idx)
-    assert tab._right_stack.currentWidget() is tab._right_placeholder
+    assert right_stack(tab).currentWidget() is right_page(tab, "guide")
     tab.detach()
 
 
@@ -229,8 +222,8 @@ def test_exp_data_activation_refreshes_and_lifecycle_sync(
 
     # Initially no figures -> empty
     tab.select_pane("data")
-    assert tab._data_gallery.card_state("run") == "empty"
-    assert tab._data_gallery.card_state("analysis") == "empty"
+    assert gallery(tab).card_state("run") == "empty"
+    assert gallery(tab).card_state("analysis") == "empty"
 
     # Data visible: show figures should sync immediately
     fig_run = Figure()
@@ -243,40 +236,40 @@ def test_exp_data_activation_refreshes_and_lifecycle_sync(
     tab.show_run_figure(fig_run)
     assert tab.get_current_figure_for_pane("run") is fig_run
     assert tab.get_run_container() is run_c
-    assert tab._data_gallery.card_state("run") == "available"
+    assert gallery(tab).card_state("run") == "available"
 
     tab.show_analysis_figures(ready_figures(fig_a))
     assert tab.get_current_figure_for_pane("analysis") is fig_a
     assert tab.get_analysis_container() is ana_c
-    assert tab._data_gallery.card_state("analysis") == "available"
+    assert gallery(tab).card_state("analysis") == "available"
 
     tab.show_post_analysis_figures(ready_figures(fig_p))
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p
     assert tab.get_post_container() is post_c
-    assert tab._data_gallery.card_state("post_analysis") == "available"
+    assert gallery(tab).card_state("post_analysis") == "available"
 
     # Data-visible clear should revert to empty
     tab.prepare_run_container()
     assert tab.get_current_figure_for_pane("run") is None
     assert tab.get_run_container() is run_c
-    assert tab._data_gallery.card_state("run") == "empty"
+    assert gallery(tab).card_state("run") == "empty"
     # downstream also cleared
-    assert tab._data_gallery.card_state("analysis") == "empty"
-    assert tab._data_gallery.card_state("post_analysis") == "empty"
+    assert gallery(tab).card_state("analysis") == "empty"
+    assert gallery(tab).card_state("post_analysis") == "empty"
 
     # Re-show
     fig_run2 = Figure()
     tab.show_run_figure(fig_run2)
-    assert tab._data_gallery.card_state("run") == "available"
+    assert gallery(tab).card_state("run") == "available"
     # clear_post_figure only affects post
     fig_a2 = Figure()
     fig_p2 = Figure()
     tab.show_analysis_figures(ready_figures(fig_a2))
     tab.show_post_analysis_figures(ready_figures(fig_p2))
-    assert tab._data_gallery.card_state("post_analysis") == "available"
+    assert gallery(tab).card_state("post_analysis") == "available"
     tab.clear_post_figure()
-    assert tab._data_gallery.card_state("post_analysis") == "empty"
-    assert tab._data_gallery.card_state("analysis") == "available"
+    assert gallery(tab).card_state("post_analysis") == "empty"
+    assert gallery(tab).card_state("analysis") == "available"
     assert tab.get_current_figure_for_pane("analysis") is fig_a2
     assert tab.get_analysis_container() is ana_c
     tab.detach()
@@ -297,7 +290,7 @@ def test_exp_data_invisible_defers_render(qapp, exp_tab_widget, make_ctrl):
 
     # Start on Run (Data not visible)
     tab.select_pane("run")
-    assert tab._right_stack.currentWidget() is tab._run_stack
+    assert right_stack(tab).currentWidget() is right_page(tab, "run")
     call_log.clear()
     fig_run = Figure()
     tab.show_run_figure(fig_run)
@@ -306,7 +299,7 @@ def test_exp_data_invisible_defers_render(qapp, exp_tab_widget, make_ctrl):
     # Switch to Data -> should render once
     tab.select_pane("data")
     assert len(call_log) == 1
-    assert tab._data_gallery.card_state("run") == "available"
+    assert gallery(tab).card_state("run") == "available"
     tab.detach()
 
 
@@ -329,7 +322,7 @@ def test_exp_production_reachability_data_gallery_is_active_right_widget(
             break
     assert data_idx is not None
     tab.select_pane("data")
-    assert tab._right_stack.currentWidget() is tab._data_gallery
+    assert right_stack(tab).currentWidget() is gallery(tab)
     # The Data pane still submits a whole Run artifact through its Save button.
     buttons = [
         button for button in tab.findChildren(QPushButton) if button.text() == "Save"
@@ -368,9 +361,9 @@ def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
     tab.show_analysis_figures(ready_figures(fig_a))
     tab.show_post_analysis_figures(ready_figures(fig_p))
     # Analysis should be unavailable, others available
-    assert tab._data_gallery.card_state("run") == "available"
-    assert tab._data_gallery.card_state("analysis") == "unavailable"
-    assert tab._data_gallery.card_state("post_analysis") == "available"
+    assert gallery(tab).card_state("run") == "available"
+    assert gallery(tab).card_state("analysis") == "unavailable"
+    assert gallery(tab).card_state("post_analysis") == "available"
     # Raster failure must not disable whole-artifact Save or Save All commands.
     buttons = [
         button for button in tab.findChildren(QPushButton) if button.text() == "Save"
@@ -406,7 +399,7 @@ def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
     tab.attach(snap, MagicMock())
     # Switch to Data so gallery is active right widget
     tab.select_pane("data")
-    assert tab._right_stack.currentWidget() is tab._data_gallery
+    assert right_stack(tab).currentWidget() is gallery(tab)
     tab.show()
     tab.resize(500, 600)
     QApplication.processEvents()
@@ -414,7 +407,7 @@ def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
     fig = Figure()
     tab.show_run_figure(fig)
     QApplication.processEvents()
-    card = tab._data_gallery.find_card("run")
+    card = gallery(tab).find_card("run")
     assert card is not None
     vp = card.image_viewport_size()
     disp = card.displayed_pixmap()
@@ -422,7 +415,7 @@ def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
     assert vp is not None and disp is not None and orig is not None
     assert_aspect_fit(vp, disp.size(), orig.size())
     # Resize larger — simulate user dragging splitter wider (still gallery viewport, not window)
-    tab._data_gallery.setFixedWidth(700)
+    gallery(tab).setFixedWidth(700)
     QApplication.processEvents()
     QApplication.processEvents()
     vp2 = card.image_viewport_size()
@@ -497,11 +490,11 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
         snap = make_snapshot(tag, analysis=caps.analysis, post=caps.post_analysis)
         tab.attach(snap, MagicMock())
         tab.select_pane("data")
-        assert tab._right_stack.currentWidget() is tab._data_gallery
+        assert right_stack(tab).currentWidget() is gallery(tab)
         tab.show()
         QApplication.processEvents()
         QApplication.processEvents()
-        g = tab._data_gallery
+        g = gallery(tab)
         assert g.card_count() == expected_count
 
         # Narrow via ExpTabWidget resize — automatic reflow, no private call.

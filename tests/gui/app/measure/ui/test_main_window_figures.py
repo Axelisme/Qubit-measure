@@ -489,16 +489,20 @@ def test_show_analysis_figure_draws_canvas(
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
-    canvas = MagicMock()
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.ui.exp_tab_widget.attach_existing_figure_to_container",
-        lambda fig, container: canvas,
-    )
+    drawn: list[FigureCanvasQTAgg] = []
+    draw = FigureCanvasQTAgg.draw
 
-    tab.show_analysis_figures(ready_figures(Figure()))
+    def record_draw(canvas: FigureCanvasQTAgg) -> None:
+        drawn.append(canvas)
+        draw(canvas)
 
-    canvas.draw.assert_called_once_with()
+    monkeypatch.setattr(FigureCanvasQTAgg, "draw", record_draw)
+    figure = Figure()
+    tab.show_analysis_figures(ready_figures(figure))
+
+    assert drawn == [figure.canvas]
 
 
 def _figure_pane_stack(tab: ExpTabWidget, accessible_name: str) -> QStackedWidget:

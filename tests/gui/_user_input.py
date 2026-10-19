@@ -455,6 +455,22 @@ class ComponentDriver:
             mouse_click(widget, point)
         QApplication.processEvents()
 
+    def click_tooltip(self, tooltip: str) -> None:
+        """Click the unique on-screen control with this exact tooltip.
+
+        Missing or ambiguous matches raise LookupError. Disabled, clipped or
+        modal-blocked controls are no-ops, just as with caption-based click.
+        """
+        candidates = [
+            widget
+            for widget in self._widgets()
+            if self._on_screen(widget) and widget.toolTip() == tooltip
+        ]
+        widget = _unique(tooltip, candidates, [w.objectName() for w in candidates])
+        if self._can_interact(widget):
+            mouse_click(widget, widget.rect().center())
+        QApplication.processEvents()
+
     def _field_control(self, text: str | None, object_name: str | None) -> QWidget:
         if (text is None) == (object_name is None):
             raise ValueError("Supply exactly one of text or object_name")
