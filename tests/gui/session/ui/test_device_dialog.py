@@ -149,7 +149,7 @@ def test_disconnect_shows_terminal_status_and_allows_reconnect(qapp, tmp_path: P
         bg,
         runner,
         handles,
-        driver_factory=lambda _type, _address: driver,
+        driver_factory=lambda type_name, address: driver,
     )
     facet = DeviceControlFacet(bus=bus, device=service, progress=progress)
     dialog = DeviceDialog(facet, parameter_provider=lambda: None)
