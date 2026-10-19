@@ -179,7 +179,7 @@ def _make_real_svc(driver: FakeDevice | None = None) -> tuple[DeviceService, obj
         bg,
         runner,
         handles,
-        driver_factory=lambda _type, _address: fake_device,  # type: ignore[arg-type]
+        driver_factory=lambda type_name, address: fake_device,
         device_registry=manager,
     )
     return svc, fake_device
