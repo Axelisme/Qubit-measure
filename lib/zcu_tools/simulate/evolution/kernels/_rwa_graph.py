@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 
 from ..secular import SecularModel
 from ..workplan import FactKey, WorkPlan
-from .multitone_rwa import RWA_POLICY, retained_edges
+from .multitone_rwa import RWA_POLICY, RWARetention, retained_edges
 
 ZERO_GHZ = 1e-12
 PRUNE_LIMIT = 1e-3
@@ -34,11 +34,14 @@ def phase_graph(
     ports: tuple[int, ...],
     frequencies: tuple[float, ...],
     plan: WorkPlan,
+    retention: RWARetention | None = None,
 ) -> PhaseGraph:
     """Publish deterministic dressed charges and explicit RWA edge omissions.
 
     ports/frequencies name each ordered carrier; negative frequencies work too.
-    This model-only fact is independent of gains, shape, duration and phase.
+    retention supplies resolved Fourier edges instead of the initial window;
+    its final edge coordinates enter the fact identity. For a fixed retained set
+    this model-only fact is independent of gains, shape, duration and phase.
     It uses the shared RWA retained operator, then strongest-first integer
     constraints q[i]-q[j]=e[k]. Incompatible cycles are omitted, not silently
     declared covariant. Consumers MUST apply pruning_admitted before use.
@@ -54,6 +57,7 @@ def phase_graph(
         model.level,
         ports,
         frequencies,
+        None if retention is None else retention.edges,
     )
 
     def build() -> PhaseGraph:
@@ -63,6 +67,8 @@ def phase_graph(
                     model,
                     ports[k],
                     frequencies[k],
+                    retention,
+                    k,
                 )
                 for k in range(count)
             ]

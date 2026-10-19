@@ -57,6 +57,34 @@ RWA_POLICY = (
 )
 
 
+ADAPTIVE_RWA_POLICY = ("omission-retained-edges-v1", CONSTANT_RWA_POLICY, RWA_POLICY)
+
+
+@dataclass(frozen=True)
+class RWARetention:
+    """Resolved additions to the initial window and remaining omission estimate.
+
+    edges has one ordered tuple of added (i,j) coordinates per positive carrier;
+    the final set is the 50 MHz window union these edges. Negative Fourier masks
+    are the transposes. omission_transfer is the maximum
+    remaining first/second-order transfer proxy, not a rigorous error bound.
+    """
+
+    edges: tuple[tuple[tuple[int, int], ...], ...]
+    omission_transfer: float
+
+
+@dataclass(frozen=True)
+class ConstantRetentions:
+    """Single-constant retained sets aligned with absolute SegmentTable rows.
+
+    rows contains None outside the fixed-flux single constant carrier domain.
+    The complete immutable inventory avoids repeated per-key fact lookups.
+    """
+
+    rows: tuple[RWARetention | None, ...]
+
+
 class RWACoefficients(NamedTuple):
     """Joint RWA coefficients supplied by the single Hamiltonian owner.
 
@@ -126,7 +154,7 @@ def _transfer_probability(coupling, detuning, duration):
 @njit(nogil=True, cache=True)
 def _two_step_coupling(data, first, second, i, k):
     # Sum intermediates for ONE ordered pair of signed Fourier carriers.
-    energies, operators, frequencies = data
+    energies, operators, frequencies, retained = data
     a, sa = first
     b, sb = second
     sign_a, sign_b = 1 - 2 * sa, 1 - 2 * sb
@@ -134,9 +162,9 @@ def _two_step_coupling(data, first, second, i, k):
     for m in range(len(energies)):
         d_first = energies[i] - energies[m] + sign_a * frequencies[a]
         d_second = energies[m] - energies[k] + sign_b * frequencies[b]
-        if abs(d_first) >= _EDGE_GHZ:
+        if not retained[a, sa, i, m]:
             denominator = d_first
-        elif abs(d_second) >= _EDGE_GHZ:
+        elif not retained[b, sb, m, k]:
             denominator = -d_second
         else:
             continue
@@ -145,8 +173,8 @@ def _two_step_coupling(data, first, second, i, k):
 
 
 @njit(nogil=True, cache=True)
-def _pair_probability(data, first, second, duration):
-    energies, _, frequencies = data
+def _pair_probability(data, first, second, duration, additions):
+    energies, _, frequencies, _ = data
     a, sa = first
     b, sb = second
     combination = (1 - 2 * sa) * frequencies[a] + (1 - 2 * sb) * frequencies[b]
@@ -158,17 +186,62 @@ def _pair_probability(data, first, second, duration):
             coupling = _two_step_coupling(data, first, second, i, k)
             if first != second:
                 coupling += _two_step_coupling(data, second, first, i, k)
-            maximum = max(
-                maximum,
-                _transfer_probability(
-                    coupling, energies[i] - energies[k] + combination, duration
-                ),
+            probability = _transfer_probability(
+                coupling, energies[i] - energies[k] + combination, duration
             )
+            maximum = max(maximum, probability)
+            if probability > _MAX_OMISSION_TRANSFER:
+                _restore_paths(data, first, second, i, k, additions)
+                if first != second:
+                    _restore_paths(data, second, first, i, k, additions)
     return maximum
 
 
 @njit(nogil=True, cache=True)
 def _omission_probability(energies, x, y, frequencies, amplitudes, duration):
+    retained = _window_mask(energies, frequencies)
+    probability, _ = _omission_analysis(
+        energies, (x, y), frequencies, amplitudes, duration, retained
+    )
+    return probability
+
+
+@njit(nogil=True, cache=True)
+def _window_mask(energies, frequencies):
+    size = len(energies)
+    retained = np.empty((len(frequencies), 2, size, size), dtype=np.bool_)
+    for a in range(len(frequencies)):
+        for sa in range(2):
+            for i in range(size):
+                for j in range(size):
+                    retained[a, sa, i, j] = (
+                        abs(energies[i] - energies[j] + (1 - 2 * sa) * frequencies[a])
+                        < _EDGE_GHZ
+                    )
+    return retained
+
+
+@njit(nogil=True, cache=True)
+def _restore_paths(data, first, second, i, k, additions):
+    # Restore only nonzero paths contributing to this effective channel.
+    energies, operators, _, retained = data
+    a, sa = first
+    b, sb = second
+    for m in range(len(energies)):
+        if operators[a, sa, i, m] == 0 or operators[b, sb, m, k] == 0:
+            continue
+        if not retained[a, sa, i, m]:
+            additions[a, sa, i, m] = True
+            additions[a, 1 - sa, m, i] = True
+        if not retained[b, sb, m, k]:
+            additions[b, sb, m, k] = True
+            additions[b, 1 - sb, k, m] = True
+
+
+@njit(nogil=True, cache=True)
+def _omission_analysis(
+    energies, quadratures, frequencies, amplitudes, duration, retained
+):
     """One rule for every removed first/second-order Fourier coupling.
 
     C_s=(X-s*iY)/2, d=Ei-Ej+s*f. Removed one-photon edges use
@@ -197,8 +270,10 @@ def _omission_probability(energies, x, y, frequencies, amplitudes, duration):
     96-point calibration keeps 24/36 previously admitted points; twelve safe
     intermediate-flux points now fall back due to the new omissions.
     """
+    x, y = quadratures
     maximum = 0.0
     size, count = len(energies), len(frequencies)
+    additions = np.zeros_like(retained)
     operators = np.empty((count, 2, size, size), dtype=np.complex128)
     for a in range(count):
         for sa in range(2):
@@ -207,31 +282,31 @@ def _omission_probability(energies, x, y, frequencies, amplitudes, duration):
             for i in range(size):
                 for j in range(size):
                     d = energies[i] - energies[j] + sign_a * frequencies[a]
-                    if abs(d) >= _EDGE_GHZ:
-                        maximum = max(
-                            maximum,
-                            _transfer_probability(operators[a, sa, i, j], d, duration),
+                    if not retained[a, sa, i, j]:
+                        probability = _transfer_probability(
+                            operators[a, sa, i, j], d, duration
                         )
+                        maximum = max(maximum, probability)
+                        if probability > _MAX_OMISSION_TRANSFER:
+                            additions[a, sa, i, j] = True
+                            additions[a, 1 - sa, j, i] = True
     for a in range(count):
         for b in range(a, count):
             for sa in range(2):
                 for sb in range(2):
                     if a == b and sa > sb:
                         continue
+                    data = (energies, operators, frequencies, retained)
+                    first, second = (a, sa), (b, sb)
                     maximum = max(
                         maximum,
-                        _pair_probability(
-                            (energies, operators, frequencies),
-                            (a, sa),
-                            (b, sb),
-                            duration,
-                        ),
+                        _pair_probability(data, first, second, duration, additions),
                     )
-    return maximum
+    return maximum, additions
 
 
 @njit(nogil=True, cache=True)
-def _coefficients(models, ports, frequencies, tones):
+def _coefficients(models, ports, frequencies, tones, retained=None):
     """Build retained edges and compact per-tone diagonal from the same window."""
     size = models.energies.shape[1]
     positive = np.zeros((len(tones), ports.shape[1], size, size), np.complex128)
@@ -250,7 +325,10 @@ def _coefficients(models, ports, frequencies, tones):
                     for sign in (1, -1):
                         coefficient = _fourier_coefficient(x, y, sign)
                         detuning = gap + sign * frequency
-                        if abs(detuning) < _EDGE_GHZ:
+                        keep = abs(detuning) < _EDGE_GHZ
+                        if retained is not None:
+                            keep = retained[tone, 0 if sign == 1 else 1, i, j]
+                        if keep:
                             if sign == 1:
                                 positive[key, tone, i, j] = coefficient
                             else:
@@ -388,13 +466,18 @@ def _smooth(table: SegmentTable, envelope: int, context: KernelContext) -> bool:
 
 
 def _retained_norm(
-    model: SecularModel, port: int, frequency: float, context: KernelContext
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    context: KernelContext,
+    retention: RWARetention | None = None,
 ) -> float:
     """Cache the near-resonant positive Fourier operator spectral norm."""
     key = FactKey(
         (
             "multitone-rwa-retained-norm",
             RWA_POLICY,
+            None if retention is None else retention.edges,
             model.identity,
             model.level,
             port,
@@ -404,7 +487,93 @@ def _retained_norm(
     )
 
     def build() -> float:
-        return float(np.linalg.norm(retained_edges(model, port, frequency), 2))
+        return float(
+            np.linalg.norm(retained_edges(model, port, frequency, retention), 2)
+        )
+
+    return context.work_plan.fact(key, build)
+
+
+def _constant_retention(
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    duration_ns: float,
+) -> RWARetention:
+    """Resolve a single constant carrier's model-only retained set.
+
+    Start at 50 MHz. Each round restores all over-threshold one-photon edges
+    and all omitted nonzero first-order edges in an over-threshold two-photon
+    channel's contributing paths, together with their adjoints. Recompute the
+    complete shared omission estimate after each round. Monotone edge addition
+    terminates on a finite graph. Consumers still enforce strength, phase,
+    compatible-charge pruning and block-size limits. No multitone policy changes.
+    Downstream graph/prepare identities include the final edge coordinates,
+    not a guessed wider window.
+    """
+    drive = model.drives[port]
+    frequencies = np.array([frequency])
+    initial = _window_mask(model.energies_ghz, frequencies)
+    retained = initial
+    while True:
+        probability, additions = _omission_analysis(
+            model.energies_ghz,
+            (drive.in_phase_ghz[None], drive.quadrature_ghz[None]),
+            frequencies,
+            np.array([abs(amplitude)]),
+            duration_ns,
+            retained,
+        )
+        if not np.any(additions & ~retained):
+            break
+        retained = retained | additions
+    edges = ()
+    if retained is not initial:
+        edges = tuple(
+            (int(i), int(j)) for i, j in np.argwhere(retained[0, 0] & ~initial[0, 0])
+        )
+    return RWARetention((edges,), float(probability))
+
+
+def constant_retentions(
+    table: SegmentTable, context: KernelContext
+) -> ConstantRetentions:
+    """Publish one retained-set inventory for a complete constant-row table.
+
+    Each eligible row uses its own model, signed carrier, abs(gain) and duration;
+    no edges are shared across rows. Ineligible rows have None. The table/source
+    scoped fact is built once, then guard, keys and per-key builders reuse it.
+    Graph facts and prepare keys additionally identify the resolved edge set.
+    This avoids one resource lookup per row at every subsequent prepare step.
+    """
+    key = FactKey(
+        ("constant-rwa-retentions", ADAPTIVE_RWA_POLICY, id(table), id(context.source)),
+        ConstantRetentions,
+    )
+
+    def build() -> ConstantRetentions:
+        results: list[RWARetention | None] = []
+        for row in range(len(table.timeline)):
+            if (
+                table.tones[row] != 1
+                or table.envelopes[table.tone_envelope[row, 0]].kind != "constant"
+                or abs(table.tone_frequency_ghz[row, 0]) < _EDGE_GHZ
+                or not fixed_flux(table, row)
+            ):
+                results.append(None)
+                continue
+            model = context.source.model(tuple(int(v) for v in table.level[row]))
+            results.append(
+                _constant_retention(
+                    model,
+                    int(table.tone_port[row, 0]),
+                    float(table.tone_frequency_ghz[row, 0]),
+                    float(table.tone_amplitude[row, 0]),
+                    float(table.duration_ns[row]),
+                )
+            )
+        return ConstantRetentions(tuple(results))
 
     return context.work_plan.fact(key, build)
 
@@ -444,6 +613,22 @@ def admit_constant_rows(
     return _admit_rows(table, rows, context, single_tone=True, constant_single=True)
 
 
+def _constant_domain(
+    table: SegmentTable, row: int, *, constant: bool, single: bool
+) -> bool:
+    """Keep single constants separate from distinct-port dual constants.
+
+    Same-port Stark/probe spectra retain their Floquet/direct route: small
+    population errors can still reorder a narrow spectrum's local maxima.
+    Shaped rows use the existing simultaneous or single-gate domain.
+    """
+    if single:
+        return constant
+    return not constant or (
+        table.tones[row] == 2 and table.tone_port[row, 0] != table.tone_port[row, 1]
+    )
+
+
 def _admit_rows(
     table: SegmentTable,
     rows: NDArray[np.int64],
@@ -455,6 +640,7 @@ def _admit_rows(
     tolerances(context.budget)
     bounds = envelope_bounds(table, context.work_plan)
     accepted = np.zeros(len(rows), dtype=np.bool_)
+    retentions = None
     for index, row in enumerate(rows):
         count = table.tones[row]
         if (
@@ -465,13 +651,8 @@ def _admit_rows(
             continue
         envs = table.tone_envelope[row, :count]
         constant = all(table.envelopes[e].kind == "constant" for e in envs)
-        # Same-port Stark/probe spectra retain their Floquet/direct route:
-        # small population errors can still shift a narrow resonance peak.
-        if constant_single:
-            if not constant:
-                continue
-        elif constant and (
-            count != 2 or table.tone_port[row, 0] == table.tone_port[row, 1]
+        if not _constant_domain(
+            table, int(row), constant=constant, single=constant_single
         ):
             continue
         if not all(_smooth(table, int(e), context) for e in envs):
@@ -482,7 +663,15 @@ def _admit_rows(
         ):
             continue
         model = context.source.model(tuple(int(v) for v in table.level[row]))
-        if constant:
+        retention = None
+        if constant_single:
+            if retentions is None:
+                retentions = constant_retentions(table, context)
+            retention = retentions.rows[row]
+            assert retention is not None  # The row passed the same domain checks above.
+            if retention.omission_transfer > _MAX_OMISSION_TRANSFER:
+                continue
+        elif constant:
             ports = table.tone_port[row, :count]
             probability = _omission_probability(
                 model.energies_ghz,
@@ -500,7 +689,11 @@ def _admit_rows(
             port = int(table.tone_port[row, tone])
             drive = model.drives[port]
             retained = _retained_norm(
-                model, port, float(table.tone_frequency_ghz[row, tone]), context
+                model,
+                port,
+                float(table.tone_frequency_ghz[row, tone]),
+                context,
+                retention,
             )
             phase += (
                 table.tone_amplitude[row, tone] * bounds.peaks[env] * retained
@@ -525,22 +718,34 @@ def _admit_rows(
 
 
 def retained_edges(
-    model: SecularModel, port: int, frequency: float
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    retention: RWARetention | None = None,
+    tone: int = 0,
 ) -> NDArray[np.complex128]:
     """Return the positive-carrier joint operator in GHz/gain.
 
     The negative-carrier operator is its adjoint. Both RWA integrators and
-    covariant gate construction use this same 50 MHz retained-edge policy.
+    covariant gate construction default to the same 50 MHz retained-edge policy.
+    retention overrides it with the resolved edges for the ordered tone index.
     The caller owns the returned mutable matrix.
     """
     drive = model.drives[port]
     gaps = model.energies_ghz[:, None] - model.energies_ghz[None, :]
     coupling = _fourier_coefficient(drive.in_phase_ghz, drive.quadrature_ghz, 1)
-    return coupling * (np.abs(gaps + frequency) < _EDGE_GHZ)
+    mask = np.abs(gaps + frequency) < _EDGE_GHZ
+    if retention is not None:
+        for i, j in retention.edges[tone]:
+            mask[i, j] = True
+    return coupling * mask
 
 
 def rwa_coefficients(
-    model: SecularModel, ports: tuple[int, ...], frequencies: tuple[float, ...]
+    model: SecularModel,
+    ports: tuple[int, ...],
+    frequencies: tuple[float, ...],
+    retention: RWARetention | None = None,
 ) -> RWACoefficients:
     """Build all joint drive coefficients for ordered signed carriers.
 
@@ -549,17 +754,29 @@ def rwa_coefficients(
     in GHz/gain², restricted to abs(Ei-Ej+s*f)>=0.05 GHz. Retained edges
     evolve explicitly, with no zero division or double counting. The common
     compiled builder also serves batched ordinary RWA preparation.
-    Graph pruning may replace the Fourier operators but retains the diagonal.
+    retention overrides the initial window in both Fourier terms and virtual
+    diagonal, so restored edges are never counted twice. Graph pruning may
+    replace the Fourier operators but retains the diagonal.
     Returned arrays are owned and mutable. Misaligned/empty carriers raise
     ValueError; ports must index the supplied model's validated drives.
     """
     if not ports or len(ports) != len(frequencies):
         raise ValueError("RWA coefficients require aligned nonempty carriers")
+    retained = None
+    if retention is not None and any(retention.edges):
+        if len(retention.edges) != len(ports):
+            raise ValueError("RWA retention must align with carriers")
+        retained = _window_mask(model.energies_ghz, np.array(frequencies))
+        for tone, edges in enumerate(retention.edges):
+            for i, j in edges:
+                retained[tone, 0, i, j] = True
+                retained[tone, 1, j, i] = True
     positive, negative, diagonal = _coefficients(
         pack_models([model]),
         np.array([ports], dtype=np.int64),
         np.array([frequencies], dtype=np.float64),
         np.array([len(ports)], dtype=np.int64),
+        retained,
     )
     return RWACoefficients(positive[0], negative[0], diagonal[0])
 
