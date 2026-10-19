@@ -16,13 +16,14 @@
 │   │   ├── t1_curve/<Q>.json             ← 舊 t1_curve_fit
 │   │   ├── samples/<Q>.jsonl             ← 舊 samples.csv
 │   │   ├── figures/<原相對路徑>           ← exps 以外的舊圖
+│   │   ├── <原相對路徑>                   ← 不支援的舊檔，原樣放在對應位置
 │   │   ├── points/<label>/{point.yaml,module_cfg.yaml,figures/}
 │   │   └── records/manual-migration-report-<date>.json
 │   └── Database/<name>/
 │       ├── runs/<run_id>/data.h5         ← Labber 轉成的 native
 │       ├── Labber/<原相對路徑>            ← 原 Labber 檔，bytes 不變
 │       ├── arb_waveforms/**
-│       └── migration-preserved/**        ← 無法轉換、需保全的檔
+│       └── <原相對路徑>                   ← 無法轉換的舊 Database 檔，原樣放在對應位置
 └── Qubit-measure-gui-backup/             ← 平行備份根：舊格式，路徑與 repo 內相同
     ├── result/<chip>/<qub>/              ← 原樣複製
     ├── Database/<chip>/<qub>/            ← 原樣複製
@@ -136,11 +137,11 @@ label 不合法時，由使用者決定新名，報告記舊名、新名與理�
 | `exps/<sub>/image/*.png` | `points/<sub>/figures/<原檔名>` | 第 7 步 |
 | 舊直屬 `<sub>/{meta_info.json,module_cfg.yaml}` | 同名 point | 與 `exps/<sub>` 同名時停下，列出兩個來源，不合併。 |
 | exps 以外的圖 | `result/<name>/figures/<原相對路徑>` | 第 7 步 |
-| `samples.csv` | `samples/<Q>.jsonl` | 第 7 步 |
+| `samples.csv` | `samples/<Q>.jsonl` | 第 7 步。有列轉不了時，原檔另外原樣放 `result/<name>/samples.csv`。 |
 | `arb_waveforms/**`（result 或 Database） | `Database/<name>/arb_waveforms/**` | 第 7 步 |
-| `autofluxdep_runs/**`、其他未知 result 檔 | `Database/<name>/migration-preserved/result/<原相對路徑>` | 第 7 步，原樣保全。 |
+| `autofluxdep_runs/**`、其他不支援的 result 檔 | `result/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
 | Database 的 Labber 檔 | `Database/<name>/runs/<run_id>/data.h5` ＋ `Database/<name>/Labber/<原相對路徑>` | 第 8 步 |
-| 其他 Database 檔 | 留在備份；需要副本時放 `migration-preserved/Database/<原相對路徑>` | 報告記原位置與未知用途。 |
+| 其他 Database 檔、無法轉 native 的 Labber 檔 | `Database/<name>/<原相對路徑>` | 第 7 步，原樣複製；報告記未轉的原因。 |
 
 `<Q>` 是舊 qubit 對應的新 component 名。找不到唯一對應時，所有寫到 `<Q>` 的項目整批列 permanent-pending，不任選一個。
 
@@ -397,7 +398,7 @@ done
 
 - **exps 以外的圖**：`copy_checked "$BR/<相對路徑>" "$NEW_R/figures/<相對路徑>"`，保留原檔名與目錄。
 - **`arb_waveforms/**`**：`$BR/arb_waveforms/` 與 `$BD/arb_waveforms/` 的每個檔複製到 `$NEW_D/arb_waveforms/`，保留相對路徑。兩個來源落到同一目的而 bytes 不同時，停下並列出兩邊的 hash。
-- **`autofluxdep_runs/**` 與未知檔**：複製到 `$NEW_D/migration-preserved/result/<相對路徑>`，報告註明它不是新格式資料。
+- **不支援的檔**：沒有轉換規則的舊檔原樣複製到新 entry 的對應位置。result 那邊的 `$BR/<相對路徑>` 複製到 `$NEW_R/<相對路徑>`；`exps/<sub>/` 裡的檔複製到 `$NEW_R/points/<sub>/<sub 內相對路徑>`；Database 那邊的 `$BD/<相對路徑>` 複製到 `$NEW_D/<相對路徑>`。報告註明它不是新格式資料。對應位置已被新格式的檔或目錄佔用時（例如 `setup.yaml`、`points/`、`records/`、`runs/`），停下列衝突，不覆寫。
 - **`samples.csv`**：由使用者指定值欄與單位，例如值欄 `calibrated mA`、單位 `mA`，再用 sample owner 轉換：
 
   `entry` 依第 9 步的方式開啟。
@@ -420,7 +421,7 @@ print(report)
 
 Labber 與 native 都是 HDF5，但格式不同，把 `.hdf5` 改名成 `data.h5` 不會得到 native。
 
-**必要證據**齊全才轉：experiment tag 與 cfg_type、完整歷史 cfg、variable、axes 與 signal 的名稱、單位、dtype 和 shape。缺任何一項就整檔列 permanent-pending，原檔留在備份裡。
+**必要證據**齊全才轉：experiment tag 與 cfg_type、完整歷史 cfg、variable、axes 與 signal 的名稱、單位、dtype 和 shape。缺任何一項就整檔列 permanent-pending，原檔用 `copy_checked` 原樣複製到 `$NEW_D/<原相對路徑>`。
 
 開始時間與 run_id 缺了也照樣轉：
 
@@ -565,7 +566,7 @@ test ! -e "$OLD_R" && test ! -e "$OLD_D"
 | --- | --- | --- |
 | 缺某些 points | 先補 setup 的缺值，再依第 6 步建缺的 point。 | 每個舊 label 對應一個 point，既有 point 不重建。 |
 | point 已被手動改過 | 逐欄比較舊 meta 與目前值，只補缺值。 | 不同值列兩來源並 pending，由使用者決定是否覆寫。 |
-| 圖在 `migration-preserved/result/exps/<sub>/image/`，沒掛到 point | point 建好後，從備份用 `copy_checked` 複製到 `points/<sub>/figures/`。 | 原檔名與 hash 相同。preserved 那份可以保留。 |
+| 圖在應急工具的 `migration-preserved/result/exps/<sub>/image/`，沒掛到 point | point 建好後，從備份用 `copy_checked` 複製到 `points/<sub>/figures/`。 | 原檔名與 hash 相同。preserved 那份可以保留。 |
 | 只複製了 `params.json`，缺格式檔 | 依第 5 步寫 predictor、dispersive、t1_curve；`params.json` 副本從新 entry 移除。 | 格式檔齊全或已列 pending。 |
 | 格式檔已存在或只寫一半 | 對照備份逐欄核對，只補缺項。 | 已有的不同值保留並列衝突。 |
 | fit 被寫進了 setup 或 point 的 component 欄位 | 另寫 entry predictor；只移除能證明是 fit 誤寫的欄位。 | meta_info 本身的正式欄位保留。 |
