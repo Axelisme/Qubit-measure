@@ -9,6 +9,7 @@ from zcu_tools.resources.predictor_file import (
     PredictorSource,
     load_predictor_file,
     save_predictor_file,
+    validate_predictor_file,
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelName, params_class
@@ -37,6 +38,16 @@ def document() -> dict[str, object]:
 def write_document(path: Path, document: object) -> Path:
     path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
     return path
+
+
+def save_or_validate(operation: str, path: Path, predictor: PredictorFile) -> None:
+    """Exercise the requested owner write or pure validation boundary."""
+    if operation == "save":
+        save_predictor_file(path, predictor)
+    elif operation == "validate":
+        validate_predictor_file(predictor)
+    else:
+        raise ValueError(f"Unknown operation: {operation}")
 
 
 @pytest.mark.parametrize(
@@ -119,7 +130,7 @@ def test_load_preserves_unknown_metadata_and_timezone_text(
     )
 
 
-@pytest.mark.parametrize("operation", ["load", "save"])
+@pytest.mark.parametrize("operation", ["load", "save", "validate"])
 @pytest.mark.parametrize(
     "timestamp",
     [
@@ -153,21 +164,16 @@ def test_rejects_timestamp_outside_extended_shape(
         with pytest.raises(ValueError, match="."):
             load_predictor_file(path)
     else:
+        predictor = PredictorFile(
+            "fluxonium", FluxoniumParams(), None, PredictorSource(None, timestamp)
+        )
         with pytest.raises(ValueError, match="."):
-            save_predictor_file(
-                path,
-                PredictorFile(
-                    "fluxonium",
-                    FluxoniumParams(),
-                    None,
-                    PredictorSource(None, timestamp),
-                ),
-            )
+            save_or_validate(operation, path, predictor)
 
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("operation", ["load", "save"])
+@pytest.mark.parametrize("operation", ["load", "save", "validate"])
 @pytest.mark.parametrize(
     "timestamp",
     [
@@ -190,16 +196,11 @@ def test_rejects_invalid_timestamp_values(
         with pytest.raises(ValueError, match="."):
             load_predictor_file(path)
     else:
+        predictor = PredictorFile(
+            "fluxonium", FluxoniumParams(), None, PredictorSource(None, timestamp)
+        )
         with pytest.raises(ValueError, match="."):
-            save_predictor_file(
-                path,
-                PredictorFile(
-                    "fluxonium",
-                    FluxoniumParams(),
-                    None,
-                    PredictorSource(None, timestamp),
-                ),
-            )
+            save_or_validate(operation, path, predictor)
 
 
 @pytest.mark.parametrize(
@@ -403,7 +404,10 @@ def test_save_writes_versioned_json_and_round_trips(
     assert load_predictor_file(destination) == predictor
 
 
-def test_save_rejects_mismatched_model_before_overwriting(tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["save", "validate"])
+def test_rejects_mismatched_model_before_overwriting(
+    tmp_path: Path, operation: str
+) -> None:
     destination = tmp_path / "predictor.json"
     destination.write_text("keep me", encoding="utf-8")
     predictor = PredictorFile(
@@ -411,19 +415,53 @@ def test_save_rejects_mismatched_model_before_overwriting(tmp_path: Path) -> Non
     )
 
     with pytest.raises(ValueError, match="model"):
-        save_predictor_file(destination, predictor)
+        save_or_validate(operation, destination, predictor)
     assert destination.read_text(encoding="utf-8") == "keep me"
 
 
-def test_save_rejects_invalid_numeric_values_before_writing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["save", "validate"])
+def test_rejects_invalid_numeric_values_before_writing(
+    tmp_path: Path, operation: str
+) -> None:
     destination = tmp_path / "predictor.json"
     predictor = PredictorFile(
         "fluxonium", FluxoniumParams(EJ=float("nan")), None, PredictorSource(None, None)
     )
 
     with pytest.raises(ValueError, match="EJ"):
-        save_predictor_file(destination, predictor)
+        save_or_validate(operation, destination, predictor)
     assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    "predictor",
+    [
+        PredictorFile(
+            "fluxonium",
+            FluxoniumParams(EC=-1, flux_period=0),
+            None,
+            PredictorSource(None, None),
+        ),
+        PredictorFile(
+            "transmon",
+            TransmonParams(d=2, flux_period=0),
+            "mV",
+            PredictorSource("historical-run", "2026-10-20T12:34-03:30"),
+        ),
+    ],
+)
+def test_validate_accepts_partial_unphysical_inputs_without_mutation_or_io(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, predictor: PredictorFile
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    before = predictor.params.to_dict()
+    source = predictor.source
+
+    validate_predictor_file(predictor)
+
+    assert predictor.params.to_dict() == before
+    assert predictor.source == source
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_save_requires_existing_parent(tmp_path: Path) -> None:

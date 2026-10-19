@@ -23,6 +23,12 @@ from zcu_tools.resources.entry import (
     document_value,
     snapshot,
 )
+from zcu_tools.resources.predictor_file import (
+    PredictorFile,
+    PredictorSource,
+    load_predictor_file,
+)
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from migrations.storage_mapping import build_mapping
 from migrations.storage_migration import (
@@ -139,6 +145,13 @@ def read_predictor(request: MigrationRequest) -> JsonObject:
     path = request.results_root / request.name / "predictors" / "Qlegacy.json"
     assert path.is_file(), "migrate_storage must publish the entry predictor"
     return TypeAdapter(JsonObject).validate_json(path.read_text(encoding="utf-8"))
+
+
+def load_migrated_predictor(request: MigrationRequest) -> PredictorFile:
+    """Read the migration output through the predictor format owner."""
+    return load_predictor_file(
+        request.results_root / request.name / "predictors" / "Qlegacy.json"
+    )
 
 
 def backup_path(request: MigrationRequest) -> Path:
@@ -930,21 +943,19 @@ def test_legacy_fit_publishes_named_entry_predictor_with_native_values(
         legacy_fit["flux_unit"] = fit_unit
     write_params(request_data, values)
     migrate(request_data, analysis_mapping)
-    assert read_predictor(request_data) == {
-        "format": "zcu.predictor",
-        "version": 1,
-        "model": "fluxonium",
-        "params": {
-            "EJ": 6.27,
-            "EC": 1.41,
-            "EL": 0.8,
-            "flux_half": 0.2,
-            "flux_period": 1.0,
-            "flux_bias": 0.0,
-        },
-        "flux_unit": root_unit or fit_unit,
-        "source": {"run_id": None, "created_at": "2020-07-07T16:30:00+08:00"},
-    }
+    assert load_migrated_predictor(request_data) == PredictorFile(
+        model="fluxonium",
+        params=FluxoniumParams(
+            EJ=6.27,
+            EC=1.41,
+            EL=0.8,
+            flux_half=0.2,
+            flux_period=1.0,
+            flux_bias=0.0,
+        ),
+        flux_unit=root_unit or fit_unit,
+        source=PredictorSource(None, "2020-07-07T16:30:00+08:00"),
+    )
     point = snapshot(open_entry(request_data).use_point("bias"))
     assert document_value(point, "Qlegacy.EJ") == 11.0
     assert document_value(point, "general.ext.flux_unit") == "mV"
@@ -985,10 +996,7 @@ def test_unproven_time_is_null_with_pending_at_verified_backup_original(
     legacy_fit["timestamp"] = timestamp
     source = write_params(request_data, {"flux_unit": "A", "fluxdep_fit": legacy_fit})
     report = migrate(request_data, analysis_mapping)
-    assert read_predictor(request_data)["source"] == {
-        "run_id": None,
-        "created_at": None,
-    }
+    assert load_migrated_predictor(request_data).source == PredictorSource(None, None)
     backup_source = backup_path(request_data) / "result/chip/qubit/params.json"
     pending = [
         item
@@ -1035,13 +1043,12 @@ def test_partial_fit_keeps_unknowns_without_enforcing_physical_constraints(
         },
     )
     migrate(request_data, analysis_mapping)
-    params = predictor_params(request_data)
-    assert params.get("EJ") is None
-    assert params["EC"] == -1.0
-    assert params.get("EL") is None
-    assert params.get("flux_half") is None
-    assert params["flux_period"] == 0.0
-    assert params["flux_bias"] == 0.0
+    assert load_migrated_predictor(request_data) == PredictorFile(
+        model="fluxonium",
+        params=FluxoniumParams(EC=-1.0, flux_period=0.0, flux_bias=0.0),
+        flux_unit="A",
+        source=PredictorSource(None, None),
+    )
 
 
 @pytest.mark.parametrize("model", ["fluxonium", "transmon", "unrecognized"])
@@ -1129,6 +1136,13 @@ def interrupted_predictor(
         ("flux_period", True),
         ("flux_bias", False),
         ("EJ", 9.0),
+        ("params", {"unknown": 1}),
+        ("model", "unknown"),
+        ("source", {"run_id": "", "created_at": None}),
+        ("source", {"run_id": None, "created_at": "2020-07-07T16:30:00"}),
+        ("source", {"run_id": None}),
+        ("source", {"run_id": None, "created_at": None, "extra": 1}),
+        ("extra", 1),
     ],
 )
 def test_unfinished_resume_rejects_changed_or_schema_invalid_predictor(
@@ -1136,10 +1150,10 @@ def test_unfinished_resume_rejects_changed_or_schema_invalid_predictor(
     analysis_mapping: MigrationMapping,
     interrupted_predictor: Path,
     field: str,
-    value: bool | float,
+    value: JsonValue,
 ) -> None:
     document = read_predictor(request_data)
-    if field == "version":
+    if field in ("version", "params", "model", "source", "extra"):
         document[field] = value
     else:
         params = predictor_params(request_data)
@@ -1149,6 +1163,39 @@ def test_unfinished_resume_rejects_changed_or_schema_invalid_predictor(
     before = interrupted_predictor.read_bytes()
     with pytest.raises(MigrationInputError, match="predictor"):
         migrate(replace(request_data, resume=True), analysis_mapping)
+    assert interrupted_predictor.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "legacy_fit",
+    [{"params": {"EC": -1.0, "EL": None}, "flux_period": 0.0}],
+)
+@pytest.mark.parametrize("unknown_representation", ["omitted", "null"])
+def test_unfinished_resume_compares_unknown_predictor_values_semantically(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    interrupted_predictor: Path,
+    unknown_representation: str,
+) -> None:
+    document = read_predictor(request_data)
+    params = predictor_params(request_data)
+    if unknown_representation == "omitted":
+        params.pop("EL")
+    else:
+        params["EJ"] = None
+    document["params"] = params
+    interrupted_predictor.write_text(json.dumps(document), encoding="utf-8")
+    before = interrupted_predictor.read_bytes()
+
+    conflict = None
+    try:
+        migrate(replace(request_data, resume=True), analysis_mapping)
+    except MigrationInputError as error:
+        conflict = str(error)
+
+    assert conflict is None, (
+        "Unknown numeric omissions and nulls describe the same predictor"
+    )
     assert interrupted_predictor.read_bytes() == before
 
 
@@ -1178,9 +1225,18 @@ def test_dry_run_predictor_plan_matches_apply_and_completed_resume_keeps_edits(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
     legacy_fit: JsonObject,
+    tmp_path: Path,
 ) -> None:
     source = write_params(request_data, {"flux_unit": "mV", "fluxdep_fit": legacy_fit})
+    before = {
+        path: path.read_bytes() if path.is_file() else None
+        for path in tmp_path.rglob("*")
+    }
     dry = migrate(replace(request_data, dry_run=True), analysis_mapping)
+    assert {
+        path: path.read_bytes() if path.is_file() else None
+        for path in tmp_path.rglob("*")
+    } == before
     predictor_path = (
         request_data.results_root / request_data.name / "predictors/Qlegacy.json"
     )

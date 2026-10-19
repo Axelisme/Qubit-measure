@@ -22,7 +22,7 @@ class PredictorSource:
     YYYY-MM-DDTHH:MM[:SS[.ffffff]] followed by Z or an offset of ±HH:MM.
     Only uppercase T separates date and time; fractional seconds use 1–6 digits.
     Calendar, time and offset values must be valid; other ISO forms are rejected.
-    Text is preserved verbatim. The file I/O functions validate these fields.
+    Text is preserved verbatim. Validation and I/O functions check these fields.
     """
 
     run_id: str | None
@@ -37,8 +37,9 @@ class PredictorFile:
     params holds that model's GHz/native-flux inputs; None leaves a value unknown.
     flux_unit names the native flux unit as nonblank text, or None when unknown.
     source holds authored provenance, without checking whether the run exists.
-    The I/O functions validate representation, not completeness or physical
-    constraints. Call params.build_predictor() to validate and build a model.
+    validate_predictor_file and the I/O functions check representation, not
+    completeness or physical constraints. Call params.build_predictor() to
+    validate and build a model.
     """
 
     model: ModelName
@@ -132,6 +133,34 @@ def load_predictor_file(path: Path) -> PredictorFile:
     return _decode(value)
 
 
+def _document(predictor: PredictorFile) -> dict[str, object]:
+    return {
+        "format": "zcu.predictor",
+        "version": 1,
+        "model": predictor.model,
+        "params": predictor.params.to_dict(),
+        "flux_unit": predictor.flux_unit,
+        "source": {
+            "run_id": predictor.source.run_id,
+            "created_at": predictor.source.created_at,
+        },
+    }
+
+
+def validate_predictor_file(predictor: PredictorFile) -> None:
+    """Validate typed inputs using the load/save representation rules, without I/O.
+
+    Model and parameter type must agree. Invalid metadata or numeric inputs raise
+    ValueError. Unknown numbers and metadata remain unknown; incomplete or
+    physically invalid inputs are accepted without building a numeric model.
+    The input is not mutated. This checks the candidate for dry-run callers;
+    save_predictor_file repeats validation before writing.
+    """
+    if predictor.model != predictor.params.model:
+        raise ValueError("model and params type must agree")
+    _decode(_document(predictor))
+
+
 def save_predictor_file(path: Path, predictor: PredictorFile) -> None:
     """Validate and atomically replace path with zcu.predictor v1 UTF-8 JSON.
 
@@ -143,20 +172,8 @@ def save_predictor_file(path: Path, predictor: PredictorFile) -> None:
     and removes the sibling temporary. There is no multiwriter merge, lock or
     power-loss guarantee.
     """
-    if predictor.model != predictor.params.model:
-        raise ValueError("model and params type must agree")
-    document = {
-        "format": "zcu.predictor",
-        "version": 1,
-        "model": predictor.model,
-        "params": predictor.params.to_dict(),
-        "flux_unit": predictor.flux_unit,
-        "source": {
-            "run_id": predictor.source.run_id,
-            "created_at": predictor.source.created_at,
-        },
-    }
-    _decode(document)
+    validate_predictor_file(predictor)
+    document = _document(predictor)
     encoded = json.dumps(document, ensure_ascii=False, allow_nan=False, indent=2) + "\n"
     temporary: Path | None = None
     try:
