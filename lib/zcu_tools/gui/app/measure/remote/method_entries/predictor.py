@@ -13,7 +13,8 @@ _SOURCES = (
         "filename",
         "Predictor JSON filename including .json (e.g. fitted.json) in the opened "
         "entry's predictors directory, not a path, component or alias. No selected "
-        "point is required. Supply exactly one of filename or params.",
+        "point is required. Supply exactly one non-null source: filename or params. "
+        "Omission and null both mean no source.",
     ),
     ParamSpec(
         "params",
@@ -23,8 +24,9 @@ _SOURCES = (
         "EC, EL, flux_half, flux_period, flux_bias}. SQUID transmon: {model: "
         "'transmon', EJmax, EC, d, flux_half, flux_period, flux_bias}, where d is "
         "the junction asymmetry. Energies use GHz; affine values use native device "
-        "units. Omitted/null fields are unknown. Supply exactly one of filename or "
-        "params; inline inputs need no entry. No dialog/cache or alias is read.",
+        "units. Omitted/null fields are unknown. Supply exactly one non-null source: "
+        "filename or params. Omission and null both mean no source. Inline inputs "
+        "need no entry. No dialog/cache or alias is read.",
     ),
 )
 

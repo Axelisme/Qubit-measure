@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.services.predictor import (
     CalibrateFluxBiasRequest,
@@ -37,9 +38,13 @@ def _source_params(
             raise TypeError("Invalid validated predictor filename")
         try:
             predictor_file = adapter.predictor_control.load_file(filename)
-        except ValueError as exc:
+        except (InvalidInputError, ValueError) as exc:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_file"
+            ) from exc
+        except FailedPreconditionError as exc:
+            raise RemoteError(
+                ErrorCode.PRECONDITION_FAILED, str(exc), reason="no_entry"
             ) from exc
         except OSError as exc:
             raise RemoteError(

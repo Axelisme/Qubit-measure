@@ -37,8 +37,9 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 
 ## Predictor sources
 
-`predictor.info`, `predictor.predict` and `predictor.calibrate` accept exactly one
-of `filename` or inline `params`. A filename includes `.json` and names a file in
+`predictor.info`, `predictor.predict` and `predictor.calibrate` require exactly one
+non-null source, `filename` or inline `params`. Omission and null both mean no
+source. A filename includes `.json` and names a file in
 the opened entry's `predictors/` directory. Predictor control owns loading and
 validation; remote only projects errors and numeric replies. No point, component,
 alias, dialog state or cache participates. Inline inputs require no entry.
@@ -46,7 +47,7 @@ Queries and calibration candidates never write predictor files.
 
 Invalid filenames/content return `invalid_params/invalid_predictor_file`.
 Unreadable files return `precondition_failed/predictor_file_unavailable`; no entry
-retains the owner's `precondition_failed/no_entry`. Source conflicts and numeric
+returns `precondition_failed/no_entry`. Source conflicts and numeric
 parameter errors retain their existing predictor reasons in `method_entries`.
 
 ## Wire contract
