@@ -197,6 +197,9 @@ class MigrationRequest:
     independent report file; None selects records/migration-report.json.
     run_evidence is the complete caller-loaded document or None. The converter
     resolves paths and rejects source/destination overlaps and identity changes.
+    repo_root is the checkout to exclude from backup, or None for this tool's
+    checkout. backup_parent is an external directory, or None for repo_root.parent;
+    the tool exclusively creates its <name>-backup child before migration writes.
     """
 
     result_root: Path
@@ -210,6 +213,8 @@ class MigrationRequest:
     resume: bool = False
     report_path: Path | None = None
     run_evidence: MigrationRunEvidenceDocument | None = None
+    repo_root: Path | None = None
+    backup_parent: Path | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -296,6 +301,8 @@ class MigrationReport:
     actions of the corresponding status. pending/failures hold unresolved items.
     format/format_version identify zcu.migration-report 1.x. raw retains a loaded
     document's unknown fields; an empty raw denotes a newly constructed report.
+    backup_path is the external verified backup, or its planned path in dry_run;
+    None is reserved for reports loaded without the backup extension.
     """
 
     source: MigrationSource
@@ -308,6 +315,7 @@ class MigrationReport:
     preserved_files: tuple[FileMigrationItem, ...] = ()
     pending: tuple[PendingItem, ...] = ()
     failures: tuple[FailureItem, ...] = ()
+    backup_path: Path | None = None
     format: str = "zcu.migration-report"
     format_version: str = "1.0"
     raw: JsonObject = field(default_factory=dict)
@@ -382,6 +390,21 @@ class ModuleFilePublication:
 
 
 @dataclass(frozen=True, kw_only=True)
+class MigrationBackup:
+    """Verified external backup identity fixed before any migration writes.
+
+    path is the resolved <name>-backup directory. inventory_hash is SHA256 of
+    sha256.json, binding its complete relative file hashes and directory list.
+    source_hashes maps absolute original files to their backed-up SHA256, so
+    publications reject changed/new sources before any individual move deletes.
+    """
+
+    path: Path
+    inventory_hash: str
+    source_hashes: Mapping[str, str]
+
+
+@dataclass(frozen=True, kw_only=True)
 class MigrationManifest:
     """Durable state for this tool's entry, not a multi-file transaction.
 
@@ -398,6 +421,10 @@ class MigrationManifest:
     unknown fields; an empty raw denotes a new manifest. module_files records
     completed point-local library commits; pending entries may remain in report.
     Module files and manifest are not a cross-file atomic transaction.
+    backup binds the verified external inventory; None is invalid for execution.
+    cleanup_phase is pending before full completion, cleaning after verified
+    deletion authorization, or complete after both old entry trees are removed.
+    A cleaning checkpoint permits resuming deletion of missing backed-up files.
     """
 
     identity: MigrationIdentity
@@ -415,3 +442,5 @@ class MigrationManifest:
     format_version: str = "1.0"
     raw: JsonObject = field(default_factory=dict)
     module_files: tuple[ModuleFilePublication, ...] = ()
+    backup: MigrationBackup | None = None
+    cleanup_phase: Literal["pending", "cleaning", "complete"] = "pending"

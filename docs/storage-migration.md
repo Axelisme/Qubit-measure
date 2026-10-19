@@ -2,10 +2,11 @@
 
 本指南把舊 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/` 整理成新 entry。
 範例直接建立同根下的 `result/<name>/` 與 `Database/<name>/`，不必先放另一個 root 再搬回。
-目前 [GUI runtime](../lib/zcu_tools/gui/session/services/build.py) 使用 `result/`，部分 owner／ADR 舊例使用 `results/`，兩者尚待裁決。
-本文維持 `result/` 範例；實際 root 以裁決結果為準。`result_root` 可明確指定其他目錄，名稱本身不決定格式。
+新格式根目錄統一為 `result/`，與 [GUI runtime](../lib/zcu_tools/gui/session/services/build.py) 一致。
+他機已寫入 `results/<name>/` 時，依[根目錄搬移](#將他機已寫入的-results-搬到-result)處理，不必重做遷移。
+`result_root` 可明確指定其他目錄，名稱本身不決定格式。
 也適用於他機應急工具只遷一半的資料，見[部分遷移接手](#從部分遷移的狀態手動接手)。
-本文不要求執行 `migrate_storage`，也不宣稱自動備份、exps discovery 或 cleanup 已可用。
+本文不要求執行 `migrate_storage`，也不宣稱自動備份、exps discovery、predictor 轉換或 cleanup 已可用。
 腳本操作另行補充。舊腳本可能仍限制在整個舊 result root 內寫入，本文不保證其 CLI 已支援同根目的地。
 手動操作只要求新 entry 與本次兩個來源樹不重疊。**先驗證完整備份，最後才清理舊來源。**
 
@@ -107,7 +108,7 @@ find "$BR/exps" -type f -iname '*.png' -printf '%P\n' | LC_ALL=C sort
 
 | 舊檔 | 新位置與處理 |
 | --- | --- |
-| 根層 `params.json` | 原檔可原樣存 `result/<name>/params.json` 作稽核副本；可用數值另轉入 setup/component，不能只 copy 就算完成。 |
+| 根層 `params.json` | 原檔可原樣存 `result/<name>/params.json` 作稽核副本；`fluxdep_fit` 另寫 `result/<name>/predictors/<component名>.json`，其餘依第 4 節保存到 component 的 `ext.legacy_params`，不能只 copy 就算完成。 |
 | 根層 `meta_info.json` | 依欄位 mapping 寫 `setup.yaml`；與 params 衝突時 meta 優先。 |
 | `exps/<sub>/meta_info.json` | `result/<name>/points/<sub>/point.yaml`，先繼承完整 setup 再套用 point meta。 |
 | `exps/<sub>/module_cfg.yaml` | 同一 point 的 `module_cfg.yaml`，轉正式 Spec，不原樣冒充新格式。 |
@@ -118,7 +119,7 @@ find "$BR/exps" -type f -iname '*.png' -printf '%P\n' | LC_ALL=C sort
 | `autofluxdep_runs/**` | 同相對路徑保全到 `Database/<name>/migration-preserved/result/autofluxdep_runs/**`；不是新 workflow run。 |
 | exps 外的 `image/**`、未知 result 檔 | 原樣保全到 `Database/<name>/migration-preserved/result/<相對路徑>`，無法確定關聯則 pending。 |
 | `result/<chip>/<qub>/arb_waveforms/**` 或 `Database/<chip>/<qub>/arb_waveforms/**` | 原樣複製到 `Database/<name>/arb_waveforms/**`，保留 arb_waveforms 下的相對 asset key 並核對 hash；兩來源對應同一目的但 bytes 不同時停下列衝突，不覆寫。 |
-| Database Labber 檔 | 有完整證據才產 native，再保留原 Labber bytes。證據不足先留完整備份並 pending，可另存 `migration-preserved/Database/<原相對路徑>`。 |
+| Database Labber 檔 | 依第 7 節核對必要證據，再產 native 2.1 並保留原 Labber bytes。未知開始時間用 None/unknown，缺可信 ID 用原生 API 分配。其他必要證據不足仍 pending，可另存 `migration-preserved/Database/<原相對路徑>`。 |
 | 其他 Database 檔 | 備份保全，報告記明原相對位置與未知用途；需新副本時放 `migration-preserved/Database/`，不冒充 run。 |
 
 不要從 `070716_0.500` 解讀磁通或時間。這類 label 可原樣使用。
@@ -154,7 +155,7 @@ find "$BR/exps" -type f -iname '*.png' -printf '%P\n' | LC_ALL=C sort
 `permanent-pending` 表示目前無法安全轉換，已在完整備份中定位並說明缺哪項證據。
 衝突列出兩個來源、值、單位與採用理由。完成判斷是每個檔與每個未轉欄位都有去向，不能只記總數。
 
-## 4. 先把 params 寫進 setup
+## 4. 分開保存 predictor 與 setup
 
 先確定舊 qubit 對應哪個新 component，以及物理 kind。
 全新 entry 可沿用已確認的 `Q0` 等名稱；部分接手沿用現有 mapping 與 component 名稱。
@@ -177,8 +178,88 @@ PY
 預期印出新 UUID 與兩個目的路徑，產生 setup、points、records 及同名 Database 目錄。
 既有條目不跑 create，不重新產生身分。保存此 UUID 與建立時間。
 
+### fluxdep_fit 寫成 entry predictor
+
+`fluxdep_fit` 不再轉成 component 欄位，也不隨 setup 複製到 points。
+將它寫成 `$NEW_R/predictors/<component名>.json`，例如已確認唯一對應為 Q0 時用 `Q0.json`。
+component 名只決定本次遷移的檔名，不決定 predictor 的模型或參數 schema。
+格式 owner 是 **predictor-file**。其實作尚未 land 時，可按以下格式用編輯器直接寫 JSON。
+land 後改用 `resources.predictor_file.save_predictor_file(Path, PredictorFile)`，型別為 `PredictorFile`、`PredictorSource`。
+`ResultEntry.predictors_path` 只回傳路徑，不建立目錄，不能拿屬性讀取成功當成檔案已存在。
+這是手動寫法，不表示舊 migration 腳本已能輸出 predictor，也不保證目前 predictor UI 已能載入。
+
+先從唯讀備份核對模型、參數及來源，再建立 `predictors/` 並寫入檔案。
+目的檔已存在時先走部分接手，只核對或補缺，不覆寫不同內容。
+最小格式包含以下欄位。頂層只允許表列的六個 key。
+`source` 只允許 `run_id`、`created_at`，不要另加 metadata 或 migration 註記。
+
+| 欄位 | 寫法與證據 |
+| --- | --- |
+| `format`、`version` | 固定為 `"zcu.predictor"`、嚴格整數 `1`，不接受 `true` 或 `1.0`。不是 parameter-container 的 `format_version`。 |
+| `model` | 格式接受 `"fluxonium"` 或 `"transmon"`。本次只轉換下述已有契約的舊 Fluxonium fit，不從 component kind 或名稱猜測。 |
+| `params` | 模型參數及 `flux_half`、`flux_period`、`flux_bias` 的 mapping。沿用 simulate 的 `Params.from_mapping`，只用該模型的合法欄名；未知值可省略或填 `null`，已知值須是有限數字，不接受 bool、數字字串、NaN 或 Infinity。完整性與物理約束由 `build_predictor` 檢查。 |
+| `flux_unit` | 必填，非空字串或 `null`。只接受 params 根層 `flux_unit` 或 `fluxdep_fit.flux_unit` 的明示單位。只有一處時採該值，兩處都有時必須相同；皆無或衝突時寫 `null` 並列 pending。數值不換算。 |
+| `source` | `run_id`、`created_at` 都必填，值為非空字串或 `null`。舊 fit 的 `run_id` 寫 `null`；`created_at` 只採用可證實為含時區 ISO 8601 的 `fluxdep_fit.timestamp`，否則寫 `null` 並列 pending。不能拿 entry UUID、檔名、mtime 或本次遷移時間代填。 |
+
+舊 [FluxDepFit 契約](../lib/zcu_tools/resources/qubit_params.md) 的手動 mapping 如下：
+
+| 舊值或既有預設 | predictor 位置 |
+| --- | --- |
+| `fluxdep_fit.params.EJ`、`EC`、`EL` | `model` 寫 `"fluxonium"`，數值分別寫 `params.EJ`、`params.EC`、`params.EL`，保留 GHz。 |
+| `fluxdep_fit.flux_half`、`fluxdep_fit.flux_period` | 分別寫 `params.flux_half`、`params.flux_period`，不換算。 |
+| 舊 predictor 的 bias 預設 | `params.flux_bias` 寫 `0.0`。這是舊契約的預設，不是從 `flux_int` 或 half/period 推算。 |
+| `fluxdep_fit.flux_int` | 只作舊 alignment，不寫入 predictor，也不改名成 `flux_bias`。原文留備份。 |
+| `fluxdep_fit.timestamp` | 符合上述時間證據才寫 `source.created_at`，例如 `"2026-10-19T08:00:00Z"`；否則 `null` 並在報告定位備份內原文或缺失。 |
+
+已知 mapping 但缺參數值時，可以省略該參數或填 `null`，例如 `"EC": null`，並列 pending。
+JSON 格式有效不等於參數已足夠建立 predictor，不用零值補缺，也不為未知 source 造值。
+舊 owner 未定義的 transmon 或帶明示 `model` 的 fit 保持 pending，不自行擴充 legacy 輸入契約，也不把 EJ 改名成 EJmax。
+其他映射若缺可靠依據，保全原文及 metadata，報告記錄缺項與備份位置，請使用者與格式 owner 核對。
+
+以下是合成的舊 Fluxonium fit 遷移範例，不是 TestChip/Q0 的實測參數。
+假設允許的單位來源明示 A，舊 fit 的數值已核對，但沒有可證實的 timestamp，`result/<entry>/predictors/Q0.json` 可寫成：
+
+```json
+{
+  "format": "zcu.predictor",
+  "version": 1,
+  "model": "fluxonium",
+  "params": {
+    "EJ": 6.27,
+    "EC": 1.41,
+    "EL": 0.80,
+    "flux_half": 0.001,
+    "flux_period": 0.002,
+    "flux_bias": 0.0
+  },
+  "flux_unit": "A",
+  "source": {
+    "run_id": null,
+    "created_at": null
+  }
+}
+```
+
+本例的未知 timestamp 必須在報告列 pending，附備份內 `params.json#fluxdep_fit` 的定位，不能把它標為已驗證的歷史時間。
+若同一份已核對參數缺少單位或兩個允許來源互相衝突，把 `flux_unit` 寫成 `null`，保留數值，不換算。
+報告逐項記錄兩個來源、原值或缺失，並列 pending。這份檔案不代表磁通座標已可安全使用。
+`cur_A` 名稱、逐欄 unit、目前裝置、其他區塊或 meta_info 的單位都不能補作 predictor 的單位證據。
+predictor 的單位與數值在同一個 JSON，不寫進 `general.ext.flux_unit` 或 qubit 的 local `flux_unit`。
+保留完整原始 params 及 metadata 的 byte-identical 備份，不能只靠上述精簡 JSON 取代來源稽核。
+
+### 其餘 params 與 meta_info 寫入 setup
+
 編輯 `$NEW_R/setup.yaml`，使用[正式 component 欄位](../zcu_lab/components/)。
-以下是合成 Fluxonium 範例，不是 TestChip/Q0 的實測參數。UUID 與 created_at 應保留剛建立的實值。
+沒有正式欄位的區塊，如 dispersive、t1_curve_fit、plot_transitions，將整個原始區塊連同內含 metadata 放進
+`components.<qubit>.ext.legacy_params.<區塊名>`。不能只挑 params 數字或刪掉未知子欄位。
+另列 located pending，保留來源 JSON 的 byte-identical 備份。
+project/name/schema_version 等識別資料也記入稽核清單，沒有正式對應的內容原樣保留於 legacy_params，
+不冒充 entry UUID 或量測資訊。
+
+再套用根層 meta_info。已有 meta 值優先，params 只補有正式對應的缺值；這不包含已獨立保存的 fluxdep_fit。
+不一致時保留 meta，報告列兩個來源並 pending。predictor 不能作為 setup 的參數或單位後備來源。
+以下是合成 setup 範例，假設根層 meta 明示 `q_f: 5000.0`，legacy_params 保存原始 dispersive 區塊。
+UUID 與 created_at 應保留剛建立的實值。
 
 ```yaml
 format: zcu.parameter-container
@@ -187,34 +268,20 @@ general:
   entry_id: '54cd2da2-e8cd-49d5-a414-4ec40eb7eb14'
   created_at: '2026-10-20T08:00:00Z'
   description: 'Manual migration of one legacy qubit'
-  ext:
-    flux_unit: A
 components:
   Q0:
     kind: qubit/fluxonium
-    EJ: 6.27
-    EC: 1.41
-    EL: 0.80
-    flux_half: 0.001
-    flux_int: 0.0
-    flux_period: 0.002
+    freq: 5000.0
     ext:
       legacy_params:
         dispersive:
           params: {chi: 0.12}
           metadata: {comment: 'original analysis note'}
 metadata:
-  Q0.EJ:
-    source: 'params.json#fluxdep_fit.params.EJ'
-    comment: 'Copied in GHz, no conversion'
+  Q0.freq:
+    source: 'meta_info.json#q_f'
+    comment: 'Copied in MHz, no conversion'
 ```
-
-按以下順序填寫，預期得到可由新 loader 讀取的 setup：
-
-1. 讀原始 JSON。`fluxdep_fit.params` 的 `EJ`、`EC`、`EL` 寫入對應 component 同名欄位，單位 GHz，metadata 保留在 dotted path 旁表。不要從別的 fit 或缺值推算。Transmon 沒有 EJ/EL 正式欄位，這兩項 pending，不改名成 EJmax 或擴 schema。
-2. `flux_half`、`flux_int`、`flux_period` 只有明示單位才轉。單位證據只接受 params 根層 `flux_unit` 或 `fluxdep_fit.flux_unit`。兩處都有必須相同；皆無或衝突就將這些 flux 數值列 pending，不採 `cur_A` 名稱、逐欄 unit、目前裝置或其他區塊作證據。數字不換算，單位寫 `general.ext.flux_unit`，不是 qubit 的 local `flux_unit`。
-3. 沒有正式欄位的區塊，如 dispersive、t1_curve_fit、plot_transitions，將整個原始區塊連同內含 metadata 放進 `components.<qubit>.ext.legacy_params.<區塊名>`。不能只挑 params 數字或刪掉未知子欄位。另列 located pending，保留來源 JSON 的 byte-identical 備份。project/name/schema_version 等識別資料也記入稽核清單，沒有正式對應的內容原樣保留於 legacy_params，不冒充 entry UUID 或量測資訊。
-4. 套用根層 meta_info。已有 meta 值優先，params 只補缺。不一致時保留 meta，報告列兩個來源並 pending。若根層 meta 的 global unit 不同，也不能把 params 的 flux 數字套在新 unit 下。
 
 meta_info 的主要對照如下。Q、R、J 是你已確認的實際 component 名稱，不是角色字串。
 完整歷史 key 清單見 [storage_mapping.py](../migrations/storage_mapping.py)。未列出的 key 保全並 pending，不猜測用途。
@@ -231,14 +298,16 @@ meta_info 的主要對照如下。Q、R、J 是你已確認的實際 component �
 | `pi_gain`、`pi_len`、`pi2_gain`、`pi2_len` | module/waveform 資料，不直接塞 qubit scalar；依下一節的正式 Spec 處理 |
 
 頻率保留 MHz，時間保留 us，能量保留 GHz，metadata 不換算。
-新值寫在 `components`，metadata 的 key 則不加 `components.` 前綴。
+meta_info 的新值寫在 `components` 或表列的 `general.ext`，metadata 的 key 不加 `components.` 前綴。
+這些正式 component 欄位的 mapping 不因 predictor 獨立保存而改名或移除。
 若缺 R/J 的實體對應，相關欄位 pending，不為了套表新增虛構元件或通道。
 完成時逐欄比對 params 與根 meta；setup 中每個採用值都有來源，pending 不混入可用數值。
 
 ## 5. 複製完整 YAML 成 point，再套 point meta
 
 先完成 setup，再逐個建立 `exps/<sub>` 對應的 point。不要逐區塊挑 components 或 metadata。
-整份 copy 才能保存 `general.ext` 與其他合法內容，避免 flux 有數字卻沒單位。
+整份 copy 才能保存 `general.ext` 與其他合法內容，避免 meta_info 的 flux 有數字卻沒單位。
+predictor 留在 entry 的 `predictors/`，不複製到 point，也不從 JSON 把 fit 參數補進 point.yaml。
 本節用直接檔案操作，不依賴 checkout 的 `new_point` 是否已更新繼承行為。
 
 ```bash
@@ -268,21 +337,23 @@ format_version: '2.0'
 general:
   created_at: '2026-10-20T08:05:00Z'
   description: 'Manual migration of one legacy qubit'
-  ext: {flux_unit: A}
 components:
   Q0:
     kind: qubit/fluxonium
-    EJ: 6.27
-    EC: 1.41
-    EL: 0.80
+    freq: 5000.0
+    ext:
+      legacy_params:
+        dispersive:
+          params: {chi: 0.12}
+          metadata: {comment: 'original analysis note'}
 metadata:
-  Q0.EJ: {source: 'params.json#fluxdep_fit.params.EJ'}
+  Q0.freq: {source: 'meta_info.json#q_f'}
 ```
 
-如果 point meta 的 global unit 與 params 不同，移除 point 內僅由 params 繼承的 flux_half/int/period，
-以及這些值的 metadata，再寫入有該 point meta 單位證據的數值。
-不要留下「params 的 A 數字配上 point 的 V」。缺少 point 數字就保持缺值，報告列兩來源 pending，不換算。
-相同單位但數值不同也列衝突，保留 point meta。
+如果 point meta 的 global unit 與 setup 中根 meta 的單位不同，移除 point 副本中僅從根 meta 繼承的
+flux_half/int/period 及其 metadata，再寫入有該 point meta 單位證據的數值。
+不要留下「根 meta 的 A 數字配上 point 的 V」。缺少 point 數字就保持缺值，報告列兩來源 pending，不換算。
+相同單位但數值不同也列衝突，保留 point meta。這只處理 meta_info 的正式 component 欄位，不改 entry predictor。
 
 從另一個 point clone 時，整份來源改為該 point.yaml，不帶入 setup 的較新值。
 library 的複製與來源處理另依 context owner；不要直接複製帶 ledger event 引用的 library 到另一 entry。
@@ -393,7 +464,15 @@ helper 不是跨檔交易，中斷可能留下半份目的檔；先記為未完�
 Labber 與 native 都可能是 HDF5，但格式不同。把 `.hdf5` 改名為 `data.h5` 不會得到 native。
 不要從路徑日期、mtime、檔名、目前 setup 或目前裝置猜量測時間、cfg、point、run_id 或 ledger。
 
-每個檔案先核對下表。缺任一必要證據就停止該檔轉換，保全並列永久 pending。
+每個檔案先核對下表。experiment tag+cfg_type、完整歷史 cfg，以及 variable/axes/signal 的名稱、單位、dtype、shape 都必須齊全。
+缺少這些或其他必要 mapping 時，停止該檔轉換，保全並列永久 pending，不推論、不拿目前值補缺。
+只有開始時間與 run_id 依下列規則處理，不因這兩項未知就擋住 native 產出。
+
+- 缺可證實開始時間時，仍寫 native 2.1，使用 `started_at=None`、`completion="unknown"`、`finished_at=None`。這不是量測完成的證據。
+- 缺可信 run_id 時，用公開的 `resources.entry.new_run_id()` 分配，報告標「遷移賦值」。ID 裡的 UTC 時戳是本次分配時間，不是歷史量測時間，不能拿來填 started_at。
+- 可信既有 run_id 與可證實歷史時間保留原證據。已知開始時間仍寫 UTC ISO；完成狀態只採證據支持的 complete/partial/stopped，未知用 unknown，不把可讀資料等同 complete。
+
+本節是手動流程，使用目前已公開的 native 2.1 API，不表示 `migrate_storage` 已支援這些未知歷史值。
 
 | 證據 | 要填的正式資料 |
 | --- | --- |
@@ -401,19 +480,25 @@ Labber 與 native 都可能是 HDF5，但格式不同。把 `.hdf5` 改名為 `d
 | experiment tag、cfg_type、完整 schema_version | `(tag, cfg_type)` 配對到明確 cfg 與 disk schema，不能只看 tag。 |
 | 完整歷史 cfg JSON | `CfgSnapshot(values, cfg_type, schema_version)`，不拿目前 defaults 補值。 |
 | variable、axes、signal 的名稱、SI/離散單位、dtype、shape | `VariableSchema` 與 `ExperimentPayload`，inner-first axes，array shape 是反向 axes 長度。 |
-| 真實 started_at、completion，及可得的 finished_at | `RunMetadata` 的 UTC ISO 時間與 complete/partial/stopped。finished_at 可為 None，不以檔案時間代替。 |
+| started_at、completion，及可得的 finished_at 證據 | `RunMetadata` 保留可證實的 UTC ISO 時間與完成狀態。缺開始時間時用 None/unknown/None；已知開始但完成狀態未知時 completion 用 unknown。finished_at 不明用 None，不以檔案時間代替。 |
 | 當時 entry 名、point、description、roles，以及此次 entry UUID 的明示對應 | `RunSnapshot`，point 可有證據地為 None；新 UUID 的對應是遷移指定，不聲稱舊系統有此 UUID。 |
 | 歷史軟體/主機/SoC 資訊 | `SoftwareProvenance`，未知只用型別允許的 None/空 mapping，device_snapshot 未記錄時用 None，不寫空表冒充捕捉。 |
-| 可信 run_id 或經明確授權的遷移 ID 分配 | 保留可信既有 ID。若分配新 ID，報告寫「遷移賦值」，不能冒充歷史 ID 或歷史量測時間。沒有裁定先 pending。 |
+| 可信 run_id，或本次遷移的 ID 分配紀錄 | 保留可信既有 ID。缺可信 ID 時用 `new_run_id()` 分配，先保存來源/hash 與 ID 的對照，報告標「遷移賦值」，不冒充歷史 ID 或時間。接手沿用已固定 ID。 |
 
 正式型別與欄位見 [datafile owner](../lib/zcu_tools/datafile/README.md) 與
-[native models](../lib/zcu_tools/datafile/native_models.py)。以下先示範完整物件構造，再接讀寫順序。
-這是合成範例，所有數字、時間、ID、名稱與路徑都不可直接用在真檔。
+[native models](../lib/zcu_tools/datafile/native_models.py)。ID 分配使用 [entry owner](../lib/zcu_tools/resources/entry/README.md#輸出位置)
+的 `new_run_id(*, at=None)`，不自行拼接 ID，也不從 run_id 解析歷史時間。
+以下示範必要 mapping 已齊全，但開始時間與可信 run_id 不可得的情況。
+這是合成範例，所有數字、UUID、名稱與路徑都不可直接用在真檔。
 假設虛構實驗 `synthetic_demo` 的 `DemoCfg` 完整 cfg 只有 reps，資料是單一 frequency 軸的複數 response；它不是 repo 已註冊的實驗。
 真檔必須換成已確認的 `(tag, cfg_type, schema_version)`、完整歷史 cfg JSON 與正式 disk schema，不可只換檔名或套用這份 reps。
-None 與空 provenance mapping 示範「證據確實不可得」，不是略過查證。缺必要證據就 pending。
+None 與空 provenance mapping 示範「證據確實不可得」，不是略過查證。其他必要證據缺失仍 pending。
+先走部分接手盤點，確認沒有該來源的有效 native 或已固定 ID，再執行新分配。
+範例將對照保存在 WORK 的獨立 JSON；它是手動紀錄，不是工具 resume manifest。
 
 ```python
+import hashlib
+import json
 import os
 from pathlib import Path
 from uuid import UUID
@@ -424,6 +509,29 @@ from zcu_tools.datafile import (
     SoftwareProvenance, VariableSchema,
     load_run_data, save_run_data, validate_experiment_payload,
 )
+from zcu_tools.resources.entry import new_run_id
+
+source = Path(os.environ["BD"]) / "synthetic-only.hdf5"
+with source.open("rb") as stream:
+    source_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+# Compare source_sha256 with the verified backup inventory before continuing.
+identity_path = Path(os.environ["WORK"]) / "synthetic-only-native-identity.json"
+if identity_path.exists():
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    if (identity["source"] != source.relative_to(Path(os.environ["BD"])).as_posix()
+            or identity["source_sha256"] != source_sha256):
+        raise ValueError("Saved identity does not match the verified source")
+else:
+    # This example has no trusted historical ID or previously assigned ID.
+    identity = {
+        "source": source.relative_to(Path(os.environ["BD"])).as_posix(),
+        "source_sha256": source_sha256,
+        "run_id": new_run_id(),
+        "run_id_origin": "遷移賦值",
+    }
+    with identity_path.open("x", encoding="utf-8") as stream:
+        json.dump(identity, stream, ensure_ascii=False, indent=2)
+print(identity_path, identity["run_id"], identity["run_id_origin"])
 
 schema = (VariableSchema(
     variable=DataVariable("response"),
@@ -434,9 +542,9 @@ cfg = CfgSnapshot(
     values={"reps": 10}, cfg_type="DemoCfg", schema_version="1.0",
 )
 metadata = RunMetadata(
-    run_id="20261020T080000Z-abc123", experiment="synthetic_demo",
-    started_at="2026-10-20T08:00:00Z", finished_at=None,
-    completion="complete", labber_path=None,
+    run_id=identity["run_id"], experiment="synthetic_demo",
+    started_at=None, finished_at=None,
+    completion="unknown", labber_path=None,
     snapshot=RunSnapshot(
         entry_id=UUID("54cd2da2-e8cd-49d5-a414-4ec40eb7eb14"),
         entry_name="migrated-Q0", point="070716_0.500",
@@ -448,8 +556,6 @@ metadata = RunMetadata(
     ),
     device_snapshot=None,
 )
-# source 換成備份內已驗 hash 的原檔；新 run_id 須有明示分配授權並記入報告。
-source = Path(os.environ["BD"]) / "synthetic-only.hdf5"
 destination = Path(os.environ["NEW_D"]) / "runs" / metadata.run_id / "data.h5"
 payload = load_legacy_labber_payload(source, schema=schema)
 validate_experiment_payload(payload, schema=schema)
@@ -459,13 +565,27 @@ stored = load_run_data(destination)
 validate_experiment_payload(stored.payload, schema=schema)
 ```
 
+預期先得到一份固定的來源/hash→run_id 對照，再得到 `runs/<該 run_id>/data.h5`。
+把對照中的 run_id、`run_id_origin="遷移賦值"`、備份內完整路徑及 native path 記入 manual-report.json 的該來源列。
+另記 `started_at=null`、`completion="unknown"`、`finished_at=null` 與「缺可證實開始時間」，不要把這些值報成歷史時間已驗證。
+只缺上述歷史值不列為無法產 native 的 pending；其他必要證據不足仍列 pending。
+「遷移賦值」只在報告與手動對照中說明，不加進 native metadata 的正式欄位。
+
+中斷後保留並讀取同一份對照，不刪檔重配 ID。對照損壞、來源/hash 不符或與既有 native 衝突時停止處理。
+若先前工具或人工已固定 ID，先核對其來源/hash 並沿用，不能因本例的對照檔不存在就再分配。
+有可信歷史 ID 時，改以該 ID 建立對照，origin 記其證據來源，不呼叫 new_run_id。
+目的 native 已存在時不要重跑寫入段，先以 reader 核對原 ID 與資料，只補缺項，不用 replace=True。
+
 schema 只宣告名稱、單位與 dtype，axes 依 inner-first 排列；軸值、signal arrays、shape、timestamps 與 Labber metadata 由來源 payload 讀入並驗證，不在此補造。
 此例單軸 signal shape 必須為 `(該軸長度,)`；多軸 shape 為反向 axes 長度。
 HDF5 階層與序列化交給 [datafile owner](../lib/zcu_tools/datafile/README.md) 的 writer，不手填 dataset。
 此段是 owner API 的操作順序，不是能替任意 Labber 猜出 schema 的通用轉換器。
 先依該實驗的正式 cfg model 驗證歷史 cfg；寫完還要由具體 experiment 的 `load_run` 讀回，
 逐欄比對 cfg、tag、時間、snapshot、axes、signal、timestamps 與原 payload。
-預期 generic 與 typed reader 都成功，內容相同。失敗保留來源，記未完成 publication，不搬走唯一副本。
+本例的 generic metadata 讀回必須仍是 None/unknown/None，run_id 必須與保存的對照相同。
+需要核對 typed metadata 時，用 `experiment.native_persistence.load_run_with_metadata(path, spec=...)`，不可把 unknown 改成 complete。
+預期 generic 與 typed reader 都成功，內容相同。complete-only 分析入口可能拒絕 unknown，不能用它判定 native 無效。
+讀回失敗時保留來源，記未完成 publication，不搬走唯一副本。
 對未知 pair、未支援 layout、缺歷史 snapshot 的檔案，此時無法手動安全補成 native，應明示限制而不是補猜測。
 
 只有 native 讀回通過後，才用 `copy_checked` 將原 Labber 存入
@@ -474,6 +594,98 @@ HDF5 階層與序列化交給 [datafile owner](../lib/zcu_tools/datafile/README.
 無法證明原始日期結構時，改存 preservation，不偽裝 SaveLayout 產物。
 遷移 native 的 `labber_path` 可明示 None，原檔關係由報告保存。
 本流程不手造 acquired/saved/accepted ledger 事件。沒有事件不代表檔案失效，也不能聲稱 GUI ledger 清單會自動出現它。
+
+## 將他機已寫入的 results 搬到 result
+
+已在他機寫入 `results/<name>/` 的完整或部分 entry，只需搬到 `result/<name>/`，不需重遷。
+這是實體目錄搬移，不是 native 格式轉換。不改 entry UUID、point label、metadata 或任何檔案內容，
+也不搬動或修改 `Database/<name>/`。未完成的骨架、隱藏檔、暫存檔、報告與未知檔都一起保全。
+搬完不代表遷移完成，原有 pending 與清理限制仍適用。
+
+先停止 GUI、Notebook、同步程式與其他 writers，取得本次備份與搬移授權。
+以下範例在同一個 Bash shell 依序操作，使用 GNU 工具。換成已確認的絕對路徑與單一路徑段 NAME，
+不含 `/`、`.` 或 `..` 路徑段。WORK 使用 repo 外尚不存在的獨立目錄。
+
+```bash
+set -euo pipefail
+export REPO=/absolute/path/to/Qubit-measure-gui
+export NAME=migrated-Q0
+export WORK=/absolute/path/outside/repo/root-move-review
+export FROM_ROOT="$REPO/results" TO_ROOT="$REPO/result"
+export FROM="$FROM_ROOT/$NAME" TO="$TO_ROOT/$NAME"
+
+# Reject symlinks in both roots, entries, WORK and all parent directories.
+no_symlink_parents() {
+  local path=$1
+  while test "$path" != /; do
+    test ! -L "$path" || return 1
+    path=$(dirname -- "$path")
+  done
+}
+for path in "$FROM" "$TO" "$WORK"; do
+  no_symlink_parents "$path"
+done
+realpath -m -- "$FROM_ROOT" "$TO_ROOT" "$FROM" "$TO" "$WORK"
+test -d "$FROM"
+test ! -e "$TO"
+test ! -L "$TO"
+test ! -e "$WORK"
+test ! -L "$WORK"
+find "$FROM" ! -type d ! -type f -print
+```
+
+預期 realpath 列出已確認的絕對路徑，所有 test exit 0，find 無輸出。
+人工核對兩 root 不相同、不互相包含，來源與目的不重疊。WORK 不在 repo 內，與兩 root 也不互相包含。
+若發現 symlink 或特殊檔，停止並確認保全方式，不跟隨連結搬移。
+**目的已存在就不執行下方命令。** 即使看似空目錄，也先保存兩端完整副本與清單，
+按[部分遷移接手](#從部分遷移的狀態手動接手)逐項比對，只補缺項，不覆蓋或混合整棵目錄。
+來源中若記錄了絕對路徑或工具續跑狀態，另記新舊位置供 owner 確認，不為了搬移改寫原內容。
+
+確認以上條件後，先保存完整副本與相對路徑清單。inventory 包含空目錄、檔案類型與權限，
+hash 清單包含所有普通檔，包括未完成內容。
+
+```bash
+hash_tree() {
+  (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z |
+    xargs -0 -r sha256sum)
+}
+inventory_tree() {
+  (cd "$1" && find . -printf '%y %m %P\0' | LC_ALL=C sort -z)
+}
+mkdir -- "$WORK"
+hash_tree "$FROM" > "$WORK/before.sha256"
+inventory_tree "$FROM" > "$WORK/before.inventory"
+cp -a -- "$FROM" "$WORK/entry-before-move"
+hash_tree "$WORK/entry-before-move" > "$WORK/backup.sha256"
+inventory_tree "$WORK/entry-before-move" > "$WORK/backup.inventory"
+cmp "$WORK/before.sha256" "$WORK/backup.sha256"
+cmp "$WORK/before.inventory" "$WORK/backup.inventory"
+hash_tree "$FROM" > "$WORK/recheck.sha256"
+inventory_tree "$FROM" > "$WORK/recheck.inventory"
+cmp "$WORK/before.sha256" "$WORK/recheck.sha256"
+cmp "$WORK/before.inventory" "$WORK/recheck.inventory"
+
+# Recheck the destination. Keep writers stopped during verification and move.
+no_symlink_parents "$TO"
+mkdir -p -- "$TO_ROOT"
+test ! -e "$TO"
+test ! -L "$TO"
+mv -T --no-clobber -- "$FROM" "$TO"
+test ! -e "$FROM"
+test ! -L "$FROM"
+hash_tree "$TO" > "$WORK/after.sha256"
+inventory_tree "$TO" > "$WORK/after.inventory"
+cmp "$WORK/before.sha256" "$WORK/after.sha256"
+cmp "$WORK/before.inventory" "$WORK/after.inventory"
+printf 'Root move verified: %s\n' "$TO"
+```
+
+預期所有 cmp 無輸出且 exit 0，最後印出 `Root move verified: .../result/<name>`。
+完成判斷是來源 entry 已不存在，目的與搬前的完整 hash、inventory 一致，完整副本仍保留在 WORK。
+記錄搬前後位置、驗證結果與日期，再用明確的 result/Database 根目錄重新開啟 entry，核對原 UUID 與 points。
+不要沿用搬移前已開啟、仍綁舊路徑的物件。原有工具能否 resume 由 owner 確認，不改 manifest 強迫通過。
+任何中斷或核對失敗都停止，不刪來源殘留、目的半份內容或備份，也不自動重跑 mv。
+先保全現況，再走部分接手。不要刪整棵 results root，裡面可能還有其他 entry。
 
 ## 從部分遷移的狀態手動接手
 
@@ -488,12 +700,17 @@ HDF5 階層與序列化交給 [datafile owner](../lib/zcu_tools/datafile/README.
 | 缺某些 points | 先補 setup 的缺失 params，再依第 5 節為缺項完整 copy YAML，套其 meta/library。 | 每個舊 label 唯一對應 point；已存在的 point 不重建。 |
 | point 已有新修改 | 逐欄比較 params、根 meta、point meta 與當前值，只補缺值。 | 保留有效新值與原 metadata；不同值列兩來源 pending，需使用者決定才覆寫。 |
 | PNG 在 `migration-preserved/result/exps/<sub>/image`，未掛 point | 對照原始相對路徑與備份 hash。建好/驗證 point 後，從已驗證副本用 copy_checked 複製到該 point/figures。 | 原檔名與 hash 相同；preserved 多一份不算衝突，不急著刪它。 |
-| params.json 只 copy，component 沒有 fit | 確定唯一 qubit，依第 4 節補 setup，再逐個補既有 point 的缺值並套 point meta 優先規則。 | 改 setup 不會同步既有 point；每個 point 都需核對，不能重新 copy 蓋掉新值。 |
-| point 有繼承的 flux 數字卻缺 unit | 找 params 的允許單位證據與該 point meta，無衝突才補 general.ext.flux_unit。 | 無/衝突則移除僅遷移帶入且無證據的數字，保留原文與 pending；不猜 A。 |
+| params.json 只 copy，缺 `predictors/<component名>.json` | 確定唯一 qubit，依第 4 節將舊 EJ/EC/EL fit 寫成 fluxonium，bias=0.0，不寫 flux_int。核對兩個允許的 unit 來源與 timestamp。 | zcu.predictor v1 的必填 key 齊全，run_id=null；未知參數可省略/null，未知時間為 null 並 pending。未定義的 transmon/明示 model fit 保全並 pending，不造 mapping。component 沒有 fit 不再是缺項。 |
+| predictor 已存在或只寫了一半 | 對照備份逐欄核對 format/version、model、params、flux_unit、source；保存現檔，按契約補缺。 | 已有不同值保留並列衝突，不覆寫；未知參數省略/null，unit、run_id、created_at 不可省略。unit 缺失/衝突或時間無證據須為 null 且 pending。只改 header 不算完成。 |
+| fit 曾被寫進 setup/point component | 保存現況與來源，按第 4 節另寫 entry predictor。逐欄確認舊 fit 的誤寫範圍，再修正 setup 及每個既有 point。 | 只移除能證實僅由 fit 誤寫的欄位與 metadata；meta_info 自身的正式欄位和有效新值保留。來源不明列 pending，先核對，不整份覆寫。 |
+| 其餘 params 區塊未保存 | 依第 4 節補入對應 component.ext.legacy_params，保留完整原文及 metadata。 | setup 與每個既有 point 分別核對，不能重新 copy 蓋掉新值；無正式欄位者仍列 located pending。 |
+| point 有 meta_info 的 flux 數字卻缺 unit | 查根 meta、該 point meta 與目前值的來源，依原有 meta 單位規則補缺。 | 無/衝突則移除僅遷移帶入且無證據的數字，保留原文與 pending；不借用 predictor 或 params 的單位。 |
 | library 只換了 header 或有 dangling slot | 先保存現況，依正式 Spec 與 mapping 修補缺項，不覆寫有效 Spec。 | Spec、child keys、slot 與 asset 都有核對結果；不能轉者逐筆 pending。 |
 | Labber 已搬到新處 | 以原始盤點/hash 對照現檔，確認備份包含原 bytes。另用正常 reader 查 native 是否真的存在且有效。 | 「已搬」與「native 已轉」分開記；只有改檔名不算完成。 |
-| Labber 未搬，有完整 evidence | 依第 7 節產 native、generic/typed 讀回，再 copy/hash 原 Labber。 | 新 run 與原檔的對照清楚，舊來源保留到最後統一清理。 |
-| Labber 已搬或未搬，但 evidence 不足 | 不造 cfg/時間/ID/ledger；確認完整備份後列永久 pending，可另留 preservation 副本。 | 報告有備份內路徑、hash、缺失證據與理由，不標成 native 成功。 |
+| 已有有效 native 或已固定 run_id | 以來源/hash 對照、generic/typed reader 核對既有資料與 ID。只補缺少的副本或報告。 | 不因新規則覆寫有效 native，不重分配已固定 ID，不改可信歷史時間或已有 None/unknown。 |
+| Labber 未轉 native，必要 evidence 齊全，只有開始時間或可信 ID 缺失 | 依第 7 節以 None/unknown/None 寫未知時間，缺 ID 用 new_run_id，先保存對照再產 native。generic/typed 讀回後 copy/hash 原 Labber。 | 未知時間與「遷移賦值」記入報告，不冒充歷史；重做時沿用固定 ID。開始時間已知則保留證據，不改為 None。 |
+| Labber 未轉 native，有完整歷史 evidence | 保留可信 ID 與歷史時間，依第 7 節產 native、generic/typed 讀回，再 copy/hash 原 Labber。 | 新 run 與原檔的對照清楚，舊來源保留到最後統一清理。 |
+| Labber 已搬或未搬，但其他必要 evidence 不足 | tag+cfg_type、完整歷史 cfg、variable/axes/signal 名稱、單位、dtype、shape 或必要 mapping 缺失時仍永久 pending。不猜 cfg/時間，不造 ledger。 | 完整備份及報告列明路徑、hash、缺項與理由。僅缺開始時間或可信 ID 不屬於此列。 |
 | 來源和目的都在但 hash 不同 | 保存兩者，不挑較新 mtime，也不直接覆寫。 | 記為衝突或未完成 publication，使用者決定前不得清理。 |
 
 每補一項就重新讀回或 cmp，更新該項狀態。現有 metadata 若與舊資料不同也保留並列衝突，不能靜默 deep merge。
@@ -523,9 +740,12 @@ PY
 
 預期列出原 entry UUID 與所有 points，exit 0。接著逐項審閱，不用程式載入成功代替內容核對：
 
-- params/meta 已進正確 component；metadata、global/local unit、衝突處理均有記錄。
+- 每份 fluxdep_fit 已對應 entry 的 `predictors/<component名>.json`，或在備份定位並列永久 pending。逐欄核對嚴格整數 version、模型、模型與 flux 參數、unit、source，不加未知 key。entry loader 成功不代表已驗證 predictor。
+- predictor 的未知參數省略或填 null。unit 缺失/衝突、timestamp 無證據時，對應必填欄位為 null 且 pending，報告記錄備份內原文位置。
+- 其餘 params 已完整保存在正確 component.ext.legacy_params 並列 located pending。meta_info 仍寫正式 component/general 欄位。metadata、global/local unit、衝突處理均有記錄，fit 不混進 setup/point。
 - 每張 exps PNG 已掛正確 point，原名與 hash 相同。沒有「等 point」的暫待圖。
 - 每筆可轉 module/native 已由相應 owner 讀回，未完成、半份檔案與暫存 publication 都已處理。
+- 缺開始時間的 native 2.1 讀回仍是 None/unknown/None。遷移分配的 ID 與固定對照一致，報告標「遷移賦值」，未把 ID 時戳當 started_at。可信既有 ID 與歷史時間未改寫。
 - samples、autofluxdep、未知檔及無法轉 Labber 已保全。永久 pending 逐筆以 BACKUP 內路徑與 hash 定位，原因可追溯。
 - parameters 與 data 兩部分均完成核對，報告的 unfinished_publications 與 temporary_pending 都空。只剩真正無法轉換的永久 pending 才可進清理。
 
@@ -554,7 +774,7 @@ test ! -e "$OLD_R" && test ! -e "$OLD_D"
 
 repo 範例的盤點為 5 個 exps、14 張 PNG，label 是 `062823`、`070216`、`070716_0.500`、
 `070800_0.500`、`072523`。params.json 只有 schema_version、project、name，沒有 fluxdep_fit，
-所以不能從這份範例憑空產出 EJ/EC/EL。
+所以不能從這份範例憑空產出 predictor，或把合成範例的 EJ/EC/EL 當成實值。
 
 舊流程的唯讀 dry-run 回報 exit 0、key_mappings 0、failures 0、pending 28，
 其中 association 18、unconverted file 10。該次使用獨立空 Database 作基準，沒有驗證真實 Labber。

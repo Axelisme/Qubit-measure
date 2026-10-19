@@ -195,12 +195,19 @@ class _SelectionHandler(BaseHTTPRequestHandler):
 
 
 def run_setup(
-    binary: Path, config_dir: Path, cache_dir: Path, *, no_browser: bool
+    binary: Path,
+    config_dir: Path,
+    cache_dir: Path,
+    settings_dir: Path,
+    *,
+    no_browser: bool,
 ) -> TransferSettings:
     """Use official GUI for OAuth and folder browsing; Enter confirms and saves.
 
-    Existing transfer.json is preserved on cancellation/failure. Returns only
-    after the selected remote parent has passed a fresh directory listing.
+    config_dir holds the per-user rclone.conf account; settings_dir receives
+    this checkout's transfer.json. Existing transfer.json is preserved on
+    cancellation/failure. Returns only after the selected remote parent has
+    passed a fresh directory listing.
     """
     with (
         gui_session(binary, config_dir, cache_dir) as endpoint,
@@ -243,7 +250,7 @@ def run_setup(
                 except ValueError as exc:
                     print(str(exc), flush=True)
                     continue
-                save_settings(config_dir, selection)
+                save_settings(settings_dir, selection)
                 print(
                     f"Saved cloud parent: {selection.remote_parent}. Future upload/download commands do not need the GUI.",
                     flush=True,

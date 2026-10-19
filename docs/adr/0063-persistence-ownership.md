@@ -41,7 +41,10 @@ MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不
 
 ### Run 輸出位置與 writer 權責
 
-`resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `results/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、前端啟動實驗的名稱、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
+新格式根目錄統一為 `result/`，與 GUI runtime 一致，不另設 `results/`。`.gitignore` 保留 `result/`，移除 `/results/`。
+使用者於 2026-10-20 裁決：「好，統一result，那gitignore也做處理」。
+
+`resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `result/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、前端啟動實驗的名稱、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
 
 新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<run_id>/`。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域副本，對等 paths 使用同一份 bytes。Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取 `<experiment>_<id6>_<序號>.hdf5` 新檔名。實驗名中的 `/` 轉 `_`，id6 是 run_id 的後六碼。序號從 1 起避讓既有檔案，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
 

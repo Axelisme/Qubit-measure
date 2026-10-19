@@ -22,6 +22,7 @@ from .models import (
     KeyRule,
     MigrationMapping,
 )
+from .params_json import convert_params_json
 from .paths import contained_path, validate_segment
 from .state import MigrationSession, clear_pending, record_pending
 
@@ -189,11 +190,10 @@ def _convert_context(
 ) -> None:
     source_root = session.manifest.report.source.result_path
     destination_root = session.manifest.report.destination.result_path
-    source = contained_path(candidate, source_root)
-    session.baseline(source)
-    values = _JSON.validate_json(source.read_text(encoding="utf-8"), strict=True)
-    is_setup = source == source_root / "meta_info.json"
-    label = candidate.parent.name
+    contained_path(candidate, source_root)
+    source = contained_path(candidate / "meta_info.json", source_root)
+    is_setup = candidate == source_root
+    label = candidate.name
     validate_segment(label, "context label")
     target = (
         destination_root / "setup.yaml"
@@ -209,15 +209,34 @@ def _convert_context(
             if label in entry.list_points()
             else entry.new_point(label)
         )
-    _map_parameters(session, source, target, values, mapping, view)
+    if source.is_file():
+        session.baseline(source)
+        values = _JSON.validate_json(source.read_text(encoding="utf-8"), strict=True)
+        _map_parameters(session, source, target, values, mapping, view)
+        session.baseline(source)
     convert_module_cfg(
         session,
         entry=entry,
         label=None if is_setup else label,
-        source=candidate.parent / "module_cfg.yaml",
+        source=candidate / "module_cfg.yaml",
         mapping=mapping,
     )
-    session.baseline(source)
+
+
+def _context_directories(source_root: Path) -> list[Path]:
+    children = sorted(path.parent for path in source_root.glob("*/meta_info.json"))
+    labels = {path.name: path for path in children}
+    for child in sorted((source_root / "exps").glob("*")):
+        if not child.is_dir():
+            continue
+        if child.name in labels:
+            raise MigrationInputError(
+                f"Duplicate point label {child.name!r}: {labels[child.name]} and {child}"
+            )
+        children.append(child)
+    if (source_root / "meta_info.json").is_file():
+        children.insert(0, source_root)
+    return children
 
 
 def convert_parameters(
@@ -227,7 +246,10 @@ def convert_parameters(
 
     session owns progress/report and sources; entry is its handle or None in a new
     dry-run; mapping provides registered seeds and working-unit key decisions.
-    Preserve unknown/expressions in ext, convert typed module cfg and copy params bytes.
+    Root metadata seeds setup; direct metadata children and every exps child
+    become points. Reject duplicate labels with both source locations before
+    point writes. Preserve unknown/expressions in ext, convert typed module cfg
+    and copy params bytes.
     Completed parameters are not rewritten. Checkpoint completion; input/schema
     and I/O failures propagate without modifying the old result tree."""
     if session.manifest.parameters_complete:
@@ -236,11 +258,8 @@ def convert_parameters(
     destination_root = session.manifest.report.destination.result_path
     if entry is not None and not session.dry_run:
         _seed_components(entry, mapping)
-    sources = sorted(source_root.glob("*/meta_info.json"))
-    root_meta = source_root / "meta_info.json"
-    if root_meta.is_file():
-        sources.insert(0, root_meta)
-    for candidate in sources:
+    convert_params_json(session, entry, mapping)
+    for candidate in _context_directories(source_root):
         _convert_context(session, entry, mapping, candidate)
     params = source_root / "params.json"
     if params.is_file():
