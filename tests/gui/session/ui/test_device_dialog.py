@@ -133,6 +133,79 @@ def test_failed_address_shows_reason_and_allows_corrected_retry(qapp, tmp_path: 
         qapp.processEvents()
 
 
+def test_disconnect_shows_terminal_status_and_allows_reconnect(qapp, tmp_path: Path):
+    workers = DeviceWorkers()
+    bus = EventBus()
+    gate = RunBlocksHardwareGate(run_kind="run", bus=bus)
+    bg = workers.background()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(gate, handles, progress, bg, bus)
+    driver = FakeDevice(fast_mode=True)
+    service = DeviceService(
+        bus,
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        gate,
+        bg,
+        runner,
+        handles,
+        driver_factory=lambda _type, _address: driver,
+    )
+    facet = DeviceControlFacet(bus=bus, device=service, progress=progress)
+    dialog = DeviceDialog(facet, parameter_provider=lambda: None)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        ui = ComponentDriver(dialog)
+        ui.choose_option("Type:", "FakeDevice")
+        ui.enter_text("Name:", "label_device", commit=False)
+        ui.enter_text("Address:", "synthetic", commit=False)
+        ui.screenshot(tmp_path / "01-ready-to-connect.png")
+        ui.click("Add Device")
+        # The synthetic factory returns immediately; wait for owner delivery.
+        qt_until(
+            lambda: any(
+                "Connected label_device." in widget.text
+                for widget in ui.visible().widgets
+            ),
+            label="device connected",
+        )
+        ui.screenshot(tmp_path / "02-connected.png")
+        ui.click("Drop")
+        # Close returns immediately. Reconnect becoming enabled proves the
+        # disconnect terminal has reached the view, independently of its label.
+        qt_until(
+            lambda: any(
+                widget.text == "Reconnect" and widget.enabled
+                for widget in ui.visible().widgets
+            ),
+            label="disconnect delivered",
+        )
+        ui.screenshot(tmp_path / "03-disconnected.png")
+        visible_text = [widget.text for widget in ui.visible().widgets]
+        assert "Disconnected label_device." in visible_text, visible_text
+        assert [row.text for row in ui.list_rows()] == [
+            "label_device (FakeDevice) [not connected]"
+        ]
+        ui.click("Reconnect")
+        qt_until(
+            lambda: any(
+                "Connected label_device." in widget.text
+                for widget in ui.visible().widgets
+            ),
+            label="device reconnected",
+        )
+        ui.screenshot(tmp_path / "04-reconnected.png")
+        assert ui.observe("Apply Changes").enabled
+        ui.click("Close")
+    finally:
+        workers.close()
+        dialog.close()
+        dialog.deleteLater()
+        driver.close()
+        qapp.processEvents()
+
+
 def _listing(dialog: DeviceDialog) -> QListWidget:
     listing = dialog.findChild(QListWidget)
     assert listing is not None
