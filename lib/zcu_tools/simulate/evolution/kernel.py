@@ -416,6 +416,9 @@ class Kernel(Protocol):
         context shares immutable workload facts with guard and preparation.
         Keys include the model identity and exclude apply-only parameters;
         the exact algorithm determines which parameters belong in each half.
+        Resident inventory calls this before guard on structural candidates.
+        Numerically ineligible rows may use inventory-only identities disjoint
+        from preparable keys. Only guard-accepted rows reach prepare and apply.
         """
         ...
 

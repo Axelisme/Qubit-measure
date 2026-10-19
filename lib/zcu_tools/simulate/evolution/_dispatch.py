@@ -651,13 +651,10 @@ class _Classifier:
             self.classify_two_tone(two_tone)
         domain = self.domains["multiple"]
         multiple = rows[domain.mask[rows]]
-        # A calibrated approximation has its own visible family. Custom
-        # registries can omit this optional fast path, like shaped_sambe.
-        if domain.families[1] in self.kernels:
-            candidates = tuple(name for name in domain.families if name in self.kernels)
-            self.accept(multiple, candidates)
-        else:
-            self.accept(multiple, domain.families[2:])
+        # Each calibrated approximation is optional; the direct terminal is
+        # required even when neither fast path is present in a custom registry.
+        optional = tuple(name for name in domain.families[:-1] if name in self.kernels)
+        self.accept(multiple, (*optional, domain.families[-1]))
         return self._result()
 
     def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
