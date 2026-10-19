@@ -3,6 +3,7 @@
 Remove with the offline migrations package once legacy entries are converted.
 """
 
+import importlib
 import json
 import shutil
 from collections.abc import Generator
@@ -138,6 +139,202 @@ def backup_path(request: MigrationRequest) -> Path:
 def predictor_params(request: MigrationRequest) -> JsonObject:
     """Return the public predictor parameters as a typed JSON object."""
     return TypeAdapter(JsonObject).validate_python(read_predictor(request)["params"])
+
+
+@pytest.fixture
+def analysis_sections() -> JsonObject:
+    return {
+        "dispersive": {
+            "g": None,
+            "bare_rf": 5.1,
+            "timestamp": "unproven",
+            "future": [1, None],
+        },
+        "fluxdep_fit": {"plot_transitions": {"r_f": 5.2, "0.1": [1, 2]}},
+        "t1_curve_fit": {
+            "params": {"Q_cap": None, "Temp": 0.04},
+            "stderr": {"Q_cap": None},
+            "bounds": {"Q_cap": [1, None]},
+            "free": ["Q_cap"],
+            "fixed": ["Temp"],
+            "cost": None,
+            "timestamp": "2020-07-07T16:30:00+08:00",
+        },
+    }
+
+
+def test_analysis_files_publish_typed_unknowns_and_keep_original_sections(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    analysis_sections: JsonObject,
+) -> None:
+    write_params(request_data, analysis_sections)
+    report = migrate(request_data, analysis_mapping)
+    entry = open_entry(request_data)
+    for kind in ("dispersive", "t1_curve"):
+        file = entry.result_path / kind / "Qlegacy.json"
+        assert file.is_file(), f"migration must publish {kind} fit"
+        owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
+        loaded = getattr(owner, f"load_{kind}_file")(file)
+        assert loaded.source.run_id is None
+        assert any(
+            row.new_file == file and row.action == "value"
+            for row in report.key_mappings
+        )
+        if kind == "dispersive":
+            assert entry.dispersive_path == file.parent
+            assert loaded.params.g is None
+            assert loaded.params.bare_rf == 5.1
+            assert loaded.params.plot_transitions.r_f == 5.2
+            assert loaded.params.plot_transitions.model_extra == {"0.1": [1, 2]}
+            assert loaded.source.created_at is None
+            assert any(
+                item.location == "dispersive.timestamp" for item in report.pending
+            )
+        else:
+            assert entry.t1_curve_path == file.parent
+            assert loaded.params.params.Q_cap is None
+            assert loaded.params.params.Temp == 0.04
+            assert loaded.params.stderr.Q_cap is None
+            assert loaded.params.bounds == {"Q_cap": (1.0, None)}
+            assert loaded.source.created_at == "2020-07-07T16:30:00+08:00"
+    doc = snapshot(entry.setup)
+    for key, value in analysis_sections.items():
+        assert document_value(doc, f"Qlegacy.ext.legacy_params.{key}") == value
+
+
+def test_transition_only_fit_publishes_dispersive_without_inventing_fit_values(
+    request_data: MigrationRequest, analysis_mapping: MigrationMapping
+) -> None:
+    write_params(request_data, {"fluxdep_fit": {"plot_transitions": {"r_f": 5.2}}})
+    migrate(request_data, analysis_mapping)
+    file = open_entry(request_data).result_path / "dispersive/Qlegacy.json"
+    assert file.is_file(), "transition seed alone must publish dispersive data"
+    owner = importlib.import_module("zcu_tools.resources.dispersive_file")
+    loaded = owner.load_dispersive_file(file)
+    assert loaded.params.g is None
+    assert loaded.params.bare_rf is None
+    assert loaded.params.plot_transitions.r_f == 5.2
+
+
+@pytest.mark.parametrize(
+    ("section", "value", "kind"),
+    [
+        ("dispersive", {"g": True}, "dispersive"),
+        ("t1_curve_fit", {"params": {"Temp": None}, "free": ["Q_cap"]}, "t1_curve"),
+    ],
+)
+def test_invalid_analysis_content_stays_located_pending(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    section: str,
+    value: JsonObject,
+    kind: str,
+) -> None:
+    write_params(request_data, {section: value})
+    report = migrate(request_data, analysis_mapping)
+    file = open_entry(request_data).result_path / kind / "Qlegacy.json"
+    assert any(
+        row.old_key == section
+        and row.new_file == file
+        and row.action == "pending"
+        and "validation" in row.reason.lower()
+        for row in report.key_mappings
+    )
+    assert (
+        document_value(
+            snapshot(open_entry(request_data).setup),
+            f"Qlegacy.ext.legacy_params.{section}",
+        )
+        == value
+    )
+
+
+@pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
+@pytest.mark.parametrize("conflict", [False, True])
+def test_analysis_file_resume_validates_unfinished_and_preserves_completed_edits(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    analysis_sections: JsonObject,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    conflict: bool,
+) -> None:
+    source = write_params(request_data, analysis_sections)
+    destination = request_data.results_root / request_data.name
+    copyfile = shutil.copyfile
+
+    def interrupt(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
+        if src == source and dst.parent == destination:
+            raise OSError("analysis checkpoint interrupted")
+        return copyfile(src, dst, follow_symlinks=follow_symlinks)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(shutil, "copyfile", interrupt)
+        with pytest.raises(OSError, match="analysis checkpoint interrupted"):
+            migrate(request_data, analysis_mapping)
+    file = destination / kind / "Qlegacy.json"
+    assert file.is_file(), "fit must be published before the interrupted checkpoint"
+    raw = json.loads(file.read_text(encoding="utf-8"))
+    if conflict:
+        raw["version"] = True
+    file.write_text(json.dumps(raw, separators=(",", ":")), encoding="utf-8")
+    before = file.read_bytes()
+    if conflict:
+        with pytest.raises(MigrationInputError, match=kind.replace("_", "[ _-]?")):
+            migrate(replace(request_data, resume=True), analysis_mapping)
+    else:
+        migrate(replace(request_data, resume=True), analysis_mapping)
+        assert file.read_bytes() == before
+        raw["source"]["run_id"] = "user-edited"
+        file.write_text(json.dumps(raw), encoding="utf-8")
+        edited = file.read_bytes()
+        migrate(replace(request_data, resume=True), analysis_mapping)
+        assert file.read_bytes() == edited
+
+
+def test_unfinished_t1_resume_rejects_new_active_null_channel(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    analysis_sections: JsonObject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = write_params(request_data, analysis_sections)
+    copyfile = shutil.copyfile
+
+    def interrupt(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
+        if src == source:
+            raise OSError("T1 checkpoint interrupted")
+        return copyfile(src, dst, follow_symlinks=follow_symlinks)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(shutil, "copyfile", interrupt)
+        with pytest.raises(OSError, match="T1 checkpoint interrupted"):
+            migrate(request_data, analysis_mapping)
+    file = open_entry(request_data).result_path / "t1_curve/Qlegacy.json"
+    raw = json.loads(file.read_text(encoding="utf-8"))
+    raw["params"]["params"]["Q_ind"] = None
+    file.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(MigrationInputError, match="differs"):
+        migrate(replace(request_data, resume=True), analysis_mapping)
+
+
+def test_analysis_dry_run_reports_the_same_files_without_writes(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    analysis_sections: JsonObject,
+) -> None:
+    write_params(request_data, analysis_sections)
+    dry = migrate(replace(request_data, dry_run=True), analysis_mapping)
+    destination = request_data.results_root / request_data.name
+    for kind in ("dispersive", "t1_curve"):
+        assert any(
+            row.new_file == destination / kind / "Qlegacy.json"
+            and row.action == "value"
+            for row in dry.key_mappings
+        )
+    assert not destination.exists()
+    assert not backup_path(request_data).exists()
 
 
 def test_lossless_sections_are_inherited_before_point_meta_overrides(

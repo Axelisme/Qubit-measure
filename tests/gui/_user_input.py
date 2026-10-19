@@ -506,6 +506,68 @@ class ComponentDriver:
             key_click(tree, Qt.Key.Key_Right)
         QApplication.processEvents()
 
+    def edit_tree_value(
+        self, path: tuple[str, ...], *, object_name: str, value: str
+    ) -> None:
+        """Edit a visible tree row's Value cell using double-click and Enter.
+
+        path contains exact visible root-to-row captions, not model keys.
+        object_name selects one QTreeWidget whose second column is Value.
+        value is the text to type into its QLineEdit delegate. Missing or
+        ambiguous trees/visible paths/editors raise LookupError; a non-tree
+        target raises TypeError. The delegate must expose a QLineEdit.
+        Disabled, hidden, clipped,
+        modal-blocked or noneditable cells are no-ops. Ancestors must already
+        be expanded; this method never scrolls or opens hidden rows.
+        """
+        tree = self._find(None, object_name)
+        if not isinstance(tree, QTreeWidget):
+            raise TypeError(f"{object_name!r} is not a QTreeWidget")
+        if not self._can_interact(tree):
+            return
+        item = _unique(
+            repr(path),
+            [i for i, captions in self._visible_tree_items(tree) if captions == path],
+            [repr(captions) for _, captions in self._visible_tree_items(tree)],
+        )
+        if not item.flags() & Qt.ItemFlag.ItemIsEditable:
+            return
+        rect = tree.visualItemRect(item)
+        viewport = tree.viewport()
+        assert viewport is not None
+        target = QPoint(
+            tree.columnViewportPosition(1) + tree.columnWidth(1) // 2,
+            rect.center().y(),
+        )
+        if tree.isColumnHidden(1) or not viewport.visibleRegion().contains(target):
+            return
+        mouse_click(viewport, target)
+        for kind, buttons in (
+            (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
+            (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+        ):
+            QApplication.sendEvent(
+                viewport,
+                QMouseEvent(
+                    kind,
+                    QPointF(target),
+                    QPointF(viewport.mapToGlobal(target)),
+                    Qt.MouseButton.LeftButton,
+                    buttons,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
+        QApplication.processEvents()
+        editors = [e for e in tree.findChildren(QLineEdit) if self._on_screen(e)]
+        editor = _unique(
+            "tree Value editor", editors, [e.objectName() for e in editors]
+        )
+        if self._can_interact(editor):
+            key_click(editor, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+            type_text(editor, value)
+            key_click(editor, Qt.Key.Key_Return)
+        QApplication.processEvents()
+
     def click(self, text: str | None = None, *, object_name: str | None = None) -> None:
         """Click a usable widget with real mouse events.
 

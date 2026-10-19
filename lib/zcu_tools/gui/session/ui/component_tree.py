@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 _FIELD, _VALUE, _UNIT, _METADATA = range(4)
 _UNSET_TEXT = "(unset)"
 
-# A row key is the component name followed by the Field-column texts below it.
+# A row key is the component/general root followed by its Field-column texts.
 type _RowKey = tuple[str, ...]
 
 
@@ -67,8 +67,8 @@ type _RowKey = tuple[str, ...]
 class _EditTarget:
     """What an in-place edit of one Value cell submits.
 
-    component names the owning component and segments the field path inside
-    it. value_kind selects the parsing rule for the submitted text. choices
+    component names the owning component or "general" root; segments is the
+    field path inside it. value_kind selects the parsing rule for the submitted text. choices
     are drop-down options; empty means a free-text editor. completions are
     component names a free-text editor offers while typing (empty for none).
     initial is the editor's start text, "" for an unset field. write_depth is
@@ -86,7 +86,7 @@ class _EditTarget:
 
 
 class ComponentTreeWidget(QWidget):
-    """Inspect and edit registered components through ContextControlPort.
+    """Inspect and edit components and general extensions through ContextControlPort.
 
     The widget owns presentation only. The tree has Field, Value, Unit and
     Metadata columns. Metadata shows a row's opaque caller mapping as one-line
@@ -94,7 +94,9 @@ class ComponentTreeWidget(QWidget):
     and unset rows, blank when absent or empty; no key is interpreted. Each component row shows its kind; its children follow
     component_field_specs(kind), so unset fields stay visible as an italic
     gray "(unset)" and nested models expand into child rows. Document data
-    the schema does not declare follows the declared rows. Double-click or F2
+    the schema does not declare follows the declared rows. A separate general/ext
+    branch shows the selected document's extension fields, including nested
+    mappings; it is not a registered component. Double-click or F2
     opens an in-place editor on an editable Value cell: Enter or focus loss
     submits, Esc cancels. Choice, boolean and role reference fields edit
     through a drop-down (references list the document's components matching
@@ -180,6 +182,7 @@ class ComponentTreeWidget(QWidget):
         self._add_btn.setEnabled(not self._read_only)
         items: dict[_RowKey, QTreeWidgetItem] = {}
         default_expanded: dict[_RowKey, bool] = {}
+        self._render_general_ext(document, items, default_expanded)
         for name, component in document.components.items():
             root = QTreeWidgetItem(self._tree, [name, component.kind, "", ""])
             items[(name,)] = root
@@ -295,6 +298,50 @@ class ComponentTreeWidget(QWidget):
         header.setSectionResizeMode(_UNIT, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(_METADATA, QHeaderView.ResizeMode.ResizeToContents)
         return tree
+
+    def _render_general_ext(
+        self,
+        document: SetupDocument | PointDocument,
+        items: dict[_RowKey, QTreeWidgetItem],
+        default_expanded: dict[_RowKey, bool],
+    ) -> None:
+        """Render general extensions without treating general as a component kind."""
+        general = QTreeWidgetItem(self._tree, ["general", "", "", ""])
+        items[("general",)] = general
+        items[("general", "ext")] = QTreeWidgetItem(general, ["ext", "", "", ""])
+        default_expanded[("general",)] = True
+        default_expanded[("general", "ext")] = True
+        for field in document_fields(document):
+            key = field.segments
+            if key[:2] != ("general", "ext"):
+                continue
+            for depth in range(2, len(key) + 1):
+                prefix = key[:depth]
+                if prefix not in items:
+                    items[prefix] = QTreeWidgetItem(
+                        items[prefix[:-1]], [prefix[-1], "", "", ""]
+                    )
+                item = items[prefix]
+                if _addressable(prefix):
+                    path = ".".join(prefix)
+                    item.setToolTip(_FIELD, path)
+                    self._show_metadata(item, document_meta(document, path))
+            item = items[key]
+            item.setText(_VALUE, _display(field.value))
+            self._show_metadata(item, field.metadata)
+            if field.editable_path is not None:
+                self._add_target(
+                    item,
+                    _EditTarget(
+                        component="general",
+                        segments=key[1:],
+                        value_kind="text" if isinstance(field.value, str) else "yaml",
+                        choices=(),
+                        completions=(),
+                        initial=_display(field.value),
+                        write_depth=len(key) - 1,
+                    ),
+                )
 
     def _render_declared(
         self,
