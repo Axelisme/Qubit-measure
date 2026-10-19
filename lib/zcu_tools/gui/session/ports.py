@@ -19,6 +19,7 @@ this module as the session services move in.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -29,8 +30,8 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.device import DeviceActivity
+    from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.session.context_types import EntryInfo
-    from zcu_tools.gui.session.services.device import DeviceProtocol
     from zcu_tools.gui.session.types import ParameterContext
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
     from zcu_tools.resources.entry import ResultEntry
@@ -211,6 +212,40 @@ class ProgressTransport(Protocol):
     def emit(self, event: ProgressEvent) -> None: ...
 
     def set_receiver(self, receiver: Callable[[ProgressEvent], None]) -> None: ...
+
+
+@runtime_checkable
+class DeviceProtocol(Protocol):
+    """Structural contract a hardware driver must satisfy to be a GUI device.
+
+    pyright only checks the *shape* (these methods exist with these signatures).
+    The semantic invariants an implementer must also honour — and which a bug
+    silently violates — are:
+
+    - ``setup`` runs **off the main thread** (via ``BackgroundRunner``), never
+      the Qt main thread. It MUST poll ``stop_event`` during any long operation:
+      cancellation works by ``stop_event.set()``, and the worker reports
+      "cancelled" only if it returns with the event set. A ``setup`` that ignores
+      ``stop_event`` makes cancel a no-op (the worker blocks until natural
+      completion). ``progress`` may drive a pbar via the ambient pbar factory.
+    - ``get_info`` returns a fresh value snapshot. It is called on the worker
+      right after ``setup``, by the synchronous idle read path, and by the
+      off-main poll path that may refresh current values during setup/ramp. It
+      must not mutate device state.
+    - ``close`` releases the underlying resource and SHOULD be idempotent: it is
+      called on disconnect, and on any rollback where a driver was constructed
+      but never became the live registry entry.
+    """
+
+    def setup(
+        self,
+        cfg: Any,
+        *,
+        progress: bool = True,
+        stop_event: threading.Event | None = None,
+    ) -> None: ...
+    def get_info(self) -> BaseDeviceInfo: ...
+    def close(self) -> None: ...
 
 
 @runtime_checkable

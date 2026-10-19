@@ -3,7 +3,7 @@
 import pytest
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
+from zcu_tools.gui.session.device_models import ConnectDeviceRequest
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 from tests.gui.app.workflows._start_fakes import StartHarness

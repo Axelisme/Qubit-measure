@@ -25,19 +25,19 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.session.device_models import (
+    ConnectDeviceRequest,
+    DeviceSnapshot,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
-from zcu_tools.gui.session.services.device import (
-    ConnectDeviceRequest,
-    DeviceSnapshot,
-    DeviceStatus,
-    DisconnectDeviceRequest,
-    SetupDeviceRequest,
-    list_supported_device_types,
-)
+from zcu_tools.gui.session.services.device import list_supported_device_types
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import (

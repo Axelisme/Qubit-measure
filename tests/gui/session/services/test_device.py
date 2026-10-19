@@ -14,6 +14,11 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.device_models import (
+    ConnectDeviceRequest,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
@@ -22,14 +27,9 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationInfrastructure
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
-from zcu_tools.gui.session.services.device import (
-    ConnectDeviceRequest,
-    DeviceService,
-    DeviceStatus,
-    DisconnectDeviceRequest,
-    SetupDeviceRequest,
-)
+from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._completion_helpers import (
     on_device_connected,

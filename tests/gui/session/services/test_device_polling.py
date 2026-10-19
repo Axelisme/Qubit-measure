@@ -11,13 +11,13 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.session.events import DeviceChangedPayload
-from zcu_tools.gui.session.ports import OperationKind
-from zcu_tools.gui.session.services.device import (
-    DeviceStatus,
+from zcu_tools.gui.session.device_models import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.events import DeviceChangedPayload
+from zcu_tools.gui.session.ports import OperationKind
+from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._completion_helpers import on_device_disconnected
 from tests.gui._qt_waits import qt_until

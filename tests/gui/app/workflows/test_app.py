@@ -36,7 +36,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
+from zcu_tools.gui.session.device_models import ConnectDeviceRequest
 from zcu_tools.resources.entry import (
     ResultEntry,
     RoleResolutionError,

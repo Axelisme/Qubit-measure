@@ -17,12 +17,12 @@ from zcu_tools.gui.session.context_types import (
     WorkingPointInfo,
 )
 from zcu_tools.gui.session.device_control import DeviceControlFacet
+from zcu_tools.gui.session.device_models import DeviceEntry
 from zcu_tools.gui.session.services.connection import (
     ConnectRemoteRequest,
     ConnectRequest,
     SoCConnectionService,
 )
-from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.project_settings import (
     ConnectionPreferences,
     ProjectSettingsService,

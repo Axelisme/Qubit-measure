@@ -15,7 +15,7 @@ import pytest
 from qtpy.QtWidgets import QApplication, QListWidget, QPushButton, QWidget
 from zcu_tools.device import FakeDevice
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
+from zcu_tools.gui.session.device_models import ConnectDeviceRequest
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
 from tests.gui._user_input import ComponentDriver

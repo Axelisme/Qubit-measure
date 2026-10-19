@@ -14,16 +14,13 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.device_models import DeviceEntry, DeviceSnapshot
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
-from zcu_tools.gui.session.services.device import (
-    DeviceEntry,
-    DeviceSnapshot,
-    DeviceStatus,
-)
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
 from tests.gui.session.ui._parameter_fakes import make_parameters

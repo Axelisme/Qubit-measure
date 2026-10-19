@@ -41,14 +41,14 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
+from zcu_tools.gui.session.device_models import (
+    ConnectDeviceRequest,
+    DisconnectDeviceRequest,
+)
 from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
     OperationConflictError,
     OperationKind,
-)
-from zcu_tools.gui.session.services.device import (
-    ConnectDeviceRequest,
-    DisconnectDeviceRequest,
 )
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg

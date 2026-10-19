@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
-from zcu_tools.gui.session.services.connection import (
-    ConnectRemoteRequest,
-)
-from zcu_tools.gui.session.services.device import (
+from zcu_tools.gui.session.device_models import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
+)
+from zcu_tools.gui.session.services.connection import (
+    ConnectRemoteRequest,
 )
 
 if TYPE_CHECKING:

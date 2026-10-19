@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from qtpy.QtWidgets import QLabel
-from zcu_tools.gui.session.services.device import SetupDeviceRequest
+from zcu_tools.gui.session.device_models import SetupDeviceRequest
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 
 from tests.gui.session.ui._device_dialog_support import (

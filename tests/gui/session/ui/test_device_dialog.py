@@ -22,18 +22,18 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.device_models import (
+    ConnectDeviceRequest,
+    DeviceEntry,
+    DeviceSnapshot,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
 )
-from zcu_tools.gui.session.services.device import (
-    ConnectDeviceRequest,
-    DeviceEntry,
-    DeviceSnapshot,
-    DeviceStatus,
-    DisconnectDeviceRequest,
-    SetupDeviceRequest,
-)
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.widgets import error_colour

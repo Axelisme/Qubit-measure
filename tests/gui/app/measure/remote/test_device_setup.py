@@ -10,7 +10,7 @@ from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.param_spec import validate_params
-from zcu_tools.gui.session.services.device import SetupDeviceRequest
+from zcu_tools.gui.session.device_models import SetupDeviceRequest
 
 
 @dataclass

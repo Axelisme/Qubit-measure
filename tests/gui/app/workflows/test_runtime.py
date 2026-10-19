@@ -17,8 +17,9 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.session.device_models import ConnectDeviceRequest
 from zcu_tools.gui.session.operation_runner import OperationInfrastructure
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
+from zcu_tools.gui.session.services.device import DeviceService
 
 from tests.experiment.workflows._engine_fakes import (
     Cfg,

@@ -16,20 +16,20 @@ from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.device_models import (
+    ActiveDeviceOperation,
+    ConnectDeviceRequest,
+    DeviceEntry,
+    DeviceSnapshot,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
 from zcu_tools.gui.session.ports import OperationKind
-from zcu_tools.gui.session.services.device import (
-    ActiveDeviceOperation,
-    ConnectDeviceRequest,
-    DeviceEntry,
-    DeviceSnapshot,
-    DeviceStatus,
-    DisconnectDeviceRequest,
-    SetupDeviceRequest,
-)
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.plotting.plots import Plots
 
 from tests.gui._qt_waits import qt_until

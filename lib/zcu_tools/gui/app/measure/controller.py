@@ -20,6 +20,7 @@ from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
+from zcu_tools.gui.session.device_models import ActiveDeviceOperation
 from zcu_tools.gui.session.events import (
     DeviceOperationFinishedPayload,
     DeviceSetupFinishedPayload,
@@ -38,7 +39,6 @@ from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
 )
-from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.services.predictor import ParamsFor
 from zcu_tools.gui.session.types import ParameterContext
 

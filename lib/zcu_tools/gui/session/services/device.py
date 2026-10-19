@@ -7,8 +7,6 @@ from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
-    Protocol,
-    runtime_checkable,
 )
 
 from zcu_tools.device import DeviceActivity, DeviceInfo
@@ -17,6 +15,15 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
+from zcu_tools.gui.session.device_models import (
+    ActiveDeviceOperation,
+    ConnectDeviceRequest,
+    DeviceEntry,
+    DeviceSetupSnapshot,
+    DeviceSnapshot,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceOperationFinishedPayload,
@@ -34,6 +41,7 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
     DeviceMemoryInfo,
+    DeviceProtocol,
     DeviceRegistryPort,
     DriverFactoryPort,
     OperationConflictError,
@@ -47,118 +55,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.state import SessionState
 
 logger = logging.getLogger(__name__)
-
-
-@runtime_checkable
-class DeviceProtocol(Protocol):
-    """Structural contract a hardware driver must satisfy to be a GUI device.
-
-    pyright only checks the *shape* (these methods exist with these signatures).
-    The semantic invariants an implementer must also honour — and which a bug
-    silently violates — are:
-
-    - ``setup`` runs **off the main thread** (via ``BackgroundRunner``), never
-      the Qt main thread. It MUST poll ``stop_event`` during any long operation:
-      cancellation works by ``stop_event.set()``, and the worker reports
-      "cancelled" only if it returns with the event set. A ``setup`` that ignores
-      ``stop_event`` makes cancel a no-op (the worker blocks until natural
-      completion). ``progress`` may drive a pbar via the ambient pbar factory.
-    - ``get_info`` returns a fresh value snapshot. It is called on the worker
-      right after ``setup``, by the synchronous idle read path, and by the
-      off-main poll path that may refresh current values during setup/ramp. It
-      must not mutate device state.
-    - ``close`` releases the underlying resource and SHOULD be idempotent: it is
-      called on disconnect, and on any rollback where a driver was constructed
-      but never became the live registry entry.
-    """
-
-    def setup(
-        self,
-        cfg: Any,
-        *,
-        progress: bool = True,
-        stop_event: threading.Event | None = None,
-    ) -> None: ...
-    def get_info(self) -> BaseDeviceInfo: ...
-    def close(self) -> None: ...
-
-
-@dataclass(frozen=True)
-class ConnectDeviceRequest:
-    type_name: str
-    name: str
-    address: str
-    remember: bool = True
-
-
-@dataclass(frozen=True)
-class DisconnectDeviceRequest:
-    name: str
-    remember: bool = True
-
-
-@dataclass(frozen=True)
-class SetupDeviceRequest:
-    name: str
-    info: BaseDeviceInfo
-
-
-@dataclass(frozen=True)
-class DeviceSnapshot:
-    """Read-time projection of a device for View / remote readers.
-
-    Assembled by ``DeviceService._project`` from the State-owned ``DeviceState``
-    (name/type/address/status/info/error). Live setup progress is not spliced
-    here — it is polled separately via ``operation.progress`` (by operation_id,
-    ProgressService). It is never stored — State is the device-state SSOT.
-    """
-
-    name: str
-    type_name: str
-    address: str
-    status: DeviceStatus
-    info: BaseDeviceInfo | None = None
-    error: str | None = None
-
-
-@dataclass(frozen=True)
-class DeviceEntry:
-    name: str
-    type_name: str
-    # Fine-grained lifecycle status (DeviceStatus.value) rather than a coarse
-    # bool, so the list view matches the snapshot/active-operations projections
-    # (single-status SSOT; FC7). One of: memory_only | connecting | connected |
-    # disconnecting | setting_up.
-    status: str
-
-
-@dataclass(frozen=True)
-class DeviceSetupSnapshot:
-    # Live progress is polled via operation.progress (by operation_id, ADR-0068
-    # device↔run alignment), not carried here — this names *which* device is
-    # setting up.
-    device_name: str
-
-
-@dataclass(frozen=True)
-class ActiveDeviceOperation:
-    """One in-flight device operation in the concurrent-enumeration view.
-
-    Phase C runs operations for different devices in parallel, so the read-only
-    "what is in flight" surface is a *set*, not a single op. Each entry pairs the
-    device-state projection with the operation ``kind`` (connect / disconnect /
-    setup) so an agent knows both which device and which kind of operation is
-    live without re-deriving it from ``status``. ``device_name`` mirrors
-    ``snapshot.name`` for callers that only need the key.
-    """
-
-    device_name: str
-    kind: OperationKind
-    snapshot: DeviceSnapshot
-    # The operation handle (runner token), so a concurrent-enumeration reader can
-    # await each in-flight GUI operation by token, or expose it through MCP
-    # status() as an agent handle, without re-resolving by device name.
-    token: int
 
 
 @dataclass(frozen=True)

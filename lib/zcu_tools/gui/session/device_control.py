@@ -15,17 +15,17 @@ from zcu_tools.gui.session.events import (
 if TYPE_CHECKING:
     from zcu_tools.device import DeviceActivity
     from zcu_tools.device.base import BaseDeviceInfo
-    from zcu_tools.gui.session.pbar_host import ProgressBarModel
-    from zcu_tools.gui.session.progress_control import OwnerProgressPort
-    from zcu_tools.gui.session.services.device import (
+    from zcu_tools.gui.session.device_models import (
         ActiveDeviceOperation,
         ConnectDeviceRequest,
         DeviceEntry,
-        DeviceService,
         DeviceSnapshot,
         DisconnectDeviceRequest,
         SetupDeviceRequest,
     )
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
+    from zcu_tools.gui.session.progress_control import OwnerProgressPort
+    from zcu_tools.gui.session.services.device import DeviceService
 
 
 class DeviceControlPort(Protocol):

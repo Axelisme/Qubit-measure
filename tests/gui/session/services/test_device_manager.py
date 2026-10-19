@@ -16,6 +16,11 @@ from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.device_models import (
+    ConnectDeviceRequest,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
@@ -25,13 +30,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationInfrastructure,
     OperationRunner,
 )
-from zcu_tools.gui.session.services.device import (
-    ConnectDeviceRequest,
-    DeviceRegistrationError,
-    DeviceService,
-    DisconnectDeviceRequest,
-    SetupDeviceRequest,
-)
+from zcu_tools.gui.session.services.device import DeviceRegistrationError, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui._completion_helpers import (

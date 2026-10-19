@@ -6,23 +6,23 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.ports import OperationConflictError
-    from zcu_tools.gui.session.services.connection import SoCConnectionService
-    from zcu_tools.gui.session.services.context import ContextService
-    from zcu_tools.gui.session.services.device import (
+    from zcu_tools.gui.session.device_models import (
         ConnectDeviceRequest,
-        DeviceService,
         DeviceSnapshot,
-        DeviceStatus,
         DisconnectDeviceRequest,
         SetupDeviceRequest,
     )
+    from zcu_tools.gui.session.ports import OperationConflictError
+    from zcu_tools.gui.session.services.connection import SoCConnectionService
+    from zcu_tools.gui.session.services.context import ContextService
+    from zcu_tools.gui.session.services.device import DeviceService
     from zcu_tools.gui.session.services.predictor import PredictorService
     from zcu_tools.gui.session.services.project_settings import (
         ConnectionPreferences,
         ProjectRequest,
         ProjectSettingsService,
     )
+    from zcu_tools.gui.session.state import DeviceStatus
 
     from .analyze import AnalyzeService
     from .app_services import AppServices, build_app_services
@@ -119,11 +119,11 @@ _EXPORT_MODULES: dict[str, str] = {
     "PredictorService": "zcu_tools.gui.session.services.predictor",
     "ContextService": "zcu_tools.gui.session.services.context",
     "DeviceService": "zcu_tools.gui.session.services.device",
-    "ConnectDeviceRequest": "zcu_tools.gui.session.services.device",
-    "DeviceSnapshot": "zcu_tools.gui.session.services.device",
-    "DeviceStatus": "zcu_tools.gui.session.services.device",
-    "DisconnectDeviceRequest": "zcu_tools.gui.session.services.device",
-    "SetupDeviceRequest": "zcu_tools.gui.session.services.device",
+    "ConnectDeviceRequest": "zcu_tools.gui.session.device_models",
+    "DeviceSnapshot": "zcu_tools.gui.session.device_models",
+    "DeviceStatus": "zcu_tools.gui.session.state",
+    "DisconnectDeviceRequest": "zcu_tools.gui.session.device_models",
+    "SetupDeviceRequest": "zcu_tools.gui.session.device_models",
     "OperationConflictError": "zcu_tools.gui.session.ports",
     "OperationGate": ".operation_gate",
     "OperationKind": ".operation_gate",
