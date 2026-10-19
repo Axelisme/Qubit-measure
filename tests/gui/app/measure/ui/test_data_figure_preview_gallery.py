@@ -1,243 +1,34 @@
-"""Variant A stacked Data previews — gallery and ExpTabWidget integration (Ticket 002)."""
+"""Standalone DataFigurePreviewGallery capabilities, failure isolation, and geometry contracts."""
 
 from __future__ import annotations
 
-import base64
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass
-from unittest.mock import MagicMock
-
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtCore import (
-    QBuffer,
-    QByteArray,
-    QCoreApplication,
-    QEvent,
-    QIODevice,
-    QRect,
-    QSize,
-)
-from qtpy.QtGui import QColor, QPixmap
-from qtpy.QtWidgets import (
-    QApplication,
-    QLabel,
-    QPushButton,
-    QScrollArea,
-    QWidget,
-)
-from zcu_tools.experiment.artifacts import ArtifactRef
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AdapterGuide,
-    AnalysisMode,
-)
-from zcu_tools.gui.app.measure.services import TabSnapshot
-from zcu_tools.gui.app.measure.state import TabInteractionState
+from qtpy.QtCore import QCoreApplication, QEvent, QRect, QSize
+from qtpy.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
     DataFigurePreviewGallery,
 )
-from zcu_tools.gui.control_identity import ControlIdentity
 
-from tests.gui.app.measure._form_fakes import configure_form_lookup
-from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
-
-
-@dataclass
-class DummyParams:
-    x: int = 1
-
-
-@dataclass
-class DummyPostParams:
-    p: int = 2
-
-
-# Minimal 1x1 PNG for deterministic fake renderer (opaque, valid for QPixmap)
-_FAKE_PNG_BYTES = base64.b64decode(
-    b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+from tests.gui.app.measure.ui._preview_gallery_support import (
+    FAKE_PNG_BYTES,
+    assert_aspect_fit,
+    fake_renderer,
+    gallery_geometry_cards,
+    renderer_640x480,
 )
 
-
-def _fake_renderer(_fig: object) -> bytes:
-    return bytes(_FAKE_PNG_BYTES)
-
-
-def _make_png_bytes(width: int, height: int, color: str = "#286ac7") -> bytes:
-    """Deterministic PNG bytes of exact size (for aspect-fit regression)."""
-    pix = QPixmap(width, height)
-    pix.fill(QColor(color))
-    ba = QByteArray()
-    buf = QBuffer(ba)
-    # tolerated: QtPy promotes the binding OpenModeFlag members onto QIODevice at runtime.
-    buf.open(QIODevice.WriteOnly)  # pyright: ignore[reportAttributeAccessIssue]
-    pix.save(buf, "PNG")
-    buf.close()
-    # tolerated: SIP supports QByteArray buffer conversion to bytes, which the binding stub omits.
-    return bytes(ba)  # pyright: ignore[reportArgumentType]
-
-
 _640x480_PNG = None  # lazy
-
-
-def _renderer_640x480(_fig: object) -> bytes:
-    # Each call returns fresh 640x480 PNG (production screenshot size).
-    return _make_png_bytes(640, 480, "#286ac7")
-
-
-def _aspect_ratio(size: QSize) -> float:
-    if size.height() == 0:
-        return 0.0
-    return float(size.width()) / float(size.height())
-
-
-def _assert_aspect_fit(
-    viewport: QSize, displayed: QSize, original: QSize, *, tol: float = 0.02
-) -> None:
-    # Displayed must fit within viewport (allow 1px rounding)
-    assert displayed.width() <= viewport.width() + 1, (
-        f"width {displayed.width()} > viewport {viewport.width()}"
-    )
-    assert displayed.height() <= viewport.height() + 1, (
-        f"height {displayed.height()} > viewport {viewport.height()}"
-    )
-    # Must not be cropped to zero
-    assert displayed.width() > 0 and displayed.height() > 0
-    # Aspect ratio preserved
-    orig_ar = _aspect_ratio(original)
-    disp_ar = _aspect_ratio(displayed)
-    assert abs(orig_ar - disp_ar) < tol, (
-        f"aspect {disp_ar:.3f} vs original {orig_ar:.3f}"
-    )
-    # Displayed should be maximal within viewport: at least one dimension tight (within 2px)
-    # For 640x480 -> 396x120 viewport, height should be ~120, width ~160.
-    assert (
-        abs(displayed.width() - viewport.width()) <= 2
-        or abs(displayed.height() - viewport.height()) <= 2
-    ), (
-        f"not tight {displayed.width()}x{displayed.height()} in {viewport.width()}x{viewport.height()}"
-    )
 
 
 def _failing_renderer_for(target_fig: object):
     def _render(fig: object) -> bytes:
         if fig is target_fig:
             raise RuntimeError("boom render")
-        return bytes(_FAKE_PNG_BYTES)
+        return bytes(FAKE_PNG_BYTES)
 
     return _render
-
-
-@pytest.fixture
-def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
-    """Retain every Local authority until this case retires its owned views."""
-    owned_authorities: list[ControlIdentity] = []
-
-    def create_ctrl() -> MagicMock:
-        ctrl = MagicMock()
-        ctrl.control_identity = ControlIdentity()
-        owned_authorities.append(ctrl.control_identity)
-        configure_form_lookup(ctrl)
-        ctrl.get_left_panel_width.return_value = 500
-        ctrl.get_tab_adapter_name.return_value = "fake"
-        ctrl.get_adapter_guide.return_value = AdapterGuide(
-            markdown="", resource_dir=None
-        )
-        ctrl.progress_control.attach_progress.return_value = lambda: None
-        ctrl.progress_control.progress_bars.return_value = []
-        ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
-        ctrl.get_cfg_editor_draft.return_value = MagicMock()
-        ctrl.active_operation_count.return_value = 0
-
-        return ctrl
-
-    try:
-        yield create_ctrl
-    finally:
-        owned_authorities.clear()
-
-
-def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=False):
-    from zcu_tools.gui.app.measure.services.ports import (
-        AnalysisPaneSnapshot,
-        PostAnalysisPaneSnapshot,
-        RunPaneSnapshot,
-        SavePaneSnapshot,
-    )
-
-    caps = AdapterCapabilities(analysis=analysis, post_analysis=post, load_data=load)
-    run_snap = RunPaneSnapshot(result=object(), source_path=None)
-    analysis_snap = AnalysisPaneSnapshot(
-        params=DummyParams() if analysis is not AnalysisMode.NONE else None,
-        result=object() if analysis is not AnalysisMode.NONE else None,
-        figures=None,
-        writeback_items=(),
-    )
-    post_snap = PostAnalysisPaneSnapshot(
-        params=DummyPostParams() if post else None,
-        result=object() if post else None,
-        figures=None,
-        writeback_items=(),
-    )
-    save_snap = SavePaneSnapshot()
-    snapshot = TabSnapshot(
-        adapter_name="fake",
-        cfg_input={},
-        tab_id=tab_id,
-        interaction=TabInteractionState(
-            global_run_active=False,
-            is_running=False,
-            is_analyzing=False,
-            has_context=True,
-            has_active_context=True,
-            has_soc=True,
-            has_run_result=True,
-            has_analyze_result=analysis is not AnalysisMode.NONE,
-            has_figure=False,
-            has_post_analyze_result=post,
-        ),
-        capabilities=caps,
-        run=run_snap,
-        analysis=analysis_snap,
-        post_analysis=post_snap,
-        save=save_snap,
-    )
-    return with_artifacts(snapshot)
-
-
-@pytest.fixture
-def exp_tab_widget(qapp, monkeypatch, make_ctrl):
-    import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
-
-    def mock_attach(fig, container):
-        from qtpy.QtWidgets import QWidget
-
-        w = QWidget()
-        # tolerated: The minimal QWidget canvas fixture supplies the figure/draw surface consumed by this tab.
-        w.figure = fig  # pyright: ignore[reportAttributeAccessIssue]
-        container.attach_canvas(w)
-        # tolerated: The minimal QWidget canvas fixture supplies the figure/draw surface consumed by this tab.
-        w.draw = lambda: None  # pyright: ignore[reportAttributeAccessIssue]
-        return w
-
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
-    owned_tabs: list[mod.ExpTabWidget] = []
-
-    def create_tab(tab_id, ctrl, capabilities, *, preview_renderer=None):
-        tab = mod.ExpTabWidget(
-            tab_id, ctrl, capabilities, preview_renderer=preview_renderer
-        )
-        owned_tabs.append(tab)
-        return tab
-
-    try:
-        yield create_tab
-    finally:
-        for tab in owned_tabs:
-            tab.close()
-            tab.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        owned_tabs.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +86,7 @@ def test_gallery_only_recovers_viewport_lifetime_errors(
 
 def test_gallery_capability_driven_cards(qapp):
     caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
-    g_none = DataFigurePreviewGallery(caps_none, renderer=_fake_renderer)
+    g_none = DataFigurePreviewGallery(caps_none, renderer=fake_renderer)
     assert g_none.has_card("run")
     assert not g_none.has_card("analysis")
     assert not g_none.has_card("post_analysis")
@@ -306,7 +97,7 @@ def test_gallery_capability_driven_cards(qapp):
 
     # Run + Analysis
     caps_a = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
-    g_a = DataFigurePreviewGallery(caps_a, renderer=_fake_renderer)
+    g_a = DataFigurePreviewGallery(caps_a, renderer=fake_renderer)
     assert g_a.has_card("run")
     assert g_a.has_card("analysis")
     assert not g_a.has_card("post_analysis")
@@ -314,7 +105,7 @@ def test_gallery_capability_driven_cards(qapp):
 
     # All three
     caps_both = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    g_both = DataFigurePreviewGallery(caps_both, renderer=_fake_renderer)
+    g_both = DataFigurePreviewGallery(caps_both, renderer=fake_renderer)
     assert g_both.has_card("run")
     assert g_both.has_card("analysis")
     assert g_both.has_card("post_analysis")
@@ -327,7 +118,7 @@ def test_gallery_capability_driven_cards(qapp):
 
 def test_gallery_card_delegates_nullable_image_event(qapp):
     caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
-    gallery = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    gallery = DataFigurePreviewGallery(caps, renderer=fake_renderer)
     try:
         card = gallery.find_card("run")
         assert card is not None
@@ -343,7 +134,7 @@ def test_gallery_card_delegates_nullable_image_event(qapp):
 
 def test_gallery_supported_but_empty_shows_named_empty_state(qapp):
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g = DataFigurePreviewGallery(caps, renderer=fake_renderer)
     # Initially empty for all
     assert g.card_state("run") == "empty"
     assert "No figure" in g.card_text("run")
@@ -363,7 +154,7 @@ def test_gallery_supported_but_empty_shows_named_empty_state(qapp):
 
 def test_gallery_raster_preview_via_injected_renderer(qapp):
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g = DataFigurePreviewGallery(caps, renderer=fake_renderer)
     fig_run = Figure()
     fig_a = Figure()
     fig_p = Figure()
@@ -403,7 +194,7 @@ def test_gallery_single_failure_isolated(qapp):
     def fail_post(fig):
         if fig is fig_p:
             raise ValueError("post boom")
-        return bytes(_FAKE_PNG_BYTES)
+        return bytes(FAKE_PNG_BYTES)
 
     g2 = DataFigurePreviewGallery(caps, renderer=fail_post)
     g2.update_figures(fig_run, fig_a, fig_p)
@@ -418,7 +209,7 @@ def test_gallery_never_retains_figure(qapp):
 
     def capturing_renderer(fig):
         held.append(fig)
-        return bytes(_FAKE_PNG_BYTES)
+        return bytes(FAKE_PNG_BYTES)
 
     g = DataFigurePreviewGallery(caps, renderer=capturing_renderer)
     fig = Figure()
@@ -438,281 +229,6 @@ def test_gallery_never_retains_figure(qapp):
 
 
 # ---------------------------------------------------------------------------
-# ExpTabWidget integration — S1 S2 S4
-# ---------------------------------------------------------------------------
-
-
-def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctrl):
-    ctrl = make_ctrl()
-    # NONE
-    caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
-    snap_none = make_snapshot("t1", analysis=AnalysisMode.NONE, post=False)
-    tab_none = exp_tab_widget("t1", ctrl, caps_none)
-    tab_none.attach(snap_none, MagicMock())
-    # Data tab exists
-    assert any(
-        tab_none._left_tabs.tabText(i) == "Data"
-        for i in range(tab_none._left_tabs.count())
-    )
-    # Switch to Data
-    for i in range(tab_none._left_tabs.count()):
-        if tab_none._left_tabs.tabText(i) == "Data":
-            tab_none._left_tabs.setCurrentIndex(i)
-            break
-    tab_none._on_left_tab_changed(tab_none._left_tabs.currentIndex())
-    assert tab_none._right_stack.currentWidget() is tab_none._data_gallery
-    assert tab_none._data_gallery.has_card("run")
-    assert not tab_none._data_gallery.has_card("analysis")
-    assert tab_none._data_gallery.card_state("run") == "empty"
-    assert "No figure" in tab_none._data_gallery.card_text("run")
-    assert isinstance(tab_none._data_gallery.findChild(QScrollArea), QScrollArea)
-    tab_none.detach()
-
-    # FIT + post
-    caps_both = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    snap_both = make_snapshot("t2", analysis=AnalysisMode.FIT, post=True)
-    tab_both = exp_tab_widget("t2", ctrl, caps_both)
-    tab_both.attach(snap_both, MagicMock())
-    for i in range(tab_both._left_tabs.count()):
-        if tab_both._left_tabs.tabText(i) == "Data":
-            tab_both._left_tabs.setCurrentIndex(i)
-            break
-    tab_both._on_left_tab_changed(tab_both._left_tabs.currentIndex())
-    assert tab_both._data_gallery.has_card("run")
-    assert tab_both._data_gallery.has_card("analysis")
-    assert tab_both._data_gallery.has_card("post_analysis")
-    assert tab_both._data_gallery.card_count() == 3
-    tab_both.detach()
-
-
-def test_exp_data_routing_a4(qapp, exp_tab_widget, make_ctrl):
-    ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
-    tab = exp_tab_widget("t1", ctrl, caps)
-    tab.attach(snap, MagicMock())
-
-    def idx(name):
-        for i in range(tab._left_tabs.count()):
-            if tab._left_tabs.tabText(i) == name:
-                return i
-        raise KeyError(name)
-
-    # Run
-    tab._left_tabs.setCurrentIndex(idx("Run"))
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._run_stack
-    # Analysis
-    tab._left_tabs.setCurrentIndex(idx("Analysis"))
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._analysis_panel_right
-    # Post
-    tab._left_tabs.setCurrentIndex(idx("Post-Analysis"))
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._post_panel_right
-    # Data -> gallery
-    tab._left_tabs.setCurrentIndex(idx("Data"))
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._data_gallery
-    # Guide -> placeholder
-    tab._left_tabs.setCurrentIndex(idx("Guide"))
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._right_placeholder
-    tab.detach()
-
-
-def test_exp_data_activation_refreshes_and_lifecycle_sync(
-    qapp, exp_tab_widget, make_ctrl
-):
-    ctrl = make_ctrl()
-    # Use fake renderer so we can assert raster not empty after show
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    tab = exp_tab_widget("t1", ctrl, caps, preview_renderer=_fake_renderer)
-    snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
-    tab.attach(snap, MagicMock())
-
-    # Initially no figures -> empty
-    for i in range(tab._left_tabs.count()):
-        if tab._left_tabs.tabText(i) == "Data":
-            tab._left_tabs.setCurrentIndex(i)
-            break
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._data_gallery.card_state("run") == "empty"
-    assert tab._data_gallery.card_state("analysis") == "empty"
-
-    # Data visible: show figures should sync immediately
-    fig_run = Figure()
-    fig_a = Figure()
-    fig_p = Figure()
-    # Capture container identities before
-    run_c = tab.get_run_container()
-    ana_c = tab.get_analysis_container()
-    post_c = tab.get_post_container()
-    tab.show_run_figure(fig_run)
-    assert tab.get_current_figure_for_pane("run") is fig_run
-    assert tab.get_run_container() is run_c
-    assert tab._data_gallery.card_state("run") == "available"
-
-    tab.show_analysis_figures(ready_figures(fig_a))
-    assert tab.get_current_figure_for_pane("analysis") is fig_a
-    assert tab.get_analysis_container() is ana_c
-    assert tab._data_gallery.card_state("analysis") == "available"
-
-    tab.show_post_analysis_figures(ready_figures(fig_p))
-    assert tab.get_current_figure_for_pane("post_analysis") is fig_p
-    assert tab.get_post_container() is post_c
-    assert tab._data_gallery.card_state("post_analysis") == "available"
-
-    # Data-visible clear should revert to empty
-    tab.prepare_run_container()
-    assert tab.get_current_figure_for_pane("run") is None
-    assert tab.get_run_container() is run_c
-    assert tab._data_gallery.card_state("run") == "empty"
-    # downstream also cleared
-    assert tab._data_gallery.card_state("analysis") == "empty"
-    assert tab._data_gallery.card_state("post_analysis") == "empty"
-
-    # Re-show
-    fig_run2 = Figure()
-    tab.show_run_figure(fig_run2)
-    assert tab._data_gallery.card_state("run") == "available"
-    # clear_post_figure only affects post
-    fig_a2 = Figure()
-    fig_p2 = Figure()
-    tab.show_analysis_figures(ready_figures(fig_a2))
-    tab.show_post_analysis_figures(ready_figures(fig_p2))
-    assert tab._data_gallery.card_state("post_analysis") == "available"
-    tab.clear_post_figure()
-    assert tab._data_gallery.card_state("post_analysis") == "empty"
-    assert tab._data_gallery.card_state("analysis") == "available"
-    assert tab.get_current_figure_for_pane("analysis") is fig_a2
-    assert tab.get_analysis_container() is ana_c
-    tab.detach()
-
-
-def test_exp_data_invisible_defers_render(qapp, exp_tab_widget, make_ctrl):
-    ctrl = make_ctrl()
-    call_log: list[str] = []
-
-    def counting_renderer(fig):
-        call_log.append("render")
-        return bytes(_FAKE_PNG_BYTES)
-
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
-    tab = exp_tab_widget("t1", ctrl, caps, preview_renderer=counting_renderer)
-    snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=False)
-    tab.attach(snap, MagicMock())
-
-    # Start on Run (Data not visible)
-    for i in range(tab._left_tabs.count()):
-        if tab._left_tabs.tabText(i) == "Run":
-            tab._left_tabs.setCurrentIndex(i)
-            break
-    assert tab._right_stack.currentWidget() is tab._run_stack
-    call_log.clear()
-    fig_run = Figure()
-    tab.show_run_figure(fig_run)
-    # No render while Data invisible
-    assert call_log == []
-    # Switch to Data -> should render once
-    for i in range(tab._left_tabs.count()):
-        if tab._left_tabs.tabText(i) == "Data":
-            tab._left_tabs.setCurrentIndex(i)
-            break
-    assert len(call_log) == 1
-    assert tab._data_gallery.card_state("run") == "available"
-    tab.detach()
-
-
-def test_exp_production_reachability_data_gallery_is_active_right_widget(
-    qapp, exp_tab_widget, make_ctrl
-):
-    ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    tab = exp_tab_widget("reach", ctrl, caps)
-    snap = make_snapshot("reach", analysis=AnalysisMode.FIT, post=True)
-    actions = MagicMock()
-    tab.attach(snap, actions)
-    # Select real Data subtab via left_tabs
-    data_idx = None
-    for i in range(tab._left_tabs.count()):
-        if tab._left_tabs.tabText(i) == "Data":
-            data_idx = i
-            break
-    assert data_idx is not None
-    tab._left_tabs.setCurrentIndex(data_idx)
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._data_gallery
-    # The Data pane still submits a whole Run artifact through its Save button.
-    buttons = [
-        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
-    ]
-    assert len(buttons) == 3
-    assert buttons[0].isEnabled()
-    buttons[0].click()
-    assert [call.args for call in actions.save_artifact.call_args_list] == [
-        ("reach", ArtifactRef("run", "measurement_data"))
-    ]
-    tab.detach()
-
-
-def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
-    qapp, exp_tab_widget, make_ctrl
-):
-    ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    fig_run = Figure()
-    fig_a = Figure()
-    fig_p = Figure()
-
-    def fail_analysis(fig):
-        if fig is fig_a:
-            raise RuntimeError("analysis boom")
-        return bytes(_FAKE_PNG_BYTES)
-
-    tab = exp_tab_widget("t1", ctrl, caps, preview_renderer=fail_analysis)
-    snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
-    actions = MagicMock()
-    tab.attach(snap, actions)
-    # Go to Data
-    for i in range(tab._left_tabs.count()):
-        if tab._left_tabs.tabText(i) == "Data":
-            tab._left_tabs.setCurrentIndex(i)
-            break
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    # Show figures while Data visible
-    tab.show_run_figure(fig_run)
-    tab.show_analysis_figures(ready_figures(fig_a))
-    tab.show_post_analysis_figures(ready_figures(fig_p))
-    # Analysis should be unavailable, others available
-    assert tab._data_gallery.card_state("run") == "available"
-    assert tab._data_gallery.card_state("analysis") == "unavailable"
-    assert tab._data_gallery.card_state("post_analysis") == "available"
-    # Raster failure must not disable whole-artifact Save or Save All commands.
-    buttons = [
-        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
-    ]
-    assert len(buttons) == 3
-    assert all(button.isEnabled() for button in buttons)
-    for button in buttons:
-        button.click()
-    assert [call.args for call in actions.save_artifact.call_args_list] == [
-        ("t1", ArtifactRef("run", "measurement_data")),
-        ("t1", ArtifactRef("analysis", "results")),
-        ("t1", ArtifactRef("post_analysis", "results")),
-    ]
-    save_all = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Save All"
-    )
-    assert save_all.isEnabled()
-    save_all.click()
-    assert [call.args for call in actions.save_all.call_args_list] == [("t1",)]
-    tab.detach()
-
-
-# ---------------------------------------------------------------------------
 # A3 regression: 640x480 pixmap must aspect-fit inside ~396x120 viewport
 # ---------------------------------------------------------------------------
 
@@ -727,7 +243,7 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
     pre-fix code that stored the raw 640x480 pixmap directly.
     """
     caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
-    g = DataFigurePreviewGallery(caps, renderer=_renderer_640x480)
+    g = DataFigurePreviewGallery(caps, renderer=renderer_640x480)
     # Show gallery at size that reproducibly yields ~396x120 image viewport.
     # 434x200 was determined to produce 396x120 label viewport with 160x120 display
     # (see probe); using narrow tolerance ensures clipping regression is real.
@@ -754,7 +270,7 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
     assert 155 <= disp.width() <= 165, f"displayed width {disp.width()} not ~160"
     assert 115 <= disp.height() <= 125, f"displayed height {disp.height()} not ~120"
     # Displayed must fit and preserve aspect — would fail pre-fix where disp==640x480
-    _assert_aspect_fit(vp, disp.size(), orig.size())
+    assert_aspect_fit(vp, disp.size(), orig.size())
     # After resize: widen gallery, viewport grows, displayed must re-scale and still fit
     g.setFixedSize(700, 500)
     QApplication.processEvents()
@@ -775,52 +291,11 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
     else:
         expected = QSize(vp2.width(), vp2.width() * orig.height() // orig.width())
     assert disp2.size() == expected, f"disp2 {disp2.size()} != fit {expected}"
-    _assert_aspect_fit(vp2, disp2.size(), orig.size())
+    assert_aspect_fit(vp2, disp2.size(), orig.size())
     # Original cache must stay 640x480 across resizes
     # tolerated: The successfully rendered card retains its original pixmap across viewport resizes.
     assert card.original_pixmap().size() == orig.size()  # pyright: ignore[reportOptionalMemberAccess]
     g.hide()
-
-
-def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
-    qapp, exp_tab_widget, make_ctrl
-):
-    """Via shipped ExpTabWidget Data path, verify bounds and ratio before/after resize."""
-    ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
-    tab = exp_tab_widget("t-aspect", ctrl, caps, preview_renderer=_renderer_640x480)
-    snap = make_snapshot("t-aspect", analysis=AnalysisMode.NONE, post=False)
-    tab.attach(snap, MagicMock())
-    # Switch to Data so gallery is active right widget
-    for i in range(tab._left_tabs.count()):
-        if tab._left_tabs.tabText(i) == "Data":
-            tab._left_tabs.setCurrentIndex(i)
-            break
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._data_gallery
-    tab.show()
-    tab.resize(500, 600)
-    QApplication.processEvents()
-    QApplication.processEvents()
-    fig = Figure()
-    tab.show_run_figure(fig)
-    QApplication.processEvents()
-    card = tab._data_gallery.find_card("run")
-    assert card is not None
-    vp = card.image_viewport_size()
-    disp = card.displayed_pixmap()
-    orig = card.original_pixmap()
-    assert vp is not None and disp is not None and orig is not None
-    _assert_aspect_fit(vp, disp.size(), orig.size())
-    # Resize larger — simulate user dragging splitter wider (still gallery viewport, not window)
-    tab._data_gallery.setFixedWidth(700)
-    QApplication.processEvents()
-    QApplication.processEvents()
-    vp2 = card.image_viewport_size()
-    disp2 = card.displayed_pixmap()
-    assert vp2 is not None and disp2 is not None
-    _assert_aspect_fit(vp2, disp2.size(), orig.size())
-    tab.detach()
 
 
 # ---------------------------------------------------------------------------
@@ -828,28 +303,16 @@ def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
 # ---------------------------------------------------------------------------
 
 
-def _gallery_geometry_cards(g: DataFigurePreviewGallery) -> dict[str, QRect]:
-    # Force layout
-    QApplication.processEvents()
-    QApplication.processEvents()
-    geoms: dict[str, QRect] = {}
-    for key in ["run", "analysis", "post_analysis"]:
-        c = g.find_card(key)
-        if c is not None:
-            geoms[key] = c.geometry()
-    return geoms
-
-
 def test_gallery_narrow_single_column_three_cards(qapp):
     """Narrow viewport (< threshold) must show three cards in one vertical column (S1)."""
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g = DataFigurePreviewGallery(caps, renderer=fake_renderer)
     g.setFixedSize(360, 700)  # narrow: viewport ~348 < 450
     g.show()
     QApplication.processEvents()
     QApplication.processEvents()
     assert not g.is_wide_mode(), "expected narrow mode at 360, got wide"
-    geoms = _gallery_geometry_cards(g)
+    geoms = gallery_geometry_cards(g)
     assert "run" in geoms and "analysis" in geoms and "post_analysis" in geoms
     r: QRect = geoms["run"]
     a: QRect = geoms["analysis"]
@@ -867,13 +330,13 @@ def test_gallery_narrow_single_column_three_cards(qapp):
 def test_gallery_wide_three_card_mosaic_run_left_spanning(qapp):
     """Wide + 3 cards: Run left spanning two rows, Analysis/Post right (S1/S4)."""
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g = DataFigurePreviewGallery(caps, renderer=fake_renderer)
     g.setFixedSize(750, 700)  # wide: viewport ~738 > 450
     g.show()
     QApplication.processEvents()
     QApplication.processEvents()
     assert g.is_wide_mode(), "expected wide mode at 750"
-    geoms = _gallery_geometry_cards(g)
+    geoms = gallery_geometry_cards(g)
     r: QRect = geoms["run"]
     a: QRect = geoms["analysis"]
     p: QRect = geoms["post_analysis"]
@@ -899,13 +362,13 @@ def test_gallery_wide_three_card_mosaic_run_left_spanning(qapp):
 def test_gallery_wide_two_card_side_by_side(qapp):
     """Wide + 2 cards: Run and Analysis side-by-side (S4)."""
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
-    g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g = DataFigurePreviewGallery(caps, renderer=fake_renderer)
     g.setFixedSize(750, 400)
     g.show()
     QApplication.processEvents()
     QApplication.processEvents()
     assert g.is_wide_mode()
-    geoms = _gallery_geometry_cards(g)
+    geoms = gallery_geometry_cards(g)
     r: QRect = geoms["run"]
     a: QRect = geoms["analysis"]
     # Side-by-side -> same y, distinct x
@@ -925,7 +388,7 @@ def test_gallery_wide_single_full_width(qapp):
     """Single card (Run only) occupies full width in both narrow and wide (S4)."""
     caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
     # Narrow
-    g_n = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g_n = DataFigurePreviewGallery(caps, renderer=fake_renderer)
     g_n.setFixedSize(360, 400)
     g_n.show()
     QApplication.processEvents()
@@ -934,7 +397,7 @@ def test_gallery_wide_single_full_width(qapp):
     # tolerated: Run-only capabilities always create the run card queried here.
     r_n: QRect = g_n.find_card("run").geometry()  # pyright: ignore[reportOptionalMemberAccess]
     # Wide
-    g_w = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g_w = DataFigurePreviewGallery(caps, renderer=fake_renderer)
     g_w.setFixedSize(750, 400)
     g_w.show()
     QApplication.processEvents()
@@ -947,113 +410,3 @@ def test_gallery_wide_single_full_width(qapp):
     assert r_n.x() <= 4 and r_w.x() <= 4
     g_n.hide()
     g_w.hide()
-
-
-def _assert_narrow_gallery_geometries(
-    geoms: dict[str, QRect], expected_count: int
-) -> None:
-    """Assert narrow layout geometry for the expected gallery card count."""
-    if expected_count == 1:
-        r = geoms["run"]
-        assert r.x() <= 4
-    elif expected_count == 2:
-        r = geoms["run"]
-        a = geoms["analysis"]
-        assert abs(r.x() - a.x()) <= 2, (
-            f"2-card narrow x not aligned {r.x()} vs {a.x()}"
-        )
-        assert r.y() < a.y(), f"2-card narrow y not monotonic {r.y()} vs {a.y()}"
-    else:  # 3
-        r = geoms["run"]
-        a = geoms["analysis"]
-        p = geoms["post_analysis"]
-        assert abs(r.x() - a.x()) <= 2 and abs(a.x() - p.x()) <= 2, (
-            "3-card narrow x not aligned"
-        )
-        assert r.y() < a.y() < p.y(), "3-card narrow y not monotonic"
-
-
-def _assert_wide_gallery_geometries(
-    geoms: dict[str, QRect], expected_count: int
-) -> None:
-    """Assert wide layout geometry for the expected gallery card count."""
-    if expected_count == 1:
-        r = geoms["run"]
-        assert r.x() <= 4
-        assert r.width() > 400  # wide single card expands
-    elif expected_count == 2:
-        r = geoms["run"]
-        a = geoms["analysis"]
-        assert abs(r.y() - a.y()) <= 4, f"2-card wide y not aligned {r.y()} vs {a.y()}"
-        assert a.x() > r.x() + r.width() - 4, "2-card wide not side-by-side"
-        assert abs(r.width() - a.width()) <= 20
-    else:
-        r = geoms["run"]
-        a = geoms["analysis"]
-        p = geoms["post_analysis"]
-        assert r.x() < a.x() - 2, f"Run not left of Analysis {r.x()} vs {a.x()}"
-        assert abs(a.x() - p.x()) <= 2
-        assert abs(r.y() - a.y()) <= 4
-        assert p.y() > a.y() + 2
-        assert r.height() > a.height() + 2
-
-
-def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
-    qapp, exp_tab_widget, make_ctrl
-):
-    """Geometry via shipped ExpTabWidget Data path for each capability combination (A1).
-
-    Verifies automatic viewport-driven reflow (gallery viewport, not test-driven
-    private call) across 1/2/3 cards through the shipped ExpTabWidget resize.
-    """
-
-    def _check_one(caps: AdapterCapabilities, expected_count: int) -> None:
-        ctrl = make_ctrl()
-        tag = f"t-geom-{expected_count}-{caps.analysis}-{caps.post_analysis}"
-        tab = exp_tab_widget(tag, ctrl, caps, preview_renderer=_fake_renderer)
-        snap = make_snapshot(tag, analysis=caps.analysis, post=caps.post_analysis)
-        tab.attach(snap, MagicMock())
-        for i in range(tab._left_tabs.count()):
-            if tab._left_tabs.tabText(i) == "Data":
-                tab._left_tabs.setCurrentIndex(i)
-                break
-        tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-        assert tab._right_stack.currentWidget() is tab._data_gallery
-        tab.show()
-        QApplication.processEvents()
-        QApplication.processEvents()
-        g = tab._data_gallery
-        assert g.card_count() == expected_count
-
-        # Narrow via ExpTabWidget resize — automatic reflow, no private call.
-        tab.resize(650, 600)
-        QApplication.processEvents()
-        QApplication.processEvents()
-        QApplication.processEvents()
-        assert not g.is_wide_mode(), (
-            f"expected narrow at 650 for {expected_count} cards"
-        )
-        geoms = _gallery_geometry_cards(g)
-        _assert_narrow_gallery_geometries(geoms, expected_count)
-
-        # Wide via ExpTabWidget resize — automatic.
-        tab.resize(1200, 600)
-        QApplication.processEvents()
-        QApplication.processEvents()
-        QApplication.processEvents()
-        assert g.is_wide_mode(), f"expected wide at 1200 for {expected_count} cards"
-        geoms = _gallery_geometry_cards(g)
-        _assert_wide_gallery_geometries(geoms, expected_count)
-        tab.detach()
-        g.hide()
-        QApplication.processEvents()
-
-    # 1 card: Run only
-    caps1 = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
-    _check_one(caps1, 1)
-    # 2 cards: Run + Analysis
-    caps2 = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
-    _check_one(caps2, 2)
-    # 3 cards: Run + Analysis + Post
-    caps3 = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    _check_one(caps3, 3)
