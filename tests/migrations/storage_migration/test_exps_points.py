@@ -45,6 +45,10 @@ def _entry(request: MigrationRequest) -> ResultEntry:
     )
 
 
+def _backup_result(request: MigrationRequest) -> Path:
+    return request.result_root.parent.parent / f"{request.name}-backup" / "result"
+
+
 def _image(request: MigrationRequest, label: str, contents: bytes = b"figure") -> Path:
     path = request.result_root / "chip" / "qubit" / "exps" / label / "image" / "fit.png"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,7 +153,9 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     assert not target.exists(), "parameters-only must not publish data assets"
     report = _convert(replace(request, part="data", resume=True), mapping)
     assert target.is_file(), "exps images belong to their point figures directory"
-    assert target.read_bytes() == figure.read_bytes() == b"point figure bytes"
+    backup = _backup_result(request)
+    retained_figure = backup / "exps/070716_0.500/image/fit.png"
+    assert target.read_bytes() == retained_figure.read_bytes() == b"point figure bytes"
     copies = [item for item in report.preserved_files if item.source == figure]
     assert len(copies) == 1
     assert copies[0].destination == target
@@ -158,9 +164,11 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     assert not any(item.source == figure for item in report.pending)
     archive = entry.database_path / "migration-preserved/result"
     assert not (archive / "exps/070716_0.500/image/fit.png").exists()
-    assert (archive / "image/root.png").read_bytes() == outside.read_bytes()
+    retained_outside = backup / "image/root.png"
+    assert (archive / "image/root.png").read_bytes() == retained_outside.read_bytes()
+    assert retained_outside.read_bytes() == b"unassociated root image"
     assert any(
-        item.source == outside and item.location == "association"
+        item.source == retained_outside and item.location == "association"
         for item in report.pending
     )
     manifest = TypeAdapter(MigrationManifest).validate_json(
@@ -174,10 +182,12 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     resumed = _convert(replace(request, part="all", resume=True), mapping)
     assert resumed.preserved_files == report.preserved_files
     assert _entry(request).use_point("070716_0.500").C1.frequency == 99.0
-    assert target.read_bytes() == figure.read_bytes()
+    assert target.read_bytes() == retained_figure.read_bytes()
+    assert not (request.result_root / "chip/qubit").exists()
+    assert not (request.database_root / "chip/qubit").exists()
 
 
-@pytest.mark.parametrize("changed", ["source", "destination"])
+@pytest.mark.parametrize("changed", ["backup", "destination"])
 def test_resume_refuses_changed_point_figure_hash(
     request_data: MigrationRequest, mapping: MigrationMapping, changed: str
 ) -> None:
@@ -186,9 +196,16 @@ def test_resume_refuses_changed_point_figure_hash(
     _convert(request_data, mapping)
     target = _entry(request_data).result_path / "points/context/figures/fit.png"
     assert target.is_file(), "point figure must be published before resume"
-    path = figure if changed == "source" else target
+    path = (
+        _backup_result(request_data)
+        / figure.relative_to(request_data.result_root / "chip/qubit")
+        if changed == "backup"
+        else target
+    )
     path.write_bytes(b"changed")
-    with pytest.raises(MigrationInputError, match="hash"):
+    with pytest.raises(
+        MigrationInputError, match="backup" if changed == "backup" else "hash"
+    ):
         _convert(replace(request_data, resume=True), mapping)
     assert path.read_bytes() == b"changed"
 
@@ -210,11 +227,22 @@ def test_data_first_defers_figures_until_parameters_create_the_point(
     assert _entry(request).list_points() == ["070716_0.500"]
     completed = _convert(replace(request, resume=True), mapping)
     target = entry.result_path / "points/070716_0.500/figures/fit.png"
-    assert target.read_bytes() == figure.read_bytes()
+    retained = _backup_result(request) / "exps/070716_0.500/image/fit.png"
+    assert target.read_bytes() == retained.read_bytes() == b"figure"
+    digest = hashlib.sha256(b"figure").hexdigest()
+    publication = next(
+        item for item in completed.preserved_files if item.source == figure
+    )
+    assert publication.source_hash == publication.destination_hash == digest
+    assert not (request.result_root / "chip/qubit").exists()
+    assert not (request.database_root / "chip/qubit").exists()
     assert not any(item.source == figure for item in completed.pending)
     assert (
         len([item for item in completed.preserved_files if item.source == figure]) == 1
     )
+    resumed = _convert(replace(request, resume=True), mapping)
+    assert resumed.preserved_files == completed.preserved_files
+    assert target.read_bytes() == retained.read_bytes() == b"figure"
 
 
 @pytest.mark.parametrize("dry_run", [False, True])

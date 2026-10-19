@@ -222,7 +222,18 @@ def test_cfg_boolean_number_conflict_retains_source(
     )
     assert report.converted_files == report.moved_labber_files == ()
     assert any("comment.cfg" in item.reason for item in report.pending)
-    assert source.read_bytes() == before
+    retained = (
+        request.result_root.parent.parent
+        / f"{request.name}-backup"
+        / "Database"
+        / source.relative_to(request.database_root / "chip/qubit")
+    )
+    assert retained.read_bytes() == before
+    assert (
+        hashlib.sha256(retained.read_bytes()).hexdigest()
+        == hashlib.sha256(before).hexdigest()
+    )
+    assert not source.exists()
 
 
 @pytest.mark.parametrize("flag, replacement", [(True, 1), (False, 0)])
