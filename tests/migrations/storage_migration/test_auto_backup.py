@@ -32,7 +32,9 @@ def migrate(request: MigrationRequest, mapping: MigrationMapping) -> None:
 
 def backup_path(request: MigrationRequest) -> Path:
     """Locate the fixture's external backup, never the real checkout parent."""
-    return request.result_root.parent.parent / "repo-backup"
+    if request.backup_parent is None or request.repo_root is None:
+        raise ValueError("Tests must provide synthetic repo_root and backup_parent")
+    return request.backup_parent / f"{request.repo_root.name}-backup"
 
 
 def test_complete_backup_precedes_cleanup_and_resume_needs_no_sources(
