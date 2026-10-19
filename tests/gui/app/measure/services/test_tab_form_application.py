@@ -17,6 +17,8 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.form import FormInput, FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -50,6 +52,36 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
         context: RunContext,
     ) -> TraceCfg:
         return cfg
+
+
+def test_deferred_restore_preserves_pending_until_point_is_ready(qapp: QApplication) -> None:
+    application = Fixture(headless=True)
+    application.registry.register("trace", TraceAdapter)
+    try:
+        tab_id = application.ctrl.new_tab("trace")
+        application.ctrl.cfg_resources.lookup(tab_id).write({("amount",): 7.0})
+        saved = application.ctrl.capture_persisted_state()
+        application.ctrl.close_tab(tab_id)
+        application.ctrl.setup_control.open_entry(EntryRequest("fake_qubit"))
+        report = application.ctrl.restore_persisted_state(saved)
+        assert report.restored_tabs == 0, "Startup must wait for a selected point"
+        assert application.ctrl.list_tab_ids() == []
+        assert application.ctrl.capture_persisted_state().session == saved.session
+        with pytest.raises(FailedPreconditionError) as rejected:
+            application.ctrl.restore_session()
+        assert rejected.value.reason_code == "no_context"
+        assert application.ctrl.capture_persisted_state().session == saved.session
+        application.ctrl.context_control.use_point(PointUseRequest("ctx001"))
+        restored_ids = application.ctrl.list_tab_ids()
+        assert len(restored_ids) == 1
+        assert application.ctrl.cfg_resources.lookup(restored_ids[0]).result() == TraceCfg(amount=7.0)
+        assert application.ctrl.restore_session().restored_tabs == 0
+        application.ctrl.context_control.use_point(PointUseRequest("ctx001"))
+        assert application.ctrl.list_tab_ids() == restored_ids
+        application.ctrl.close_tab(restored_ids[0])
+        assert application.ctrl.capture_persisted_state().session.tabs == ()
+    finally:
+        application.stop()
 
 
 class FactoryCfg(ConfigBase):
