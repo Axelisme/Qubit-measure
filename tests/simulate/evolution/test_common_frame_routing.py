@@ -6,10 +6,19 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, FamilyRouting
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EnvelopeSpec,
+    FamilyRouting,
+    ModelSource,
+    SecularDrive,
+    SecularModel,
+)
+from zcu_tools.simulate.evolution.kernel import GuardResult
 from zcu_tools.simulate.evolution.kernels import REGISTRY
 
 from ._common_frame import batch, model_source
+from ._engine import RecordingKernel
 
 
 def run(engine, source, timeline):
@@ -120,6 +129,63 @@ def test_constant_singleton_avoids_unamortized_product_build():
     original = fallback(source, timeline)
     assert result.paths.segments_by_kernel == original.paths.segments_by_kernel
     np.testing.assert_array_equal(result.densities, original.densities)
+
+
+@pytest.mark.parametrize("workers,cache_bytes", [(1, 0), (2, 1_000_000)])
+def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(
+    workers, cache_bytes
+):
+    # Six levels make the cold common price competitive even without key reuse.
+    # Identity kernels isolate fallback sharing from numerical admission policy.
+    zero = np.zeros((6, 6), dtype=np.complex128)
+    model = SecularModel(
+        (0,),
+        "shared-fallback",
+        np.arange(6, dtype=float) * 0.29,
+        np.eye(6, dtype=np.complex128),
+        (SecularDrive("a", zero, zero), SecularDrive("b", zero, zero)),
+        np.zeros((6, 6)),
+        np.zeros((6, 6)),
+    )
+    source = ModelSource(
+        np.diag([1.0, 0, 0, 0, 0, 0]).astype(np.complex128),
+        lambda level: replace(model, level=level),
+    )
+    timeline = batch([80] * 4, gain=0.3)
+    timeline = replace(
+        timeline,
+        tracks=(
+            timeline.tracks[0],
+            replace(timeline.tracks[1], frequency_ghz=np.linspace(0.291, 0.294, 4)),
+        ),
+    )
+
+    class RejectedCommon(RecordingKernel):
+        guard_builds = True
+
+        def __init__(self):
+            super().__init__("common_frame")
+            self.admission_rows = 0
+
+        def prepare_keys(self, table, rows, context):
+            return table.tone_frequency_ghz[rows, 1].copy()
+
+        def guard_prepared(self, table, rows, context):
+            self.admission_rows += len(rows)
+            return GuardResult(np.zeros(len(rows), dtype=bool))
+
+    common = RejectedCommon()
+    fallback_kernel = RecordingKernel("multitone_rwa")
+    with closing(
+        Engine(workers, cache_bytes, kernels=(common, fallback_kernel))
+    ) as engine:
+        result = run(engine, source, timeline)
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 4}
+    assert common.admission_rows == 4
+    assert fallback_kernel.preparations == 1
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(source.initial_density[None], 4, axis=0)
+    )
 
 
 def test_oversize_products_stream_and_rebuild_without_changing_results():
