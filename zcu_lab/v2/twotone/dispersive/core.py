@@ -47,6 +47,12 @@ from zcu_tools.program.v2 import (
 
 @dataclass(frozen=True)
 class DispersiveResult:
+    """Readout frequencies in MHz and mean IQ shaped (2, Nfreq).
+
+    ``ge`` labels branches 0/1 without/with the qubit preparation pulse;
+    these labels do not certify pure ground/excited populations.
+    """
+
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
     ge: NDArray[np.int64] = field(default_factory=lambda: np.array([0, 1]))
@@ -144,6 +150,14 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         *,
         context: RunContext,
     ) -> DispersiveResult:
+        """Compare resonator spectra without and with a qubit preparation pulse.
+
+        Reset and apply the optional init pulse, then omit or apply the
+        configured qubit pulse (nominally pi) before frequency-swept readout.
+        Return mean complex IQ for both branches; analysis infers the
+        dispersive shift from their resonance separation.
+        """
+        # Prepare a common frequency axis and separate IQ traces for both branches.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -164,6 +178,8 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
             (2, len(freqs)),
             on_update=lambda data: viewer.update(freqs, dispersive_signal2real(data)),
         )
+
+        # Sweep readout frequency for both preparations in the same FPGA program.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             cfg = sched.cfg
             modules = cfg.modules
@@ -192,6 +208,14 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         *,
         plots: Plots,
     ) -> DispersiveAnalysis:
+        """Fit the two resonator IQ traces with a shared electrical delay.
+
+        Return half the absolute resonance separation (chi) and the average
+        FWHM in MHz. ``fit_bg_amp_slope`` allows a sloped amplitude background;
+        the ``fit`` figure shows spectra and normalized IQ circles. The
+        source cfg may be None; the preparation labels alone do not establish
+        state purity or a readout fidelity.
+        """
         result = source.result
 
         freqs = result.freqs

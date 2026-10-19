@@ -1,4 +1,4 @@
-"""One calibrated onetone spectrum and its explicit writeback handoff."""
+"""Resonator frequency sweep, spectral fit and reviewed calibration."""
 
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
@@ -29,30 +29,38 @@ def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     reps: int | None = None,
     rounds: int | None = None,
 ) -> RecipeGenerator:
-    """Save one spectrum's raw data and Primary images, then ask before writing.
+    """Sweep readout frequency to locate the resonator response.
 
-    target binds the new tab's primary role without changing GUI focus.
-    Omission uses focus. Do not pass target when reusing an existing tab.
+    At each frequency, apply the readout pulse and average its IQ signal.
+    Primary fits the spectrum to estimate resonator frequency and linewidth.
+    Save raw data and analysis, then ask before applying the calibration.
 
-    session is driver-supplied. reuse_tab_id resets that idle onetone/freq tab.
-    readout_ref selects a library; None retains the GUI selection. MHz center/span
-    default to resonator/linewidth calibration; other None values retain GUI
-    defaults. gain is the native pulse amplitude and points is the sweep count.
-    Missing calibration ends needs_parameters. Invalid cfg/native failures throw
-    at their author step. Cancelled yields return; finish_early saves usable data.
-    The writeback question resumes with accepted/skipped, not an automatic write.
+    session is driver-supplied. target overrides the qubit alias for this Reset;
+    None uses global aliases. reuse_tab_id resets a named idle onetone/freq tab.
+    readout_ref selects a library module; None retains its GUI selection.
+    center_mhz and positive span_mhz use MHz; omitted values use resonator
+    frequency and three linewidths for the full span. gain is native amplitude,
+    points is the sweep count, and reps/rounds control averaging.
+    Other None values retain GUI defaults. Blank references or invalid ranges
+    fail; missing calibration reports needs_parameters. Cfg/native failures
+    propagate. Cancellation stops later steps; skipped writeback changes nothing.
     """
+    # 1. Validate inputs before selecting the measurement sources.
     for name, value in (("reuse_tab_id", reuse_tab_id), ("readout_ref", readout_ref)):
         if value is not None and not value.strip():
             raise ValueError(f"{name} must be a non-empty string or null")
     if span_mhz is not None and span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
+
+    # 2. Open/reset the tab and select the pulse libraries.
     tab = session.open_tab(
         "onetone/freq",
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
     tab.use_library(("modules", "readout"), readout_ref)
+
+    # 3. Set the scan range and averaging for the resonator response.
     missing = set_frequency_sweep(
         tab,
         ("sweep", "freq"),
@@ -72,14 +80,20 @@ def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
         retain_scalar(tab, ("modules", "readout", "gain"))
     tab.set(("reps",), reps)
     tab.set(("rounds",), rounds)
+
+    # 4. Acquire and save the raw IQ sweep.
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
         return
     run.save_raw()
+
+    # 5. Fit the resonator frequency and linewidth.
     analysis = yield from run.analyze_step("primary")
     if analysis.status == "cancelled":
         return
+
+    # 6. Ask before applying the proposed calibration.
     decision = yield from ask(run.propose_writeback())
     if decision.status == "cancelled":
         return

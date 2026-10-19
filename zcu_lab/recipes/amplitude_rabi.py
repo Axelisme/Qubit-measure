@@ -1,4 +1,4 @@
-"""One gain Rabi sweep, with explicit Primary and writeback handoffs."""
+"""Measure Rabi oscillations versus drive gain to calibrate rotation amplitudes."""
 
 from math import isfinite
 
@@ -51,24 +51,29 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     reps: int | None = None,
     rounds: int | None = None,
 ) -> RecipeGenerator:
-    """Save one gain sweep and yield Primary before asking to write.
+    """Sweep drive gain at fixed pulse length to calibrate pi and pi/2 rotations.
 
-    target binds the new tab's primary role without changing GUI focus.
-    Omission uses focus. Do not pass target when reusing an existing tab.
+    After optional reset, apply the drive pulse and read out the qubit at each
+    gain. Fit the Rabi oscillations to estimate pi and pi/2 gains, save raw IQ,
+    and ask before applying the proposed calibration; skipping writes nothing.
 
-    session is driver-supplied. reuse_tab_id resets that idle amp_rabi tab.
+    session is supplied by the recipe driver. target selects the qubit alias
+    without changing GUI focus; omission uses focus. reuse_tab_id resets an idle
+    amp_rabi tab and must not be combined with target.
     readout_ref/drive_ref select library modules; None retains the GUI selection.
-    Drive frequency prefers explicit frequency_mhz, then a usable library, then
-    qubit calibration. Readout prefers a usable library, then resonator calibration.
-    No pi calibration is required. None disables reset; use_reset selects its
-    library module. pulse_length_us is the fixed pulse length in us; gain_range
-    contains two finite endpoints in native gain units. points is at least 2.
-    reps/rounds are integer counts. Omitted values retain GUI defaults/expressions.
-    Invalid inputs fail before preparing; absent frequency sources report all
-    missing parameters. Invalid cfg/native failures throw at their author step.
-    Cancelled yields return; finish_early saves usable raw data. Primary may
-    hand off for interaction. accepted explicitly writes; skipped writes none.
+    Drive frequency uses explicit frequency_mhz (MHz), then a usable library
+    value, then qubit calibration. Readout uses library frequency, then resonator
+    calibration. No pi calibration is needed. use_reset selects a library reset
+    module; None disables reset.
+    pulse_length_us is the fixed length in us. gain_range has two finite
+    endpoints in native gain units; points is at least 2. reps/rounds are integer
+    counts. Omitted sweep/scalar values retain GUI defaults and expressions.
+
+    Invalid inputs raise ValueError before opening a tab. Missing frequency
+    sources raise RecipeNeedsParameters with every missing input; invalid cfg
+    or measurement/analysis failures propagate from the failing step.
     """
+    # 1. Reject invalid overrides before preparing the measurement.
     _validate_inputs(
         (
             ("reuse_tab_id", reuse_tab_id),
@@ -81,6 +86,7 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
         points,
     )
 
+    # 2. Choose the qubit tab, readout and optional reset modules.
     tab = session.open_tab(
         "twotone/rabi/amp_rabi",
         aliases=None if target is None else {"qubit": target},
@@ -93,7 +99,7 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     tab.use_library(("modules", "readout"), readout_ref)
     tab.use_library(("modules", "qub_pulse"), drive_ref)
 
-    # Preserve the complete missing-source list rather than failing on its first item.
+    # 3. Resolve drive and readout frequencies; report all missing sources.
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
@@ -119,6 +125,7 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
+    # 4. Sweep gain while keeping the drive duration fixed.
     tab.set_sweep(
         ("sweep", "gain"),
         start=gain_range[0] if gain_range is not None else None,
@@ -135,14 +142,19 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     tab.set(("reps",), reps, source="explicit")
     tab.set(("rounds",), rounds, source="explicit")
 
+    # 5. Acquire the sweep and save raw IQ before fitting.
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
         return
     run.save_raw()
+
+    # 6. Fit Rabi oscillations to estimate pi and pi/2 drive gains.
     analysis = yield from run.analyze_step("primary")
     if analysis.status == "cancelled":
         return
+
+    # 7. Apply the proposed calibration only after explicit acceptance.
     decision = yield from ask(run.propose_writeback())
     if decision.status == "cancelled":
         return

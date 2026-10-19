@@ -32,6 +32,8 @@ from zcu_tools.utils.process import minus_background
 
 @dataclass(frozen=True)
 class PowerResult:
+    """Drive gains, frequencies in MHz, and mean IQ shaped (Ngain, Nfreq)."""
+
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -78,6 +80,14 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         *,
         context: RunContext,
     ) -> PowerResult:
+        """Map the qubit spectrum as a function of drive gain.
+
+        For each host-selected gain, reset, apply the optional init pulse,
+        sweep the qubit probe frequency on the FPGA, then read out. Return
+        mean complex IQ on the (gain, frequency) grid. Gain is the configured
+        drive amplitude, not a calibrated power in dBm.
+        """
+        # Prepare drive-gain rows and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -108,6 +118,8 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             (len(gains), len(freqs)),
             on_update=lambda data: viewer.update(gains, freqs, gain_signal2real(data)),
         )
+
+        # Acquire a complete spectrum at each fixed drive gain.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
@@ -117,6 +129,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
                 freq_sweep = cfg.sweep.freq
                 modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
+                # Reset and initialize before each probe; read out its response.
                 _ = (
                     step.prog_builder(soc, soccfg)
                     .add_reset("reset", modules.reset)

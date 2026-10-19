@@ -1,4 +1,4 @@
-"""One bounded mux recipe; numeric acquisition remains with its native owner."""
+"""Measure mux Rabi oscillations versus gain and review pi/pi2 pulse updates."""
 
 from typing import Unpack
 
@@ -10,47 +10,87 @@ from zcu_tools.mcp.measure.execution_reply import (
 )
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeSession,
+    ask,
 )
 
 from .mux_helpers import (
     DRIVE_PARAMETERS,
     INPUTS,
     MuxInputs,
-    finish_mux,
-    prepare_mux,
 )
 
 
 def mux_amp_rabi(
     session: RecipeSession, **inputs: Unpack[MuxInputs]
 ) -> RecipeGenerator:
-    """Run mux amplitude Rabi; review candidates before explicit Apply.
+    """Measure Rabi oscillations, fit pi/pi2 gains and ask before writing updates.
 
-    session is driver-supplied. target binds the Reset mux alias; None retains
-    global aliases. reuse_tab_id resets an idle mux/amp_rabi tab.
-    participants is an ordered name list; None keeps Reset defaults. library
-    selects typed path/key pairs, then inline copies typed selector paths, then
-    overrides sends one batch of typed scalar path/value edits. Caller order is
-    preserved; list indexes are full original positions, never participant rows.
-    Copy ref ancestors outer-first before editing children. None values retain
-    input; expressions remain authored. No range/calibration inference occurs.
-    Paths use MHz/us/native gain, matching the Form; count leaves use n.
-    Shared reps/rounds/recovery and delay axes remain shared, not per-tone.
-    All elements, including nonparticipants, must validate before Run.
-    Defaults report retained Form inputs, not their internal generation history.
-    Run saves raw and Primary; cancellation stops later steps. Finish-early
-    follows owner partial-data policy. Only an accepted writeback answer applies;
-    skipped writes none. Invalid inputs/cfg and native/transport failures propagate
-    at their author step; successful copies are not rolled back on later failure.
+    session opens a mux/amp_rabi tab; target selects its mux group, or None keeps
+    global aliases. reuse_tab_id resets an idle tab. participants gives the ordered
+    qubit names, or None keeps the Form defaults. library selects path/key pairs;
+    inline copies selected modules before overrides applies scalar path/value edits.
+    Paths index the complete tone list, not participant rows. Copy referenced
+    ancestors outer-first. None values retain inputs; expressions remain authored.
+    Frequencies use MHz, times us and gains normalized units; sweep counts use n.
+    No scan range is inferred. All tones must validate, including nonparticipants.
+    Raw data and Primary analysis are saved before the writeback question.
+    Only an accepted answer applies the current pi/pi2 pulse, slot and pi_product
+    proposals; skipping writes nothing. Cancellation stops later steps, while
+    finish-early retains partial data. Invalid inputs and operation errors propagate.
     """
-    tab = prepare_mux(
-        session,
+    # Capture this group's Form defaults without changing the global aliases.
+    target = inputs.get("target")
+    participants = inputs.get("participants")
+    tab = session.open_tab(
         "mux/amp_rabi",
-        inputs,
+        aliases=None if target is None else {"mux": target},
+        reuse=inputs.get("reuse_tab_id"),
     )
-    yield from finish_mux(tab)
+
+    # Select sources before copying referenced modules for scalar edits.
+    for selection in inputs.get("library") or ():
+        tab.use_library(tuple(selection["path"]), selection["key"])
+    for copy in inputs.get("inline") or ():
+        tab.use_inline(tuple(copy["path"]))
+
+    # Apply participants and overrides together, retaining omitted Form values.
+    edits = [
+        RecipeFieldEdit(
+            ("participants",),
+            None if participants is None else [name for name in participants],
+        )
+    ]
+    edits.extend(
+        RecipeFieldEdit(
+            tuple(edit["path"]),
+            edit["value"],
+            source="derived" if isinstance(edit["value"], dict) else "explicit",
+        )
+        for edit in inputs.get("overrides") or ()
+    )
+    tab.set_fields(edits)
+
+    # Acquire and save raw IQ before fitting the gain oscillations.
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled" or run is None:
+        return
+    run.save_raw()
+
+    # Primary analysis saves the fit and proposes pi/pi2 pulse calibrations.
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
+        return
+
+    # Preview never writes: apply only after an explicit accepted answer.
+    decision = yield from ask(run.propose_writeback())
+    if decision.status == "cancelled":
+        return
+    if decision.decision == "accepted":
+        tab.accept()
 
 
 DEFINITION = RecipeDefinition(
