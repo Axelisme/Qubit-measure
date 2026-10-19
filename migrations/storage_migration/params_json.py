@@ -1,14 +1,14 @@
-"""Offline projection of the legacy analysis handoff into entry parameters."""
+"""Offline conversion of legacy analysis handoffs into entry-scoped resources."""
 
 from dataclasses import dataclass, replace
+from datetime import datetime
 from math import isfinite
 from pathlib import Path
 
-from pydantic import JsonValue, TypeAdapter
+from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import (
-    PointView,
     ResultEntry,
     SetupView,
     component_registry,
@@ -16,24 +16,24 @@ from zcu_tools.resources.entry import (
     snapshot,
 )
 
+from .errors import MigrationInputError
 from .models import KeyMappingItem, MigrationMapping
 from .paths import contained_path
-from .state import MigrationSession, record_pending
+from .state import MigrationSession, record_pending, write_json
 
 _JSON = TypeAdapter(JsonObject)
 _YAML = TypeAdapter(YamlValue)
 _ENERGIES = ("EJ", "EC", "EL")
-_FLUX_FIELDS = ("flux_half", "flux_int", "flux_period")
+_FLUX_FIELDS = ("flux_half", "flux_period")
 
 
 @dataclass
 class _Context:
-    """One destination and its already accepted meta_info values for dry-run."""
+    """Setup metadata, including seed values when no dry-run handle exists."""
 
     target: Path
-    view: SetupView | PointView | None
+    view: SetupView | None
     values: YamlMap
-    origins: dict[str, Path]
 
     def value(self, path: str) -> YamlValue:
         if self.view is not None:
@@ -68,7 +68,6 @@ def _setup_context(
             f"{name}.{key}": _YAML.validate_python(value, strict=True)
             for key, value in model.model_dump().items()
         },
-        origins={},
     )
 
 
@@ -82,84 +81,135 @@ def _flux_unit(values: JsonObject, fit: JsonObject) -> tuple[str | None, str | N
     return unit, None
 
 
-def _put_field(
-    context: _Context, path: str, value: JsonValue, source: Path
-) -> str | None:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not isfinite(value)
-    ):
-        return "Expected a finite numeric value; no expression evaluation or coercion"
-    current = context.value(path)
-    if current is not None and current != value:
-        origin = context.origins.get(path, context.target)
-        return f"Keep {origin}: {path}={current!r}; params source {source}: {value!r}"
-    if current is None:
-        context.set(path, value)
-    return None
+def _created_at(value: object) -> str | None:
+    if not isinstance(value, str) or "T" not in value.upper():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return (
+        value if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
+    )
+
+
+def _write_predictor(path: Path, document: JsonObject) -> None:
+    # The destination belongs to this migration, but an interrupted write may
+    # already have committed it. Never replace different bytes on resume.
+    if path.is_symlink():
+        raise MigrationInputError(f"{path}: predictor symlink conflict")
+    if path.exists():
+        existing = _JSON.validate_json(path.read_text(encoding="utf-8"), strict=True)
+        if existing != document:
+            raise MigrationInputError(
+                f"{path}: predictor differs from planned legacy fit"
+            )
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, document, replace_existing=False)
 
 
 def _project_fit(
-    context: _Context,
+    session: MigrationSession,
     source: Path,
     name: str,
     values: JsonObject,
-    fields: set[str],
 ) -> list[KeyMappingItem]:
     fit = values.get("fluxdep_fit")
     if not isinstance(fit, dict):
         return []
+    target = (
+        session.manifest.report.destination.result_path / "predictors" / f"{name}.json"
+    )
     energies = fit.get("params")
-    unit, unit_error = _flux_unit(values, fit)
+    unsupported = None
+    if "model" in fit:
+        unsupported = "fluxdep_fit.model"
+    elif isinstance(energies, dict) and energies.keys() - set(_ENERGIES):
+        unsupported = "fluxdep_fit.params"
+    if unsupported is not None:
+        return [
+            KeyMappingItem(
+                old_file=source,
+                old_key=unsupported,
+                new_file=None,
+                new_path=None,
+                action="pending",
+                reason="Model or parameter names have no supported legacy fluxdep_fit contract; preserve without guessing",
+            )
+        ]
+    params: JsonObject = {"flux_bias": 0.0}
     rows: list[KeyMappingItem] = []
     for field in (*_ENERGIES, *_FLUX_FIELDS):
         container = energies if field in _ENERGIES else fit
         if not isinstance(container, dict) or field not in container:
             continue
+        value = container[field]
+        reason = None
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            reason = "Expected a finite numeric value or null; no expression evaluation or coercion"
+        else:
+            params[field] = value
         key = (
             f"fluxdep_fit.params.{field}"
             if field in _ENERGIES
             else f"fluxdep_fit.{field}"
         )
-        path = f"{name}.{field}"
-        reason = (
-            f"No formal field {path} in the destination component"
-            if field not in fields
-            else None
-        )
-        if reason is None and field in _FLUX_FIELDS:
-            reason = unit_error or _context_unit_conflict(context, source, unit)
-        if reason is None:
-            reason = _put_field(context, path, container[field], source)
-            if (
-                reason is None
-                and field in _FLUX_FIELDS
-                and context.value("general.ext.flux_unit") is None
-            ):
-                context.set("general.ext.flux_unit", unit)
         rows.append(
             KeyMappingItem(
                 old_file=source,
                 old_key=key,
-                new_file=context.target,
-                new_path=path,
+                new_file=target,
+                new_path=f"params.{field}",
                 action="pending" if reason else "value",
-                reason=reason
-                or "Fill missing entry value from explicit legacy analysis result",
+                reason=reason or "Preserve legacy fluxonium parameter in native units",
             )
         )
+    unit, unit_error = _flux_unit(values, fit)
+    created_at = _created_at(fit.get("timestamp"))
+    backup = session.manifest.report.backup_path
+    original = (
+        backup
+        / "result"
+        / source.relative_to(session.manifest.report.source.result_path)
+        if backup is not None
+        else source
+    )
+    for key, path, reason in (
+        ("fluxdep_fit.flux_unit", "flux_unit", unit_error),
+        (
+            "fluxdep_fit.timestamp",
+            "source.created_at",
+            None
+            if created_at is not None
+            else f"No proven timezone-aware ISO 8601 timestamp; original at {original}#fluxdep_fit.timestamp",
+        ),
+    ):
+        rows.append(
+            KeyMappingItem(
+                old_file=source,
+                old_key=key,
+                new_file=target,
+                new_path=path,
+                action="pending" if reason else "value",
+                reason=reason or "Preserve explicit legacy source metadata",
+            )
+        )
+    document: JsonObject = {
+        "format": "zcu.predictor",
+        "version": 1,
+        "model": "fluxonium",
+        "params": params,
+        "flux_unit": unit,
+        "source": {"run_id": None, "created_at": created_at},
+    }
+    if not session.dry_run:
+        _write_predictor(target, document)
     return rows
-
-
-def _context_unit_conflict(
-    context: _Context, source: Path, unit: str | None
-) -> str | None:
-    current = context.value("general.ext.flux_unit")
-    if current is None or current == unit:
-        return None
-    origin = context.origins.get("general.ext.flux_unit", context.target)
-    return f"Keep {origin}: flux_unit={current!r}; params source {source}: flux_unit={unit!r}; do not reinterpret flux values or convert units"
 
 
 def _preserve_sections(
@@ -199,17 +249,22 @@ def convert_params_json(
     entry: ResultEntry | None,
     mapping: MigrationMapping,
 ) -> None:
-    """Fill setup analysis fields from params.json after component seeding.
+    """Preserve setup metadata and publish an entry predictor from legacy params.
 
     session owns baselines and report; entry is its destination handle or None in
     dry-run. mapping supplies seeds with exactly one qubit/* kind; otherwise the
-    whole handoff stays pending. Run before meta contexts so new points inherit
-    these defaults. Existing non-null seed values win. Meta conversion must call
-    reconcile_params_meta after applying each context. Flux numbers require explicit
-    units; no conversion or expression evaluation occurs. Preserve complete raw
-    sections (including metadata) in component.ext.legacy_params with located
-    pending rows. No publication/completion checkpoint is owned here. Validation
-    and I/O errors propagate; old sources are never changed.
+    whole handoff stays pending. Call before points so they inherit raw metadata,
+    then apply each context's meta_info normally. Legacy EJ/EC/EL fits use the
+    documented fluxonium model and zero bias; flux_int is alignment-only. An
+    explicit model is unsupported and stays pending. Unknown/invalid numbers
+    remain unknown, with invalid values located in pending. Units only come from
+    explicit root/fit flux_unit; missing/conflicting units become null and pending,
+    without conversion. Source run_id is unknown; only a timezone-aware ISO 8601
+    timestamp supplies created_at. Preserve full raw sections and metadata in
+    component.ext.legacy_params with located pending. Predictors remain entry
+    resources and never participate in setup/point inheritance. Dry-run reports
+    the same plan without writes. The parameters owner checkpoints completion;
+    input/I/O failures propagate and sources are never changed here.
     """
     root = session.manifest.report.source.result_path
     candidate = root / "params.json"
@@ -237,7 +292,7 @@ def convert_params_json(
         raise ValueError(f"{name}: seed requires kind")
     fields = set(component_registry.get(kind).model_fields)
     context = _setup_context(session, entry, mapping, name)
-    rows = _project_fit(context, source, name, values, fields)
+    rows = _project_fit(session, source, name, values)
     rows.extend(
         _preserve_sections(context, source, name, values, has_ext="ext" in fields)
     )
@@ -258,101 +313,3 @@ def convert_params_json(
     for key, messages in reasons.items():
         record_pending(session, source, key, "; ".join(messages))
     session.baseline(source)
-
-
-def _original_value(values: JsonObject, key: str) -> JsonValue:
-    value: JsonValue = values
-    for part in key.split("."):
-        if not isinstance(value, dict):
-            raise ValueError(f"{key}: invalid analysis field location")
-        value = value[part]
-    return value
-
-
-def _conflict_pending(
-    session: MigrationSession, source: Path, key: str, reason: str
-) -> None:
-    previous = next(
-        (
-            item.reason
-            for item in session.manifest.report.pending
-            if item.source == source and item.location == key
-        ),
-        None,
-    )
-    record_pending(
-        session, source, key, f"{previous}; {reason}" if previous else reason
-    )
-
-
-def reconcile_params_meta(
-    session: MigrationSession,
-    source: Path,
-    view: SetupView | PointView | None,
-) -> None:
-    """Report accepted meta overrides and remove inherited flux with different units.
-
-    Call immediately after mapping one meta_info context. session's report is
-    the parameter owner's acceptance record; source is that absolute meta file.
-    view is the updated context, or None for dry-run. Meta values always win.
-    When meta explicitly changes global flux_unit, clear only params-derived
-    flux fields not explicitly supplied by that meta file. Never convert units.
-    Keep params and meta source paths and values in located pending reasons.
-    No source writes or completion checkpoint occur; I/O/validation propagates.
-    """
-    report = session.manifest.report
-    params = report.source.result_path / "params.json"
-    projected = {
-        row.new_path: row
-        for row in report.key_mappings
-        if row.old_file == params and row.action == "value"
-    }
-    if not projected:
-        return
-    accepted = [
-        row
-        for row in report.key_mappings
-        if row.old_file == source
-        and row.action == "value"
-        and not any(
-            item.source == source and item.location == row.old_key
-            for item in report.pending
-        )
-    ]
-    if not accepted:
-        return
-    values = _JSON.validate_json(source.read_text(encoding="utf-8"), strict=True)
-    original = _JSON.validate_json(params.read_text(encoding="utf-8"), strict=True)
-    mapped = {row.new_path: values[row.old_key] for row in accepted}
-    for path, row in projected.items():
-        if path in mapped and mapped[path] != _original_value(original, row.old_key):
-            _conflict_pending(
-                session,
-                params,
-                row.old_key,
-                f"Keep {source}: {path}={mapped[path]!r}; params source {params}: {_original_value(original, row.old_key)!r}",
-            )
-    unit_row = next(
-        (row for row in accepted if row.new_path == "general.ext.flux_unit"), None
-    )
-    fit = original.get("fluxdep_fit")
-    if unit_row is None or not isinstance(fit, dict):
-        return
-    unit, error = _flux_unit(original, fit)
-    meta_unit = values[unit_row.old_key]
-    if error is not None or meta_unit == unit:
-        return
-    for path, row in projected.items():
-        if path is None or row.old_key not in {
-            f"fluxdep_fit.{field}" for field in _FLUX_FIELDS
-        }:
-            continue
-        _conflict_pending(
-            session,
-            params,
-            row.old_key,
-            f"Keep {source}: flux_unit={meta_unit!r}; params source {params}: flux_unit={unit!r}; no unit conversion",
-        )
-        if path not in mapped and view is not None and not session.dry_run:
-            with view.edit() as draft:
-                draft.set(path, None)

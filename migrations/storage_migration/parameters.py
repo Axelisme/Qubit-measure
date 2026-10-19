@@ -22,7 +22,7 @@ from .models import (
     KeyRule,
     MigrationMapping,
 )
-from .params_json import convert_params_json, reconcile_params_meta
+from .params_json import convert_params_json
 from .paths import contained_path, validate_segment
 from .state import MigrationSession, clear_pending, record_pending
 
@@ -213,7 +213,6 @@ def _convert_context(
         session.baseline(source)
         values = _JSON.validate_json(source.read_text(encoding="utf-8"), strict=True)
         _map_parameters(session, source, target, values, mapping, view)
-        reconcile_params_meta(session, source, view)
         session.baseline(source)
     convert_module_cfg(
         session,
