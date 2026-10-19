@@ -162,7 +162,7 @@ def test_schedule_body_exception_is_not_replaced_by_final_callback_failure(
             stop.raise_if_error()
         assert caught.value.__cause__ is error
     else:
-        with pytest.raises(ValueError) as caught_body:
+        with pytest.raises(ValueError, match="body failed") as caught_body:
             run()
         assert caught_body.value is error
         assert sched.outcome.status == "completed"
