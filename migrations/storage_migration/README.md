@@ -16,6 +16,7 @@
   `LegacyParameterSource`、`LegacyCloneOrigin`。Wire shape 不變，完整 raw evidence 留在 manifest。
   Converter 產生 native 2.0 簡單 context，不把歷史 params 投影到 native。
 - Manifest 保存固定 entry／run 身分、來源 baseline、完整 evidence raw 與逐檔 publication 狀態。Report 是累積快照。兩者保留同 major 的未知 JSON 欄位。
+- Native 的 `labber_path` 保存相對 entry Database 根的原檔保存路徑，例如 `Labber/2025/10/scan.hdf5`。`Instrument config` 透過 datafile owner 的唯讀 codec 轉為 device_snapshot，只用舊檔中的值。不能表示的 snapshot 列 `device snapshot pending`，該 run snapshot 為 None，但量測資料仍轉 native，原設定留在保存的 Labber。
 - Native publication 與驗證完成後才搬移對應 Labber。搬移先複製、驗證雜湊，再刪來源。Source_removed 只驗證目的 hash，舊位置重用不改既有 run，也不刪新檔。缺歷史證據時不產生 native 或逐檔搬移，只列 pending，不猜名稱或補量測時間。兩部分都完成後，這些舊檔隨來源清理，只保留在外部備份。
 - 新 entry 可與舊資料共用 result／Database root，只要目的與本次兩個舊來源樹互不包含。目的已存在就拒絕，不覆寫其他 entry；report 也不得寫入本次來源樹。
 - 正式執行在建立 entry 前完整複製本次舊 result 與 Database 到 repo 外的 `<name>-backup`。`backup_parent`／CLI `--backup-parent` 指定外部上層，預設為工具 checkout 的上層。`repo_root`／`--repo-root` 可明示被保護的 checkout。備份內 `result/` 與 `Database/` 保留原相對路徑與空目錄，`sha256.json` 列出每檔 SHA256。既有備份目錄、repo 內或與來源／目的重疊的路徑一律拒絕。Symlink 與非一般檔案不支援，拒絕後不進入遷移。

@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
+from zcu_tools.datafile import LabberMetadata
 from zcu_tools.plotting.figures import NamedFigures
 
 from .cfg_model import ExpCfgModel
@@ -22,13 +23,18 @@ class RunRecord(Generic[CfgT, ResultT]):
     stay paired, while cfg and result data remain mutable. Callers own the result
     data; hardware handles and presentation do not belong in this envelope.
     Loaded data may remain usable without a valid configuration.
+    labber_metadata holds the loaded comment, tags, project, user and creation
+    time, or None for records without captured file metadata. Construction
+    detaches this metadata from the caller; its nested values remain mutable.
     """
 
     cfg: CfgT | None
     result: ResultT
+    labber_metadata: LabberMetadata | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cfg", deepcopy(self.cfg))
+        object.__setattr__(self, "labber_metadata", deepcopy(self.labber_metadata))
 
 
 @dataclass(frozen=True)

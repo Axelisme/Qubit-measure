@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-20，原子替換的 Windows 短暫鎖重試
+**Last updated:** 2026-10-20，entry dispersive 與 T1 curve 格式檔
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
@@ -23,6 +23,20 @@
 SyncFile 與舊 CSV SampleTable 已退休。現行樣本歷史使用 JSONL，舊 CSV 的離線讀取與轉換由 root [`migrations/`](../../../migrations/README.md) 提供。
 
 離線 legacy 轉換、evidence 與可續跑 publication 由 root [`migrations/storage_migration/`](../../../migrations/storage_migration/README.md) 擁有。Caller 注入具體 mapping 與 native 驗證。`lib` 不 import `migrations`。
+
+## Entry 分析格式檔
+
+`dispersive_file.py` 擁有 `zcu.dispersive` v1，公開 `DispersiveFile`、`DispersiveParams`、`PlotTransitions` 與 `load_dispersive_file`／`save_dispersive_file`。`t1_curve_file.py` 擁有 `zcu.t1-curve` v1，公開 `T1CurveFile`、`T1CurveParams`、`T1NoiseParams` 與 `load_t1_curve_file`／`save_t1_curve_file`。兩者共用 `analysis_source.AnalysisSource`。Resources root 不 re-export 這些名稱。
+
+兩種 JSON 都必須含 `format`、嚴格整數 `version: 1`、`params` 與 `source`。Envelope 與 source 不接受額外欄位。`source.run_id` 與 `source.created_at` 必填，未知寫 null。Run ID 是非空字串。Created_at 只接受含時區的 ISO 8601 字串，讀寫保留原文，不改成 UTC，也不補目前時間。
+
+Dispersive 的 `params.g` 與 `params.bare_rf` 是 GHz，可省略或 null。`params.plot_transitions.r_f` 是 GHz 的 resonator seed，可省略或 null。其餘 transition keys 保留原始 JsonValue，不解釋躍遷名稱。T1 的 `params.params` 保存 `Q_cap`、`x_qp`、`Q_ind` 與 `Temp`。前三者無量綱，Temp 是 K。整個 noise params 可省略或 null；個別欄位也可省略或 null。已知數值須有限，拒絕 bool 和數字字串。
+
+T1 noise params 中存在的 key 是 active parameter，值為 null 表示 active 但數值未知。`fixed`、`free`、`bounds`、`stderr` 與 `init` 只能引用 active 名稱。Init 的 active noise channel 集合須與 params 一致。Bounds 保存兩個有限數值或 null 端點。`cost`、`reduced_chi2`、`success`、`message`、`residual_mode`、`loss`、`max_nfev` 保存 optimizer metadata，不代表實驗完成狀態。Storage 不要求正值、完整 Temp 或至少一個 noise channel。分析 owner 負責物理完整性，成功 load 不表示資料可直接做分析。
+
+Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出，不作 legacy fallback。Save 重新驗證具名 model，保留 explicit null、未提供的內容欄位與來源字串。Parent directory 必須存在。Writer 先寫 sibling temporary，再 atomic replace，失敗清 temporary。這不是多檔交易、multiwriter lock 或掉電持久保證。ResultEntry 只提供 `dispersive_path` 與 `t1_curve_path` 目錄，caller 選擇檔名，預設以 component 名命名。
+
+離線 migration 把 `params.json.dispersive` 與 `fluxdep_fit.plot_transitions` 合寫 `dispersive/<component>.json`，把 `t1_curve_fit` 寫 `t1_curve/<component>.json`。沒有 dispersive fit 時仍可只保存 transition seed，不補 g 或 bare_rf。遷移的 run_id 為 null，created_at 只用對應 section 的含時區 timestamp。未知欄位與原 timestamp 原文仍留在 component.ext.legacy_params，無法驗證的 section 只列 pending，不產生不合格式的檔案。
 
 ## 獨立參數
 
