@@ -26,7 +26,11 @@ from zcu_tools.notebook.analysis.t1_curve import (
     prepare_t1_curve_data,
     subtract_relaxation_limit,
 )
-from zcu_tools.resources.sample_table import SampleTableV2Error
+from zcu_tools.resources.sample_table import (
+    SampleFluxFrame,
+    SampleTableV2Error,
+    resolve_sample_flux,
+)
 
 
 def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
@@ -359,13 +363,13 @@ def test_build_t1_channel_curves_uses_uniform_flux_grid() -> None:
 
 def _synthetic_calibration(samples: pd.DataFrame) -> T1FluxCalibration:
     context = _synthetic_context(samples)
-    resolution = workflow.resolve_sample_flux(
-        samples, fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0)
+    resolution = resolve_sample_flux(
+        samples, fallback_frame=SampleFluxFrame("A", 0.5, 1.0)
     )
     return T1FluxCalibration(
         context=context,
         resolution=resolution,
-        fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0),
+        fallback_frame=SampleFluxFrame("A", 0.5, 1.0),
         t1_df=samples,
         freq_rows=samples,
         summary_table=pd.DataFrame(),

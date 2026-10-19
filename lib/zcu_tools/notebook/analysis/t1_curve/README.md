@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-19，逐項機制 probe 共用具名 options，保留三個 notebook wrapper 介面
+**Last updated:** 2026-10-19，分清資料準備、Purcell、逐機制分析、呈現與編排責任
 
 Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us` 與 `t1_err_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
@@ -47,14 +47,22 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - `t1_curve_fit.py` 是明確的 public module name；`fit.py` 保留為既有 import path，兩者 export 同一組 API。
 - notebook 若要把 all-in-one fit 結果交給後續模擬，使用 `QubitParams.set_t1_curve_fit(T1CurveFit(...))` 寫入 `params.json` 的 `t1_curve_fit` section。這個 section 只放 active noise params、stderr、fixed/free、bounds 與 fit metadata；省略的 noise key 表示該 channel 未納入模型。sample arrays、residual arrays 與 dense model curve 留在 notebook 輸出或資料檔。
 
-### `workflow.py` — notebook-facing fixed workflow
+### Notebook stages 與 `workflow.py` 編排
+
+- `models.py` 持有共用 stage records、機制 metadata 與有效性規則。
+- `preparation.py` 持有 sample loading、flux calibration、row filtering 與 provenance。
+- `purcell.py` 持有 Purcell 計算、單一 bounded cache、溫度上限搜尋與 rate-domain 運算。
+- `probes.py` 持有三種機制的 pointwise Q、溫度搜尋、Purcell 扣除與參數建議。
+- `presentation.py` 持有 Notebook 圖、參數文字與圖檔保存。需要 dense 物理曲線的圖仍在繪圖階段計算。
+- `workflow.py` 持有 combined fit、channel curves、結果收集、顯式 writeback 與一鍵編排。Package 與 workflow 直接 re-export 原有 stage 介面。
+- `base.py` 保留共用作圖與溫度工具，並持有跨 stage 的 omega window、正值解析與參數格式化。
 
 - `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、v2 flux resolution（explicit → row-frame → caller-declared fallback）、f01-based flux correction（derived rows 且 observed f01 finite 才執行）、integer branch alignment、T1/T1err 單位轉換與 fit-window filtering。以 `resolve_sample_flux` 取得 normalized flux；`freq_mhz` 為 null 的行仍可由 resolved flux 進入 analysis，missing observed f01 改用 model 在該 flux 預測的 f01。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
 - `plot_t1_flux_calibration(data)` 將每個 retained sample 的 raw flux 與 f01-corrected flux 畫在對應 f01 frequency 高度，供檢查 half-flux 附近是否發生不合理 branch jump。
 - `PurcellEffectParams(kappa_ghz, bare_rf, g)` 是 optional Purcell 設定本身的完整值容器；三個欄位都必填且必須為正 finite GHz。`kappa_ghz=0.001` 表示 1 MHz linewidth，不是 decay rate κ。`load_t1_purcell_params(context, kappa_ghz=...)` 會從 `params.json` 的 `dispersive` section 解析 `bare_rf/g`，目前 `kappa_ghz` 仍由 notebook 明確輸入。
 - `calculate_purcell_t1_limit()` 使用原 frequency-selected a†／a bath，分別對 e→g 與 g→e rates 做 resonator thermal average，回傳 equilibrium `T1=1/(Γeg+Γge)`，單位 ns。逐項 probe、combined fit 與 channel curves 都使用此 total rate。
   - 模型只納入 0↔1，不包含高能態 leakage，也不代表來源論文的完整 loss 模型。底層 module-public `purcell` 保留 directional escape lifetime。
-  - Workflow 對 Purcell sweep 使用 bounded LRU cache，並在內部關閉 scqubits sweep progress。Cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
+  - Purcell owner 對 sweep 使用 bounded LRU cache，並在內部關閉 scqubits sweep progress。Cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
 - `estimate_purcell_Temp_upper_bound(data, purcell, Temp_range=(10e-3, 300e-3), progress=False)` 用 `T1_Purcell(flux, Temp) >= T1_observed` 作為所有 fit 點的可行性條件，估算 Purcell 允許的最高 `Temp`；Purcell 不提供可正常推導的溫度下限。`progress=True` 只顯示外層 Temp bracket/bisection 進度，內部 Purcell sweep 仍關閉 scqubits progress。`plot_purcell_Temp_upper_bound(data, purcell, Temp=upper)` 用 T1 over flux 疊加 upper-bound Purcell curve，供檢查是哪個 flux 點限制溫度上限。
 - `analyze_t1_{capacitive,quasiparticle,inductive}_limit(..., purcell=None, fit_temperature=False, Temp_bounds=(10e-3, 300e-3))` 是逐項機制 probe；若提供 Purcell，會先以 rate domain 扣除 Purcell relaxation，再用 intrinsic T1 反推 pointwise Q、建議初值、上下界參考與 summary table。`fit_temperature=True` 時，Temp search 會使用 `Temp_bounds`，可傳 `(None, upper)` 只限制 Purcell 推得的上限，Purcell T1 也會以 candidate Temp 重算。`plot_t1_mechanism_dipole(probe)` 會用同一組 T1 口徑畫 T1 over dipole。
 - `T1MechanismOptions(Temp=..., purcell=None, omega_range=(None, None), fit_temperature=False, Temp_bounds=(10e-3, 300e-3), fit_constant=True, statistic="median", parameter_init=None)` 集中三個 probe wrapper 共同傳遞的控制。

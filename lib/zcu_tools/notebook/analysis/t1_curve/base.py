@@ -467,3 +467,51 @@ def _t1_plot_ylim(sample_T1s: NDArray[np.float64]) -> tuple[float, float]:
     if values.size == 0:
         raise ValueError("T1 plot needs at least one positive finite sample T1 value")
     return 0.5 * float(np.min(values)), 3.0 * float(np.max(values))
+
+
+def omega_mask(
+    omegas: NDArray[np.float64],
+    omega_range: tuple[float | None, float | None],
+) -> NDArray[np.bool_]:
+    """Select omegas in the inclusive omega_range, both in rad/ns.
+
+    Each None endpoint leaves that side open. Return a boolean array matching
+    omegas; NaNs follow NumPy comparison semantics (an entirely open range keeps
+    every element). This selection does not validate or mutate the inputs.
+    """
+    mask = np.ones_like(omegas, dtype=bool)
+    lower, upper = omega_range
+    if lower is not None:
+        mask &= omegas >= lower
+    if upper is not None:
+        mask &= omegas <= upper
+    return mask
+
+
+def format_parameter(name: str, value: float) -> str:
+    """Format a T1 parameter as ``name = value`` without changing its value.
+
+    Temp is supplied in K and displayed in mK; Q_cap, Q_ind, x_qp and other
+    names use scientific notation in their input units. Nonfinite values are
+    displayed as such, not rejected.
+    """
+    return f"{name} = {_format_parameter_value(name, value)}"
+
+
+def _format_parameter_value(name: str, value: float) -> str:
+    if name == "Temp":
+        return f"{value * 1e3:.2f} mK"
+    return f"{value:.3e}"
+
+
+def positive_override(override: float | None, fallback: float, name: str) -> float:
+    """Resolve an optional positive finite parameter in the caller's units.
+
+    Use fallback only when override is None. Return a Python float; raise
+    ValueError naming the parameter if the selected value is nonpositive or
+    nonfinite. Neither value is converted to a different physical unit.
+    """
+    value = fallback if override is None else override
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be positive and finite")
+    return float(value)
