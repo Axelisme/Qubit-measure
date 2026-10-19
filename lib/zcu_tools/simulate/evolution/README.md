@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, documented dispatch contracts and shared Floquet policies, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone and single shaped-gate omitted-channel retention
+**Last updated:** 2026-10-19, documented dispatch contracts and shared Floquet policies, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone and single shaped-gate omitted-channel retention, close-carrier multitone admission
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -183,9 +183,11 @@ population difference against lab DOP853 was 1.76e-3 through depth 16.
 The calibrated half-flux pair has summed full-operator/carrier ratio 0.217.
 The sampled 128 ns Gaussian with sigma 32 ns has normalized slope 0.0192/ns
 and curvature 0.00231/ns², including DAC quantization. Smoothness admission uses 0.025/ns and 0.003/ns² to leave margin around those
-measured pulses, rather than treating arbitrary samples as smooth. Carrier
-separation remains independent of omission-driven retention. They are admission limits, not rigorous omission-error
-bounds. Preparation also computes one float64 coefficient per key, tone and
+measured pulses, rather than treating arbitrary samples as smooth. Ordinary
+multitone RWA admits close and equal carriers through the same joint omission
+estimates and retained-dimension limit, without a carrier-separation veto.
+Covariant gates retain their separate carrier-separation policy. These are
+admission limits, not rigorous omission-error bounds. Preparation also computes one float64 coefficient per key, tone and
 joint state: `sum(j,s, abs(C_s[i,j])**2/(Ei-Ej+s*f))` over the final omitted
 Fourier mask, with `C_+=(X-iY)/2` and `C_-=C_+†`. Without adaptive retention,
 this is the set `abs(Ei-Ej+s*f) >= 0.05 GHz`. Restored edges are excluded.

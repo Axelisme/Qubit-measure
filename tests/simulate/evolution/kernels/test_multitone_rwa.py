@@ -61,8 +61,6 @@ def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
             env, samples=np.where(np.arange(129) % 2, 1.0, 0.0).astype(complex)
         )
     frequencies = [0.3, -0.6, 0.9][:tones]
-    if kind == "degenerate":
-        frequencies[1] = -0.30001
     if kind == "dc":
         frequencies[1] = 0.0
     tracks = tuple(
@@ -90,7 +88,7 @@ def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
 def test_smooth_multiple_drives_route_with_explicit_admission():
     routes = {}
     with closing(Engine(1, 1000000)) as engine:
-        for kind in ("smooth", "complex", "rough", "degenerate", "dc"):
+        for kind in ("smooth", "complex", "rough", "dc"):
             result = engine.evolve(model_source(), (timeline(kind),), cancel=Event())
             routes[kind] = dict(result.paths.segments_by_kernel)
         result = engine.evolve(model_source(), (timeline(tones=3),), cancel=Event())
@@ -483,6 +481,35 @@ def test_same_port_sampled_pair_keeps_joint_rwa():
     assert result.paths.segments_by_kernel == {"t4": 1, "multitone_rwa": 1}
 
 
+@pytest.mark.parametrize("sampled", [False, True])
+@pytest.mark.parametrize("frequency", [0.3, 0.301437, -0.301437])
+def test_close_carriers_keep_joint_interference_and_coherent_density(
+    sampled, frequency
+):
+    batch = timeline()
+    batch = replace(
+        batch,
+        tracks=tuple(
+            replace(
+                track,
+                frequency_ghz=np.array([f]),
+                amplitude=np.array([0.8]),
+                envelopes=(smooth() if sampled else EnvelopeSpec("constant"),),
+            )
+            for track, f in zip(batch.tracks, (0.3, frequency), strict=True)
+        ),
+    )
+    source = model_source()
+    with closing(Engine(1, 1000000)) as engine:
+        actual = engine.evolve(source, (batch,), cancel=Event())
+        expected = engine.evolve(source, (batch,), budget=1e-7, cancel=Event())
+    assert actual.paths.segments_by_kernel == {"t4": 1, "multitone_rwa": 1}
+    # RWA is approximate: use the existing constant-pair density tolerance,
+    # still much tighter than the qualitative population allowance of 0.1.
+    np.testing.assert_allclose(actual.densities, expected.densities, atol=0.01, rtol=0)
+    assert np.max(np.abs(actual.densities[0] - source.initial_density)) > 0.01
+
+
 def test_constant_pair_uses_joint_rwa_and_preserves_coherent_joint_input():
     source, batch = constant_pair()
     with closing(Engine(1, 1000000)) as engine:
@@ -572,7 +599,8 @@ def test_omission_admission_accepts_strong_retained_rows(sampled, detuning):
     np.testing.assert_allclose(actual[0], expected, atol=budget, rtol=0)
 
 
-def test_connected_retained_graph_over_block_limit_declines():
+@pytest.mark.parametrize("frequencies", [(0.3, 0.9), (0.3, 0.301437)])
+def test_connected_retained_graph_over_block_limit_declines(frequencies):
     from zcu_tools.simulate.evolution.kernels.multitone_rwa import MultitoneRWAKernel
 
     size = 17
@@ -598,7 +626,7 @@ def test_connected_retained_graph_over_block_limit_declines():
         level=np.zeros((1, 1), dtype=np.int64),
         tones=np.array([2]),
         tone_port=np.array([[0, 1]]),
-        tone_frequency_ghz=np.array([[0.3, 0.9]]),
+        tone_frequency_ghz=np.array([frequencies]),
         tone_amplitude=np.ones((1, 2)),
         tone_theta_rad=np.zeros((1, 2)),
         tone_envelope=np.zeros((1, 2), dtype=np.int64),

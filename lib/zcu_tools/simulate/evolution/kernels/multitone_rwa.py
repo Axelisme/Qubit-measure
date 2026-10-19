@@ -846,8 +846,9 @@ def _admit_rows(
         if not all(_smooth(table, int(e), context) for e in envs):
             continue
         frequencies = np.abs(table.tone_frequency_ghz[row, :count])
-        if np.min(frequencies) < _EDGE_GHZ or np.any(
-            np.diff(np.sort(frequencies)) < 2 * _EDGE_GHZ
+        if np.min(frequencies) < _EDGE_GHZ or (
+            not adaptive_multitone
+            and np.any(np.diff(np.sort(frequencies)) < 2 * _EDGE_GHZ)
         ):
             continue
         model = context.source.model(tuple(int(v) for v in table.level[row]))
@@ -1007,9 +1008,11 @@ class MultitoneRWAKernel:
     Admission requires >=2 tones with a sampled envelope, or exactly two
     constant envelopes on distinct ports, fixed flux,
     real envelopes with peak-normalized slope <=0.025/ns and curvature
-    <=0.003/ns², each |f|>=0.05 GHz, pairwise ||f_i|-|f_j||>=0.1 GHz,
-    and budget >=1e-3. Full-operator/carrier and retained-norm phase caps do
-    not apply here. Single-constant RWA and covariant gates keep their policies.
+    <=0.003/ns², each |f|>=0.05 GHz and budget >=1e-3. Carrier spacing
+    does not veto admission: close or equal carriers use the same joint
+    omission solver and retained-dimension limit. Full-operator/carrier and
+    retained-norm phase caps do not apply here. Single-constant RWA and
+    covariant gates keep their policies.
 
     The shared omission solver starts from 50 MHz edges and estimates only
     omitted one-photon and same/cross-tone two-photon terms with peak envelope
