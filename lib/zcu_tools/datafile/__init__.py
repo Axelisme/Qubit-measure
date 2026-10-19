@@ -28,7 +28,12 @@ if TYPE_CHECKING:
         LabberMetadata,
         LabberPayload,
     )
-    from .native import load_run_data, save_run_data, validate_experiment_payload
+    from .native import (
+        load_run_data,
+        read_run_metadata,
+        save_run_data,
+        validate_experiment_payload,
+    )
     from .native_metadata import json_values_equal, validate_cfg_snapshot
     from .native_models import (
         AxisSchema,
@@ -81,6 +86,7 @@ __all__ = [
     "write_labber",
     "save_run_data",
     "load_run_data",
+    "read_run_metadata",
     "validate_experiment_payload",
     "validate_cfg_snapshot",
     "Axis",
@@ -129,6 +135,7 @@ _EXPORT_MODULES = {
     "LabberMetadata": ".models",
     "LabberPayload": ".models",
     "load_run_data": ".native",
+    "read_run_metadata": ".native",
     "save_run_data": ".native",
     "validate_experiment_payload": ".native",
     "json_values_equal": ".native_metadata",

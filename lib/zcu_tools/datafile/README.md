@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-19，native 2.1 未知歷史值與 grouped independent Labber layout
+**Last updated:** 2026-10-20，native metadata-only 讀取
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -18,6 +18,7 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
+- `read_run_metadata(path)` 共用 native header 與 metadata／cfg envelope 解碼，回傳歷史 `RunMetadata`，不讀量測 arrays。它保留未知時間與 completion，不查 ledger，不保證 payload 完整或可供分析。格式／I/O 錯誤沿 native reader 契約拋出；GUI 檔案清單逐檔隔離錯誤。
 - `read_fluxdep_database_info(path)` 回 `FluxdepDatabaseInfo`，擁有 fluxonium search HDF5 的 dataset 名稱、shape 與有限值驗證。
   Reader 只讀參數／flux ranges 與 energies 維度，不讀 energy values、不建立 search cache。
   EJ／EC／EL ranges 為 GHz，flux range 為 normalized flux。

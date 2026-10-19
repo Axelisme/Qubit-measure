@@ -149,10 +149,12 @@ def test_query_metadata_and_load_validity_are_independent(
         load = dialog.findChild(QPushButton, "load_selected")
         assert table is not None and load is not None
         if row.metadata_error:
-            assert any(
-                row.metadata_error in table.item(0, column).text()
-                for column in range(table.columnCount())
-            )
+            texts = []
+            for column in range(table.columnCount()):
+                item = table.item(0, column)
+                assert item is not None
+                texts.append(item.text())
+            assert any(row.metadata_error in text for text in texts)
         table.selectRow(0)
         assert load.isEnabled()
         load.click()
@@ -162,7 +164,7 @@ def test_query_metadata_and_load_validity_are_independent(
             WritebackService(
                 ContextControlFacet(context=session.context), arb_names=lambda: ()
             ),
-            context=session.context,
+            context=ContextControlFacet(context=session.context),
             captured_parameters=lambda _aliases: None,
         )
         with pytest.raises(LoadDataError) as error:
