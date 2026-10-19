@@ -64,6 +64,10 @@ class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
     # not the concrete shape of the adapter-owned run handle.
     # Never infer it from a name.
     experiment_tag: ClassVar[str | None]
+    # Device alias path ("$name") supplying Sample writeback coordinates from
+    # captured parameters and Run device evidence. None disables only samples;
+    # resolution/missing-evidence failures omit them with an unavailable reason.
+    sample_device_alias: ClassVar[str | None]
 
     @classmethod
     def guide(cls) -> AdapterGuide:

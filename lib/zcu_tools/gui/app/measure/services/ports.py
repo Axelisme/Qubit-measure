@@ -225,11 +225,15 @@ class WritebackLifecyclePort(Protocol):
         experiment_name: str,
         run_id: str | None = None,
         device_snapshot: Mapping[str, JsonObject] | None = None,
+        sample_device_alias: str | None = None,
     ) -> WritebackDraft:
         """Fix proposals, destination and native Run identity in one draft.
 
         run_id is historical RunMetadata.run_id, even before Save, or None
         without native evidence. Save does not change the draft's identity.
+        sample_device_alias is the adapter's coordinate device alias ("$name").
+        None omits only Sample proposals. Resolve it from parameters and the
+        fixed device_snapshot; missing facts produce public unavailable reasons.
         A module proposal that is not a concrete persistent Spec raises.
         """
         ...

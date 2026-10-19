@@ -50,6 +50,7 @@ class FreqAdapter(
     BaseAdapter[FreqCfg, FreqRunResult, FreqAnalyzeResult, FreqAnalyzeParams]
 ):
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
+    sample_device_alias: ClassVar[str | None] = "$flux_dev"
     exp_cls = FreqExp
 
     @staticmethod

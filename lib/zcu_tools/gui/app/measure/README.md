@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-18，共用草稿 codec 與獨立 live snapshot
+**Last updated:** 2026-10-20，adapter 宣告 Sample 座標來源
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -78,6 +78,11 @@ Run、WB 與目前 point 的 Inspect Set 要先選取或建立工作點；GUI �
 重新 Open 同 entry 清除 selection，WB 必須再次選取任一 point 才能提交，
 但目的地仍是候選捕捉的 SavedPoint，不跟隨畫面上的 point。
 Cfg/editor drafts 與 WB 候選 preview 保持各自的生命週期。
+
+Adapter 以 `sample_device_alias` 宣告提供 Sample 座標的 device alias path。
+預設 `None` 不提供 Sample writeback，不影響 Parameter／Module proposals。
+Analyze／Post-analyze 只轉送宣告，WritebackService 從固定 Run／Load parameters
+與 device snapshot 解析座標。缺 alias 或裝置證據時略過 Sample，並提供不可用原因。
 
 `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。`AdapterCapabilities`
 宣告 SoC 需求、analysis、post-analysis、load 的支援範圍；`requires_soc` 不代表

@@ -40,20 +40,27 @@ def _sample_fields(
     fields: JsonObject,
     parameters: ParameterContext | None,
     device_snapshot: Mapping[str, JsonObject] | None,
+    device_alias: str | None,
 ) -> JsonObject:
     """Bind automatic GUI coordinates once, or explain why no sample is offered."""
+    if device_alias is None:
+        raise FailedPreconditionError(
+            "Sample writeback requires an adapter-declared device alias"
+        )
     if parameters is None:
         raise FailedPreconditionError(
-            "Sample writeback requires a Run $flux_dev binding"
+            f"Sample writeback requires a Run {device_alias} binding"
         )
     try:
-        device_name = parameters.value("$flux_dev")
+        device_name = parameters.value(device_alias)
     except RoleResolutionError as exc:
         raise FailedPreconditionError(
-            f"Sample writeback requires $flux_dev: {exc}"
+            f"Sample writeback requires {device_alias}: {exc}"
         ) from exc
     if not isinstance(device_name, str) or not device_name:
-        raise FailedPreconditionError("Sample writeback requires a Run $flux_dev name")
+        raise FailedPreconditionError(
+            f"Sample writeback requires a Run {device_alias} name"
+        )
     if device_snapshot is None or device_name not in device_snapshot:
         raise FailedPreconditionError(f"Run snapshot has no device {device_name!r}")
     device = device_snapshot[device_name]
@@ -371,6 +378,7 @@ class WritebackService:
         experiment_name: str,
         run_id: str | None = None,
         device_snapshot: Mapping[str, JsonObject] | None = None,
+        sample_device_alias: str | None = None,
     ) -> WritebackDraft:
         """Create a draft with one Form per module item at the creation capture.
 
@@ -395,8 +403,11 @@ class WritebackService:
         It stays fixed through Save, selection changes, edits and application.
         Application copies it into accepted evidence and library provenance.
         device_snapshot maps Run-fixed device names to their JSON settings; None
-        means no device evidence. Samples require run_id and a captured flux
-        binding with value/value_unit. Missing facts omit only those proposals
+        means no device evidence. sample_device_alias is the adapter-declared
+        device alias path ("$name"); None disables Sample proposals. Samples
+        require run_id and that alias resolving to a nonempty device name in the
+        captured snapshot with value/value_unit. Alias errors and missing facts
+        omit only those proposals
         and appear in draft.unavailable_reasons. Sample fields are detached and
         automatic device coordinates replace any producer-supplied coordinates.
         """
@@ -419,7 +430,10 @@ class WritebackService:
                             "Sample writeback requires a captured run_id"
                         )
                     item.proposed_value = _sample_fields(
-                        item.proposed_value, parameters, device_snapshot
+                        item.proposed_value,
+                        parameters,
+                        device_snapshot,
+                        sample_device_alias,
                     )
                 except FailedPreconditionError as exc:
                     unavailable_reasons.append(f"{item.target_name}: {exc}")
