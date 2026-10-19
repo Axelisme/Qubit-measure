@@ -12,7 +12,7 @@ from math import isfinite
 from jsonschema import Draft7Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
-from zcu_tools.mcp.measure.recipe import (
+from zcu_tools.mcp.measure.recipe_contracts import (
     RecipeInputSchema,
     RecipeParameter,
     RecipePropertySchema,
