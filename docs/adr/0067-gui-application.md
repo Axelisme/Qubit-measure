@@ -34,9 +34,9 @@ Shared `gui.session.ui.alias_dialog` 是 Measure 與 workflows 的同一編輯�
 
 Device 的連線資訊與 cached DeviceInfo 在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作；remembered device 的磁碟保存由 Persistence owner 從已提交狀態選擇性投影。State 是否供多方觀察與資料是否重啟後保存是兩個問題。Live SoC handle 可屬 session environment 而不落盤，worker、lease 和 driver 的控制權也不因有人需要觀察其狀態而交給 State。
 
-RunContext 提供 devices 與 cancel_signal 等執行能力，不提供儀器設定方法。Device 層只提供 current／voltage、frequency／power、output 或 value 等操作，不知道 flux／RF 角色。實驗層 helper 負責把角色用途與明示單位對應到 driver 操作；新增儀器接口不因此擴充 RunContext。這沿既有 C8 分層與 C9 無循環 contracts，experiment 使用 device，而非由 device 反向理解實驗。
+RunContext 提供 devices 與 cancel_signal 等執行能力，不提供儀器設定方法。Device 層只提供 current／voltage、frequency／power、output 或 value 等操作，不知道 flux／RF 角色。使用者套件 helper 負責把角色用途與明示單位對應到 driver 操作；新增儀器接口不因此擴充 RunContext。這沿既有 C8 分層與 C9 無循環 contracts，experiment 使用 device，而非由 device 反向理解實驗。
 
-`experiment.utils.check_flux_unit(cfg, unit)` 只比對有效 Info 的 `value_unit`，不讀寫硬體或 cache。YOKO Info 擁有 mode／unit validator，Fake 的單位為 native；其他 Info 類型報 TypeError。`set_flux` 委派同一檢查，保既有 mode 查詢、driver safety、stop 與 progress，不新增 get_info 查詢。
+`zcu_lab.v2._support.device.check_flux_unit(cfg, unit)` 只比對有效 Info 的 `value_unit`，不讀寫硬體或 cache。YOKO Info 擁有 mode／unit validator，Fake 的單位為 native；其他 Info 類型報 TypeError。`set_flux` 委派同一檢查，保既有 mode 查詢、driver safety、stop 與 progress，不新增 get_info 查詢。
 
 Workflow 宿主提供同步 `get_device_cfg` 與完整 cfg 的 `setup_device`，zcu_lab 工具組合讀取、單位檢查與修改。框架不新增 value＋unit effect 或部分 cfg 合併。
 

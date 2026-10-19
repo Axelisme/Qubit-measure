@@ -17,7 +17,6 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
@@ -29,6 +28,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.process import minus_background
+
+from zcu_lab.v2._support.device import set_flux
 
 
 @dataclass(frozen=True)
