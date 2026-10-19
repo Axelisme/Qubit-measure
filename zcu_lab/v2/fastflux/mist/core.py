@@ -90,6 +90,14 @@ class MistExp(PersistableExperiment[MistResult, MistCfg]):
     )
 
     def run(self, config: MistCfg, *, context: RunContext) -> MistResult:
+        """Map the MIST readout response versus flux and MIST pulse gains.
+
+        Reset and apply the initialization pulse, then start flux and MIST
+        branches together. Read out after both finish. Return the two gain axes
+        in a.u. and mean complex IQ shaped (flux_gain, mist_gain). This contrast
+        map is not a calibrated state population or transition probability.
+        """
+        # Quantize both gain axes for their respective generators.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -108,6 +116,7 @@ class MistExp(PersistableExperiment[MistResult, MistCfg]):
             {"soccfg": soccfg, "gen_ch": modules.mist_pulse.ch},
         )
 
+        # Display the averaged response without classifying individual shots.
         viewer = context.plots.liveplot_2d(
             "measurement", "Flux Pulse Gain (a.u.)", "Mist Pulse Gain (a.u.)"
         )
@@ -117,6 +126,7 @@ class MistExp(PersistableExperiment[MistResult, MistCfg]):
                 flux_gains, mist_gains, mist_signal2real(data)
             ),
         )
+
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.flux_pulse.set_param(
@@ -125,6 +135,8 @@ class MistExp(PersistableExperiment[MistResult, MistCfg]):
             modules.mist_pulse.set_param(
                 "gain", sweep2param("mist_gain", sched.cfg.sweep.mist_gain)
             )
+
+            # Prepare once per shot, apply the two parallel stimuli, then read out.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -150,6 +162,11 @@ class MistExp(PersistableExperiment[MistResult, MistCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot IQ contrast against flux gain and squared MIST gain.
+
+        options.ac_coeff, when supplied, scales squared gain to a photon-number
+        axis; otherwise the vertical coordinate remains gain squared.
+        """
         result = source.result
 
         flux_gains, mist_gains, signals2D = (

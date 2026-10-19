@@ -1,4 +1,4 @@
-"""Frequency/flux survey with explicit calibration and writeback handoff."""
+"""Resonator frequency/flux map and interactive flux calibration."""
 
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
@@ -36,24 +36,27 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     reps: int | None = None,
     rounds: int | None = None,
 ) -> RecipeGenerator:
-    """Save one frequency/flux survey and Primary images, then ask before writing.
+    """Map the resonator spectrum across a native flux range.
 
-    target binds the new tab's primary role without changing GUI focus.
-    Omission uses focus. Do not pass target when reusing an existing tab.
+    At each flux value, sweep the readout frequency and average IQ.
+    Primary lets the user pick half- and integer-flux lines to estimate flux
+    calibration. Save the raw map and analysis, then ask before applying it.
 
-    session is driver-supplied. reuse_tab_id resets an idle onetone/flux_dep tab.
-    readout_ref selects a library; None retains the selection. center/span use MHz
-    and default to resonator/linewidth calibration. flux_range has two distinct
-    device-native endpoints and is required along with flux_points >=2.
-    flux_device is a required registered device name. flux_unit must match its
-    cached snapshot unit exactly, including explicitly requested native. These
-    inputs reject null; no coordinates are converted and no device is connected.
-    Other None values retain GUI defaults. Missing frequency/linewidth sources
-    share one needs_parameters handoff; invalid device/unit fails before Run.
-    Invalid cfg/native failures throw at their author step. Cancelled yields return;
-    finish_early saves usable data. Accepted answer triggers explicit current-draft
-    writeback; skipped does not write.
+    session is driver-supplied. target overrides the qubit alias for this Reset;
+    None uses global aliases. reuse_tab_id resets an idle onetone/flux_dep tab.
+    readout_ref selects a library module; None retains its GUI selection.
+    center_mhz and positive span_mhz use MHz; omitted values use resonator
+    frequency and two linewidths for the full span. gain is native amplitude;
+    freq_points counts frequencies and reps/rounds control averaging.
+    Required flux_range has two distinct device-native endpoints; flux_points
+    must be >=2. Required flux_device names a registered device; flux_unit must
+    exactly match its cached unit, including native. No coordinates are converted
+    or devices connected. Other None values retain GUI defaults.
+    Missing frequency/linewidth reports needs_parameters; invalid device/unit
+    fails before Run. Invalid inputs/cfg/native failures propagate.
+    Cancellation stops later steps; skipped writeback changes nothing.
     """
+    # 1. Validate inputs before selecting the measurement sources.
     if (
         not flux_device
         or not flux_device.strip()
@@ -69,13 +72,17 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
             raise ValueError(f"{name} must be a non-empty string or null")
     if span_mhz is not None and span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
+
+    # 2. Open/reset the tab and select the pulse libraries.
     tab = session.open_tab(
         "onetone/flux_dep",
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
     tab.use_library(("modules", "readout"), readout_ref)
-    # Report independent missing sources together before admitting a Run.
+
+    # 3. Set frequency and native flux axes before acquisition.
+    # Report independent missing sources together before Run.
     missing: list[MissingParameter] = []
     missing.extend(
         set_frequency_sweep(
@@ -106,14 +113,20 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
         retain_scalar(tab, ("modules", "readout", "gain"))
     tab.set(("reps",), reps)
     tab.set(("rounds",), rounds)
+
+    # 4. Acquire and save the raw IQ sweep.
     result = yield from tab.run_step()
     run = result.run
     if result.status == "cancelled" or run is None:
         return
     run.save_raw()
+
+    # 5. Let the user select half- and integer-flux lines.
     analysis = yield from run.analyze_step("primary")
     if analysis.status == "cancelled":
         return
+
+    # 6. Ask before applying the proposed calibration.
     decision = yield from ask(run.propose_writeback())
     if decision.status == "cancelled":
         return

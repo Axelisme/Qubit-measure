@@ -172,7 +172,7 @@ def _source_rounds(
 
 
 class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
-    """Stateless conditional Ramsey measurement and native persistence."""
+    """Compare target Ramsey fringes for thermal spectator I/Xπ preparations."""
 
     AXES_SPEC = AxesSpec(
         axes=(
@@ -195,14 +195,21 @@ class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
     )
 
     def run(self, config: IdleZZCfg, *, context: RunContext) -> IdleZZResult:
-        """Acquire full mux shots for every DC/branch/delay and host round.
+        """Measure conditional Ramsey fringes, optionally sweeping a named DC source.
 
-        Only external acquisition and optional named DC source have effects.
-        Schedule retains completed round slots on cancel; unacquired slots stay
-        NaN. Final conversion overwrites the round, never appends. The caller
-        checks cancel_signal.raise_if_error() to distinguish failure from stop.
-        This method never saves, writes calibration, rebinds roles or mutates cfg.
+        Apply I or Xπ to the thermal spectator, then target π/2→delay→π/2
+        with projection phase advanced by +360*detune*delay, followed by one
+        full mux read. No reset, heralding or post-selection purifies either
+        branch. Return actual delays in us and raw IQ ordered
+        (DC, branch, delay, rounds*reps, full tones), not fitted ζ. Analyze
+        estimates the nominal-branch frequency difference under its sign and
+        single-frequency assumptions, not a purified ZZ coupling.
+
+        Only the optional named DC source is swept; cfg is unchanged. Completed
+        rounds survive cancellation, missing rounds stay NaN; the caller checks
+        cancel_signal.raise_if_error() to distinguish failure from stop.
         """
+        # Resolve delay/DC axes; retain each host round as raw shots, not a mean.
         cfg = config.model_copy(deep=True, update={"rounds": 1})
         delays = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         dc_values = (
@@ -224,6 +231,8 @@ class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
             (len(dc_values), 2, len(delays), config.rounds, cfg.reps, ntones),
             on_update=update_view,
         )
+
+        # Sweep only the named DC source; a disabled source leaves devices untouched.
         with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
             for dc_value, dc_step in sched.scan("dc", dc_values.tolist()):
                 if cfg.dc_device is not None:
@@ -239,6 +248,8 @@ class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
                         m = cfg.modules
                         spectator = m.x180_f2 if cfg.target == "F1" else m.x180_f1
                         pi2 = m.x90_f1 if cfg.target == "F1" else m.x90_f2
+
+                        # Compare thermal I/Xπ preparations with the same target Ramsey.
                         if branch:
                             builder.add_pulse("spectator_x180", spectator)
                         builder.add(
@@ -252,6 +263,8 @@ class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
                             ),
                             MuxReadout("readout", m.readout),
                         )
+
+                        # Reuse this sequence while collecting full-tone shots per round.
                         prog = builder.build()
                         for _, round_step in step.repeat("round", config.rounds):
                             _ = round_step.prog_builder(
@@ -259,6 +272,8 @@ class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
                             ).run_program(
                                 prog, raw2signal_fn=partial(collect_joint_shots, prog)
                             )
+
+        # Flatten rounds into the shot axis without changing tone or shot order.
         buffer.trigger_update(flush=True)
         return IdleZZResult(
             dc_values,
@@ -278,7 +293,10 @@ class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
         *,
         plots: Plots,
     ) -> IdleZZAnalysis:
-        """Fit complete nominal branches using saved cfg and raw IQ only.
+        """Estimate ζ (MHz) as the fitted Xπ-minus-I nominal-branch frequency.
+
+        Fit the target Ramsey IQ for each complete branch at each DC setting
+        using only the saved cfg and raw data.
 
         Second π/2 phase advances by +360*detune*delay degrees. The existing
         free-phase decay cosine gives a nonnegative fringe magnitude m (MHz).
