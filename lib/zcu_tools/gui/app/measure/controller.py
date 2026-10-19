@@ -625,7 +625,7 @@ class Controller(SessionControllerMixin):
     def capture_persisted_state(self) -> AppPersistedState:
         """Snapshot the whole app state into a memento (no disk). Composes the
         remembered settings + device projection + view's left-panel width and the
-        live tabs into one immutable ``AppPersistedState``."""
+        adopted live tabs (or untouched pending tabs) into ``AppPersistedState``."""
         settings = self._settings_svc.capture_settings(
             left_panel_width=self._capture_left_panel_width()
         )
@@ -683,13 +683,34 @@ class Controller(SessionControllerMixin):
 
     # -- lifecycle façade (runtime startup / MainWindow close) ---------------
 
-    def restore_all(self, *, load: bool = True) -> None:
+    def restore_all(self, *, load: bool = True, auto_restore_tabs: bool = True) -> None:
+        """Load settings and stage saved tabs on the owner thread.
+
+        load=False uses fresh defaults without reading disk. auto_restore_tabs
+        restores once a point is ready; False leaves adoption to the startup
+        script through restore_session or finish_startup_script. Attach a
+        caretaker first. Load errors are presented; unexpected failures propagate.
+        Pending tabs remain the save authority until adoption, including shutdown
+        during an unfinished script. This coordinator does not execute scripts.
+        """
         assert self._caretaker is not None, "caretaker not attached"
+        self._auto_restore_tabs = auto_restore_tabs
         outcome = self._caretaker.restore_all(load=load)
         if outcome.load_error is not None:
             self._report_persistence_error(
                 "Settings restore failed", outcome.load_error
             )
+
+    def finish_startup_script(self) -> None:
+        """Adopt current tabs after startup script completion, on the owner thread.
+
+        Call after the script returns (including a reported startup failure), not
+        when shutdown interrupts a running script. If restore_session was never
+        called, discard pending saved tabs and adopt the current clean workspace.
+        Repeated calls are inert. No sources, drivers or script objects are owned
+        or closed here. This command cannot fail and does not save to disk.
+        """
+        self._pending_session = None
 
     def persist_all(self) -> None:
         assert self._caretaker is not None, "caretaker not attached"
