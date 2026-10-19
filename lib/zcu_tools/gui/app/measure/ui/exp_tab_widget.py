@@ -9,13 +9,11 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import (
     QColor,
-    QMouseEvent,
     QPainter,
     QPainterPath,
     QPen,
 )
 from qtpy.QtWidgets import (
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -23,7 +21,6 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
-    QStackedWidget,
     QTabWidget,
     QToolButton,
     QVBoxLayout,
@@ -36,7 +33,7 @@ from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormModel, FormState
-from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
+from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import (
@@ -48,19 +45,18 @@ from zcu_tools.gui.widgets import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from ..writeback import WritebackWidget
-from .analyze_form import AnalyzeFormWidget
-from .data_figure_preview_gallery import DataFigurePreviewGallery
+from .experiment_figure_area import ExperimentFigureArea
+from .experiment_ledger import (
+    BLUE_PRIMARY_STYLESHEET,
+    LedgerSection,
+    ledger_column,
+    ledger_form,
+    primary_action_button,
+)
 from .guide_view import GuideView
 
 logger = logging.getLogger(__name__)
 
-# Approved prototype blue primary treatment (A3)
-_BLUE_PRIMARY_STYLESHEET = (
-    "QPushButton#primaryButton { background-color: #286ac7; color: white; "
-    "font-weight: 600; border: 1px solid #205aa9; border-radius: 4px; }"
-    "QPushButton#primaryButton:disabled { background-color: #a0b8d9; color: #e6edf7; border-color: #8da6c9; }"
-    "QPushButton#primaryButton:hover:!disabled { background-color: #2f76dc; }"
-)
 _RED_STOP_STYLESHEET = (
     "background-color: #f44336; color: white; font-weight: bold; "
     "border: 1px solid #d32f2f; border-radius: 4px;"
@@ -159,137 +155,14 @@ class _PanelEdgeHandle(QToolButton):
             painter.drawLine(center_x + 2, center_y + 7, center_x - 2, center_y)
 
 
-class _LedgerSection(QWidget):
-    """App-local single-column ledger section with whole-row folding.
-
-    Header row (blank or text area) toggles the body; the action bar stays
-    fixed outside the scroll area. Presentation is app-local; the shared tree
-    adapter remains the only cross-module structural seam (S1).
-    """
-
-    def __init__(
-        self,
-        title: str,
-        parent: QWidget | None = None,
-        *,
-        collapsed: bool = False,
-    ) -> None:
-        super().__init__(parent)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-
-        # Header — whole row is clickable (S1/A2).
-        self._header = QWidget()
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        self._header.setCursor(Qt.PointingHandCursor)  # pyright: ignore[reportAttributeAccessIssue]
-        self._header.setObjectName("ledgerHeader")
-        header_row = QHBoxLayout(self._header)
-        header_row.setContentsMargins(4, 4, 4, 4)
-        header_row.setSpacing(6)
-
-        self._toggle_btn = QPushButton("▼" if not collapsed else "▶")
-        self._toggle_btn.setFixedWidth(16)
-        self._toggle_btn.setFlat(True)
-        self._toggle_btn.setCheckable(True)
-        self._toggle_btn.setChecked(not collapsed)
-        header_row.addWidget(self._toggle_btn)
-
-        self._title_label = QLabel(f"<b>{title}</b>")
-        font = self._title_label.font()
-        font.setPixelSize(13)
-        self._title_label.setFont(font)
-        header_row.addWidget(self._title_label, stretch=1)
-
-        # Body
-        self._body = QWidget()
-        self.body_layout = QVBoxLayout(self._body)
-        self.body_layout.setContentsMargins(8, 2, 0, 2)
-        self.body_layout.setSpacing(2)
-
-        outer.addWidget(self._header)
-        outer.addWidget(self._body)
-
-        self._collapsed = collapsed
-        self._body.setVisible(not collapsed)
-
-        # Whole header row toggles; button also toggles (no double toggle because
-        # click on button goes to button widget, not header).
-        self._toggle_btn.clicked.connect(self._toggle)
-        # Install header click handler via event filter on header.
-        self._header.mouseReleaseEvent = self._on_header_mouse_release
-
-    def _on_header_mouse_release(self, a0: QMouseEvent | None) -> None:
-        if a0 is None:
-            QWidget.mouseReleaseEvent(self._header, a0)
-            return
-        try:
-            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-            if a0.button() == Qt.LeftButton:  # pyright: ignore[reportAttributeAccessIssue]
-                self._toggle()
-                a0.accept()
-                return
-        # tolerated: Event accessors/presentation may fail arbitrarily; delegate default mouse handling.
-        except Exception:  # noqa: BLE001
-            pass
-        # Fallback to default
-        QWidget.mouseReleaseEvent(self._header, a0)
-
-    def _toggle(self, *_: object) -> None:
-        self._collapsed = not self._collapsed
-        self._body.setVisible(not self._collapsed)
-        self._toggle_btn.setText("▶" if self._collapsed else "▼")
-        self._toggle_btn.setChecked(not self._collapsed)
-
-    def set_collapsed(self, *, collapsed: bool) -> None:
-        if bool(collapsed) == self._collapsed:
-            return
-        self._toggle()
-
-    def is_collapsed(self) -> bool:
-        return self._collapsed
-
-
-def _ledger_column() -> tuple[QWidget, QVBoxLayout]:
-    """Return an analysis-pane container and the scrolled column to fill."""
-    container = QWidget()
-    outer = QVBoxLayout(container)
-    outer.setContentsMargins(0, 0, 0, 0)
-    outer.setSpacing(0)
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    scroll.setFrameShape(QFrame.Shape.NoFrame)
-    inner = QWidget()
-    layout = QVBoxLayout(inner)
-    layout.setContentsMargins(4, 4, 4, 4)
-    layout.setSpacing(4)
-    layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-    scroll.setWidget(inner)
-    outer.addWidget(scroll, stretch=1)
-    return container, layout
-
-
-def _ledger_form() -> AnalyzeFormWidget:
-    """Return an analysis parameter form in the 13 px ledger font."""
-    form = AnalyzeFormWidget()
-    font = form.font()
-    font.setPixelSize(13)
-    form.setFont(font)
-    return form
-
-
-def _primary_action_button(text: str) -> QPushButton:
-    """Return a full-width blue primary button at the analysis action height."""
-    button = QPushButton(text)
-    button.setObjectName("primaryButton")
-    button.setFixedHeight(30)
-    button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    button.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
-    return button
-
-
 class ExpTabWidget(QWidget):
-    """A single experiment tab with capability-driven subtabs and independent figure panes."""
+    """Project an experiment snapshot into capability-driven forms and figure panes.
+
+    The owned ExperimentFigureArea holds right-side presentation. Figure methods
+    run synchronously on the Qt owner thread and borrow caller-owned Figures.
+    Unsupported Analysis/Post operations raise RuntimeError; attach/draw failures
+    propagate. Clearing presentation keeps retained Figures saveable.
+    """
 
     def __init__(
         self,
@@ -313,8 +186,6 @@ class ExpTabWidget(QWidget):
         self._cfg = ctrl.cfg_resources.lookup(tab_id)
         # The action boundary is retained for Reset; button slots close over it.
         self._actions: TabActions | None = None
-        # Optional injected Figure->PNG renderer for Data preview (tests)
-        self._preview_renderer = preview_renderer
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -361,7 +232,13 @@ class ExpTabWidget(QWidget):
 
         splitter.addWidget(self._left_tabs)
 
-        splitter.addWidget(self._build_plot_area())
+        self._figure_area = ExperimentFigureArea(
+            tab_id,
+            capabilities,
+            lambda pane: self.get_current_figure_for_pane(pane),
+            preview_renderer=preview_renderer,
+        )
+        splitter.addWidget(self._figure_area)
 
         splitter.setCollapsible(0, True)
         self._update_left_panel_controls()
@@ -412,7 +289,7 @@ class ExpTabWidget(QWidget):
         self.run_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+        self.run_btn.setStyleSheet(BLUE_PRIMARY_STYLESHEET)
         bar_layout.addWidget(self.run_btn, stretch=80)
         run_layout.addWidget(self._run_action_bar)
         self._run_panel = run_panel
@@ -423,24 +300,22 @@ class ExpTabWidget(QWidget):
         if self._has_analysis:
             # Single-column 13 px ledger with whole-header folding; Analyze sits
             # immediately after params and before Writeback preview (A4).
-            analysis_container, analysis_layout = _ledger_column()
+            analysis_container, analysis_layout = ledger_column()
 
-            self._analyze_section = _LedgerSection(
+            self._analyze_section = LedgerSection(
                 "Analysis parameters", collapsed=False
             )
-            self.analyze_form = _ledger_form()
+            self.analyze_form = ledger_form()
             self._analyze_section.body_layout.addWidget(self.analyze_form)
             analysis_layout.addWidget(self._analyze_section)
 
             # Analyze immediately below params and before Writeback preview,
             # occupying 100% of available content width (A6). Stays enabled
             # per availability/busy and retains blue primary when idle.
-            self.analyze_btn = _primary_action_button("Analyze")
+            self.analyze_btn = primary_action_button("Analyze")
             analysis_layout.addWidget(self.analyze_btn)
 
-            self.writeback_section = _LedgerSection(
-                "Writeback preview", collapsed=False
-            )
+            self.writeback_section = LedgerSection("Writeback preview", collapsed=False)
             self.writeback_widget = WritebackWidget(
                 self._ctrl, tab_id=self.tab_id, pane="analysis"
             )
@@ -458,12 +333,12 @@ class ExpTabWidget(QWidget):
         # ── Tab: Post-Analysis (only when post capability true) ────
         # Same ledger, form, button, and writeback presentation as Analysis.
         if self._has_post:
-            post_container, post_layout = _ledger_column()
+            post_container, post_layout = ledger_column()
 
-            self._post_analyze_section = _LedgerSection(
+            self._post_analyze_section = LedgerSection(
                 "Post-analysis parameters", collapsed=False
             )
-            self.post_analyze_form = _ledger_form()
+            self.post_analyze_form = ledger_form()
             self._post_analyze_section.body_layout.addWidget(self.post_analyze_form)
             post_layout.addWidget(self._post_analyze_section)
 
@@ -473,10 +348,10 @@ class ExpTabWidget(QWidget):
             set_foreground(self._post_gate_label, secondary_colour(self))
             post_layout.addWidget(self._post_gate_label)
 
-            self.post_analyze_btn = _primary_action_button("Run Post-Analysis")
+            self.post_analyze_btn = primary_action_button("Run Post-Analysis")
             post_layout.addWidget(self.post_analyze_btn)
 
-            self.post_writeback_section = _LedgerSection(
+            self.post_writeback_section = LedgerSection(
                 "Writeback preview", collapsed=False
             )
             self.post_writeback_widget = WritebackWidget(
@@ -509,94 +384,6 @@ class ExpTabWidget(QWidget):
         adapter_name = self._ctrl.get_tab_adapter_name(self.tab_id)
         self._guide_panel = GuideView(self._ctrl.get_adapter_guide(adapter_name))
         self._left_tabs.addTab(self._guide_panel, "Guide")
-
-    def _build_analysis_figure_pane(self) -> None:
-        # Analysis figure pane (only when analysis present)
-        if self._has_analysis:
-            self._analysis_stack = QStackedWidget()
-            self._analysis_placeholder = QLabel("(no plot yet)")
-            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-            self._analysis_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
-            self._analysis_stack.addWidget(self._analysis_placeholder)
-            self._analysis_container = FigureContainer(
-                self._analysis_stack, self._analysis_placeholder
-            )
-            self._analysis_figures: FigureCollection | None = None
-            self._analysis_panel_right = QWidget()
-            analysis_right = QVBoxLayout(self._analysis_panel_right)
-            analysis_right.setContentsMargins(0, 0, 0, 0)
-            self._analysis_selector = QComboBox()
-            self._analysis_selector.setAccessibleName("Analysis figure")
-            self._analysis_selector.hide()
-            self._analysis_selector.currentIndexChanged.connect(
-                self._on_analysis_figure_selected
-            )
-            analysis_right.addWidget(self._analysis_selector)
-            analysis_right.addWidget(self._analysis_stack, stretch=1)
-
-    def _build_post_figure_pane(self) -> None:
-        # Post figure pane (only when post present)
-        if self._has_post:
-            self._post_stack = QStackedWidget()
-            self._post_placeholder = QLabel("(no plot yet)")
-            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-            self._post_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
-            self._post_stack.addWidget(self._post_placeholder)
-            self._post_container = FigureContainer(
-                self._post_stack, self._post_placeholder
-            )
-            self._post_figures: FigureCollection | None = None
-            self._post_panel_right = QWidget()
-            post_right = QVBoxLayout(self._post_panel_right)
-            post_right.setContentsMargins(0, 0, 0, 0)
-            self._post_selector = QComboBox()
-            self._post_selector.setAccessibleName("Post-analysis figure")
-            self._post_selector.hide()
-            self._post_selector.currentIndexChanged.connect(
-                self._on_post_figure_selected
-            )
-            post_right.addWidget(self._post_selector)
-            post_right.addWidget(self._post_stack, stretch=1)
-
-    def _build_plot_area(self) -> QWidget:
-        # ── Right pane: per-pane figure containers ────────────────
-        plot_panel = QWidget()
-        self._plot_layout = QVBoxLayout(plot_panel)
-        self._plot_layout.setContentsMargins(0, 0, 0, 0)
-        self._right_stack = QStackedWidget()
-
-        # Run figure pane (always)
-        self._run_stack = QStackedWidget()
-        self._run_placeholder = QLabel("(no plot yet)")
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        self._run_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
-        self._run_stack.addWidget(self._run_placeholder)
-        self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
-
-        self._build_analysis_figure_pane()
-        self._build_post_figure_pane()
-
-        # Data preview gallery — Variant A stacked rail (S1, S3)
-        self._data_gallery = DataFigurePreviewGallery(
-            self._capabilities,
-            renderer=self._preview_renderer,
-        )
-
-        # Placeholder for Guide (no figure) — Data now shows gallery (S4)
-        self._right_placeholder = QLabel("(no plot yet)")
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        self._right_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
-
-        self._right_stack.addWidget(self._run_stack)
-        if self._has_analysis:
-            self._right_stack.addWidget(self._analysis_panel_right)
-        if self._has_post:
-            self._right_stack.addWidget(self._post_panel_right)
-        self._right_stack.addWidget(self._data_gallery)
-        self._right_stack.addWidget(self._right_placeholder)
-
-        self._plot_layout.addWidget(self._right_stack, stretch=1)
-        return plot_panel
 
     # ------------------------------------------------------------------
     # Capability helpers
@@ -839,174 +626,80 @@ class ExpTabWidget(QWidget):
     # ── Figure container helpers (stable per-subtab identity S2) ──────────
 
     def get_run_container(self) -> FigureContainer:
-        return self._run_container
+        """Return the stable Run container borrowed by the explicit plot host."""
+        return self._figure_area.get_run_container()
 
     def get_analysis_container(self) -> FigureContainer:
-        self._require_analysis()
-        return self._analysis_container
+        """Return the stable Analysis container; unsupported panes raise RuntimeError."""
+        return self._figure_area.get_analysis_container()
 
     def get_post_container(self) -> FigureContainer:
-        self._require_post()
-        return self._post_container
+        """Return the stable Post container; unsupported panes raise RuntimeError."""
+        return self._figure_area.get_post_container()
 
     def prepare_run_container(self) -> FigureContainer:
         """Clear Run and every downstream presentation for a new run."""
-        self.clear_all_figures()
-        return self._run_container
+        return self._figure_area.prepare_run_container()
 
     def prepare_analysis_container(self) -> FigureContainer:
         """Clear Analysis presentation and return its container."""
-        self._require_analysis()
-        self._analysis_container.clear_dynamic_canvases()
-        self._refresh_data_gallery()
-        return self._analysis_container
+        return self._figure_area.prepare_analysis_container()
 
     def prepare_post_container(self) -> FigureContainer:
         """Clear Post presentation and return its container."""
-        self.clear_post_figure()
-        return self._post_container
+        return self._figure_area.prepare_post_container()
 
     def clear_post_figure(self) -> None:
         """Clear only the invalidated Post-Analysis presentation."""
-        self._require_post()
-        self._post_container.clear_dynamic_canvases()
-        self._refresh_data_gallery()
+        self._figure_area.clear_post_figure()
 
     def mount_interactive_widget(self, widget: QWidget) -> None:
         """Mount an interactive analysis widget as the visible plot content (analysis pane)."""
-        self._require_analysis()
-        self._analysis_selector.hide()
-        self._analysis_stack.addWidget(widget)
-        self._analysis_stack.setCurrentWidget(widget)
-        self._right_stack.setCurrentWidget(self._analysis_panel_right)
+        self._figure_area.mount_interactive_widget(widget)
 
     def interactive_frontend(self) -> InteractiveFrontend | None:
         """Return only the currently mounted interactive analysis presentation."""
-        current = self._analysis_stack.currentWidget()
-        return current if isinstance(current, InteractiveFrontend) else None
+        return self._figure_area.interactive_frontend()
 
     def unmount_interactive_widgets(self, widget_type: type[QWidget]) -> None:
         """Remove interactive widgets of ``widget_type`` and show placeholder in analysis pane."""
-        self._require_analysis()
-        for index in reversed(range(self._analysis_stack.count())):
-            widget = self._analysis_stack.widget(index)
-            if isinstance(widget, widget_type):
-                self._analysis_stack.removeWidget(widget)
-                widget.deleteLater()
-        self._analysis_stack.setCurrentWidget(self._analysis_placeholder)
+        self._figure_area.unmount_interactive_widgets(widget_type)
 
     def left_panel_width(self) -> int:
         """Return the latest expanded left-panel width for persistence."""
         return self._splitter_left_saved
 
     def get_current_figure_for_pane(self, pane: str) -> Figure | None:
-        """Pane-specific figure read (run|analysis|post_analysis)."""
-        from matplotlib.figure import Figure
+        """Borrow the presented run/analysis/post_analysis Figure, or None if empty.
 
-        if pane == "run":
-            stack = self._run_stack
-            placeholder = self._run_placeholder
-        elif pane == "analysis":
-            self._require_analysis()
-            stack = self._analysis_stack
-            placeholder = self._analysis_placeholder
-        elif pane == "post_analysis":
-            self._require_post()
-            stack = self._post_stack
-            placeholder = self._post_placeholder
-        else:
-            raise ValueError(f"unknown pane {pane!r}")
-        canvas = stack.currentWidget()
-        if canvas is None or canvas is placeholder:
-            return None
-        figure = getattr(canvas, "figure", None)
-        if not isinstance(figure, Figure):
-            raise RuntimeError(f"tab {self.tab_id!r} canvas has no matplotlib figure")
-        return figure
+        Unknown panes raise ValueError; unsupported panes or mounted widgets
+        without a Figure raise RuntimeError. Data previews use this overridable
+        reader dynamically and isolate each pane's synchronous failure.
+        """
+        return self._figure_area.get_current_figure_for_pane(pane)
 
     def clear_all_figures(self) -> None:
         """Clear all figure panes (used for LoadData and Run start invalidation)."""
-        self._run_container.clear_dynamic_canvases()
-        if self._has_analysis:
-            self._analysis_container.clear_dynamic_canvases()
-            self._analysis_figures = None
-            self._analysis_selector.blockSignals(True)
-            self._analysis_selector.clear()
-            self._analysis_selector.blockSignals(False)
-            self._analysis_selector.hide()
-        if self._has_post:
-            self._post_container.clear_dynamic_canvases()
-            self._post_figures = None
-            self._post_selector.blockSignals(True)
-            self._post_selector.clear()
-            self._post_selector.blockSignals(False)
-            self._post_selector.hide()
-        self._refresh_data_gallery()
+        self._figure_area.clear_all_figures()
 
     def show_run_figure(self, fig: Figure) -> None:
         """Embed a matplotlib Figure in the Run pane."""
-        canvas = attach_existing_figure_to_container(fig, self._run_container)
-        draw = getattr(canvas, "draw", None)
-        if not callable(draw):
-            raise RuntimeError("Attached run canvas does not support draw()")
-        draw()
-        logger.debug("show_run_figure: tab_id=%r canvas set", self.tab_id)
-        self._refresh_data_gallery()
+        self._figure_area.show_run_figure(fig)
 
     def show_analysis_figures(self, figures: FigureCollection | None) -> None:
-        self._require_analysis()
-        self._show_named_figures("analysis", figures)
+        """Draw named Analysis Figures, or clear for None/empty; raise if unsupported.
+
+        The same collection identity preserves the selected name. A replacement
+        rebuilds the selector with signals blocked. Attach/draw failures propagate.
+        """
+        self._figure_area.show_analysis_figures(figures)
 
     def show_post_analysis_figures(self, figures: FigureCollection | None) -> None:
-        self._require_post()
-        self._show_named_figures("post_analysis", figures)
+        """Draw named Post Figures using the same identity/draw contract as Analysis.
 
-    def _show_named_figures(
-        self,
-        pane: Literal["analysis", "post_analysis"],
-        figures: FigureCollection | None,
-    ) -> None:
-        if pane == "analysis":
-            selector = self._analysis_selector
-            container = self._analysis_container
-            previous = self._analysis_figures
-        else:
-            selector = self._post_selector
-            container = self._post_container
-            previous = self._post_figures
-        if figures is not previous:
-            selector.blockSignals(True)
-            try:
-                selector.clear()
-                if figures is not None:
-                    selector.addItems(list(figures))
-            finally:
-                selector.blockSignals(False)
-            if pane == "analysis":
-                self._analysis_figures = figures
-            else:
-                self._post_figures = figures
-        selector.setVisible(bool(figures))
-        if not figures:
-            container.clear_dynamic_canvases()
-        else:
-            name = selector.currentText()
-            if name not in figures:
-                raise RuntimeError(f"No selected {pane} figure in {self.tab_id!r}")
-            canvas = attach_existing_figure_to_container(figures[name], container)
-            draw = getattr(canvas, "draw", None)
-            if not callable(draw):
-                raise RuntimeError("Attached figure canvas does not support draw()")
-            draw()
-        self._refresh_data_gallery()
-
-    def _on_analysis_figure_selected(self, index: int) -> None:
-        if index >= 0 and self._analysis_figures is not None:
-            self._show_named_figures("analysis", self._analysis_figures)
-
-    def _on_post_figure_selected(self, index: int) -> None:
-        if index >= 0 and self._post_figures is not None:
-            self._show_named_figures("post_analysis", self._post_figures)
+        None/empty clears presentation. Unsupported Post raises RuntimeError.
+        """
+        self._figure_area.show_post_analysis_figures(figures)
 
     def _on_reset_cfg_clicked(self) -> None:
         confirmed = self._dialog_presenter.confirm(
@@ -1092,83 +785,24 @@ class ExpTabWidget(QWidget):
             raise RuntimeError(f"tab {self.tab_id!r} has no form editor")
         return self._editor
 
-    def _is_data_visible(self) -> bool:
-        return self._left_tabs.currentWidget() is self._save_panel
-
-    def _refresh_data_gallery(self) -> None:
-        """Refresh Data gallery from current pane figures when Data is visible (S2)."""
-        if not hasattr(self, "_data_gallery"):
-            return
-        if not self._is_data_visible():
-            return
-        try:
-            run_fig = self.get_current_figure_for_pane("run")
-        # tolerated: The pane reader is overridable; a failed run lookup leaves only its preview empty.
-        except Exception:  # noqa: BLE001
-            run_fig = None
-        if self._has_analysis:
-            try:
-                ana_fig = self.get_current_figure_for_pane("analysis")
-            # tolerated: An arbitrary analysis pane-reader failure must not block the other previews.
-            except Exception:  # noqa: BLE001
-                ana_fig = None
-        else:
-            ana_fig = None
-        if self._has_post:
-            try:
-                post_fig = self.get_current_figure_for_pane("post_analysis")
-            # tolerated: An arbitrary post pane-reader failure must not block the other previews.
-            except Exception:  # noqa: BLE001
-                post_fig = None
-        else:
-            post_fig = None
-        try:
-            self._data_gallery.update_figures(run_fig, ana_fig, post_fig)
-        except Exception:
-            logger.exception("failed to refresh data gallery")
-
     def _on_left_tab_changed(self, index: int) -> None:
-        """Switch right pane to match left subtab (S4).
-
-        Data → gallery (with snapshot refresh), Guide → placeholder,
-        Run/Analysis/Post → their source stacks.
-        """
+        """Translate the left selection into the corresponding figure-area page."""
         widget = self._left_tabs.widget(index)
         if widget is self._run_panel:
-            self._right_stack.setCurrentWidget(self._run_stack)
-            return
-        if self._has_analysis and widget is self._analysis_panel:
-            self._right_stack.setCurrentWidget(self._analysis_panel_right)
-            return
-        if self._has_post and widget is self._post_panel:
-            self._right_stack.setCurrentWidget(self._post_panel_right)
-            return
-        if widget is self._save_panel:
-            self._refresh_data_gallery()
-            self._right_stack.setCurrentWidget(self._data_gallery)
-            # Viewport-driven mosaic must reflow by gallery's own width (S1);
-            # QStackedWidget hides inactive pages so width changes while hidden
-            # would otherwise defer resize/show until next event.
-            # tolerated: suppress(Exception) splits mixed BaseExceptionGroup; preserve the original group.
-            try:  # noqa: SIM105
-                self._data_gallery.refresh_layout()
-            # tolerated: Data activation must survive arbitrary public reflow/presentation failures.
-            except Exception:  # noqa: BLE001
-                pass
-            return
-        # Guide
-        self._right_stack.setCurrentWidget(self._right_placeholder)
+            self._figure_area.select_pane("run")
+        elif self._has_analysis and widget is self._analysis_panel:
+            self._figure_area.select_pane("analysis")
+        elif self._has_post and widget is self._post_panel:
+            self._figure_area.select_pane("post_analysis")
+        elif widget is self._save_panel:
+            self._figure_area.select_pane("data")
+        else:
+            self._figure_area.select_pane("guide")
 
     def set_writable(self, *, writable: bool) -> None:
         """Receive Local write availability; domain and Stop gates remain separate."""
         self._writable = writable
-        if self._has_analysis:
-            # Removed widgets remain QObject children until DeferredDelete; only
-            # stack membership owns mounted presentations.
-            for index in range(self._analysis_stack.count()):
-                frontend = self._analysis_stack.widget(index)
-                if isinstance(frontend, InteractiveFrontend):
-                    frontend.set_read_only(read_only=not writable)
+        self._figure_area.set_writable(writable=writable)
         if self._actions is not None:
             self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
 
@@ -1214,7 +848,7 @@ class ExpTabWidget(QWidget):
                 state, capabilities, writable=writable, local_busy=local_busy
             )
             # Apply explicit blue primary style (idle/disabled) — objectName alone has no global stylesheet
-            self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+            self.run_btn.setStyleSheet(BLUE_PRIMARY_STYLESHEET)
             # Force style refresh for objectName/stylesheet change
             # tolerated: The initialized button has a live widget/application style after setStyleSheet.
             self.run_btn.style().unpolish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]

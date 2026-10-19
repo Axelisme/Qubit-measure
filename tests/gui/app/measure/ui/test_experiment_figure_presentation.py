@@ -7,8 +7,10 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QComboBox, QWidget
+from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,6 +25,7 @@ from zcu_tools.gui.app.measure.services.persistence_types import (
     PersistedTab,
 )
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
+from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -42,6 +45,38 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
 )
 from tests.gui.app.measure.ui._figure_presentation_support import gallery
+
+
+class StaticInteractive(InteractiveFrontend):
+    """Synthetic presentation with no worker or editing actions to quiesce."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._figure = Figure()
+        axes = self._figure.subplots()
+        axes.plot([0, 1, 2], [1, 0, 1], label="Interactive preview")
+        axes.set_xlabel("Time")
+        axes.legend()
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Interactive preview"))
+        layout.addWidget(FigureCanvasQTAgg(self._figure))
+
+    @property
+    def figure(self) -> Figure:
+        return self._figure
+
+    @property
+    def preview_active(self) -> bool:
+        return False
+
+    def set_read_only(self, *, read_only: bool) -> None:
+        pass
+
+    def cancel_preview(self) -> None:
+        pass
+
+    def teardown(self) -> None:
+        pass
 
 
 class PresentationAdapter(AnalysisSavingAdapter):
@@ -111,6 +146,45 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         )
         app.window.resize(1280, 800)
         yield app.window
+
+
+@pytest.fixture(params=["mounted", "unmounted"])
+def interactive_presentation(
+    presentation_window: QWidget, request
+) -> tuple[QWidget, str]:
+    """Prepare public mounted/unmounted states; no user-driven lifecycle is claimed."""
+    (tab,) = presentation_window.findChildren(ExpTabWidget)
+    tab.mount_interactive_widget(StaticInteractive())
+    if request.param == "unmounted":
+        tab.unmount_interactive_widgets(StaticInteractive)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return presentation_window, request.param
+
+
+def test_interactive_presentation_and_placeholder_survive_user_pane_switches(
+    interactive_presentation: tuple[QWidget, str], tmp_path: Path
+) -> None:
+    window, state = interactive_presentation
+    flow = ComponentDriver(window)
+    shots = tmp_path / state
+    flow.click("Close")
+    flow.select_tab("Analysis")
+    expected = ("Interactive preview",) if state == "mounted" else ()
+    assert flow.legends().texts == expected
+    if state == "unmounted":
+        assert flow.observe("(no plot yet)").visible
+    flow.screenshot(shots / "01-analysis.png")
+    flow.select_tab("Data")
+    assert flow.observe(object_name="dataFigurePreviewGallery").visible
+    flow.screenshot(shots / "02-data.png")
+    flow.select_tab("Guide")
+    assert flow.legends().texts == ()
+    flow.screenshot(shots / "03-guide.png")
+    flow.select_tab("Analysis")
+    assert flow.legends().texts == expected
+    if state == "unmounted":
+        assert flow.observe("(no plot yet)").visible
+    flow.screenshot(shots / "04-analysis-return.png")
 
 
 def test_user_switches_named_figures_gallery_and_left_panel(

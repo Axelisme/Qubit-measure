@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QLineEdit, QPushButton
+from qtpy.QtWidgets import QComboBox, QLineEdit, QPushButton
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -268,11 +268,17 @@ def test_no_analysis_capability_constructs_only_run_data_and_guide(
         == 1
     )
     assert not hasattr(tab_none, "_analysis_panel")
-    assert not hasattr(tab_none, "_analysis_container")
+    assert not any(
+        widget.accessibleName() == "Analysis figure"
+        for widget in tab_none.findChildren(QComboBox)
+    )
     assert not hasattr(tab_none, "post_analyze_form")
     assert not hasattr(tab_none, "post_writeback_widget")
     assert not hasattr(tab_none, "_post_panel")
-    assert not hasattr(tab_none, "_post_container")
+    assert not any(
+        widget.accessibleName() == "Post-analysis figure"
+        for widget in tab_none.findChildren(QComboBox)
+    )
     with pytest.raises(RuntimeError, match="does not support analysis"):
         tab_none.get_analysis_container()
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
