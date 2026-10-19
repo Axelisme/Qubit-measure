@@ -1,6 +1,9 @@
 """Entry-scoped predictor selection through the shared public control seam."""
 
+import errno
+import os
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -38,6 +41,39 @@ def files(tmp_path: Path):
         database_root=tmp_path / "Database",
     )
     return context, control, entry
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        PermissionError(errno.EACCES, "predictor scan denied"),
+        OSError(errno.EIO, "predictor scan failed"),
+    ],
+    ids=["permission-denied", "io-error"],
+)
+def test_list_files_propagates_scan_failures(
+    files, monkeypatch: pytest.MonkeyPatch, error: OSError
+) -> None:
+    context, control, entry = files
+    context.install_entry(entry)
+    entry.predictors_path.mkdir()
+
+    def fail_scan(path: object) -> NoReturn:
+        raise error
+
+    with monkeypatch.context() as filesystem:
+        filesystem.setattr(os, "scandir", fail_scan)
+        with pytest.raises(type(error), match="predictor scan"):
+            control.list_files()
+
+
+def test_list_files_rejects_predictor_directory_is_file(files) -> None:
+    context, control, entry = files
+    context.install_entry(entry)
+    entry.predictors_path.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(NotADirectoryError):
+        control.list_files()
 
 
 def load_outcome(

@@ -119,6 +119,118 @@ def test_load_preserves_unknown_metadata_and_timezone_text(
     )
 
 
+@pytest.mark.parametrize("operation", ["load", "save"])
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        pytest.param("2026-10-20X12:34:56Z", id="x-separator"),
+        pytest.param("2026-10-20 12:34:56Z", id="space-separator"),
+        pytest.param("2026-10-20\n12:34:56Z", id="newline-separator"),
+        pytest.param("20261020T12:34:56Z", id="basic-date"),
+        pytest.param("2026-W43-2T12:34:56Z", id="week-date"),
+        pytest.param("2026-10-20T123456Z", id="basic-time"),
+        pytest.param("2026-10-20T12:34:56+0800", id="basic-offset"),
+        pytest.param("2026-10-20T12:34:56+08", id="hour-offset"),
+        pytest.param("2026-10-20T12:34:56+08:00:30", id="second-offset"),
+        pytest.param("2026-10-20T12:34:56+08:00:30.5", id="fractional-offset"),
+        pytest.param("2026-10-20T12:34:56,123Z", id="comma-fraction"),
+        pytest.param("2026-10-20T12:34:56.1234567Z", id="excessive-fraction"),
+        pytest.param("2026-10-20T12Z", id="hour-only"),
+        pytest.param("2026-10-20T12:34.5Z", id="fractional-minute"),
+    ],
+)
+def test_rejects_timestamp_outside_extended_shape(
+    tmp_path: Path,
+    document: dict[str, object],
+    operation: str,
+    timestamp: str,
+) -> None:
+    document["source"] = {"run_id": None, "created_at": timestamp}
+    path = write_document(tmp_path / "predictor.json", document)
+    before = path.read_bytes()
+
+    if operation == "load":
+        with pytest.raises(ValueError, match="."):
+            load_predictor_file(path)
+    else:
+        with pytest.raises(ValueError, match="."):
+            save_predictor_file(
+                path,
+                PredictorFile(
+                    "fluxonium",
+                    FluxoniumParams(),
+                    None,
+                    PredictorSource(None, timestamp),
+                ),
+            )
+
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["load", "save"])
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-293T12:34:56Z",
+        "2026-02-30T12:34:56Z",
+        "2026-10-20T24:34:56Z",
+        "2026-10-20T12:34:56+24:00",
+    ],
+    ids=["ordinal-date", "invalid-calendar-date", "invalid-time", "invalid-offset"],
+)
+def test_rejects_invalid_timestamp_values(
+    tmp_path: Path,
+    document: dict[str, object],
+    operation: str,
+    timestamp: str,
+) -> None:
+    document["source"] = {"run_id": None, "created_at": timestamp}
+    path = write_document(tmp_path / "predictor.json", document)
+    if operation == "load":
+        with pytest.raises(ValueError, match="."):
+            load_predictor_file(path)
+    else:
+        with pytest.raises(ValueError, match="."):
+            save_predictor_file(
+                path,
+                PredictorFile(
+                    "fluxonium",
+                    FluxoniumParams(),
+                    None,
+                    PredictorSource(None, timestamp),
+                ),
+            )
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        None,
+        "2026-10-20T12:34Z",
+        "2026-10-20T12:34+08:00",
+        "2026-10-20T12:34-03:30",
+        "2026-10-20T12:34:56Z",
+        "2026-10-20T12:34:56+00:00",
+        "2026-10-20T12:34:56.1Z",
+        "2026-10-20T12:34:56.123456-03:30",
+    ],
+)
+def test_timestamp_extended_shape_round_trips_verbatim(
+    tmp_path: Path, timestamp: str | None
+) -> None:
+    path = tmp_path / "predictor.json"
+    predictor = PredictorFile(
+        "fluxonium", FluxoniumParams(), None, PredictorSource(None, timestamp)
+    )
+    save_predictor_file(path, predictor)
+
+    assert load_predictor_file(path) == predictor
+    assert (
+        json.loads(path.read_text(encoding="utf-8"))["source"]["created_at"]
+        == timestamp
+    )
+
+
 @pytest.mark.parametrize(
     "changes",
     [
