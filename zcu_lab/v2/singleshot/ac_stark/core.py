@@ -161,13 +161,27 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         *,
         context: RunContext,
     ) -> AcStarkResult:
+        """Measure the qubit resonance under a variable cavity Stark tone.
+
+        After optional reset and initialization, launch stark_pulse1 without
+        waiting for it to finish, play the frequency-swept stark_pulse2 qubit
+        probe, then read out. Pulse lengths and delays in cfg set the overlap.
+        Scan cavity gain on the host, uniformly in gain squared before
+        hardware rounding, and probe frequency on the board.
+
+        Return gains (a.u.), probe frequencies (MHz), and classified G/E
+        fractions shaped (Ngain, Nfreq, 2). cfg supplies distinct finite IQ
+        centers and a positive finite radius. Other is 1-G-E, not a calibrated
+        leakage population. Subsequent analysis extracts the Stark shift.
+        """
+
+        # Prepare the probe grid and a gain grid spaced in drive intensity.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
 
         gain_sweep = cfg.sweep.gain
 
-        # uniform in square space
         freqs = sweep2array(
             cfg.sweep.freq,
             "freq",
@@ -183,6 +197,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
             allow_array=True,
         )
 
+        # Show G/E and the unclassified remainder alongside the current trace.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
             for line, label in zip(
@@ -246,6 +261,8 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                 modules = step.cfg.modules
                 modules.stark_pulse1.set_param("gain", gain)
                 current_index = gain_idx
+
+                # Start the cavity tone nonblocking so the qubit probe can overlap.
                 _ = (
                     step.prog_builder(soc, soccfg)
                     .add_reset("reset", modules.reset)
@@ -259,12 +276,15 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                     .add_readout("readout", modules.readout)
                     .declare_sweep("freq", step.cfg.sweep.freq)
                     .build_and_acquire(
+                        # Classify shots before averaging; do not classify mean IQ.
                         raw2signal_fn=raw_population_signal,
                         g_center=cfg.g_center,
                         e_center=cfg.e_center,
                         ge_radius=cfg.radius,
                     )
                 )
+
+        # Preserve measured G/E fractions; Other remains a derived quantity.
         signals = buffer.array
         return AcStarkResult(gains=gains, freqs=freqs, populations=signals)
 
