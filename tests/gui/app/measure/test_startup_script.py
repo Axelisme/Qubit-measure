@@ -51,6 +51,7 @@ class StartupProbe(ModuleType):
     driver: ClosingDevice
     soccfg: object
     tab: str
+    connection_threads: list[int]
 
 
 @pytest.fixture
@@ -71,6 +72,7 @@ def startup_app(qapp, tmp_path, monkeypatch):
     probe.started = threading.Event()
     probe.release = threading.Event()
     probe.worker_ids = []
+    probe.connection_threads = []
     probe.driver = ClosingDevice(fast_mode=True)
     probe.driver.calls = probe.calls
     probe.soccfg = make_mock_soccfg()
@@ -94,6 +96,17 @@ def write_script(tmp_path: Path, body: str) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def run_script(ctrl: Controller, path: Path) -> None:
+    """Run a synthetic script and surface its public assertions at the runner seam."""
+    token = ctrl.start_startup(path)
+    qt_until(
+        lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed",
+        label="synthetic facet script",
+    )
+    outcome = ctrl.operation_control.await_operation(token, 0).outcome
+    assert outcome is not None and outcome.status == "finished", outcome
 
 
 def test_script_selection_uses_only_default_custom_or_clean(tmp_path):
@@ -214,6 +227,182 @@ def test_component_and_alias_facets_commit_through_context_owner(startup_app, tm
     finally:
         restore_registry(before)
         assert registry_state() == before
+
+
+def test_live_queries_and_close_callback_read_current_not_startup_state(startup_app, tmp_path):
+    behavior, assembly, ctrl, _window, probe = startup_app
+    path = write_script(
+        tmp_path,
+        "    from zcu_tools.gui.session.state import DeviceStatus\n"
+        "    assert ctx.soc.current() is None\n"
+        "    assert ctx.setup.current().entry.name == 'synthetic'\n"
+        "    assert ctx.setup.current().point_label == 'first'\n"
+        "    assert ctx.tabs.current() == ()\n"
+        "    ctx.devices.register('live', p.driver)\n"
+        "    row, = ctx.devices.current()\n"
+        "    assert (row.name, row.type_name, row.address) == ('live', 'FakeDevice', p.driver.get_info().address)\n"
+        "    assert row.status is DeviceStatus.CONNECTED\n"
+        "    def closing():\n"
+        "        assert ctx.setup.current().point_label == 'later'\n"
+        "        assert len(ctx.tabs.current()) == 1\n"
+        "        assert ctx.devices.current()[0].status is DeviceStatus.CONNECTED\n"
+        "        p.calls.append('snapshot')\n"
+        "    ctx.on_close(closing)\n",
+    )
+    run_script(ctrl, path)
+    ctrl.setup_control.new_point(PointCreateRequest("later", "", CommandOrigin("gui")))
+    ctrl.new_tab("sample")
+    behavior.close(assembly)
+    assert probe.calls == ["snapshot", "hardware"]
+
+
+def test_remember_and_connect_non_manual_device_through_known_adapter(startup_app, tmp_path):
+    _behavior, _assembly, ctrl, _window, _probe = startup_app
+    run_script(ctrl, write_script(
+        tmp_path,
+        "    from zcu_tools.gui.session.state import DeviceStatus\n"
+        "    ctx.devices.remember('offline', 'FakeDevice', 'startup-offline')\n"
+        "    row, = ctx.devices.current()\n"
+        "    assert (row.name, row.type_name, row.address) == ('offline', 'FakeDevice', 'startup-offline')\n"
+        "    assert row.status is DeviceStatus.MEMORY_ONLY\n"
+        "    ctx.devices.connect('offline', 'FakeDevice', 'startup-offline')\n"
+        "    assert ctx.devices.current()[0].status is DeviceStatus.CONNECTED\n"
+        "    try:\n"
+        "        ctx.devices.remember('offline', 'FakeDevice', 'replacement')\n"
+        "    except RuntimeError:\n"
+        "        pass\n"
+        "    else:\n"
+        "        raise AssertionError('remember must reject a live identity')\n"
+        "    assert ctx.devices.current()[0].address == 'startup-offline'\n",
+    ))
+    assert ctrl.device_control.get_device_info("offline") is not None
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_connection_facets_wait_off_owner_and_publish_only_success(startup_app, tmp_path, monkeypatch, fails):
+    from zcu_tools import qick_remote
+
+    _behavior, _assembly, ctrl, _window, probe = startup_app
+    owner_id = threading.get_ident()
+
+    def connect(ip: str, port: int):
+        assert (ip, port) == ("offline-board", 1234)
+        probe.connection_threads.append(threading.get_ident())
+        if fails:
+            raise OSError("offline connection refused")
+        return probe.soccfg, probe.soccfg
+
+    monkeypatch.setattr(qick_remote, "make_soc_proxy", connect)
+    run_script(ctrl, write_script(
+        tmp_path,
+        "    try:\n"
+        "        ctx.soc.connect('offline-board', 1234)\n"
+        "    except RuntimeError as error:\n"
+        "        assert 'offline connection refused' in str(error)\n"
+        "        assert ctx.soc.current() is None\n"
+        "        p.calls.append('failed')\n"
+        "    else:\n"
+        "        current = ctx.soc.current()\n"
+        "        assert (current.ip, current.port) == ('offline-board', 1234)\n"
+        "        ctx.soc.install(p.soccfg, p.soccfg)\n"
+        "        assert ctx.soc.current() is None\n"
+        "        p.calls.append('connected')\n",
+    ))
+    assert probe.calls == ["failed" if fails else "connected"]
+    assert len(probe.connection_threads) == 1
+    assert probe.connection_threads[0] != owner_id
+
+
+def test_failed_device_connection_propagates_and_retains_memory_row(startup_app, tmp_path):
+    _behavior, _assembly, ctrl, _window, _probe = startup_app
+    run_script(ctrl, write_script(
+        tmp_path,
+        "    from zcu_tools.gui.session.state import DeviceStatus\n"
+        "    try:\n"
+        "        ctx.devices.connect('unknown', 'NoSuchDriver', 'unavailable')\n"
+        "    except RuntimeError as error:\n"
+        "        assert 'NoSuchDriver' in str(error)\n"
+        "    else:\n"
+        "        raise AssertionError('unknown driver must not connect')\n"
+        "    row, = ctx.devices.current()\n"
+        "    assert row.status is DeviceStatus.MEMORY_ONLY and row.error\n",
+    ))
+    assert ctrl.device_control.get_device_snapshot("unknown").error
+
+
+def test_summary_survives_terminal_and_cache_root_is_available(startup_app, tmp_path):
+    _behavior, _assembly, ctrl, window, _probe = startup_app
+    run_script(ctrl, write_script(
+        tmp_path,
+        "    assert ctx.cache_root.is_absolute()\n"
+        "    try:\n"
+        "        ctx.summary('  ')\n"
+        "    except ValueError:\n"
+        "        pass\n"
+        "    else:\n"
+        "        raise AssertionError('blank summary accepted')\n"
+        "    ctx.summary('Restored 2 items; 1 failed')\n",
+    ))
+    assert ComponentDriver(window).status().text == "Restored 2 items; 1 failed"
+
+
+def test_tab_input_roundtrip_preserves_expression_selection_and_invalid_draft(startup_app, tmp_path):
+    _behavior, _assembly, ctrl, _window, _probe = startup_app
+    original = ctrl.new_tab("sample")
+    resource = ctrl.cfg_resources.lookup(original)
+    resource.write({("gain",): "{unfinished", ("reps",): "not-an-int"})
+    resource.select(("sweep",), {"kind": "start_stop"})
+    expected = resource.input.to_json()
+    run_script(ctrl, write_script(
+        tmp_path,
+        "    tab, = ctx.tabs.current()\n"
+        "    assert tab.adapter_name == 'sample'\n"
+        "    p.tab = ctx.tabs.new_tab(tab.adapter_name, input=tab.input)\n"
+        "    assert ctx.tabs.current()[1].input == tab.input\n",
+    ))
+    restored = ctrl.cfg_resources.lookup(ctrl.list_tab_ids()[1])
+    assert restored.input.to_json() == expected
+    assert restored.preview().errors
+
+
+def test_new_tab_rejects_bad_input_and_logs_incompatible_paths(startup_app, tmp_path, caplog):
+    _behavior, _assembly, ctrl, _window, _probe = startup_app
+    run_script(ctrl, write_script(
+        tmp_path,
+        "    from zcu_tools.gui.app.measure.services.tab_input import TabInput\n"
+        "    for adapter, raw, expected in [('missing', '{}', KeyError), ('sample', 'not-json', ValueError), ('sample', '{}', ValueError)]:\n"
+        "        try:\n"
+        "            ctx.tabs.new_tab(adapter, input=TabInput(raw))\n"
+        "        except expected:\n"
+        "            pass\n"
+        "        else:\n"
+        "            raise AssertionError('bad tab admitted')\n"
+        "    assert ctx.tabs.current() == ()\n"
+        "    ctx.tabs.new_tab('sample', input=TabInput('{\"data\":{\"gain\":0.35,\"removed\":1},\"selections\":[]}'))\n",
+    ))
+    assert ctrl.cfg_resources.lookup(ctrl.list_tab_ids()[0]).input.data["gain"] == 0.35
+    assert "discarded" in caplog.text and "removed" in caplog.text
+
+
+def test_blocking_connections_fast_fail_from_owner_callback(startup_app, tmp_path):
+    behavior, assembly, ctrl, _window, probe = startup_app
+    run_script(ctrl, write_script(
+        tmp_path,
+        "    def closing():\n"
+        "        for connect in [lambda: ctx.soc.connect('never', 1234), lambda: ctx.devices.connect('never', 'FakeDevice', 'never')]:\n"
+        "            try:\n"
+        "                connect()\n"
+        "            except RuntimeError as error:\n"
+        "                assert 'worker' in str(error)\n"
+        "                p.calls.append('rejected')\n"
+        "            else:\n"
+        "                raise AssertionError('owner connection admitted')\n"
+        "        assert ctx.soc.current() is None\n"
+        "        assert ctx.devices.current() == ()\n"
+        "    ctx.on_close(closing)\n",
+    ))
+    behavior.close(assembly)
+    assert probe.calls == ["rejected", "rejected"]
 
 
 @pytest.mark.parametrize("selection", ["default", "custom", "clean"])
