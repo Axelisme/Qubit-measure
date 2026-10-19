@@ -7,7 +7,7 @@ from typing import Self
 
 import pytest
 from pydantic import Field, ValidationError
-from zcu_tools.device import FakeDevice, FakeDeviceInfo
+from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Done,
@@ -18,7 +18,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
+from zcu_tools.gui.session.services.device import DeviceService
 
 from tests.experiment.workflows._engine_fakes import (
     Cfg,
@@ -84,6 +84,8 @@ class RecordingDriver(FakeDevice):
 def connected() -> tuple[StartHarness, DeviceService, RecordingDriver, SessionDevices]:
     harness = StartHarness()
     driver = RecordingDriver()
+    manager = DeviceManager()
+    manager.register_device("flux", driver)
     service = DeviceService(
         harness.bus,
         harness.state,
@@ -92,11 +94,9 @@ def connected() -> tuple[StartHarness, DeviceService, RecordingDriver, SessionDe
         harness.runner,
         harness.handles,
         driver_factory=lambda type_name, address: driver,
+        device_registry=manager,
     )
-    service.start_connect_device(
-        ConnectDeviceRequest("FakeDevice", "flux", driver.address)
-    )
-    harness.complete_segment()
+    service.publish_initial_devices()
     # The connect observation belongs to the cache; later reads may reuse a model.
     driver.info = driver.info.model_copy(deep=True)
     driver.reads = 0

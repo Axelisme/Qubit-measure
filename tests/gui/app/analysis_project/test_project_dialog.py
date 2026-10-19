@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QPushButton
-from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.gui.result_scope import (
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+from zcu_tools.gui.app.analysis_project.project_dialog import ProjectDialog
+from zcu_tools.gui.app.analysis_project.result_scope import (
     ResultScope,
     ResultScopeManager,
     write_params_identity,
 )
-from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
 
 def _field(widget: ProjectDialog, label: str) -> QLineEdit:

@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-19，明確宣告的 grouped independent Labber layout
+**Last updated:** 2026-10-19，native 2.1 未知歷史值與 grouped independent Labber layout
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -8,7 +8,13 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 載入該名稱的 owner。Path helpers 不要求 HDF5，HDF5 reader／writer 仍在使用時載入 h5py。
 `data.h5` 是單次 Experiment Result 的正規資料，Labber 是獨立 writer 產生的衍生輸出，供 Log Browser 使用。
 
-- `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.0。
+- `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.1。
+  `RunMetadata.started_at` 可以是 UTC ISO 字串或 None，`completion` 接受
+  complete／partial／stopped／unknown。None 與 unknown 表示歷史證據缺失，
+  不從 run_id、檔名或檔案時間推算。正常量測仍提供開始時間與已知完成狀態。
+  2.1 以必填的空字串 attr 表示 started_at=None，completion 原樣寫 unknown。
+  Reader 接受 2.0 與同 major 的後續 minor。2.0 仍拒絕空 started_at 與 unknown completion；
+  所有版本的缺失 attr、非法型別與非 UTC 時間都明確失敗。
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
@@ -41,6 +47,8 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 - Native loading 預設只投影已知內容。明示 `preserve_unknown=True` 才取得
   `NativeExtensions` detached HDF5 image。Generic caller 把 image 傳回 writer，
   保留同 major minor 的未知 JSON／HDF5 內容與不改形 rewrite 的 references。
+  寫回版本一律取 max(來源版本, 2.1)：2.0 即使沒有新未知值也升為 2.1，
+  future-minor 保留原版本，不降版。
   Typed experiment tuple 不是 lossless rewrite envelope，也沒有 legacy fallback。
 
 - `write_labber` 從同一 `ExperimentPayload` 輸出 single 或 canonical

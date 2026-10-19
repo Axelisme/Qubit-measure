@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -71,7 +72,6 @@ def _make_ctx() -> SessionEnv:
         parameters=None,
         soc=MagicMock(),  # simulate connected soc
         soccfg=make_mock_soccfg(),
-        res_name="fake_res",
     )
 
 
@@ -115,6 +115,9 @@ class ControllerFixture:
             view=self.view,
             bus=self.bus,
             project_root=project_root or mkdtemp(prefix="context-"),
+            driver_factory=lambda type_name, address: FakeDevice(
+                address=address, fast_mode=True
+            ),
         )
         self.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
         self.ctrl.setup_control.new_point(
@@ -663,9 +666,9 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
 def test_device_connect_updates_state_and_presents_ui_feedback(
     cf: ControllerFixture,
 ):
-    """The default FakeDevice connects through the public device control facet."""
+    """A synthetic hardware driver connects through the public control facet."""
     cf.ctrl.device_control.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
+        ConnectDeviceRequest(type_name="YOKOGS200", name="flux", address="addr")
     )
     _wait_for(lambda: not cf.ctrl.device_control.get_active_device_operations())
 

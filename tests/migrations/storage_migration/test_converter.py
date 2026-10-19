@@ -184,7 +184,7 @@ def test_parts_accumulate_with_same_identity(
     assert len(result.preserved_files) == 1
     assert (
         request_data.results_root / request_data.name / "params.json"
-    ).read_bytes() == params.read_bytes()
+    ).read_bytes() == b'{"legacy": true}'
 
 
 def test_data_resume_keeps_valid_user_edit(
@@ -313,7 +313,7 @@ def test_native_is_readable_and_validated_before_source_removal(
 def test_historical_parameters_remain_evidence_and_unresolved_sources_stay_pending(
     request_data: MigrationRequest, mapping: MigrationMapping, origin: str
 ) -> None:
-    request, source = write_run(request_data)
+    request, source = write_run(replace(request_data, part="data"))
     assert request.run_evidence is not None
     evidence = request.run_evidence.entries[0]
     parameter = LegacyParameterSnapshot(
@@ -479,7 +479,7 @@ def test_dry_run_never_publishes_or_calls_validator(
 def test_move_resumes_each_publication_window(
     request_data: MigrationRequest, mapping: MigrationMapping, phase: str
 ) -> None:
-    request, source = write_run(request_data)
+    request, source = write_run(replace(request_data, part="data"))
     report = migrate_storage(
         request,
         mapping=mapping,
@@ -680,7 +680,7 @@ def test_native_resume_before_labber_move_keeps_assignment(
     mapping: MigrationMapping,
     phase: str,
 ) -> None:
-    request, source = write_run(request_data)
+    request, source = write_run(replace(request_data, part="data"))
     report = migrate_storage(
         request,
         mapping=mapping,
@@ -725,7 +725,7 @@ def test_native_resume_before_labber_move_keeps_assignment(
 def test_prepared_final_window_does_not_require_temp(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
-    request, source = write_run(request_data)
+    request, source = write_run(replace(request_data, part="data"))
     report = migrate_storage(
         request,
         mapping=mapping,

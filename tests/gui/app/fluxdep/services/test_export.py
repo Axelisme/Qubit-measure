@@ -7,12 +7,12 @@ import os
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.io import load_spectrums
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.project import ProjectInfo
 
 
 def test_export_empty_raises(tmp_path):

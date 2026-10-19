@@ -18,6 +18,7 @@ from zcu_tools.cfg_model import (
     Expr,
     FormNode,
     Hidden,
+    LogPoints,
     ModuleSpec,
     Range,
     Slot,
@@ -49,6 +50,14 @@ from ._seeds import persistent_input
 from ._types import members as _members
 from ._types import union_type
 from .fixed_elements import FixedElementsForm
+from .log_points import (
+    ExplicitIntegerPoints,
+    IntegerPointsInput,
+    LogIntegerPoints,
+    PositiveExplicitIntegerPoints,
+    PositiveIntegerPointsInput,
+    PositiveLogIntegerPoints,
+)
 from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
 
@@ -283,7 +292,16 @@ class Section:
                 continue
             annotation = self._annotation(name, info, node)
             field_info = _field_info(info)
-            if name in self.modules or SweepCfg in _members(info.annotation):
+            if isinstance(node, LogPoints):
+                # Native list constraints apply after lowering, not to the input model.
+                field_info.metadata = [
+                    item for item in field_info.metadata if isinstance(item, Display)
+                ]
+            if (
+                name in self.modules
+                or SweepCfg in _members(info.annotation)
+                or isinstance(node, LogPoints)
+            ):
                 field_info.discriminator = "kind"
             if isinstance(node, Expr):
                 field_info.default = PydanticUndefined
@@ -308,6 +326,28 @@ class Section:
             result: dict[tuple[str | int, ...], tuple[Option, ...]] = {
                 (name,): field.options(env) for name, field in section.modules.items()
             }
+            result.update(
+                {
+                    (name,): (
+                        Option(
+                            "Log",
+                            {"kind": "log"},
+                            fields=LogIntegerPoints
+                            if node.include_zero
+                            else PositiveLogIntegerPoints,
+                        ),
+                        Option(
+                            "List",
+                            {"kind": "list"},
+                            fields=ExplicitIntegerPoints
+                            if node.include_zero
+                            else PositiveExplicitIntegerPoints,
+                        ),
+                    )
+                    for name, node in section.tree.items()
+                    if isinstance(node, LogPoints)
+                }
+            )
             # Empty device defaults need a label; choices remains the value policy.
             result.update(
                 {
@@ -354,6 +394,14 @@ class Section:
         return result
 
     def _annotation(self, name: str, info: FieldInfo, node: FormNode) -> object:
+        if isinstance(node, LogPoints):
+            if get_origin(info.annotation) is not list or _members(
+                get_args(info.annotation)[0]
+            ) != (int,):
+                raise TypeError(f"{(*self.path, name)!r}: LogPoints requires list[int]")
+            return (
+                IntegerPointsInput if node.include_zero else PositiveIntegerPointsInput
+            )
         if module_specs(info.annotation):
             field = ModuleField(
                 info.annotation,
@@ -440,6 +488,8 @@ class Section:
                 data.pop(name, None)
                 if (module := self.modules[name].initial_input(env)) is not None:
                     data[name] = module
+            elif isinstance(node, LogPoints):
+                data[name] = {"kind": "log", "max": node.max, "points": node.points}
             elif isinstance(node, Range):
                 data[name] = {
                     "kind": "linrange",
@@ -543,6 +593,14 @@ class Section:
                 child.to_raw(item, env, errors, (*prefix, name, index))
                 for index, item in enumerate(items)
             ]
+        for name, node in self.tree.items():
+            if isinstance(node, LogPoints):
+                item = getattr(value, name)
+                if not isinstance(item, LogIntegerPoints | ExplicitIntegerPoints):
+                    raise TypeError(
+                        f"{(*prefix, name)!r}: expected validated integer points"
+                    )
+                raw[name] = item.values
         return raw
 
     def to_raw(

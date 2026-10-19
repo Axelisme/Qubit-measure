@@ -4,14 +4,14 @@ import json
 from pathlib import Path
 
 import pytest
-import zcu_tools.gui.result_scope as result_scope_mod
-from zcu_tools.gui.expected_error import ExpectedErrorCategory
-from zcu_tools.gui.result_scope import (
+import zcu_tools.gui.app.analysis_project.result_scope as result_scope_mod
+from zcu_tools.gui.app.analysis_project.result_scope import (
     ResultScopeError,
     ResultScopeManager,
     migrate_params_v0_to_v1_project_info,
     read_params_identity,
 )
+from zcu_tools.gui.expected_error import ExpectedErrorCategory
 
 
 def test_result_scope_scans_canonical_params(tmp_path) -> None:

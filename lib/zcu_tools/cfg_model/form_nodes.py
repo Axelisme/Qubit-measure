@@ -53,6 +53,22 @@ class Range:
 
 
 @dataclass(frozen=True, slots=True)
+class LogPoints:
+    """Opt a list[int] field into Log/List input with these fresh Log values.
+
+    max is the inclusive integer endpoint. include_zero=True keeps a zero
+    point and counts it in points. False requests positive points starting at
+    1; max>1 needs at least two points, while max=1 accepts one. The frontend
+    owns generation, rounding, deduplication and validation; this declaration
+    performs no computation.
+    """
+
+    max: int = 128
+    points: int = 9
+    include_zero: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class AliasName:
     """Resolve an alias once at Reset to a direct name, not an expression.
 
@@ -79,6 +95,7 @@ type FormNode = (
     TemplateSeed
     | Template
     | Range
+    | LogPoints
     | AliasName
     | Hidden
     | Mapping[str, FormNode]

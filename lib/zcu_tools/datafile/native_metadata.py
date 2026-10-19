@@ -163,7 +163,8 @@ def validate_metadata(metadata: RunMetadata, cfg: CfgSnapshot) -> None:
         )
     if not checked.experiment:
         raise ValueError("/: experiment must not be empty")
-    _validate_utc(checked.started_at, "/: started_at")
+    if checked.started_at is not None:
+        _validate_utc(checked.started_at, "/: started_at")
     if checked.finished_at is not None:
         _validate_utc(checked.finished_at, "/: finished_at")
     for name in _OPTIONAL_EVIDENCE:
@@ -229,10 +230,15 @@ def write_metadata(file: h5.File, metadata: RunMetadata, cfg: CfgSnapshot) -> No
     ]
 
 
-def read_metadata(file: h5.File, source: Path) -> tuple[RunMetadata, CfgSnapshot]:
+def read_metadata(
+    file: h5.File, source: Path, *, minor_version: int
+) -> tuple[RunMetadata, CfgSnapshot]:
     """Decode required metadata/cfg and validate known fields; unknown cfg keys remain.
 
-    Missing/null are distinct. Invalid JSON or wire values raise located
+    minor_version is the validated native major-2 header minor. Minor 0 requires
+    a known started_at and complete/partial/stopped completion. Since minor 1,
+    an empty started_at attr decodes to None and completion may be unknown.
+    Required attrs remain required. Invalid JSON or wire values raise located
     ValueError; the caller adds source context for other decoding errors.
     """
     raw: JsonObject = {}
@@ -245,8 +251,15 @@ def read_metadata(file: h5.File, source: Path) -> tuple[RunMetadata, CfgSnapshot
         "labber_path",
     ):
         value = text_attr(file, name)
+        if minor_version == 0 and (name, value) in {
+            ("started_at", ""),
+            ("completion", "unknown"),
+        }:
+            raise ValueError(f"/: {name}: {value!r} requires native 2.1 or later")
         raw[name] = (
-            None if name in {"finished_at", "labber_path"} and value == "" else value
+            None
+            if name in {"started_at", "finished_at", "labber_path"} and value == ""
+            else value
         )
     cfg_values = read_json(file, "cfg")
     cfg_node = known_node(file, "cfg")

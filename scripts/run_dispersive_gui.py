@@ -12,10 +12,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from zcu_tools.gui.launcher import (
+from zcu_tools.gui.app.analysis_project.launcher import (
     add_analysis_project_cli_options,
-    add_runtime_cli_options,
     project_info_from_args,
+)
+from zcu_tools.gui.launcher import (
+    add_runtime_cli_options,
     runtime_options_from_args,
 )
 

@@ -29,7 +29,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建與表單路徑。
 
-- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、共用初值政策的 domain helper 邊界、持久範本、具名裝置欄位與 sweep 四種座標／採樣表示。
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、固定捕捉、adapter 黑箱、共用初值政策的 domain helper 邊界、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、固定來源與共用 Inspect Aliases 頁。
 - [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 的宿主所有權、opaque writeback draft、ModuleSpec proposal 與 selected Apply 的成功前綴。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：已被 [[0065]]、[[0073]] 的 Form／持久 Spec 取代，保留歷史設計。
@@ -50,7 +50,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Persistence
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；SaveLayout 計算位置，Labber 檔名含實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。Native 2.1 保存未知歷史時間與完成狀態，保真寫回不降 minor。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；SaveLayout 計算位置，Labber 檔名含實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
 
 ## Experiment runtime／Workflows
 

@@ -5,6 +5,12 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
+from zcu_lab.v2.fastflux.distortion.acc_phase.gui import AccPhaseAdapter
+from zcu_lab.v2.fastflux.distortion.freq.gui import FastFluxFreqAdapter
+from zcu_lab.v2.fastflux.distortion.phase.gui import PhaseAdapter
+from zcu_lab.v2.fastflux.mist.gui import MistAdapter
+from zcu_lab.v2.fastflux.t1.gui import T1Adapter as FastFluxT1Adapter
+from zcu_lab.v2.fastflux.twotone.gui import TwoToneAdapter
 from zcu_lab.v2.ftf.chevron.gui import ChevronAdapter
 from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
 from zcu_lab.v2.ftf.conditional_spectroscopy.gui import SpectroscopyAdapter
@@ -21,6 +27,9 @@ from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
 from zcu_lab.v2.lookback.gui import LookbackAdapter
+from zcu_lab.v2.mist.flux_dep.gui import MistFluxDepAdapter
+from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAdapter
+from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
 from zcu_lab.v2.mux.freq.gui import MuxFreqAdapter
 from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
@@ -40,6 +49,7 @@ from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAdapter
 from zcu_lab.v2.singleshot.mist.freq.gui import MistFreqAdapter
 from zcu_lab.v2.singleshot.mist.power.gui import MistPowerAdapter
 from zcu_lab.v2.singleshot.mist.power_freq.gui import MistPowerFreqAdapter
+from zcu_lab.v2.singleshot.mist.pre_freq.gui import MistPreFreqAdapter
 from zcu_lab.v2.singleshot.reset_check.gui import SsResetCheckAdapter
 from zcu_lab.v2.singleshot.t1.t1.gui import SsT1Adapter
 from zcu_lab.v2.singleshot.t1.t1_with_tone.gui import SsT1ToneAdapter
@@ -72,6 +82,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq.gui import RoOptFreqAdapter
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.gui import RoOptFreqGainAdapter
 from zcu_lab.v2.twotone.ro_optimize.length.gui import RoOptLengthAdapter
 from zcu_lab.v2.twotone.ro_optimize.power.gui import RoOptPowerAdapter
+from zcu_lab.v2.twotone.time_domain.cpmg.gui import CPMGAdapter
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAdapter
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAdapter
@@ -82,6 +93,10 @@ from zcu_lab.v2.twotone.zigzag_sweep.gui import (
 )
 
 ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
+    "fastflux/distortion/acc_phase": AccPhaseAdapter,
+    "fastflux/distortion/freq": FastFluxFreqAdapter,
+    "fastflux/mist": MistAdapter,
+    "fastflux/t1": FastFluxT1Adapter,
     "ftf/joint_readout": JointReadoutAdapter,
     "ftf/idle_zz": IdleZZAdapter,
     "ftf/conditional_spectroscopy": SpectroscopyAdapter,
@@ -91,7 +106,10 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/conditional_phase": ConditionalPhaseAdapter,
     "ftf/local_z": LocalZAdapter,
     "ftf/rb": TwoQubitRBAdapter,
+    "fastflux/twotone": TwoToneAdapter,
+    "fastflux/distortion/phase": PhaseAdapter,
     "lookback": LookbackAdapter,
+    "mist/power_dep/single_trace": MistTraceAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,
@@ -129,6 +147,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/t1": T1Adapter,
     "twotone/t2ramsey": T2RamseyAdapter,
     "twotone/t2echo": T2EchoAdapter,
+    "twotone/cpmg": CPMGAdapter,
     "twotone/zigzag": ZigZagAdapter,
     "twotone/zigzag_scan/gain": ZigZagScanGainAdapter,
     "twotone/zigzag_scan/freq": ZigZagScanFreqAdapter,
@@ -145,9 +164,12 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "singleshot/t1_tone_sweep_gain": SsT1ToneSweepGainAdapter,
     "singleshot/t1_tone_sweep_freq": SsT1ToneSweepFreqAdapter,
     "singleshot/ac_stark": SsAcStarkAdapter,
+    "mist/flux_dep": MistFluxDepAdapter,
+    "mist/power_dep/drive_freq": DriveFreqAdapter,
     "singleshot/mist/freq": MistFreqAdapter,
     "singleshot/mist/power": MistPowerAdapter,
     "singleshot/mist/power_freq": MistPowerFreqAdapter,
+    "singleshot/mist/pre_freq": MistPreFreqAdapter,
     "jpa/freq": JpaFreqAdapter,
     "jpa/flux": JpaFluxAdapter,
     "jpa/power": JpaPowerAdapter,

@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-16，具名 FTF YAML 輸入
+**Last updated:** 2026-10-20，原子替換的 Windows 短暫鎖重試
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
@@ -32,7 +32,7 @@ Caller 從 `zcu_tools.resources.parameters` import `open_parameters`，提供既
 
 `with params.edit() as draft` 把數筆值與 metadata 放同一筆 DocumentStore 提交。Draft 可用屬性或 `set(path, value)` 改值，用 `set_meta(path, mapping)` 整份替換該 path 的 metadata。空 mapping 清空內容。只改值保留 metadata。框架不依 stderr、source、comment 等 key 驗證領域意義，不查 ledger，不自動補時間或來源。
 
-`refresh()` 明確重讀文件。不同 mapping leaf 沿既有規則合併，同 leaf 衝突拒絕整筆提交。驗證、body、lock 或提交前 I/O 失敗不發布候選。提交後 observer 失敗只記錄錯誤，不撤銷已提交文件。這是單檔保證，不提供跨檔原子性、掉電恢復或自動 retry。
+`refresh()` 明確重讀文件。不同 mapping leaf 沿既有規則合併，同 leaf 衝突拒絕整筆提交。驗證、body、lock 或提交前 I/O 失敗不發布候選。提交後 observer 失敗只記錄錯誤，不撤銷已提交文件。這是單檔保證，不提供跨檔原子性、掉電恢復或整筆交易的自動 retry。原子替換透過 utils.atomic_replace，只對 Windows 短暫 sharing／lock violation 重試約 0.5 秒。
 
 `parameter_fields.py` 集中 FieldView 與完整 caller-model candidate 驗證。Entry 的 setup／point 視圖重用這個 FieldView、stage_model 與 metadata 讀寫，並使用同一 2.0 header 契約。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
 

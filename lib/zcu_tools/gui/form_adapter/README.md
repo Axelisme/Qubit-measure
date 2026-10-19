@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-19，固定值分類與 logical observation readonly
+**Last updated:** 2026-10-19，Log／List 的正值政策與 logical observation readonly
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -99,6 +99,16 @@ SweepCfg 生成 Range／Center × Expts／Step 四個 tagged branches，各自�
 Step 驗證保留 start 與 step，以 floor count 投影實際 stop／center／span。接近整數的商使用 1e-9 相對容差，不普遍 round。步長大於非零區間、零步長或方向錯誤保留錯誤草稿，不能縮成單點。Input 保存原稿，preview／result 提供有效端點，不回寫 input。不提供 explicit-list 分支。
 
 座標 command 不要求 n／step 有效，採樣 command 要求座標與目前採樣值有效。換算只在成功時將參與 expression 改為 direct 值；未參與 input 保留原文與缺席狀態。缺值、expression 或換算失敗不安裝部分結果。手寫表單可使用同一個 `SweepInput`；annotation 只接受部分分支時，description 與 execution 不提供其他分支的 command。
+
+## Log／List 整數清單
+
+`Form(Cfg, {"depths": LogPoints(max=128, points=9)})` 為 `list[int]` 欄位選用 Log／List 輸入。`LogPoints` 從 `cfg_model` 匯入。未標記的 list 與 SweepCfg 不變。
+
+Log 產生 0 加 `geomspace(1, max, points-1)`，末點固定為 max，再四捨五入、排序並去重。points 包含 0，至少為 2。兩點產生 [0, max]。去重後 preview 的 points 是實際點數，原稿保留請求值，Editor 顯示 Effective 值。max=0 只有 [0]，請求點數仍至少為 2。單元素 List 切到 Log 時，回填的 points=1 保持為 invalid draft，不自動增加點數。
+
+`LogPoints(..., include_zero=False)` 選用正值政策。Log 的 max 至少為 1；max>1 時 points 至少為 2，max=1 時 points 至少為 1。它產生 `geomspace(1, max, points)` 並四捨五入去重，首尾固定為 1 與 max；max=1 得到 `[1]`。List 同樣只接受正整數，保留輸入順序與單點。`PositiveLogIntegerPoints(max=..., points=...).values` 提供相同產生政策給 recipe 等前端 caller，不各自重算。
+
+Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切換經 `FormState.select(path, {"kind": "list"}, env)` 或 `{"kind": "log"}`，使用共用 converter 與原子安裝；無效來源或 expression 失敗不改草稿。List 的 `values` 是非空非負整數清單，不重新取樣，額外實驗限制由 core 驗證。`to_cfg` 只輸出整數清單，不保存輸入模式。
 
 ## Logical 操作
 

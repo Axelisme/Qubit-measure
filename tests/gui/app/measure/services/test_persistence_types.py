@@ -17,7 +17,7 @@ from zcu_tools.gui.app.measure.services.persistence_types import (
 def test_app_state_model_dump_validate_roundtrip():
     state = AppPersistedState(
         startup=PersistedStartup(
-            chip_name="chip",
+            entry_name="entry",
             ip="host",
             port=1234,
             devices=(PersistedDeviceEntry(type_name="T", name="flux", address="a"),),
