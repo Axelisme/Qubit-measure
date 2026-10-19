@@ -2,6 +2,7 @@
 - DeadLabelEliminationPass (BasicBlockNode path)
 - BranchEliminationPass
 - BlockMergePass
+- DmemDispatchPass
 """
 
 from __future__ import annotations
@@ -44,6 +45,8 @@ from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
     PipeLineContext,
 )
+
+from .pass_test_support import transform_only_child, walk_basic_blocks
 
 
 def _label(name: str) -> Label:
@@ -499,3 +502,86 @@ def test_branch_elim_preserves_effectful_or_pseudo_jump(jump: JumpInst):
     assert isinstance(block.branch, JumpInst)
     assert block.branch == jump
     assert block.branch.to_dict() == original_dict
+
+
+# ---------------------------------------------------------------------------
+# DmemDispatchPass — small pmem (line 97-103) and big pmem (line 84-95) paths
+# ---------------------------------------------------------------------------
+
+
+def test_dmem_dispatch_k1_returns_none():
+    """k == 1: DmemDispatchPass must skip (single target is not a meaningful dispatch)."""
+    from zcu_tools.program.v2.ir.node import IRDispatch
+    from zcu_tools.program.v2.ir.passes.control_flow import DmemDispatchPass
+
+    labels = [Label("only_case")]
+    dispatch = IRDispatch(name="br", value_reg=Register("r2"), target_labels=labels)
+    ctx = PipeLineContext(config=PipeLineConfig(pmem_capacity=4096), pmem_budget=1024)
+    result = DmemDispatchPass().transform(dispatch, ctx)
+    assert result is None
+
+
+def test_dmem_dispatch_small_pmem_uses_label_jump():
+    """pmem_capacity=512 (<=2048): guard uses label-mode JumpInst, not s15-indirect."""
+    from zcu_tools.program.v2.ir.node import IRDispatch
+    from zcu_tools.program.v2.ir.passes.control_flow import DmemDispatchPass
+
+    labels = [Label(f"case{i}") for i in range(3)]
+    dispatch = IRDispatch(
+        name="br",
+        value_reg=Register("r2"),
+        target_labels=labels,
+    )
+    root = BlockNode(insts=[dispatch])
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=512),
+        pmem_budget=1024,
+    )
+    out = transform_only_child(root, DmemDispatchPass(), ctx)
+
+    all_bbs = list(walk_basic_blocks(out))
+    guard_bbs = [
+        bb for bb in all_bbs if bb.branch is not None and bb.branch.if_cond == "NS"
+    ]
+    assert len(guard_bbs) == 1, "expected exactly one guard block"
+    guard_branch = guard_bbs[0].branch
+    assert isinstance(guard_branch, JumpInst)
+    # label-mode: has a label ref, no addr (no s15 register)
+    assert guard_branch.label is not None
+    assert guard_branch.addr is None
+
+
+def test_dmem_dispatch_big_pmem_uses_s15_indirect():
+    """pmem_capacity=4096 (>2048): guard uses RegWriteInst(s15=LABEL) + JumpInst(addr=s15)."""
+    from zcu_tools.program.v2.ir.node import IRDispatch
+    from zcu_tools.program.v2.ir.passes.control_flow import DmemDispatchPass
+
+    labels = [Label(f"case{i}") for i in range(3)]
+    dispatch = IRDispatch(
+        name="br",
+        value_reg=Register("r2"),
+        target_labels=labels,
+    )
+    root = BlockNode(insts=[dispatch])
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=4096),
+        pmem_budget=1024,
+    )
+    out = transform_only_child(root, DmemDispatchPass(), ctx)
+
+    all_bbs = list(walk_basic_blocks(out))
+    guard_bbs = [
+        bb for bb in all_bbs if bb.branch is not None and bb.branch.if_cond == "NS"
+    ]
+    assert len(guard_bbs) == 1, "expected exactly one guard block"
+    guard_bb = guard_bbs[0]
+    guard_branch = guard_bb.branch
+    assert isinstance(guard_branch, JumpInst)
+    # big pmem: addr=s15 (indirect), no label ref on the jump
+    assert guard_branch.addr == Register("s15")
+    assert guard_branch.label is None
+    # insts must contain a RegWriteInst that loads LABEL into s15
+    write_insts = [i for i in guard_bb.insts if isinstance(i, RegWriteInst)]
+    assert any(getattr(i, "src", None) == SrcKeyword.LABEL for i in write_insts), (
+        "expected RegWriteInst src=LABEL in guard block"
+    )

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-17，runtime 測試按公開契約分組與測試成本規則
+**Last updated:** 2026-10-19，IR optimization 測試按公開契約歸位
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -447,7 +447,7 @@ _make_prog(modules=[b], sweep=[("sel", 2)])
 ### IR pass 測試
 
 - `tests/program/v2/ir/test_ir_builder.py` 覆蓋 `__META__` parsing、branch case identity、loop section parsing，以及 jump label reference 不被誤判成 label definition。
-- `tests/program/v2/ir/test_ir_passes_optimization.py` 等 `ir/test_ir_passes_*.py` 涵蓋結構與 label validation、label DCE、branch case normalize、constant loop unroll、hoist/peephole/timing pass。新增案例從 pipeline 結果驗證 IR 行為。
+- `tests/program/v2/ir/test_ir_passes_optimization.py` 擁有 pipeline 協作與預設 pipeline 整合；dataflow、loop 與 control-flow pass 契約各歸同目錄具名 pass 測試，`clone_renamed` 歸 node 測試。新增案例從公開 pass 或 pipeline 結果驗證 IR 行為。
 - `PeepholePass` 應保留 `NOP`；驗證輸出時分辨 `NOP` 與可清除的 `IR_` internal annotations。
 - `ConstantLoopUnrollPass` 測試使用顯式 `IRLoop.trip_count`，不要用 QICK 實際 loop asm shape 當作 unroll 偵測依據。
 
