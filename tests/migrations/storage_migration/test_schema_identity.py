@@ -222,7 +222,18 @@ def test_cfg_boolean_number_conflict_retains_source(
     )
     assert report.converted_files == report.moved_labber_files == ()
     assert any("comment.cfg" in item.reason for item in report.pending)
-    assert source.read_bytes() == before
+    retained = (
+        request.result_root.parent.parent
+        / f"{request.name}-backup"
+        / "Database"
+        / source.relative_to(request.database_root / "chip/qubit")
+    )
+    assert retained.read_bytes() == before
+    assert (
+        hashlib.sha256(retained.read_bytes()).hexdigest()
+        == hashlib.sha256(before).hexdigest()
+    )
+    assert not source.exists()
 
 
 @pytest.mark.parametrize("flag, replacement", [(True, 1), (False, 0)])
@@ -263,6 +274,70 @@ def test_planned_raw_boolean_number_replacement_is_refused(
     saved = json.loads(manifest_path(request).read_text())
     assert saved["evidence"]["entries"][0]["future_nested"]["flags"][0] is flag
     assert {path: path.read_bytes() for path in before} == before
+    assert not source.exists()
+
+
+@pytest.mark.parametrize("supply_evidence", [False, True])
+def test_completed_resume_accepts_unchanged_or_omitted_evidence_without_sources(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    supply_evidence: bool,
+) -> None:
+    request, source = write_run(request_data)
+    report = migrate_storage(
+        request,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    assert not source.exists()
+    before = {
+        item.destination: item.destination.read_bytes()
+        for item in (*report.converted_files, *report.moved_labber_files)
+    }
+    resumed = migrate_storage(
+        replace(
+            request,
+            resume=True,
+            run_evidence=request.run_evidence if supply_evidence else None,
+        ),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    assert resumed.converted_files == report.converted_files
+    assert resumed.moved_labber_files == report.moved_labber_files
+    assert {path: path.read_bytes() for path in before} == before
+
+
+def test_completed_resume_rejects_typed_raw_disagreement(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+) -> None:
+    request, source = write_run(request_data)
+    migrate_storage(
+        request,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    evidence = request.run_evidence
+    assert evidence is not None
+    original = evidence.entries[0]
+    assert original.cfg is not None
+    changed = replace(original, cfg=replace(original.cfg, values={"frequency": 99.0}))
+    manifest = manifest_path(request)
+    before = manifest.read_bytes()
+    with pytest.raises(MigrationInputError, match="typed projection"):
+        migrate_storage(
+            replace(
+                request, resume=True, run_evidence=replace(evidence, entries=(changed,))
+            ),
+            mapping=mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        )
+    assert manifest.read_bytes() == before
     assert not source.exists()
 
 

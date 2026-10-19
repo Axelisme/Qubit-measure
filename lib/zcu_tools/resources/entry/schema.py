@@ -81,9 +81,10 @@ class SetupGeneral(BaseModel):
 
 
 class PointGeneral(BaseModel):
-    """Metadata belonging to one point, never inherited from setup.
+    """Independent metadata copied from the seed setup or source point.
 
-    created_at is an ISO-8601 timestamp with a UTC offset; Z and +00:00 are valid.
+    entry_id optionally retains the seed entry UUID; it is not point identity.
+    created_at is renewed on creation, as an ISO-8601 UTC timestamp.
     description is optional human-readable text; None means no description.
     ext is a YAML mapping, empty by default, with no unit conversion.
     Empty keys or keys containing dots cannot be addressed by set/meta.
@@ -92,9 +93,17 @@ class PointGeneral(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    entry_id: str | None = None
     created_at: str
     description: str | None = None
     ext: YamlMap = Field(default_factory=dict)
+
+    @field_validator("entry_id")
+    @classmethod
+    def validate_entry_id(cls, value: str | None) -> str | None:
+        if value is not None:
+            SetupGeneral.validate_entry_id(value)
+        return value
 
     @field_validator("created_at")
     @classmethod

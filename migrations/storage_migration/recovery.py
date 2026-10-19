@@ -97,7 +97,7 @@ def _validate_baselines(manifest: MigrationManifest) -> None:
             for root in (source.result_path, source.database_path)
         ):
             raise MigrationInputError("manifest: invalid baseline source")
-        if source_removed(source_path, manifest):
+        if source_removed(source_path, manifest) or manifest.cleanup_phase != "pending":
             continue
         if source_path.exists():
             if file_hash(source_path) != expected:
