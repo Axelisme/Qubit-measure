@@ -41,6 +41,8 @@ from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
 
 @dataclass(frozen=True)
 class FreqResult:
+    """Readout frequencies in MHz and moment-SNR scores (frequency,)."""
+
     freqs: NDArray[np.float64]
     signals: NDArray[np.float64]
 
@@ -96,6 +98,16 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
+        """Measure readout-frequency dependence of ground/excited IQ separation.
+
+        At each frequency, apply the optional reset, omit or apply qub_pulse,
+        then read out. Configure qub_pulse for the intended excitation.
+        Return MHz frequencies and moment-based SNR shaped (Nfreq,);
+        skew_penalty optionally reduces scores for distorted IQ distributions.
+        This score is not assignment fidelity. acquire_kwargs is forwarded
+        to acquisition.
+        """
+        # Quantize the readout frequency grid on the pulse generator.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -106,6 +118,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
         )
 
+        # Show the separation score rather than either preparation's mean IQ.
         viewer = context.plots.liveplot_1d(
             "measurement",
             "Frequency (MHz)",
@@ -116,6 +129,8 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(freqs, np.abs(data)),
         )
+
+        # Compare pulse-off/on branches at each hardware-swept readout frequency.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             freq_sweep = sched.cfg.sweep.freq
@@ -142,6 +157,8 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                     **(acquire_kwargs or {}),
                 )
             )
+
+        # Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
         return FreqResult(freqs, signals)
@@ -153,6 +170,11 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
+        """Select the frequency with maximum smoothed SNR and publish fit.
+
+        options controls smoothing; unmeasured NaN scores become zero before
+        smoothing. Return best_freq in MHz. source.cfg may be None.
+        """
         result = source.result
         freqs, signals = result.freqs, result.signals
 
