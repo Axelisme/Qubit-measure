@@ -64,11 +64,11 @@ Tab 建立時就能 headless 編輯。Qt attach/detach 只管理 view 與訂閱�
 
 ## 固定來源與 Form library key
 
-Open 與 Reset 捕捉一次 point、library、alias 表、cached device infos 與已發布 value sources。Edit、parameter_read、preview、result 與 Run 使用這份 capture，直到下一次 Reset。全域來源事件不刷新既有 tab。捕捉不輪詢硬體。
+Open、Refresh 與 Reset 各捕捉一次 point、library、alias 表、cached device infos 與已發布 value sources。Edit、parameter_read、preview、result 與 Run 使用這份 capture，直到下一次 Refresh 或 Reset。全域來源事件不刷新既有 tab。捕捉不輪詢硬體。
 
 公開 `read_context(aliases=None)` 固定 point、library、storage 與全表。非空 aliases 只覆寫這次 capture 的具名列，保留 dependent authored links，不改全域表。省略、None 與 {} 使用全域列。EMPTY 且無覆寫時回 None，保留 context-free defaults，非空覆寫仍拒絕 no_context。
 
-`tab.reset_cfg(aliases=...)` 是 tab 的單次覆寫入口，重新捕捉來源並恢復 defaults。覆寫不存入 alias 表或 memento。`tab.parameter_read` 只讀 resource.env.parameters，不收 aliases。`tab.run_start` 在任何 focus 或 operation 效果前拒絕非空 aliases，None 與 {} 使用畫面上的值與固定 capture。
+`tab.refresh_sources(aliases=...)` 重新捕捉來源，保留全部 input data 與 explicit selections，包括 expression 原稿與先前初值求得的 direct 值，再以新來源驗證。缺失來源仍是欄位錯誤。`tab.reset_cfg(aliases=...)` 重新捕捉來源並以新來源重算 defaults。兩者的單次覆寫都不存入 alias 表或 memento。`tab.parameter_read` 只讀 resource.env.parameters，不收 aliases。`tab.run_start` 在任何 focus 或 operation 效果前拒絕非空 aliases，None 與 {} 使用畫面上的值與固定 capture。
 
 RecipeSession.open_tab 的公開 aliases/reuse 用法不變。新 tab 與 reuse tab 都先 Reset，再設定參數與 Run。Target 對到 Reset 的 aliases，而非 preview 或 Run 的臨時解析。Recipe 的參數 schema 保持手寫，不從 Form 或 Python signatures 生成。
 

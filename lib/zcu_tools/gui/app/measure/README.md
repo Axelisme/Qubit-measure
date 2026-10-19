@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-18，共用草稿 codec 與獨立 live snapshot
+**Last updated:** 2026-10-19，明確的 Refresh 與 Reset 分工
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -55,7 +55,7 @@ receives their catalogs by injection and never imports the user package.
 ## Sources and workflow
 
 `Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
-and captures parameters, library and cached device infos on Open and Reset. Preview, result and Run use that capture until the next Reset.
+and captures parameters, library and cached device infos on Open, Refresh and Reset. Preview, result and Run use that capture until the next explicit source action. Refresh preserves all authored data and explicit selections, including expression drafts and previously resolved direct defaults. Reset recaptures sources and computes fresh defaults. Capture and factory failures preserve the previous form.
 Workspace persistence stores each FormInput with the shared `{data,selections}` codec, including explicit choices that differ from raw input. Restore uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data; tab creation from saved state accepts `PersistedTab` instead. Old raw-only persisted forms report a format error and open defaults without backup.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.

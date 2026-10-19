@@ -76,6 +76,9 @@ class FormEditor[F: FormModel](QWidget):
     Uncommitted text changes neither state nor validity, and an external state
     publication redraws it with the state's input. Evaluation, choices, branch
     defaults and model validation belong to state.
+    WriteRejected, FormConversionError, FormInputRejected and source errors
+    expressed as PydanticCustomError become field-local errors, retaining the
+    previous committed state; other failures propagate.
     No Engine update, revision check, source capture, persistence or I/O occurs.
 
     Public child object names use model-field paths and indexes joined by dots:

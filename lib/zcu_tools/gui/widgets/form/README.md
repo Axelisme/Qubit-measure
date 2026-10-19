@@ -14,7 +14,7 @@ Model-list 的 `form.picker.<path>` 依 Core 的 elements 列出「index: name�
 
 `selection_fixed` 不鎖內層選項。`fixed` option.value 也不凍結 children 或移除 commands；只有固定 scalar 且沒有 command 時畫成唯讀文字。
 
-Host 必須同時傳入 `write=`、`select=` 與 `run_command=`，或全部省略。三者分別接收 parsed input batch、typed path 與 option.value、typed path 與 command 名稱，並使用同一 guard。Dropdown 只呼叫 select，不以值寫入觸發 converter。Editor 不另寫 state。Host 以 `WriteRejected(message)` 拒絕時，文字保留且顯示訊息；dropdown、checkbox 與 Enabled 回到已發布值。各 mutation 路徑都處理明確的 `FormConversionError` 或 `FormInputRejected`。失敗時顯示 row tooltip，selector 回到已提交的 selection，不重跑 write 或 converter，也不發布 mutation。每個 row 有 `form.row.<canonical path>` objectName，可定位該列及其拒絕原因。其他例外照常拋出。沒有 callback 時，editor 直接呼叫 FormState 的 write、select 與 run_command。
+Host 必須同時傳入 `write=`、`select=` 與 `run_command=`，或全部省略。三者分別接收 parsed input batch、typed path 與 option.value、typed path 與 command 名稱，並使用同一 guard。Dropdown 只呼叫 select，不以值寫入觸發 converter。Editor 不另寫 state。Host 以 `WriteRejected(message)` 拒絕時，文字保留且顯示訊息；dropdown、checkbox 與 Enabled 回到已發布值。各 mutation 路徑都處理明確的 `FormConversionError` 或 `FormInputRejected`。來源拒絕的 `PydanticCustomError` 也顯示為欄位錯誤，不送到 Qt 的 unhandled exception。失敗時顯示 row tooltip，selector 回到已提交的 selection，不重跑 write 或 converter，也不發布 mutation。每個 row 有 `form.row.<canonical path>` objectName，可定位該列及其拒絕原因。其他例外照常拋出。沒有 callback 時，editor 直接呼叫 FormState 的 write、select 與 run_command。
 
 `set_editing_enabled(enabled=False)` 保持表單可讀，不停用整個 widget。文字可選取與複製，fold titles 可展開、折疊與捲動；寫入與 commands 不可用。唯讀時第一次展開的 controls 也遵守這項限制。`refresh(env)` 使用新 capture 重讀已建層的 descriptions，不沿用舊 choices 或 active branch。Detach 與 close 只解除訂閱，不關閉 caller 的 state。
 
