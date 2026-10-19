@@ -1,9 +1,11 @@
 """Observable migration, source preservation and explicit resume contracts."""
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
 
+import h5py as h5
 import numpy as np
 import pytest
 from pydantic import TypeAdapter
@@ -270,6 +272,57 @@ def test_resume_rejects_changed_identity(
         )
 
 
+@pytest.mark.parametrize("unsupported", [False, True])
+def test_instrument_snapshot_preserves_values_or_reports_isolated_pending(
+    request_data: MigrationRequest, mapping: MigrationMapping, unsupported: bool
+) -> None:
+    request_data, source = write_run(request_data)
+    with h5.File(source, "r+") as file:
+        instrument = file["Instrument config"].create_group("synthetic source")
+        instrument.attrs["frequency"] = np.float64(5.25e9)
+        instrument.attrs["enabled"] = np.bool_(True)
+        instrument.attrs["label"] = np.bytes_(b"offline")
+        instrument.attrs["points"] = np.array([1 + 2j, complex(np.inf, np.nan)])
+        instrument.attrs["bounds"] = np.array([np.nan, np.inf, -np.inf])
+        instrument.attrs["empty"] = np.array([], dtype=float)
+        if unsupported:
+            instrument.attrs["reference"] = file.ref
+    evidence_path = request_data.result_root.parent / "evidence.json"
+    raw = json.loads(evidence_path.read_text())
+    raw["entries"][0]["source_hash"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    evidence_path.write_text(json.dumps(raw))
+    request_data = replace(request_data, run_evidence=load_run_evidence(evidence_path))
+    original = source.read_bytes()
+    report = migrate_storage(
+        request_data, mapping=mapping, validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    native = next(
+        (request_data.database_root / request_data.name / "runs").glob("*/data.h5")
+    )
+    stored = load_run_data(native)
+    if unsupported:
+        assert stored.metadata.device_snapshot is None
+        pending = [item for item in report.pending if item.location == "device snapshot pending"]
+        assert len(pending) == 1
+        assert "reference" in pending[0].reason
+    else:
+        assert stored.metadata.device_snapshot is not None
+        assert stored.metadata.device_snapshot["synthetic source"] == {
+            "frequency": 5.25e9, "enabled": True, "label": "offline",
+            "points": [{"real": 1.0, "imag": 2.0},
+                       {"real": {"nonfinite": "inf"}, "imag": {"nonfinite": "nan"}}],
+            "bounds": [{"nonfinite": "nan"}, {"nonfinite": "inf"}, {"nonfinite": "-inf"}],
+            "empty": [],
+        }
+        assert not report.pending
+    np.testing.assert_array_equal(
+        stored.payload.variables[DataVariable("signal")].z, [1 + 2j, 3 + 4j]
+    )
+    assert (request_data.database_root / request_data.name / "Labber/2025/10/scan.hdf5").read_bytes() == original
+    assert not report.failures
+
+
 def test_native_links_to_preserved_labber_relative_to_entry_database(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
@@ -305,7 +358,7 @@ def test_native_is_readable_and_validated_before_source_removal(
         assert stored.metadata.completion == "stopped"
         assert stored.metadata.snapshot.point == "point_at_acquisition"
         assert stored.metadata.snapshot.entry_name == "historical"
-        assert stored.metadata.labber_path is None
+        assert stored.metadata.labber_path == "Labber/2025/10/scan.hdf5"
         assert stored.cfg.values == {"frequency": 12.5}
         np.testing.assert_array_equal(
             stored.payload.variables[DataVariable("signal")].z, [1 + 2j, 3 + 4j]
