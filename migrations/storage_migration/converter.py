@@ -5,6 +5,7 @@ from pathlib import Path
 
 from zcu_tools.datafile import CfgSnapshot
 
+from .backup import finish_cleanup
 from .bootstrap import prepare_session, publish_report, validate_mapping
 from .evidence import select_run_evidence
 from .models import (
@@ -24,7 +25,7 @@ def migrate_storage(
     validate_cfg: Callable[[str, CfgSnapshot], None],
     validate_native: Callable[[Path, str, str], None],
 ) -> MigrationReport:
-    """Convert an explicit legacy entry without modifying its old result tree.
+    """Back up and convert an explicit legacy entry, then safely remove old sources.
 
     request names roots, safe source segments, destination, selected parts and
     optional acquisition evidence. mapping supplies complete registered seeds,
@@ -41,6 +42,14 @@ def migrate_storage(
     validate_native receives the published native path, historical source tag and cfg_type;
     it must load against its declared experiment spec without modifying the file.
     It runs synchronously before the corresponding Labber source can be deleted.
+
+    First execution verifies a complete external SHA256 backup before entry writes.
+    Backup location comes from request.repo_root/backup_parent. Shared old/new
+    result roots are allowed for independent entries; source overlaps and existing
+    destinations are refused. Once both parts and all publications complete with
+    no deferred point figures, verify backup/current sources again, remove only
+    the two old source trees, and locate permanent pending in the backup.
+    Cleanup interruption resumes without rerunning conversions.
 
     First execution refuses either existing destination and independent report.
     resume only accepts this tool's matching manifest, immutable entry identity,
@@ -63,6 +72,10 @@ def migrate_storage(
     """
     validate_mapping(mapping)
     session, entry = prepare_session(request, mapping)
+    if session.manifest.cleanup_phase != "pending":
+        finish_cleanup(session)
+        publish_report(session)
+        return session.manifest.report
     evidence = select_run_evidence(request, session)
     try:
         if request.part in ("parameters", "all"):
@@ -72,6 +85,7 @@ def migrate_storage(
                 session, entry, mapping, evidence, validate_cfg, validate_native
             )
         report_unrecognized_files(session)
+        finish_cleanup(session)
         report = session.manifest.report
         if not request.dry_run:
             publish_report(session)
