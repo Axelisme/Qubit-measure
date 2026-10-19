@@ -1217,6 +1217,39 @@ class RecipeTab:
         """
         self.set_fields((RecipeFieldEdit(field, value, source),))
 
+    def set_integer_points(
+        self, field: RecipeFieldPath, values: list[int] | None
+    ) -> None:
+        """Replace one Log/List integer field with a complete explicit List input.
+
+        field is a nonempty typed logical path to a LogPoints-authored field.
+        values is a list of built-in integers, preserving order and duplicates;
+        None retains even an invalid GUI draft and records gui_default. Supplied
+        values atomically replace the whole branch, without sampling or conversion.
+        Experiment bounds, nonempty-list and readonly rules belong to the owner.
+
+        Invalid path syntax or noninteger values raise ValueError before editing.
+        GUI structural/admission errors propagate as GuiRpcError. Owner validation
+        errors raise GuiRpcError(invalid_cfg), retaining the invalid List draft
+        without recording successful provenance. No new RPC or source refresh occurs.
+        """
+        path = field_path(field)
+        if values is None:
+            self._binding.origins[path] = "gui_default"
+            return
+        if type(values) is not list or any(
+            type(value) is not int for value in values
+        ):
+            raise ValueError("values must be a list of integers or null")
+        reply = self._edit(
+            [{"path": list(path), "value": {"kind": "list", "values": [*values]}}]
+        )
+        if reply is not None and directed_errors(reply, path):
+            raise GuiRpcError(
+                f"Invalid {field} integer points; draft retained", reason="invalid_cfg"
+            )
+        self._binding.origins[path] = "explicit"
+
     def _write_sweep(self, field: RecipeFieldPath, values: dict[str, object]) -> None:
         field_path(field)
         if not values:

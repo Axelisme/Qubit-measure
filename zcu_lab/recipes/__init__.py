@@ -3,6 +3,7 @@
 from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
+from .cpmg import DEFINITION as CPMG
 from .lookback import DEFINITION as LOOKBACK
 from .mux_amp_rabi import DEFINITION as MUX_AMP_RABI
 from .mux_freq import DEFINITION as MUX_FREQ
@@ -29,6 +30,7 @@ RECIPES: tuple[RecipeDefinition, ...] = (
     SINGLESHOT_GE,
     T2RAMSEY,
     T2ECHO,
+    CPMG,
     T1,
     AMPLITUDE_RABI,
     TIME_RABI,
