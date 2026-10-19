@@ -126,6 +126,41 @@ def test_exps_child_becomes_complete_point_with_independent_meta_and_library(
     assert report.failures == ()
 
 
+def test_entry_figures_keep_relative_paths_and_workflow_images_stay_archived(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    source = request_data.result_root / "chip/qubit"
+    files = {
+        "image/fit.png": b"root figure",
+        "overview/image/fit.png": b"nested figure",
+        "autofluxdep_runs/run/image/fit.png": b"workflow figure",
+    }
+    for relative, content in files.items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    dry = _convert(replace(request_data, dry_run=True), mapping)
+    assert not (request_data.results_root / request_data.name).exists()
+    report = _convert(request_data, mapping)
+    entry = _entry(request_data)
+    assert (entry.result_path / "figures/image/fit.png").is_file()
+    assert (
+        entry.result_path / "figures/overview/image/fit.png"
+    ).read_bytes() == b"nested figure"
+    workflow = (
+        entry.database_path
+        / "migration-preserved/result/autofluxdep_runs/run/image/fit.png"
+    )
+    assert workflow.read_bytes() == b"workflow figure"
+    assert dry.failures == ()
+    assert not any(
+        item.location == "association" and item.source == source / "image/fit.png"
+        for item in report.pending
+    )
+    _convert(replace(request_data, resume=True), mapping)
+    assert (entry.result_path / "figures/image/fit.png").read_bytes() == b"root figure"
+
+
 def test_exps_child_without_parameter_files_still_gets_point(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
