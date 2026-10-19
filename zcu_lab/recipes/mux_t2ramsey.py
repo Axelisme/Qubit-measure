@@ -1,5 +1,7 @@
 """One bounded mux recipe; numeric acquisition remains with its native owner."""
 
+from typing import Unpack
+
 from zcu_tools.mcp.measure.execution_reply import (
     SummaryElements,
     SummaryEstimate,
@@ -15,25 +17,15 @@ from zcu_tools.mcp.measure.recipe import (
 from .mux_helpers import (
     DETUNE_PARAMETERS,
     DRIVE_PARAMETERS,
-    ECHO_PI_PARAMETERS,
     INPUTS,
-    MuxInline,
-    MuxLibrary,
-    MuxOverride,
+    MuxInputs,
     finish_mux,
     prepare_mux,
 )
 
 
-def mux_t2ramsey(  # noqa: PLR0913 - Typed keywords are the declared recipe inputs.
-    session: RecipeSession,
-    *,
-    target: str | None = None,
-    reuse_tab_id: str | None = None,
-    participants: list[str] | None = None,
-    library: list[MuxLibrary] | None = None,
-    inline: list[MuxInline] | None = None,
-    overrides: list[MuxOverride] | None = None,
+def mux_t2ramsey(
+    session: RecipeSession, **inputs: Unpack[MuxInputs]
 ) -> RecipeGenerator:
     """Run mux Ramsey; review candidates before explicit Apply.
 
@@ -57,12 +49,7 @@ def mux_t2ramsey(  # noqa: PLR0913 - Typed keywords are the declared recipe inpu
     tab = prepare_mux(
         session,
         "mux/t2ramsey",
-        target=target,
-        reuse_tab_id=reuse_tab_id,
-        participants=participants,
-        library=library,
-        inline=inline,
-        overrides=overrides,
+        inputs,
     )
     yield from finish_mux(tab)
 

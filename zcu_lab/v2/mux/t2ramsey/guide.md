@@ -152,6 +152,10 @@ A finite fit is not a calibration-quality guarantee.
 `save_run(source, path, metadata=...)` stores full cfg, inactive tones, original
 indices, shared requested delay, IQ, actual detunes and source frequencies.
 Time and frequency use seconds and Hz on disk, us and MHz in memory.
+The native file is loadable when the additional Labber export fails: IQ uses a
+delay/tone grid, while detune and source frequency use only the tone grid.
+The save report marks this as `Partially saved`, with native `saved` and Labber
+`failed`; it does not report an all-formats success.
 `load_run(path)` restores an explicit source; changing a current cfg does not
 retarget or alter its analysis. The caller sets complete/partial/stopped metadata
 from the run outcome, not from the existence of IQ.
@@ -164,7 +168,9 @@ frequency correction. NaN detune does not meet that requirement.
 
 `MuxT2RamseyAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
 Its native generated Form is registered as `mux/t2ramsey`.
-A recipe entry is not available yet.
+The registered MCP recipe is `mux_t2ramsey`. See the
+[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
+source-bound reporting and explicit writeback decisions.
 
 Summary rows include original tone `position`, source `name`, selected fit model,
 quality and values, or a failure reason. Q3/Q1 retains indices 2/0 in that row

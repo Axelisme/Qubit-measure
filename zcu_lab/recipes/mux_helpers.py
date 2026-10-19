@@ -1,6 +1,6 @@
 """Shared author operations for the seven mux qubit recipes, not a cfg engine."""
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
@@ -37,6 +37,23 @@ class MuxInline(TypedDict):
     """Copy this selector's captured Spec; list ref ancestors before children."""
 
     path: list[str | int]
+
+
+class MuxInputs(TypedDict):
+    """Optional keywords shared by the seven tools; absent and None retain defaults.
+
+    target is this Reset's mux alias. reuse_tab_id identifies an idle matching tab.
+    participants contains names in execution order. library and inline contain
+    ordered selector operations, followed by the atomic scalar overrides batch.
+    Integer path segments always identify original complete-list positions.
+    """
+
+    target: NotRequired[str | None]
+    reuse_tab_id: NotRequired[str | None]
+    participants: NotRequired[list[str] | None]
+    library: NotRequired[list[MuxLibrary] | None]
+    inline: NotRequired[list[MuxInline] | None]
+    overrides: NotRequired[list[MuxOverride] | None]
 
 
 INPUTS: RecipeInputSchema = {
@@ -96,13 +113,16 @@ INPUTS: RecipeInputSchema = {
                     "value": {
                         "type": [
                             "string",
+                            "integer",
                             "number",
                             "boolean",
                             "null",
                             "array",
                             "object",
                         ],
-                        "items": {"type": ["string", "number", "boolean", "null"]},
+                        "items": {
+                            "type": ["string", "integer", "number", "boolean", "null"]
+                        },
                         "properties": {"expr": {"type": "string"}},
                         "required": ["expr"],
                         "additionalProperties": False,
@@ -114,19 +134,10 @@ INPUTS: RecipeInputSchema = {
 }
 
 
-def prepare_mux(  # noqa: PLR0913 - All seven authors share these typed tool inputs.
-    session: RecipeSession,
-    adapter: str,
-    *,
-    target: str | None,
-    reuse_tab_id: str | None,
-    participants: list[str] | None,
-    library: list[MuxLibrary] | None,
-    inline: list[MuxInline] | None,
-    overrides: list[MuxOverride] | None,
-) -> RecipeTab:
+def prepare_mux(session: RecipeSession, adapter: str, inputs: MuxInputs) -> RecipeTab:
     """Reset the mux tab, then select library, copy inline, and batch scalar edits.
 
+    inputs contains the optional tool keywords described by MuxInputs.
     target overrides only this Reset's mux alias; None uses global aliases.
     reuse_tab_id names an idle tab of adapter. Caller order within library and
     inline is preserved. Ref ancestors must be copied explicitly, outer first.
@@ -137,14 +148,16 @@ def prepare_mux(  # noqa: PLR0913 - All seven authors share these typed tool inp
     No name lookup, range inference, calibration fallback or device access occurs.
     Owner/admission/connection failures propagate without retry or refresh.
     """
+    target = inputs.get("target")
+    participants = inputs.get("participants")
     tab = session.open_tab(
         adapter,
         aliases=None if target is None else {"mux": target},
-        reuse=reuse_tab_id,
+        reuse=inputs.get("reuse_tab_id"),
     )
-    for selection in library or ():
+    for selection in inputs.get("library") or ():
         tab.use_library(tuple(selection["path"]), selection["key"])
-    for copy in inline or ():
+    for copy in inputs.get("inline") or ():
         tab.use_inline(tuple(copy["path"]))
     edits = [
         RecipeFieldEdit(
@@ -158,7 +171,7 @@ def prepare_mux(  # noqa: PLR0913 - All seven authors share these typed tool inp
             edit["value"],
             source="derived" if isinstance(edit["value"], dict) else "explicit",
         )
-        for edit in overrides or ()
+        for edit in inputs.get("overrides") or ()
     )
     tab.set_fields(edits)
     return tab

@@ -38,7 +38,9 @@ Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 ton
 七個 mux qubit adapters 已註冊在 catalog，透過各 leaf 的 native `form.py` 生成完整
 固定具名 tones 及獨立 Participants 輸入。元素 picker 只選編輯對象；名稱 readonly。
 普通改名、增刪及重排由公開 FixedElements owner 原子拒絕。
-未參與及未顯示元素錯誤照常顯示並擋 Run。Recipe entries 尚未提供。
+未參與及未顯示元素錯誤照常顯示並擋 Run。七個同名 mux recipes 已明列於
+`zcu_lab.recipes.RECIPES`，typed overrides、逐元素來源與操作見
+[mux recipe guide](../recipes/mux-guide.md)。
 各 leaf guide 說明 GUI、保存來源及 explicit Apply 操作，core 本身仍不依賴 GUI。
 
 `_support.mux_liveplot.draw_mux_magnitudes` 為七個實驗提供 combined `measurement` 圖，

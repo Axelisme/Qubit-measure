@@ -110,7 +110,9 @@ Options 沿用單 qubit Len Rabi。`decay=True` 預設擬合衰減 cosine，可�
 
 `MuxLenRabiAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
 Its native generated Form is registered as `mux/len_rabi`.
-A recipe entry is not available yet.
+The registered MCP recipe is `mux_len_rabi`. See the
+[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
+source-bound reporting and explicit writeback decisions.
 
 Summary rows retain original tone `position`, source `name` and each fit or failure
 reason. Q3/Q1 produces rows for indices 2/0, not renumbered 0/1. Fit-quality

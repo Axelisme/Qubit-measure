@@ -160,7 +160,11 @@ coherence estimate.
 
 `save_run(source, path, metadata=...)` saves the full cfg, shared requested delay,
 original indices, IQ and per-tone actual detune/source frequency metadata.
-Disk units are seconds/Hz; memory units are us/MHz. `load_run(path)` restores the
+Disk units are seconds/Hz; memory units are us/MHz.
+The native file is loadable when the additional Labber export fails: IQ uses a
+delay/tone grid, while detune and source frequency use only the tone grid.
+The save report marks this as `Partially saved`, with native `saved` and Labber
+`failed`; it does not report an all-formats success. `load_run(path)` restores the
 source without reading a current cfg or Form. The caller sets
 complete/partial/stopped from the run outcome.
 
@@ -172,7 +176,9 @@ replaced by a guessed frequency correction.
 
 `MuxT2EchoAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
 Its native generated Form is registered as `mux/t2echo`.
-A recipe entry is not available yet.
+The registered MCP recipe is `mux_t2echo`. See the
+[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
+source-bound reporting and explicit writeback decisions.
 
 Summary rows include original tone `position`, source `name`, fit model, quality
 and values, or a failure reason. Q3/Q1 gives indices 2/0 in that row order.

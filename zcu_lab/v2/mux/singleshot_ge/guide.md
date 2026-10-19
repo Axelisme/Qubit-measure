@@ -234,7 +234,9 @@ fitter or splice separately simulated shots.
 `MuxGEAdapter` in `gui.py` uses explicit Run/Load sources. Its primary and post
 operations publish `fit_i` and `post_i` through the existing GE plot owner,
 where i is the original tone index. Its native generated Form is registered as
-`mux/singleshot_ge`. A recipe entry is not available yet.
+`mux/singleshot_ge`. The registered MCP recipe is `mux_singleshot_ge`. See the
+[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
+source-bound reporting and explicit writeback decisions.
 
 Both summaries retain original `position`, source `name` and per-tone results or
 failure reasons. Q3/Q1 gives indices 2/0 in that row order. Quality diagnostics
