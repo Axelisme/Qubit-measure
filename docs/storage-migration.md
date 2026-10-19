@@ -341,7 +341,7 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 
 接著編輯 `point.yaml`：
 
-1. 刪除 `general.entry_id`，因為目前的 point loader 不接受這個欄位。setup 的 UUID 保持不變。
+1. `general.entry_id` 保留不動。它是複製來源 setup 的 UUID，不是 point 的身分。
 2. `general.created_at` 改成剛印出的時間，也就是新 point 的建立時間。
 3. 套用 `exps/<sub>/meta_info.json`：用第 4 步的對照表，point meta 有的值覆蓋 setup 繼承的值。
 4. 單位依第 4 步的順序決定。point meta 沒寫單位時，沿用從 setup 繼承的單位，報告記「unit from root meta_info.json」。
