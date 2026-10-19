@@ -207,6 +207,7 @@ def test_failed_connect_never_reports_success_or_registers_device(
     device_client,
 ) -> None:
     invoke = device_client
+    before = invoke("rpc_call", {"method": "device.list"})["devices"]
     started = invoke(
         "rpc_call",
         {
@@ -223,9 +224,17 @@ def test_failed_connect_never_reports_success_or_registers_device(
     assert outcome["status"] == "failed"
     assert outcome["error"]
     assert invoke("rpc_call", {"method": "device.list"}) == {
-        "devices": [
-            {"name": "broken", "type_name": "UnknownDriver", "status": "memory_only"}
-        ]
+        "devices": sorted(
+            before
+            + [
+                {
+                    "name": "broken",
+                    "type_name": "UnknownDriver",
+                    "status": "memory_only",
+                }
+            ],
+            key=lambda row: row["name"],
+        )
     }
     snapshot = invoke(
         "rpc_call", {"method": "device.snapshot", "params": {"name": "broken"}}

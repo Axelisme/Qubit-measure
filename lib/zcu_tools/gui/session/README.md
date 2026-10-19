@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，device 連線失敗與重試、未連線改名、模擬 device address lookup 與重連
+**Last updated:** 2026-10-19，FakeDevice 僅允許模擬發布、連線失敗與重試、未連線改名與重連
 
 # gui/session/ — 量測 session core
 
@@ -101,8 +101,12 @@ before preference restore. Live rows win over same-name remembered rows; other
 remembered rows stay MEMORY_ONLY without connecting. `install_startup_soc` publishes
 the bound SoC/config through the connection owner and fixes that pair for this process.
 Composition also injects the environment's device lookup into DeviceService.
-Explicit FakeDevice addresses retrieve process-shared instances without resetting
-settings or model bindings. Unsupported simulation types/addresses fail clearly;
+Users cannot manually add FakeDevice in normal or simulated sessions. Only rows
+published by `publish_initial_devices` may reconnect at their stored address,
+including after rename. Remembered preferences do not authorize new FakeDevice.
+The Add Device type menu lists hardware drivers only; published FakeDevice panels
+remain available. Explicit FakeDevice addresses retrieve process-shared instances
+without resetting settings or model bindings. Unsupported simulation types/addresses fail clearly;
 real-mode hardware creation is unchanged. Session has no environment builder,
 second instance cache or dynamic simulation coordinator. The host drains work
 and closes the same manager; Controller close alone does not close drivers.
