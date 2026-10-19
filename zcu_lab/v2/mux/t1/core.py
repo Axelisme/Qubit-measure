@@ -130,7 +130,7 @@ class MuxT1Result:
     """Averaged complex IQ on a common requested delay axis.
 
     times is float64 (P,) requested us, not compiled actual delays. tone_indices
-    is int64 (K,) of active original full-tone indices in ascending order.
+    is int64 (K,) of original full-tone indices in participants order.
     signals is complex128 (K,P), I+jQ in ADC-length-normalized a.u. Unwritten
     entries remain NaN; completed-round means survive cancellation. The caller
     must check the RunContext stop signal before declaring success.

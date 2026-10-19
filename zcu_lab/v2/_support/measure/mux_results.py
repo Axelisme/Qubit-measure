@@ -2,6 +2,8 @@
 
 from collections.abc import Mapping, Sequence
 
+from zcu_tools.core.element import ElementIdentity
+from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 from zcu_tools.gui.session.parameters import ParameterContext
 
 from .mux_bindings import require_mux_qubits
@@ -31,15 +33,22 @@ def captured_qubits(
 def indexed_summary(
     names: Sequence[str] | None, index: int, values: Mapping[str, object]
 ) -> dict[str, object]:
-    """Attach original position/name to one outcome's presentation fields.
+    """Attach original position/name and author identity to one source outcome.
 
     names comes from the source cfg only. Without cfg the name is None, never
     guessed from current state. Invalid original positions raise IndexError.
-    values contains the leaf's numeric scalars, fit_quality or failure reason;
-    this helper neither computes fits nor changes proposal eligibility.
+    values contains the leaf's numeric scalars, JSON-safe fit_quality or failure
+    reason. Direct NumPy scalars become Python scalars for nested analysis JSON;
+    values and proposal eligibility are unchanged. Containers are not repaired.
     """
+    identity = (
+        {}
+        if names is None
+        else {"element": ElementIdentity(index=index, name=names[index])}
+    )
     return {
+        **identity,
         "position": index,
         "name": None if names is None else names[index],
-        **values,
+        **{key: normalize_numpy_scalar(value) for key, value in values.items()},
     }

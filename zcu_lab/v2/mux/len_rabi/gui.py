@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 import numpy as np
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -134,11 +135,13 @@ class MuxLenRabiAdapter(
             ):
                 continue
             qubit = qubits[outcome.index]
+            row_items: list[WritebackItem] = []
             items.append(
                 ParameterWriteback(
                     target_name=f"{qubit}.ext.rabi_freq",
                     description="Rabi oscillation frequency (MHz)",
                     proposed_value=outcome.rabi_f,
+                    element=ElementIdentity(index=outcome.index, name=qubit),
                 )
             )
             if snapshot is None:
@@ -155,7 +158,7 @@ class MuxLenRabiAdapter(
                 ("pi2_amp", "x90", outcome.pi2_len, "Pi/2 pulse"),
             ):
                 target = f"{qubit}.pulses.{suffix}"
-                items.append(
+                row_items.append(
                     module_writeback(
                         pulse,
                         target=target,
@@ -163,18 +166,21 @@ class MuxLenRabiAdapter(
                         field_updates=(("waveform.length", value),),
                     )
                 )
-                items.append(
+                row_items.append(
                     ParameterWriteback(
                         target_name=f"{qubit}.module.{slot}",
                         description=f"{description} slot",
                         proposed_value=parameters.library_key(target),
                     )
                 )
-            items.append(
+            row_items.append(
                 ParameterWriteback(
                     target_name=f"{qubit}.ext.pi_product",
                     description="Pi pulse gain times length (a.u. * us)",
                     proposed_value=gain * outcome.pi_len,
                 )
             )
+            for item in row_items:
+                item.element = ElementIdentity(index=outcome.index, name=qubit)
+            items.extend(row_items)
         return items

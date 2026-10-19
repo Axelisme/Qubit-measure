@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 import numpy as np
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -197,19 +198,23 @@ class MuxGEAdapter(
             primary = outcome.primary
             primary.validate_calibration()
             qubit = qubits[outcome.index]
+            row_items: list[WritebackItem] = []
             for field, value, description in (
                 ("fidelity", primary.fidelity, "Single-shot assignment fidelity"),
                 ("sigma", primary.ge_s, "Single-shot IQ cluster width (s)"),
                 ("g_center", primary.g_center, "Single-shot ground IQ center"),
                 ("e_center", primary.e_center, "Single-shot excited IQ center"),
             ):
-                items.append(
+                row_items.append(
                     ParameterWriteback(
                         target_name=f"{qubit}.ext.readout_cal.{field}",
                         description=description,
                         proposed_value=value,
                     )
                 )
+            for item in row_items:
+                item.element = ElementIdentity(index=outcome.index, name=qubit)
+            items.extend(row_items)
         return items
 
     def get_post_writeback_items(
@@ -240,7 +245,8 @@ class MuxGEAdapter(
             ):
                 continue
             qubit = qubits[outcome.index]
-            items.extend(
+            row_items: list[WritebackItem] = []
+            row_items.extend(
                 [
                     ParameterWriteback(
                         target_name=f"{qubit}.ext.readout_cal.radius",
@@ -254,4 +260,7 @@ class MuxGEAdapter(
                     ),
                 ]
             )
+            for item in row_items:
+                item.element = ElementIdentity(index=outcome.index, name=qubit)
+            items.extend(row_items)
         return items

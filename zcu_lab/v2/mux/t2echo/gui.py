@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 import numpy as np
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -133,7 +134,8 @@ class MuxT2EchoAdapter(
             ):
                 continue
             qubit = qubits[outcome.index]
-            items.extend(
+            row_items: list[WritebackItem] = []
+            row_items.extend(
                 [
                     ParameterWriteback(
                         target_name=f"{qubit}.t2e",
@@ -150,4 +152,7 @@ class MuxT2EchoAdapter(
                     ),
                 ]
             )
+            for item in row_items:
+                item.element = ElementIdentity(index=outcome.index, name=qubit)
+            items.extend(row_items)
         return items
