@@ -152,10 +152,13 @@ A finite fit is not a calibration-quality guarantee.
 `save_run(source, path, metadata=...)` stores full cfg, inactive tones, original
 indices, shared requested delay, IQ, actual detunes and source frequencies.
 Time and frequency use seconds and Hz on disk, us and MHz in memory.
-The native file is loadable when the additional Labber export fails: IQ uses a
-delay/tone grid, while detune and source frequency use only the tone grid.
-The save report marks this as `Partially saved`, with native `saved` and Labber
-`failed`; it does not report an all-formats success.
+The grouped axes spec declares the Labber `independent` layout. Native and
+Labber outputs preserve IQ on the delay/tone grid and detune and source frequency
+on the tone-only grid. The writer uses this declaration, without an automatic
+grid fallback, broadcasting per-tone values or splitting files.
+A successful save reports both native and Labber members as `saved`.
+Inspect each output's status and error if saving fails; recipe completion alone
+does not prove that every output saved.
 `load_run(path)` restores an explicit source; changing a current cfg does not
 retarget or alter its analysis. The caller sets complete/partial/stopped metadata
 from the run outcome, not from the existence of IQ.

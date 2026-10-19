@@ -101,12 +101,15 @@ writeback decision. GE also analyzes and saves Post before asking. Inspect the
 per-output artifact status as well as execution status. A finished recipe does
 not imply every requested output format saved successfully.
 
-Ramsey and Echo currently save native `data.h5` but cannot export their mixed-grid
-variables to grouped Labber format. The public report marks raw save `incomplete`,
-measurement data `Partially saved`, the native member `saved` and the Labber
-member `failed`, with its grid error. Load the native member as the authoritative
-source. This partial artifact failure does not turn the acquired data or analysis
-into an all-formats success.
+Ramsey and Echo declare the Labber `independent` layout in their grouped axes
+spec. Native `data.h5` and the Labber export preserve IQ on the delay/tone grid
+and actual detune and source frequency on the tone-only grid. The writer does
+not broadcast per-tone values or split them into separate files. It uses the
+declared layout, not an automatic fallback for mismatched grids.
+A successful save reports raw save `saved`, measurement data `Saved`, and both
+native and Labber members `saved`. Native `data.h5` remains the authoritative
+source for Load. If an output fails, inspect its error and status rather than
+treating recipe completion as proof of a complete save.
 
 Candidates use the Run/Load capture's original index, name and destination.
 Rabi retains its pulse proposals and x180/x90 slots. Ramsey frequency correction
