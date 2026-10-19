@@ -70,6 +70,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq.gui import RoOptFreqAdapter
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.gui import RoOptFreqGainAdapter
 from zcu_lab.v2.twotone.ro_optimize.length.gui import RoOptLengthAdapter
 from zcu_lab.v2.twotone.ro_optimize.power.gui import RoOptPowerAdapter
+from zcu_lab.v2.twotone.time_domain.cpmg.gui import CPMGAdapter
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAdapter
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAdapter
@@ -124,6 +125,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/t1": T1Adapter,
     "twotone/t2ramsey": T2RamseyAdapter,
     "twotone/t2echo": T2EchoAdapter,
+    "twotone/cpmg": CPMGAdapter,
     "twotone/zigzag": ZigZagAdapter,
     "twotone/zigzag_scan/gain": ZigZagScanGainAdapter,
     "twotone/zigzag_scan/freq": ZigZagScanFreqAdapter,
