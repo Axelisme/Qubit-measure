@@ -391,7 +391,8 @@ def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(for
         fixture.state.set_tab_running(tab, running=True)
         try:
             busy = rpc.call("tab.refresh_sources", {"tab_id": tab})
-            assert busy["error"]["reason"] == "busy", busy
+            assert busy["error"]["code"] == "precondition_failed", busy
+            assert busy["error"]["reason"] == "mutation_blocked", busy
         finally:
             fixture.state.set_tab_running(tab, running=False)
         fixture.ctrl.control_identity.reclaim_local()
