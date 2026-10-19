@@ -347,17 +347,22 @@ def test_failed_device_connection_propagates_and_retains_memory_row(
     assert ctrl.device_control.get_device_snapshot("unknown").error
 
 
-def test_handled_script_connection_failure_uses_summary_without_dialog(startup_app, tmp_path):
+def test_handled_script_connection_failure_uses_summary_without_dialog(
+    startup_app, tmp_path
+):
     _behavior, _assembly, ctrl, window, _probe = startup_app
     window.show()
-    run_script(ctrl, write_script(
-        tmp_path,
-        "    try:\n"
-        "        ctx.devices.connect('offline', 'NoSuchDriver', 'none')\n"
-        "    except RuntimeError:\n"
-        "        ctx.devices.remember('offline', 'NoSuchDriver', 'none')\n"
-        "    ctx.summary('Startup: device failed; kept offline')\n",
-    ))
+    run_script(
+        ctrl,
+        write_script(
+            tmp_path,
+            "    try:\n"
+            "        ctx.devices.connect('offline', 'NoSuchDriver', 'none')\n"
+            "    except RuntimeError:\n"
+            "        ctx.devices.remember('offline', 'NoSuchDriver', 'none')\n"
+            "    ctx.summary('Startup: device failed; kept offline')\n",
+        ),
+    )
     ui = ComponentDriver(window)
     assert ui.dialogs() == ()
     assert ui.status().text == "Startup: device failed; kept offline"
@@ -369,15 +374,17 @@ def test_manual_device_failure_still_shows_dialog(startup_app):
     _behavior, _assembly, ctrl, window, _probe = startup_app
     window.show()
     token = ctrl.device_control.start_connect_device(
-        ConnectDeviceRequest('NoSuchDriver', 'manual', 'none')
+        ConnectDeviceRequest("NoSuchDriver", "manual", "none")
     )
     qt_until(
-        lambda: ctrl.operation_control.await_operation(token, 0).reason == 'completed',
-        label='manual device failure',
+        lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed",
+        label="manual device failure",
     )
     ui = ComponentDriver(window)
-    assert any(dialog.title == 'Device operation failed: manual' for dialog in ui.dialogs())
-    ui.click('OK')
+    assert any(
+        dialog.title == "Device operation failed: manual" for dialog in ui.dialogs()
+    )
+    ui.click("OK")
 
 
 def test_summary_survives_terminal_and_cache_root_is_available(startup_app, tmp_path):
@@ -406,7 +413,7 @@ def test_tab_input_roundtrip_preserves_expression_selection_and_invalid_draft(
     _behavior, _assembly, ctrl, _window, _probe = startup_app
     original = ctrl.new_tab("sample")
     resource = ctrl.cfg_resources.lookup(original)
-    resource.write({("gain",): "{unfinished", ("reps",): "not-an-int"})
+    resource.write({("gain",): {"expr": "unfinished +"}, ("reps",): "not-an-int"})
     resource.select(("sweep",), {"kind": "center"})
     expected = resource.input.to_json()
     run_script(
