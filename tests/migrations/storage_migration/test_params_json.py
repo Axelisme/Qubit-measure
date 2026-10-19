@@ -9,6 +9,7 @@ import shutil
 from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from pydantic import ConfigDict, Field, TypeAdapter
@@ -48,19 +49,23 @@ class AnalysisQubit(ComponentSchema):
     ext: YamlMap = Field(default_factory=dict)
     wiring: dict[str, int] = Field(default_factory=dict)
     module: dict[str, str] = Field(default_factory=dict)
-    flux_unit: str | None = None
+    flux_unit: Literal["A", "V"] | None = None
     flux_half: float | None = None
     flux_period: float | None = None
+    flux_int: float | None = None
+    flux: float | None = None
 
 
 @pytest.fixture(scope="module", autouse=True)
 def analysis_kind() -> Generator[None]:
     before = registry_state()
     component_registry.register("qubit/migration_analysis", AnalysisQubit)
+    component_registry.register("amplifier/migration_analysis", AnalysisQubit)
     try:
         yield
     finally:
         component_registry.unregister("qubit/migration_analysis")
+        component_registry.unregister("amplifier/migration_analysis")
         assert registry_state() == before
 
 
@@ -154,7 +159,10 @@ def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
     )
     return replace(
         concrete,
-        components={"Q1": {"kind": "qubit/migration_analysis"}},
+        components={
+            "Q1": {"kind": "qubit/migration_analysis"},
+            "J1": {"kind": "amplifier/migration_analysis"},
+        },
         roles={"qubit": "Q1"},
     )
 
@@ -231,21 +239,63 @@ def test_entry_explicit_unit_beats_assumption_and_reports_its_file(
     )
 
 
-def test_conflicting_point_unit_keeps_inherited_values_and_located_pending(
+def test_point_unit_override_clears_only_unreplaced_inherited_group_values(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping
 ) -> None:
-    root_meta = write_meta(request_data, "", {"flux_unit": "V", "flx_half": 0.2})
-    point_meta = write_meta(request_data, "bias", {"flux_unit": "A", "flx_half": 0.3})
+    write_meta(request_data, "", {
+        "flux_unit": "V", "local_flux_unit": "A", "flx_half": 0.2,
+        "flx_period": 0.4, "flx_int": 0.1, "cur_A": 0.5, "flux_bias": 0.6,
+        "jpa_flux_unit": "V", "best_jpa_flux": 1.0,
+    })
+    point_meta = write_meta(request_data, "bias", {
+        "flux_unit": "A", "flx_half": 0.3, "local_flux_unit": "V"
+    })
     report = migrate(request_data, metadata_mapping)
     point = snapshot(open_entry(request_data).use_point("bias"))
-    assert document_value(point, "Q1.flux_half") == 0.2
-    assert document_value(point, "general.ext.flux_unit") == "V"
+    assert document_value(point, "Q1.flux_half") == 0.3
+    assert document_value(point, "Q1.flux_period") is None
+    assert document_value(point, "Q1.flux_int") is None
+    assert document_value(point, "general.ext") == {"flux_unit": "A"}
+    assert document_value(point, "Q1.ext") == {}
+    assert document_value(point, "Q1.flux_unit") == "V"
+    assert document_value(point, "J1.flux") == 1.0
+    assert document_value(point, "J1.flux_unit") == "V"
+    assert not any(item.source == point_meta for item in report.pending)
+
+
+def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    write_params(request_data, {"flux_unit": "A"})
+    source = write_meta(request_data, "", {
+        "best_jpa_flux": 0.2, "local_flux_unit": "mA", "flx_half": 0.3,
+    })
+    report = migrate(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
     assert any(
-        item.source == point_meta
-        and item.location == "flx_half"
-        and str(root_meta) in item.reason
+        item.source == source and item.location == "best_jpa_flux"
         for item in report.pending
     )
+    assert any(
+        item.source == source and item.location == "local_flux_unit"
+        for item in report.pending
+    )
+    assert document_value(setup, "Q1.flux_half") == 0.3
+    assert document_value(setup, "J1")["flux"] is None
+
+
+def test_invalid_jpa_unit_keeps_whole_group_pending_without_conversion(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    source = write_meta(request_data, "", {
+        "jpa_flux_unit": "mA", "best_jpa_flux": 2.0,
+    })
+    report = migrate(request_data, metadata_mapping)
+    assert {item.location for item in report.pending if item.source == source} >= {
+        "jpa_flux_unit", "best_jpa_flux"
+    }
+    setup = snapshot(open_entry(request_data).setup)
+    assert document_value(setup, "J1")["flux"] is None
 
 
 def test_conflicting_entry_units_block_values_instead_of_using_assumption(
