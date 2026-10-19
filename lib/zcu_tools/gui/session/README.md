@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，live preferences、app layout persistence 與 runtime 資源生命週期
+**Last updated:** 2026-10-20，instrument adapters、既有 row Reconnect、live preferences、app layout persistence 與 runtime 資源生命週期
 
 # gui/session/ — 量測 session core
 
@@ -60,6 +60,7 @@ session/
 ├── expression.py       — simpleeval 共用求值引擎，封裝函式／算子白名單、AST／數值大小限制及固定 ParameterContext 查詢。裸 `$alias` 求值為名稱 str，不接受字串算術或插值。數值 `evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs，常數 pi/e；math 函式不自動轉 cmath。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。
 ├── value_lookup.py     — read-only value source lookup（`ValueLookup`/`ValueRegistry`/owner-scoped replace/unregister/`ValueRef` resolve-once helpers）；純 session leaf，provider 來源由 service binder 負責，使用端只見 lookup
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free；worker API 同時支援 incremental `update(delta)` 與 absolute `set_progress(n)`
+├── devices/            — 明確登錄的儀器 adapters；base 定義 driver/panel 契約與 bias_source/user_connectable 能力。各儀器 module 同檔保存 adapter 與專屬 Qt panel，service 和 dialog 共用同一 catalog，未知 type 不建立 driver 或專屬 panel
 ├── adapters/
 │   ├── manual_owner_scheduler.py — ManualOwnerScheduler（headless/test owner queue，由建立它的owner thread明確pump）
 │   ├── thread_pool_background.py — ThreadPoolBackgroundExecutor（純threading worker，terminal delivery經OwnerScheduler回owner；quiesce等待worker與delivery ack）
@@ -84,7 +85,7 @@ session/
     ├── alias_panel.py — AliasPanel：Inspect 的 Aliases 頁。編輯有序 authored rows，透過 ContextControlPort 原子提交；唯讀解析欄投影已安裝的表。Load preset 選單列出 host 傳入的具名 preset，選一份整張取代草稿、不合併、不提交，Apply 才保存；None 表示無 catalog，選單停用。唯讀時同樣停用。只回報 Unsaved，不自己詢問
     ├── component_tree.py — ComponentTreeWidget：Field／Value／Unit／Metadata 四欄樹，Metadata 以單行 flow YAML 與多行 tooltip 顯示 caller 的 opaque mapping，不解讀 key；依 `component_field_specs` 列出全部欄位（未設定顯示 `(unset)`），Value 就地編輯；父欄位未設定時寫入最淺一層未設定祖先的巢狀 mapping。寫入走 owner，UI 不直接寫文件
     ├── setup_dialog.py — Result entry、Working points 與 Connection 的 shared dialog。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。Clone from 的 `(empty)` 表示新 point 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體
-    ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；per-device panel lazy-import zcu_tools.device.*；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
+    ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；專屬 panel 由 device adapter 建立並按需保留；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. Calibration displays actual MHz and clamped from the shared model result; it changes only dialog bias/cache, never a component. No Apply or session model. Device values and frequency expressions remain optional inputs.
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
     ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口、DialogPresenter 與具名 alias preset catalog（None 表示無 catalog），沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，開啟時讀一次已安裝的表，關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
@@ -110,10 +111,11 @@ Host 在工作 drain 及 caller callbacks 完成後呼叫 `close_all_devices()`�
 拋彙整 ExceptionGroup。Measure 的 `Controller.close()` 只 drain，`close_hardware()`
 才逐台關閉並卸載 SoC。後者記錄關閉錯誤而不阻擋 GUI 結束，重呼不自動重試。
 使用者不能手動新增 FakeDevice。Add Device 類型選單只列硬體 driver，
-已發布 FakeDevice 仍使用專屬 panel。只有 `publish_initial_devices()` 發布的
-FakeDevice rows 可在原 address 重連，未連線改名後仍保留這項授權。
-Remembered preferences 不授權建立 FakeDevice。目前 `register_device()` 不授予
-這項重連權限，經它註冊的 FakeDevice 在斷線後不能直接 Reconnect。
+已登記 FakeDevice 仍使用專屬 panel。Adapter 的 `user_connectable=False` 只禁止
+手動 Add Device。可信 caller 透過 `register_device()`、`publish_initial_devices()` 或
+`register_remembered_devices()` 建立的既有 row，皆可經已知 adapter 在原 address
+Reconnect，未連線改名後也相同。Reconnect 與手動新增分開 admission；未知 type
+沒有預設 factory。
 顯式 FakeDevice address 取回 process-shared instance，不重設設定或模型綁定。
 Session 不載入 simulation environment，也不組裝模擬資源。
 
