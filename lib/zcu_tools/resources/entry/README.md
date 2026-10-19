@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-19，Labber 檔名使用實驗啟動名稱與 id6
+**Last updated:** 2026-10-20，entry 範本讀取與建立分離
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -16,7 +16,7 @@ Resources 只保存與驗證資料表示。Session 的 AliasTable 擁有語法�
 
 `load_entry_template(path)` 讀取 `format: zcu.entry-template`、`format_version: "1.0"`，接受 major 1 的 forward minor。它回傳具名 `EntryTemplate`，包含有序的 `components` model mapping 與 `EntryAliases`。Caller 必須先註冊 component models。Reader 不建立 entry，不產生 UUID 或時間，不載入 module library。
 
-範本必須有 `components` mapping 與 `aliases`。Components 沿用 point 的名稱、kind 與原 model 欄位驗證。`aliases` 是完整嵌套的 `zcu.aliases` 1.x document，內含 `format`、`format_version` 與 `aliases` mapping。Reader 在讀檔時拒絕錯誤 header、kind、欄位與非字串 alias bindings。Alias 語法、backward links 與解析仍由 GUI Session 的 AliasTable 擁有。`scripts/create_entry.py` 組合 reader、ResultEntry 與 alias 保存能力，產生 GUI 可 Open 的普通 entry。
+範本必須有 `components` mapping 與 `aliases`。Components 沿用 point 的名稱、kind 與原 model 欄位驗證。`aliases` 是完整嵌套的 `zcu.aliases` 1.x document，內含 `format`、`format_version` 與 `aliases` mapping。Reader 在讀檔時拒絕錯誤 header、kind、欄位與非字串 alias bindings。Alias 語法、backward links 與解析仍由 GUI Session 的 AliasTable 擁有。
 
 ## 文件與 seed
 
