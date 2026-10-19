@@ -95,10 +95,7 @@ class IdleZZCfg(ProgramV2Cfg, ExpCfgModel):
             raise ValueError("F1/F2 require independent charge generators")
         if m.x90_f1.ch != m.x180_f1.ch or m.x90_f2.ch != m.x180_f2.ch:
             raise ValueError("Each role's Xπ and Xπ/2 must use the same generator")
-        if self.roles.tone_count != len(m.readout.tones) or max(
-            self.roles.f1_tone, self.roles.f2_tone
-        ) >= len(m.readout.tones):
-            raise ValueError("Captured role tones must match the complete mux readout")
+        self.roles.validate_readout(m.readout)
         delays = sweep2array(self.delay)
         if not np.all(np.isfinite(delays)) or np.any(delays < 0):
             raise ValueError("Ramsey delay must be finite and nonnegative")

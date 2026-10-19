@@ -5,8 +5,15 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
+from zcu_lab.v2.ftf.chevron.gui import ChevronAdapter
+from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
+from zcu_lab.v2.ftf.conditional_spectroscopy.gui import SpectroscopyAdapter
+from zcu_lab.v2.ftf.constructive_phase.gui import ConstructivePhaseAdapter
+from zcu_lab.v2.ftf.cz_amplitude.gui import CZAmplitudeAdapter
 from zcu_lab.v2.ftf.idle_zz.gui import IdleZZAdapter
 from zcu_lab.v2.ftf.joint_readout.gui import JointReadoutAdapter
+from zcu_lab.v2.ftf.local_z.gui import LocalZAdapter
+from zcu_lab.v2.ftf.rb.gui import TwoQubitRBAdapter
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
 from zcu_lab.v2.jpa.flux.gui import JpaFluxAdapter
@@ -75,6 +82,13 @@ from zcu_lab.v2.twotone.zigzag_sweep.gui import (
 ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/joint_readout": JointReadoutAdapter,
     "ftf/idle_zz": IdleZZAdapter,
+    "ftf/conditional_spectroscopy": SpectroscopyAdapter,
+    "ftf/constructive_phase": ConstructivePhaseAdapter,
+    "ftf/chevron": ChevronAdapter,
+    "ftf/cz_amplitude": CZAmplitudeAdapter,
+    "ftf/conditional_phase": ConditionalPhaseAdapter,
+    "ftf/local_z": LocalZAdapter,
+    "ftf/rb": TwoQubitRBAdapter,
     "lookback": LookbackAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,

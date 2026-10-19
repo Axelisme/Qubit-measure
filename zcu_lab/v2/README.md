@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-19，mux 與 ZigZag 的 core 序列說明
+**Last updated:** 2026-10-19，mux 與 ZigZag 的 core 序列；FTF gate 校準與共用 quadrature 分析
 
 ZigZag 的 `run()` 直接列出 pulse 序列，使用 register loop。
 公開 `build_zigzag_modules` 保留給離線編譯，另行列出相同序列。
@@ -98,7 +98,11 @@ zcu_lab/
 
 ## Reading routes
 
-- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式，以及待交付的 two-qubit 校準路線。
+- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈 smoke 已完成，不代表物理校準或 fidelity 已驗收。
+  - 四分支 [conditional spectroscopy](ftf/conditional_spectroscopy/guide.md)、[relative-phase × duration constructive phase](ftf/constructive_phase/guide.md) 與 [common-frequency × duration Rabi chevron](ftf/chevron/guide.md) 提供雙線校準圖與分析。
+  - [CZ common-amplitude](ftf/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
+  - [Conditional phase](ftf/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
+  - [Local-Z](ftf/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。

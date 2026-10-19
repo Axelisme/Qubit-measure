@@ -1,4 +1,4 @@
-"""Fixed capture binding for the joint and idle FTF Forms, never used by core."""
+"""Fixed capture binding for FTF Forms, never used by core."""
 
 from zcu_tools.cfg_model import Locked
 from zcu_tools.gui.form_adapter import FormContext

@@ -95,7 +95,7 @@ def test_default_analysis_params_retain_result_source(
     assert state.get_tab("tab").run.parameters is saved
     assert state.session_env.parameters is current
     if saved is not None:
-        assert saved.value("source_qubit.rate") == 1.0
+        assert saved.value("$source_qubit.rate") == 1.0
     if loaded:
         assert state.get_tab("tab").run.source_operation_id is None
         assert state.get_tab("tab").run.metadata is metadata
@@ -183,15 +183,15 @@ def test_fit_uses_run_source_for_request_and_writeback_after_rebinding(
     assert isinstance(request, AnalyzeRequest)
     assert request.parameters is captured
     if request.parameters is not None:
-        assert request.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
-        assert request.parameters.value("source_qubit.rate") == 1.0
+        assert request.parameters.resolve_path("$source_qubit.rate") == "Q1.rate"
+        assert request.parameters.value("$source_qubit.rate") == 1.0
     assert background.last_on_done is not None
     background.last_on_done(result)
     proposal = tab.adapter.get_writeback_items.call_args.args[0]
     assert proposal.ctx.parameters is captured
     assert writeback.create_draft.call_args.kwargs["parameters"] is captured
     if proposal.ctx.parameters is not None:
-        assert proposal.ctx.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
+        assert proposal.ctx.parameters.resolve_path("$source_qubit.rate") == "Q1.rate"
     assert tab.analysis.result is result
 
 
@@ -227,7 +227,7 @@ def test_interactive_writeback_retains_run_source_after_rebinding(
     assert proposal.ctx.parameters is captured
     assert writeback.create_draft.call_args.kwargs["parameters"] is captured
     if proposal.ctx.parameters is not None:
-        assert proposal.ctx.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
+        assert proposal.ctx.parameters.resolve_path("$source_qubit.rate") == "Q1.rate"
     assert tab.analysis.result is not None
     assert service.is_interactive_active("tab1") is False
 
@@ -260,13 +260,13 @@ def test_post_uses_run_source_for_request_and_writeback_after_rebinding(
     assert request.analyze_result is primary_result
     assert request.parameters is captured
     if request.parameters is not None:
-        assert request.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
-        assert request.parameters.value("source_qubit.rate") == 1.0
+        assert request.parameters.resolve_path("$source_qubit.rate") == "Q1.rate"
+        assert request.parameters.value("$source_qubit.rate") == 1.0
     assert background.last_on_done is not None
     background.last_on_done(result)
     proposal = tab.adapter.get_post_writeback_items.call_args.args[0]
     assert proposal.ctx.parameters is captured
     assert writeback.create_draft.call_args.kwargs["parameters"] is captured
     if proposal.ctx.parameters is not None:
-        assert proposal.ctx.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
+        assert proposal.ctx.parameters.resolve_path("$source_qubit.rate") == "Q1.rate"
     assert tab.post_analysis.result is result

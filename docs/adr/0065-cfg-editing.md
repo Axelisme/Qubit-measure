@@ -76,7 +76,7 @@ RecipeTab.read_field 每次以一次 `tab.describe_cfg` 讀同一 owner turn 的
 
 Core 以 context.devices[cfg.flux_dev] 等具名欄位取 driver。缺名由實際使用者報錯；RunContext 不提供 setters。操作分工見 [[0067]]，Run 前 snapshot 與保存見 [[0063]]。Measure 不保留舊跨 tab source refresh／Unavailable 恢復路徑；使用時綁範本與缺來源的語義由 [[0073]] 擁有。
 
-Form expression 的 `$alias` 與 `$alias.path` 沿固定 ParameterContext 解析，bare concrete paths 使用獨立 namespace。裸 `$alias` 是名稱字串，不參與數值算術或字串插值。缺列或未綁時 errors 指名 alias，不沿用舊解析值。Expression 不刷新來源。
+Form expression 的 `$alias` 與 `$alias.path` 沿固定 ParameterContext 解析，bare concrete paths 使用獨立 namespace。Run 與 Load capture 相同。裸 `$alias` 是名稱字串，不參與數值算術或字串插值。缺列或未綁時 errors 指名 alias，不沿用舊解析值。Expression 不刷新來源。
 
 ## Library 與 Inspect
 

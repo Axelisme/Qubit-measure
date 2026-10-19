@@ -76,8 +76,9 @@ class ParameterContext:
 
     Construction accepts validated point and library snapshots, a SavedPoint
     destination, and an optional fixed consumer RoleBinding.
-    Binding declarations may omit names for unbound roles. Their data reads
-    raise RoleResolutionError naming the role; concrete paths remain readable.
+    Binding declarations may omit names for unbound roles. Their $role reads
+    raise RoleResolutionError naming the role; bare paths always name concrete
+    components or general fields, for both Run and Load captures.
     source_faults contains only point/module_cfg diagnostics, not setup faults.
     The target, authored alias rows, diagnostics and already resolved bindings
     remain readable on an unavailable capture. Data reads and alias-derived
@@ -312,18 +313,14 @@ class ParameterContext:
         )
 
     def resolve_path(self, path: str) -> str:
-        """Expand a fixed $ alias or captured role, preserving the path suffix.
+        """Expand $ aliases while keeping bare paths in the concrete namespace.
 
         $alias returns its resolved name; $alias.path expands its prefix.
-        Both use authored rows or fixed resolved names, never concrete-
-        prefix inference. Missing,
-        unbound and wrong-kind aliases raise RoleResolutionError. Bare concrete
-        paths remain independent of $ alias names, including name collisions.
-        Accepts direct components, captured roles, and general.* paths.
-        Without authored aliases, reading a declared unbound role raises
-        RoleResolutionError even if a concrete component shares its name.
-        Other entry syntax/collision/unknown
-        namespace errors propagate.
+        Both use authored rows or fixed resolved names, never concrete-prefix
+        inference. Missing, unbound and wrong-kind aliases raise
+        RoleResolutionError. Bare paths name concrete components or general
+        fields, independent of alias names or bindings, in Run and Load captures.
+        Other entry syntax/collision/unknown namespace errors propagate.
         """
         self._ensure_readable()
         if path.startswith("$"):
@@ -350,21 +347,7 @@ class ParameterContext:
             if not separator:
                 return name
             return resolve_path(self._point, f"{name}.{suffix}", roles={})
-        if self._aliases is None and self._roles is not None:
-            prefix = path.split(".", 1)[0]
-            if prefix in self._roles.declarations and prefix not in self._roles.names:
-                raise RoleResolutionError(
-                    prefix,
-                    self._roles.focus,
-                    self._roles.declarations[prefix].kind,
-                    "Role is not bound",
-                )
-        names = (
-            self._roles.names
-            if self._aliases is None and self._roles is not None
-            else {}
-        )
-        return resolve_path(self._point, path, roles=names)
+        return resolve_path(self._point, path, roles={})
 
     def library_key(self, path: str) -> str:
         """Resolve a three-segment library root or a point module slot.
