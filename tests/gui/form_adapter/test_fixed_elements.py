@@ -5,7 +5,7 @@ from typing import Annotated
 
 import pytest
 from pydantic import Field, JsonValue, create_model
-from zcu_tools.cfg_model import ConfigBase, Hidden, Locked, Slot, Template
+from zcu_tools.cfg_model import ConfigBase, Hidden
 from zcu_tools.gui import form as core
 from zcu_tools.gui import form_adapter as adapter
 from zcu_tools.gui.app.measure.services.form_contracts import (
@@ -128,10 +128,7 @@ def test_readonly_list_positions_keep_individual_values_and_restore_saved_values
 @pytest.mark.parametrize(
     "node",
     [
-        Locked(1),
         Hidden(),
-        Slot("Q.pulses.drive", lock={"ch": 0}),
-        Template("pulse", lock={"ch": 0}),
     ],
 )
 def test_native_position_seeds_reject_declaration_changes_at_typed_position(node):

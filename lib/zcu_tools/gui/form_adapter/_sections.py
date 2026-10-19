@@ -18,7 +18,6 @@ from zcu_tools.cfg_model import (
     Expr,
     FormNode,
     Hidden,
-    Locked,
     ModuleSpec,
     Range,
     Slot,
@@ -47,8 +46,8 @@ from ._modules import (
     module_specs,
 )
 from ._seeds import persistent_input
-from ._types import literal_type, union_type
 from ._types import members as _members
+from ._types import union_type
 from .fixed_elements import FixedElementsForm
 from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
@@ -135,9 +134,7 @@ def _seed_json(seed: FormNode) -> JsonValue:
 
 def _check_position_seed(node: FormNode, path: FormWritePath) -> None:
     """Position trees supply values, never alter the shared element declaration."""
-    if isinstance(node, (Locked, Hidden)) or (
-        isinstance(node, (Slot, Template)) and node.lock
-    ):
+    if isinstance(node, Hidden):
         raise ValueError(
             f"{path!r}: position seed cannot change the shared element declaration "
             f"with {type(node).__name__}; declare shared constraints on the element type"
@@ -160,10 +157,10 @@ def _alias_name(node: AliasName, env: FormEnv) -> str | None:
         return None
 
 
-def _field_info(info: FieldInfo, *, locked: bool) -> FieldInfo:
+def _field_info(info: FieldInfo) -> FieldInfo:
     result = deepcopy(info)
-    display = field_display(info, locked=locked)
-    if SweepCfg in _members(info.annotation) and not locked:
+    display = field_display(info)
+    if SweepCfg in _members(info.annotation):
         display = replace(display or Display(), decimals=None, selector=False)
     if display is not None:
         result.metadata.append(display)
@@ -193,7 +190,7 @@ class SpecSection:
     def __init__(self, spec: type[ConfigBase], tree: Mapping[str, FormNode]) -> None:
         if tree:
             raise ValueError(f"{spec.__name__}: Spec forms take no authored tree")
-        self.editable = editable_spec(spec, {}, {})
+        self.editable = editable_spec(spec, {})
         model = new_class(
             f"{spec.__name__}Form",
             (self.editable,),
@@ -285,16 +282,12 @@ class Section:
                     )
                 continue
             annotation = self._annotation(name, info, node)
-            field_info = _field_info(info, locked=isinstance(node, Locked))
-            if (name in self.modules and not self.modules[name].locks) or (
-                not isinstance(node, Locked) and SweepCfg in _members(info.annotation)
-            ):
+            field_info = _field_info(info)
+            if name in self.modules or SweepCfg in _members(info.annotation):
                 field_info.discriminator = "kind"
             if isinstance(node, Expr):
                 field_info.default = PydanticUndefined
                 field_info.default_factory = None
-            if isinstance(node, Locked):
-                field_info.default = node.value
             annotations[name] = annotation
             namespace[name] = field_info
         section = self
@@ -361,8 +354,6 @@ class Section:
         return result
 
     def _annotation(self, name: str, info: FieldInfo, node: FormNode) -> object:
-        if isinstance(node, Locked):
-            return literal_type(node.value)
         if module_specs(info.annotation):
             field = ModuleField(
                 info.annotation,
@@ -460,8 +451,6 @@ class Section:
                 data.pop(name, None)
                 if (value := _alias_name(node, env)) is not None:
                     data[name] = value
-            elif isinstance(node, Locked):
-                data[name] = node.value
             else:
                 data[name] = _seed_json(node)
         # Only core-disabled modules get an explicit selection. Existing initial

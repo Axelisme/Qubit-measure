@@ -51,7 +51,7 @@ from ._recipe_support import LookbackGui, recipe_client
 class AuthorCfg(ConfigBase):
     rounds: int = 3
     pulse: PulseCfg | None = None
-    locked_pulse: PulseCfg | None = None
+    locked_pulse: Annotated[PulseCfg | None, FieldMeta(readonly=True)] = None
 
 
 class FormGui(LookbackGui):
@@ -73,7 +73,7 @@ class FormGui(LookbackGui):
             AuthorCfg,
             {
                 "pulse": Slot("$qubit.module.pulse"),
-                "locked_pulse": Slot("Q1.pulses.pi", lock={"freq": 100.0}),
+                "locked_pulse": Slot("Q1.pulses.pi", copy=True),
             },
         )
         self.owner = TabFormResource(
@@ -413,9 +413,7 @@ def test_locked_inline_slot_rejects_library_selection_at_owner(
         try:
             locked = tab.read_field(("locked_pulse",))
         except (KeyError, ValueError) as error:
-            raise AssertionError(
-                "read_field must expose inline-only Form lock"
-            ) from error
+            raise AssertionError("read_field must expose module readonly") from error
         assert locked.mode == "inline"
         assert locked.key is None
         assert locked.locked
@@ -424,7 +422,7 @@ def test_locked_inline_slot_rejects_library_selection_at_owner(
         before = list(client.transport.sent)
         with pytest.raises(GuiRpcError) as rejected:
             tab.use_library(("locked_pulse",), "Q1.pulses.pi")
-        assert rejected.value.reason == "module_selector"
+        assert rejected.value.reason == "form_input_rejected"
         assert client.transport.sent[len(before) :] == [
             (
                 "tab.select_recipe_module",

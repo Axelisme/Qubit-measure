@@ -55,15 +55,15 @@ class Form[C: ConfigBase]:
     strings, including $-prefixed strings, remain literal. Expr initial values
     remove static defaults in this form only; failed evaluation requires input
     instead of falling back to core defaults. Range endpoints authored as None
-    are also blank required input, never inherited 0/1 defaults. Module locks remove
-    the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
+    are also blank required input, never inherited 0/1 defaults.
+    Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
     Generated module input omits optional desc; conversion restores its
     Spec default, and copying a library entry inline discards its description.
     Templates cannot seed desc (see bind_templates); there is no override.
     Readout ro_ch remains required input; Pulse has no persistent ro_ch. FieldMeta label, unit,
-    decimals, description and group become Display metadata; locked fields
-    drop decimals because they are single-value Literals.
+    decimals, description, group and readonly become Display metadata.
+    Readonly fixes the current subtree, not an ancestor's source selection.
     Generated options(env) declares nullable None, family-limited captured keys
     and every editable Inline kind. Key values use kind=ref/name; inline uses
     kind=inline/module at every depth. Inline values contain only branch tags
@@ -177,7 +177,8 @@ class Form[C: ConfigBase]:
         target ref itself remains observable with unavailable value and errors.
         Authored input remains separate from source values. No defaults, capture,
         state mutation, publication or materialization occurs. Wrong input model
-        raises TypeError; template subclasses preserve locks and requiredness.
+        raises TypeError; template projections preserve initial values and
+        requiredness.
         Declared fixed-list descendants include the deepest matching
         FixedElements identity from this same input, never from participants.
         """
@@ -310,7 +311,7 @@ class Form[C: ConfigBase]:
     ) -> LogicalEditCandidate:
         """Copy this selector's captured Spec into detached inline input explicitly.
 
-        Preserve child keys and locks, omit unsupported fields, never materialize
+        Preserve child keys, omit unsupported fields, never materialize
         cfg/assets. An inline target returns changed=False. Missing/disabled/
         unresolved targets raise LogicalEditError; missing/incompatible captured
         sources raise LogicalSourceError. Ref ancestors must be copied first.
@@ -454,7 +455,7 @@ class Form[C: ConfigBase]:
         """Build fresh creation input for this persistent module or waveform Spec.
 
         template names a catalog ID, with optional qubit/resonator bindings,
-        relative-path seed overrides and literal locks. catalog maps IDs to
+        relative-path seed overrides. catalog maps IDs to
         TemplateDef values. env supplies captured parameters and library for
         Expr initial values and Slot resolution. Partial seeds overlay Spec
         defaults; failed Expr initial values leave required fields unfilled.
@@ -462,17 +463,18 @@ class Form[C: ConfigBase]:
         No native cfg or asset is materialized. to_cfg returns the original Spec.
 
         input.model may be a subclass of this Form's model, specialized for
-        this template's Expr requirements and locks. Build a new FormState from
-        the returned input. An inline kind switch at any depth uses fresh template
-        values at that path only when its branch ancestry matches; other kinds
-        use type defaults. Switching never reads the previous draft.
+        this template's Expr requirements and initial values. Build a new
+        FormState from the returned input. An inline kind switch uses template
+        defaults at that path only when its branch ancestry matches; other
+        branches use type defaults. The converter then inherits same-name,
+        same-type fields from the previous draft.
         Recompute the same template's initial values with
         input.model.default_input(env); changing templates requires a new state.
         The original Form.model, template, catalog and sources are not modified.
         The input model retains a detached catalog mapping, not the caller's map.
 
         Core cfg Forms raise TypeError. Unknown IDs, incompatible Spec families,
-        unsupported or malformed seed/lock paths raise
+        unsupported or malformed seed paths raise
         ValueError naming the template or path. Captured-source and default
         factory failures propagate; they never silently use a fallback.
         """
@@ -480,9 +482,7 @@ class Form[C: ConfigBase]:
             raise TypeError("template_input requires a persistent Spec form")
         bound = MappingProxyType(dict(catalog))
         _template_input(template, bound, (self.model,), None)
-        editable = editable_spec(
-            self.model, template.lock, template_seed_tree(template, bound)
-        )
+        editable = editable_spec(self.model, template_seed_tree(template, bound))
 
         model = new_class(
             f"{self.model.__name__}Template",

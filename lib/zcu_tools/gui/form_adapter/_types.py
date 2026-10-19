@@ -26,11 +26,6 @@ def annotated_type(annotation: object, metadata: object) -> object:
     return methodcaller("__getitem__", (annotation, metadata))(Annotated)
 
 
-def literal_type(value: object) -> object:
-    # The authored literal value is necessarily dynamic, not a static type name.
-    return methodcaller("__getitem__", value)(Literal)
-
-
 def type_tag(model: type[BaseModel]) -> str | None:
     info = model.model_fields.get("type")
     if info is not None and get_origin(info.annotation) is Literal:

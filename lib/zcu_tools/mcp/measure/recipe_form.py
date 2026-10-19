@@ -66,16 +66,17 @@ class RecipeFormField:
     mode is key for a library key, inline for an inline module/Spec, or None for
     scalar, ordinary section, range, disabled or unfilled fields.
     key is the actual library key in key mode, never an alias, otherwise None.
-    locked is the owner's selection_fixed or fixed flag: this level has a
-    declaration-fixed branch or complete value. It does not freeze inner
-    choices, hide children or imply readonly descendants.
+    locked is the owner's selection_fixed, fixed or readonly flag: this level
+    has a declaration-fixed branch, complete value or readonly subtree.
+    A fixed branch alone does not freeze its inner choices or hide children.
     fields lists logical direct children, including readable captured Spec
     children. Only generated wrappers are hidden; real module fields remain.
     value_status is available (including null), missing or unavailable. selector
     is owner-supplied generated identity or None for ordinary fields. source is
-    the nearest captured ref identity or None. readonly means a ref ancestor was
-    crossed, not declaration-fixed. errors contains relevant logical directed
-    failures, including root and affecting ancestors. Reading grants no writes.
+    the nearest captured ref identity or None. via_ref means a ref ancestor was
+    crossed, independently of declaration readonly. errors contains relevant
+    logical directed failures, including root and affecting ancestors.
+    Reading grants no writes.
     element is the declaring owner's same-read original index/name, or None
     outside declared fixed elements. All containers are detached from the reply.
     """
@@ -91,7 +92,7 @@ class RecipeFormField:
     value_status: Literal["available", "missing", "unavailable"]
     selector: RecipeSelectorWire | None
     source: RecipeSourceWire | None
-    readonly: bool
+    via_ref: bool
     element: ElementIdentity | None = None
 
 
@@ -223,7 +224,7 @@ def read_form_field(
         value=wire_value(observation["value"]),
         mode=mode,
         key=key,
-        locked=target["selection_fixed"] or target["fixed"],
+        locked=target["selection_fixed"] or target["fixed"] or target["readonly"],
         fields=tuple(
             child["name"]
             for child in description["children"]
@@ -236,6 +237,6 @@ def read_form_field(
         value_status=observation["value_status"],
         selector=selector,
         source=observation["source"],
-        readonly=observation["readonly"],
+        via_ref=observation["readonly"],
         element=observation.get("element"),
     )
