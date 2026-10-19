@@ -1,20 +1,27 @@
-"""Opened-entry ledger Load query contracts through the shipped Save facet."""
+"""File-backed Load listing through the shipped Save control and Load seams."""
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
+import h5py as h5
 import pytest
-from qtpy.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication, QPushButton, QTableWidget
+from zcu_tools.datafile import save_run_data
+from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
+from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
+from zcu_tools.gui.app.measure.writeback import WritebackService
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     LedgerEvent,
     ResultEntry,
-    SavedOutput,
     SavedPayload,
 )
 
+from tests._native_support import native_cfg, native_payload
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     native_save_session,
@@ -27,205 +34,216 @@ def session(tmp_path: Path, qapp: QApplication) -> Iterator[NativeSaveSession]:
         yield active
 
 
-def acquired(
-    session: NativeSaveSession,
-    run_id: str,
-    *,
-    point: str = "p",
-    experiment: str = "scan",
-    at: str = "2026-10-08T00:01:00Z",
-) -> None:
+def native_file(session: NativeSaveSession, *, completion: str = "complete") -> Path:
+    """Write a synthetic native run at its canonical entry path."""
+    path = session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+    path.parent.mkdir(parents=True)
+    metadata = session.metadata
+    if completion == "unknown":
+        metadata = replace(
+            metadata, started_at=None, finished_at=None, completion="unknown"
+        )
+    save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+    return path
+
+
+def acquired(session: NativeSaveSession, run_id: str) -> None:
     session.entry.ledger.append(
         LedgerEvent(
             id=str(uuid4()),
             kind="acquired",
-            at=at,
+            at="2026-10-08T00:02:00Z",
             entry_id=session.entry.entry_id,
             origin="gui",
             payload=AcquiredPayload(
                 run_id=run_id,
                 tab="scan",
-                experiment=experiment,
-                point=point,
+                experiment="ledger/tag",
+                point="other",
                 roles={},
             ),
         )
     )
 
 
-def saved(
+def test_query_lists_native_files_without_ledger_and_keeps_unknown_history(
     session: NativeSaveSession,
-    run_id: str,
-    path: Path,
-    *,
-    status: str = "saved",
-    point: str = "p",
-    experiment: str = "scan",
-    at: str = "2026-10-08T00:02:00Z",
-) -> str:
-    output = SavedOutput.model_validate(
-        {
-            "artifact": "measurement_data",
-            "member": "data",
-            "format": "data_h5",
-            "path": str(path),
-            "status": status,
-            "error": "Permission denied" if status == "failed" else None,
-        }
+) -> None:
+    path = native_file(session, completion="unknown")
+    rows = session.control.list_saved_runs()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.data_path == path
+    assert (row.run_id, row.point, row.experiment) == (
+        session.metadata.run_id,
+        "p",
+        session.metadata.experiment,
     )
+    assert row.started_at is None
+    assert row.finished_at is None
+    assert row.completion == "unknown"
+    assert row.metadata_error is None
+    assert session.entry.ledger.events() == ()
+    assert session.control.list_saved_runs(point="p") == (row,)
+    assert session.control.list_saved_runs(point="other") == ()
+
+
+def test_query_uses_native_history_for_rows_despite_unrelated_ledger_events(
+    session: NativeSaveSession,
+) -> None:
+    path = native_file(session)
+    acquired(session, "ledger-only")
+    acquired(session, session.metadata.run_id)
+    before = session.entry.ledger.events()
+    rows = session.control.list_saved_runs()
+    assert [row.data_path for row in rows] == [path]
+    assert (
+        rows[0].point,
+        rows[0].experiment,
+        rows[0].started_at,
+        rows[0].finished_at,
+        rows[0].completion,
+    ) == (
+        "p",
+        session.metadata.experiment,
+        session.metadata.started_at,
+        session.metadata.finished_at,
+        "complete",
+    )
+    assert session.entry.ledger.events() == before
+
+
+@pytest.mark.parametrize(
+    "fault", ["invalid-hdf5", "invalid-metadata", "missing-payload"]
+)
+def test_query_metadata_and_load_validity_are_independent(
+    session: NativeSaveSession,
+    qapp: QApplication,
+    fault: str,
+) -> None:
+    path = native_file(session)
+    if fault == "invalid-hdf5":
+        path.write_bytes(b"not HDF5")
+    else:
+        with h5.File(path, "r+") as file:
+            if fault == "invalid-metadata":
+                del file.attrs["experiment"]
+            else:
+                del file["data"]
+    rows = session.control.list_saved_runs()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.data_path == path
+    if fault == "missing-payload":
+        assert row.metadata_error is None
+        assert row.experiment == session.metadata.experiment
+    else:
+        assert row.metadata_error
+        assert row.experiment == ""
+        assert row.started_at is None
+        assert row.completion is None
+
+    dialog = RunLoadDialog(rows, initial_point="", start_directory="")
+    try:
+        table = dialog.findChild(QTableWidget, "load_runs")
+        load = dialog.findChild(QPushButton, "load_selected")
+        assert table is not None and load is not None
+        if row.metadata_error:
+            assert any(
+                row.metadata_error in table.item(0, column).text()
+                for column in range(table.columnCount())
+            )
+        table.selectRow(0)
+        assert load.isEnabled()
+        load.click()
+        assert dialog.selected_path() == str(path)
+        service = LoadService(
+            session.state,
+            WritebackService(
+                ContextControlFacet(context=session.context), arb_names=lambda: ()
+            ),
+            context=session.context,
+            captured_parameters=lambda _aliases: None,
+        )
+        with pytest.raises(LoadDataError) as error:
+            service.load_result("tab", dialog.selected_path() or "")
+        assert error.value.reason_code == (
+            "data_file_read_failed" if fault == "invalid-hdf5" else "invalid_data_file"
+        )
+    finally:
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("fault", ["corrupt-ledger", "missing-attachment"])
+def test_query_ledger_fault_does_not_hide_valid_or_broken_files(
+    session: NativeSaveSession,
+    fault: str,
+) -> None:
+    valid = native_file(session)
+    broken = session.entry.database_path / "runs" / "broken" / "data.h5"
+    broken.parent.mkdir(parents=True)
+    broken.write_bytes(b"not HDF5")
     event_id = str(uuid4())
     session.entry.ledger.append(
         LedgerEvent(
             id=event_id,
             kind="saved",
-            at=at,
+            at="2026-10-08T00:03:00Z",
             entry_id=session.entry.entry_id,
             origin="gui",
-            payload=SavedPayload(run_id=run_id, outputs=(output,)),
+            payload=SavedPayload(run_id=session.metadata.run_id, outputs=()),
         ),
-        record={"point": point, "experiment": experiment, "outputs": []},
+        record={"point": "p", "experiment": "scan"},
     )
-    return event_id
-
-
-def test_query_merges_native_save_history_without_opening_data(
-    session: NativeSaveSession, tmp_path: Path
-) -> None:
-    acquired(session, "opaque-run")
-    first = tmp_path / "missing-first.h5"
-    latest = tmp_path / "missing-latest.h5"
-    saved(session, "opaque-run", first)
-    saved(session, "opaque-run", latest)
-    saved(session, "opaque-run", first, status="failed")
-    before = session.entry.ledger.events()
+    records = session.entry.result_path / "records"
+    if fault == "corrupt-ledger":
+        (records / "ledger.jsonl").write_text("not-json\n", encoding="utf-8")
+    else:
+        (records / f"{event_id}.json").unlink()
     rows = session.control.list_saved_runs()
-    assert len(rows) == 1
-    row = rows[0]
-    assert (row.run_id, row.point, row.experiment, row.recorded_at) == (
-        "opaque-run",
-        "p",
-        "scan",
-        "2026-10-08T00:01:00Z",
-    )
-    assert row.data_path == latest
-    assert session.entry.ledger.events() == before
-    assert not (session.entry.database_path / "runs").exists()
+    assert {row.data_path for row in rows} == {valid, broken}
+    errors = {row.data_path: row.metadata_error for row in rows}
+    assert errors[valid] is None
+    assert errors[broken]
 
 
-def test_query_saved_only_and_acquired_only_with_exact_point_filter(
-    session: NativeSaveSession, tmp_path: Path
-) -> None:
-    saved(session, "saved-only", tmp_path / "gone.h5", point="p2", experiment="fit")
-    acquired(session, "not-saved")
-    rows = session.control.list_saved_runs()
-    assert [row.run_id for row in rows] == ["saved-only", "not-saved"]
-    assert rows[0].recorded_at == "2026-10-08T00:02:00Z"
-    assert rows[0].experiment == "fit"
-    assert rows[1].data_path is None
-    assert session.control.list_saved_runs(point="p2") == (rows[0],)
-    assert session.control.list_saved_runs(point="unknown") == ()
-
-
-def test_query_acquired_facts_win_even_when_saved_event_came_first(
-    session: NativeSaveSession, tmp_path: Path
-) -> None:
-    saved(session, "run", tmp_path / "gone.h5", point="other", experiment="other")
-    acquired(session, "run", at="2026-10-08T00:03:00Z")
-    acquired(session, "run", point="later", at="2026-10-08T00:04:00Z")
-    (row,) = session.control.list_saved_runs()
-    assert (row.point, row.experiment, row.recorded_at) == (
-        "p",
-        "scan",
-        "2026-10-08T00:03:00Z",
-    )
-
-
-def test_query_real_shared_saver_attachment_is_consumed(
+def test_query_follows_current_entry_and_ignores_noncanonical_files(
     session: NativeSaveSession,
+    tmp_path: Path,
 ) -> None:
+    native_file(session)
+    other = ResultEntry.create(
+        "other",
+        result_root=tmp_path / "result",
+        database_root=tmp_path / "Database",
+    )
+    decoy = other.database_path / "Labber" / "data.h5"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_bytes(b"not a run")
+    session.context.install_entry(other)
+    assert session.control.list_saved_runs() == ()
+    session.context.install_entry(session.entry)
+    assert len(session.control.list_saved_runs()) == 1
+
+
+def test_query_real_shared_saver_file_is_listed(session: NativeSaveSession) -> None:
     report = session.save()
     (row,) = session.control.list_saved_runs()
-    assert row.run_id == session.metadata.run_id
-    assert row.point == session.metadata.snapshot.point
-    assert row.experiment == session.metadata.experiment
     native = next(
         item.output.path
         for item in report.outputs
         if item.output.format == "data_h5" and item.status == "saved"
     )
     assert row.data_path == native
-    saved_event = session.entry.ledger.events()[0]
-    assert row.recorded_at == saved_event.at
+    assert row.run_id == session.metadata.run_id
+    assert row.point == session.metadata.snapshot.point
+    assert row.experiment == session.metadata.experiment
 
 
-def test_query_empty_draft_and_no_opened_entry(session: NativeSaveSession) -> None:
-    assert session.control.list_saved_runs() == ()
-    session.context.install_entry(session.entry)
+def test_query_empty_entry_and_no_opened_entry(session: NativeSaveSession) -> None:
     assert session.control.list_saved_runs() == ()
     session.context.clear_context()
     with pytest.raises(FailedPreconditionError) as error:
         session.control.list_saved_runs()
     assert error.value.reason_code == "no_entry"
-
-
-def test_query_ignores_non_native_outputs_and_follows_current_opened_entry(
-    session: NativeSaveSession,
-    tmp_path: Path,
-) -> None:
-    event_id = str(uuid4())
-    session.entry.ledger.append(
-        LedgerEvent(
-            id=event_id,
-            kind="saved",
-            at="2026-10-08T00:02:00Z",
-            entry_id=session.entry.entry_id,
-            origin="gui",
-            payload=SavedPayload(
-                run_id="png-only",
-                outputs=(
-                    SavedOutput(
-                        artifact="fit",
-                        member="figure",
-                        format="png",
-                        path=str(tmp_path / "fit.png"),
-                        status="saved",
-                    ),
-                ),
-            ),
-        ),
-        record={"point": "p", "experiment": "scan"},
-    )
-    (row,) = session.control.list_saved_runs()
-    assert row.data_path is None
-    other = ResultEntry.create(
-        "other",
-        result_root=tmp_path / "Result",
-        database_root=tmp_path / "Database",
-    )
-    session.context.install_entry(other)
-    assert session.control.list_saved_runs() == ()
-    assert len(session.entry.ledger.events()) == 1
-
-
-@pytest.mark.parametrize(
-    "failure",
-    ["corrupt-ledger", "missing-record", "malformed-record", "invalid-fields"],
-)
-def test_query_persistence_faults_are_not_an_empty_list(
-    session: NativeSaveSession, tmp_path: Path, failure: str
-) -> None:
-    event_id = saved(session, "run", tmp_path / "gone.h5")
-    records = session.entry.result_path / "records"
-    if failure == "corrupt-ledger":
-        (records / "ledger.jsonl").write_text("not-json\n", encoding="utf-8")
-    elif failure == "missing-record":
-        (records / f"{event_id}.json").unlink()
-    elif failure == "malformed-record":
-        (records / f"{event_id}.json").write_text("not-json", encoding="utf-8")
-    else:
-        (records / f"{event_id}.json").write_text(
-            '{"point": 42, "experiment": "scan"}', encoding="utf-8"
-        )
-    expected = FileNotFoundError if failure == "missing-record" else ValueError
-    with pytest.raises(expected):
-        session.control.list_saved_runs()
