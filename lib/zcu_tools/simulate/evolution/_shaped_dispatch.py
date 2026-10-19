@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from ._carrier_plan import plan_ramp_families
 from .kernel import Kernel, KernelContext, SegmentTable
-from .kernels._rwa_gate import canonical_key, gate_segments
+from .kernels._rwa_gate import canonical_keys, gate_segments
 from .kernels._workload_facts import envelope_bounds, fixed_flux
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.multitone_rwa import retained_edges
@@ -161,12 +161,15 @@ def populate_single_gate_plan(
 
     def build() -> tuple[SingleGateChoice, ...]:
         context = KernelContext(source, budget, plan)
-        choices = []
         families = plan.ramp_families or plan_ramp_families(table, source, plan)
+        if not families:
+            return ()
+        canonical = canonical_keys(table, context)
+        choices = []
         for family in families:
             group: dict[tuple[bytes, bool], tuple[int, int]] = {}
             for row in family.rows:
-                key = canonical_key(table, row, source)
+                key = canonical[row]
                 identity = (key, fixed_flux(table, row))
                 representative, count = group.get(identity, (row, 0))
                 group[identity] = (representative, count + 1)
@@ -215,7 +218,5 @@ def single_gate_preferred(
     }
     if not preferred:
         return np.zeros(len(rows), dtype=bool)
-    return np.array(
-        [canonical_key(table, int(row), context.source) in preferred for row in rows],
-        dtype=bool,
-    )
+    canonical = canonical_keys(table, context)
+    return np.array([canonical[row] in preferred for row in rows], dtype=bool)

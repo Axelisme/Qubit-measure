@@ -17,7 +17,7 @@ from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._secular import coherence_decay, population_generator, split_step
-from ._workload_facts import envelope_bounds, fixed_flux
+from ._workload_facts import TableIdentity, envelope_bounds, fixed_flux
 from .multitone_rwa import (
     RWA_POLICY,
     RWACoefficients,
@@ -95,6 +95,53 @@ def canonical_key(table: SegmentTable, row: int, source: ModelSource) -> bytes:
     return digest.digest()
 
 
+def canonical_keys(table: SegmentTable, context: KernelContext) -> tuple[bytes, ...]:
+    """Return table-aligned physics hashes, with b'' for undriven rows.
+
+    Planner, guards and preparation share these unchanged canonical hashes.
+    Exact row bytes group equal physical inputs before hashing representatives.
+    Start/theta remain apply-only, while flux motion is checked separately on
+    every row. Table and source ownership scope the fact to this evolve.
+    """
+    key = FactKey(("covariant-gate-keys", TableIdentity(table), context.source), tuple)
+
+    def build() -> tuple[bytes, ...]:
+        rows = np.flatnonzero(table.tones > 0)
+        result = [b""] * len(table.timeline)
+        if not len(rows):
+            return tuple(result)
+        # Compare bytes rather than floating values to preserve the original
+        # hash distinctions, including signed zeros and integer field widths.
+        physical = np.concatenate(
+            [
+                np.ascontiguousarray(array[rows]).reshape(len(rows), -1).view(np.uint8)
+                for array in (
+                    table.level,
+                    table.tones,
+                    table.duration_ns,
+                    table.tone_port,
+                    table.tone_frequency_ghz,
+                    table.tone_amplitude,
+                    table.tone_envelope,
+                    table.tone_envelope_offset_ns,
+                )
+            ],
+            axis=1,
+        )
+        records = physical.view(np.dtype((np.void, physical.shape[1]))).ravel()
+        _, representatives, inverse = np.unique(
+            records, return_index=True, return_inverse=True
+        )
+        hashes = [
+            canonical_key(table, int(rows[i]), context.source) for i in representatives
+        ]
+        for row, index in zip(rows, inverse, strict=True):
+            result[row] = hashes[index]
+        return tuple(result)
+
+    return context.work_plan.fact(key, build)
+
+
 def _common_support(table: SegmentTable, row: int) -> bool:
     # First release intentionally accepts complete, coextensive shaped pulses.
     # Partly overlapping, sliced or constant companions retain ordinary RWA.
@@ -129,6 +176,7 @@ def _admitted(
 ) -> NDArray[np.bool_]:
     tolerances(context.budget)
     accepted = np.zeros(len(rows), dtype=np.bool_)
+    physics = canonical_keys(table, context)
     for index, row in enumerate(rows):
         # Waveform support is not covariant: equal playback keys can have
         # different flux motion, so this check must precede every fact lookup.
@@ -140,7 +188,7 @@ def _admitted(
                 GATE_POLICY,
                 RWA_POLICY,
                 single_tone,
-                canonical_key(table, int(row), context.source),
+                physics[row],
                 context.budget,
             ),
             bool,
@@ -194,9 +242,7 @@ def gate_segments(table: SegmentTable, row: int, context: KernelContext) -> int:
     only: diagonal shifts commute with the secular dissipator. Numerical RWA
     and pruning admission remain separate. The result is shared per physics key.
     """
-    key = FactKey(
-        ("covariant-gate-segments", canonical_key(table, row, context.source)), int
-    )
+    key = FactKey(("covariant-gate-segments", canonical_keys(table, context)[row]), int)
 
     def build() -> int:
         graph = _row_graph(table, row, context)
@@ -486,8 +532,9 @@ class CovariantGateKernel:
         """
         by_physics: dict[bytes, bytes] = {}
         keys = []
+        canonical = canonical_keys(table, context)
         for row in rows:
-            physics = canonical_key(table, int(row), context.source)
+            physics = canonical[row]
             if physics not in by_physics:
                 segments = gate_segments(table, int(row), context)
                 by_physics[physics] = sha256(
