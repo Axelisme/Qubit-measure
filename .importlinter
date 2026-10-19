@@ -13,7 +13,16 @@ root_packages =
     zcu_lab
     migrations
     mcp_servers
+    scripts
 include_external_packages = True
+
+[importlinter:contract:library-no-script-entrypoints]
+name = C21: library implementations do not depend on script entrypoints
+type = forbidden
+source_modules =
+    zcu_tools
+forbidden_modules =
+    scripts
 
 # Runtime code must not depend on offline data migration tools.
 [importlinter:contract:runtime-no-migrations]

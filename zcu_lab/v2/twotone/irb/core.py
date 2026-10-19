@@ -2,18 +2,17 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Self
+from typing import Annotated
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
-from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
@@ -36,20 +35,6 @@ class IRBCfg(RBCfg):
     """Physical Clifford inserted after each random Clifford, in its current frame."""
     n_seeds: Annotated[int, FieldMeta(label="Number of sequences")] = Field(ge=2)
     """Number of independent random sequences shared by both arms."""
-
-    @model_validator(mode="after")
-    def validate_depths(self) -> Self:
-        """Reject fractional, negative, repeated or empty depths before device I/O."""
-        depths = sweep2array(self.sweep.depth, allow_array=True)
-        if (
-            len(depths) == 0
-            or not np.isfinite(depths).all()
-            or np.any(depths < 0)
-            or np.any(depths != np.floor(depths))
-            or len(np.unique(depths)) != len(depths)
-        ):
-            raise ValueError("IRB requires unique nonnegative integer depths")
-        return self
 
 
 @dataclass(frozen=True)
@@ -87,7 +72,7 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=IRBResult,
         cfg_type=IRBCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/irb",
     )
 
@@ -103,7 +88,7 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
         """
         # 1. Pair both arms on the same reproducible seeds and depth axis.
         run_cfg = deepcopy(cfg)
-        depths = sweep2array(run_cfg.sweep.depth, allow_array=True).astype(np.int64)
+        depths = np.asarray(run_cfg.depths, dtype=np.int64)
         seeds = np.array(
             [
                 int(child.generate_state(1)[0])

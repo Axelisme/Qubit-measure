@@ -100,6 +100,14 @@ Step 驗證保留 start 與 step，以 floor count 投影實際 stop／center／
 
 座標 command 不要求 n／step 有效，採樣 command 要求座標與目前採樣值有效。換算只在成功時將參與 expression 改為 direct 值；未參與 input 保留原文與缺席狀態。缺值、expression 或換算失敗不安裝部分結果。手寫表單可使用同一個 `SweepInput`；annotation 只接受部分分支時，description 與 execution 不提供其他分支的 command。
 
+## Log／List 整數清單
+
+`Form(Cfg, {"depths": LogPoints(max=128, points=9)})` 為 `list[int]` 欄位選用 Log／List 輸入。`LogPoints` 從 `cfg_model` 匯入。未標記的 list 與 SweepCfg 不變。
+
+Log 產生 0 加 `geomspace(1, max, points-1)`，末點固定為 max，再四捨五入、排序並去重。points 包含 0，至少為 2。兩點產生 [0, max]。去重後 preview 的 points 是實際點數，原稿保留請求值，Editor 顯示 Effective 值。max=0 只有 [0]，請求點數仍至少為 2。單元素 List 切到 Log 時，回填的 points=1 保持為 invalid draft，不自動增加點數。
+
+Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切換經 `FormState.select(path, {"kind": "list"}, env)` 或 `{"kind": "log"}`，使用共用 converter 與原子安裝；無效來源或 expression 失敗不改草稿。List 的 `values` 是非空非負整數清單，不重新取樣，額外實驗限制由 core 驗證。`to_cfg` 只輸出整數清單，不保存輸入模式。
+
 ## Logical 操作
 
 `KeyRef`、`ModuleRef`、`ModuleInline` 與 `ModuleInput` 從本 package import，不再由 form core export。`KeyRef.name` 以通用 `InputPolicy` 宣告 literal input。它不要求 captured key 存在，持久 Spec 保存 child key 的政策不變。`ModuleRef.check_sources` 承接 core module 的 captured source admission。

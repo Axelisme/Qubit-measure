@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Self
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import (
@@ -20,7 +21,6 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
-from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
@@ -32,7 +32,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
-from .program import RBModuleCfg, RBSweepCfg
+from .program import RBModuleCfg
 from .sequence import make_seed_tables
 
 
@@ -54,9 +54,20 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 class RBCfg(ProgramV2Cfg, ExpCfgModel):
     modules: RBModuleCfg
-    sweep: RBSweepCfg
+    depths: Annotated[
+        list[Annotated[int, Field(ge=0, strict=True)]],
+        FieldMeta(label="Clifford depths"),
+    ] = Field(min_length=1)
+    """Ordered nonempty, unique nonnegative integer Clifford depths."""
     seed: Annotated[int, FieldMeta(label="Random seed")]
     n_seeds: Annotated[int, FieldMeta(label="Number of sequences")]
+
+    @model_validator(mode="after")
+    def validate_depths(self) -> Self:
+        """Reject repeated depths before building any sequence or doing device I/O."""
+        if len(set(self.depths)) != len(self.depths):
+            raise ValueError("RB requires unique nonnegative integer depths")
+        return self
 
 
 @dataclass(frozen=True)
@@ -77,7 +88,7 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
         z=ZSpec("signals2D", "Signal", "a.u."),
         result_type=RB_Result,
         cfg_type=RBCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/rb",
     )
 
@@ -94,7 +105,7 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
         run_cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        depths = sweep2array(run_cfg.sweep.depth, allow_array=True).astype(np.int64)
+        depths = np.asarray(run_cfg.depths, dtype=np.int64)
 
         ss = np.random.SeedSequence(run_cfg.seed)
         entropys = np.array(
