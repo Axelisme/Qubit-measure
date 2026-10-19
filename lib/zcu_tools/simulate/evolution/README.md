@@ -288,9 +288,10 @@ The registry kernels retain no evolve-local data.
 WorkPlan publishes each lazy fact once, including concurrent requests for the
 same key. WorkPlan copies builder results and publishes read-only arrays. The
 shared facts include envelope peak/slope/real flags, period split rates, packed
-DOP853 samples and compact two-tone Floquet frames. Floquet consumes full Fourier
-averages during frame construction; facts and residents retain only compact
-frame data and optional sideband candidates. Model facts include the full
+DOP853 samples and small Floquet probe-bin certificate extensions. Floquet consumes
+full Fourier averages during frame construction. Its compact frames and optional
+sideband candidates belong only to active preparations or budget-admitted cache
+ownership, never evolve-long facts. Model facts include the full
 physical coordinates in their identity. Table-indexed facts
 also include table identity, so renumbered prefix representatives cannot alias
 the complete table. DOP853 packing also distinguishes flux-inclusive samples.
@@ -365,7 +366,9 @@ After each schedule joins, the caller publishes pending products for later
 prefix/suffix lookups. After the evolve pool drains, it restores surviving stale
 residents as older than current work, even on failure or cancellation. Fully
 rejected guard handoffs stay separate from apply bindings and fill only idle
-capacity. Current row, probe-bin, domain and budget checks still run on every
+capacity. Schedule consumes Dispatch's rejected handoff queue on offer, so declined
+or evicted products have no remaining Dispatch owner. Current row, probe-bin,
+domain and budget checks still run on every
 evolve. The unified account bounds retained arrays, not transient builders,
 active nonretained/oversize bindings, input-bound data or process RSS.
 

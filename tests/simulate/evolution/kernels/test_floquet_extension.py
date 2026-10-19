@@ -159,6 +159,21 @@ def test_parallel_windows_replace_cache_charge_instead_of_accumulating_frames():
         )
 
 
+class CountingWorkPlan(WorkPlan):
+    """Observe certificate construction without inspecting published payloads."""
+
+    def __init__(self):
+        super().__init__()
+        self.builds = 0
+
+    def fact(self, key, build):
+        def observed():
+            self.builds += 1
+            return build()
+
+        return super().fact(key, observed)
+
+
 def test_concurrent_extensions_share_complete_union_and_preserve_certificates():
     solver = CountingFloquet()
     src = source()
@@ -168,13 +183,10 @@ def test_concurrent_extensions_share_complete_union_and_preserve_certificates():
         acquire(engine, src, window([0.0, 0.004, 0.008]))
     table, rows, initial = solver.guards[-1]
     original = initial.preparations[0].prepared
+    original_bytes = original.nbytes
     changed = replace(table, tone_frequency_ghz=table.tone_frequency_ghz + [0.0, 0.004])
-    extend = getattr(solver, "extend_prepared", None)
-    assert callable(extend), (
-        "Floquet must support immutable certificate-domain extension"
-    )
     barrier = Barrier(2)
-    with closing(WorkPlan()) as plan:
+    with closing(CountingWorkPlan()) as plan, closing(WorkPlan()) as cold_plan:
         context = KernelContext(src, 1e-3, plan)
 
         def run():
@@ -183,75 +195,79 @@ def test_concurrent_extensions_share_complete_union_and_preserve_certificates():
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             a, b = list(pool.map(lambda _: run(), range(2)))
-        # Every caller sees the full table, not a completion-order-dependent bin.
-        cold = solver.guard_prepared(
-            changed, rows, KernelContext(src, 1e-3, WorkPlan())
-        )
-        before = original.entries[0].sidebands
-        assert before is not None
+        assert plan.builds == 1, "new certificate publication must be single-flight"
+        assert solver.builds == 1, "extensions must borrow the existing frame"
+        assert original_bytes < a.nbytes < 2 * original_bytes
+        assert a.nbytes == b.nbytes, "both callers must receive the complete union"
+        cold_context = KernelContext(src, 1e-3, cold_plan)
+        cold = solver.guard_prepared(changed, rows, cold_context)
+        assert solver.builds == 2
         for prepared in (a, b):
-            entry = prepared.entries[0]
-            frame = entry.sidebands
-            assert frame is not None
-            assert entry.rotations is original.entries[0].rotations
-            assert frame.coefficients is before.coefficients
-            assert len(frame.certificates) == 4
-            for port, certificate in before.certificates:
-                assert any(
-                    p == port and c is certificate for p, c in frame.certificates
+            # The union admits both windows. Its numerical products agree with
+            # the old payload on old rows and a fresh build on the shifted rows.
+            for current, reference in ((table, initial), (changed, cold)):
+                admitted = solver.admit_prepared(prepared, current, rows, context)
+                assert admitted is not None
+                np.testing.assert_array_equal(admitted.accepted, reference.accepted)
+                states = np.repeat(src.initial_density[None], len(rows), axis=0)
+                expected_states = states.copy()
+                indices = np.zeros(len(rows), dtype=np.int64)
+                solver.apply(
+                    prepared,
+                    indices,
+                    current,
+                    rows,
+                    states,
+                    ApplyContext(1e-3, admitted.plan),
                 )
-            expected_prepared = solver.extend_prepared(
-                cold.preparations[0].prepared, changed, context
-            )
-            expected_frame = expected_prepared.entries[0].sidebands
-            assert expected_frame is not None
-            for port, expected in expected_frame.certificates:
-                actual = next(
-                    c
-                    for p, c in frame.certificates
-                    if p == port and c.center == expected.center
+                solver.apply(
+                    reference.preparations[0].prepared,
+                    indices,
+                    current,
+                    rows,
+                    expected_states,
+                    ApplyContext(1e-3, reference.plan),
                 )
-                for field in (
-                    "rows",
-                    "columns",
-                    "values",
-                    "frequencies",
-                    "signs",
-                    "q",
-                    "r",
-                    "e",
-                    "tail",
-                ):
-                    np.testing.assert_array_equal(
-                        getattr(actual, field), getattr(expected, field)
-                    )
-            admitted = solver.admit_prepared(prepared, changed, rows, context)
-            assert admitted is not None
-            np.testing.assert_array_equal(admitted.accepted, cold.accepted)
-            states = np.repeat(src.initial_density[None], len(rows), axis=0)
-            expected_states = states.copy()
-            indices = np.zeros(len(rows), dtype=np.int64)
-            solver.apply(
-                prepared,
-                indices,
-                changed,
-                rows,
-                states,
-                ApplyContext(1e-3, admitted.plan),
-            )
-            solver.apply(
-                cold.preparations[0].prepared,
-                indices,
-                changed,
-                rows,
-                expected_states,
-                ApplyContext(1e-3, cold.plan),
-            )
-            np.testing.assert_array_equal(states, expected_states)
-        # New certificate publications are single-flight, not duplicate builds.
-        frame_a, frame_b = a.entries[0].sidebands, b.entries[0].sidebands
-        assert frame_a is not None and frame_b is not None
-        assert frame_a.certificates[-1][1] is frame_b.certificates[-1][1]
-        assert len(before.certificates) == 3, (
-            "the original payload must remain immutable"
+                np.testing.assert_array_equal(states, expected_states)
+            assert solver.extend_prepared(prepared, changed, context) is prepared
+        assert plan.builds == 1, "covered domains must not rebuild certificates"
+        assert original.nbytes == original_bytes
+        assert solver.admit_prepared(original, changed, rows, context) is None, (
+            "extension must not mutate the original payload's domain"
+        )
+
+
+def test_discarded_frame_releases_arrays_while_work_plan_remains_open():
+    """A frame with no active binding must not survive as an evolve-long fact."""
+    import gc
+    import tracemalloc
+
+    # Warm numerical libraries and obtain a real table at the kernel seam before
+    # tracing. The warm payload is not part of the measured allocation interval.
+    observer = CountingFloquet()
+    src = source()
+    with closing(
+        Engine(1, 0, kernels=(observer, RecordingKernel("dop853", accepts=False)))
+    ) as engine:
+        acquire(engine, src, window([0.0]))
+    table, _, _ = observer.guards[-1]
+    solver = FloquetKernel()
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+        rows = np.array([0])
+        keys = solver.prepare_keys(table, rows, context)
+        gc.collect()
+        tracemalloc.start()
+        try:
+            before = tracemalloc.get_traced_memory()[0]
+            prepared = solver.prepare(keys, table, rows, context)
+            charged = prepared.nbytes
+            del prepared
+            gc.collect()
+            retained = tracemalloc.get_traced_memory()[0] - before
+        finally:
+            tracemalloc.stop()
+        assert retained < charged // 2, (
+            f"discarded {charged}-byte frame still retains {retained} bytes "
+            "outside resident admission"
         )

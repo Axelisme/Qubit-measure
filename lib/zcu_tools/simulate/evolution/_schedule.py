@@ -255,8 +255,13 @@ class Schedule:
         )
 
     def retain_rejected(self, dispatch: Dispatch) -> None:
-        """Offer non-consumer guard handoffs without constructing apply bindings."""
-        for name, preparations in dispatch.rejected_preparations.items():
+        """Transfer unused handoffs to admission, releasing declined/evicted data.
+
+        Dispatch must not remain a second owner after an offer: these products
+        have no apply consumers to justify retaining them outside the byte account.
+        """
+        for name in tuple(dispatch.rejected_preparations):
+            preparations = dispatch.rejected_preparations.pop(name)
             for preparation in preparations:
                 payload = PreparedPayload(
                     preparation.prepared,
