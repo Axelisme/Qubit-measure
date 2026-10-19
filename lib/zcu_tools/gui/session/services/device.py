@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import logging
 import threading
 from collections.abc import Generator
@@ -9,18 +8,16 @@ from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
-    Protocol,
     cast,
-    runtime_checkable,
 )
 
 from zcu_tools.device import DeviceActivity, DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
-from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
-from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
+from zcu_tools.gui.session.devices import device_adapters, get_device_adapter
+from zcu_tools.gui.session.devices.base import DeviceProtocol
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceOperationFinishedPayload,
@@ -53,40 +50,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.state import SessionState
 
 logger = logging.getLogger(__name__)
-
-
-@runtime_checkable
-class DeviceProtocol(Protocol):
-    """Structural contract a hardware driver must satisfy to be a GUI device.
-
-    pyright only checks the *shape* (these methods exist with these signatures).
-    The semantic invariants an implementer must also honour — and which a bug
-    silently violates — are:
-
-    - ``setup`` runs **off the main thread** (via ``BackgroundRunner``), never
-      the Qt main thread. It MUST poll ``stop_event`` during any long operation:
-      cancellation works by ``stop_event.set()``, and the worker reports
-      "cancelled" only if it returns with the event set. A ``setup`` that ignores
-      ``stop_event`` makes cancel a no-op (the worker blocks until natural
-      completion). ``progress`` may drive a pbar via the ambient pbar factory.
-    - ``get_info`` returns a fresh value snapshot. It is called on the worker
-      right after ``setup``, by the synchronous idle read path, and by the
-      off-main poll path that may refresh current values during setup/ramp. It
-      must not mutate device state.
-    - ``close`` releases the underlying resource and SHOULD be idempotent: it is
-      called on disconnect, and on any rollback where a driver was constructed
-      but never became the live registry entry.
-    """
-
-    def setup(
-        self,
-        cfg: Any,
-        *,
-        progress: bool = True,
-        stop_event: threading.Event | None = None,
-    ) -> None: ...
-    def get_info(self) -> BaseDeviceInfo: ...
-    def close(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -189,15 +152,6 @@ class _InflightOp:
     prior: DeviceState | None
 
 
-_DEVICE_TYPE_REGISTRY: dict[str, tuple[str, bool]] = {
-    "FakeDevice": ("zcu_tools.device.fake.FakeDevice", False),
-    "YOKOGS200": ("zcu_tools.device.yoko.YOKOGS200", True),
-    "RohdeSchwarzSGS100A": ("zcu_tools.device.sgs100a.RohdeSchwarzSGS100A", True),
-}
-
-_FLUX_DEVICE_TYPES = {"FakeDevice", "YOKOGS200"}
-
-
 def _extract_numeric_device_value(info: BaseDeviceInfo | None) -> float | None:
     """Return a strict numeric ``value`` field from cached/live device info."""
     if info is None:
@@ -208,24 +162,11 @@ def _extract_numeric_device_value(info: BaseDeviceInfo | None) -> float | None:
     return float(raw)
 
 
-def list_supported_device_types() -> list[str]:
-    """Return driver types users may add manually; simulation publishes its own."""
-    return [name for name in _DEVICE_TYPE_REGISTRY if name != "FakeDevice"]
-
-
 def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
-    if type_name not in _DEVICE_TYPE_REGISTRY:
+    adapter = get_device_adapter(type_name)
+    if adapter is None:
         raise DeviceRegistrationError(f"Unknown device type: {type_name!r}")
-    if type_name == "FakeDevice":
-        return FakeDevice(address=address)
-    class_path, requires_address = _DEVICE_TYPE_REGISTRY[type_name]
-    module_path, cls_name = class_path.rsplit(".", 1)
-    cls = getattr(importlib.import_module(module_path), cls_name)
-    if requires_address:
-        import pyvisa  # type: ignore[import-untyped]
-
-        return cast(DeviceProtocol, cls(address, pyvisa.ResourceManager()))
-    return cast(DeviceProtocol, cls())
+    return adapter.connect(address)
 
 
 class DeviceService:
@@ -267,8 +208,6 @@ class DeviceService:
         # per-name operation transients. The gate prevents concurrent mutations
         # of the same device. ProgressService owns per-operation setup progress.
         self._inflight: dict[str, _InflightOp] = {}
-        # Restored preferences cannot grant simulation publication provenance.
-        self._published_fake_devices: set[str] = set()
 
     def register_device(self, name: str, driver: BaseDevice[Any]) -> None:
         """Adopt an already built driver and publish its current info on owner thread.
@@ -375,8 +314,8 @@ class DeviceService:
 
         No drivers are reconstructed or connected. Read failure propagates;
         the caller must drain work and close the service's registered drivers.
-        Existing published rows are rejected rather than overwritten. Published
-        FakeDevice rows may reconnect at their stored address, also after rename.
+        Existing published rows are rejected rather than overwritten. Known
+        instrument rows may reconnect at their stored address, also after rename.
         """
         entries = self._registry.get_all_devices()
         infos = {name: driver.get_info() for name, driver in entries.items()}
@@ -393,35 +332,30 @@ class DeviceService:
                     info=info,
                 )
             )
-            if info.type == "FakeDevice":
-                self._published_fake_devices.add(name)
             self._emit_device_changed(name)
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
-        """Start an off-main connection and return its operation token.
+        """Manually add a user-connectable instrument off-main; return its token.
 
-        New FakeDevice rows raise FailedPreconditionError in every session.
-        Only simulation-published FakeDevice rows may reconnect at their stored
-        address, including after rename. Remembered preferences do not publish
-        devices. Live or busy names also raise FailedPreconditionError.
-        Driver failures settle the operation as failed and retain an offline
-        snapshot with the reason,
-        allowing callers to submit the same name with a corrected address.
+        Non-user-connectable known types raise FailedPreconditionError before
+        admission, even for an existing offline row. Use start_reconnect_device
+        for a trusted stored identity. Live/busy names also fail before admission.
+        Driver failures settle failed and retain an offline snapshot with a reason
+        so callers can correct the address and retry.
         """
+        adapter = get_device_adapter(req.type_name)
+        if adapter is not None and not adapter.capabilities.user_connectable:
+            raise FailedPreconditionError(
+                f"{req.type_name} cannot be added manually; register a driver or "
+                "remember its identity, then use Reconnect."
+            )
+        return self._start_connection(req)
+
+    def _start_connection(self, req: ConnectDeviceRequest) -> int:
         current = self._state.get_device(req.name)
         if current is not None and current.is_live():
             raise FailedPreconditionError(
                 f"Device {req.name!r} is already connected or busy"
-            )
-        if req.type_name == "FakeDevice" and (
-            req.name not in self._published_fake_devices
-            or current is None
-            or current.type_name != "FakeDevice"
-            or req.address != current.address
-        ):
-            raise FailedPreconditionError(
-                "FakeDevice cannot be added manually; the simulation environment "
-                "must publish it through publish_initial_devices."
             )
         initial = current or DeviceState(
             name=req.name,
@@ -514,17 +448,19 @@ class DeviceService:
         return token
 
     def start_reconnect_device(self, name: str) -> int:
-        # Reconnect is a thin alias for connect of a remembered (memory-only)
-        # device: it reuses the stored type/address. Return the connect
-        # operation's token so the wire/MCP layers can expose it as an async
-        # handle (FC1 — reconnect must produce an operation_id like the other
-        # device starts, otherwise MCP wait(op) cannot track a name-only reconnect).
+        """Reconnect an idle stored row off-main using its type/address.
+
+        Manual Add policy does not apply to identities from trusted register,
+        publish or remember callers. Unknown types have no default factory and
+        fail the operation; live/busy rows reject before admission. Returns the
+        token; failures retain the offline row and error.
+        """
         dev = self._require_device(name)
         if not dev.is_memory_only():
             raise FailedPreconditionError(
                 f"Device {name!r} is not a memory-only device"
             )
-        return self.start_connect_device(
+        return self._start_connection(
             ConnectDeviceRequest(
                 type_name=dev.type_name,
                 name=dev.name,
@@ -561,7 +497,6 @@ class DeviceService:
                 )
             else:
                 self._state.remove_device(name)
-                self._published_fake_devices.discard(name)
             logger.info("device disconnect succeeded: name=%r", name)
             self._inflight.pop(name, None)
             # State is observable before settle.
@@ -788,9 +723,6 @@ class DeviceService:
         # committed set, and MEMORY_ONLY has no driver or lease key to migrate.
         self._state.remove_device(old_name)
         self._state.put_device(replace(dev, name=new_name))
-        if old_name in self._published_fake_devices:
-            self._published_fake_devices.remove(old_name)
-            self._published_fake_devices.add(new_name)
         self._bus.emit(DeviceChangedPayload(name=None))
 
     def forget_device(self, name: str) -> None:
@@ -800,7 +732,6 @@ class DeviceService:
                 f"Device {name!r} is not a memory-only device"
             )
         self._state.remove_device(name)
-        self._published_fake_devices.discard(name)
         self._emit_device_changed(name)
 
     def _project(self, dev: DeviceState) -> DeviceSnapshot:
@@ -973,41 +904,52 @@ class DeviceService:
         infer a unit from device type or change connection/cache state.
         """
         dev = self._state.get_device(name)
-        if dev is not None and isinstance(dev.info, (YOKOGS200Info, FakeDeviceInfo)):
-            return dev.info.value_unit
-        return "none"
+        if dev is None or dev.info is None:
+            return "none"
+        adapter = get_device_adapter(dev.info.type)
+        if adapter is None:
+            return "none"
+        return adapter.bias_unit(dev.info) or "none"
 
     def get_device_unit_strict(self, name: str) -> str:
         """Read a cached flux unit for context binding, without hardware I/O.
 
-        The device must be registered as YOKOGS200 or FakeDevice and have valid
-        flux Info. Otherwise DeviceRegistrationError names the device. Missing
-        Info never selects a unit from type; connection/cache state is unchanged.
+        The registered type's adapter must declare bias_source and the cached
+        Info must provide a validated bias unit. Otherwise DeviceRegistrationError
+        names the device. Missing Info never selects a unit from type;
+        connection/cache state is unchanged.
         """
         dev = self._state.get_device(name)
         if dev is None:
             raise DeviceRegistrationError(f"No such device: {name!r}")
-        if dev.type_name not in _FLUX_DEVICE_TYPES:
+        adapter = get_device_adapter(dev.type_name)
+        if adapter is None or not adapter.capabilities.bias_source:
+            supported = sorted(
+                known.driver_cls.__name__
+                for known in device_adapters()
+                if known.capabilities.bias_source
+            )
             raise DeviceRegistrationError(
                 f"Device {name!r} of type {dev.type_name!r} cannot bind a "
-                f"flux context (supported: {sorted(_FLUX_DEVICE_TYPES)})"
+                f"flux context (supported: {supported})"
             )
-        if not isinstance(dev.info, (YOKOGS200Info, FakeDeviceInfo)):
+        unit = self.get_device_unit(name)
+        if unit == "none":
             raise DeviceRegistrationError(f"Device {name!r} has no cached flux Info")
-        return dev.info.value_unit
+        return unit
 
     def get_cached_device_value(self, name: str) -> float | None:
         """Return the cached numeric predictor/flux value for a live device.
 
         This is a cheap State-only query: it does not touch hardware, refresh the
-        cache, bump versions, or emit events. The type whitelist intentionally
-        matches the existing flux-device unit whitelist so RF sources are not
-        treated as predictor device-value providers by accident.
+        cache, bump versions, or emit events. The registered type's bias_source
+        capability excludes RF sources from predictor device-value providers.
         """
         dev = self._state.get_device(name)
         if dev is None or dev.status is not DeviceStatus.CONNECTED:
             return None
-        if dev.type_name not in _FLUX_DEVICE_TYPES:
+        adapter = get_device_adapter(dev.type_name)
+        if adapter is None or not adapter.capabilities.bias_source:
             return None
         return _extract_numeric_device_value(dev.info)
 

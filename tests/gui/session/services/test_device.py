@@ -130,7 +130,7 @@ def test_manual_fake_device_is_rejected_before_operation_admission(
             [DeviceMemoryInfo(type_name="FakeDevice", name="manual", address="addr")]
         )
     before = svc.list_device_snapshots()
-    with pytest.raises(FailedPreconditionError, match="simulation.*publish"):
+    with pytest.raises(FailedPreconditionError, match="cannot be added manually"):
         svc.start_connect_device(ConnectDeviceRequest("FakeDevice", "manual", "addr"))
     assert svc.list_device_snapshots() == before
     assert svc.get_active_device_operations() == ()
