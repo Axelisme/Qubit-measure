@@ -690,8 +690,8 @@ def test_host_apply_presents_expected_busy_error_without_losing_draft(module_hos
 
 
 @pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
-def test_host_apply_does_not_swallow_unexpected_storage_error(module_host):
-    ctrl, window, _widget, tab_id, pane, presenter = module_host
+def test_controller_apply_propagates_unexpected_storage_error(module_host):
+    ctrl, _window, _widget, tab_id, pane, presenter = module_host
     context = ctrl.context_control
     storage = context.capture_storage(context.read_context())
     ledger = storage.result_path / "records" / "ledger.jsonl"
@@ -700,8 +700,9 @@ def test_host_apply_does_not_swallow_unexpected_storage_error(module_host):
         ledger.rename(backup)
     ledger.mkdir()
     try:
+        # The application propagates storage failures; the Qt host presents them.
         with pytest.raises(IsADirectoryError):
-            window.apply_tab_writeback(tab_id, pane=pane)
+            ctrl.apply_writeback_for_pane(tab_id, pane)
         assert presenter.calls == []
         assert (
             MODULE_PROPOSAL_TARGET not in context.read_context().library.module_keys()
