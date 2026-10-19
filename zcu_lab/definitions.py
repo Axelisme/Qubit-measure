@@ -50,6 +50,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
 from zcu_lab.v2.twotone.ac_stark.gui import AcStarkAdapter, AcStarkRamseyAdapter
 from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
+from zcu_lab.v2.twotone.dispersive.gui import DispersiveAdapter
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
 from zcu_lab.v2.twotone.freq.gui import FreqAdapter
 from zcu_lab.v2.twotone.irb.gui import IRBAdapter
@@ -106,6 +107,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/ckp": CKPAdapter,
     "twotone/ac_stark": AcStarkAdapter,
     "twotone/ac_stark_ramsey": AcStarkRamseyAdapter,
+    "twotone/dispersive": DispersiveAdapter,
     "twotone/power_dep": PowerDepAdapter,
     "twotone/flux_dep": FluxDepAdapter,
     "twotone/rabi/amp_rabi": AmpRabiAdapter,
