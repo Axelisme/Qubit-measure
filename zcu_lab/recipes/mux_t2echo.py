@@ -1,4 +1,4 @@
-"""One bounded mux recipe; numeric acquisition remains with its native owner."""
+"""Measure mux Hahn Echo, save the results and review coherence writeback."""
 
 from typing import Unpack
 
@@ -10,8 +10,10 @@ from zcu_tools.mcp.measure.execution_reply import (
 )
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeSession,
+    ask,
 )
 
 from .mux_helpers import (
@@ -20,37 +22,67 @@ from .mux_helpers import (
     ECHO_PI_PARAMETERS,
     INPUTS,
     MuxInputs,
-    finish_mux,
-    prepare_mux,
 )
 
 
 def mux_t2echo(session: RecipeSession, **inputs: Unpack[MuxInputs]) -> RecipeGenerator:
-    """Run mux Echo; review candidates before explicit Apply.
+    """Run x90 → half wait → x180 → half wait → x90 for selected mux qubits.
 
-    session is driver-supplied. target binds the Reset mux alias; None retains
-    global aliases. reuse_tab_id resets an idle mux/t2echo tab.
-    participants is an ordered name list; None keeps Reset defaults. library
-    selects typed path/key pairs, then inline copies typed selector paths, then
-    overrides sends one batch of typed scalar path/value edits. Caller order is
-    preserved; list indexes are full original positions, never participant rows.
-    Copy ref ancestors outer-first before editing children. None values retain
-    input; expressions remain authored. No range/calibration inference occurs.
-    Paths use MHz/us/native gain, matching the Form; count leaves use n.
-    Shared reps/rounds/recovery and delay axes remain shared, not per-tone.
-    All elements, including nonparticipants, must validate before Run.
-    Defaults report retained Form inputs, not their internal generation history.
-    Run saves raw and Primary; cancellation stops later steps. Finish-early
-    follows owner partial-data policy. Only an accepted writeback answer applies;
-    skipped writes none. Invalid inputs/cfg and native/transport failures propagate
-    at their author step; successful copies are not rolled back on later failure.
+    session supplies the GUI connection. target binds the mux group;
+    reuse_tab_id resets an idle Echo tab. participants gives ordered qubit names.
+    library selects path/key pairs, inline copies references (outermost first),
+    then overrides edits scalar paths in MHz/us/native gain. Integer paths use
+    full tone positions, not participant rows. None retains the current input.
+    The delay axis, reps, rounds and recovery are shared across all tones.
+    Save raw IQ and Primary Echo fits, then ask before applying T2E writeback.
+    Cancellation stops later steps; a skipped answer writes nothing.
     """
-    tab = prepare_mux(
-        session,
+    # 1. Reset the requested tab with this call's mux group and captured sources.
+    target = inputs.get("target")
+    participants = inputs.get("participants")
+    tab = session.open_tab(
         "mux/t2echo",
-        inputs,
+        aliases=None if target is None else {"mux": target},
+        reuse=inputs.get("reuse_tab_id"),
     )
-    yield from finish_mux(tab)
+
+    # 2. Select calibrated pulses before copying references for local edits.
+    for selection in inputs.get("library") or ():
+        tab.use_library(tuple(selection["path"]), selection["key"])
+    for copy in inputs.get("inline") or ():
+        tab.use_inline(tuple(copy["path"]))
+    edits = [
+        RecipeFieldEdit(
+            ("participants",),
+            None if participants is None else [name for name in participants],
+        )
+    ]
+    edits.extend(
+        RecipeFieldEdit(
+            tuple(edit["path"]),
+            edit["value"],
+            source="derived" if isinstance(edit["value"], dict) else "explicit",
+        )
+        for edit in inputs.get("overrides") or ()
+    )
+    tab.set_fields(edits)
+
+    # 3. Acquire and save raw IQ before fitting the Echo decay or fringes.
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled" or run is None:
+        return
+    run.save_raw()
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
+        return
+
+    # 4. Let the user review T2E candidates; only acceptance applies the draft.
+    decision = yield from ask(run.propose_writeback())
+    if decision.status == "cancelled":
+        return
+    if decision.decision == "accepted":
+        tab.accept()
 
 
 DEFINITION = RecipeDefinition(

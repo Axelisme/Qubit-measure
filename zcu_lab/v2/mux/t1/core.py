@@ -153,10 +153,11 @@ def _averaged_signal(
 
 
 class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
-    """Stateless mux T1 core; no GUI registration or writeback side effects.
+    """Measure selected qubits' energy relaxation on one shared delay axis.
 
-    Native save/load retain requested times, original indices, complex IQ and
-    full cfg from explicit RunRecord sources. No current form or library is read.
+    Each point applies simultaneous pi pulses, waits for the longest branch,
+    then waits the requested delay before a joint mux readout. Saved results
+    retain requested times, original tone indices, complex IQ and the full cfg.
     """
 
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
@@ -173,20 +174,18 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
     )
 
     def run(self, config: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
-        """Acquire common-start pi pulses, then common Delay and mux readout.
+        """Acquire pi pulse -> shared wait -> mux readout for each delay in us.
 
-        Copy/validate config without mutation. Lower active indices once, keeping
-        the full readout in cfg. Each requested time (us) compiles once; Join
-        waits for the longest pulse branch, including native pulse delays.
-        Return requested times (P,), original indices (K,) and average IQ (K,P).
-        context supplies compatible soc/soccfg and owns devices, a fresh stop
-        signal and Plots. Publish measurement_i and combined measurement with
-        original index/source cfg name legend; caller finishes
-        and releases plots and hardware resources. Cancellation preserves complete
-        points/current completed rounds, leaving unwritten IQ NaN. Acquisition
-        failures retain their cause on context.cancel_signal; call raise_if_error()
-        before reporting success. Admission/build errors propagate. No I/O saving.
+        config supplies the full tone list, ordered participants, pi pulses,
+        reset/readout and averaging controls; it is validated without mutation.
+        Join waits for the longest pi branch, including its pulse delays, before
+        the shared wait. Return requested times (P,), original tone indices (K,)
+        and averaged complex IQ (K,P), with individual and combined live plots.
+        Cancelled scans retain acquired averages and leave unwritten IQ as NaN.
+        context supplies offline or hardware handles, plots and a stop signal;
+        check cancel_signal.raise_if_error() before reporting success.
         """
+        # 1. Keep participant order while selecting readout tones from the full cfg.
         cfg = MuxT1Cfg.model_validate(config.model_dump())
         indices = participant_indices(
             [tone.name for tone in cfg.tones], cfg.participants
@@ -195,6 +194,8 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         readout = cfg.modules.readout.with_updates(
             tones=[cfg.modules.readout.tones[i] for i in indices]
         )
+
+        # 2. Show each decay and a combined view on the requested delay axis.
         viewers = [
             context.plots.liveplot_1d(
                 f"measurement_{i}", "Requested delay (us)", "Magnitude (a.u.)"
@@ -213,6 +214,7 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
                 "Requested delay (us)",
             )
 
+        # 3. Compile each delay once; all pi pulses start together after reset.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
             for delay, step in sched.scan("delay", times.tolist()):
@@ -230,9 +232,12 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
                     )
                 )
                 prog = builder.build()
+                # Average completed rounds into this delay's participant rows.
                 _ = builder.run_program(
                     prog, raw2signal_fn=partial(_averaged_signal, prog)
                 )
+
+        # 4. Flush live plots and return one IQ row per original selected tone.
         signals.trigger_update(flush=True)
         return MuxT1Result(
             times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
@@ -245,10 +250,11 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         *,
         plots: Plots,
     ) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
-        """Fit explicit source using requested us, existing T1 options and quality.
+        """Fit each saved IQ row against the requested delays to estimate T1 in us.
 
-        cfg=None is allowed. Shape/option errors raise. Per-tone numerical failures
-        retain indexed reasons, not zero calibrations. plots owns fit_i figures;
-        caller finishes/releases them. No hardware, file or current cfg is read.
+        source is a Run/Load record; its cfg may be absent. options selects
+        initial points to skip and single or dual exponential decay. Return
+        per-tone fits with uncertainties and quality, or indexed fit failures;
+        invalid axes/options raise. Draw each decay in plots as fit_i.
         """
         return analyze_t1(source.result, options, plots=plots)

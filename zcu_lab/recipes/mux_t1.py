@@ -1,4 +1,4 @@
-"""One bounded mux recipe; numeric acquisition remains with its native owner."""
+"""Measure simultaneous T1 decays and ask before writing calibrations."""
 
 from typing import Unpack
 
@@ -10,45 +10,82 @@ from zcu_tools.mcp.measure.execution_reply import (
 )
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeSession,
+    ask,
 )
 
 from .mux_helpers import (
     DRIVE_PARAMETERS,
     INPUTS,
     MuxInputs,
-    finish_mux,
-    prepare_mux,
 )
 
 
 def mux_t1(session: RecipeSession, **inputs: Unpack[MuxInputs]) -> RecipeGenerator:
-    """Run mux T1; review candidates before explicit Apply.
+    """Excite selected qubits, scan a shared wait, and fit their T1 decays.
 
-    session is driver-supplied. target binds the Reset mux alias; None retains
-    global aliases. reuse_tab_id resets an idle mux/t1 tab.
-    participants is an ordered name list; None keeps Reset defaults. library
-    selects typed path/key pairs, then inline copies typed selector paths, then
-    overrides sends one batch of typed scalar path/value edits. Caller order is
-    preserved; list indexes are full original positions, never participant rows.
-    Copy ref ancestors outer-first before editing children. None values retain
-    input; expressions remain authored. No range/calibration inference occurs.
-    Paths use MHz/us/native gain, matching the Form; count leaves use n.
-    Shared reps/rounds/recovery and delay axes remain shared, not per-tone.
-    All elements, including nonparticipants, must validate before Run.
-    Defaults report retained Form inputs, not their internal generation history.
-    Run saves raw and Primary; cancellation stops later steps. Finish-early
-    follows owner partial-data policy. Only an accepted writeback answer applies;
-    skipped writes none. Invalid inputs/cfg and native/transport failures propagate
-    at their author step; successful copies are not rolled back on later failure.
+    session supplies the measurement tab. target selects the mux group;
+    reuse_tab_id resets an idle mux/t1 tab instead of opening a new one.
+    participants lists qubit names in measurement order. library selects pulse
+    or readout entries, inline copies selections for editing, and overrides sets
+    scalar fields in MHz, us or native gain. Integer paths address the complete
+    tone list, not participant rows; copy parent references before children.
+    Omitted/None values retain Form inputs, and expressions stay expressions.
+
+    Save raw IQ and Primary fits, then ask before applying T1 calibrations to
+    the captured qubits. Skipping writes nothing. Cancellation stops later
+    steps; invalid settings and acquisition/save failures propagate.
     """
-    tab = prepare_mux(
-        session,
+    # 1. Open or reset the tab with this mux group's pulse/readout defaults.
+    target = inputs.get("target")
+    participants = inputs.get("participants")
+    tab = session.open_tab(
         "mux/t1",
-        inputs,
+        aliases=None if target is None else {"mux": target},
+        reuse=inputs.get("reuse_tab_id"),
     )
-    yield from finish_mux(tab)
+
+    # 2. Select library entries before copying and editing their fields.
+    for selection in inputs.get("library") or ():
+        tab.use_library(tuple(selection["path"]), selection["key"])
+    for copy in inputs.get("inline") or ():
+        tab.use_inline(tuple(copy["path"]))
+    edits = [
+        RecipeFieldEdit(
+            ("participants",),
+            None if participants is None else [name for name in participants],
+        )
+    ]
+    edits.extend(
+        RecipeFieldEdit(
+            tuple(edit["path"]),
+            edit["value"],
+            source="derived" if isinstance(edit["value"], dict) else "explicit",
+        )
+        for edit in inputs.get("overrides") or ()
+    )
+    tab.set_fields(edits)
+
+    # 3. Run pi pulses -> shared delay -> mux readout, then save raw IQ.
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled" or run is None:
+        return
+    run.save_raw()
+
+    # 4. Fit each qubit's decay on the requested delay axis and save Primary.
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
+        return
+
+    # 5. Apply the current calibration draft only after an accepted answer.
+    decision = yield from ask(run.propose_writeback())
+    if decision.status == "cancelled":
+        return
+    if decision.decision == "accepted":
+        tab.accept()
 
 
 DEFINITION = RecipeDefinition(
