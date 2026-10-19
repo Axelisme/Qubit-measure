@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，模擬 device address lookup 與重連
+**Last updated:** 2026-10-19，device 連線失敗與重試、模擬 device address lookup 與重連
 
 # gui/session/ — 量測 session core
 
@@ -108,6 +108,9 @@ second instance cache or dynamic simulation coordinator. The host drains work
 and closes the same manager; Controller close alone does not close drivers.
 
 Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提供獨立 `value_unit` 編輯。完整 cfg 的單位由 Info 驗證，snapshot 與 recipe 沿同一儲存事實。
+
+首次 device 連線失敗保留 `MEMORY_ONLY` snapshot 與 error，operation handle 回報 failed。
+GUI 與 remote 查詢讀取同一個失敗原因。Dialog 保留失敗的名稱與 address，使用者修改 address 後可再次 Add Device。
 
 ## Analysis-only operations
 

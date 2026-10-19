@@ -221,7 +221,8 @@ def test_cancel_missing_device_operation_is_failed_precondition(qapp):
 
 
 def test_device_connect_failure_is_reported_without_live_registration(qapp):
-    svc, device = _make_svc()
+    handles = OperationHandles()
+    svc, device = _make_svc(handles=handles)
     device.get_info.side_effect = RuntimeError("cannot query")
     errors: list[str] = []
     loop = _workers.completion(allow_failure=True)
@@ -229,14 +230,30 @@ def test_device_connect_failure_is_reported_without_live_registration(qapp):
         svc, lambda _name, error: errors.append(error) or loop.quit()
     )
 
-    svc.start_connect_device(_req())
+    token = svc.start_connect_device(_req())
     loop.exec()
 
     assert errors
     assert "cannot query" in errors[0]
     assert "dev1" not in svc.get_connected_devices()
     device.close.assert_called_once_with()
-    assert svc.get_device_snapshot("dev1") is None
+    failed = svc.get_device_snapshot("dev1")
+    assert failed is not None, "failed connection must retain a queryable device row"
+    assert failed.status is DeviceStatus.MEMORY_ONLY
+    assert failed.address == "addr"
+    assert failed.error is not None and "cannot query" in failed.error
+    outcome = handles.await_outcome(token, timeout=0)
+    assert outcome is not None and outcome.outcome is not None
+    assert outcome.outcome.status == "failed"
+
+    device.get_info.side_effect = None
+    device.get_info.return_value = FakeDeviceInfo(address="corrected", value=0.0)
+    _connect(svc, ConnectDeviceRequest("FakeDevice", "dev1", "corrected"))
+    retried = svc.get_device_snapshot("dev1")
+    assert retried is not None
+    assert retried.status is DeviceStatus.CONNECTED
+    assert retried.address == "corrected"
+    assert retried.error is None
 
 
 def test_setup_uses_gate_and_returns_to_connected_snapshot(qapp):

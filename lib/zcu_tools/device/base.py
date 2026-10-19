@@ -185,6 +185,14 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
             )
 
     def __init__(self, address: str, rm: ResourceManager | None) -> None:
+        """Open a VISA session for address, then query its identity.
+
+        VISA open/lock timeout is 5000 ms; each I/O timeout is 2000 ms.
+        Enforcement depends on the VISA backend: the open/lock timeout does
+        not guarantee that every backend socket connection ends within 5 s.
+        Opening or identity-query failures propagate to the caller. Fake
+        devices override session opening and require no ResourceManager.
+        """
         self.address = address
         self._init_locks()
         self._in_operation = False
@@ -227,7 +235,10 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         import pyvisa as visa
 
         try:
-            return cast(_DeviceSession, rm.open_resource(self.address))
+            return cast(
+                _DeviceSession,
+                rm.open_resource(self.address, open_timeout=5000, timeout=2000),
+            )
         except visa.Error:
             self._logger.exception("could not connect to %s", self.address)
             raise
