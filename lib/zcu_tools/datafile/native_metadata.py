@@ -139,6 +139,20 @@ def validate_cfg_snapshot(cfg: CfgSnapshot) -> None:
         raise ValueError("/cfg: cfg_type must not be empty")
 
 
+def validate_run_id(run_id: str) -> None:
+    """Check the native run identity format without deriving acquisition time.
+
+    Accept YYYYMMDDTHHMMSSZ followed by a hyphen and six lowercase ASCII
+    alphanumeric characters. This validates the stored token, not calendar
+    semantics or historical timing evidence. Return None; a malformed string
+    raises ValueError naming run_id. Non-string inputs raise TypeError.
+    """
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}", run_id) is None:
+        raise ValueError(
+            "/: run_id must be a UTC timestamp plus six-character identity"
+        )
+
+
 def validate_metadata(metadata: RunMetadata, cfg: CfgSnapshot) -> None:
     """Validate historical metadata, UTC times and cfg JSON before creating a file."""
     validate_cfg_snapshot(cfg)
@@ -157,10 +171,7 @@ def validate_metadata(metadata: RunMetadata, cfg: CfgSnapshot) -> None:
         )
     except (ValidationError, ValueError) as error:
         raise ValueError(f"/context: {error}") from error
-    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}", checked.run_id) is None:
-        raise ValueError(
-            "/: run_id must be a UTC timestamp plus six-character identity"
-        )
+    validate_run_id(checked.run_id)
     if not checked.experiment:
         raise ValueError("/: experiment must not be empty")
     if checked.started_at is not None:
