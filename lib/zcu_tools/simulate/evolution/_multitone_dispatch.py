@@ -1,5 +1,6 @@
 """Cold prices for omission-expanded multitone RWA and full-drive integration."""
 
+from dataclasses import dataclass
 from hashlib import sha256
 
 import numpy as np
@@ -8,6 +9,69 @@ from .kernel import KernelContext, SegmentTable
 from .kernels.multitone_rwa import MultitoneRWAKernel, multitone_retention
 from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
+
+
+@dataclass(frozen=True)
+class MultitoneInventory:
+    """Complete admitted rows and expanded-row source usage, fixed before workers.
+
+    admitted lists row indices of the complete Engine geometry, not a prefix
+    slice. cheap lists admitted unexpanded small graphs. uses pairs an expanded row with its source-cumulative key use count.
+    Prices are evaluated lazily only when dispatch needs the legacy fallback.
+    """
+
+    admitted: tuple[int, ...]
+    cheap: tuple[int, ...]
+    uses: tuple[tuple[int, int], ...]
+
+
+def populate_multitone_inventory(
+    table: SegmentTable, source: ModelSource, plan: WorkPlan, budget: float = 1e-3
+) -> MultitoneInventory:
+    """Record complete admission/usage once, independently of common selection.
+
+    This preserves cumulative fallback decisions for zero-cache and cached
+    Engines without building any RWA prepared coefficients or pricing rows
+    already handled by common frame.
+    """
+
+    def build() -> MultitoneInventory:
+        if budget < 1e-3:
+            return MultitoneInventory((), (), ())
+        context = KernelContext(source, budget, plan)
+        kernel = MultitoneRWAKernel()
+        candidates = np.flatnonzero(table.tones >= 2)
+        admitted = candidates[kernel.guard(table, candidates, context)]
+        expanded, cheap = [], []
+        for row in admitted:
+            retained = multitone_retention(table, int(row), context)
+            if any(retained.edges):
+                expanded.append(int(row))
+            elif retained.dimension is not None:
+                model = source.model(tuple(int(v) for v in table.level[row]))
+                if retained.dimension <= max(9, 2 * len(model.energies_ghz)):
+                    cheap.append(int(row))
+        rows = np.array(expanded, dtype=np.int64)
+        physics = kernel.prepare_keys(table, rows, context) if len(rows) else ()
+        keys = []
+        inventory: dict[bytes, int] = {}
+        for row, key in zip(rows, physics, strict=True):
+            model = source.model(tuple(int(v) for v in table.level[row]))
+            identity = sha256(
+                b"multitone-cold" + model.identity.encode() + key.tobytes()
+            ).digest()
+            keys.append(identity)
+            inventory[identity] = inventory.get(identity, 0) + 1
+        usage = source.record_gate_usage(inventory) if inventory else {}
+        return MultitoneInventory(
+            tuple(int(row) for row in admitted),
+            tuple(cheap),
+            tuple((int(row), usage[key]) for row, key in zip(rows, keys, strict=True)),
+        )
+
+    return plan.fact(
+        FactKey(("multitone-cold-inventory", budget), MultitoneInventory), build
+    )
 
 
 def populate_multitone_plan(
@@ -36,37 +100,14 @@ def populate_multitone_plan(
     """
 
     def build() -> frozenset[int]:
-        if budget < 1e-3:
-            return frozenset()
+        complete = plan.common_frame_table
+        geometry = table if complete is None else complete
+        inventory = populate_multitone_inventory(geometry, source, plan, budget)
         context = KernelContext(source, budget, plan)
-        kernel = MultitoneRWAKernel()
-        candidates = np.flatnonzero(table.tones >= 2)
-        admitted = candidates[kernel.guard(table, candidates, context)]
-        rows = np.array(
-            [
-                row
-                for row in admitted
-                if any(multitone_retention(table, int(row), context).edges)
-            ],
-            dtype=np.int64,
-        )
-        if not len(rows):
-            return frozenset()
-        physics = kernel.prepare_keys(table, rows, context)
-        keys = []
-        inventory: dict[bytes, int] = {}
-        for row, key in zip(rows, physics, strict=True):
-            model = source.model(tuple(int(v) for v in table.level[row]))
-            identity = sha256(
-                b"multitone-cold" + model.identity.encode() + key.tobytes()
-            ).digest()
-            keys.append(identity)
-            inventory[identity] = inventory.get(identity, 0) + 1
-        usage = source.record_gate_usage(inventory)
         return frozenset(
-            int(row)
-            for row, key in zip(rows, keys, strict=True)
-            if _direct_cheaper(table, int(row), context, usage[key])
+            row
+            for row, uses in inventory.uses
+            if _direct_cheaper(geometry, row, context, uses)
         )
 
     return plan.fact(FactKey(("multitone-cold-plan", budget), frozenset), build)

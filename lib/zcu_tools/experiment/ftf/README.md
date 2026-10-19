@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-20, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission, restored single-tone gate signatures, per-round pacing and local routing telemetry
+**Last updated:** 2026-10-20, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission, restored single-tone gate signatures, per-round pacing and local routing telemetry with frontend/build/admission breakdowns
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -48,10 +48,13 @@ density/readout results are unchanged bitwise.
 
 Each line contains `timestamp`, `points` (request grid, excluding shots),
 `rounds` (captured attempts), `wall_s` (admitted acquire time including pacing,
-excluding telemetry I/O), `estimated_cost_unit` and `families`. Failed calls
+excluding telemetry I/O), `frontend_cpu_s` (geometry and WorkPlan calling-thread
+CPU), `estimated_cost_unit` and `families`. Failed calls
 before a captured request have zero points and empty families. Family values are
 `rows`, `prepare_cpu_s`, `apply_cpu_s`, `actual_cpu_s`, `cache_hits`,
-`rejected_rows`, `estimated_cost` and nullable `estimated_cpu_s`; see the
+`rejected_rows`, `prepare_builds`, `admission_rows`, `estimated_cost` and nullable
+`estimated_cpu_s`; common-frame instruments builds and admission evaluations,
+while other families currently leave those two counters zero; see the
 [evolution report contract](../../simulate/evolution/README.md#routing-telemetry).
 Rows and hits sum across rounds. Noiseless reuse contributes logical rows and
 cache hits but zero kernel CPU, rejections and estimated work. Actual CPU excludes

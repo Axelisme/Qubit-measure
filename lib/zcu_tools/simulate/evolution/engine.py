@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import warnings
 from collections.abc import Mapping, Sequence
 from contextlib import closing
@@ -224,6 +225,8 @@ class PathDiagnostics:
     exceeded_by_kernel: Mapping[str, int] = field(default_factory=dict)
     max_trace_error: float = 0.0
     routing: Mapping[str, FamilyRouting] = field(default_factory=dict)
+    frontend_cpu_s: float = 0.0
+    """Calling-thread geometry and WorkPlan CPU; zero when telemetry is off."""
 
     def for_reuse(self, *, telemetry: bool) -> PathDiagnostics:
         """Preserve routes but report no kernel calls for an exact-result hit.
@@ -233,6 +236,7 @@ class PathDiagnostics:
         """
         return replace(
             self,
+            frontend_cpu_s=0.0,
             routing={
                 name: FamilyRouting(rows=count, cache_hits=count, estimated_cpu_s=0.0)
                 for name, count in self.segments_by_kernel.items()
@@ -436,6 +440,7 @@ class Engine:
                 cached = self._cached_result(key, cancel, telemetry=telemetry)
                 if cached is not None:
                     return cached
+            frontend_started = time.thread_time() if telemetry else 0.0
             geometry = plan(source, batches)
             workers = (
                 self._workers
@@ -446,6 +451,9 @@ class Engine:
             with closing(
                 create_work_plan(geometry.table, source, budget, telemetry=telemetry)
             ) as work_plan:
+                frontend_cpu_s = (
+                    time.thread_time() - frontend_started if telemetry else 0.0
+                )
                 context = KernelContext(source, budget, work_plan)
                 if key is not None:
                     key = route_key(key, geometry.table, context)
@@ -476,6 +484,10 @@ class Engine:
                         self._chunks,
                         timeline_workers=workers if self._inventory_chunks else None,
                     )
+            if telemetry:
+                result = replace(
+                    result, paths=replace(result.paths, frontend_cpu_s=frontend_cpu_s)
+                )
             if cancel.is_set():
                 raise Cancelled()
             _warn_exceeded(result)

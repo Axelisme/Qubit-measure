@@ -26,6 +26,10 @@ class FamilyRouting:
     estimated_cost: sum of relative scheduling units for executed segments.
     estimated_cpu_s: selected-plan CPU seconds, or None when any selected
         segment lacks a seconds estimate. Not inferred from scheduling units.
+    prepare_builds: coefficient products built by instrumented owners (currently
+        common_frame); zero for families without product instrumentation.
+    admission_rows: common-frame row indicator evaluations, excluding apply and
+        exact-result hits. Other families currently leave this count zero.
     CPU values exclude dispatch, geometry, ADC and I/O. All values are
     nonnegative; actual_cpu_s is the sum of the two measured phases.
     """
@@ -37,6 +41,8 @@ class FamilyRouting:
     rejected_rows: int = 0
     estimated_cost: float = 0.0
     estimated_cpu_s: float | None = None
+    prepare_builds: int = 0
+    admission_rows: int = 0
 
     @property
     def actual_cpu_s(self) -> float:
@@ -52,6 +58,8 @@ class _Totals:
     estimated_cost: float = 0.0
     estimated_cpu_s: float = 0.0
     missing_estimate: bool = False
+    prepare_builds: int = 0
+    admission_rows: int = 0
 
 
 class RoutingCollector:
@@ -87,6 +95,18 @@ class RoutingCollector:
                     total.prepare_cpu_s += elapsed
                 else:
                     total.apply_cpu_s += elapsed
+
+    def built(self, name: str, count: int) -> None:
+        """Count coefficient products built by instrumented numerical owners."""
+        if self.enabled and count:
+            with self._lock:
+                self._totals.setdefault(name, _Totals()).prepare_builds += count
+
+    def admitted(self, name: str, count: int) -> None:
+        """Count row indicator evaluations, not apply calls or result hits."""
+        if self.enabled and count:
+            with self._lock:
+                self._totals.setdefault(name, _Totals()).admission_rows += count
 
     def reject(self, name: str, count: int) -> None:
         """Count actual numerical rejections, never cost-based skips."""
@@ -143,6 +163,8 @@ class RoutingCollector:
             total = self._totals.get(name, _Totals())
             result[name] = FamilyRouting(
                 rows=segments.get(name, 0),
+                prepare_builds=total.prepare_builds,
+                admission_rows=total.admission_rows,
                 prepare_cpu_s=total.prepare_cpu_s,
                 apply_cpu_s=total.apply_cpu_s,
                 cache_hits=len(self._hits.get(name, ())),

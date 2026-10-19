@@ -26,7 +26,8 @@ class Channels(NamedTuple):
     denominator_min: float
 
 
-def coefficients(energies, full, frequencies) -> Channels:
+def first_order_channels(energies, full, frequencies):
+    """Common first-order frame algebra, also used by cold build-cost pricing."""
     size, count = len(energies), 2 * len(frequencies)
     carrier = float(np.mean(frequencies))
     labels = np.rint(energies / carrier)
@@ -47,6 +48,36 @@ def coefficients(energies, full, frequencies) -> Channels:
         out=generators,
         where=fast & (np.abs(denominators) > 1e-10),
     )
+    return (
+        carrier,
+        labels,
+        difference,
+        label_difference,
+        signs,
+        signed_frequencies,
+        signed,
+        retained,
+        denominators,
+        minimum,
+        generators,
+    )
+
+
+def coefficients(energies, full, frequencies) -> Channels:
+    size, count = len(energies), 2 * len(frequencies)
+    (
+        carrier,
+        labels,
+        difference,
+        label_difference,
+        signs,
+        signed_frequencies,
+        signed,
+        retained,
+        denominators,
+        minimum,
+        generators,
+    ) = first_order_channels(energies, full, frequencies)
     operators = np.zeros((count + count * count, size, size), np.complex128)
     operators[:count] = np.where(retained, signed, 0)
     omega = np.zeros(len(operators))

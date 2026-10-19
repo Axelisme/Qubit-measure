@@ -6,6 +6,7 @@ current gains, envelopes and duration, even when coefficients are reused.
 """
 
 from dataclasses import dataclass
+from hashlib import sha256
 from itertools import combinations_with_replacement
 
 import numpy as np
@@ -13,11 +14,12 @@ from numpy.typing import NDArray
 from scipy.linalg import expm
 
 from ..kernel import SegmentTable
-from ..secular import SecularModel
+from ..secular import ModelSource, SecularModel
 from ._common_frame import (
     Channels,
     amplitudes,
     coefficients,
+    first_order_channels,
     propagate,
     remainder_channels,
     remainder_estimates,
@@ -28,6 +30,31 @@ from ._secular import secular_operators
 COMMON_FRAME_POLICY = ("common-frame-sw2-v1", 0.03, 0.01, 8.0, 0.08, 2.0)
 _COHERENT_LIMIT, _BATH_LIMIT = 0.03, 0.01
 _MAX_STEP_NS, _PHASE_CYCLES, _MIN_STEP_NS = 8.0, 0.08, 2.0
+
+
+def coefficient_keys(
+    table: SegmentTable, rows: NDArray[np.int64], source: ModelSource
+) -> NDArray[np.void]:
+    """Hash complete coefficient physics; gains, phases and envelopes stay row-local.
+
+    Source identity describes the complete builder. Model identity and level
+    describe the local basis, bath and drives. Labels and the retained SW2 set
+    are deterministic functions of these inputs under COMMON_FRAME_POLICY.
+    """
+    dc = source.model((0,) * table.level.shape[1]).identity
+    keys = np.empty(len(rows), dtype="V32")
+    for index, row in enumerate(rows):
+        count = int(table.tones[row])
+        model = source.model(tuple(int(v) for v in table.level[row]))
+        digest = sha256(repr((dc, model.identity, COMMON_FRAME_POLICY)).encode())
+        for values in (
+            table.level[row],
+            table.tone_port[row, :count],
+            table.tone_frequency_ghz[row, :count],
+        ):
+            digest.update(values.tobytes())
+        keys[index] = np.void(digest.digest())
+    return keys
 
 
 @dataclass(frozen=True)
@@ -139,6 +166,31 @@ def _monomial_inventory(count: int):
         groups,
         powers,
     )
+
+
+def common_frame_strengths(
+    model: SecularModel, ports: tuple[int, ...], frequencies_ghz: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Return (tones, states) absolute SW row sums for cold-cost risk pricing.
+
+    Inputs match build_common_frame. Only first-order algebra is built, not SW2
+    or remainder tensors. Multiplying each tone by its gain/envelope peak and
+    summing gives the eta used by the build-risk cost model. This value is not
+    an admission decision or an accuracy veto. Zero mean carrier returns inf
+    so dispatch retains the original solver rather than building an invalid frame.
+    """
+    if abs(float(np.mean(frequencies_ghz))) < 1e-10:
+        return np.full((len(ports), len(model.energies_ghz)), np.inf)
+    full = np.array(
+        [
+            (model.drives[p].in_phase_ghz - 1j * model.drives[p].quadrature_ghz) / 2
+            for p in ports
+        ]
+    )
+    generators = first_order_channels(
+        model.energies_ghz - model.energies_ghz[0], full, frequencies_ghz
+    )[-1]
+    return np.abs(generators).sum(axis=2).reshape(len(ports), 2, -1).sum(axis=1)
 
 
 def build_common_frame(
@@ -409,12 +461,34 @@ def advance_common_frame(
         raise ValueError(
             "common-frame state must be a finite complex128 model-sized matrix"
         )
-    args, peaks, slopes = _row_envelopes(frame, table, row)
+    _, peaks, slopes = _row_envelopes(frame, table, row)
     duration = float(table.duration_ns[row])
     admission = _admission(frame, duration, peaks, slopes)
     channels = frame.channels
     if not admission.accepted or channels is None:
         raise ValueError(f"common-frame row rejected: {admission.reason}")
+    return advance_admitted_common_frame(frame, table, row, state, admission)
+
+
+def advance_admitted_common_frame(
+    frame: CommonFrame,
+    table: SegmentTable,
+    row: int,
+    state: NDArray[np.complex128],
+    admission: CommonFrameAdmission,
+) -> NDArray[np.complex128]:
+    """Apply a dispatch admission for this exact immutable table row and frame.
+
+    The caller must supply the admission previously computed for these unchanged
+    inputs. This entry avoids reevaluating indicators during production apply.
+    Standalone callers should use advance_common_frame, which validates inputs
+    and computes admission itself. A rejected admission raises ValueError.
+    """
+    channels = frame.channels
+    if not admission.accepted or channels is None:
+        raise ValueError(f"common-frame row rejected: {admission.reason}")
+    args, _, _ = _row_envelopes(frame, table, row)
+    duration = float(table.duration_ns[row])
     dt = duration / admission.steps
     generator, decay = secular_operators(frame.model)
     populations = expm(generator * dt / 2)

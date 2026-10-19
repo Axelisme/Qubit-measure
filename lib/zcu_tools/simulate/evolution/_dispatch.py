@@ -9,9 +9,10 @@ from joblib import delayed
 from numpy.typing import NDArray
 
 from ._carrier_plan import populate_carrier_plan
+from ._common_frame_dispatch import preferred as common_frame_preferred
 from ._dop853_dispatch import direct_plans
 from ._gain_plan import plan_gain_groups
-from ._multitone_dispatch import populate_multitone_plan
+from ._multitone_dispatch import populate_multitone_inventory, populate_multitone_plan
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
@@ -56,11 +57,12 @@ def create_work_plan(
     """
     plan = WorkPlan()
     plan.routing.enabled = telemetry
+    plan.publish_common_frame_table(table)
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)
     populate_single_gate_plan(table, source, plan, budget)
-    populate_multitone_plan(table, source, plan, budget)
+    populate_multitone_inventory(table, source, plan, budget)
     return plan
 
 
@@ -99,11 +101,11 @@ def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
         ),
         "two": _CandidateDomain(
             ordinary & (table.tones == 2) & constant,
-            ("multitone_rwa", "floquet", "dop853"),
+            ("common_frame", "multitone_rwa", "floquet", "dop853"),
         ),
         "multiple": _CandidateDomain(
             ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)),
-            ("multitone_gate", "multitone_rwa", "dop853"),
+            ("common_frame", "multitone_gate", "multitone_rwa", "dop853"),
         ),
     }
 
@@ -654,6 +656,9 @@ class _Classifier:
         for name in ("idle", "flux"):
             domain = self.domains[name]
             self.accept(rows[domain.mask[rows]], domain.families)
+        # Group shaped and constant consumers together before any legacy prepare.
+        common = self.domains["two"].mask | self.domains["multiple"].mask
+        self.try_common_frame(rows[common[rows]])
         domain = self.domains["plateau"]
         plateau = rows[domain.mask[rows]]
         # Distinct inputs cannot share Dyson paths; try constant RWA and period
@@ -678,10 +683,28 @@ class _Classifier:
         self.classify_multiple(multiple)
         return self._result()
 
+    def try_common_frame(self, rows: NDArray[np.int64]) -> NDArray[np.int64]:
+        """Try the cold-priced variant without removing any original fallback."""
+        kernel = self.kernels.get("common_frame")
+        candidates = rows[self.table.tones[rows] == 2]
+        if kernel is not None and len(candidates):
+            rwa = self.kernels.get("multitone_rwa")
+            preferred = common_frame_preferred(
+                self.table,
+                candidates,
+                self.context,
+                rwa if isinstance(rwa, MultitoneRWAKernel) else None,
+            )
+            if np.any(preferred):
+                self.try_kernel(kernel, candidates[preferred])
+        return rows[(self.names[rows] == "") & ~self.deferred[rows]]
+
     def expanded_direct(self, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
         """Borrow the cold comparison only when both families are available."""
-        if not isinstance(self.kernels.get("multitone_rwa"), MultitoneRWAKernel) or (
-            "dop853" not in self.kernels
+        if (
+            not len(rows)
+            or not isinstance(self.kernels.get("multitone_rwa"), MultitoneRWAKernel)
+            or ("dop853" not in self.kernels)
         ):
             return np.zeros(len(rows), dtype=bool)
         direct = populate_multitone_plan(
@@ -691,7 +714,8 @@ class _Classifier:
 
     def classify_multiple(self, rows: NDArray[np.int64]) -> None:
         """Try reusable gates, then the cheaper admitted RWA/direct alternative."""
-        gate, rwa, direct = self.domains["multiple"].families
+        _, gate, rwa, direct = self.domains["multiple"].families
+        rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
         if gate in self.kernels and len(rows):
             rows = self.try_kernel(self.kernels[gate], rows)
         preferred = self.expanded_direct(rows)
@@ -701,14 +725,18 @@ class _Classifier:
 
     def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
         """Fix acquire-wide costs before either guard; workers borrow the plan."""
+        selected = rows[
+            self.scope[rows] & (self.names[rows] == "") & ~self.deferred[rows]
+        ]
+        if not len(selected):
+            return
         if self.two_tone_direct is None:
             self.two_tone_direct = np.zeros(len(self.names), dtype=bool)
             self.two_tone_direct[rows] = direct_preferred(
                 self.table, rows, self.context
             )
-        selected = rows[self.scope[rows]]
         expanded = self.expanded_direct(selected)
-        rwa, floquet, dop853 = self.domains["two"].families
+        _, rwa, floquet, dop853 = self.domains["two"].families
         prefix = (rwa,) if rwa in self.kernels else ()
         self.accept(selected[expanded], (dop853, *prefix, floquet))
         selected = selected[~expanded]

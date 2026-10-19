@@ -18,6 +18,7 @@ class _Record(TypedDict):
     points: int
     rounds: int
     wall_s: float
+    frontend_cpu_s: float
     estimated_cost_unit: str
     families: dict[str, dict[str, int | float | None]]
 
@@ -37,6 +38,8 @@ def _families(
             prepare_cpu_s=sum(f.prepare_cpu_s for f in uses),
             apply_cpu_s=sum(f.apply_cpu_s for f in uses),
             cache_hits=sum(f.cache_hits for f in uses),
+            prepare_builds=sum(f.prepare_builds for f in uses),
+            admission_rows=sum(f.admission_rows for f in uses),
             rejected_rows=sum(f.rejected_rows for f in uses),
             estimated_cost=sum(f.estimated_cost for f in uses),
             estimated_cpu_s=(
@@ -93,6 +96,7 @@ class RoutingTelemetry:
                     "points": points,
                     "rounds": rounds,
                     "wall_s": wall_s,
+                    "frontend_cpu_s": sum(p.frontend_cpu_s for p in paths),
                     "estimated_cost_unit": "relative scheduling units",
                     "families": _families(paths),
                 }

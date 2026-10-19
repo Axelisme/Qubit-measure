@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-20, documented dispatch contracts and shared Floquet policies, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone and single shaped-gate omitted-channel retention, close-carrier multitone admission and cold-cost selection of expanded retained graphs, optional routing CPU reports, and the standalone common-frame numerical owner
+**Last updated:** 2026-10-20, documented dispatch contracts and shared Floquet policies, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone and single shaped-gate omitted-channel retention, close-carrier multitone admission and cold-cost selection of expanded retained graphs, optional routing CPU reports, and cold-priced common-frame dispatch with charged coefficient reuse
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -43,7 +43,10 @@ I/Q. ADC owns its probability tolerance and readout sums; see the
 
 `Engine.evolve(..., telemetry=True)` adds immutable `FamilyRouting` values to
 `result.paths.routing`. The default is False, with no thread CPU clock reads and
-an empty mapping. Evolution never writes files. Telemetry does not change guards,
+an empty mapping. Evolution never writes files. `paths.frontend_cpu_s` separately
+reports calling-thread geometry and WorkPlan CPU (zero on exact-result reuse).
+Common-frame reports also count `prepare_builds` and `admission_rows`; other
+families currently leave these two instrumented-owner counters at zero. Telemetry does not change guards,
 routes, cache admission, densities or cancellation.
 
 Each family reports logical segment `rows`, `prepare_cpu_s`, `apply_cpu_s`,
@@ -85,20 +88,40 @@ tries the next candidate in the following graph.
 | One constant tone, unshared driven input, duration at most 10 us | `single_tone_rwa` → `floquet_period` → `dyson` → `t6`. |
 | Other single constant tone | `dyson` → `single_tone_rwa` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
 | One shaped tone | Choose canonical `single_tone_gate` keys in the lowest estimated mixed gate/Sambe cold plan using source-cumulative usage through the complete current acquire. Rejected or unamortized rows try `shaped_sambe`, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
-| Two constant tones | For distinct ports, compare omission-expanded `multitone_rwa` with DOP853 using cold prepare, guard and apply estimates including retained dimension and restored oscillation frequencies. Unexpanded RWA stays first. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order. |
-| Shaped two-tone or three-or-more-tone row | Try `multitone_gate`, then the cheaper cold-cost choice between omission-expanded `multitone_rwa` and `dop853`. Unexpanded RWA stays first. Ordinary RWA admits fixed-flux rows with acceptable omitted-channel estimates, smooth real envelopes and at least one sampled envelope, including close or equal carriers. Other rows retain the full-drive fallback. |
+| Two constant tones | First try cold-priced `common_frame`. For remaining distinct ports, compare omission-expanded `multitone_rwa` with DOP853 using cold prepare, guard and apply estimates including retained dimension and restored oscillation frequencies. Unexpanded RWA stays first. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order. |
+| Shaped two-tone or three-or-more-tone row | Two-tone rows first try cold-priced `common_frame`. Remaining rows try `multitone_gate`, then the cheaper cold-cost choice between omission-expanded `multitone_rwa` and `dop853`. Unexpanded RWA stays first. Ordinary RWA admits fixed-flux rows with acceptable omitted-channel estimates, smooth real envelopes and at least one sampled envelope, including close or equal carriers. Other rows retain the full-drive fallback. |
 
 Expanded-RWA preparation is amortized over the complete acquire and source-cumulative exact prepare-key usage, not resident cache warmth. Prefix and worker subsets borrow the same plan. Exact-result memoization includes the selected route and still counts cumulative usage on memo hits.
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
 no-tone or single constant-tone row respectively. They have no DOP853 fallback.
-The internal [registry](kernels/__init__.py) contains 14 families. T7 is the
+The internal [registry](kernels/__init__.py) contains 15 families. T7 is the
 single-tone `dyson` family; the two-tone `floquet` family has its own modal
 second-order Dyson implementation. Production `dop853` is terminal for valid
 ordinary rows. The direct-first two-tone chain retains its Floquet tail only
 for injected registries whose DOP853-named kernel can reject.
 
 ### Builders and variants
+
+Common-frame pricing includes the full coefficient build, complete-acquire key
+reuse, duration, model dimension, and a wasted-build risk estimated from
+first-order SW strength weighted by the current gain and envelope peak. This
+risk is a **cost estimate**, not an accuracy veto. Cheap admitted unexpanded RWA
+graphs keep their original route. Constant singletons at the three-level cold
+calibration stay on the original chain; larger native models can amortize the
+build against their higher integration cost. Cache warmth never chooses a variant.
+Shaped and constant consumers share coefficient builds before legacy preparation.
+Rejected common rows retain the complete original RWA/Floquet/DOP853 ordering.
+
+Common-frame coefficients include full source/model identity, level, ordered
+ports, carriers and numerical policy; frame labels and retained SW2 channels
+are deterministic under that identity. Compressed signed-monomial arrays use
+the existing resident/pending byte account. Oversize products stream without
+retention. WorkPlan holds only small inventory, cost features and immutable row
+admissions, never an uncharged coefficient-tensor dictionary. Apply consumes
+that exact row admission once; repeated coefficients do not reuse admissions
+across gain, phase, duration or envelope changes. The coherent .03 and bath .01
+limits remain calibrated indicators, not rigorous certificates.
 
 Dispatch also owns choices within a family. Kernels own numerical construction,
 application and certificates that require their intermediate data.
@@ -520,7 +543,7 @@ class's methods.
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py), with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. Separate from two-tone Floquet frames. |
 | Two-tone retained-sideband certificates and equations | [kernels/_floquet_sidebands.py](kernels/_floquet_sidebands.py), used by [floquet](kernels/floquet.py) guard admission and apply. |
-| Common-carrier frame, SW2 beat channels, omitted-channel indicators and dressed CF4/secular propagation | [kernels/common_frame.py](kernels/common_frame.py), a model-only numerical owner with row-local admission. It does not register a production dispatch route or retain a cache. |
+| Common-carrier frame, SW2 beat channels, omitted-channel indicators and dressed CF4/secular propagation | [kernels/common_frame.py](kernels/common_frame.py), the model-only numerical owner with row-local admission. [kernels/common_frame_kernel.py](kernels/common_frame_kernel.py) hands charged products to the engine; [_common_frame_dispatch.py](_common_frame_dispatch.py) owns cold variant pricing. |
 
 ## Accuracy, failures and lifecycle
 
