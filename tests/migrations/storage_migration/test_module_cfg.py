@@ -452,7 +452,7 @@ def test_resume_rejects_changed_library_hash_without_overwriting(
     destination = _entry(request).module_library("context").source_path
     backup = (
         request.result_root.parent.parent
-        / f"{request.name}-backup/result/context/module_cfg.yaml"
+        / "repo-backup/result/chip/qubit/context/module_cfg.yaml"
     )
     backup_before = backup.read_bytes()
     path = source if changed == "source" else destination
