@@ -1,6 +1,7 @@
 """Connected fake driver that records checkpoint ordering and I/O failures."""
 
 from collections.abc import Callable
+from typing import Self
 
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 
@@ -9,6 +10,10 @@ class SnapshotDevice(FakeDevice):
     """Real single-value driver with observable reads and experiment writes."""
 
     info_model = FakeDeviceInfo
+
+    def __new__(cls) -> Self:
+        """Keep this test driver's no-argument constructor anonymous."""
+        return super().__new__(cls)
 
     def __init__(self) -> None:
         super().__init__(fast_mode=True)
