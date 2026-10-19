@@ -39,7 +39,7 @@ from .models import (
     RunAssignment,
 )
 from .paths import contained_path, source_removed
-from .preservation import preserve_result_files
+from .preservation import preserve_database_files, preserve_result_files
 from .state import MigrationSession, clear_pending, record_pending
 
 
@@ -187,7 +187,7 @@ def _convert_run(
             session,
             source,
             "run evidence",
-            "cfg.cfg_type: missing explicit historical identity; Labber source retained",
+            "cfg.cfg_type: missing explicit historical identity; native conversion pending",
         )
         return
     native = session.state(source, "native")
@@ -294,13 +294,18 @@ def _convert_run(
     )
     session.completed(native)
     relative = source.relative_to(session.manifest.report.source.database_path)
-    moved = session.publish(
-        source,
-        contained_path(
-            destination.database_path / "Labber" / relative, destination.database_path
-        ),
-        operation="move_labber",
+    labber_path = contained_path(
+        destination.database_path / "Labber" / relative, destination.database_path
     )
+    # Reuse only this manifest's verified raw copy after native validation, not
+    # an arbitrary existing destination. Keep the earlier preservation history.
+    if (
+        session.state(source, "copy") is not None
+        and session.state(source, "move_labber") is None
+    ):
+        copied = session.publish(source, labber_path, operation="copy")
+        session.update_file(replace(copied, operation="move_labber"))
+    moved = session.publish(source, labber_path, operation="move_labber")
     session.completed(moved)
 
 
@@ -312,7 +317,7 @@ def convert_data(
     validate_cfg: Callable[[str, CfgSnapshot], None],
     validate_native: Callable[[Path, str, str], None],
 ) -> None:
-    """Convert evidence-backed Labber sources, then copy/verify/remove only validated originals.
+    """Convert evidence-backed Labber sources and preserve all original Labber bytes.
 
     session owns fixed run identities and publication recovery. entry resolves
     historical ledger references; mapping supplies disk schemas and optional
@@ -326,6 +331,10 @@ def convert_data(
     are fixed in the manifest before publication. Other missing/conflicting
     metadata is pending; execution, callback,
     identity/hash and I/O failures propagate and retain owned recovery state.
+    All originals share Labber/<source-relative-path>. Failed conversion keeps
+    its evidence pending and publishes an exact preservation copy, not native.
+    Other unknown Database files keep entry-relative paths. Only validated native
+    permits individual source removal; full cleanup still requires both parts.
     dry_run invokes only the pure cfg check and never writes or validates native."""
     preserve_result_files(session)
     source_root = session.manifest.report.source.database_path
@@ -353,9 +362,10 @@ def convert_data(
                 session,
                 source,
                 "run evidence",
-                "Missing explicit historical experiment/cfg/snapshot evidence; Labber source retained",
+                "Missing explicit historical experiment/cfg/snapshot evidence; native conversion pending",
             )
             continue
         _convert_run(session, entry, mapping, legacy, validate_cfg, validate_native)
+    preserve_database_files(session)
     session.manifest = replace(session.manifest, data_complete=True)
     session.checkpoint()

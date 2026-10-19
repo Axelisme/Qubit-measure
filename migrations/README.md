@@ -37,7 +37,9 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
 
 樣本單位獨立由 `--sample-source-unit` 宣告。缺 legacy CSV 宣告或資料非法時，報告按列定位 pending。合法列轉進唯一 qubit 的 `samples/<component>.jsonl`。V2 CSV 自帶 `dev_value/dev_unit`，不需要 legacy 宣告。Resume 沿用首次提供的四個選項，不能中途改單位或欄位。兩種假設都不能修補非法或衝突的明示單位。API 與 CLI 在任何寫入前拒絕不合法的假設輸入。
 
-根 `module_cfg.yaml` 寫成 setup library。Exps 外的 `image/` 保留完整來源相對路徑，發布到 `result/<entry>/figures/`。Autofluxdep 圖片與其他舊 workflow 檔仍放 preserved。`params.json` 不在新 entry 留副本，原文由完整備份保存。
+根 `module_cfg.yaml` 寫成 setup library。Exps 外的 `image/` 保留完整來源相對路徑，發布到 `result/<entry>/figures/`。其他未支援 result 檔與 `autofluxdep_runs/**` 保留在新 result entry 的相對位置，exps 附屬未知檔放到對應 point。Database 未支援檔保留 entry 相對位置，所有 Labber 原檔則統一放 `Database/<entry>/Labber/<來源相對路徑>`，不依 native 轉換成功與否分流。成功者另產 native，失敗者仍列 pending。CSV 有無法轉換的列時，合法列照常寫入樣本表，另將完整原文保存在 `result/<entry>/samples.csv`。`params.json` 不在新 entry 留副本，原文由完整備份保存。
+
+原樣保全只標 `preserved`，不代表已轉成 native 或可由分析工具解析。首次執行在備份及 entry 寫入前預檢保全目的。與新格式保留位置、其他來源的目的或既有檔案有同名及祖先／後代衝突時，工具列出來源與目的並停止，不覆寫、不改名。Resume 只重用 manifest 擁有且 hash 一致的發布，沿用 prepared publication 的既有復原協定。Data-only 不預建缺少的 point；附屬檔保持 located pending，parameters 建 point 後再 resume data。未完成保全發布不得清理來源。
 
 ## Sample CSV → JSONL
 

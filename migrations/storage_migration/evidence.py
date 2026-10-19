@@ -212,7 +212,8 @@ def validate_run_evidence(
 
     Reject typed/raw disagreement and changed planned entries, including unknown
     fields, with MigrationInputError. A durable run assignment already fixes the
-    evidence, even before its first file publication is planned. Unplanned entries may supplement the returned
+    evidence, even before its first native publication is planned. Raw preservation
+    fixes source bytes, not external run evidence. Unplanned entries may supplement the returned
     document. Return stored evidence when incoming evidence is omitted, or None
     when neither exists. Do not access legacy sources, change the session or write
     checkpoints. Cleanup-only resume uses this validation without adopting new
@@ -255,7 +256,8 @@ def validate_run_evidence(
             )
             source = session.manifest.report.source.database_path / entry.source
             planned = any(
-                item.source == source for item in session.manifest.files
+                item.source == source and item.operation in ("native", "move_labber")
+                for item in session.manifest.files
             ) or any(item.source == source for item in session.manifest.runs)
             if old_index is not None:
                 if planned and not json_values_equal(

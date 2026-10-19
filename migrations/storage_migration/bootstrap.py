@@ -34,6 +34,7 @@ from .models import (
     ModuleRule,
 )
 from .paths import contained_path, validate_segment
+from .preservation import preflight_preservation
 from .recovery import validate_owned_state
 from .state import MigrationSession, read_manifest, report_json, write_json
 
@@ -199,6 +200,10 @@ def _resume_session(
         and request.report_path.resolve() != manifest.report_path
     ):
         raise MigrationInputError(f"{path}: report_path is fixed on resume")
+    if manifest.cleanup_phase == "pending":
+        preflight_preservation(
+            source, destination, manifest.report.declarations, manifest=manifest
+        )
     entry = ResultEntry.open(
         request.name,
         result_root=expected.results_root,
@@ -271,6 +276,7 @@ def _new_session(
             )
         if not report_path.parent.is_dir():
             raise MigrationInputError(f"{report_path}: report parent must exist")
+    preflight_preservation(source, destination, _declarations(request))
     backup = create_backup(backup_path, source, dry_run=request.dry_run)
     entry = None
     entry_id = uuid4()

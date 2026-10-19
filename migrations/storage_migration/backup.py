@@ -293,9 +293,7 @@ def _ready(session: MigrationSession) -> bool:
         manifest.parameters_complete
         and manifest.data_complete
         and not manifest.report.failures
-        and not any(
-            item.location == "point figures" for item in manifest.report.pending
-        )
+        and not any(item.location == "point files" for item in manifest.report.pending)
         and all(
             (
                 state.phase == "source_removed"
@@ -332,7 +330,7 @@ def _retained_pending(
 def finish_cleanup(session: MigrationSession) -> None:
     """Remove only fully backed-up sources after both migration parts complete.
 
-    Permanent pending is retained at backup paths. Deferred point figures and
+    Permanent pending is retained at backup paths. Deferred point files and
     incomplete publications block cleanup. Verify all remaining source bytes
     before authorizing deletion, checkpoint cleaning, then unlink verified files
     and remove empty directories. Resume after interruption safely repeats this

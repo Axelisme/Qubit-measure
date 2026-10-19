@@ -38,7 +38,11 @@ def migrate_storage(
     assumption. Point unit overrides clear unreplaced inherited group values and
     metadata in one context edit. Owner-incompatible groups stay pending without
     conversion. CSV samples use independent declarations and the sample_csv owner,
-    then publish prepared JSONL through the manifest; originals remain in backup.
+    then publish prepared JSONL through the manifest; partial CSVs also retain
+    exact originals at entry/samples.csv. Unsupported result/Database files keep
+    entry-relative paths; exps attachments keep point-relative paths. Every Labber
+    original uses Database/<entry>/Labber/<source-relative-path>, including pending
+    conversions. Raw copies are preservation, never native conversion.
     validate_cfg receives the known historical source tag and CfgSnapshot.
     It must check cfg_type, schema_version and values with the concrete cfg owner,
     return None without mutation, and raise ValueError for unconvertible cfg.
@@ -55,8 +59,10 @@ def migrate_storage(
     First execution verifies a complete external SHA256 backup before entry writes.
     Backup location comes from request.repo_root/backup_parent. Shared old/new
     result roots are allowed for independent entries; source overlaps and existing
-    destinations are refused. Once both parts and all publications complete with
-    no deferred point figures, verify backup/current sources again, remove only
+    destinations are refused. Raw-copy routes are preflighted before backup and
+    entry writes, rejecting reserved native paths and overlapping/occupied targets
+    with source/destination diagnostics. Once both parts and all publications complete with
+    no deferred point files, verify backup/current sources again, remove only
     the two old source trees, and locate permanent pending in the backup.
     Cleanup interruption resumes without rerunning conversions.
 

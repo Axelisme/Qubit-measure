@@ -22,7 +22,8 @@ def convert_samples(
     Source CSV is hashed against the complete backup. Missing/ambiguous qubit
     identity stays located pending. The CSV owner alone interprets columns,
     units and rows using independent operator declarations. Invalid rows stay
-    pending; valid rows publish once to entry.samples(component), through a
+    pending at the owner's source path/row/reason, with a complete byte-identical
+    copy at entry/samples.csv; valid rows publish once to entry.samples(component), through a
     prepared JSONL temp and the same hash/recovery protocol as other artifacts.
     Dry-run only plans, without binding an entry or creating any output.
     A completed publication is hash-checked on resume, never appended again.
@@ -34,6 +35,23 @@ def convert_samples(
         return
     source = contained_path(source, root)
     session.baseline(source)
+    declarations = session.manifest.report.declarations
+    plan = plan_sample_csv(
+        [source],
+        dev_value_column=declarations.sample_value_column,
+        source_unit=declarations.sample_source_unit,
+    )
+    for pending in plan.pending:
+        record_pending(
+            session, pending.source_path, f"row {pending.row_number}", pending.reason
+        )
+    if plan.pending:
+        preserved = session.publish(
+            source,
+            session.manifest.report.destination.result_path / "samples.csv",
+            operation="copy",
+        )
+        session.completed(preserved)
     names = [
         name
         for name, seed in mapping.components.items()
@@ -44,14 +62,6 @@ def convert_samples(
             session, source, "samples.csv", "No unique migrated qubit component"
         )
         return
-    declarations = session.manifest.report.declarations
-    plan = plan_sample_csv(
-        [source],
-        dev_value_column=declarations.sample_value_column,
-        source_unit=declarations.sample_source_unit,
-    )
-    for pending in plan.pending:
-        record_pending(session, source, f"row {pending.row_number}", pending.reason)
     target = (
         entry.samples(names[0]).path
         if entry is not None and not session.dry_run
