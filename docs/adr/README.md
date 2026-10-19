@@ -50,7 +50,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Persistence
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；SaveLayout 計算位置，Labber 檔名含實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。Native 2.1 保存未知歷史時間與完成狀態，保真寫回不降 minor。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；SaveLayout 計算位置，Labber 檔名含實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
 
 ## Experiment runtime／Workflows
 
