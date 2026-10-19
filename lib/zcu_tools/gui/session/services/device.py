@@ -209,7 +209,9 @@ class DeviceService:
         # of the same device. ProgressService owns per-operation setup progress.
         self._inflight: dict[str, _InflightOp] = {}
 
-    def register_device(self, name: str, driver: BaseDevice[Any]) -> None:
+    def register_device[Info: BaseDeviceInfo](
+        self, name: str, driver: BaseDevice[Info]
+    ) -> None:
         """Adopt an already built driver and publish its current info on owner thread.
 
         ``name`` is a nonblank session name, preserved verbatim. ``driver`` must

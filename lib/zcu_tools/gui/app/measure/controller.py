@@ -70,7 +70,7 @@ from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.device.base import BaseDevice
+    from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
     from zcu_tools.experiment.artifacts import SaveReport
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.alias_presets import AliasPresets
@@ -816,7 +816,9 @@ class Controller(SessionControllerMixin):
         if not self._background_svc.quiesce(timeout_ms):
             raise TimeoutError("Controller background work did not drain in time")
 
-    def register_device(self, name: str, driver: BaseDevice[Any]) -> None:
+    def register_device[Info: BaseDeviceInfo](
+        self, name: str, driver: BaseDevice[Info]
+    ) -> None:
         """Adopt a constructed driver through DeviceService on the owner thread.
 
         ``name`` is a nonblank session name and ``driver`` supplies its own info.

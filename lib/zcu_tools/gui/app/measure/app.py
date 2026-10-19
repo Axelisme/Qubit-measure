@@ -85,11 +85,11 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             install_global_exception_hook,
         )
 
+        if clean and startup_script is not None:
+            raise ValueError("--clean and --script are mutually exclusive")
         validate_alias_presets(alias_presets)
         install_global_exception_hook(show_error_dialog)
         self._registry, self._catalog_loader = registry_factory()
-        if clean and startup_script is not None:
-            raise ValueError("--clean and --script are mutually exclusive")
         self._clean = clean
         self._startup_script = startup_script
         self._project_root = project_root
