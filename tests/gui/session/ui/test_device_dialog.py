@@ -23,43 +23,41 @@ from qtpy.QtWidgets import (
     QStackedWidget,
     QWidget,
 )
+from zcu_tools.device import FakeDevice
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
+from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceEntry,
+    DeviceService,
     DeviceSnapshot,
     DeviceStatus,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.widgets import error_colour
 
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
+from tests.gui.session.services._device_waits import DeviceWorkers
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
 def test_failed_address_shows_reason_and_allows_corrected_retry(qapp, tmp_path: Path):
-    from zcu_tools.device import FakeDevice
-    from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
-    from zcu_tools.gui.session.device_control import DeviceControlFacet
-    from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
-    from zcu_tools.gui.session.operation_handles import OperationHandles
-    from zcu_tools.gui.session.operation_runner import OperationRunner
-    from zcu_tools.gui.session.services.device import DeviceService
-    from zcu_tools.gui.session.services.progress import ProgressService
-    from zcu_tools.gui.session.state import SessionState
-    from zcu_tools.gui.session.types import SessionEnv
-
-    from tests.gui.session.services._device_waits import DeviceWorkers
-
     workers = DeviceWorkers()
     bus = EventBus()
     gate = RunBlocksHardwareGate(run_kind="run", bus=bus)
