@@ -5,11 +5,13 @@ from __future__ import annotations
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     CallInst,
-    DmemWriteInst,
     JumpInst,
     NopInst,
     RegWriteInst,
     TestInst,
+)
+from zcu_tools.program.v2.ir.io_instructions import (
+    DmemWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode

@@ -5,10 +5,12 @@ from collections.abc import Iterator
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     NopInst,
-    PortWriteInst,
     RegWriteInst,
     TimeInst,
     WaitInst,
+)
+from zcu_tools.program.v2.ir.io_instructions import (
+    PortWriteInst,
 )
 from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,

@@ -20,11 +20,13 @@ from zcu_tools.program.v2.ir.analysis import (
     estimate_flat_size,
 )
 from zcu_tools.program.v2.ir.instructions import (
-    DmemReadInst,
     JumpInst,
     NopInst,
-    PortWriteInst,
     TimeInst,
+)
+from zcu_tools.program.v2.ir.io_instructions import (
+    DmemReadInst,
+    PortWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.node import (

@@ -9,13 +9,15 @@ from zcu_tools.program.v2.ir.instructions import (
     ClearInst,
     ComInst,
     CustomPeripheralInst,
+    FlagInst,
+    NetInst,
+    RegWriteInst,
+)
+from zcu_tools.program.v2.ir.io_instructions import (
     DmemReadInst,
     DmemWriteInst,
     DportReadInst,
-    FlagInst,
-    NetInst,
     PortWriteInst,
-    RegWriteInst,
     TrigInst,
     WmemWriteInst,
 )

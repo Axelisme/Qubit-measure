@@ -68,13 +68,15 @@ import dataclasses
 from ...hw_semantics import TIMED_BASE_REG
 from ...instructions import (
     BaseInst,
+    RegWriteInst,
+    TimeInst,
+    WaitInst,
+)
+from ...io_instructions import (
     DmemReadInst,
     DmemWriteInst,
     DportWriteInst,
     PortWriteInst,
-    RegWriteInst,
-    TimeInst,
-    WaitInst,
     WmemWriteInst,
 )
 from ...node import BasicBlockNode

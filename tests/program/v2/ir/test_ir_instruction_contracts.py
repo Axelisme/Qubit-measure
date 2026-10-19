@@ -8,15 +8,17 @@ import pytest
 from zcu_tools.program.v2.ir.instructions import (
     BaseInst,
     DivInst,
-    DportWriteInst,
     FlagInst,
     JumpInst,
     LabelInst,
-    PortWriteInst,
     RegWriteInst,
     TestInst,
     TimeInst,
     WaitInst,
+)
+from zcu_tools.program.v2.ir.io_instructions import (
+    DportWriteInst,
+    PortWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import (

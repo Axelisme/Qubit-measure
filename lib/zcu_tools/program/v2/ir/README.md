@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-19，instruction owners
 
 本模塊負責把 QICK ASM V2 程式表示成可分析、可優化、可再降階回 assembler 輸入的 IR。
 
@@ -19,7 +19,9 @@
    - 提供 loop / branch 共用的 dispatch-table lowering 原語。
 
 [operands.py](operands.py) 擁有 operand 型別與 parse factories。
-[instructions.py](instructions.py) 擁有指令與 QICK dictionary 的互轉。
+[instructions.py](instructions.py) 擁有指令基底、compute／control／time 指令與中央 QICK dispatcher。
+[io_instructions.py](io_instructions.py) 擁有完整的 memory／port 指令及其 QICK dictionary 互轉。
+[instruction_fields.py](instruction_fields.py) 擁有兩組指令共用的有限值契約、QICK 欄位解析與 label reference remap。
 [node.py](node.py) 擁有 IR tree 節點、`clone_renamed` 與唯讀共用 interface
 `collect_subtree_names`。Clone、parser 與 passes 共用此 interface 收集子樹定義的 label names
 及 structure names，名稱配置仍由 [labels.py](labels.py) 擁有。

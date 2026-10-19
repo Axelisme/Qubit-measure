@@ -9,17 +9,19 @@ from ..instructions import (
     ComInst,
     CustomPeripheralInst,
     DivInst,
-    DmemReadInst,
-    DmemWriteInst,
-    DportReadInst,
     FlagInst,
     NetInst,
     NopInst,
-    PortWriteInst,
     RegWriteInst,
     TimeInst,
-    TrigInst,
     WaitInst,
+)
+from ..io_instructions import (
+    DmemReadInst,
+    DmemWriteInst,
+    DportReadInst,
+    PortWriteInst,
+    TrigInst,
     WmemWriteInst,
 )
 from ..node import BasicBlockNode
