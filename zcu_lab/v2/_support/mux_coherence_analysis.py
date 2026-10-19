@@ -1,7 +1,6 @@
-"""Per-tone coherence fitting with the single-qubit Ramsey/Echo policies."""
+"""Prepare IQ traces and fit decay/fringe curves with explicit numeric settings."""
 
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,22 +10,18 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_decay_fringe,
 )
-from zcu_tools.plotting.plots import Plots
 from zcu_tools.utils.process import rotate2real
-
-from .mux import MuxFitFailure
-from .mux_coherence import MuxCoherenceResult, validate_coherence_result
 
 
 @dataclass(frozen=True)
 class MuxCoherenceFit:
-    """Original tone index and selected coherence fit, independent of live cfg.
+    """Original tone index and fitted coherence time and fringe rate.
 
-    t2/t2_err are coherence time and one-sigma error in us (Ramsey T2* or Echo
-    T2E). detune/detune_err are fitted fringe rate/error in MHz, zero for decay.
-    quality is computed from the chosen model's observations/parameters/covariance.
-    fit_fringe records whether frequency correction has a fitted fringe source;
-    actual/source frequencies remain in the Result, not inferred from this fit.
+    index is the original full-readout tone position. t2/t2_err are coherence
+    time and one-sigma error in us. detune/detune_err are fitted fringe rate/error
+    in MHz, zero for decay. quality describes the fitted observations, parameters
+    and covariance. fit_fringe is True for a damped cosine, False for a decay.
+    Actual detune and source frequency remain in the measurement Result.
     """
 
     index: int
@@ -38,107 +33,105 @@ class MuxCoherenceFit:
     fit_fringe: bool
 
 
-def _fixed_phase(
+@dataclass(frozen=True)
+class MuxCoherenceTrace:
+    """Finite IQ observations for one original tone after the requested omission.
+
+    index is the original full-readout position. times is the requested delay
+    in us, shape (N,). signal is matching complex mean IQ, shape (N,). Both arrays
+    contain only acquired points; N may be zero for an incomplete measurement.
+    """
+
+    index: int
+    times: NDArray[np.float64]
+    signal: NDArray[np.complex128]
+
+
+def prepare_coherence_trace(
+    index: int,
     times: NDArray[np.float64],
+    signal: NDArray[np.complex128],
+    *,
+    skip: int,
+) -> MuxCoherenceTrace:
+    """Omit skip leading positions, then retain finite IQ with its requested delay.
+
+    index is the original tone position. times (us) and signal (mean complex IQ)
+    are matching one-dimensional arrays from a validated MuxCoherenceResult.
+    skip is a nonnegative point count. No rotation, fitting or mutation occurs.
+    """
+    # Omit by position before filtering so missing IQ cannot shift the omission.
+    signal = signal[skip:]
+    finite = np.isfinite(signal)
+    return MuxCoherenceTrace(index, times[skip:][finite], signal[finite])
+
+
+def project_coherence_trace(
+    trace: MuxCoherenceTrace, *, minimum_points: int
+) -> NDArray[np.float64]:
+    """Rotate acquired IQ to its real principal axis after checking point count.
+
+    minimum_points is the fit's required observation count. Return one real
+    value per trace time. Raise ValueError for too few acquired observations;
+    rotation errors propagate so the caller can report a per-tone fit failure.
+    """
+    if len(trace.times) < minimum_points:
+        raise ValueError("Insufficient acquired points for coherence fit")
+    return rotate2real(trace.signal).real
+
+
+def fit_coherence_trace(
+    trace: MuxCoherenceTrace,
     real: NDArray[np.float64],
     *,
-    mode: Literal["ramsey", "echo"],
-    fit_phase: bool,
-) -> list[float | None] | None:
-    if fit_phase:
-        return None
-    phase = 0.0
-    if mode == "ramsey":
-        zero = real[np.argmin(np.abs(times))]
-        phase = 0.0 if zero > 0.5 * (np.max(real) + np.min(real)) else 180.0
-    return [None, None, None, phase, None]
-
-
-def analyze_coherence(
-    result: MuxCoherenceResult,
-    *,
-    mode: Literal["ramsey", "echo"],
     fit_fringe: bool,
-    fit_phase: bool,
-    plots: Plots,
-) -> tuple[MuxCoherenceFit | MuxFitFailure, ...]:
-    """Fit explicit source on its requested-delay axis, isolating numeric failures.
+    phase: float | None,
+) -> tuple[MuxCoherenceFit, NDArray[np.float64]]:
+    """Fit projected IQ to a damped cosine or exponential and return its curve.
 
-    mode chooses Ramsey's data-driven fixed 0/180-degree phase or Echo's fixed
-    zero phase and first-point omission. fit_phase frees fringe phase; decay
-    ignores it. fit_fringe selects damped cosine versus exponential decay.
-    Filter missing IQ after Echo's omission, never shift its omission to a later
-    finite point. Require six fringe or four decay observations. Invalid source
-    contracts raise before plotting; numeric failures retain index/reason rather
-    than fabricated zero calibration. Publish fit_i for each original index.
-    plots belongs to the caller, which finishes/releases it. No cfg, Form, files,
-    hardware or writeback access occurs.
+    trace supplies requested us delays and original tone index; real contains
+    the matching projected IQ. fit_fringe selects the damped cosine. phase fixes
+    its phase in degrees; None fits phase freely. Decay ignores phase. Return
+    T2/error in us, fringe rate/error in MHz and fit quality, plus the predicted
+    real IQ at each trace time. Numeric fit errors propagate; nonfinite estimates
+    raise ValueError. Inputs are not changed and no plotting occurs.
     """
-    validate_coherence_result(result)
-    outcomes: list[MuxCoherenceFit | MuxFitFailure] = []
-    skip = 1 if mode == "echo" else 0
-    for row, raw_index in enumerate(result.tone_indices):
-        index = int(raw_index)
-        signal = result.signals[row, skip:]
-        finite = np.isfinite(signal)
-        times, signal = result.times[skip:][finite], signal[finite]
-        fig, ax = plots.subplots(f"fit_{index}", figsize=(8, 5))
-        ax.set(xlabel="Requested delay (us)", ylabel="Signal real (a.u.)")
-        fig.suptitle(f"{mode} tone {index}")
-        try:
-            if len(times) < (6 if fit_fringe else 4):
-                raise ValueError("Insufficient acquired points for coherence fit")
-            real = rotate2real(signal).real
-            if fit_fringe:
-                t2, error, detune, detune_error, fitted, (params, covariance) = (
-                    fit_decay_fringe(
-                        times,
-                        real,
-                        fixedparams=_fixed_phase(
-                            times, real, mode=mode, fit_phase=fit_phase
-                        ),
-                    )
-                )
-            else:
-                t2, error, fitted, (params, covariance) = fit_decay(times, real)
-                detune, detune_error = 0.0, 0.0
-            if not np.all(np.isfinite((t2, error, detune, detune_error))):
-                raise ValueError("Coherence fit returned nonfinite estimates")
-            names = (
-                ("y0", "yscale", "freq", "phase", "decay_time")
-                if fit_fringe
-                else ("y0", "yscale", "decay_time")
-            )
-            quality = compute_fit_quality(
+    # Fit with the caller's numeric phase choice, never an experiment name.
+    if fit_fringe:
+        t2, error, detune, detune_error, fitted, (params, covariance) = (
+            fit_decay_fringe(
+                trace.times,
                 real,
-                fitted,
-                {name: float(value) for name, value in zip(names, params, strict=True)},
-                covariance,
+                fixedparams=None if phase is None else [None, None, None, phase, None],
             )
-            outcome = MuxCoherenceFit(
-                index,
-                float(t2),
-                float(error),
-                float(detune),
-                float(detune_error),
-                quality,
-                fit_fringe,
-            )
-        except (
-            ValueError,
-            RuntimeError,
-            ArithmeticError,
-            np.linalg.LinAlgError,
-        ) as exc:
-            ax.plot(times, np.abs(signal), "o", label="acquired magnitude")
-            ax.text(0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True)
-            outcomes.append(MuxFitFailure(index, str(exc)))
-        else:
-            ax.plot(times, real, "o", label="measured")
-            ax.plot(times, fitted, label="fit")
-            ax.set_title(f"T2 = {t2:.4g} ± {error:.2g} us; fringe = {detune:.4g} MHz")
-            outcomes.append(outcome)
-        ax.legend()
-        ax.grid(True)
-        fig.tight_layout()
-    return tuple(outcomes)
+        )
+    else:
+        t2, error, fitted, (params, covariance) = fit_decay(trace.times, real)
+        detune, detune_error = 0.0, 0.0
+    if not np.all(np.isfinite((t2, error, detune, detune_error))):
+        raise ValueError("Coherence fit returned nonfinite estimates")
+
+    # Describe the chosen fit without repeating optimization or changing its data.
+    names = (
+        ("y0", "yscale", "freq", "phase", "decay_time")
+        if fit_fringe
+        else ("y0", "yscale", "decay_time")
+    )
+    quality = compute_fit_quality(
+        real,
+        fitted,
+        {name: float(value) for name, value in zip(names, params, strict=True)},
+        covariance,
+    )
+    return (
+        MuxCoherenceFit(
+            trace.index,
+            float(t2),
+            float(error),
+            float(detune),
+            float(detune_error),
+            quality,
+            fit_fringe,
+        ),
+        fitted,
+    )

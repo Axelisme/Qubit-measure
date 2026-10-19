@@ -15,21 +15,24 @@ def draw_mux_magnitudes(
     labels: Sequence[str],
     coordinate_label: str,
 ) -> None:
-    """Draw one live measurement figure, retaining each source line's x grid.
+    """Plot mean IQ magnitude for each participating tone on its own scan grid.
 
     coordinates and signals are matching (K,P) arrays in participant/data-row
     order. labels names each line with its original index and source cfg name;
     GE callers additionally identify the preparation. NaN partial IQ stays NaN.
-    Copy coordinates, magnitudes and labels before dispatch. All artist creation,
-    legend and autoscaling run synchronously inside Plots.draw's host owner
-    callback. No active artists escape it. Existing measurement_i figures remain
-    untouched. Invalid shapes raise ValueError; host/draw failures propagate.
+    coordinate_label names the horizontal axis, including its units.
+    Existing measurement_i figures remain untouched. Invalid shapes raise
+    ValueError; drawing failures propagate. Copy the arrays before drawing on
+    the plots owner's thread; no active artists leave the callback.
     """
+    # Copy this update so the figure uses one consistent acquisition snapshot.
     xs = np.array(coordinates, dtype=np.float64, copy=True)
     ys = np.abs(np.array(signals, dtype=np.complex128, copy=True))
     captions = tuple(labels)
     if xs.ndim != 2 or xs.shape != ys.shape or len(captions) != xs.shape[0]:
         raise ValueError("Mux live coordinates/signals must be (K,P) with K labels")
+
+    # Keep artist creation and autoscaling on the plot owner's thread.
     if "measurement" not in plots:
         plots.subplots("measurement")
 

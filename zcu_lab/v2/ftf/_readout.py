@@ -19,7 +19,8 @@ class JointRoles(ConfigBase):
     f1/f2 name distinct fluxonium components, coupler names their transmon,
     and mux names the MuxGroup. f1_tone/f2_tone are their original zero-based
     positions in 0..tone_count-1. All fields remain visible and readonly in
-    Forms, derived from captured MuxGroup.qubits, never labels or ADCs. Core callers supply that same resolved mapping and tone_count, the complete
+    Forms, derived from captured MuxGroup.qubits, never labels or ADCs.
+    Core callers supply that same resolved mapping and tone_count, the complete
     captured group size in 1..8. Names persist with the run; no
     live alias/library lookup occurs during acquisition or offline analysis.
     """

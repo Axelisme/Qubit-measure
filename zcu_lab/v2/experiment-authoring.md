@@ -1,12 +1,100 @@
 # v2 experiment authoring
 
-**Last updated:** 2026-10-15，實驗 cfg 與 GUI 持久 Spec 邊界
+**Last updated:** 2026-10-19，分析政策也由各實驗 core 明示
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。
 
 GUI adapter 的 module writeback 直接提出持久 ModuleSpec，由共用 Form 編輯，再交 Library owner 保存。Core 仍接收執行用 typed cfg，不依賴 GUI 表單或 draft。作者入口見 [measure authoring](measure-authoring.md)，跨宿主契約見 ADR-0065、ADR-0008。
 
 一般實驗以 [runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 的 `SignalBuffer`、`Schedule` 與 `ProgramBuilder` 編排 host loop 與 program acquire。Runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
+
+## 讓使用者只看一個檔案就能理解實驗
+
+以下四條規則適用於 `zcu_lab` 的實驗與 recipes。序列與流程由各實驗自己寫出，
+不要為了減少相似程式碼，把使用者要讀的步驟藏到共用 helper。
+
+### 1. 在 core 直接寫出 pulse 序列與分析政策
+
+`core.py` 的 `run()` 直接列出 `Pulse`、`Delay`、`Join` 與 readout 的先後關係。
+共用 helper 只做驗證、資料整形、平均等機械工作，不用 mode 或旗標切換不同實驗。
+兩個實驗可以共用平均工具，但各自在 `run()` 寫出自己的序列。
+
+例如 [mux Amp Rabi](mux/amp_rabi/core.py) 每個掃描點先 reset，
+所有參與 drive 同時起跑，最後共同 readout。以下是序列片段，省略準備與取資料：
+
+```python
+builder = (
+    step.prog_builder(context.soc, context.soccfg)
+    .add_reset("reset", modules.reset)
+    .add(
+        Join(
+            *[
+                Pulse(f"drive_{index}", pulse)
+                for index, pulse in zip(scan.indices, pulses, strict=True)
+            ]
+        ),
+        MuxReadout("readout", readout),
+    )
+)
+```
+
+短 branch 等最長 branch 結束才 readout，不把短 pulse 的末端對齊到最長 pulse。
+Ramsey 與 Echo 也各自列出 pulse 與 delay，不能交給 `acquire(mode="ramsey")` 選序列。
+
+同一條規則也適用 `analyze()`。Echo 在自己的 core 明示跳過第 1 點，Ramsey 在自己的
+core 依資料選固定 0°／180° 相位。共用 fitting helper 只接收明確的 skip、phase 等
+擬合參數，不用實驗名稱或 mode 選擇不同實驗的政策。phase 只傳數值或代表自由擬合的
+`None`，不傳選政策的 callback。搬移政策時，保持數值結果與失敗語義不變。
+
+### 2. 在 recipe 函式本體寫出操作流程
+
+Recipe 本體依序開 tab、選 library／設欄位、Run、Analyze，再詢問 writeback。
+Helper 只能完成單一步驟，例如選一次 library，不能包住整個量測流程。
+
+例如 [mux Amp Rabi recipe](../recipes/mux_amp_rabi.py) 應直接讀得到
+`session.open_tab(...)`、`tab.use_library(...)`、`tab.set_fields(...)`、
+`yield from tab.run_step()`、`yield from run.analyze_step("primary")` 與
+`yield from ask(run.propose_writeback())`。接受答案後才 `tab.accept()`。
+完整的短例與保存步驟見 [recipe 撰寫慣例](../recipes/mux-guide.md#authoring-readable-experiments-and-recipes)。
+
+### 3. Docstring 說明量測、序列與結果
+
+公開 docstring 先說量什麼、序列怎麼做、回傳結果代表什麼。
+單位、資料形狀及必要的失敗條件仍要交代。Lifecycle、rollback 與 caller 責任
+只在必要時用一句帶過，詳細契約連到 framework 文件，不在每個實驗重貼。
+
+例如 [mux Ramsey](mux/t2ramsey/core.py) 的 `run()` 可用這樣的量測說明開頭：
+
+```python
+"""Measure Ramsey fringes for the selected qubits with shared mux readout.
+
+Apply simultaneous x90 pulses, wait the requested delay, then apply the
+final x90 pulses and read out together. Return requested delays in us
+and mean complex IQ per participating tone; the fringe decay measures T2.
+"""
+```
+
+這裡的 IQ 是量測結果，T2 由後續分析取得，不把擬合值說成 `run()` 的回傳值。
+
+### 4. 用註解與空行分開階段
+
+在準備、序列、取資料與平均等階段之間留空行。註解說明這段做什麼、為什麼，
+不逐行重述賦值或函式名稱。程式註解用英文。
+
+例如 [mux Amp Rabi](mux/amp_rabi/core.py) 的階段可以標成：
+
+```python
+# 1. Prepare selected tones without changing their original readout indices.
+...
+
+# 2. Start drives together; read out after the longest branch finishes.
+...
+
+# 3. Collect mean IQ and restore tone-major result order.
+...
+```
+
+這是分段示意，不是可執行的範本。Recipe 同樣按設定、量測、分析與 writeback 問答分段。
 
 ## 使用者實驗的測試
 
@@ -63,14 +151,15 @@ NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，�
 產生各 drive 自己的量化座標 `(K,P)` 與 nominal `point_pulses (P,K)`。Inactive tone 不限制掃描點數。
 Freq 的座標是 MHz，Amp Rabi 是 normalized gain。不同範圍按 index zip，不展開 Cartesian product。
 
-兩個 run 共用 `_support.mux_acquisition.acquire_mux_scan`。後續 pulse 掃描可傳入已驗證的
-`MuxPulseScan`、完整 `MuxDriveModuleCfg` 與共同 `ProgramV2Cfg`。Helper 逐點 compile 一次，
-組成 reset、`Join(Pulse(...), ...)`、active `MuxReadout`。所有 branch 同時開始，短 branch
-完成後等待；readout 接在最長 branch 之後。沒有末端 padding，也沒有第二次 compile 或自訂 Module。
-既有 Pulse 與 Join 擁有 native timing，helper 不改 pulse 的 pre/post delay。
+兩個 run 各自在函式本體逐點建立 program，直接組成 reset、
+`Join(Pulse(...), ...)` 與 active `MuxReadout`，不經共用 acquisition helper 選擇或隱藏序列。
+可共用的 `MuxPulseScan` 準備工作只產生已驗證的座標與 pulses，不 acquire。
+每點 compile 一次。所有 branch 同時開始，短 branch 完成後等待；readout 接在最長 branch 之後。
+沒有末端 padding，也沒有第二次 compile 或自訂 Module。
+既有 Pulse 與 Join 擁有 native timing，不改 pulse 的 pre/post delay。
 
 `SignalBuffer` 以 `(P,K)` 儲存，讓 Schedule 每步寫入整個 tone vector，回傳時轉為 `(K,P)`。
-Program 擁有 reps/rounds 平均；helper 只經初始化後的 `MuxReadout.collect_iq` 取得平均 IQ。
+Program 擁有 reps/rounds 平均；取資料時只經初始化後的 `MuxReadout.collect_iq` 取得平均 IQ。
 Round hook 保留目前點已完成 rounds 的平均。取消後，未寫入點仍是 NaN。RunContext 的
 `cancel_signal.raise_if_error()` 區分 acquisition failure 與正常取消；有 partial data 不代表成功。
 Plots 以原始 index 命名 `measurement_i`，每條曲線用自己的座標，不靠 label 去重。
@@ -232,7 +321,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 只有兩類「副本外操作」是有意保留的：
 
 - **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.cancel_signal)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
-- **singleshot 強制 reps/rounds**：singleshot 家族（`ge` / `check` / ...）的 `run()` 開頭以 `cfg = deepcopy(cfg)` 重綁本地副本後才改 `cfg.rounds = 1` / `cfg.reps = cfg.shots`，並在覆寫前 `warnings.warn(...)`。重綁後的 mutation 作用在本地副本，非副本外。
+- **raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 另建 `ProgramV2Cfg(reps=cfg.shots, rounds=1, ...)`，保留原始 initial／relax delay，再交給 builder。Lookback 同樣另建 program cfg，固定 reps=1，rounds 沿用可編輯的實驗欄位。這些 runtime 固定值不出現在 Form。
 
 ---
 

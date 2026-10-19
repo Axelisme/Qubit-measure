@@ -40,8 +40,7 @@ class MuxOnetoneResult:
     channel. K is the active count and N the full cfg tone count.
     signals is complex128 (Ndf, K) of averaged I+jQ in a.u., retaining the
     program's ADC-length normalization. Unwritten entries remain NaN; acquired
-    rows survive cancellation or failure. Data alone does not indicate success:
-    the run's caller must check context.cancel_signal.raise_if_error().
+    rows survive cancellation or failure.
     """
 
     dfs: NDArray[np.float64]
@@ -83,12 +82,11 @@ class MuxOnetoneSweepCfg(ConfigBase):
 
 
 class MuxOnetoneCfg(ProgramV2Cfg, ExpCfgModel):
-    """Inputs for a common-offset scan; hardware handles belong to RunContext.
+    """Scan every selected readout tone by the same frequency offset.
 
     modules supplies the base mux readout and optional reset. sweep.df supplies
     nominal offsets in MHz; each point uses base_freq[i] + df with no cumulative
-    update. Nested cfgs validate numeric settings; program/QICK validate hardware
-    reachability and quantize each newly built program.
+    update. Each point's program quantizes these frequencies to the hardware grid.
 
     Inherited reps (default 1) is repetitions per round; rounds (default 1) is
     software acquisition rounds per offset. initial_delay and relax_delay are
@@ -96,8 +94,7 @@ class MuxOnetoneCfg(ProgramV2Cfg, ExpCfgModel):
     active_tones selects original readout indices in execution/column order.
     None selects all tones. Lists must be nonempty, unique integers in 0..N-1;
     bool, floating point and string indices are rejected without coercion.
-    Keep this original cfg with the Result when constructing a RunRecord so
-    persistence records base frequencies and the sweep, not the final point.
+    Saved data retains the full base readout, including inactive tones.
     """
 
     modules: MuxOnetoneModuleCfg
@@ -146,13 +143,12 @@ def _mux_signal(
 
 
 class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
-    """Stateless core-only spectroscopy, with one complex Signal and numeric axes.
+    """Measure several resonator spectra with a common frequency-offset scan.
 
-    AXES_SPEC maps inner-first Tone (unitless int64) then Frequency offset
-    (MHz in memory, Hz on disk), preserving signals.shape == (Ndf, K) for K active tones.
-    Inherited save_run/load_run use native data; save exports one Labber complex
-    log. Labber reads use zcu_tools.datafile.load_labber_data, not core.load.
-    This class neither connects instruments nor registers frontend recipes.
+    Each point applies the optional reset, then plays and acquires the selected
+    mux readout tones together. Results contain averaged complex IQ with shape
+    (Ndf, K), where K is the selected tone count. Saved axes retain original tone
+    indices and nominal offsets (MHz in memory, Hz on disk).
     """
 
     AXES_SPEC = AxesSpec(
@@ -168,21 +164,17 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
     )
 
     def run(self, config: MuxOnetoneCfg, *, context: RunContext) -> MuxOnetoneResult:
-        """Scan fixed programs using this run's explicit hardware, plots and stop.
+        """Reset, read all selected tones together, and repeat at each offset.
 
-        config is a validated base-tone cfg and is never mutated. context must
-        provide compatible soc/soccfg, active Plots and a fresh cancel_signal;
-        devices may be empty. Publish K active magnitude-vs-nominal-offset lines as
-        measurement, and return all coordinates plus the complex signal buffer.
-        No result is cached, saved or wrapped in a RunRecord here.
-
-        Schedule propagates cancellation to acquire and retains completed data,
-        leaving unwritten entries NaN. Acquire failures remain on the shared
-        signal; consumers must call context.cancel_signal.raise_if_error() to
-        distinguish them from successful or stopped partial returns. Cfg, build
-        and other errors outside the acquire boundary propagate unchanged.
-        Hardware spectra, clipping, crosstalk and synchronization are not checked.
+        config supplies the base readout and common MHz offsets; it is unchanged.
+        context supplies connected soc/soccfg, plots and cancellation. The live
+        plot shows one magnitude curve per selected tone. Returned complex IQ is
+        averaged over reps and rounds, in active_tones order; unmeasured points
+        stay NaN after a stop. Call context.cancel_signal.raise_if_error() to
+        distinguish acquisition failure from a successful or stopped return.
+        Invalid cfg or program settings raise.
         """
+        # 1. Select tones without changing their original indices or base frequencies.
         cfg = deepcopy(config)
         base_readout = cfg.modules.readout
         dfs = sweep2array(cfg.sweep.df, "none")
@@ -199,6 +191,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
             base_readout.tones[index].label or f"tone {index}" for index in indices
         ]
 
+        # 2. Plot each selected spectrum against the shared nominal offset axis.
         def configure_axes(axes: Axes) -> None:
             for line, label in zip(axes.lines, labels, strict=True):
                 line.set_label(label)
@@ -215,6 +208,8 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
             (len(dfs), len(tone_indices)),
             on_update=lambda data: viewer.update(dfs, np.abs(data).T),
         )
+
+        # 3. Rebuild reset -> mux readout at each offset, always from the base tones.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for df, step in sched.scan("df", dfs.tolist()):
                 readout = active_readout.with_updates(
@@ -229,8 +224,10 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
                     .add(MuxReadout("readout", readout))
                 )
                 prog = builder.build()
+                # Collect all selected ADCs and average reps/rounds into this scan row.
                 _ = builder.run_program(prog, raw2signal_fn=partial(_mux_signal, prog))
 
+        # 4. Keep acquired rows and the original tone mapping, including partial scans.
         signals_buffer.trigger_update(flush=True)
         return MuxOnetoneResult(
             dfs=dfs,

@@ -102,6 +102,19 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
     )
 
     def run(self, cfg: PowerCfg, *, context: RunContext) -> PowerResult:
+        """Measure MIST populations versus probe gain.
+
+        Apply optional reset and init, sweep probe gain on the board, then
+        read out. Return rounded gains (a.u.) and classified G/E fractions
+        shaped (Ngain, 2), averaged over shots and rounds. Gain is not
+        calibrated power; analysis can convert it to photons with ac_coeff.
+
+        cfg supplies distinct finite IQ centers and a positive finite radius.
+        Other is 1-G-E, not calibrated leakage. Optional confusion correction
+        and photon/log plotting are analysis choices, not acquisition steps.
+        """
+
+        # Prepare the hardware gain grid before collecting populations.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -112,6 +125,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
+        # Show G/E and the unclassified remainder without altering saved fractions.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
             for line, label in zip(
@@ -137,6 +151,8 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             modules = run_cfg.modules
             gain_sweep = run_cfg.sweep.gain
             modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+
+            # Repeat reset/preparation/probe/readout at each hardware sweep point.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add_reset("reset", modules.reset)
@@ -145,12 +161,15 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
                 .add_readout("readout", modules.readout)
                 .declare_sweep("gain", gain_sweep)
                 .build_and_acquire(
+                    # Classify individual shots, then average their G/E fractions.
                     raw2signal_fn=raw_population_signal,
                     g_center=cfg.g_center,
                     e_center=cfg.e_center,
                     ge_radius=cfg.radius,
                 )
             )
+
+        # Store G/E only; the Other curve is derived as 1-G-E.
         signals = buffer.array
 
         return PowerResult(gains=gains, signals=signals)

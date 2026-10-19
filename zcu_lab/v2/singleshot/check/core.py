@@ -88,6 +88,18 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
     )
 
     def run(self, cfg: CheckCfg, *, context: RunContext) -> CheckResult:
+        """Collect an IQ cloud after a fixed qubit preparation and probe.
+
+        Repeat optional reset, optional init pulse, probe pulse, then readout
+        for cfg.shots shots. Return shot indices and one complex IQ per shot,
+        not an averaged response. Analyze classifies this cloud with supplied
+        G/E centers and radius to inspect preparation and readout separation.
+
+        Acquisition uses one round and cfg.shots reps on a copied cfg, and
+        raw-shot conversion requires exactly one readout channel.
+        """
+
+        # Keep individual shots with a separate raw-shot program configuration.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         program_cfg = ProgramV2Cfg(
@@ -100,6 +112,8 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         signals_buffer = SignalBuffer((cfg.shots,))
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
+
+            # Prepare the same state for every shot before probing and readout.
             program = (
                 sched.prog_builder(soc, soccfg, cfg=program_cfg)
                 .add(
@@ -110,6 +124,8 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                 )
                 .build()
             )
+
+            # Retain raw IQ; an interrupted acquisition leaves missing data.
             try:
                 program.acquire(soc, progress=True, cancel_flag=sched.stop)
             except StoppedPartialAcquireError:

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
@@ -12,12 +15,14 @@ from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_freq, sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
-from zcu_lab.v2._support.mux_acquisition import acquire_mux_scan
+from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
@@ -31,16 +36,15 @@ from .analysis import MuxFreqFit, analyze_frequency
 
 
 class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
-    """Complete named tones, ordered participants and shared acquisition controls.
+    """Settings for simultaneous qubit frequency sweeps and mux readout.
 
-    modules holds optional reset and complete mux readout. tones contains one
-    MuxToneCfg per original readout position, with unique nonempty names.
-    participants is a nonempty, duplicate-free list of those names; its order
-    determines execution/data rows (Q3/Q1 maps to original indices 2/0).
-    Every drive is required/validated, including nonparticipants, on independent
-    generators distinct from readout. Independent finite MHz sweeps have equal point counts across all tones.
-    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
-    nonnegative us. No capture, bindings or writeback destinations are stored.
+    modules supplies optional reset and the full readout tone list. tones gives
+    each original readout position a unique name, a drive and a MHz sweep.
+    participants selects a nonempty, unique list of names in measurement order.
+    All tones need distinct drive generators, separate from readout, and equal
+    sweep point counts, even when not selected. Sweeps advance together by point,
+    not as a Cartesian product. reps/rounds are positive averaging counts;
+    initial_delay/relax_delay are finite nonnegative waits in us.
     """
 
     modules: MuxDriveModuleCfg
@@ -49,21 +53,19 @@ class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxFreqCfg:
-        """Reject invalid full length, drive channels and zip counts at admission."""
+        """Reject mismatched tones, shared drive channels or unequal sweep counts."""
         validate_mux_scan(self, self.modules, self.tones, self.participants)
         return self
 
 
 def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxPulseScan:
-    """Lower full tones once and prepare fixed per-point pulses without acquisition.
+    """Prepare each selected qubit's frequency axis and per-point drive pulses.
 
-    cfg is validated again from a copy, never mutated. soccfg is the target
-    board's public QickConfig; coordinates use each active drive's own MHz
-    grid and match program-native conversion. Returned point_pulses keeps nominal
-    values so the program remains the sole native-conversion owner. Equal point
-    counts are zipped by index, never expanded to a product. Invalid cfg raises
-    ValueError; hardware conversion errors propagate. No devices, GUI, files or
-    bindings are accessed. Program construction is left to acquire_mux_scan.
+    cfg is copied and validated. soccfg supplies the board frequency grids.
+    Returned coordinates are actual MHz in participant order; point_pulses keeps
+    nominal frequencies for compilation. Sweeps advance together by point index.
+    Invalid settings raise ValueError; frequency conversion errors propagate.
+    This function does not acquire data or change cfg.
     """
     cfg = MuxFreqCfg.model_validate(cfg.model_dump())
     indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
@@ -80,12 +82,24 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxPulseSc
     return MuxPulseScan(indices, np.asarray(coordinates, dtype=np.float64), points)
 
 
-class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
-    """Stateless zipped mux spectroscopy with per-original-index results.
+def _averaged_signal(
+    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
+) -> NDArray[np.complex128]:
+    # Builder copies modules; collect only through the initialized program owner.
+    for module in prog.modules:
+        if isinstance(module, MuxReadout) and module.name == "readout":
+            iq = module.collect_iq(prog, acquired, read_index=0)
+            return iq[:, 0] + 1j * iq[:, 1]
+    raise ValueError("Mux scan program is missing its named MuxReadout")
 
-    Run uses a common-start Join and host zip scan. Analysis and native
-    persistence retain independent quantized coordinates, complex IQ and full cfg.
-    Core neither registers a GUI nor produces binding-dependent proposals.
+
+class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
+    """Measure qubit spectra with simultaneous drives and a shared mux readout.
+
+    Each point optionally resets, starts selected drives together and reads out after
+    the longest drive finishes. Analysis estimates each qubit's transition
+    frequency and linewidth. Saved results retain the full settings, original
+    tone positions, actual MHz axes and complex IQ.
     """
 
     AXES_SPEC = mux_sweep_spec(
@@ -99,26 +113,76 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
     def run(self, config: MuxFreqCfg, *, context: RunContext) -> MuxSweepResult:
-        """Acquire independent zipped drives with common-start mux readout.
+        """Sweep selected drive frequencies together, then measure mux IQ.
 
-        config is copied and validated without mutation. Coordinates and complex
-        average IQ are (K,P), in active original tone order. Frequencies are MHz.
-        context owns compatible hardware, plots and a fresh cancel signal.
-        Publish measurement_i for each original index; caller finishes/releases
-        plots. Cancellation preserves completed points and the current point's
-        completed-round average, leaving unwritten IQ NaN. Acquisition errors
-        remain on context.cancel_signal: call raise_if_error() before success.
-        Validation/build errors propagate. No saving or GUI access occurs.
+        config supplies independent MHz sweeps and shared averaging settings;
+        it is copied before use. context supplies the board, plots and stop signal.
+        Optional reset precedes each point. Drives start together, without end-alignment
+        padding, and readout follows the longest drive. Return actual MHz and
+        average complex IQ arrays of shape (participants, points), with original
+        tone indices. Live plots show each spectrum and their combined magnitudes.
+        Cancellation keeps acquired averages and leaves missing points NaN;
+        call context.cancel_signal.raise_if_error() before reporting success.
         """
+        # 1. Prepare zipped frequencies and readout channels in participant order.
         cfg = MuxFreqCfg.model_validate(config.model_dump())
         scan = prepare_frequency_scan(cfg, soccfg=context.soccfg)
-        return acquire_mux_scan(
-            cfg,
-            cfg.modules,
-            scan,
-            context=context,
-            coordinate_label="Drive frequency (MHz)",
-            tone_names=[tone.name for tone in cfg.tones],
+        readout = cfg.modules.readout.with_updates(
+            tones=[cfg.modules.readout.tones[index] for index in scan.indices]
+        )
+
+        # 2. Keep each spectrum on its own hardware-rounded frequency axis.
+        viewers = [
+            context.plots.liveplot_1d(
+                f"measurement_{index}", "Drive frequency (MHz)", "Magnitude (a.u.)"
+            )
+            for index in scan.indices
+        ]
+
+        def update(data: NDArray[np.complex128]) -> None:
+            for row, viewer in enumerate(viewers):
+                viewer.update(scan.coordinates[row], np.abs(data[:, row]))
+            draw_mux_magnitudes(
+                context.plots,
+                scan.coordinates,
+                data.T,
+                [f"{index}: {cfg.tones[index].name}" for index in scan.indices],
+                "Drive frequency (MHz)",
+            )
+
+        # Point-major storage lets each scan step write a whole tone vector.
+        signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
+        with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+            for pulses, step in sched.scan("point", scan.point_pulses):
+                # 3. Reset -> simultaneous drives -> readout after the longest drive.
+                builder = (
+                    step.prog_builder(context.soc, context.soccfg)
+                    .add_reset("reset", cfg.modules.reset)
+                    .add(
+                        Join(
+                            *[
+                                Pulse(f"drive_{index}", pulse)
+                                for index, pulse in zip(
+                                    scan.indices, pulses, strict=True
+                                )
+                            ]
+                        ),
+                        MuxReadout("readout", readout),
+                    )
+                )
+
+                # 4. Average acquired rounds, preserving partial data on cancellation.
+                prog = builder.build()
+                _ = builder.run_program(
+                    prog, raw2signal_fn=partial(_averaged_signal, prog)
+                )
+
+        # Publish the final spectra and restore tone-major result storage.
+        signals.trigger_update(flush=True)
+        return MuxSweepResult(
+            np.asarray(scan.indices, dtype=np.int64),
+            scan.coordinates,
+            signals.array.T.copy(),
         )
 
     def analyze(
@@ -128,9 +192,10 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
         *,
         plots: Plots,
     ) -> tuple[MuxFreqFit | MuxFitFailure, ...]:
-        """Fit explicit source data, allowing cfg=None; publish distinct fit_i plots.
+        """Fit each acquired spectrum for transition frequency and linewidth.
 
-        Coordinates and IQ alone determine analysis. Numeric failures retain each
-        original index and reason. No current form, device or binding is read.
+        source contains actual MHz axes and IQ; its cfg may be absent. options
+        selects the line shape and fit overlay. plots receives a fit_i figure
+        per original tone index. Return estimates or a per-tone failure reason.
         """
         return analyze_frequency(source.result, options, plots=plots)

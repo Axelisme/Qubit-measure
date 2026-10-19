@@ -47,6 +47,12 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class CKP_Result:
+    """Probe frequencies in MHz and mean IQ shaped (2, Nres_freq, Nqub_freq).
+
+    ``initial_states`` labels nominal ground/excited preparations as 0/1,
+    not independently measured state populations.
+    """
+
     res_freqs: NDArray[np.float64]
     qub_freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -57,6 +63,8 @@ class CKP_Result:
 
 @dataclass(frozen=True)
 class CKPAnalysis:
+    """Dispersive chi, resonator linewidth kappa and resonance estimate, all in MHz."""
+
     chi: float
     kappa: float
     res_freq: float
@@ -294,6 +302,15 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
         *,
         context: RunContext,
     ) -> CKP_Result:
+        """Map qubit resonance versus resonator drive frequency for two preparations.
+
+        Reset and omit/apply the pi pulse for nominal ground/excited states.
+        Start resonator and qubit probes together, wait for both to finish,
+        then read out. The FPGA sweeps both probe frequencies. Return mean
+        complex IQ on the (state, resonator frequency, qubit frequency) grid;
+        the two resonance curves constrain chi, kappa and resonator frequency.
+        """
+        # Prepare the two hardware frequency grids and one map per preparation.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -339,6 +356,8 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
             (2, len(res_freqs), len(qub_freqs)),
             on_update=plot_fn,
         )
+
+        # Acquire both preparations and the full frequency grid in one program.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             res_freq_param = sweep2param("res_freq", sched.cfg.sweep.res_freq)
@@ -346,6 +365,7 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
             modules.res_pulse.set_param("freq", res_freq_param)
             modules.qub_pulse.set_param("freq", qub_freq_param)
 
+            # State preparation precedes the parallel probes and common readout.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -376,6 +396,14 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
         *,
         plots: Plots,
     ) -> CKPAnalysis:
+        """Joint-fit both resonance curves to infer chi, kappa and resonator frequency.
+
+        Extract Lorentzian qubit centers at each resonator frequency, then
+        fit both preparation curves with shared parameters. Return MHz values
+        and publish ``fit``. Raise RuntimeError if no finite IQ exists, fewer
+        than five centers survive per state, or the shared fit/covariance is
+        invalid. ``options`` is None; source cfg is not needed.
+        """
         del options
         result = source.result
 
