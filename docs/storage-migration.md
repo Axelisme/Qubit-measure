@@ -119,7 +119,7 @@ find "$BR/exps" -type f -iname '*.png' -printf '%P\n' | LC_ALL=C sort
 | `autofluxdep_runs/**` | 同相對路徑保全到 `Database/<name>/migration-preserved/result/autofluxdep_runs/**`；不是新 workflow run。 |
 | exps 外的 `image/**`、未知 result 檔 | 原樣保全到 `Database/<name>/migration-preserved/result/<相對路徑>`，無法確定關聯則 pending。 |
 | `result/<chip>/<qub>/arb_waveforms/**` 或 `Database/<chip>/<qub>/arb_waveforms/**` | 原樣複製到 `Database/<name>/arb_waveforms/**`，保留 arb_waveforms 下的相對 asset key 並核對 hash；兩來源對應同一目的但 bytes 不同時停下列衝突，不覆寫。 |
-| Database Labber 檔 | 有完整證據才產 native，再保留原 Labber bytes。證據不足先留完整備份並 pending，可另存 `migration-preserved/Database/<原相對路徑>`。 |
+| Database Labber 檔 | 依第 7 節核對必要證據，再產 native 2.1 並保留原 Labber bytes。未知開始時間用 None/unknown，缺可信 ID 用原生 API 分配。其他必要證據不足仍 pending，可另存 `migration-preserved/Database/<原相對路徑>`。 |
 | 其他 Database 檔 | 備份保全，報告記明原相對位置與未知用途；需新副本時放 `migration-preserved/Database/`，不冒充 run。 |
 
 不要從 `070716_0.500` 解讀磁通或時間。這類 label 可原樣使用。
@@ -464,7 +464,15 @@ helper 不是跨檔交易，中斷可能留下半份目的檔；先記為未完�
 Labber 與 native 都可能是 HDF5，但格式不同。把 `.hdf5` 改名為 `data.h5` 不會得到 native。
 不要從路徑日期、mtime、檔名、目前 setup 或目前裝置猜量測時間、cfg、point、run_id 或 ledger。
 
-每個檔案先核對下表。缺任一必要證據就停止該檔轉換，保全並列永久 pending。
+每個檔案先核對下表。experiment tag+cfg_type、完整歷史 cfg，以及 variable/axes/signal 的名稱、單位、dtype、shape 都必須齊全。
+缺少這些或其他必要 mapping 時，停止該檔轉換，保全並列永久 pending，不推論、不拿目前值補缺。
+只有開始時間與 run_id 依下列規則處理，不因這兩項未知就擋住 native 產出。
+
+- 缺可證實開始時間時，仍寫 native 2.1，使用 `started_at=None`、`completion="unknown"`、`finished_at=None`。這不是量測完成的證據。
+- 缺可信 run_id 時，用公開的 `resources.entry.new_run_id()` 分配，報告標「遷移賦值」。ID 裡的 UTC 時戳是本次分配時間，不是歷史量測時間，不能拿來填 started_at。
+- 可信既有 run_id 與可證實歷史時間保留原證據。已知開始時間仍寫 UTC ISO；完成狀態只採證據支持的 complete/partial/stopped，未知用 unknown，不把可讀資料等同 complete。
+
+本節是手動流程，使用目前已公開的 native 2.1 API，不表示 `migrate_storage` 已支援這些未知歷史值。
 
 | 證據 | 要填的正式資料 |
 | --- | --- |
@@ -472,19 +480,25 @@ Labber 與 native 都可能是 HDF5，但格式不同。把 `.hdf5` 改名為 `d
 | experiment tag、cfg_type、完整 schema_version | `(tag, cfg_type)` 配對到明確 cfg 與 disk schema，不能只看 tag。 |
 | 完整歷史 cfg JSON | `CfgSnapshot(values, cfg_type, schema_version)`，不拿目前 defaults 補值。 |
 | variable、axes、signal 的名稱、SI/離散單位、dtype、shape | `VariableSchema` 與 `ExperimentPayload`，inner-first axes，array shape 是反向 axes 長度。 |
-| 真實 started_at、completion，及可得的 finished_at | `RunMetadata` 的 UTC ISO 時間與 complete/partial/stopped。finished_at 可為 None，不以檔案時間代替。 |
+| started_at、completion，及可得的 finished_at 證據 | `RunMetadata` 保留可證實的 UTC ISO 時間與完成狀態。缺開始時間時用 None/unknown/None；已知開始但完成狀態未知時 completion 用 unknown。finished_at 不明用 None，不以檔案時間代替。 |
 | 當時 entry 名、point、description、roles，以及此次 entry UUID 的明示對應 | `RunSnapshot`，point 可有證據地為 None；新 UUID 的對應是遷移指定，不聲稱舊系統有此 UUID。 |
 | 歷史軟體/主機/SoC 資訊 | `SoftwareProvenance`，未知只用型別允許的 None/空 mapping，device_snapshot 未記錄時用 None，不寫空表冒充捕捉。 |
-| 可信 run_id 或經明確授權的遷移 ID 分配 | 保留可信既有 ID。若分配新 ID，報告寫「遷移賦值」，不能冒充歷史 ID 或歷史量測時間。沒有裁定先 pending。 |
+| 可信 run_id，或本次遷移的 ID 分配紀錄 | 保留可信既有 ID。缺可信 ID 時用 `new_run_id()` 分配，先保存來源/hash 與 ID 的對照，報告標「遷移賦值」，不冒充歷史 ID 或時間。接手沿用已固定 ID。 |
 
 正式型別與欄位見 [datafile owner](../lib/zcu_tools/datafile/README.md) 與
-[native models](../lib/zcu_tools/datafile/native_models.py)。以下先示範完整物件構造，再接讀寫順序。
-這是合成範例，所有數字、時間、ID、名稱與路徑都不可直接用在真檔。
+[native models](../lib/zcu_tools/datafile/native_models.py)。ID 分配使用 [entry owner](../lib/zcu_tools/resources/entry/README.md#輸出位置)
+的 `new_run_id(*, at=None)`，不自行拼接 ID，也不從 run_id 解析歷史時間。
+以下示範必要 mapping 已齊全，但開始時間與可信 run_id 不可得的情況。
+這是合成範例，所有數字、UUID、名稱與路徑都不可直接用在真檔。
 假設虛構實驗 `synthetic_demo` 的 `DemoCfg` 完整 cfg 只有 reps，資料是單一 frequency 軸的複數 response；它不是 repo 已註冊的實驗。
 真檔必須換成已確認的 `(tag, cfg_type, schema_version)`、完整歷史 cfg JSON 與正式 disk schema，不可只換檔名或套用這份 reps。
-None 與空 provenance mapping 示範「證據確實不可得」，不是略過查證。缺必要證據就 pending。
+None 與空 provenance mapping 示範「證據確實不可得」，不是略過查證。其他必要證據缺失仍 pending。
+先走部分接手盤點，確認沒有該來源的有效 native 或已固定 ID，再執行新分配。
+範例將對照保存在 WORK 的獨立 JSON；它是手動紀錄，不是工具 resume manifest。
 
 ```python
+import hashlib
+import json
 import os
 from pathlib import Path
 from uuid import UUID
@@ -495,6 +509,29 @@ from zcu_tools.datafile import (
     SoftwareProvenance, VariableSchema,
     load_run_data, save_run_data, validate_experiment_payload,
 )
+from zcu_tools.resources.entry import new_run_id
+
+source = Path(os.environ["BD"]) / "synthetic-only.hdf5"
+with source.open("rb") as stream:
+    source_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+# Compare source_sha256 with the verified backup inventory before continuing.
+identity_path = Path(os.environ["WORK"]) / "synthetic-only-native-identity.json"
+if identity_path.exists():
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    if (identity["source"] != source.relative_to(Path(os.environ["BD"])).as_posix()
+            or identity["source_sha256"] != source_sha256):
+        raise ValueError("Saved identity does not match the verified source")
+else:
+    # This example has no trusted historical ID or previously assigned ID.
+    identity = {
+        "source": source.relative_to(Path(os.environ["BD"])).as_posix(),
+        "source_sha256": source_sha256,
+        "run_id": new_run_id(),
+        "run_id_origin": "遷移賦值",
+    }
+    with identity_path.open("x", encoding="utf-8") as stream:
+        json.dump(identity, stream, ensure_ascii=False, indent=2)
+print(identity_path, identity["run_id"], identity["run_id_origin"])
 
 schema = (VariableSchema(
     variable=DataVariable("response"),
@@ -505,9 +542,9 @@ cfg = CfgSnapshot(
     values={"reps": 10}, cfg_type="DemoCfg", schema_version="1.0",
 )
 metadata = RunMetadata(
-    run_id="20261020T080000Z-abc123", experiment="synthetic_demo",
-    started_at="2026-10-20T08:00:00Z", finished_at=None,
-    completion="complete", labber_path=None,
+    run_id=identity["run_id"], experiment="synthetic_demo",
+    started_at=None, finished_at=None,
+    completion="unknown", labber_path=None,
     snapshot=RunSnapshot(
         entry_id=UUID("54cd2da2-e8cd-49d5-a414-4ec40eb7eb14"),
         entry_name="migrated-Q0", point="070716_0.500",
@@ -519,8 +556,6 @@ metadata = RunMetadata(
     ),
     device_snapshot=None,
 )
-# source 換成備份內已驗 hash 的原檔；新 run_id 須有明示分配授權並記入報告。
-source = Path(os.environ["BD"]) / "synthetic-only.hdf5"
 destination = Path(os.environ["NEW_D"]) / "runs" / metadata.run_id / "data.h5"
 payload = load_legacy_labber_payload(source, schema=schema)
 validate_experiment_payload(payload, schema=schema)
@@ -530,13 +565,27 @@ stored = load_run_data(destination)
 validate_experiment_payload(stored.payload, schema=schema)
 ```
 
+預期先得到一份固定的來源/hash→run_id 對照，再得到 `runs/<該 run_id>/data.h5`。
+把對照中的 run_id、`run_id_origin="遷移賦值"`、備份內完整路徑及 native path 記入 manual-report.json 的該來源列。
+另記 `started_at=null`、`completion="unknown"`、`finished_at=null` 與「缺可證實開始時間」，不要把這些值報成歷史時間已驗證。
+只缺上述歷史值不列為無法產 native 的 pending；其他必要證據不足仍列 pending。
+「遷移賦值」只在報告與手動對照中說明，不加進 native metadata 的正式欄位。
+
+中斷後保留並讀取同一份對照，不刪檔重配 ID。對照損壞、來源/hash 不符或與既有 native 衝突時停止處理。
+若先前工具或人工已固定 ID，先核對其來源/hash 並沿用，不能因本例的對照檔不存在就再分配。
+有可信歷史 ID 時，改以該 ID 建立對照，origin 記其證據來源，不呼叫 new_run_id。
+目的 native 已存在時不要重跑寫入段，先以 reader 核對原 ID 與資料，只補缺項，不用 replace=True。
+
 schema 只宣告名稱、單位與 dtype，axes 依 inner-first 排列；軸值、signal arrays、shape、timestamps 與 Labber metadata 由來源 payload 讀入並驗證，不在此補造。
 此例單軸 signal shape 必須為 `(該軸長度,)`；多軸 shape 為反向 axes 長度。
 HDF5 階層與序列化交給 [datafile owner](../lib/zcu_tools/datafile/README.md) 的 writer，不手填 dataset。
 此段是 owner API 的操作順序，不是能替任意 Labber 猜出 schema 的通用轉換器。
 先依該實驗的正式 cfg model 驗證歷史 cfg；寫完還要由具體 experiment 的 `load_run` 讀回，
 逐欄比對 cfg、tag、時間、snapshot、axes、signal、timestamps 與原 payload。
-預期 generic 與 typed reader 都成功，內容相同。失敗保留來源，記未完成 publication，不搬走唯一副本。
+本例的 generic metadata 讀回必須仍是 None/unknown/None，run_id 必須與保存的對照相同。
+需要核對 typed metadata 時，用 `experiment.native_persistence.load_run_with_metadata(path, spec=...)`，不可把 unknown 改成 complete。
+預期 generic 與 typed reader 都成功，內容相同。complete-only 分析入口可能拒絕 unknown，不能用它判定 native 無效。
+讀回失敗時保留來源，記未完成 publication，不搬走唯一副本。
 對未知 pair、未支援 layout、缺歷史 snapshot 的檔案，此時無法手動安全補成 native，應明示限制而不是補猜測。
 
 只有 native 讀回通過後，才用 `copy_checked` 將原 Labber 存入
@@ -658,8 +707,10 @@ printf 'Root move verified: %s\n' "$TO"
 | point 有 meta_info 的 flux 數字卻缺 unit | 查根 meta、該 point meta 與目前值的來源，依原有 meta 單位規則補缺。 | 無/衝突則移除僅遷移帶入且無證據的數字，保留原文與 pending；不借用 predictor 或 params 的單位。 |
 | library 只換了 header 或有 dangling slot | 先保存現況，依正式 Spec 與 mapping 修補缺項，不覆寫有效 Spec。 | Spec、child keys、slot 與 asset 都有核對結果；不能轉者逐筆 pending。 |
 | Labber 已搬到新處 | 以原始盤點/hash 對照現檔，確認備份包含原 bytes。另用正常 reader 查 native 是否真的存在且有效。 | 「已搬」與「native 已轉」分開記；只有改檔名不算完成。 |
-| Labber 未搬，有完整 evidence | 依第 7 節產 native、generic/typed 讀回，再 copy/hash 原 Labber。 | 新 run 與原檔的對照清楚，舊來源保留到最後統一清理。 |
-| Labber 已搬或未搬，但 evidence 不足 | 不造 cfg/時間/ID/ledger；確認完整備份後列永久 pending，可另留 preservation 副本。 | 報告有備份內路徑、hash、缺失證據與理由，不標成 native 成功。 |
+| 已有有效 native 或已固定 run_id | 以來源/hash 對照、generic/typed reader 核對既有資料與 ID。只補缺少的副本或報告。 | 不因新規則覆寫有效 native，不重分配已固定 ID，不改可信歷史時間或已有 None/unknown。 |
+| Labber 未轉 native，必要 evidence 齊全，只有開始時間或可信 ID 缺失 | 依第 7 節以 None/unknown/None 寫未知時間，缺 ID 用 new_run_id，先保存對照再產 native。generic/typed 讀回後 copy/hash 原 Labber。 | 未知時間與「遷移賦值」記入報告，不冒充歷史；重做時沿用固定 ID。開始時間已知則保留證據，不改為 None。 |
+| Labber 未轉 native，有完整歷史 evidence | 保留可信 ID 與歷史時間，依第 7 節產 native、generic/typed 讀回，再 copy/hash 原 Labber。 | 新 run 與原檔的對照清楚，舊來源保留到最後統一清理。 |
+| Labber 已搬或未搬，但其他必要 evidence 不足 | tag+cfg_type、完整歷史 cfg、variable/axes/signal 名稱、單位、dtype、shape 或必要 mapping 缺失時仍永久 pending。不猜 cfg/時間，不造 ledger。 | 完整備份及報告列明路徑、hash、缺項與理由。僅缺開始時間或可信 ID 不屬於此列。 |
 | 來源和目的都在但 hash 不同 | 保存兩者，不挑較新 mtime，也不直接覆寫。 | 記為衝突或未完成 publication，使用者決定前不得清理。 |
 
 每補一項就重新讀回或 cmp，更新該項狀態。現有 metadata 若與舊資料不同也保留並列衝突，不能靜默 deep merge。
@@ -694,6 +745,7 @@ PY
 - 其餘 params 已完整保存在正確 component.ext.legacy_params 並列 located pending。meta_info 仍寫正式 component/general 欄位。metadata、global/local unit、衝突處理均有記錄，fit 不混進 setup/point。
 - 每張 exps PNG 已掛正確 point，原名與 hash 相同。沒有「等 point」的暫待圖。
 - 每筆可轉 module/native 已由相應 owner 讀回，未完成、半份檔案與暫存 publication 都已處理。
+- 缺開始時間的 native 2.1 讀回仍是 None/unknown/None。遷移分配的 ID 與固定對照一致，報告標「遷移賦值」，未把 ID 時戳當 started_at。可信既有 ID 與歷史時間未改寫。
 - samples、autofluxdep、未知檔及無法轉 Labber 已保全。永久 pending 逐筆以 BACKUP 內路徑與 hash 定位，原因可追溯。
 - parameters 與 data 兩部分均完成核對，報告的 unfinished_publications 與 temporary_pending 都空。只剩真正無法轉換的永久 pending 才可進清理。
 
