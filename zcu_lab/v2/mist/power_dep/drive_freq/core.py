@@ -36,6 +36,8 @@ from zcu_tools.program.v2 import (
 
 @dataclass(frozen=True)
 class DriveFreqResult:
+    """Probe gains, frequencies in MHz, and mean complex IQ [frequency, gain]."""
+
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -86,6 +88,17 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
         *,
         context: RunContext,
     ) -> DriveFreqResult:
+        """Map the MIST response versus probe frequency and gain.
+
+        Reset, apply the optional init pulse, apply the probe, then read
+        out. Sweep both probe frequency and gain on the board. Return
+        hardware frequencies in MHz, gains, and mean complex IQ shaped
+        [frequency, gain], retaining that axis order in the live map.
+        The IQ change measures the probe-induced readout response, not
+        calibrated state populations. ``config`` supplies the probe and
+        readout modules and both sweep ranges.
+        """
+        # 1. Prepare both hardware axes using the probe's generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -110,6 +123,8 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
                 freqs, gains, drivefreq_signal2real(data)
             ),
         )
+
+        # 2. Bind frequency and gain sweeps to the same probe pulse.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.probe_pulse.set_param(
@@ -118,6 +133,8 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
             modules.probe_pulse.set_param(
                 "gain", sweep2param("gain", sched.cfg.sweep.gain)
             )
+
+            # 3. Reset and initialize before each probe/readout sequence.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -131,6 +148,7 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
                 .build_and_acquire()
             )
 
+        # 4. Preserve complex IQ; the baseline-subtracted magnitude is a view.
         return DriveFreqResult(gains=gains, freqs=freqs, signals=signals_buffer.array)
 
     def analyze(
@@ -140,6 +158,12 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot MIST magnitude versus probe MHz and gain from ``source``.
+
+        Subtract one mean IQ reference pooled over all frequencies and the
+        first 5% of gain samples (at least one). ``options`` is None; this
+        response map returns no population fit or calibration value.
+        """
         del options
         result = source.result
 

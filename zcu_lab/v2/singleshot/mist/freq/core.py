@@ -101,6 +101,18 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
     )
 
     def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        """Measure MIST populations versus probe frequency.
+
+        Apply optional reset and init, sweep the probe frequency on the board,
+        then read out. Return rounded frequencies (MHz) and classified G/E
+        fractions shaped (Nfreq, 2), averaged over shots and rounds.
+
+        cfg supplies distinct finite IQ centers and a positive finite radius.
+        Other is the remainder 1-G-E, not a calibrated leakage population;
+        optional confusion correction belongs to subsequent analysis.
+        """
+
+        # Prepare the hardware frequency grid before collecting populations.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -111,6 +123,7 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
+        # Show G/E and the unclassified remainder without altering saved fractions.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
             for line, label in zip(
@@ -136,6 +149,8 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
             modules = run_cfg.modules
             freq_sweep = run_cfg.sweep.freq
             modules.probe_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+
+            # Repeat reset/preparation/probe/readout at each hardware sweep point.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add_reset("reset", modules.reset)
@@ -144,12 +159,15 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
                 .add_readout("readout", modules.readout)
                 .declare_sweep("freq", freq_sweep)
                 .build_and_acquire(
+                    # Classify individual shots, then average their G/E fractions.
                     raw2signal_fn=raw_population_signal,
                     g_center=cfg.g_center,
                     e_center=cfg.e_center,
                     ge_radius=cfg.radius,
                 )
             )
+
+        # Store G/E only; the Other curve is derived as 1-G-E.
         signals = buffer.array
 
         return FreqResult(freqs=freqs, signals=signals)

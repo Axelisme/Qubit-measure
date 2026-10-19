@@ -44,6 +44,8 @@ def _default_phase_values() -> NDArray[np.float64]:
 
 @dataclass(frozen=True)
 class FreqGainResult:
+    """Mean IQ (phase, gain, frequency); phases are offsets in degrees, freqs in MHz."""
+
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -111,6 +113,17 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         *,
         context: RunContext,
     ) -> FreqGainResult:
+        """Measure bath-reset tomography contrast versus cavity gain and frequency.
+
+        After optional reset and initialization, start the cavity and qubit
+        tones together, apply the final pi/2 pulse after the cavity tone,
+        then read out. Sweep
+        its phase by 0, 90, 180 and 270 degrees relative to the configured
+        phase. Return mean complex IQ with shape (4, Ngain, Nfreq), normalized
+        gains and frequencies in MHz. Opposite-phase differences probe
+        transverse contrast, not reset fidelity.
+        """
+        # Prepare cavity-drive coordinates and four relative tomography phases.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -128,6 +141,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
+        # Display opposite-phase contrast while retaining all four complex IQ planes.
         viewer = context.plots.liveplot_2d(
             "measurement", "Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)"
         )
@@ -137,6 +151,8 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
                 freqs, gains, bathreset_signal2real(data).T
             ),
         )
+
+        # Sweep both cavity knobs and the final pi/2 phase in one program.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             tested_reset = modules.tested_reset
@@ -177,6 +193,12 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         *,
         plots: Plots,
     ) -> FreqGainAnalysis:
+        """Select cavity gain and frequency from the strongest smoothed contrast.
+
+        options controls smoothing along gain and frequency, not phase.
+        Return normalized gain and MHz frequency from the four-phase contrast
+        map, and publish it as fit; source.cfg may be None.
+        """
         result = source.result
 
         gains, freqs, signals = result.gains, result.freqs, result.signals

@@ -22,10 +22,17 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ProgramV2Cfg
+from zcu_tools.program.v2 import (
+    ComputedPulse,
+    LoadValue,
+    ProgramV2Cfg,
+    Readout,
+    Repeat,
+    Reset,
+)
 from zcu_tools.utils.process import rotate2real
 
-from .program import RBModuleCfg, RBSweepCfg, build_rb_program
+from .program import RBModuleCfg, RBSweepCfg
 from .sequence import make_seed_tables
 
 
@@ -75,6 +82,15 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
     )
 
     def run(self, cfg: RBCfg, *, context: RunContext) -> RB_Result:
+        """Measure randomized Clifford decay for error-per-Clifford analysis.
+
+        For each seed, reset, play a random Clifford prefix, apply its full
+        inverse in two recovery slots, then read out. Return mean complex IQ
+        per (seed, depth); unfinished acquisitions remain NaN. Depth and reps
+        run on hardware, with rounds averaged within each seed's program.
+        Acquisition errors are recorded on context.cancel_signal.
+        """
+        # 1. Prepare reproducible seeds and a depth axis without changing cfg.
         run_cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -99,7 +115,98 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
                 builder = step.prog_builder(soc, soccfg)
-                program = build_rb_program(builder, step.cfg.modules, tables)
+
+                # 2. Map the seed's physical gate IDs to calibrated pulses.
+                modules = step.cfg.modules
+                (
+                    rand_gate_seq,
+                    prefix_len_by_depth,
+                    recovery_gate0_by_depth,
+                    recovery_gate1_by_depth,
+                ) = tables
+                max_rand_len = max(prefix_len_by_depth, default=0)
+
+                Id_pulse = modules.I_pulse
+                X90_pulse = modules.X90_pulse
+                X180_pulse = modules.X180_pulse
+                MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
+                Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
+                Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
+                MY90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase - 90.0)
+
+                if Id_pulse is None:
+                    Id_pulse = X90_pulse.with_updates(gain=0.0)
+
+                gate_pulses = [
+                    Id_pulse,
+                    X90_pulse,
+                    X180_pulse,
+                    MX90_pulse,
+                    Y90_pulse,
+                    Y180_pulse,
+                    MY90_pulse,
+                ]
+
+                # 3. Reset, play the depth prefix, recover the full Clifford, read out.
+                program = (
+                    builder.add(
+                        LoadValue(
+                            "load_rand_len",
+                            values=prefix_len_by_depth,
+                            idx_reg="depth_idx",
+                            val_reg="rand_len",
+                        ),
+                        LoadValue(
+                            "load_recovery_gate_0",
+                            values=recovery_gate0_by_depth,
+                            idx_reg="depth_idx",
+                            val_reg="recovery_gate_0",
+                        ),
+                        LoadValue(
+                            "load_recovery_gate_1",
+                            values=recovery_gate1_by_depth,
+                            idx_reg="depth_idx",
+                            val_reg="recovery_gate_1",
+                        ),
+                        Reset("reset", cfg=modules.reset),
+                        Repeat(
+                            "rand_gate_idx",
+                            "rand_len",
+                            range_hint=(0, max_rand_len),
+                        ).add_content(
+                            [
+                                LoadValue(
+                                    "load_rand_gate",
+                                    values=rand_gate_seq,
+                                    idx_reg="rand_gate_idx",
+                                    val_reg="gate_idx",
+                                ),
+                                ComputedPulse(
+                                    "basic_gate",
+                                    val_reg="gate_idx",
+                                    pulses=gate_pulses,
+                                ),
+                            ]
+                        ),
+                        # Full candidates in both slots keep recovery timing
+                        # independent of depth, even for identity padding.
+                        ComputedPulse(
+                            "recovery_gate_0",
+                            val_reg="recovery_gate_0",
+                            pulses=gate_pulses,
+                        ),
+                        ComputedPulse(
+                            "recovery_gate_1",
+                            val_reg="recovery_gate_1",
+                            pulses=gate_pulses,
+                        ),
+                        Readout("readout", cfg=modules.readout),
+                    )
+                    .declare_sweep("depth_idx", len(prefix_len_by_depth))
+                    .build()
+                )
+
+                # 4. Average reps/rounds into this seed's depth trace.
                 _ = builder.run_program(program)
 
         return RB_Result(

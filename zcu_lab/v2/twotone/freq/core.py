@@ -34,6 +34,8 @@ from zcu_tools.utils.process import minus_background
 
 @dataclass(frozen=True)
 class FreqResult:
+    """Drive frequencies in MHz and mean complex readout IQ, both shaped (Nfreq,)."""
+
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
 
@@ -100,6 +102,13 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         context: RunContext,
     ) -> FreqResult:
+        """Locate a qubit transition by sweeping the drive frequency.
+
+        Apply reset, the frequency-swept qubit probe, then readout; this
+        sequence does not use modules.init_pulse. Return mean complex IQ
+        at each frequency in MHz, not a fitted transition frequency.
+        """
+        # Prepare the frequency axis and display the background-subtracted contrast.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -124,6 +133,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             freq_sweep = cfg.sweep.freq
             modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
+            # Reset before each probe; sweep frequency on the FPGA, then read out.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add_reset("reset", modules.reset)
@@ -145,6 +155,12 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
+        """Fit the background-subtracted IQ magnitude to a Lorentzian or sinc line.
+
+        Ignore unacquired NaN points. Return transition frequency, FWHM and
+        their fit uncertainties in MHz, and publish the spectrum as ``fit``.
+        The source cfg may be None; only the acquired data enter the fit.
+        """
         result = source.result
 
         freqs = result.freqs
