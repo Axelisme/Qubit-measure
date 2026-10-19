@@ -1,6 +1,6 @@
 """Experiment starting values from fixed captures and injected templates."""
 
-from zcu_tools.cfg_model import Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Hidden, LogPoints, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
@@ -26,7 +26,7 @@ def make_form(ctx: FormContext) -> Form[IRBCfg]:
                 else Template("readout"),
                 "I_pulse": Hidden(),
             },
-            "sweep": {"depth": Range.between(0, 100, expts=21)},
+            "depths": LogPoints(max=128, points=9),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),
             "seed": 42,
