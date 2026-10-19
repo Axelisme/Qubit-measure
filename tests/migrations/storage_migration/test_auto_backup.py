@@ -68,10 +68,19 @@ def test_complete_backup_precedes_cleanup_and_resume_needs_no_sources(
     assert json.loads((entry_records / report_path.name).read_text()) == report
     manifest = json.loads((entry_records / "migration-state.json").read_text())
     assert manifest["report_path"] == str(report_path)
-    assert any(
-        row["source"] == str(backup / "result/chip/qubit/unknown.bin")
-        for row in report["pending"]
+    preserved = next(
+        row
+        for row in report["preserved_files"]
+        if row["source"] == str(old / "unknown.bin")
     )
+    target = request_data.results_root / request_data.name / "unknown.bin"
+    assert preserved["destination"] == str(target)
+    assert (
+        preserved["source_hash"]
+        == preserved["destination_hash"]
+        == hashes["result/chip/qubit/unknown.bin"]
+    )
+    assert target.read_bytes() == b"legacy artifact"
     migrate(replace(request_data, resume=True), mapping)
     assert (backup / "result/chip/qubit/unknown.bin").read_bytes() == b"legacy artifact"
 

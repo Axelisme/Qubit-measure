@@ -305,7 +305,7 @@ def test_unsupported_sources_publish_at_entry_and_point_locations_with_exact_has
     before = _snapshot(request_data.repo_root or old_result)
     dry = _convert(replace(request_data, dry_run=True), mapping)
     assert _snapshot(request_data.repo_root or old_result) == before
-    assert not (request_data.backup_parent / "repo-backup").exists()
+    assert not (request_data.result_root.parent.parent / "repo-backup").exists()
     assert dry.converted_files == dry.preserved_files == ()
     report = _convert(request_data, mapping)
     entry = _entry(request_data)
@@ -405,7 +405,7 @@ def test_reserved_destinations_are_refused_with_source_and_target_before_writes(
     assert str(source) in str(caught.value)
     assert str(destination) in str(caught.value)
     assert _snapshot(request_data.repo_root or old_root) == before
-    assert not (request_data.backup_parent / "repo-backup").exists()
+    assert not (request_data.result_root.parent.parent / "repo-backup").exists()
 
 
 @pytest.mark.parametrize("kind", ["same", "ancestor", "descendant"])
@@ -511,3 +511,28 @@ def test_interrupted_unknown_file_publication_prevents_cleanup_and_resumes(
     _convert(replace(request_data, resume=True), mapping)
     assert target.read_bytes() == b"unconverted\x00\xff\r\n"
     assert not source.exists()
+
+
+@pytest.mark.parametrize(
+    "occupation", ["incomplete_point", "point_file", "target_file"]
+)
+def test_resume_point_occupancy_reports_source_and_target_before_any_writes(
+    request_data: MigrationRequest, mapping: MigrationMapping, occupation: str
+) -> None:
+    source = _write(request_data.result_root / "chip/qubit/exps/context/notes/blob.bin")
+    request = replace(request_data, part="data")
+    _convert(request, mapping)
+    target = _entry(request).result_path / "points/context/notes/blob.bin"
+    point = target.parent.parent
+    if occupation == "incomplete_point":
+        point.mkdir()
+    elif occupation == "point_file":
+        _write(point)
+    else:
+        _write(target)
+    before = _snapshot(request_data.result_root.parent)
+    with pytest.raises((ValueError, OSError)) as caught:
+        _convert(replace(request, resume=True), mapping)
+    assert str(source) in str(caught.value)
+    assert str(target) in str(caught.value)
+    assert _snapshot(request_data.result_root.parent) == before
