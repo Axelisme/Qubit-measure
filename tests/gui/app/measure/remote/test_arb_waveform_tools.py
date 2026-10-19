@@ -52,7 +52,7 @@ def test_set_list_and_preview_round_trip(fixture: Fixture, tmp_path: Path) -> No
     assert fixture.state.version.get("arb_waveforms") == 1
 
     asset_path = (
-        tmp_path / "Database" / "chip_a" / "q1" / "arb_waveforms" / "arb_wav1.npz"
+        Path(fixture.state.session_env.database_path) / "arb_waveforms" / "arb_wav1.npz"
     )
     assert asset_path.exists()
 
