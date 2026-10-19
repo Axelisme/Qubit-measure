@@ -1,6 +1,7 @@
 """Measure composition uses one fixed form authority through Run and restoration."""
 
 import json
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -17,6 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
+from zcu_tools.gui.app.measure.services.caretaker import create_persistence_caretaker
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormInput, FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -84,6 +86,42 @@ def test_deferred_restore_preserves_pending_until_point_is_ready(
         assert application.ctrl.list_tab_ids() == restored_ids
         application.ctrl.close_tab(restored_ids[0])
         assert application.ctrl.capture_persisted_state().session.tabs == ()
+    finally:
+        application.stop()
+
+
+@pytest.mark.parametrize("adopt", ["restore", "clean"])
+def test_script_mode_preserves_original_until_explicit_adoption(
+    qapp: QApplication, tmp_path: Path, adopt: str
+) -> None:
+    application = Fixture(headless=True)
+    application.registry.register("trace", TraceAdapter)
+    try:
+        tab_id = application.ctrl.new_tab("trace")
+        application.ctrl.cfg_resources.lookup(tab_id).write({("amount",): 7.0})
+        saved = application.ctrl.capture_persisted_state()
+        caretaker = create_persistence_caretaker(application.ctrl, cache_dir=tmp_path)
+        application.ctrl.attach_caretaker(caretaker)
+        caretaker.flush()
+        application.ctrl.close_tab(tab_id)
+        assert callable(getattr(application.ctrl, "finish_startup_script", None)), "Script completion must explicitly adopt current tabs"
+        application.ctrl.restore_all(auto_restore_tabs=False)
+        application.ctrl.context_control.use_point(PointUseRequest("ctx001"))
+        assert application.ctrl.list_tab_ids() == []
+        # Script may already have opened new tabs; interrupted startup retains disk tabs.
+        live_id = application.ctrl.new_tab("trace")
+        application.ctrl.cfg_resources.lookup(live_id).write({("amount",): 9.0})
+        application.ctrl.persist_all()
+        assert json.loads(caretaker.state_path.read_text())["session"] == saved.session.model_dump(mode="json")
+        if adopt == "restore":
+            assert application.ctrl.restore_session().restored_tabs == 1
+        application.ctrl.finish_startup_script()
+        application.ctrl.finish_startup_script()
+        application.ctrl.persist_all()
+        amounts = [tab.form_input["data"] for tab in application.ctrl.capture_persisted_state().session.tabs]
+        assert amounts == ([{"amount": 9.0}, {"amount": 7.0}] if adopt == "restore" else [{"amount": 9.0}])
+        assert application.ctrl.restore_session().restored_tabs == 0
+        assert json.loads(caretaker.state_path.read_text())["session"] == application.ctrl.capture_persisted_state().session.model_dump(mode="json")
     finally:
         application.stop()
 
