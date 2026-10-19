@@ -17,6 +17,7 @@ uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
 
 ## 從哪裡讀起
 
+- [結果傳輸](docs/result-transfer.md)：首次以官方 rclone GUI 授權並保存雲端位置，之後使用 `python scripts/transfer_results.py upload/download <name>`，agent 可直接從 Bash 呼叫。
 - [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
 - [領域詞彙](docs/CONTEXT.md) 與 [實驗層](lib/zcu_tools/experiment/README.md)與 [GUI](lib/zcu_tools/gui/README.md)的 README 提供實作定位；跨模組決策見 [ADR](docs/adr/README.md)。
 - [測試目錄與 fixture](tests/README.md) 說明案例歸屬；[程式碼品質](docs/code-quality.md) 說明 review 判準。
