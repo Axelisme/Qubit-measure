@@ -454,8 +454,10 @@ class Form[C: ConfigBase]:
     ) -> FormInput[FormModel]:
         """Build fresh creation input for this persistent module or waveform Spec.
 
-        template names a catalog ID, with optional qubit/resonator bindings,
-        relative-path seed overrides. catalog maps IDs to
+        template names a catalog ID, with optional named placeholder bindings and
+        relative-path seed overrides. Explicit bindings override the fixed
+        defaults in env.placeholders; missing bindings raise ValueError.
+        catalog maps IDs to
         TemplateDef values. env supplies captured parameters and library for
         Expr initial values and Slot resolution. Partial seeds overlay Spec
         defaults; failed Expr initial values leave required fields unfilled.

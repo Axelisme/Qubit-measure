@@ -5,6 +5,9 @@
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
 
+`PlaceholderRegistry` 由 session 組裝建立，初始為空。`Template.bindings` 提供任意具名替換，覆蓋 registry defaults。
+`TemplateDef` 建構只驗語法，展開時才要求 binding。Registry 不解析 alias、不讀寫檔案，也不保存 process 全域狀態。
+
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。
 - `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description、group、readonly 與 element_label，不改 cfg 驗證或序列化的值。group 是 MCP schema 可用的前端中立分類名稱 hint。前端用 `get_field_meta` 讀取，並決定實際的 widget、排版與折疊行為。`readonly=True` 由上層 Form core 強制執行，同值寫入通過，不同值拒絕；element_label 提供 picker label。
 - `Expr`、`Range`、`LogPoints`、`AliasName`、`Hidden`、`Slot` 與 `Template` 是前端中立的起始值宣告。它們不求值、不讀來源。`LogPoints.include_zero` 預設 True，False 請求正值 Log／List；分支與產生規則由 form_adapter 擁有。固定欄位使用初值與 readonly，不提供 `Locked` 或 Slot／Template 的 lock 參數。FormNode 的 list 按位置提供 model 元素或 scalar list 的初值，各位置的唯讀值可以不同。`TemplateDef` 的持久 Spec 目錄由呼叫者注入，Form 保留各範本的非 lock 初值與 input projection，不以單值 Literal 實作 lock。還原保留唯讀欄位的存檔值，不重算宣告初值。Core cfg 自有的單值 Literal 仍保留其固定值語意。

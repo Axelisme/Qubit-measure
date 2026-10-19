@@ -96,9 +96,10 @@ entry/point, then tabs with input only when entry/point opened successfully.
 Each failure is logged; failed devices are remembered when possible, and skipped
 tabs are not retried after later source selection. Its on-close callback captures
 then-current state. Aliases are not in that cache: opening the entry loads its
-`aliases.yaml`, and Inspect Apply remains the save path. The current script does
-not read or write component placeholders; their registry/facet and script use
-belong to later framework decoupling work, with no reserved fields or fallback.
+`aliases.yaml`, and Inspect Apply remains the save path. The script also saves
+then-current placeholder defaults through `ctx.placeholders` and restores them
+before sources and tabs. No saved record means an empty registry; the framework
+never supplies component names. Form captures detach defaults at Open/Reset.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.

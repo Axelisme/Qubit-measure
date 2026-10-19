@@ -22,7 +22,9 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
         {
             "name": name,
             "drive": Template(
-                "qub_probe", qubit=name, set={"gain": 0.1, "waveform.length": 1.0}
+                "qub_probe",
+                bindings={"qubit": name},
+                set={"gain": 0.1, "waveform.length": 1.0},
             ),
             "sweep": Range.around(f"{name}.freq", f"1.5 * {name}.kappa", expts=301),
         }

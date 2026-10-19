@@ -3,6 +3,8 @@
 Only Expr seeds evaluate; ordinary strings, numbers and bools remain literal.
 Slot seeds retain library links. The composition root injects TEMPLATES once
 into its measure Registry. This module does not register anything at import time.
+Placeholder names are lab declarations, not framework defaults. Callers must
+supply Template.bindings or register defaults through the startup context.
 """
 
 from __future__ import annotations

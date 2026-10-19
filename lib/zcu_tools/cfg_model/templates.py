@@ -12,21 +12,69 @@ from .template_nodes import Expr, Slot, TemplateSeed
 from .waveform import WaveformSpec
 
 
-def expand_path(
-    path: str, *, qubit: str = "$qubit", resonator: str = "$resonator"
-) -> str:
-    """Expand component placeholders in a slot path or seed string.
-
-    Only ``{qubit}`` and ``{resonator}`` are accepted field names. Bindings are
-    authored paths such as ``$q2``; defaults retain the primary aliases. Python
-    ``str.format`` handles escaping braces and formatting. Malformed syntax or
-    an unknown field raises ValueError. This function never resolves aliases.
-    """
+def _validate_placeholders(text: str) -> None:
     try:
-        for _, field_name, _, _ in Formatter().parse(path):
-            if field_name is not None and field_name not in {"qubit", "resonator"}:
-                raise ValueError(f"Unknown placeholder {field_name!r}")
-        return path.format(qubit=qubit, resonator=resonator)
+        for _, name, spec, conversion in Formatter().parse(text):
+            if name is not None and not name.isidentifier():
+                raise ValueError(f"Expected a plain placeholder name, got {name!r}")
+            if conversion not in (None, "s", "r", "a"):
+                raise ValueError(f"Invalid conversion {conversion!r}")
+            if spec:
+                _validate_placeholders(spec)
+    except ValueError as exc:
+        raise ValueError(f"Invalid template placeholder in {text!r}: {exc}") from exc
+
+
+class PlaceholderRegistry:
+    """Session-owned defaults for named component placeholders, initially empty.
+
+    The host serializes access on its owner thread. This registry has no I/O,
+    process-global state or allowed-name policy: explicit template bindings may
+    introduce names not registered here. Snapshots detach defaults for fixed
+    captures and script-owned persistence.
+    """
+
+    def __init__(self) -> None:
+        self._defaults: dict[str, str] = {}
+
+    def register(self, name: str, default_binding: str) -> None:
+        """Set or replace one default without resolving its authored path.
+
+        name must be a plain identifier without braces. default_binding is
+        nonblank replacement text, typically a component path or alias. Invalid
+        names or blank bindings raise ValueError without changing the registry.
+        """
+        if not name.isidentifier():
+            raise ValueError(f"Invalid placeholder name {name!r}")
+        if not default_binding.strip():
+            raise ValueError("Placeholder default binding must not be blank")
+        self._defaults[name] = default_binding
+
+    def current(self) -> dict[str, str]:
+        """Return detached name-to-default bindings, empty before registration."""
+        return dict(self._defaults)
+
+
+def expand_path(
+    path: str,
+    *,
+    bindings: Mapping[str, str] | None = None,
+    defaults: Mapping[str, str] | None = None,
+) -> str:
+    """Expand plain named placeholders using a fixed set of authored bindings.
+
+    defaults supplies captured registry defaults; bindings overrides them and
+    may introduce unregistered names. Both default to empty. Replacements are
+    literal text, not recursively expanded or resolved as aliases. Double braces
+    escape literal braces. Standard string conversion and formatting are
+    supported. Missing bindings, traversal fields or malformed placeholders
+    raise ValueError naming the path and offending placeholder.
+    """
+    _validate_placeholders(path)
+    combined = dict(defaults or {})
+    combined.update(bindings or {})
+    try:
+        return path.format_map(combined)
     except (KeyError, IndexError, ValueError) as exc:
         raise ValueError(f"Invalid template placeholder in {path!r}: {exc}") from exc
 
@@ -61,15 +109,26 @@ class TemplateDef:
         ):
             raise TypeError("Template module must be a concrete persistent Spec type")
         object.__setattr__(self, "seeds", MappingProxyType(dict(self.seeds)))
-        self.expanded_seeds()
+        for seed in self.seeds.values():
+            if isinstance(seed, Expr):
+                _validate_placeholders(seed.text)
+            elif isinstance(seed, Slot):
+                _validate_placeholders(seed.path)
+            elif isinstance(seed, str):
+                _validate_placeholders(seed)
 
     def expanded_seeds(
-        self, *, qubit: str = "$qubit", resonator: str = "$resonator"
+        self,
+        *,
+        bindings: Mapping[str, str] | None = None,
+        defaults: Mapping[str, str] | None = None,
     ) -> dict[str, TemplateSeed]:
         """Return fresh seeds with component placeholders expanded.
 
-        Defaults use primary aliases; pass authored paths to bind another pair
-        of components. Ordinary strings remain literal, Expr remains Expr and
+        defaults supplies fixed registry defaults (empty when omitted).
+        bindings overrides those defaults, including unregistered names.
+        Missing bindings raise ValueError only at expansion, not construction.
+        Ordinary strings remain literal, Expr remains Expr and
         Slot remains Slot with only its path expanded, and other scalars remain
         unchanged. Expansion does not resolve values or mutate this definition.
         Invalid placeholders raise ValueError.
@@ -77,12 +136,15 @@ class TemplateDef:
         expanded: dict[str, TemplateSeed] = {}
         for path, seed in self.seeds.items():
             if isinstance(seed, Expr):
-                seed = Expr(expand_path(seed.text, qubit=qubit, resonator=resonator))
+                seed = Expr(
+                    expand_path(seed.text, bindings=bindings, defaults=defaults)
+                )
             elif isinstance(seed, Slot):
                 seed = replace(
-                    seed, path=expand_path(seed.path, qubit=qubit, resonator=resonator)
+                    seed,
+                    path=expand_path(seed.path, bindings=bindings, defaults=defaults),
                 )
             elif isinstance(seed, str):
-                seed = expand_path(seed, qubit=qubit, resonator=resonator)
+                seed = expand_path(seed, bindings=bindings, defaults=defaults)
             expanded[path] = seed
         return expanded
