@@ -9,7 +9,7 @@ device-name / kind queries. The async handle (await / poll / cancel) lives in
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol, cast
+from typing import Protocol
 
 import pytest
 from zcu_tools.gui.app.measure.services.operation_gate import (
@@ -50,7 +50,7 @@ def _register(gate: ExclusionGate, *args, **kwargs) -> None:
     ]
 )
 def gate_case(request: pytest.FixtureRequest) -> GateCase:
-    factory = cast(Callable[[], GateCase], request.param)
+    factory: Callable[[], GateCase] = request.param
     return factory()
 
 
