@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Generic, Protocol, TypeVar
 
+from zcu_tools.utils import atomic_replace
 from zcu_tools.utils.cache import user_cache_root
 
 StateT = TypeVar("StateT")
@@ -114,7 +115,7 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
             ) as file:
                 temp_path = Path(file.name)
                 file.write(json.dumps(payload, ensure_ascii=True, indent=2))
-            temp_path.replace(self._path)
+            atomic_replace(temp_path, self._path)
         except Exception as exc:
             if temp_path is not None:
                 try:

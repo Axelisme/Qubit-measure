@@ -14,6 +14,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from zcu_tools.utils import atomic_replace
+
 from .journal import (
     IterationResult,
     IterationStarted,
@@ -270,7 +272,7 @@ class RunArtifacts:
             if writer.write(line) != len(line):
                 raise OSError("Manifest write was incomplete")
             writer.flush()
-        temporary.replace(self._paths.metadata_root / "manifest.json")
+        atomic_replace(temporary, self._paths.metadata_root / "manifest.json")
 
     def capture_record(
         self, started: IterationStarted, tunables: BaseModel
@@ -370,7 +372,8 @@ class IterationArtifacts:
         payload is the Engine-owned input/result envelope, not workflow state.
         Write and close a unique same-directory temporary before replace.
         Errors propagate to RunArtifacts' best-effort isolation; temporary
-        files remain for diagnosis, and no retry or checkpoint is provided.
+        files remain for diagnosis. Only transient Windows sharing/lock errors
+        are retried for up to 0.5 seconds; this is not a checkpoint.
         """
         line = _json_line(payload)
         temporary = self._root / f".record-{uuid4().hex}.tmp.json"
@@ -378,4 +381,4 @@ class IterationArtifacts:
             if writer.write(line) != len(line):
                 raise OSError("Iteration record write was incomplete")
             writer.flush()
-        temporary.replace(self._root / "record.json")
+        atomic_replace(temporary, self._root / "record.json")

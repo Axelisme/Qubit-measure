@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -398,6 +399,46 @@ def test_schema_rejects_malformed_wire_arrays(defect: str) -> None:
     )
     with pytest.raises(ValueError, match="readout"):
         validate_experiment_payload(payload, schema=(schema,))
+
+
+@pytest.mark.parametrize("winerror", [32, 33])
+def test_native_overwrite_recovers_from_windows_lock_after_closing_hdf5(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, winerror: int
+) -> None:
+    path = tmp_path / "run.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    changed = replace(native_metadata(), completion="stopped", finished_at=None)
+
+    class WindowsLockError(OSError):
+        def __init__(self) -> None:
+            super().__init__("native destination temporarily locked")
+            self.winerror = winerror
+
+    original_replace = os.replace
+    attempts = 0
+
+    def replace_closed_file(source: Path, destination: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        # The pending native file must be readable before it can be published.
+        assert load_run_data(source).metadata == changed
+        if attempts == 1:
+            assert load_run_data(destination).metadata == native_metadata()
+            raise WindowsLockError()
+        original_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", replace_closed_file)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    failure: OSError | None = None
+    try:
+        save_run_data(path, native_payload(), changed, cfg=native_cfg(), replace=True)
+    except OSError as error:
+        failure = error
+
+    assert failure is None, "a transient Windows lock must not abort native overwrite"
+    assert load_run_data(path).metadata == changed
+    assert attempts == 2
+    assert list(tmp_path.iterdir()) == [path]
 
 
 def test_failed_atomic_publication_preserves_destination_and_cleans_temp(
