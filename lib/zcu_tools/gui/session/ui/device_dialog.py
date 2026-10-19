@@ -25,6 +25,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
@@ -400,6 +401,16 @@ class DeviceDialog(QDialog):
         drop_row.addStretch()
         left_layout.addLayout(drop_row)
 
+        self._rename_edit = QLineEdit()
+        self._rename_edit.setObjectName("device_rename_name")
+        self._rename_edit.setPlaceholderText("New name")
+        self._rename_btn = QPushButton("Rename")
+        self._rename_btn.clicked.connect(self._on_rename_clicked)
+        rename_row = QHBoxLayout()
+        rename_row.addWidget(self._rename_edit)
+        rename_row.addWidget(self._rename_btn)
+        left_layout.addLayout(rename_row)
+
         # Add device form
         self._add_box = QGroupBox("Register New Device")
         add_form = QFormLayout(self._add_box)
@@ -695,6 +706,9 @@ class DeviceDialog(QDialog):
             # resource-aware in Phase C).
             self._drop_btn.setEnabled(False)
             self._drop_btn.setText("Drop")
+            self._rename_edit.setEnabled(False)
+            self._rename_btn.setEnabled(False)
+            self._rename_btn.setToolTip("Select a disconnected device to rename.")
             self._refresh_btn.setEnabled(False)
             self._apply_btn.setEnabled(False)
             self._apply_btn.setText("Apply Changes")
@@ -724,6 +738,15 @@ class DeviceDialog(QDialog):
         # different device's setup. So: enable iff the selected device is idle.
         self._drop_btn.setEnabled(not self._read_only and not is_busy)
         self._drop_btn.setText("Forget" if is_memory else "Drop")
+
+        can_rename = not self._read_only and is_memory
+        self._rename_edit.setEnabled(can_rename)
+        self._rename_btn.setEnabled(can_rename)
+        self._rename_btn.setToolTip(
+            "Rename the disconnected device. Aliases are not updated."
+            if is_memory
+            else "Disconnect the device before renaming."
+        )
 
         # --- Refresh button ---
         # refresh reads get_device_info; the read is gate-guarded against the
@@ -796,6 +819,23 @@ class DeviceDialog(QDialog):
         )
         set_foreground(self._add_status, secondary_colour(self))
         self._add_status.setText(f"Connecting {name}...")
+
+    def _on_rename_clicked(self) -> None:
+        if self._read_only:
+            return
+        name = self._selected_device_name()
+        if name is None:
+            return
+        new_name = self._rename_edit.text()
+        try:
+            self._dev.rename_device(name, new_name)
+        except ExpectedError as exc:
+            self._show_error(str(exc))
+            return
+        self._refresh_list(select_name=new_name)
+        self._rename_edit.clear()
+        set_foreground(self._add_status, success_colour(self))
+        self._add_status.setText(f"Device name: {new_name}. Aliases are unchanged.")
 
     def _on_forget_clicked(self) -> None:
         if self._read_only:

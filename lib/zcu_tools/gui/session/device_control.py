@@ -45,6 +45,16 @@ class DeviceControlPort(Protocol):
     def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int: ...
     def start_reconnect_device(self, name: str) -> int: ...
     def start_setup_device(self, req: SetupDeviceRequest) -> int: ...
+    def rename_device(self, old_name: str, new_name: str) -> None:
+        """Rename an idle MEMORY_ONLY row verbatim on the owner thread.
+
+        Empty/whitespace or conflicting names raise InvalidInputError; unknown,
+        live or in-flight rows raise FailedPreconditionError, including same-name
+        requests. Otherwise same-name is a no-op. Success refreshes live values
+        and remembered settings, not aliases, tabs or historical captures.
+        """
+        ...
+
     def forget_device(self, name: str) -> None: ...
     def cancel_device_operation(self, name: str) -> None: ...
 
@@ -116,6 +126,10 @@ class DeviceControlFacet:
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
         return self._device.start_setup_device(req)
+
+    def rename_device(self, old_name: str, new_name: str) -> None:
+        """Apply DeviceControlPort.rename_device's owner and failure contract."""
+        self._device.rename_device(old_name, new_name)
 
     def forget_device(self, name: str) -> None:
         self._device.forget_device(name)
