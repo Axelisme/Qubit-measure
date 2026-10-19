@@ -111,10 +111,16 @@ class PredictorService:
         root = (
             self._context.get_predictors_path() if self._context is not None else None
         )
-        if root is None or not root.exists():
+        if root is None:
+            return ()
+        try:
+            paths = tuple(root.iterdir())
+        except FileNotFoundError:
             return ()
         return tuple(
-            sorted(path.name for path in root.glob("*.json") if path.is_file())
+            sorted(
+                path.name for path in paths if path.match("*.json") and path.is_file()
+            )
         )
 
     def load_file(self, filename: str) -> PredictorFile:

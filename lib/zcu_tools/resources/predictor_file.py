@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +18,10 @@ class PredictorSource:
     """Authored provenance, with no generated values or ledger lookup.
 
     run_id is a nonblank opaque run identifier, or None when unknown.
-    created_at is an ISO 8601 timestamp with timezone, or None when unknown.
+    created_at is None when unknown, otherwise an extended calendar timestamp:
+    YYYY-MM-DDTHH:MM[:SS[.ffffff]] followed by Z or an offset of ±HH:MM.
+    Only uppercase T separates date and time; fractional seconds use 1–6 digits.
+    Calendar, time and offset values must be valid; other ISO forms are rejected.
     Text is preserved verbatim. The file I/O functions validate these fields.
     """
 
@@ -93,6 +97,18 @@ def _decode(value: object) -> PredictorFile:
     run_id = _nullable_text(source["run_id"], "source.run_id")
     created_at = _nullable_text(source["created_at"], "source.created_at")
     if created_at is not None:
+        if (
+            re.fullmatch(
+                r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}"
+                r"(?::[0-9]{2}(?:\.[0-9]{1,6})?)?(?:Z|[+-][0-9]{2}:[0-9]{2})",
+                created_at,
+            )
+            is None
+        ):
+            raise ValueError(
+                "source.created_at must be YYYY-MM-DDTHH:MM[:SS[.ffffff]] "
+                "with Z or ±HH:MM"
+            )
         timestamp = datetime.fromisoformat(created_at)
         if timestamp.utcoffset() is None:
             raise ValueError("source.created_at must include a timezone")
