@@ -60,6 +60,21 @@ class _PulseMetadata:
     block_length: Time | None
 
 
+@dataclass(frozen=True)
+class _ComputedPulseTable:
+    """Candidate-by-point matrices at the Module's most recent scalar offset."""
+
+    local_time: float
+    gen_ch: int
+    start_offsets: FloatArray
+    duration: FloatArray
+    frequency: FloatArray
+    phase: FloatArray
+    gain: FloatArray
+    envelopes: tuple[PulseEnvelope | None, ...]
+    block_length: float
+
+
 @dataclass
 class _Read:
     trigger: FloatArray
@@ -122,6 +137,7 @@ class VectorInterpreter:
         self._iterations: list[tuple[str, int]] = []
         # Module identity is valid only within this compiled interpretation.
         self._pulse_metadata: dict[Pulse, _PulseMetadata] = {}
+        self._computed_tables: dict[ComputedPulse, _ComputedPulseTable] = {}
         self._structures: list[IntArray] = []
         self.flat_tops = FlatTopEnvelopes()
 
@@ -295,19 +311,68 @@ class VectorInterpreter:
 
     def _computed(self, module: ComputedPulse, t: Time) -> Time:
         index = self._index(module.val_reg, len(module.pulse_modules))
-        slots = []
-        for candidate in module.pulse_modules:
-            start = len(self._events)
-            self._pulse(candidate, t)
-            slots.append(self._events.pop(start)[0])
-        slot = select_candidates(slots, index, source=module.name)
+        if isinstance(t, QickParam):
+            slots = self._computed_slots(module, t)
+            slot = select_candidates(slots, index, source=module.name)
+            block_length = module.total_length(self._prog)
+        else:
+            table = self._computed_tables.get(module)
+            if table is None or table.local_time != t:
+                table = self._computed_table(module, t)
+                self._computed_tables[module] = table
+
+            def select(values: FloatArray) -> FloatArray:
+                return np.take_along_axis(values, index[None, :], axis=0)[0]
+
+            slot = EventSlot(
+                table.gen_ch,
+                module.name,
+                tuple(self._iterations),
+                select(self._ref[None, :] + table.start_offsets),
+                select(table.duration),
+                select(table.frequency),
+                select(table.phase),
+                select(table.gain),
+                table.envelopes,
+                index.copy(),
+                self._active.copy(),
+            )
+            block_length = table.block_length
         self._events.append((slot, self._presence.copy()))
         self._gen_end[slot.gen_ch] = np.where(
             self._active,
             slot.start_us + slot.duration_us,
             self._gen_end[slot.gen_ch],
         )
-        return t + module.total_length(self._prog)
+        return t + block_length
+
+    def _computed_slots(self, module: ComputedPulse, t: Time) -> list[EventSlot]:
+        slots = []
+        for candidate in module.pulse_modules:
+            start = len(self._events)
+            self._pulse(candidate, t)
+            slots.append(self._events.pop(start)[0])
+        return slots
+
+    def _computed_table(self, module: ComputedPulse, t: float) -> _ComputedPulseTable:
+        slots = self._computed_slots(module, t)
+        # Cache quantized offsets before adding the dynamic reference. Subtracting
+        # the reference from an absolute timestamp would change float rounding.
+        offsets = []
+        for candidate in module.pulse_modules:
+            assert candidate.cfg is not None
+            offsets.append(self._tick(t + candidate.cfg.pre_delay))
+        return _ComputedPulseTable(
+            t,
+            slots[0].gen_ch,
+            np.stack(offsets),
+            np.stack([s.duration_us for s in slots]),
+            np.stack([s.frequency_mhz for s in slots]),
+            np.stack([s.phase_deg for s in slots]),
+            np.stack([s.gain for s in slots]),
+            tuple(s.envelopes[0] for s in slots),
+            module.total_length(self._prog),
+        )
 
     def _reset(self, module: Module, t: Time) -> Time:
         if type(module) is NoneReset:
