@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-13，Fluxdep database metadata contract
+**Last updated:** 2026-10-19，明確宣告的 grouped independent Labber layout
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -45,8 +45,9 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 
 - `write_labber` 從同一 `ExperimentPayload` 輸出 single 或 canonical
   common-grid grouped Labber，包括單成員 grouped。預設 `grouped_layout='common'`
-  保留這個單一 Experiment Result 契約。明填 `grouped_layout='independent'`
-  時只接受 grouped、各自 1D/2D 的 workflow variables，重用既有 marker-qualified
+  要求所有 variables 共用 grid，不因 grid 不同自動切換。明填
+  `grouped_layout='independent'` 時接受明確宣告的 grouped 資料，各 variable
+  必須為 1D/2D，重用既有 marker-qualified
   heterogeneous streaming v1 layout，完整寫入並標 finalized，不新增 schema 或 fallback。
   每個 variable 的軸、數值與 per-inner-trace epoch timestamps 各自保存。
   `load_grouped_labber_data` 讀回各自的 rank/grid；這不是 Labber Log Browser 驗收。

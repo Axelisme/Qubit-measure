@@ -194,7 +194,12 @@ def _save_data(
         try:
             output.path.parent.mkdir(parents=True, exist_ok=True)
             if output.format == "labber":
-                write_labber(output.path, member.data.payload, cfg=member.data.cfg)
+                write_labber(
+                    output.path,
+                    member.data.payload,
+                    cfg=member.data.cfg,
+                    grouped_layout=member.data.labber_layout,
+                )
                 metadata = replace(metadata, labber_path=str(output.path))
             else:
                 save_run_data(
