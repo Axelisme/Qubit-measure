@@ -27,14 +27,20 @@ from .multitone_rwa import (
     rwa_coefficients,
 )
 
+_MIN_SUBSEGMENTS = 4
+_SPLIT_ALLOWANCE = 0.01
+_MAX_STEP_NS = 4.0
+_RTOL = 1e-9
+_ATOL = 1e-11
+
 GATE_POLICY = (
     "joint-covariant-adaptive-v2",
     RWA_GRAPH_POLICY,
-    4,
-    0.01,
-    4.0,
-    1e-9,
-    1e-11,
+    _MIN_SUBSEGMENTS,
+    _SPLIT_ALLOWANCE,
+    _MAX_STEP_NS,
+    _RTOL,
+    _ATOL,
 )
 
 
@@ -247,10 +253,15 @@ def gate_segments(table: SegmentTable, row: int, context: KernelContext) -> int:
             for k in range(table.tones[row])
         )
         return max(
-            4,
+            _MIN_SUBSEGMENTS,
             int(
                 np.ceil(
-                    np.sqrt(table.duration_ns[row] ** 3 * gamma * strength**2 / 0.01)
+                    np.sqrt(
+                        table.duration_ns[row] ** 3
+                        * gamma
+                        * strength**2
+                        / _SPLIT_ALLOWANCE
+                    )
                 )
             ),
         )
@@ -289,9 +300,9 @@ def _single_rhs(time, state, context):
 @njit(nogil=True, cache=True)
 def _single_unitaries(context, duration_ns):
     size = len(context.energy)
-    result = np.empty((4, size, size), dtype=np.complex128)
-    boundaries = np.linspace(0.0, duration_ns, 5)
-    for segment in range(4):
+    result = np.empty((_MIN_SUBSEGMENTS, size, size), dtype=np.complex128)
+    boundaries = np.linspace(0.0, duration_ns, _MIN_SUBSEGMENTS + 1)
+    for segment in range(_MIN_SUBSEGMENTS):
         start, end = boundaries[segment], boundaries[segment + 1]
         interval = _SingleContext(
             context.energy,
@@ -307,7 +318,7 @@ def _single_unitaries(context, duration_ns):
             interval,
             np.eye(size, dtype=np.complex128).ravel(),
             end - start,
-            Tolerances(1e-9, 1e-11, 4.0),
+            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS),
             1.0,
         )
         endpoint = state.reshape(size, size)
@@ -338,7 +349,7 @@ def _adaptive_unitaries(context, duration_ns, segments):
             interval,
             np.eye(size, dtype=np.complex128).ravel(),
             end - start,
-            Tolerances(1e-9, 1e-11, 4.0),
+            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS),
             1.0,
         )
         endpoint = state.reshape(size, size)
@@ -384,7 +395,7 @@ def _build_unitaries(
             0.0,
         )
         duration = float(table.duration_ns[row])
-        if segments == 4:
+        if segments == _MIN_SUBSEGMENTS:
             return _single_unitaries(single_context, duration)
         return _adaptive_unitaries(single_context, duration, segments)
 
@@ -410,9 +421,9 @@ def _build_unitaries(
             (start, end),
             np.eye(size, dtype=complex).ravel(),
             method="DOP853",
-            rtol=1e-9,
-            atol=1e-11,
-            max_step=4.0,
+            rtol=_RTOL,
+            atol=_ATOL,
+            max_step=_MAX_STEP_NS,
         )
         if not solution.success:
             raise RuntimeError(f"joint gate integration failed: {solution.message}")
@@ -532,7 +543,7 @@ class CovariantGateKernel:
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
         """Four-step baseline work; the cold planner also charges adaptive n."""
         del table
-        return np.full(len(rows), 4.0)
+        return np.full(len(rows), float(_MIN_SUBSEGMENTS))
 
     def prepare(
         self,

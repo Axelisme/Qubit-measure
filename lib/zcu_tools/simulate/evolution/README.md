@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone omitted-channel retention
+**Last updated:** 2026-10-19, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone omitted-channel retention, shared Floquet policies and dispatch contracts
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -66,9 +66,11 @@ tries the next candidate in the following graph.
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
 no-tone or single constant-tone row respectively. They have no DOP853 fallback.
-The internal [registry](kernels/__init__.py) contains thirteen families. T7 is the
+The internal [registry](kernels/__init__.py) contains 14 families. T7 is the
 single-tone `dyson` family; the two-tone `floquet` family has its own modal
-second-order Dyson implementation.
+second-order Dyson implementation. Production `dop853` is terminal for valid
+ordinary rows. The direct-first two-tone chain retains its Floquet tail only
+for injected registries whose DOP853-named kernel can reject.
 
 ### Builders and variants
 
@@ -79,11 +81,11 @@ application and certificates that require their intermediate data.
 | --- | --- |
 | `floquet_period` | The period guard admits a single constant tone at `abs(f) >= 0.03 GHz` when its secular split bound passes. Dispatch selects dense Hilbert DOP853 at `abs(f) >= 1 GHz`. Below that, it compares Sambe work with CF4 coarse/fine work. A declined Sambe certificate uses standalone CF4, not gain anchors. For CF4 keys, dispatch fixes gain anchors from the complete gain group. Constant-CF4 inventories with at least sixteen same-sign carriers and a magnitude ratio at most 1.01 can instead use four real carrier anchors at fixed gain. Gain groups take precedence, so a key never expands both axes. Carrier prediction interpolates interaction-picture prefixes, restores the target carrier's lab frame and checks the original nine coarse-grid probes. Rejection refines the already-built coarse grid; incompatible anchor grids build independently. Prepare keys and row admission do not change. |
 | `gate_cache` | Dispatch sends a key-aligned builder mask. Positive durations up to 30 ns first try six phase nodes with two independent probes; failed convergence uses sixteen nodes. Other keys directly use sixteen nodes. Both builders produce four closed-system subsegments with secular Strang dissipation and the same phase-Fourier representation. |
-| `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. |
+| `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. Ordinary period_table also supports DC locally; default Engine costs put terminal DOP853 first for DC. |
 | `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. A cached sideband frame extends to missing probe bins without rebuilding the frame or existing certificates. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
 | `single_tone_gate` | Dispatch compares numerically admitted canonical-key builds and n-step playback against shared spectral-family Sambe construction, subperiod playback, phase contraction, polar iterations and fractional tails. It chooses the cheapest all-Sambe, mixed or all-gate cold plan. Estimates use joint dimension, duration, retained drive strength, shape motion, carrier frequency and actual subdivisions. The kernel requires exactly one smooth real sampled tone and shares RWA, phase-graph pruning and secular split admission with simultaneous gates. Sliced support, nonzero envelope offsets and final sample hold are allowed. Rejection retains Sambe. |
-| `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared real-envelope RWA admission, row-bounded sampled playback including slices and final hold, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and adaptive secular splitting with proxy at most 0.01. Builds n joint Hilbert propagators using the same `RWACoefficients.diagonal` window-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
-| `single_tone_rwa` | After Dyson, single constant rows try a constant rotating-frame Lindbladian built from the shared retained graph, coefficient diagonal and full secular bath. All populations and within-component coherences form a real block of dimension at most 64. Cross-component coherences use small complex exponentials or scalar closed forms. Apply skips only exact-zero cross-block RHS, preserves arbitrary complex residuals and restores both phase endpoints. Admission shares the constant-only omission rule below, the 0.06 rad phase cap and explicit graph-pruning bound. Rejection keeps the original period/Dyson/T6 order. |
+| `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared real-envelope RWA admission, row-bounded sampled playback including slices and final hold, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and adaptive secular splitting with proxy at most 0.01. Builds n joint Hilbert propagators using the same `RWACoefficients.diagonal` final-mask-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
+| `single_tone_rwa` | Single constant rows follow the RWA-first or Dyson-first order in the decision table above and try a constant rotating-frame Lindbladian built from the shared retained graph, coefficient diagonal and full secular bath. All populations and within-component coherences form a real block of dimension at most 64. Cross-component coherences use small complex exponentials or scalar closed forms. Apply skips only exact-zero cross-block RHS, preserves arbitrary complex residuals and restores both phase endpoints. Admission shares the constant-only omission rule below, the 0.06 rad phase cap and explicit graph-pruning bound. Rejection follows that row's remaining candidates. |
 | `multitone_rwa` | Starts with joint-basis Fourier edges satisfying `abs(Ei-Ej±f) < 0.05 GHz`, restores channels with excessive omitted transfer or phase, obtains final-mask-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 16 ns adaptive ceiling for dual constant rows and 4 ns otherwise. Sampled and dual constant admission share iterative omitted one/two-photon retention with single constant RWA, with separate residual-phase and real-block dimension limits. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the interaction picture only for independent, single-tone, nonzero-gain rows. Chains and other ordinary rows use the lab frame. Flux DOP853 has its own chain plan. |
 
@@ -184,8 +186,9 @@ and curvature 0.00231/ns², including DAC quantization. Smoothness admission use
 measured pulses, rather than treating arbitrary samples as smooth. Carrier
 separation remains independent of omission-driven retention. They are admission limits, not rigorous omission-error
 bounds. Preparation also computes one float64 coefficient per key, tone and
-joint state: `sum(j,s, abs(C_s[i,j])**2/(Ei-Ej+s*f))`, restricted to
-`abs(Ei-Ej+s*f) >= 0.05 GHz`, with `C_+=(X-iY)/2` and `C_-=C_+†`.
+joint state: `sum(j,s, abs(C_s[i,j])**2/(Ei-Ej+s*f))` over the final omitted
+Fourier mask, with `C_+=(X-iY)/2` and `C_-=C_+†`. Without adaptive retention,
+this is the set `abs(Ei-Ej+s*f) >= 0.05 GHz`. Restored edges are excluded.
 The Hamiltonian multiplies this diagonal shift by the actual
 `gain**2 * abs(envelope(t))**2`, including ramps and envelope offsets.
 Retained edges are excluded before division, so exact resonances are not
@@ -282,7 +285,8 @@ additional package integration entry points.
   calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
   and the family's plan. Floquet and both direct solvers require their own plan;
   a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
-  Families without plans, including all three RWA families, reject a non-`None` plan with `ValueError`.
+  Families without plans, including `single_tone_rwa`, `multitone_rwa`,
+  `single_tone_gate` and `multitone_gate`, reject a non-`None` plan with `ValueError`.
 
 Dispatch returns at most one plan per family and a separate global-row chain
 array. [Scheduling](_schedule.py) keeps the originating plan through preparation
@@ -296,6 +300,11 @@ acceptance mask. A guard may read the source initial density or an
 engine-computed certified prefix input, never a worker's evolving density.
 Guards do not evolve density. `guard_builds` identifies table-building guards;
 `guard_prepared` hands accepted model-only products to apply without rebuilding.
+When `guard_builds` is true, the hook must return `GuardResult`, even for empty
+or rejected rows. Returning `None` raises rather than retrying `guard`.
+When false, classification calls `guard` directly. The `multitone_gate` wrapper
+also owns its fixed complete-acquire reuse threshold; prefix and worker calls
+borrow that inventory, never subset counts or resident warmth.
 Cross-timeline keys are guarded before shared preparation. Local builders run
 inside their timeline worker and retain the same handoff.
 
