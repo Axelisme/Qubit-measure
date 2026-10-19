@@ -87,6 +87,14 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
     )
 
     def run(self, config: T1Cfg, *, context: RunContext) -> T1Result:
+        """Measure relaxation during a flux pulse at each programmed flux gain.
+
+        Reset, excite with π, apply the gain/length-swept flux pulse, then read
+        out. Return flux gains in a.u., pulse lengths in us and mean complex IQ
+        shaped (gain, length). Each row is a decay trace; T1 is fitted later,
+        not a directly measured population or a conversion from gain to flux.
+        """
+        # Resolve flux gain and duration coordinates on the hardware grid.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -94,11 +102,11 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         gain_sweep = cfg.sweep.gain
         length_sweep = cfg.sweep.length
 
-        # uniform in square space
         lf_ch = modules.flux_pulse.ch
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
+        # Keep the relaxation traces grouped by flux gain.
         viewer = context.plots.liveplot_2d(
             "measurement", "Flux Pulse Gain (a.u.)", "Time (us)"
         )
@@ -106,6 +114,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             (len(gains), len(lengths)),
             on_update=lambda data: viewer.update(gains, lengths, t1_signal2real(data)),
         )
+
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.flux_pulse.set_param(
@@ -114,6 +123,8 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             modules.flux_pulse.set_param(
                 "length", sweep2param("length", sched.cfg.sweep.length)
             )
+
+            # Let the excited state evolve during the flux pulse before readout.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -136,6 +147,12 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         *,
         plots: Plots,
     ) -> T1Analysis:
+        """Fit decay at each flux gain, returning T1 and fit errors in us.
+
+        First estimate a common baseline from accepted preliminary fits, then
+        refit each row with that baseline fixed. Rejected final fits retain NaN
+        T1 values; their initialized zero errors do not indicate a valid fit.
+        """
         del options  # This analysis has no configurable options.
         result = source.result
 

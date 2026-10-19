@@ -170,104 +170,85 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             "ro_ch": modules.readout.ro_ch,
         }
 
-    def _run_uniform(
-        self,
-        cfg: FreqCfg,
-        *,
-        context: RunContext,
-    ) -> FreqResult:
-        soc, soccfg = context.soc, context.soccfg
-
-        # Predicted frequency points (before mapping to ADC domain)
-        freqs = sweep2array(cfg.sweep.freq, "freq", self._round_info(cfg, soccfg))
-
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Frequency (MHz)", "Amplitude"
-        )
-        signals_buffer = SignalBuffer(
-            (len(freqs),),
-            on_update=lambda data: viewer.update(freqs, freq_signal2real(data)),
-        )
-
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-
-            freq_sweep = cfg.sweep.freq
-            modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
-
-            _ = (
-                sched.prog_builder(soc, soccfg)
-                .add_reset("reset", modules.reset)
-                .add(PulseReadout("readout", modules.readout))
-                .declare_sweep("freq", freq_sweep)
-                .build_and_acquire()
-            )
-
-        return FreqResult(freqs=freqs, signals=signals_buffer.array)
-
-    def _run_nonuniform(
-        self,
-        cfg: FreqCfg,
-        *,
-        context: RunContext,
-    ) -> FreqResult:
-        soc, soccfg = context.soc, context.soccfg
-        params = cfg.homophasal
-        if params is None:
-            raise ValueError("homophasal sampling requires fit parameters")
-
-        freqs = homophasal_sweep2array(
-            cfg.sweep.freq, params, self._round_info(cfg, soccfg)
-        )
-
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Frequency (MHz)", "Amplitude"
-        )
-        signals_buffer = SignalBuffer(
-            (len(freqs),),
-            on_update=lambda data: viewer.update(freqs, freq_signal2real(data)),
-        )
-
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            modules.readout.set_param("freq", float(freqs[0]))
-            readout_cfg = modules.readout
-            freq_words, ro_freq_words = readout_freq_words(
-                soccfg,
-                freqs,
-                gen_ch=readout_cfg.gen_ch,
-                ro_ch=readout_cfg.ro_ch,
-                mixer_freq=readout_cfg.mixer_freq,
-                nqz=readout_cfg.nqz,
-            )
-
-            _ = (
-                sched.prog_builder(soc, soccfg)
-                .add_reset("reset", modules.reset)
-                .add(
-                    TablePulseReadout(
-                        "readout",
-                        modules.readout,
-                        idx_reg="freq",
-                        freq_words=freq_words,
-                        ro_freq_words=ro_freq_words,
-                    ),
-                )
-                .declare_sweep("freq", len(freqs))
-                .build_and_acquire()
-            )
-
-        return FreqResult(freqs=freqs, signals=signals_buffer.array)
-
     def run(self, config: FreqCfg, *, context: RunContext) -> FreqResult:
+        """Measure the resonator response with linear or equal-phase frequency spacing.
+
+        Reset, then pulse and read out at each hardware-swept frequency. Return
+        hardware-rounded frequencies in MHz and mean complex IQ at each point;
+        fitting this response gives the resonance frequency and linewidth.
+        Homophasal sampling requires positive fit parameters and rejects points
+        that collapse onto the same hardware frequency.
+        """
+        # 1. Prepare the frequency grid without changing the caller's cfg.
         cfg = deepcopy(config)
+        soc, soccfg = context.soc, context.soccfg
         if cfg.sampling_mode == "linear":
-            return self._run_uniform(cfg, context=context)
-        if cfg.sampling_mode == "homophasal":
-            return self._run_nonuniform(cfg, context=context)
-        raise ValueError(f"Invalid sampling_mode: {cfg.sampling_mode}")
+            freqs = sweep2array(cfg.sweep.freq, "freq", self._round_info(cfg, soccfg))
+        elif cfg.sampling_mode == "homophasal":
+            params = cfg.homophasal
+            if params is None:
+                raise ValueError("homophasal sampling requires fit parameters")
+            freqs = homophasal_sweep2array(
+                cfg.sweep.freq, params, self._round_info(cfg, soccfg)
+            )
+        else:
+            raise ValueError(f"Invalid sampling_mode: {cfg.sampling_mode}")
+
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Frequency (MHz)", "Amplitude"
+        )
+        signals_buffer = SignalBuffer(
+            (len(freqs),),
+            on_update=lambda data: viewer.update(freqs, freq_signal2real(data)),
+        )
+
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+
+            # 2. Reset then read out; both modes keep the frequency loop on the FPGA.
+            if cfg.sampling_mode == "linear":
+                freq_sweep = cfg.sweep.freq
+                modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+                builder = (
+                    sched.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add(PulseReadout("readout", modules.readout))
+                    .declare_sweep("freq", freq_sweep)
+                )
+            else:
+                modules.readout.set_param("freq", float(freqs[0]))
+                readout_cfg = modules.readout
+                freq_words, ro_freq_words = readout_freq_words(
+                    soccfg,
+                    freqs,
+                    gen_ch=readout_cfg.gen_ch,
+                    ro_ch=readout_cfg.ro_ch,
+                    mixer_freq=readout_cfg.mixer_freq,
+                    nqz=readout_cfg.nqz,
+                )
+
+                # Update DDS words after each point, wrapping for the next rep;
+                # the table readout preserves the native sweep's phase timing.
+                builder = (
+                    sched.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add(
+                        TablePulseReadout(
+                            "readout",
+                            modules.readout,
+                            idx_reg="freq",
+                            freq_words=freq_words,
+                            ro_freq_words=ro_freq_words,
+                        ),
+                    )
+                    .declare_sweep("freq", len(freqs))
+                )
+
+            # 3. Average reps/rounds and retain completed data on cancellation.
+            _ = builder.build_and_acquire()
+
+        return FreqResult(freqs=freqs, signals=signals_buffer.array)
 
     def analyze(
         self,

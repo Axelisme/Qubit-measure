@@ -134,6 +134,22 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         *,
         context: RunContext,
     ) -> AmpRabiResult:
+        """Measure Rabi oscillations versus drive gain while retaining raw IQ.
+
+        Apply optional reset, the gain-swept qubit pulse, then readout.
+        Each host round acquires cfg.reps shots at every hardware-swept gain.
+        Return gains (a.u.) and complex IQ shaped (Ngain, reps * rounds);
+        rounds are concatenated, never averaged into one IQ point.
+
+        cfg.g_center/e_center must be distinct finite centers and cfg.radius
+        positive and finite for the live G/E/Other classification. These live
+        fractions are not the saved data. The later raw-IQ joint fit estimates
+        the oscillation period, pi/pi2 gains and readout calibration.
+        Acquisition requires one readout channel and raises on an unexpected
+        raw-shot buffer shape.
+        """
+
+        # Validate live classification before acquiring any shots.
         soc, soccfg = context.soc, context.soccfg
         g_center, e_center, radius = cfg.g_center, cfg.e_center, cfg.radius
         classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, radius)
@@ -145,6 +161,7 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
         )
 
+        # Preview populations from complete shot columns without losing raw IQ.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(-0.02, 1.02)
             for line, kwargs in zip(
@@ -192,6 +209,8 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             modules.qub_pulse.set_param(
                 "gain", sweep2param("gain", sched.cfg.sweep.gain)
             )
+
+            # The board sweeps gain within each reset/drive/readout acquisition.
             program = (
                 sched.prog_builder(soc, soccfg)
                 .add_reset("reset", modules.reset)
@@ -200,6 +219,8 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
                 .declare_sweep("gain", sched.cfg.sweep.gain)
                 .build()
             )
+
+            # Store each completed round separately so every shot survives.
             for _, step in sched.repeat("round", rounds):
                 try:
                     program.acquire(soc, progress=False, cancel_flag=step.stop)
@@ -212,6 +233,8 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
                         f"Amp Rabi raw IQ shape mismatch: expected {(cfg.reps, gains.size)}, got {raw.shape}"
                     )
                 buffer[step].set(raw.T)
+
+        # Join round/shot axes only; unacquired rounds remain NaN.
         update_view(buffer.array)
         return AmpRabiResult(
             gains,

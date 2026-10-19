@@ -40,6 +40,8 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class FreqResult:
+    """Reset frequencies in MHz and mean complex IQ (frequency,)."""
+
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
 
@@ -81,6 +83,14 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     )
 
     def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        """Measure the single-tone reset resonance versus reset frequency.
+
+        Apply optional reset and initialization, the frequency-swept tested
+        reset pulse, then read out. Return frequencies in MHz and mean
+        complex IQ shaped (Nfreq,). The projected response supports a
+        resonance fit; it is not a calibrated reset fidelity.
+        """
+        # Quantize reset frequency on the tested pulse's generator.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -92,6 +102,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse_cfg.ch},
         )
 
+        # Retain complex IQ and display its projection along the response axis.
         viewer = context.plots.liveplot_1d(
             "measurement", "Frequency (MHz)", "Amplitude"
         )
@@ -99,6 +110,8 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             (len(freqs),),
             on_update=lambda data: viewer.update(freqs, reset_signal2real(data)),
         )
+
+        # Sweep the tested reset frequency after the optional preparation.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
@@ -125,6 +138,11 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
+        """Fit a Lorentzian to the projected reset-frequency response.
+
+        Omit unmeasured NaN points, return the resonance center and FWHM
+        in MHz, and publish fit. source.cfg may be None.
+        """
         del options
         result = source.result
 

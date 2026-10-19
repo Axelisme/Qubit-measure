@@ -21,7 +21,7 @@ def mux_sweep_spec[T: ExpCfgModel](
     unit: str,
     scale: float,
 ) -> GroupedAxesSpec[MuxSweepResult, T]:
-    """Declare coordinates/signals variables on shared original-tone/zip-index axes.
+    """Map each tone's scan coordinates and mean IQ to matching saved grids.
 
     cfg_type is the leaf's typed cfg, tag its unique persistence identity.
     coordinate_label/unit are disk metadata; scale converts memory coordinates
@@ -29,12 +29,14 @@ def mux_sweep_spec[T: ExpCfgModel](
     then Tone axes. No I/O occurs. Invalid declarations raise from GroupedAxesSpec.
     The loader checks matching axes and result contracts without consulting cfg.
     """
+    # Keep each tone's own coordinates on the same Point/Tone grid as its IQ.
     axes = (
         VariableAxisSpec.generated_arange("Point", "", dtype=np.int64),
         VariableAxisSpec("Tone", "", field_name="tone_indices", dtype=np.int64),
     )
 
     def build(data: GroupedLoadData[T]) -> MuxSweepResult:
+        # Reject mismatched saved grids before rebuilding the measurement arrays.
         coordinates = data.variable("coordinates")
         signals = data.variable("signals")
         if any(
@@ -45,6 +47,7 @@ def mux_sweep_spec[T: ExpCfgModel](
         expected = np.arange(coordinates.z.shape[1], dtype=np.int64)
         if not np.array_equal(coordinates.axes[0], expected):
             raise ValueError("Mux Point axis must preserve original zip indices")
+
         result = MuxSweepResult(
             coordinates.axes[1].astype(np.int64),
             coordinates.z.astype(np.float64),
@@ -53,6 +56,7 @@ def mux_sweep_spec[T: ExpCfgModel](
         validate_mux_result(result)
         return result
 
+    # Declare unit conversion without reading or writing a measurement file.
     return GroupedAxesSpec(
         variables=(
             VariableSpec(

@@ -15,10 +15,16 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2 import (
+    ComputedPulse,
+    LoadValue,
+    ModularProgramV2,
+    Readout,
+    Repeat,
+    Reset,
+)
 
 from ..rb.core import RBCfg
-from ..rb.program import build_rb_program
 from ..rb.sequence import TargetGate, make_seed_tables
 from .analysis import IRBAnalysis, analyze_irb, project_arm_means
 
@@ -86,12 +92,16 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
     )
 
     def run(self, cfg: IRBCfg, *, context: RunContext) -> IRBResult:
-        """Run paired rounds; preserve partial IQ and propagate failure via context.
+        """Compare reference and target-interleaved Clifford decay on paired seeds.
 
-        Each seed owns two cached programs. Alternate arm order with seed and
-        round parity. Each program acquires exactly one round; stopping leaves
-        untouched slots NaN. No calibration or device settings are written back.
+        Reset, play each random Clifford (with a target after it in arm 1),
+        apply that arm's full inverse in two recovery slots, then read out.
+        Return repetition-averaged IQ in (round, seed, arm, depth) order for
+        decay-ratio target-error analysis; unfinished slots remain NaN.
+        Each seed/arm program is cached, with hardware depth/reps and host rounds.
+        Acquisition errors are recorded on context.cancel_signal.
         """
+        # 1. Pair both arms on the same reproducible seeds and depth axis.
         run_cfg = deepcopy(cfg)
         depths = sweep2array(run_cfg.sweep.depth, allow_array=True).astype(np.int64)
         seeds = np.array(
@@ -121,6 +131,7 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
                 for seed_index, (seed, seed_step) in enumerate(
                     round_step.scan("seed", seeds.tolist())
                 ):
+                    # Alternate which arm is measured first to balance slow drift.
                     order = (0, 1) if (round_index + seed_index) % 2 == 0 else (1, 0)
                     for arm in order:
                         if sched.is_stop():
@@ -131,12 +142,109 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
                         )
                         key = (seed_index, arm)
                         if key not in cache:
+                            # 2. Prepare reference or interleaved physical gates.
                             tables = make_seed_tables(
                                 seed, depths, run_cfg.target_gate if arm else None
                             )
-                            cache[key] = build_rb_program(
-                                builder, run_cfg.modules, tables
+                            modules = run_cfg.modules
+                            (
+                                rand_gate_seq,
+                                prefix_len_by_depth,
+                                recovery_gate0_by_depth,
+                                recovery_gate1_by_depth,
+                            ) = tables
+                            max_rand_len = max(prefix_len_by_depth, default=0)
+
+                            Id_pulse = modules.I_pulse
+                            X90_pulse = modules.X90_pulse
+                            X180_pulse = modules.X180_pulse
+                            MX90_pulse = X90_pulse.with_updates(
+                                phase=X90_pulse.phase + 180.0
                             )
+                            Y90_pulse = X90_pulse.with_updates(
+                                phase=X90_pulse.phase + 90.0
+                            )
+                            Y180_pulse = X180_pulse.with_updates(
+                                phase=X180_pulse.phase + 90.0
+                            )
+                            MY90_pulse = X90_pulse.with_updates(
+                                phase=X90_pulse.phase - 90.0
+                            )
+
+                            if Id_pulse is None:
+                                Id_pulse = X90_pulse.with_updates(gain=0.0)
+
+                            gate_pulses = [
+                                Id_pulse,
+                                X90_pulse,
+                                X180_pulse,
+                                MX90_pulse,
+                                Y90_pulse,
+                                Y180_pulse,
+                                MY90_pulse,
+                            ]
+
+                            # 3. Play this arm's prefix and its own full inverse.
+                            program = (
+                                builder.add(
+                                    LoadValue(
+                                        "load_rand_len",
+                                        values=prefix_len_by_depth,
+                                        idx_reg="depth_idx",
+                                        val_reg="rand_len",
+                                    ),
+                                    LoadValue(
+                                        "load_recovery_gate_0",
+                                        values=recovery_gate0_by_depth,
+                                        idx_reg="depth_idx",
+                                        val_reg="recovery_gate_0",
+                                    ),
+                                    LoadValue(
+                                        "load_recovery_gate_1",
+                                        values=recovery_gate1_by_depth,
+                                        idx_reg="depth_idx",
+                                        val_reg="recovery_gate_1",
+                                    ),
+                                    Reset("reset", cfg=modules.reset),
+                                    Repeat(
+                                        "rand_gate_idx",
+                                        "rand_len",
+                                        range_hint=(0, max_rand_len),
+                                    ).add_content(
+                                        [
+                                            LoadValue(
+                                                "load_rand_gate",
+                                                values=rand_gate_seq,
+                                                idx_reg="rand_gate_idx",
+                                                val_reg="gate_idx",
+                                            ),
+                                            ComputedPulse(
+                                                "basic_gate",
+                                                val_reg="gate_idx",
+                                                pulses=gate_pulses,
+                                            ),
+                                        ]
+                                    ),
+                                    # Full candidates in both slots keep recovery
+                                    # timing depth-independent, including padding.
+                                    ComputedPulse(
+                                        "recovery_gate_0",
+                                        val_reg="recovery_gate_0",
+                                        pulses=gate_pulses,
+                                    ),
+                                    ComputedPulse(
+                                        "recovery_gate_1",
+                                        val_reg="recovery_gate_1",
+                                        pulses=gate_pulses,
+                                    ),
+                                    Readout("readout", cfg=modules.readout),
+                                )
+                                .declare_sweep("depth_idx", len(prefix_len_by_depth))
+                                .build()
+                            )
+
+                            cache[key] = program
+                        # 4. Store one round's mean IQ; reuse programs next round.
                         _ = builder.run_program(cache[key])
             sched.trigger_update(flush=True)
         return IRBResult(

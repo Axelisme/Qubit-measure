@@ -1,4 +1,4 @@
-"""Capture-owned native mux Form; the picker never selects participants."""
+"""Frequency sweep inputs for every qubit in the selected mux group."""
 
 from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
@@ -9,13 +9,14 @@ from .core import MuxFreqCfg
 
 
 def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
-    """Build the complete fixed name list from this Open/Reset capture.
+    """Build per-qubit drive sweeps and shared averaging/readout controls.
 
-    All positions share the native element declaration and remain required,
-    including nonparticipants. Missing pulse/calibration leaves stay invalid.
-    Binding/source faults propagate; Reset alone recaptures. Shared controls
-    apply to every branch. No native conversion or device access occurs.
+    ctx supplies the mux group and calibration values at Open/Reset. Every qubit
+    needs valid settings, including those omitted from participants. Missing
+    calibration leaves required inputs blank; invalid group mappings raise.
+    The tone picker chooses which qubit to edit, not which qubits to measure.
     """
+    # Start each sweep around its qubit calibration, keeping all group positions.
     names = captured_mux_names(ctx)
     tones: list[FormNode] = [
         {
@@ -27,6 +28,8 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
         }
         for name in names
     ]
+
+    # Readout and recovery are shared; participants controls measurement order.
     return Form(
         MuxFreqCfg,
         tree={

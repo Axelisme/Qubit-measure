@@ -33,6 +33,8 @@ from zcu_tools.utils.process import minus_background
 
 @dataclass(frozen=True)
 class FreqFluxResult:
+    """Flux-device values, frequencies in MHz, and mean IQ shaped (Nflux, Nfreq)."""
+
     values: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -94,6 +96,16 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
         *,
         context: RunContext,
     ) -> FreqFluxResult:
+        """Map qubit spectroscopy versus the selected device's flux bias.
+
+        At each host-set flux value, reset, apply the optional init pulse,
+        sweep the qubit probe frequency on the FPGA, then read out. Return
+        mean complex IQ on the (flux, frequency) grid; no line is selected.
+        ``flux_dev`` must name a context device accepting ``flux_unit``;
+        values are passed in that unit without conversion. ``fail_retry``
+        controls acquisition retries at each flux point.
+        """
+        # Prepare the device-value axis and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -119,6 +131,8 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
                 dev_values, freqs, freqflux_signal2real(data)
             ),
         )
+
+        # Set the external flux bias before acquiring each complete spectrum.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 cfg = step.cfg
@@ -131,7 +145,7 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
                 )
                 modules = cfg.modules
 
-                # Frequency is swept by FPGA (hard sweep)
+                # Reset and initialize before each frequency-swept probe and readout.
                 freq_sweep = cfg.sweep.freq
                 modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 

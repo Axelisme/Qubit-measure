@@ -42,6 +42,8 @@ from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
 
 @dataclass(frozen=True)
 class FreqGainResult:
+    """MHz frequencies, normalized gains and moment-SNR scores (frequency, gain)."""
+
     freqs: NDArray[np.float64]
     gains: NDArray[np.float64]
     signals: NDArray[np.float64]
@@ -102,6 +104,16 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqGainResult:
+        """Measure readout SNR over a frequency-by-gain grid.
+
+        At each point, apply the optional reset, omit or apply qub_pulse,
+        then read out. Configure qub_pulse for the intended excitation.
+        Return frequencies in MHz, normalized gains and moment-based SNR
+        shaped (Nfreq, Ngain), optionally reduced by skew_penalty for distorted
+        IQ distributions. This score is not assignment fidelity.
+        acquire_kwargs is forwarded to acquisition.
+        """
+        # Prepare both readout axes on the pulse generator's hardware grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -117,6 +129,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
         )
 
+        # Retain one separation score per frequency/gain pair.
         viewer = context.plots.liveplot_2d(
             "measurement",
             "Frequency (MHz)",
@@ -127,6 +140,8 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(freqs, gains, np.abs(data)),
         )
+
+        # Compare pulse-off/on branches while sweeping both readout knobs in hardware.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             freq_sweep = sched.cfg.sweep.freq
@@ -158,6 +173,8 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
                     **(acquire_kwargs or {}),
                 )
             )
+
+        # Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
         return FreqGainResult(freqs, gains, signals)
@@ -169,6 +186,12 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         *,
         plots: Plots,
     ) -> FreqGainAnalysis:
+        """Select the joint maximum of the smoothed frequency/gain SNR map.
+
+        options controls smoothing; unmeasured NaN scores become zero before
+        smoothing. Return best_freq in MHz and normalized best_gain, and
+        publish fit. source.cfg may be None.
+        """
         result = source.result
         freqs, gains, signals = result.freqs, result.gains, result.signals
 
