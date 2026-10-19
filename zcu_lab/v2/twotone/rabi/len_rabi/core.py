@@ -90,77 +90,64 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         tag="twotone/ge/rabi_length",
     )
 
-    def _run_for_flat(
+    def run(
         self,
         cfg: LenRabiCfg,
         *,
         context: RunContext,
     ) -> LenRabiResult:
+        """Measure Rabi oscillations by sweeping drive length at fixed gain.
+
+        Apply optional reset and initialization, then the length-swept qubit
+        pulse and readout. Const/flat-top pulses sweep on the FPGA; other
+        waveforms scan on the host and reuse each length's compiled program.
+        Return quantized lengths in us and mean complex IQ at each length,
+        retaining acquired data on cancellation and NaN for unmeasured points.
+        Fit the oscillation with analyze() to obtain pi and pi/2 lengths.
+        Native arb assets reject length changes with ValueError.
+        """
+        # 1. Prepare length coordinates without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-
         modules = cfg.modules
-
-        assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
-            "This method only supports const and flat_top pulse style"
-        )
-
-        # initial values, may be rounded later
         lengths = sweep2array(
             cfg.sweep.length,
             "time",
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Signal")
-        signals_buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
-        )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            length_sweep = cfg.sweep.length
-            modules.qub_pulse.set_param("length", sweep2param("length", length_sweep))
-
-            _ = (
-                sched.prog_builder(soc, soccfg)
-                .add_reset("reset", modules.reset)
-                .add_pulse("init_pulse", modules.init_pulse)
-                .add_pulse("qubit_pulse", modules.qub_pulse)
-                .add_readout("readout", modules.readout)
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire()
+        if modules.qub_pulse.waveform.style in ["const", "flat_top"]:
+            viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Signal")
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
             )
-        return LenRabiResult(
-            lengths=lengths,
-            signals=signals_buffer.array,
-        )
+            with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+                modules = sched.cfg.modules
+                length_sweep = sched.cfg.sweep.length
+                modules.qub_pulse.set_param(
+                    "length", sweep2param("length", length_sweep)
+                )
 
-    def _run_for_arb(
-        self,
-        cfg: LenRabiCfg,
-        *,
-        context: RunContext,
-    ) -> LenRabiResult:
-        cfg = deepcopy(cfg)
-        soc, soccfg = context.soc, context.soccfg
+                # 2. Sweep length on the FPGA: reset -> init -> drive -> readout.
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add_pulse("init_pulse", modules.init_pulse)
+                    .add_pulse("qubit_pulse", modules.qub_pulse)
+                    .add_readout("readout", modules.readout)
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire()
+                )
 
-        modules = cfg.modules
+            # 3. The program acquisition supplies the completed-round mean IQ.
+            return LenRabiResult(lengths=lengths, signals=signals_buffer.array)
 
+        # 2. Other waveforms need a separate program for each distinct length.
         rounds = cfg.rounds
-        _cfg = cfg.model_copy(deep=True)
-        _cfg.rounds = 1  # we'll handle the rounds in the task loop
-
-        length_sweep = _cfg.sweep.length
-
-        lengths = sweep2array(
-            length_sweep,
-            "time",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
-        )
-        lengths = np.unique(lengths)  # remove duplicates
-
+        cfg = cfg.model_copy(deep=True)
+        cfg.rounds = 1  # Host repeats own the rounds; FPGA still owns reps.
+        lengths = np.unique(lengths)
         programs: dict[float, Any] = {}
 
         def average_round(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
@@ -178,11 +165,13 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 lengths, rabi_signal2real(average_round(data))
             ),
         )
-        with Schedule(_cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, rep in sched.repeat("round", rounds):
                 for length, step in rep.scan("length", length_values):
                     modules = step.cfg.modules
                     modules.qub_pulse.set_param("length", length)
+
+                    # 3. Reset -> init -> shaped drive -> readout at this length.
                     builder = (
                         step.prog_builder(soc, soccfg)
                         .add_reset("reset", modules.reset)
@@ -193,28 +182,13 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                     length_key = float(length)
                     if length_key not in programs:
                         programs[length_key] = builder.build()
-                    _ = builder.run_program(
-                        programs[length_key],
-                    )
+                    _ = builder.run_program(programs[length_key])
+
+        # 4. Average available rounds per length, keeping partial scans and NaNs.
         return LenRabiResult(
             lengths=lengths,
             signals=average_round(signals_buffer.array),
         )
-
-    def run(
-        self,
-        cfg: LenRabiCfg,
-        *,
-        context: RunContext,
-    ) -> LenRabiResult:
-        modules = cfg.modules
-        qub_waveform = modules.qub_pulse.waveform
-
-        if qub_waveform.style in ["const", "flat_top"]:
-            # use hard sweep for flat top pulse
-            return self._run_for_flat(cfg, context=context)
-        # use soft sweep for arb pulse
-        return self._run_for_arb(cfg, context=context)
 
     def analyze(
         self,
@@ -223,6 +197,16 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         *,
         plots: Plots,
     ) -> LenRabiAnalysis:
+        """Fit the measured IQ oscillation to derive pi and pi/2 lengths in us.
+
+        Rotate source.result IQ to a real trace and discard unmeasured NaNs.
+        options.decay enables a decay envelope; options.fit_phase frees the
+        otherwise fixed zero phase (signed amplitude also covers 180 degrees).
+        Publish the fit plot and return lengths, Rabi frequency in MHz, their
+        uncertainties and fit quality. source.cfg may be None. All-NaN data
+        raise ValueError; other invalid traces follow fit_rabi's failure rules.
+        """
+        # 1. Project mean IQ and keep only acquired length points.
         result = source.result
 
         lens, signals = result.lengths, result.signals
@@ -236,6 +220,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         lens = lens[~nan_mask]
         real_signals = real_signals[~nan_mask]
 
+        # 2. Fit this length scan with the user's envelope and phase choices.
         (
             pi_len,
             pi_len_err,
@@ -263,6 +248,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             pCov,
         )
 
+        # 3. Show the oscillation and the fitted calibration lengths.
         fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)

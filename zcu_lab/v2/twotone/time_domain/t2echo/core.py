@@ -47,6 +47,13 @@ from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 
 @dataclass(frozen=True)
 class T2EchoResult:
+    """Total delays in us and mean complex IQ, one sample per delay.
+
+    true_activate_detune is the phase-ramp frequency in MHz after hardware
+    time/phase rounding, not a fitted qubit detuning. It is run-only metadata
+    and is None after canonical load.
+    """
+
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
     true_activate_detune: float | None = None
@@ -102,6 +109,16 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
     )
 
     def run(self, cfg: T2EchoCfg, *, context: RunContext) -> T2EchoResult:
+        """Measure refocused coherence with a Hahn-echo delay sweep.
+
+        After optional reset, apply pi/2, half the total delay, pi, the other
+        half delay, then pi/2 and readout. cfg supplies the pulses and total
+        delay sweep in us. detune in MHz ramps the final pi/2 phase with total
+        delay to add fringes; it does not change the drive frequency.
+        Return hardware-rounded total delays and mean complex IQ. analyze
+        extracts T2echo from the decay or fringe envelope.
+        """
+        # 1. Round both half-delays and report the realized phase-ramp frequency.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         detune = cfg.detune
@@ -118,6 +135,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
             time_scaler=0.5,
         )
 
+        # 2. Display the IQ projection while averaging the total-delay sweep.
         viewer = context.plots.liveplot_1d(
             "measurement",
             "Time (us)",
@@ -136,6 +154,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
             length_param = sweep2param("length", length_sweep)
             detune_param = 360 * detune * length_param
 
+            # 3. Refocus at the midpoint, then project with the programmed phase ramp.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -156,6 +175,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
                 .build_and_acquire()
             )
 
+        # Keep measured IQ separate from fitted coherence times and fringe frequency.
         return T2EchoResult(
             times=lengths,
             signals=signals_buffer.array,
@@ -169,7 +189,15 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         *,
         plots: Plots,
     ) -> T2EchoAnalysis:
-        """fit_phase frees the fringe phase; decay-only fits ignore this option."""
+        """Fit T2echo in us from the IQ projection, excluding the first sample.
+
+        fit_method selects a pure decay or a decaying fringe. fit_phase frees
+        the fringe phase; otherwise it is fixed at zero. Decay-only fits ignore
+        fit_phase and return zero detune. Fringe detune is the observed MHz
+        frequency, including the applied phase ramp, not a corrected qubit
+        detuning. Return fit uncertainties and quality, and draw the fit.
+        Unknown fit_method values raise ValueError.
+        """
         result = source.result
         fit_method = options.fit_method
         fit_phase = options.fit_phase
@@ -179,6 +207,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         xs = xs[1:]
         signals = signals[1:]
 
+        # Project IQ onto its signal axis before choosing the envelope model.
         real_signals = rotate2real(signals).real
 
         if fit_method == "fringe":

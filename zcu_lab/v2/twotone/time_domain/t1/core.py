@@ -108,87 +108,88 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         tag="twotone/ge/t1",
     )
 
-    def _run_non_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
-        soc, soccfg, plots = context.soc, context.soccfg, context.plots
-
-        delay_table = materialize_nonuniform_t1_delays(
-            cfg.sweep.length,
-            soccfg=soccfg,
-        )
-        length_cycles = delay_table.cycles
-        lengths = delay_table.times_us
-
-        viewer = plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
-        signals_buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-        )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-
-            _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    LoadValue(
-                        "load_t1_delay",
-                        values=list(length_cycles),
-                        idx_reg="length_idx",
-                        val_reg="t1_delay_cycle",
-                        auto_compress=False,
-                    ),
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    DelayAuto("t1_delay", t="t1_delay_cycle"),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("length_idx", len(length_cycles))
-                .build_and_acquire()
-            )
-
-        return T1Result(times=lengths, signals=signals_buffer.array)
-
-    def _run_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
-        soc, soccfg, plots = context.soc, context.soccfg, context.plots
-
-        lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
-
-        viewer = plots.liveplot_1d(
-            "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
-        )
-        signals_buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-        )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            length_sweep = cfg.sweep.length
-            if not isinstance(length_sweep, SweepCfg):
-                raise TypeError("uniform mode requires SweepCfg")
-            length_param = sweep2param("length", length_sweep)
-
-            _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Delay("t1_delay", length_param),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire()
-            )
-
-        return T1Result(times=lengths, signals=signals_buffer.array)
-
     def run(self, config: T1Cfg, *, context: RunContext) -> T1Result:
+        """Measure energy relaxation with reset → π → delay → readout.
+
+        config selects a linear delay sweep or nonuniform delays in us.
+        Uniform sampling requires SweepCfg; nonuniform delays must remain
+        distinct and increasing after hardware quantization or raise ValueError.
+        context supplies acquisition and live plots. Return quantized delays
+        and mean complex IQ with shape (time,); unmeasured points remain NaN.
+        """
+        # 1. Prepare the delay axis without changing the caller's configuration.
         cfg = deepcopy(config)
+        if cfg.uniform and not isinstance(cfg.sweep.length, SweepCfg):
+            raise ValueError("uniform mode requires SweepCfg")
+        soc, soccfg, plots = context.soc, context.soccfg, context.plots
+
         if cfg.uniform:
-            if not isinstance(cfg.sweep.length, SweepCfg):
-                raise ValueError("uniform mode requires SweepCfg")
-            return self._run_uniform(cfg, context)
-        return self._run_non_uniform(cfg, context)
+            lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
+            viewer = plots.liveplot_1d(
+                "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
+            )
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+            )
+            with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+                cfg = sched.cfg
+                modules = cfg.modules
+                length_sweep = cfg.sweep.length
+                if not isinstance(length_sweep, SweepCfg):
+                    raise TypeError("uniform mode requires SweepCfg")
+                length_param = sweep2param("length", length_sweep)
+
+                # 2a. Excite, wait a linearly swept delay, then acquire readout IQ.
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("pi_pulse", modules.pi_pulse),
+                        Delay("t1_delay", length_param),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire()
+                )
+        else:
+            delay_table = materialize_nonuniform_t1_delays(
+                cfg.sweep.length,
+                soccfg=soccfg,
+            )
+            length_cycles = delay_table.cycles
+            lengths = delay_table.times_us
+            viewer = plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+            )
+            with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+                cfg = sched.cfg
+                modules = cfg.modules
+
+                # 2b. Load each nonuniform delay in cycles before reset and excitation.
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        LoadValue(
+                            "load_t1_delay",
+                            values=list(length_cycles),
+                            idx_reg="length_idx",
+                            val_reg="t1_delay_cycle",
+                            auto_compress=False,
+                        ),
+                        Reset("reset", modules.reset),
+                        Pulse("pi_pulse", modules.pi_pulse),
+                        DelayAuto("t1_delay", t="t1_delay_cycle"),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length_idx", len(length_cycles))
+                    .build_and_acquire()
+                )
+
+        # 3. Keep acquired averages and any NaN partial-data slots on the same axis.
+        return T1Result(times=lengths, signals=signals_buffer.array)
 
     def analyze(
         self,
@@ -284,6 +285,16 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
     )
 
     def run(self, cfg: T1WithToneCfg, *, context: RunContext) -> T1Result:
+        """Measure relaxation while applying a test tone after the π pulse.
+
+        cfg supplies reset, π, test tone and readout modules plus a tone-length
+        sweep in us. context supplies acquisition and live plots. Sweep the
+        tone duration on its generator grid, then read out; return quantized
+        durations and mean complex IQ with shape (time,), keeping NaN for
+        unmeasured points. Invalid pulse or sweep settings propagate validation
+        or compilation errors.
+        """
+        # 1. Prepare tone durations on the test generator's grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -305,6 +316,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
             cfg = sched.cfg
             modules = cfg.modules
 
+            # 2. Sweep the tone after excitation, then acquire the readout IQ.
             length_sweep = cfg.sweep.length
             length_param = sweep2param("length", length_sweep)
             modules.test_pulse.set_param("length", length_param)
@@ -321,6 +333,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
                 .build_and_acquire()
             )
 
+        # 3. Return acquired averages without filling unfinished points.
         return T1Result(times=lengths, signals=signals_buffer.array)
 
     def analyze(
@@ -416,6 +429,16 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
     def run(
         self, cfg: ScanT1WithToneCfg, *, context: RunContext
     ) -> ScanT1WithToneResult:
+        """Measure tone-driven relaxation versus test-tone gain and duration.
+
+        cfg supplies reset, π, test tone and readout modules, host-scanned gains
+        and a hardware duration sweep in us. context supplies acquisition and
+        live plots. At each gain apply reset → π → test tone → readout.
+        Return quantized gains, durations and mean complex IQ with shape
+        (gain, time), keeping NaN for unmeasured points. Invalid pulse or sweep
+        settings propagate validation or compilation errors.
+        """
+        # 1. Prepare the host gain axis and the generator's tone-duration axis.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -441,6 +464,8 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
                 gains, lengths, t1_with_tone_signal2real(data)
             ),
         )
+
+        # 2. Scan gains on the host; sweep tone duration inside each program.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
@@ -463,6 +488,7 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
                     .build_and_acquire()
                 )
 
+        # 3. Preserve gain-major IQ averages and unfinished NaN slots.
         return ScanT1WithToneResult(
             values=gains,
             times=lengths,

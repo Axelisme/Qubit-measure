@@ -35,6 +35,8 @@ from zcu_tools.program.v2 import (
 
 @dataclass(frozen=True)
 class CheckResult:
+    """Pump labels (0 off, 1 on), MHz frequencies, and complex IQ [output, freq]."""
+
     outputs: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -82,6 +84,18 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
     )
 
     def run(self, cfg: CheckCfg, *, context: RunContext) -> CheckResult:
+        """Compare the readout reflection spectrum with the JPA pump off and on.
+
+        Disable the pump, acquire a reset/readout frequency sweep, then
+        enable it and repeat the same sweep. Return frequencies in MHz,
+        output labels 0/1, and mean complex IQ shaped [output, frequency].
+        The spectra diagnose the pump's effect, not qubit-state SNR.
+
+        ``jpa_rf_dev`` must name the RF device in ``context.devices``.
+        Normal completion leaves its output ON; no off-state restoration
+        is performed.
+        """
+        # 1. Prepare a shared hardware frequency grid for both pump states.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -100,11 +114,15 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
             (len(outputs), len(freqs)),
             on_update=lambda data: viewer.update(freqs, check_signal2real(data)),
         )
+
+        # 2. Acquire OFF first, then ON; the final pump state is not restored.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for output, step in sched.scan("JPA on/off", outputs.tolist()):
                 set_output(
                     context.devices[step.cfg.jpa_rf_dev], self.OUTPUT_MAP[output]
                 )
+
+                # 3. Reset before each frequency-swept readout pulse.
                 modules = step.cfg.modules
                 modules.readout.set_param(
                     "freq", sweep2param("freq", step.cfg.sweep.freq)
@@ -118,6 +136,8 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                     .declare_sweep("freq", step.cfg.sweep.freq)
                     .build_and_acquire()
                 )
+
+        # 4. Retain complex spectra; magnitude is only a display transform.
         signals = signals_buffer.array
 
         return CheckResult(outputs=outputs, freqs=freqs, signals=signals)
@@ -125,6 +145,10 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
     def analyze(
         self, source: RunRecord[CheckCfg, CheckResult], options: None, *, plots: Plots
     ) -> None:
+        """Overlay pump-off/on IQ magnitudes from ``source`` in the fit figure.
+
+        ``options`` is None. This diagnostic returns no calibration value.
+        """
         del options
         result = source.result
 
