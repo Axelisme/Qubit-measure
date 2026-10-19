@@ -103,6 +103,13 @@ def _locations(
         request.database_root.resolve(),
         request.results_root.resolve(),
     )
+    # Resolve aliases for the configured roots, but reject links selected as
+    # part of this legacy source before contained_path erases their identity.
+    for root in (result_root, database_root):
+        chip = root / request.source_chip
+        for path in (chip, chip / request.source_qubit):
+            if path.is_symlink():
+                raise MigrationInputError(f"{path}: source symlink is unsupported")
     source = MigrationSource(
         result_path=contained_path(
             result_root / request.source_chip / request.source_qubit, result_root

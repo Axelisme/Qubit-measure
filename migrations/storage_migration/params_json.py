@@ -6,7 +6,7 @@ from math import isfinite
 from pathlib import Path
 
 from pydantic import TypeAdapter
-from zcu_tools.datafile import JsonObject
+from zcu_tools.datafile import JsonObject, json_values_equal
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -95,12 +95,15 @@ def _created_at(value: object) -> str | None:
 
 def _write_predictor(path: Path, document: JsonObject) -> None:
     # The destination belongs to this migration, but an interrupted write may
-    # already have committed it. Never replace different bytes on resume.
+    # already have committed it. Never replace a conflicting document on resume.
     if path.is_symlink():
         raise MigrationInputError(f"{path}: predictor symlink conflict")
     if path.exists():
         existing = _JSON.validate_json(path.read_text(encoding="utf-8"), strict=True)
-        if existing != document:
+        # JSON numeric equivalence is valid for params, not the integer version.
+        if type(existing.get("version")) is not int or not json_values_equal(
+            existing, document
+        ):
             raise MigrationInputError(
                 f"{path}: predictor differs from planned legacy fit"
             )
