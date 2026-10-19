@@ -48,13 +48,23 @@ class AnalysisQubit(ComponentSchema):
     ext: YamlMap = Field(default_factory=dict)
 
 
+class ChargeOnlyQubit(ComponentSchema):
+    """Synthetic qubit kind without formal Josephson or inductive energy fields."""
+
+    model_config = ConfigDict(extra="forbid")
+    EC: float | None = None
+    ext: YamlMap = Field(default_factory=dict)
+
+
 @pytest.fixture(scope="module", autouse=True)
 def analysis_kind() -> Generator[None]:
     before = registry_state()
     component_registry.register("qubit/migration_analysis", AnalysisQubit)
+    component_registry.register("qubit/migration_charge_only", ChargeOnlyQubit)
     try:
         yield
     finally:
+        component_registry.unregister("qubit/migration_charge_only")
         component_registry.unregister("qubit/migration_analysis")
         assert registry_state() == before
 
@@ -344,3 +354,21 @@ def test_non_numeric_fit_fields_remain_located_pending(
         .model_dump()["EJ"]
         is None
     )
+
+
+def test_unsupported_energy_fields_are_preserved_without_extending_schema(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+) -> None:
+    fit: JsonObject = {"params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8}}
+    source = write_params(request_data, {"fluxdep_fit": fit})
+    mapping = replace(
+        analysis_mapping,
+        components={"Qlegacy": {"kind": "qubit/migration_charge_only"}},
+    )
+    report = migrate(request_data, mapping)
+    doc = snapshot(open_entry(request_data).setup)
+    assert document_value(doc, "Qlegacy.EC") == 1.41
+    assert document_value(doc, "Qlegacy.ext.legacy_params.fluxdep_fit") == fit
+    pending = {item.location for item in report.pending if item.source == source}
+    assert {"fluxdep_fit.params.EJ", "fluxdep_fit.params.EL"} <= pending
