@@ -307,6 +307,38 @@ def test_runtime_soc_replacement_and_uninstall_forward_board_identity(monkeypatc
     assert svc.is_mock_soc() is True
 
 
+@pytest.mark.parametrize("busy", ["run", "connect"])
+def test_runtime_soc_changes_reject_busy_gate_without_losing_installed_pair(busy):
+    state = _make_state()
+    bus = EventBus()
+    gate = OperationGate(bus)
+    svc, bg, _handles = _make_svc(gate=gate, state=state, bus=bus)
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    before = state.session_env
+    endpoint = svc.connected_endpoint()
+    version = state.version.get("soc")
+    facts: list[SocChangedPayload] = []
+    bus.subscribe(SocChangedPayload, facts.append)
+    if busy == "connect":
+        svc.start_connect(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
+    else:
+        gate.register(999, MeasureOpKind.RUN, owner_id="tab", origin_kind="user", note="running")
+    try:
+        with pytest.raises(OperationConflictError):
+            svc.install_soc(MagicMock(), MagicMock())
+        with pytest.raises(OperationConflictError):
+            svc.uninstall_soc()
+        assert state.session_env is before
+        assert svc.connected_endpoint() == endpoint
+        assert state.version.get("soc") == version
+        assert facts == []
+    finally:
+        if busy == "connect":
+            bg.deliver_result()
+        else:
+            gate.release(999)
+
+
 def test_connect_sync_rejects_concurrent_calls(qapp):
     """connect_sync holds the same SOC_CONNECT lease as the async path, so a
     concurrent connect (or the GUI button) fast-fails."""
