@@ -76,8 +76,8 @@ No frontend timer or status display is installed by this backend API.
 The coverage manifest in `warmup.py` covers shaped carrier families (>9 carriers),
 shaped direct integration, covariant single-tone and simultaneous gate playback,
 Dyson gain batches, constant-tone block RWA, dense Floquet periods, t4 and ADC
-integrated/decimated/mux responses. It does not promise every possible signature
-or kernel. New routes require updating the representative inputs and checking
+integrated/decimated/mux responses and compact statistics validation for writable
+and readonly borrowed arrays. It does not promise every possible signature or kernel. New routes require updating the representative inputs and checking
 real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 
 ## Acquisition and numeric composition
