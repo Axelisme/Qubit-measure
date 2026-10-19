@@ -313,6 +313,43 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
     assert resource.input.data["amount"] == {"expr": "unfinished +"}
 
 
+def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
+    latest = 2.0
+    captures: list[Mapping[str, str] | None] = []
+
+    def capture(aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
+        captures.append(aliases)
+        return resource_api.TabFormSources(captured_env(latest))
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(ScalarCore, {"amount": Expr("general.ext.amount * 2")}),
+        capture=capture,
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "refresh_sources"), (
+        "Tabs need an explicit capture-only command that preserves authored input"
+    )
+    published: list[object] = []
+    resource.subscribe(lambda: published.append(resource.preview().values[("amount",)]))
+    latest = 5.0
+    resource.refresh_sources(aliases={"selected": "Q2"})
+    assert resource.input.data == {"amount": 4.0}
+    assert resource.result() == ScalarCore(amount=4.0)
+    resource.write({("amount",): {"expr": "general.ext.amount * 3"}})
+    assert resource.result() == ScalarCore(amount=15.0)
+    before = resource.input.to_json()
+    latest = 7.0
+    resource.refresh_sources()
+    assert resource.input.to_json() == before
+    assert resource.result() == ScalarCore(amount=21.0)
+    assert published == [4.0, 15.0, 21.0]
+    assert captures == [None, {"selected": "Q2"}, None]
+    resource.reset()
+    assert resource.input.data == {"amount": 14.0}
+    assert resource.result() == ScalarCore(amount=14.0)
+    assert captures == [None, {"selected": "Q2"}, None, None]
+
+
 def test_describe_keeps_fixed_capture_and_revokes_retained_handle() -> None:
     captures: list[Mapping[str, str] | None] = []
     current = 2.0
