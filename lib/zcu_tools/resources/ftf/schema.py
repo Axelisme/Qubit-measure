@@ -406,11 +406,14 @@ class Numerics(Values):
     """truncation: basis sizes; solver: accuracy; seed: nonnegative root RNG seed.
 
     Omitted/None seed generates once at environment startup, not once per round.
+    min_round_duration_s: finite nonnegative wall-time floor per successful binding
+    round, in seconds. Default 0.2 gives live plotting time; zero disables pacing.
     """
 
     truncation: Truncation
     solver: Solver
     seed: Index | None = None
+    min_round_duration_s: Nonnegative = 0.2
 
 
 class FTFSettings(Values):

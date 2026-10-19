@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-19，SoC-owned statistics validation certificates
+**Last updated:** 2026-10-19，SoC-owned statistics validation certificates and optional round pacing
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -10,6 +10,11 @@ it before consuming the acquire sequence or constructing a request. Failure
 releases admission and propagates; the environment callback owns any optional
 startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
+`SimulationBinding(..., min_round_duration_s=0.0)` optionally paces each
+successful round using monotonic wall time, including snapshot and execution.
+It waits only for a positive remainder and propagates failures without waiting.
+Zero disables pacing and clock reads; generic bindings remain unpaced by default.
+The environment builder owns the policy (FTF defaults to 0.2 seconds), not the GUI.
 Other SoC objects use the original path. Integrated simulation configures the
 compiled program and readouts without serializing DAC/weight arrays for no-op
 transport. Requested uploads still validate int16 envelope and weight dtypes;

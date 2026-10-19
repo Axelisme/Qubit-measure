@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-19, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission, restored single-tone gate signatures
+**Last updated:** 2026-10-19, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission, restored single-tone gate signatures, per-round pacing
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -10,6 +10,26 @@ builder failure closes its resources and preserves both startup and close errors
 The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
 `ftf.yaml`, a working copy of the tracked `default.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
 欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
+
+## Round pacing
+
+`numerics.min_round_duration_s` in the FTF YAML sets a finite, nonnegative
+minimum duration for each successful binding round in both acquisition modes.
+Omitting it uses **0.2 seconds**. The binding includes snapshot capture and numeric
+execution, then sleeps only for the remaining time before returning. Slow rounds
+and failures do not add a wait. Startup preparation, program construction and
+round hooks are outside this floor. Waiting is synchronous and not interruptible
+by Stop; the next ordinary acquisition checkpoint observes Stop. No GUI field or
+frontend awareness is needed. This does not replace final plot-buffer flushing.
+
+For profiling or benchmarking, call `ftf(path_or_settings, min_round_duration_s=0)`.
+This public override disables waiting and clock reads without changing numeric
+settings, RNG streams, density, readout or routes. Alternatively set
+`numerics.min_round_duration_s: 0` in the caller-owned YAML. With the default
+`min_round_duration_s=None`, the builder uses the YAML value. Wait for startup
+preparation with `env.wait_ready()` before starting a benchmark timer too.
+
+## Numeric source
 
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. `execute` consumes detached templates.
