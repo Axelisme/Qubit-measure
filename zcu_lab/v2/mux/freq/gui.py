@@ -1,4 +1,4 @@
-"""Mux freq source/analysis/proposal hooks; numeric core remains GUI-free."""
+"""GUI spectra, frequency fits and calibration proposals for mux qubits."""
 
 from __future__ import annotations
 
@@ -39,7 +39,11 @@ MuxFreqRunResult: TypeAlias = RunRecord[MuxFreqCfg, MuxSweepResult]
 
 @dataclass(frozen=True)
 class MuxFreqAnalyzeResult(AnalyzeResultBase):
-    """Indexed core outcomes and complete source names, absent when cfg is absent."""
+    """Frequency fits or failures for each measured original tone position.
+
+    outcomes contains per-tone estimates or failure reasons. names is the full
+    qubit name list from the measured settings, or None when unavailable.
+    """
 
     outcomes: tuple[MuxFreqFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
@@ -68,7 +72,7 @@ class MuxFreqAnalyzeResult(AnalyzeResultBase):
 class MuxFreqAdapter(
     BaseAdapter[MuxFreqCfg, MuxFreqRunResult, MuxFreqAnalyzeResult, FreqAnalyzeParams]
 ):
-    """Run explicit sources and propose captured destinations without applying them."""
+    """Measure mux qubit spectra and propose frequency and linewidth updates."""
 
     experiment_tag: ClassVar[str | None] = MuxFreqExp.persistence_tag()
     exp_cls = MuxFreqExp
@@ -76,20 +80,20 @@ class MuxFreqAdapter(
 
     @staticmethod
     def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
-        """Build the native list Form using the fixed Open/Reset capture."""
+        """Build drive sweeps and shared readout settings from the selected mux group."""
         return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: MuxFreqCfg, *, context: RunContext
     ) -> MuxFreqRunResult:
-        """Pair the validated cfg with the core result using this operation's context."""
+        """Measure the frequency sweeps in cfg and retain those settings with the IQ."""
         del req
         return RunRecord(cfg, MuxFreqExp().run(cfg, context=context))
 
     def analyze(
         self, req: AnalyzeRequest[MuxFreqRunResult, FreqAnalyzeParams], *, plots: Plots
     ) -> MuxFreqAnalyzeResult:
-        """Analyze the explicit Run/Load source, retaining each original-index outcome."""
+        """Fit the Run/Load spectra using req.analyze_params and draw them in plots."""
         params = req.analyze_params
         outcomes = MuxFreqExp().analyze(
             req.run_result,
@@ -105,13 +109,14 @@ class MuxFreqAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[MuxFreqRunResult, MuxFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
-        """Propose only complete, successful tones using the same Run/Load capture.
+        """Propose frequency, linewidth and bias-sample updates for successful fits.
 
-        Missing capture returns no items. Captured bindings must match any source
-        cfg names/count; errors propagate. Partial/nonfinite rows and failed fits
-        produce no calibration items. Pulse proposals copy source cfg only, never
-        current library values. This method neither writes nor applies proposals.
+        req supplies measured spectra, fit results and their original qubit
+        mapping. Missing mapping returns no proposals; mismatched names raise.
+        Failed fits and incomplete spectra are skipped. These are proposals only,
+        using the Run/Load destinations rather than the current Form selection.
         """
+        # Use the measured qubit mapping, not a later Form or alias selection.
         snapshot = req.run_result.cfg
         names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
         qubits = captured_qubits(req.ctx.parameters, names)
@@ -124,6 +129,7 @@ class MuxFreqAdapter(
                 or not np.isfinite(req.run_result.result.signals[row]).all()
             ):
                 continue
+            # Only complete spectra may update the qubit calibration.
             qubit = qubits[outcome.index]
             row_items: list[WritebackItem] = []
             row_items.extend(

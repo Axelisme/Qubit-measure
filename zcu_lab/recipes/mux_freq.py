@@ -1,4 +1,4 @@
-"""One bounded mux recipe; numeric acquisition remains with its native owner."""
+"""Measure mux qubit spectra and review frequency and linewidth writeback."""
 
 from typing import Unpack
 
@@ -10,45 +10,82 @@ from zcu_tools.mcp.measure.execution_reply import (
 )
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeSession,
+    ask,
 )
 
 from .mux_helpers import (
     DRIVE_PARAMETERS,
     INPUTS,
     MuxInputs,
-    finish_mux,
-    prepare_mux,
 )
 
 
 def mux_freq(session: RecipeSession, **inputs: Unpack[MuxInputs]) -> RecipeGenerator:
-    """Run mux qubit frequency; review candidates before explicit Apply.
+    """Measure selected qubit spectra, fit them and ask before writing calibration.
 
-    session is driver-supplied. target binds the Reset mux alias; None retains
-    global aliases. reuse_tab_id resets an idle mux/freq tab.
-    participants is an ordered name list; None keeps Reset defaults. library
-    selects typed path/key pairs, then inline copies typed selector paths, then
-    overrides sends one batch of typed scalar path/value edits. Caller order is
-    preserved; list indexes are full original positions, never participant rows.
-    Copy ref ancestors outer-first before editing children. None values retain
-    input; expressions remain authored. No range/calibration inference occurs.
-    Paths use MHz/us/native gain, matching the Form; count leaves use n.
-    Shared reps/rounds/recovery and delay axes remain shared, not per-tone.
-    All elements, including nonparticipants, must validate before Run.
-    Defaults report retained Form inputs, not their internal generation history.
-    Run saves raw and Primary; cancellation stops later steps. Finish-early
-    follows owner partial-data policy. Only an accepted writeback answer applies;
-    skipped writes none. Invalid inputs/cfg and native/transport failures propagate
-    at their author step; successful copies are not rolled back on later failure.
+    session opens a mux/freq tab. target selects the mux group; reuse_tab_id
+    resets an idle tab. participants gives qubit names in measurement order.
+    library selects path/key pairs, inline copies references outer-first, then
+    overrides edits scalar paths in one batch. Integer path segments are full
+    tone positions, not participant rows. Values use MHz/us/native gain; sweep
+    counts use n. Omitted or None inputs retain Form defaults, including authored
+    expressions. All tones must validate, even those not participating.
+    Raw data and Primary analysis are saved. Cancellation stops later steps;
+    skipping writeback changes no calibration. Operation errors propagate.
     """
-    tab = prepare_mux(
-        session,
+    # 1. Open or reset with the requested mux group before editing any values.
+    target = inputs.get("target")
+    participants = inputs.get("participants")
+    tab = session.open_tab(
         "mux/freq",
-        inputs,
+        aliases=None if target is None else {"mux": target},
+        reuse=inputs.get("reuse_tab_id"),
     )
-    yield from finish_mux(tab)
+
+    # 2. Select sources, then copy references before changing their scalar leaves.
+    for selection in inputs.get("library") or ():
+        tab.use_library(tuple(selection["path"]), selection["key"])
+    for copy in inputs.get("inline") or ():
+        tab.use_inline(tuple(copy["path"]))
+
+    # 3. Keep participant selection and scalar overrides in one edit batch.
+    edits = [
+        RecipeFieldEdit(
+            ("participants",),
+            None if participants is None else [name for name in participants],
+        )
+    ]
+    edits.extend(
+        RecipeFieldEdit(
+            tuple(edit["path"]),
+            edit["value"],
+            source="derived" if isinstance(edit["value"], dict) else "explicit",
+        )
+        for edit in inputs.get("overrides") or ()
+    )
+    tab.set_fields(edits)
+
+    # 4. Save acquired spectra before fitting; cancellation stops later steps.
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled" or run is None:
+        return
+    run.save_raw()
+
+    # 5. Fit each qubit spectrum and save the Primary analysis.
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
+        return
+
+    # 6. Offer calibration updates, but write only after explicit acceptance.
+    decision = yield from ask(run.propose_writeback())
+    if decision.status == "cancelled":
+        return
+    if decision.decision == "accepted":
+        tab.accept()
 
 
 DEFINITION = RecipeDefinition(

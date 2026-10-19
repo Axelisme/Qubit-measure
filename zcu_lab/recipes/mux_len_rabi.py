@@ -1,4 +1,4 @@
-"""One bounded mux recipe; numeric acquisition remains with its native owner."""
+"""Measure mux length Rabi, fit pulse lengths, and review calibration updates."""
 
 from typing import Unpack
 
@@ -10,23 +10,23 @@ from zcu_tools.mcp.measure.execution_reply import (
 )
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
+    RecipeFieldEdit,
     RecipeGenerator,
     RecipeSession,
+    ask,
 )
 
 from .mux_helpers import (
     DRIVE_PARAMETERS,
     INPUTS,
     MuxInputs,
-    finish_mux,
-    prepare_mux,
 )
 
 
 def mux_len_rabi(
     session: RecipeSession, **inputs: Unpack[MuxInputs]
 ) -> RecipeGenerator:
-    """Run mux length Rabi; review candidates before explicit Apply.
+    """Sweep simultaneous qubit pulse lengths and fit pi/pi2 calibrations.
 
     session is driver-supplied. target binds the Reset mux alias; None retains
     global aliases. reuse_tab_id resets an idle mux/len_rabi tab.
@@ -39,18 +39,57 @@ def mux_len_rabi(
     Paths use MHz/us/native gain, matching the Form; count leaves use n.
     Shared reps/rounds/recovery and delay axes remain shared, not per-tone.
     All elements require equal sweep counts; Len Rabi supports const/flat_top only.
-    Defaults report retained Form inputs, not their internal generation history.
-    Run saves raw and Primary; cancellation stops later steps. Finish-early
-    follows owner partial-data policy. Only an accepted writeback answer applies;
-    skipped writes none. Invalid inputs/cfg and native/transport failures propagate
-    at their author step; successful copies are not rolled back on later failure.
+    Run saves raw data and Primary fits, then asks whether to apply the proposed
+    calibrations. Accept writes all current draft items; skip writes nothing.
+    Cancellation stops later steps; invalid inputs and native/transport failures
+    propagate. Completed input edits are not rolled back after a later failure.
     """
-    tab = prepare_mux(
-        session,
+    # 1. Open or reset the tab with the requested mux binding.
+    target = inputs.get("target")
+    participants = inputs.get("participants")
+    tab = session.open_tab(
         "mux/len_rabi",
-        inputs,
+        aliases=None if target is None else {"mux": target},
+        reuse=inputs.get("reuse_tab_id"),
     )
-    yield from finish_mux(tab)
+
+    # 2. Select sources before copying references and editing their scalar leaves.
+    for selection in inputs.get("library") or ():
+        tab.use_library(tuple(selection["path"]), selection["key"])
+    for copy in inputs.get("inline") or ():
+        tab.use_inline(tuple(copy["path"]))
+    edits = [
+        RecipeFieldEdit(
+            ("participants",),
+            None if participants is None else [name for name in participants],
+        )
+    ]
+    edits.extend(
+        RecipeFieldEdit(
+            tuple(edit["path"]),
+            edit["value"],
+            source="derived" if isinstance(edit["value"], dict) else "explicit",
+        )
+        for edit in inputs.get("overrides") or ()
+    )
+    tab.set_fields(edits)
+
+    # 3. Acquire and save raw IQ, then fit and save Primary Rabi results.
+    result = yield from tab.run_step()
+    run = result.run
+    if result.status == "cancelled" or run is None:
+        return
+    run.save_raw()
+    analysis = yield from run.analyze_step("primary")
+    if analysis.status == "cancelled":
+        return
+
+    # 4. Ask before applying any calibration; skipping leaves the library unchanged.
+    decision = yield from ask(run.propose_writeback())
+    if decision.status == "cancelled":
+        return
+    if decision.decision == "accepted":
+        tab.accept()
 
 
 DEFINITION = RecipeDefinition(
