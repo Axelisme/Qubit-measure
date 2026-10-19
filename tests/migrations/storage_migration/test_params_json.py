@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from pydantic import ConfigDict, Field, TypeAdapter
+from pydantic import ConfigDict, Field, JsonValue, TypeAdapter
 from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.document_store import YamlMap
 from zcu_tools.resources.entry import (
@@ -364,6 +364,98 @@ def test_conflicting_entry_units_block_values_instead_of_using_assumption(
         and "params.json" in item.reason
         for item in report.pending
     )
+
+
+def declare_request(
+    request: MigrationRequest, **declarations: JsonValue
+) -> MigrationRequest:
+    """Apply operator input through the request's typed boundary."""
+    adapter = TypeAdapter(MigrationRequest)
+    return adapter.validate_python({**adapter.dump_python(request), **declarations})
+
+
+def test_jpa_never_borrows_global_assumption(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    request = declare_request(request_data, assume_flux_unit="A")
+    source = write_meta(request, "", {"cur_A": 0.4, "best_jpa_flux": 0.2})
+    report = migrate(request, metadata_mapping)
+    assert any(
+        item.source == source and item.location == "best_jpa_flux"
+        for item in report.pending
+    )
+    assert getattr(open_entry(request).setup.J1, "flux", None) is None
+    assert document_value(snapshot(open_entry(request).setup), "general.ext") == {
+        "flux_unit": "A",
+        "flux_value": 0.4,
+    }
+
+
+def test_independent_jpa_assumption_publishes_v_without_changing_global_ma(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    request = declare_request(
+        request_data, assume_flux_unit="mA", assume_jpa_flux_unit="V"
+    )
+    write_meta(request, "", {"cur_A": 0.4, "best_jpa_flux": 0.2})
+    report = migrate(request, metadata_mapping)
+    assert getattr(open_entry(request).setup.J1, "flux", None) == 0.2
+    setup = snapshot(open_entry(request).setup)
+    assert document_value(setup, "J1.flux_unit") == "V"
+    assert document_value(setup, "general.ext") == {
+        "flux_unit": "mA",
+        "flux_value": 0.4,
+    }
+    assert any(
+        row.old_key == "jpa_flux_unit" and "假設單位" in row.reason
+        for row in report.key_mappings
+    )
+
+
+@pytest.mark.parametrize("explicit", ["A", "mA", None])
+def test_jpa_assumption_never_replaces_explicit_or_invalid_evidence(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    explicit: str | None,
+) -> None:
+    request = declare_request(request_data, assume_jpa_flux_unit="V")
+    source = write_meta(request, "", {"jpa_flux_unit": explicit, "best_jpa_flux": 0.2})
+    report = migrate_with_unit_pending(request, metadata_mapping)
+    if explicit == "A":
+        assert (
+            document_value(snapshot(open_entry(request).setup), "J1.flux_unit") == "A"
+        )
+        assert not any(item.source == source for item in report.pending)
+    else:
+        assert getattr(open_entry(request).setup.J1, "flux", None) is None
+        assert any(
+            item.source == source and item.location == "best_jpa_flux"
+            for item in report.pending
+        )
+
+
+def test_resume_rejects_changed_jpa_assumption_before_writes(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    request = declare_request(request_data, assume_jpa_flux_unit="V")
+    write_meta(request, "", {"best_jpa_flux": 0.2})
+    migrate(request, metadata_mapping)
+    before = (request.results_root / request.name / "setup.yaml").read_bytes()
+    changed = declare_request(request, assume_jpa_flux_unit="A", resume=True)
+    with pytest.raises(MigrationInputError, match="declarations"):
+        migrate(changed, metadata_mapping)
+    assert (request.results_root / request.name / "setup.yaml").read_bytes() == before
+
+
+@pytest.mark.parametrize("unit", ["mA", "unknown", "", True])
+def test_invalid_jpa_assumption_is_rejected_before_any_entry_or_backup(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping, unit: JsonValue
+) -> None:
+    with pytest.raises(ValueError):
+        request = declare_request(request_data, assume_jpa_flux_unit=unit)
+        migrate(request, metadata_mapping)
+    assert not (request_data.results_root / request_data.name).exists()
+    assert not backup_path(request_data).exists()
 
 
 def test_sample_declarations_publish_runtime_rows_and_resume_once(
