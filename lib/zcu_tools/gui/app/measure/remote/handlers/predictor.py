@@ -1,8 +1,8 @@
-"""Read-only simulator wire adapter: exactly one concrete qubit or named params.
+"""Read-only simulator wire adapter: exactly one entry filename or named params.
 
-Source selection and model discrimination belong to this adapter. simulate owns
-named parameter decoding/projection and physical validation. Computations use
-PredictorControlPort; they never read a dialog, cache or installed model.
+Source selection and wire error projection belong to this adapter. Predictor
+control owns entry-local file loading; simulate owns numeric parameter validation.
+Computations never read a dialog, cache, component, alias or installed model.
 """
 
 from __future__ import annotations
@@ -25,22 +25,29 @@ if TYPE_CHECKING:
 def _source_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> ModelParams:
-    qubit, direct = params.get("qubit"), params.get("params")
-    if (qubit is None) == (direct is None):
+    filename, direct = params.get("filename"), params.get("params")
+    if (filename is None) == (direct is None):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
-            "Supply exactly one source: qubit or params",
+            "Supply exactly one source: filename or params",
             reason="invalid_predictor_source",
         )
-    if qubit is not None:
-        if not isinstance(qubit, str):
-            raise TypeError("Invalid validated qubit name")
+    if filename is not None:
+        if not isinstance(filename, str):
+            raise TypeError("Invalid validated predictor filename")
         try:
-            return adapter.predictor_control.params_for_qubit(qubit)
-        except PredictorInputError as exc:
+            predictor_file = adapter.predictor_control.load_file(filename)
+        except ValueError as exc:
             raise RemoteError(
-                ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_qubit"
+                ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_file"
             ) from exc
+        except OSError as exc:
+            raise RemoteError(
+                ErrorCode.PRECONDITION_FAILED,
+                str(exc),
+                reason="predictor_file_unavailable",
+            ) from exc
+        return predictor_file.params
     if not isinstance(direct, dict):
         raise TypeError("Invalid validated parameter object")
     model = direct.get("model")
@@ -72,11 +79,12 @@ def _complete_params(
 def h_predictor_predict(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Return {freq_mhz} for one complete qubit/params source at device_value.
+    """Return {freq_mhz} for one complete filename/params source at device_value.
 
     Device values use native units; energies use GHz; frequencies use MHz.
     INVALID_PARAMS names source conflicts, missing fields or invalid inputs.
-    Queries leave components and supplied parameters unchanged.
+    No entry or unreadable files fail with PRECONDITION_FAILED. Queries leave
+    files and supplied parameters unchanged.
     """
     inputs = _complete_params(adapter, params)
     value, frm, to = params["device_value"], params["from_level"], params["to_level"]
@@ -104,8 +112,9 @@ def h_predictor_calibrate(
 
     device_value is the measured native setpoint, frequency_mhz the measured MHz
     frequency; from_level < to_level are nonnegative integers. Source/field
-    failures are INVALID_PARAMS. No component, dialog, hardware or cache writes
-    occur. The model selects smallest |bias|; unreachable targets clamp to the
+    failures are INVALID_PARAMS. No entry or unreadable files fail with
+    PRECONDITION_FAILED. No file, dialog, hardware or cache writes occur.
+    The model selects smallest |bias|; unreachable targets clamp to the
     nearest frequency. Numerical failures propagate without fallback.
     """
     inputs = _complete_params(adapter, params)
@@ -141,8 +150,10 @@ def h_predictor_info(
 
     model is fluxonium or transmon. Params retain null unknown fields in
     GHz/native units. No model is built.
-    INVALID_PARAMS names source conflicts, unknown qubits or malformed direct
-    inputs. The selected point is read as-is, without dialog/alias/cache access.
+    INVALID_PARAMS names source conflicts, invalid files or malformed direct
+    inputs. No entry or unreadable files fail with PRECONDITION_FAILED.
+    Filename sources read the opened entry without requiring a selected point.
+    Neither source reads components, aliases, dialog state or cache.
     """
     inputs = _source_params(adapter, params)
     return {

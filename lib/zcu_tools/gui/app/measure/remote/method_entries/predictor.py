@@ -10,9 +10,10 @@ from ._registry import RemoteMethodEntry, method_entry
 
 _SOURCES = (
     optional_string(
-        "qubit",
-        "Concrete qubit component name (e.g. Q2) at the current selected point, "
-        "not an alias/path. Supply exactly one of qubit or params.",
+        "filename",
+        "Predictor JSON filename including .json (e.g. fitted.json) in the opened "
+        "entry's predictors directory, not a path, component or alias. No selected "
+        "point is required. Supply exactly one of filename or params.",
     ),
     ParamSpec(
         "params",
@@ -22,8 +23,8 @@ _SOURCES = (
         "EC, EL, flux_half, flux_period, flux_bias}. SQUID transmon: {model: "
         "'transmon', EJmax, EC, d, flux_half, flux_period, flux_bias}, where d is "
         "the junction asymmetry. Energies use GHz; affine values use native device "
-        "units. Omitted/null fields are unknown. Supply exactly one of qubit or "
-        "params; no dialog/cache or alias is read.",
+        "units. Omitted/null fields are unknown. Supply exactly one of filename or "
+        "params; inline inputs need no entry. No dialog/cache or alias is read.",
     ),
 )
 
@@ -33,10 +34,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "predictor:h_predictor_predict",
         MethodSpec(
             10.0,
-            "Read-only transition prediction from exactly one qubit or params source. "
+            "Read-only transition prediction from exactly one filename or params source. "
             "Returns {freq_mhz}. Requires complete valid parameters. INVALID_PARAMS "
-            "reasons: invalid_predictor_source, invalid_predictor_qubit, "
-            "invalid_predictor_params, missing_predictor_params (data.missing lists fields).",
+            "reasons: invalid_predictor_source, invalid_predictor_file, "
+            "invalid_predictor_params, missing_predictor_params (data.missing lists fields). "
+            "Filename sources can fail with PRECONDITION_FAILED/no_entry or "
+            "predictor_file_unavailable.",
             _SOURCES
             + (
                 required_number(
@@ -57,11 +60,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Compute {flux_bias_before, flux_bias_after, frequency_mhz, clamped} from exactly one "
-            "qubit or params source. Complete valid parameters are required; missing "
+            "filename or params source. Complete valid parameters are required; missing "
             "fields return INVALID_PARAMS/missing_predictor_params with data.missing. "
             "Source conflicts return invalid_predictor_source; malformed params or "
-            "qubits return invalid_predictor_params or invalid_predictor_qubit. "
-            "Only returns a candidate: never writes a component, dialog, file or "
+            "files return invalid_predictor_params or invalid_predictor_file. "
+            "Filename sources can fail with PRECONDITION_FAILED/no_entry or "
+            "predictor_file_unavailable. Only returns a candidate: never writes a dialog, file or "
             "hardware. Selects smallest absolute native bias across all roots. "
             "Unreachable targets return the nearest attainable frequency_mhz and "
             "clamped=true, ties choose smallest absolute bias. Reachable targets "
@@ -86,11 +90,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "predictor:h_predictor_info",
         MethodSpec(
             5.0,
-            "Read-only {model, params, missing} from exactly one qubit or params "
+            "Read-only {model, params, missing} from exactly one filename or params "
             "source. Null fields remain unknown; no complete model is required or "
             "built. Source conflicts return INVALID_PARAMS/invalid_predictor_source; "
-            "unknown/invalid concrete names return invalid_predictor_qubit; malformed "
-            "direct inputs return invalid_predictor_params. Never reads dialog/cache.",
+            "invalid filenames or content return invalid_predictor_file; malformed "
+            "direct inputs return invalid_predictor_params. Filename sources can fail "
+            "with PRECONDITION_FAILED/no_entry or predictor_file_unavailable. "
+            "Never reads components, aliases or dialog/cache.",
             _SOURCES,
             readonly=True,
         ),
