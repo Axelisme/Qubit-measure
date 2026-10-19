@@ -436,13 +436,14 @@ class ComponentDriver:
     def edit_tree_value(
         self, path: tuple[str, ...], *, object_name: str, value: str
     ) -> None:
-        """Edit a visible tree row's Value cell using click, F2 and Enter.
+        """Edit a visible tree row's Value cell using double-click and Enter.
 
         path contains exact visible root-to-row captions, not model keys.
         object_name selects one QTreeWidget whose second column is Value.
         value is the text to type into its QLineEdit delegate. Missing or
-        ambiguous trees/visible paths raise LookupError; a non-tree target or
-        a non-line-edit delegate raises TypeError. Disabled, hidden, clipped,
+        ambiguous trees/visible paths/editors raise LookupError; a non-tree
+        target raises TypeError. The delegate must expose a QLineEdit.
+        Disabled, hidden, clipped,
         modal-blocked or noneditable cells are no-ops. Ancestors must already
         be expanded; this method never scrolls or opens hidden rows.
         """
@@ -468,11 +469,26 @@ class ComponentDriver:
         if tree.isColumnHidden(1) or not viewport.visibleRegion().contains(target):
             return
         mouse_click(viewport, target)
-        key_click(tree, Qt.Key.Key_F2)
+        for kind, buttons in (
+            (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
+            (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+        ):
+            QApplication.sendEvent(
+                viewport,
+                QMouseEvent(
+                    kind,
+                    QPointF(target),
+                    QPointF(viewport.mapToGlobal(target)),
+                    Qt.MouseButton.LeftButton,
+                    buttons,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
         QApplication.processEvents()
-        editor = QApplication.focusWidget()
-        if not isinstance(editor, QLineEdit) or not tree.isAncestorOf(editor):
-            raise TypeError("Tree Value delegate did not open a QLineEdit")
+        editors = [e for e in tree.findChildren(QLineEdit) if self._on_screen(e)]
+        editor = _unique(
+            "tree Value editor", editors, [e.objectName() for e in editors]
+        )
         if self._can_interact(editor):
             key_click(editor, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
             type_text(editor, value)
