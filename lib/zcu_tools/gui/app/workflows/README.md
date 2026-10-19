@@ -1,12 +1,14 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-19，共用遞迴還原、FormInput JSON 與完整 native tunables Apply
+**Last updated:** 2026-10-19，driver factory 注入、共用遞迴還原、FormInput JSON 與完整 native tunables Apply
 
 ## 註冊與組裝
 
 `WorkflowAttachment` 配對已宣告的 native step、plan/tunables FormModel、converter 與 context seed。每個附件保留 native plan、tunables、state、record 與 form 的型別配對。同一宿主的附件共享 context 型別參數，宿主不解讀 context，也不依 workflow 名稱分支。註冊項目沒有 export 或 presentation callback。
 
 `WorkflowsGuiBehavior(registrations=..., templates=..., loader=..., alias_presets=...)` 建立一份 EMPTY session。Behavior 的公開 `alias_presets` 欄位保留完整名稱與有序表，session 只使用 default rows。省略或 None 建立空表，顯式 mapping 必須含 default，default 的空 tuple 合法。`WorkflowWindow` 也可接收既有 state/services/owner 與註冊清單，嵌入 caller 的 Qt parent。清單必須非空且名稱唯一，第一項是預設。GUI、RPC 與 MCP 使用同一 Window 與 Controller。公開參數、欄位、錯誤與 lifetime 契約見各型別 docstring。
+
+`WorkflowsGuiBehavior` 可注入 session 既有的 `DriverFactoryPort`，省略時使用 production driver factory。注入只替換 driver 建立，不改 DeviceService 的新增規則。Behavior 仍擁有 registry，關閉時先 drain workers 再關閉所有已登記 driver。
 
 `scripts/run_workflows_gui.py` 是組合根。它讀 `zcu_lab.workflows.registry`，注入註冊清單、alias preset 與 `SourceCatalogLoader`。它也把 `zcu_lab.templates.TEMPLATES` 傳給 Behavior，與 measure 使用同一份範本目錄。Builder 每次重新 import 當前清單。Framework 和 component sources 固定，workflow/form/registry sources 一起 bounded reload。Framework 不 import 使用者套件，依賴方向由 C16 保護。
 
