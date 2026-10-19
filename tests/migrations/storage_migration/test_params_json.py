@@ -452,7 +452,9 @@ def test_invalid_jpa_assumption_is_rejected_before_any_entry_or_backup(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping, unit: JsonValue
 ) -> None:
     with pytest.raises(ValueError, match="assume_jpa_flux_unit"):
-        migrate(declare_request(request_data, assume_jpa_flux_unit=unit), metadata_mapping)
+        migrate(
+            declare_request(request_data, assume_jpa_flux_unit=unit), metadata_mapping
+        )
     assert not (request_data.results_root / request_data.name).exists()
     assert not backup_path(request_data).exists()
 
@@ -548,9 +550,12 @@ def test_resume_refuses_changed_sample_declarations_before_writes(
 def test_sample_missing_declarations_are_located_without_using_flux_assumption(
     request_data: MigrationRequest, analysis_mapping: MigrationMapping
 ) -> None:
-    source = request_data.result_root / "chip/qubit/samples.csv"
+    request = declare_request(
+        request_data, assume_flux_unit="mA", assume_jpa_flux_unit="V"
+    )
+    source = request.result_root / "chip/qubit/samples.csv"
     source.write_text("calibrated mA,T1 (us)\n2,50\n", encoding="utf-8")
-    report = migrate(request_data, analysis_mapping)
+    report = migrate(request, analysis_mapping)
     assert any(
         item.source == source and item.location == "row 1" for item in report.pending
     )
