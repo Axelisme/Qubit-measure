@@ -27,6 +27,8 @@ from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.kernels._rwa_gate import GatePrepared
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
+from tests.simulate.evolution.contract.kernel_suite import KernelCase, reference
+
 
 def source():
     x = np.array([[0, 0.002, 0], [0.002, 0, 0.001], [0, 0.001, 0]], complex)
@@ -353,6 +355,91 @@ def test_strang_split_adapts_without_changing_the_four_step_control(
         )
         assert (
             np.max(np.abs(np.diagonal(actual - reference, axis1=-2, axis2=-1))) < 1e-2
+        )
+
+
+def circular_gate_case(frequency: float, size: int = 2) -> KernelCase:
+    """Smooth circular drive: full lab dynamics have no counter-rotating term."""
+    strength = 0.04 if size == 2 else 0.001
+    positive = np.diag(np.full(size - 1, strength), 1).astype(np.complex128)
+    model = SecularModel(
+        (0,),
+        f"circular-shaped-{size}-{frequency}",
+        np.arange(size, dtype=np.float64) * 0.3,
+        np.eye(size, dtype=np.complex128),
+        (
+            SecularDrive(
+                "drive",
+                positive + positive.T,
+                np.sign(frequency) * 1j * (positive - positive.T),
+            ),
+        ),
+        np.zeros((size, size)),
+        np.zeros((size, size)),
+    )
+    vector = np.zeros(size, dtype=np.complex128)
+    vector[:2] = [1 / np.sqrt(2), 1j / np.sqrt(2)]
+    initial = np.outer(vector, vector.conj())
+    src = ModelSource(initial, lambda level: replace(model, level=level))
+    table = SegmentTable(
+        timeline=np.arange(2),
+        start_ns=np.array([0.0, 37.0]),
+        duration_ns=np.full(2, 126.0),
+        level=np.zeros((2, 1), dtype=np.int64),
+        tones=np.ones(2, dtype=np.int64),
+        tone_port=np.zeros((2, 1), dtype=np.int64),
+        tone_frequency_ghz=np.full((2, 1), frequency),
+        tone_amplitude=np.ones((2, 1)),
+        tone_theta_rad=np.array([[0.0], [0.713]]),
+        tone_envelope=np.zeros((2, 1), dtype=np.int64),
+        tone_envelope_offset_ns=np.full((2, 1), 4.0),
+        envelopes=(envelope(),),
+    )
+    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
+    return KernelCase(kernel, src, table, np.repeat(initial[None], 2, axis=0))
+
+
+@pytest.mark.parametrize("frequency", [0.3, 0.37, -0.37])
+def test_omission_admission_builds_strong_shaped_gates_with_restored_dynamics(
+    frequency,
+):
+    # At resonance the old ratio and retained-phase proxies both reject this
+    # exactly circular Hamiltonian. At 70 MHz detuning its only edge must be
+    # restored, including removal of that edge's old virtual diagonal shift.
+    case = circular_gate_case(frequency)
+    rows = np.arange(2)
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(case.source, case.budget, plan)
+        assert case.kernel.guard(case.table, rows, context).all(), (
+            "omission-safe shaped gates must survive strength and phase proxies"
+        )
+        keys = case.kernel.prepare_keys(case.table, rows, context)
+        assert keys[0] == keys[1], "covariant phases must reuse the resolved graph"
+        prepared = case.kernel.prepare(keys[:1], case.table, rows[:1], context)
+        actual = case.states.copy()
+        case.kernel.apply(
+            prepared,
+            np.zeros(2, dtype=np.int64),
+            case.table,
+            rows,
+            actual,
+            ApplyContext(case.budget),
+        )
+    for row in rows:
+        expected = reference(case, int(row), case.states[row])
+        # 100x stricter than the contract: distinguish missing-mask error (0.953)
+        # from normal integration error without tightening the production solver.
+        np.testing.assert_allclose(actual[row], expected, atol=case.budget / 100, rtol=0)
+
+
+def test_shaped_gate_declines_connected_retained_graph_over_block_limit():
+    # Only guard runs: no 17-state propagator is constructed. This weak chain
+    # passed the old strength/phase proxies but needs 17**2 real equations.
+    case = circular_gate_case(0.3, size=17)
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(case.source, case.budget, plan)
+        assert not case.kernel.guard(case.table, np.array([0]), context).any(), (
+            "shaped gates must enforce the shared retained-block size limit"
         )
 
 
