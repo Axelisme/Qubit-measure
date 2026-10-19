@@ -3,7 +3,7 @@
 Covers start_analyze, the FIT terminal paths, interactive analyze, and
 cancel_interactive — using a real State + real EventBus, with bg mocked.
 
-Stage 2c: AnalyzeService is now an OperationRunner client. _StagedAnalyzeService
+Stage 2c: AnalyzeService is now an OperationRunner client. StagedAnalyzeService
 no longer has a _submit helper; FIT/post paths use _submit_with_runner internally.
 Tests drive terminal paths by capturing bg.last_on_done / on_error.
 """

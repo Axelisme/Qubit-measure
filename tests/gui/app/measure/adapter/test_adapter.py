@@ -87,9 +87,7 @@ def test_base_adapter_validates_forgotten_real_analyze_params_override():
 
     with pytest.raises(TypeError, match="get_analyze_params"):
 
-        class _Adapter(
-            BaseAdapter[MagicMock, MagicMock, NoAnalysisResult, _RequiredParams]
-        ):
+        class _(BaseAdapter[MagicMock, MagicMock, NoAnalysisResult, _RequiredParams]):
             capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
             exp_cls = MagicMock()
 
@@ -112,7 +110,7 @@ def test_base_adapter_analyze_raises_by_default():
 
 def test_analyze_params_cls_fallback_when_no_annotation():
 
-    class _UnannotatedAdapter(BaseAdapter):
+    class _UnannotatedAdapter(BaseAdapter[ConfigBase, MagicMock]):
         capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
         exp_cls = MagicMock()
 
