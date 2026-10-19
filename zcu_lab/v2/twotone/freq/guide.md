@@ -14,6 +14,13 @@ Starts with a fresh inline 'qub_probe' const pulse, not a calibrated state-prep 
 
 Proposes fitted qubit.freq and qubit.kappa (FWHM) in MHz. An independent freq_mhz/freq_err_mhz sample uses the captured Run bias when device evidence is available. No module writeback. Apply only after the agent/user verifies that the plotted feature is the intended qubit line.
 
+## MCP recipe
+
+`twotone_spectrum` requires explicit `center_mhz`, `span_mhz` and `points`.
+None can be null. Center and span use MHz, span must be positive, and points
+must be at least 2. The recipe writes numeric frequency endpoints from the
+supplied center and span.
+
 ## Recommended
 
 Standard flow at a fresh `$qubit.flux_int`: first run a wide survey over the user-approved passband to find a real qubit feature, without using predictor output or simulator truth as the answer. Then run a narrower scan around the observed feature and fit it. Analysis defaults to the Lorentzian fit ('lor') with plot-fit on; switch to 'sinc' for power-broadened or saturated lines. If the scan looks like noise, widen/re-centre and check readout/gain before concluding there is no qubit.

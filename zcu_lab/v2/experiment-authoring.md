@@ -342,7 +342,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ---
 
-父層 `experiment/utils/` 的 comment、device 與 sweep helper 見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
+父層 `experiment/utils/` 的 comment 與 sweep helper 見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。儀器角色 helper 位於 `_support/device.py`，見 [lab v2 說明](README.md#實驗角色與-device-操作)。
 
 ## v2 工具與實驗輔助
 
