@@ -15,6 +15,8 @@ from zcu_tools.core.simulation import (
     RoundStatistics,
 )
 
+from ._envelope_pool import EnvelopePool
+
 
 @dataclass(frozen=True)
 class SimulationProvenance:
@@ -61,6 +63,8 @@ class SimulationBinding:
             "PCG64/SeedSequence-v2/numpy-<version>".
         provenance: SimulationProvenance for this binding. Only its identifier
             is intended for public Run metadata.
+        envelope_pool: Byte-bounded immutable DAC envelope pool shared across
+            this binding's acquisitions. It retains no mutable program buffers.
         last_request: Most recently installed AcquireRequest, or None before any
             request is installed. A failure before installation may leave the
             preceding request here. It is not cleared by begin or end.
@@ -103,6 +107,7 @@ class SimulationBinding:
             isinstance(seed, bool) or type(seed) is not int or seed < 0
         ):
             raise ValueError("seed must be a nonnegative integer or None")
+        self.envelope_pool = EnvelopePool()
         self._wait_ready = wait_ready
         self.capture_snapshot = capture_snapshot
         self.execute = execute

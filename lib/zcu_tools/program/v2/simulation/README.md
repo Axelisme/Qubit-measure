@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-18，no-op integrated upload removal 與 frontend lowering
+**Last updated:** 2026-10-19，no-op integrated upload removal、frontend lowering 與 binding-owned envelope reuse
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -155,6 +155,11 @@ without padding to the longest entry. TablePulseReadout first plays its initial
 compiled template; only its named loop's exec-after hook prepares the next words.
 The last update restores table entry zero for the next outer repetition. Register
 and template state belongs to one frontend preparation, never to another acquire.
+The binding retains detached immutable DAC envelopes in a 32 MiB LRU pool across
+acquisitions. Every preparation checks current DAC content, normalization, clocks
+and flat-top duration; names and program identities are not cross-acquire keys.
+The budget includes keys, Python samples and containers. Eviction releases only
+pool references, so existing requests keep their immutable envelopes unchanged.
 Normal hardware compilation and the existing block_mode timing policy are unchanged.
 
 - `AcquireRequest` fixes C-order `loop_dims`, `avg_level`, non-reps `point_dims`

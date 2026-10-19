@@ -40,7 +40,7 @@ def build_request(
         prog.compile()
     if prog.loop_dims is None or prog.avg_level is None:
         raise ValueError("compiled acquisition layout is missing")
-    interpreter = VectorInterpreter(prog)
+    interpreter = VectorInterpreter(prog, envelope_pool=binding.envelope_pool)
     templates = interpreter.run_templates()
     loops = prog.loop_dict
     names = tuple(n for n in loops if n != "reps")
