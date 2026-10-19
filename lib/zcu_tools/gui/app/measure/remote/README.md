@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-19，Recipe wire readonly 與宣告唯讀
+**Last updated:** 2026-10-20，Predictor entry-local filenames
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -34,6 +34,21 @@ not declare MCP tools and does not own stdio transport.
 Shared transport primitives live in [`zcu_tools.gui.remote`](../../../remote/README.md): NDJSON framing,
 typed request/reply/error envelope, socket endpoint, owner-scheduler dispatch, and
 router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/wire.py).
+
+## Predictor sources
+
+`predictor.info`, `predictor.predict` and `predictor.calibrate` require exactly one
+non-null source, `filename` or inline `params`. Omission and null both mean no
+source. A filename includes `.json` and names a file in
+the opened entry's `predictors/` directory. Predictor control owns loading and
+validation; remote only projects errors and numeric replies. No point, component,
+alias, dialog state or cache participates. Inline inputs require no entry.
+Queries and calibration candidates never write predictor files.
+
+Invalid filenames/content return `invalid_params/invalid_predictor_file`.
+Unreadable files return `precondition_failed/predictor_file_unavailable`; no entry
+returns `precondition_failed/no_entry`. Source conflicts and numeric
+parameter errors retain their existing predictor reasons in `method_entries`.
 
 ## Wire contract
 

@@ -39,7 +39,6 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.device import ActiveDeviceOperation
-from zcu_tools.gui.session.services.predictor import ParamsFor
 from zcu_tools.gui.session.types import ParameterContext
 
 from .adapter import AdapterGuide, SessionEnv
@@ -278,7 +277,6 @@ class Controller(SessionControllerMixin):
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
-        params_for: ParamsFor | None = None,
         *,
         alias_presets: AliasPresets | None = None,
         device_registry: DeviceRegistryPort | None = None,
@@ -351,7 +349,6 @@ class Controller(SessionControllerMixin):
             owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
-            params_for=params_for,
             alias_presets=alias_presets,
             device_registry=device_registry,
             driver_factory=driver_factory,
