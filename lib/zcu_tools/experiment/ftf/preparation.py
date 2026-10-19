@@ -16,29 +16,120 @@ from .readout import FTFReadoutConfig
 T = TypeVar("T")
 
 
-def preparation_key(request: AcquireRequest, readout: FTFReadoutConfig) -> bytes:
+class EnvelopeEncoder:
+    """Source-scoped byte-bounded LRU of exact immutable envelope encodings.
+
+    encode accepts core-owned immutable PulseEnvelope tuples, retaining a strong
+    reference so object identities cannot be recycled while resident. No request
+    or borrowed ndarray is retained. max_bytes is adjustable between serialized
+    calls; zero disables residency. resident_bytes includes full envelope tuples,
+    numeric objects, encoded bytes, entry metadata and the Python LRU container.
+    Shared objects across entries are conservatively charged again. builds/hits
+    count encodings/reuses cumulatively, including across clear().
+    """
+
+    def __init__(self, max_bytes: int = 32 * 1024**2) -> None:
+        if type(max_bytes) is not int or max_bytes < 0:
+            raise ValueError("envelope max_bytes must be a nonnegative integer")
+        self.max_bytes = max_bytes
+        self.builds = 0
+        self.hits = 0
+        self.resident_bytes = 0
+        self._entries: OrderedDict[int, tuple[PulseEnvelope, bytes, int]] = (
+            OrderedDict()
+        )
+        self._entry_bytes = 0
+
+    def clear(self) -> None:
+        """Release every encoding and envelope, preserving cumulative counters."""
+        self._entries.clear()
+        self._entry_bytes = 0
+        self.resident_bytes = 0
+
+    def encode(self, envelope: PulseEnvelope) -> bytes:
+        """Return the original preparation stream for one immutable envelope."""
+        if self.resident_bytes > self.max_bytes:
+            self._trim()
+        identity = id(envelope)
+        entry = self._entries.get(identity)
+        if entry is not None:
+            self._entries.move_to_end(identity)
+            self.hits += 1
+            return entry[1]
+        self.builds += 1
+        payload = bytearray()
+
+        def frame(data: bytes) -> None:
+            payload.extend(len(data).to_bytes(8, "little"))
+            payload.extend(data)
+
+        frame(type(envelope).__qualname__.encode())
+        for values, dtype in (
+            (envelope.sample_us, np.float64),
+            (envelope.values, np.complex128),
+        ):
+            array = np.asarray(values, dtype=dtype)
+            frame(type(array).__qualname__.encode())
+            frame(array.dtype.str.encode())
+            frame(repr(array.shape).encode())
+            frame(array.tobytes())
+        encoded = bytes(payload)
+        if self.max_bytes == 0:
+            return encoded
+        size = (
+            _owned_bytes(envelope)
+            + getsizeof(encoded)
+            + getsizeof(identity)
+            + getsizeof((envelope, encoded, 0))
+            + getsizeof(0)
+        )
+        if size <= self.max_bytes:
+            self._entries[identity] = (envelope, encoded, size)
+            self._entry_bytes += size
+            self._trim()
+        return encoded
+
+    def _trim(self) -> None:
+        self.resident_bytes = getsizeof(self._entries) + self._entry_bytes
+        while self._entries and self.resident_bytes > self.max_bytes:
+            _, entry = self._entries.popitem(last=False)
+            self._entry_bytes -= entry[2]
+            self.resident_bytes = getsizeof(self._entries) + self._entry_bytes
+        if not self._entries:
+            self.clear()
+
+
+def preparation_key(
+    request: AcquireRequest,
+    readout: FTFReadoutConfig,
+    *,
+    encoder: EnvelopeEncoder | None = None,
+) -> bytes:
     """Hash all detached C1/layout/readout values, excluding sampling identities.
 
     Physical/numeric generation and engine lifetime are managed by the owner,
     which clears the cache before lookup on any generation change. Borrowed C1
     arrays are read on every lookup; no program or array identity is trusted.
     Numeric envelopes use bulk binary encoding rather than per-sample recursion.
+    Optional source-owned encoder reuses only immutable envelope byte streams;
+    omitting it computes the same digest without retaining any encodings.
     """
     digest = sha256()
+    envelope_encoder = EnvelopeEncoder(0) if encoder is None else encoder
 
     def frame(data: bytes) -> None:
         digest.update(len(data).to_bytes(8, "little"))
         digest.update(data)
 
     def visit(value: object) -> None:
+        if isinstance(value, PulseEnvelope):
+            digest.update(envelope_encoder.encode(value))
+            return
         frame(type(value).__qualname__.encode())
         if isinstance(value, np.ndarray):
             frame(value.dtype.str.encode())
             frame(repr(value.shape).encode())
             frame(value.tobytes())
-        elif isinstance(value, PulseEnvelope):
-            visit(np.asarray(value.sample_us, dtype=np.float64))
-            visit(np.asarray(value.values, dtype=np.complex128))
         elif is_dataclass(value) and not isinstance(value, type):
             for field in fields(value):
                 frame(field.name.encode())
