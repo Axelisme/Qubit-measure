@@ -61,7 +61,7 @@ def rename_session(qapp, tmp_path: Path) -> Iterator[RenameSession]:
         background,
         runner,
         handles,
-        driver_factory=lambda _type, _address: FakeDevice(fast_mode=True),
+        driver_factory=lambda type_name, address: FakeDevice(fast_mode=True),
         device_registry=FakeDeviceRegistry(),
     )
     device.register_remembered_devices(
@@ -165,7 +165,10 @@ def test_same_name_rename_is_a_noop(rename_session: RenameSession) -> None:
 
     assert changed == []
     assert session.binder.snapshot() == before
-    assert {entry.name for entry in session.device.list_devices()} == {"occupied", "old"}
+    assert {entry.name for entry in session.device.list_devices()} == {
+        "occupied",
+        "old",
+    }
 
 
 @pytest.mark.parametrize("new_name", ["new", "old"])
