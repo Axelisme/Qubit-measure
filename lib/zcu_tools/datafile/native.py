@@ -10,6 +10,7 @@ import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
 from zcu_tools.format_version import FormatError, FormatVersion, validate_header
+from zcu_tools.utils import atomic_replace
 
 from .models import DataVariable, LabberMetadata, LabberPayload
 from .native_metadata import (
@@ -47,7 +48,8 @@ def save_run_data(
     same-directory temporary file, close it, then atomically publish; failures
     remove this call's temp and preserve the prior destination.
     extensions reuses a detached validated image for same-shape generic rewrites;
-    None creates version 2.0. Known nodes must resolve within this file. Existing
+    rewrites use max(source version, 2.1); None creates version 2.1.
+    Known nodes must resolve within this file. Existing
     fixed UTF-8 JSON retains unchanged raw text; edits beyond byte capacity fail.
     Invalid known data raises a destination/location ValueError. I/O errors
     propagate. No cross-file or power-loss guarantee.
@@ -71,14 +73,16 @@ def save_run_data(
             temp.write_bytes(extensions.file_image)
         with h5.File(temp, "r+" if extensions is not None else "w") as file:
             if extensions is not None:
-                _validate_header(file, destination)
+                version = _validate_header(file, destination)
+                if version.minor < 1:
+                    file.attrs["format_version"] = "2.1"
             else:
                 file.attrs["format"] = "zcu.experiment-data"
-                file.attrs["format_version"] = "2.0"
+                file.attrs["format_version"] = "2.1"
             write_metadata(file, metadata, cfg)
             _write_payload(file, payload, labber_json)
         if replace:
-            os.replace(temp, destination)
+            atomic_replace(temp, destination)
         else:
             # link publishes without overwriting a destination created after validation.
             os.link(temp, destination)
@@ -96,7 +100,9 @@ def load_run_data(source: Path, *, preserve_unknown: bool = False) -> StoredRun:
     Reject legacy/Labber, wrong major, missing required attrs/datasets, invalid
     wire values, names, shapes, dtypes and units with source/location ValueError
     (format-version errors retain their existing public subtype). Same-major
-    minor versions are readable. cfg preserves the entire JSON object.
+    minor versions are readable. Native 2.0 requires known started_at/completion;
+    2.1 and later allow started_at=None and completion="unknown". Missing attrs
+    remain errors. cfg preserves the entire JSON object.
     preserve_unknown=True additionally captures a detached HDF5 image for an
     explicit generic lossless rewrite; False returns extensions=None.
     Unknown nodes are not decoded or used to traverse external link targets.
@@ -106,8 +112,8 @@ def load_run_data(source: Path, *, preserve_unknown: bool = False) -> StoredRun:
     """
     with h5.File(source, "r") as file:
         try:
-            _validate_header(file, source)
-            metadata, cfg = read_metadata(file, source)
+            version = _validate_header(file, source)
+            metadata, cfg = read_metadata(file, source, minor_version=version.minor)
             payload = _read_payload(file)
             _validate_payload_arrays(payload)
         except ValueError as error:
@@ -128,14 +134,14 @@ def load_run_data(source: Path, *, preserve_unknown: bool = False) -> StoredRun:
 _LABBER_METADATA = TypeAdapter(LabberMetadata)
 
 
-def _validate_header(file: h5.File, source: Path) -> None:
-    validate_header(
+def _validate_header(file: h5.File, source: Path) -> FormatVersion:
+    return validate_header(
         {
             "format": text_attr(file, "format"),
             "format_version": text_attr(file, "format_version"),
         },
         expected_format="zcu.experiment-data",
-        supported_version=FormatVersion(2, 0),
+        supported_version=FormatVersion(2, 1),
         source=source,
     )
 

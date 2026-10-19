@@ -68,7 +68,6 @@ def _make_ctx() -> SessionEnv:
         parameters=None,
         soc=MagicMock(),  # simulate connected soc
         soccfg=make_mock_soccfg(),
-        res_name="fake_res",
     )
 
 

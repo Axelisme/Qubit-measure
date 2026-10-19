@@ -33,7 +33,6 @@ from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
-from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import (
     DialogPresenter,
@@ -45,6 +44,7 @@ from zcu_tools.gui.widgets import (
     warning_colour,
 )
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.file_dialog import nearest_existing
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
 

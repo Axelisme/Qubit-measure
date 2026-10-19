@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，腳本與 entry 保存分界、儀器 adapters 與關閉順序
+**Last updated:** 2026-10-20，腳本與 entry 保存分界、儀器 adapters、shared user cache 與 entry-scoped arb 資產
 
 # gui/session/ — 量測 session core
 
@@ -34,6 +34,10 @@ DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，�
 
 `persistence.py` 是 app-neutral、強型別的 single-file caretaker；app 注入 codec 並保留
 schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
+預設存放於 `utils.cache.user_cache_root()/gui`，與 session discovery 共用 user cache 根目錄。
+`ZCU_TOOLS_CACHE_DIR` 指定非空絕對根路徑，空字串或相對路徑會在建立 caretaker 時 raise ValueError。
+顯式 `cache_dir` 仍直接指定保存目錄，不讀取這個 override。
+根目錄的 platformdirs 預設與 tempdir fallback 見 [utils README](../../utils/README.md#user-cache-root)。
 JSON／UTF-8 或 codec 格式錯誤時，caretaker 以 defaults 開啟，透過
 `RestoreOutcome.load_error` 交給 host 顯示。載入不改寫或備份原檔，正常保存時機不變。
 Provider 和其他 restore 故障仍傳播。Measure 的 framework caretaker 只保存 `measure_layout_v1.json` 的視窗尺寸與左面板寬度，不保存、還原或遷移 SoC、devices、entry／point、tabs／input。Session preferences 是目前程序的 Setup 預填值，不負責 domain session 檔案。Workspace 快照與 FormInput reload 只在 RAM 中重建，不是持久 session schema，見 ADR-0063、ADR-0064、ADR-0079。
@@ -56,7 +60,7 @@ session/
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
 ├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。Alias 表可在未開 entry 時編輯；set 只改 memory，Apply 才保存 opened entry。
 ├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責
-├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：qubit-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
+├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：entry-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
 ├── setup_control.py    — SetupControlPort + SetupControlFacet：entry open/new、point use/new、cached setup preferences 與獨立 SoC commands；直接公開既有 devices facet 供 cached label 建議，不依賴 app Controller
 ├── controller_mixin.py — SessionControllerMixin：measure 的 session forwards；shared dialog 使用窄 control facet，entry open/new 直接交 SetupControlPort，不經 project identity 或 app Controller
 ├── expression.py       — simpleeval 共用求值引擎，封裝函式／算子白名單、AST／數值大小限制及固定 ParameterContext 查詢。裸 `$alias` 求值為名稱 str，不接受字串算術或插值。數值 `evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs，常數 pi/e；math 函式不自動轉 cmath。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。
@@ -78,7 +82,7 @@ session/
 │   ├── project_settings.py — ProjectSettingsService：以明確 result/Database roots 呼叫 ResultEntry.open/create，再交 ContextService.install_entry；記住的 entry/connection/device preferences 不證明來源已開啟
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）
 │   ├── shutdown.py     — ShutdownCoordinator（Qt-free cancel-all + poll state machine，吃 OperationHandles，ADR-0066；QTimer driver 在 adapters/）
-│   ├── arb_waveform.py — ArbWaveformService：只依賴 SessionState，資產根目錄依 session_env 的 database path 與 chip／qubit 名稱；每次成功寫入 bump 共用 `arb_waveforms` version 一次；未設 project 時 list 回空，其他操作拒絕 no_project
+│   ├── arb_waveform.py — ArbWaveformService：只依賴 SessionState，資產根目錄直接使用目前 entry 的 database path 下的 `arb_waveforms`；每次成功寫入 bump 共用 `arb_waveforms` version 一次；未設 project 時 list 回空，其他操作拒絕 no_project
 │   ├── value_sources.py — ValueSourceBinder：訂閱 Context/Device event，把 live SessionState 投影註冊進 `ValueRegistry`；provider 只讀 cached state（device value 只看 `DeviceState.info`，不 poll hardware），並用 owner-level replace/unregister 維護 lifecycle
 │   └── build.py        — SessionServices bundle 與 build_session_services：組裝 owning services/facets（含 arb_waveform），從 project_root 注入 result/Database roots，明確注入 entry-scoped asset binder
 └── ui/                 — 共用 dialog，依賴各 domain 的窄 control facets

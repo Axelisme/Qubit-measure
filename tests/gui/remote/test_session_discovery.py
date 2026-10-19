@@ -20,10 +20,22 @@ from zcu_tools.gui.remote import session_discovery as sd
 
 @pytest.fixture
 def session_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect the discovery dir to a tmp path so tests never touch ~/.cache."""
-    root = tmp_path / "sessions"
-    monkeypatch.setattr(sd, "session_dir", lambda: root)
-    return root
+    """Isolate discovery through the public cache-root environment override."""
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+    return tmp_path / "sessions"
+
+
+def test_session_directory_uses_shared_cache_root(session_root: Path) -> None:
+    assert sd.session_dir() == session_root
+
+
+@pytest.mark.parametrize("override", ["", "relative/cache"])
+def test_session_directory_rejects_invalid_cache_override(
+    override: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", override)
+    with pytest.raises(ValueError, match="ZCU_TOOLS_CACHE_DIR"):
+        sd.session_dir()
 
 
 def _open_listener() -> tuple[socket.socket, int]:

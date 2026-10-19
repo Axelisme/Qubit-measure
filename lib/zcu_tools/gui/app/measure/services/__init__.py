@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.predictor import PredictorService
     from zcu_tools.gui.session.services.project_settings import (
         ConnectionPreferences,
-        ProjectRequest,
         ProjectSettingsService,
     )
 
@@ -90,7 +89,6 @@ __all__ = [
     "APP_STATE_VERSION",
     "DEFAULT_LEFT_PANEL_WIDTH",
     "ConnectionPreferences",
-    "ProjectRequest",
     "ProjectSettingsService",
     "TabService",
     "TabSnapshot",
@@ -135,7 +133,6 @@ _EXPORT_MODULES: dict[str, str] = {
     "APP_STATE_VERSION": ".persistence_types",
     "DEFAULT_LEFT_PANEL_WIDTH": ".persistence_types",
     "ConnectionPreferences": "zcu_tools.gui.session.services.project_settings",
-    "ProjectRequest": "zcu_tools.gui.session.services.project_settings",
     "ProjectSettingsService": "zcu_tools.gui.session.services.project_settings",
     "TabService": ".tab",
     "TabSnapshot": ".tab",

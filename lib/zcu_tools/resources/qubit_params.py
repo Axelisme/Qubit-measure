@@ -12,6 +12,8 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Self
 
+from zcu_tools.utils import atomic_replace
+
 PARAMS_SCHEMA_VERSION = 1
 UNKNOWN_PROJECT_NAME = "unknown"
 UNKNOWN_RESONATOR_NAME = "unknown"
@@ -694,7 +696,7 @@ class QubitParams:
             ) as stream:
                 temporary = Path(stream.name)
                 stream.write(content)
-            temporary.replace(self._path)
+            atomic_replace(temporary, self._path)
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)

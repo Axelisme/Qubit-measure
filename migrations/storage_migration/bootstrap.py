@@ -12,6 +12,7 @@ from zcu_tools.resources.entry import (
     ResultEntry,
 )
 
+from .backup import backup_location, create_backup, validate_backup_sources
 from .errors import MigrationInputError
 from .models import (
     MigrationDestination,
@@ -82,11 +83,11 @@ def _validate_library_rules(rules: tuple[ModuleRule, ...]) -> None:
             )
 
 
-def _protect_result_root(root: Path, *paths: Path) -> None:
+def _protect_source(root: Path, *paths: Path) -> None:
     for path in paths:
         if path.is_relative_to(root) or root.is_relative_to(path):
             raise MigrationInputError(
-                f"{path}: write/deletion overlaps old result root {root}"
+                f"{path}: write/deletion overlaps source tree {root}"
             )
 
 
@@ -102,6 +103,13 @@ def _locations(
         request.database_root.resolve(),
         request.results_root.resolve(),
     )
+    # Resolve aliases for the configured roots, but reject links selected as
+    # part of this legacy source before contained_path erases their identity.
+    for root in (result_root, database_root):
+        chip = root / request.source_chip
+        for path in (chip, chip / request.source_qubit):
+            if path.is_symlink():
+                raise MigrationInputError(f"{path}: source symlink is unsupported")
     source = MigrationSource(
         result_path=contained_path(
             result_root / request.source_chip / request.source_qubit, result_root
@@ -114,23 +122,14 @@ def _locations(
         result_path=contained_path(results_root / request.name, results_root),
         database_path=contained_path(database_root / request.name, database_root),
     )
-    _protect_result_root(
-        result_root,
-        destination.result_path,
-        destination.database_path,
-        source.database_path,
-    )
-    if request.report_path is not None:
-        _protect_result_root(result_root, request.report_path.resolve())
+    _protect_source(source.result_path, source.database_path)
+    for root in (source.result_path, source.database_path):
+        _protect_source(root, destination.result_path, destination.database_path)
+        if request.report_path is not None:
+            _protect_source(root, request.report_path.resolve())
     for path in (source.result_path, source.database_path):
-        if not path.is_dir():
+        if not request.resume and not path.is_dir():
             raise MigrationInputError(f"{path}: source directory does not exist")
-    for target in (destination.result_path, destination.database_path):
-        for old in (source.result_path, source.database_path):
-            if target.is_relative_to(old) or old.is_relative_to(target):
-                raise MigrationInputError(
-                    f"{target}: source/destination overlap with {old}"
-                )
     if destination.result_path.is_relative_to(
         destination.database_path
     ) or destination.database_path.is_relative_to(destination.result_path):
@@ -160,9 +159,15 @@ def _resume_session(
     if not path.is_file():
         raise MigrationInputError(f"{path}: resume requires this tool's manifest")
     manifest = read_manifest(path)
-    _validate_report_location(
-        manifest.report_path, source, destination, request.result_root.resolve()
-    )
+    backup = manifest.backup
+    if backup is None or backup.path != backup_location(request, source):
+        raise MigrationInputError(
+            f"{path}: verified backup identity changed or missing"
+        )
+    if manifest.report_path.is_relative_to(backup.path):
+        raise MigrationInputError(f"{path}: report cannot write into verified backup")
+    validate_backup_sources(MigrationSession(path, manifest, dry_run=True))
+    _validate_report_location(manifest.report_path, source, destination)
     manifest = _recover_first_report(manifest)
     expected = _identity(request, manifest.identity.entry_id)
     if (
@@ -176,6 +181,7 @@ def _resume_session(
         manifest.report.source != source
         or manifest.report.destination != destination
         or manifest.report.entry_id != expected.entry_id
+        or manifest.report.backup_path != backup.path
     ):
         raise MigrationInputError(f"{path}: report identity disagrees")
     if (
@@ -200,9 +206,9 @@ def _validate_report_location(
     report_path: Path,
     source: MigrationSource,
     destination: MigrationDestination,
-    result_root: Path,
 ) -> None:
-    _protect_result_root(result_root, report_path.resolve())
+    for root in (source.result_path, source.database_path):
+        _protect_source(root, report_path.resolve())
     default = destination.result_path / "records" / "migration-report.json"
     if not report_path.is_absolute() or report_path.resolve() != report_path:
         raise MigrationInputError(
@@ -253,6 +259,8 @@ def _new_session(
             )
         if not report_path.parent.is_dir():
             raise MigrationInputError(f"{report_path}: report parent must exist")
+    backup_path = backup_location(request, source)
+    backup = create_backup(backup_path, source, dry_run=request.dry_run)
     entry = None
     entry_id = uuid4()
     if not request.dry_run:
@@ -263,7 +271,11 @@ def _new_session(
         )
         entry_id = UUID(entry.entry_id)
     report = MigrationReport(
-        source=source, destination=destination, entry_id=entry_id, part=request.part
+        source=source,
+        destination=destination,
+        entry_id=entry_id,
+        part=request.part,
+        backup_path=backup_path,
     )
     manifest = MigrationManifest(
         identity=_identity(request, entry_id),
@@ -276,6 +288,7 @@ def _new_session(
         parameters_complete=False,
         data_complete=False,
         report=report,
+        backup=backup,
     )
     return manifest, entry
 
@@ -320,7 +333,9 @@ def prepare_session(
     entry handle, or None for a new dry-run entry. Refuse collisions, overlapping
     trees, invalid current containers or conflicting manifest/hash/identity with
     MigrationInputError/FileExistsError. Checkpoint initial ownership before source
-    operations. No legacy source is modified; I/O/schema failures propagate."""
+    operations. Complete and verify the external backup before creating any entry;
+    resume verifies that backup independently of removed old sources. Bootstrap
+    does not delete sources; I/O/schema failures propagate."""
     source, destination = _locations(request)
     path = destination.result_path / "records" / "migration-state.json"
     if request.resume:

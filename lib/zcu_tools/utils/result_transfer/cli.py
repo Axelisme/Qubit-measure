@@ -38,7 +38,7 @@ def _parser(default_local_root: Path) -> argparse.ArgumentParser:
         "--local-root",
         type=Path,
         default=default_local_root,
-        help="Local parent of entry folders (default: this checkout/results)",
+        help="Local parent of entry folders (default: this checkout/result)",
     )
     parser.add_argument(
         "--no-browser",

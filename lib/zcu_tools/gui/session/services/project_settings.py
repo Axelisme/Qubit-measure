@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.owner import OwnerThreadGuard
-from zcu_tools.gui.result_scope import ResultScopeManager
 from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
 from zcu_tools.resources.entry import ResultEntry
 
@@ -22,59 +21,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.state import SessionState
 
 logger = logging.getLogger(__name__)
-
-
-def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str, str]:
-    """Single source of truth for the default per-qubit result / database paths.
-
-    Returns ``(result_dir, database_path)`` mirroring single_qubit.md, where
-    ``database_path`` is the *dated* data folder
-    ``Database/chip/qub/YYYY/MM/Data_MMDD`` — the notebook's ``create_datafolder``
-    return value, with the date in the path itself. Save-path builders therefore
-    join filenames directly under ``ctx.database_path`` and must NOT re-append the
-    date. The date is *today's* at the moment this is called, so restore paths
-    (which re-derive) always land in the
-    current day's folder rather than a stale persisted one.
-
-    Both the setup dialog and the mock/RPC project helpers derive through here so
-    the chip/qub (and date) segments are joined in exactly ONE place —
-    ``apply_project`` must not re-scope. ``root`` is the base dir (e.g. cwd)."""
-    paths = ResultScopeManager(root).derive_paths(chip_name, qub_name)
-    return paths.result_dir, paths.database_path
-
-
-@dataclass(frozen=True)
-class ProjectRequest:
-    chip_name: str
-    qub_name: str
-    res_name: str
-    scope_id: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.chip_name or not self.qub_name or not self.res_name:
-            raise ValueError("Project names must be non-empty")
-
-
-@dataclass(frozen=True)
-class ResolvedProject:
-    chip_name: str
-    qub_name: str
-    res_name: str
-    result_dir: str
-    database_path: str
-    params_path: str
-    scope_id: str
-
-    def as_wire_dict(self) -> dict[str, str]:
-        return {
-            "chip_name": self.chip_name,
-            "qub_name": self.qub_name,
-            "res_name": self.res_name,
-            "result_dir": self.result_dir,
-            "database_path": self.database_path,
-            "params_path": self.params_path,
-            "scope_id": self.scope_id,
-        }
 
 
 @dataclass(frozen=True)

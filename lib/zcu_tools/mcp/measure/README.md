@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，MCP startup script selection
+**Last updated:** 2026-10-20，MCP startup script selection 與 Writeback destination 摘要
 
 # `zcu_tools/mcp/measure/`
 
@@ -70,6 +70,8 @@ Mode/key 只來自 owner 的 selector。普通 scalar 不繼承祖先 mode，lib
 
 `use_inline` 送同一 selector RPC 的 use_inline action，從固定 capture 明確複製。先逐層複製 ref 祖先，再改內容。外層 copy 保留 child key，child selector 仍需另行 copy。既有 inline 是 guarded no-op，holder、busy、lifetime 與通知重入仍可拒絕。Missing、disabled 與 unresolved 不建立預設內容。Copy 已成功而下一次 set 失敗時，不回滾 copy。
 
+`set_integer_points(field, values)` 以一次完整 List 分支替換 Log／List 整數欄位。values 是整數清單，None 保留 GUI 原稿與分支；方法不產生掃描點、不增加 RPC。非空與正值限制由 Form owner 驗證，invalid_cfg 保留無效 List 原稿。
+
 `set`、`set_fields` 與 `set_sweep` 把 supplied logical edits 一次送 `tab.edit_recipe_fields`，不預讀 canonical mapping。None 保留 input 並記 gui_default，全 None 或空批次不送 mutation。Expression 原文保持不變。Owner 在同一 turn 解析全部 paths、檢查 admission 並提交，結構、來源、宣告唯讀或 ref 祖先拒絕不留成功前綴。一般 invalid draft 仍會安裝；MCP 回 invalid_cfg 時保留 owner draft，且不記成功 provenance。
 
 宣告唯讀由 Form core 統一執行，同值寫入通過，不同值拒絕，父層或批次寫入不能繞過唯讀子欄位。拒絕保留 `error.reason="form_input_rejected"` 與 `error.data.form_path`，唯讀拒絕另帶 `error.data.reason="readonly"` 與目前值的 JSON 形式 `error.data.current`；其他 rejection 不帶這兩個欄位。
@@ -86,7 +88,7 @@ Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核
 
 `twotone_spectrum` 的 center_mhz／span_mhz／points 必填。三個 resonator spectrum 可省略 frequency range，domain helper 讀目前 frequency／linewidth 後寫數字 endpoints。正式 freq／power／flux 的 full-span 倍率為 3／3／2，省略 count 保留 GUI 值。四個 spectrum 摘要只保 sweep，不另計 center／span。Frequency／flux／unit policy 由 zcu_lab.recipes.helpers 擁有。
 
-`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗 carrier 與 label，再以一次 edit_recipe_fields 交 owner 驗證與寫入；None 保留值並標 gui_default。Retain_source 以 fresh logical read 檢查欄位，再記 caller 選好的 scalar/sweep label，不改 Form input。Framework 不解讀 calibration、角色或 linewidth。
+`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields、set_sweep 與 set_integer_points。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗 carrier 與 label，再以一次 edit_recipe_fields 交 owner 驗證與寫入；None 保留值並標 gui_default。Retain_source 以 fresh logical read 檢查欄位，再記 caller 選好的 scalar/sweep label，不改 Form input。Framework 不解讀 calibration、角色或 linewidth。
 
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
 
@@ -232,7 +234,7 @@ Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項�
 
 `apply_writeback(tab, items=None)` 按 preview 的穩定 `target_name` 選擇當前候選。省略 items 或傳 null 寫全部，空陣列寫零項。它不看 GUI 勾選，也不回答 recipe。工具先讀 Primary 與既有 Post 的當前 preview，再檢查未知、重複及跨 stage 同名；全部檢查通過後才用當前 session ID 寫入。寫入順序是 Primary 再 Post，首錯停止，不 retry 或 rollback。收據只列 GUI-confirmed completed，並保留 skipped、failed stage、not_started 及失敗 stage 的不確定性。
 
-摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。`WritebackItem.element` 由作者選填同次 Run／Load 的 `ElementIdentity`，draft 建立時複製，remote 與 MCP 只投影，不改 stable target 或目的地。Destination 摘要只列 context/project 身分，native context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。Module edits 使用與 tab Form 相同的 path 陣列，回 input／values／errors，只有有效 Spec 可提交。Library 使用 `context.ml_edit`，child key 保持 key，不用 editor handle。`editor.*` 與舊 eval／value_ref wire 已退休，`value.list`／`value.read` 保留。
+摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。`WritebackItem.element` 由作者選填同次 Run／Load 的 `ElementIdentity`，draft 建立時複製，remote 與 MCP 只投影，不改 stable target 或目的地。Destination 摘要只列 context 的 active_label，native paths 與 context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。Module edits 使用與 tab Form 相同的 path 陣列，回 input／values／errors，只有有效 Spec 可提交。Library 使用 `context.ml_edit`，child key 保持 key，不用 editor handle。`editor.*` 與舊 eval／value_ref wire 已退休，`value.list`／`value.read` 保留。
 
 MCP 以 `context.aliases_set` 整表套用 authored rows，以 `context.set_parameter` 寫目前 point 的具體路徑。兩者直接走 owner，不開 Inspect、不切頁或焦點，也不改既有 Form／Run 的固定 capture。Aliases 在 Inspect 第三頁，`dialog.screenshot` 只拍目前頁，不接受 tab selector。
 

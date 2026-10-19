@@ -34,7 +34,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result-root", required=True, type=Path)
     parser.add_argument("--database-root", required=True, type=Path)
-    parser.add_argument("--results-root", required=True, type=Path)
+    parser.add_argument(
+        "--entry-result-root",
+        required=True,
+        type=Path,
+        help="Root for the new result entry; --result-root selects legacy sources",
+    )
     parser.add_argument("--source-chip", required=True)
     parser.add_argument("--source-qubit", required=True)
     parser.add_argument("--name", required=True)
@@ -45,6 +50,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--report", type=Path)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        help="Checkout to exclude from backup (default: tool checkout)",
+    )
+    parser.add_argument(
+        "--backup-parent",
+        type=Path,
+        help="External parent for <name>-backup (default: checkout parent)",
+    )
     parser.add_argument("--run-evidence", type=Path)
     return parser
 
@@ -99,7 +114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         request = MigrationRequest(
             result_root=args.result_root,
             database_root=args.database_root,
-            results_root=args.results_root,
+            results_root=args.entry_result_root,
             source_chip=args.source_chip,
             source_qubit=args.source_qubit,
             name=args.name,
@@ -107,6 +122,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             dry_run=args.dry_run,
             resume=args.resume,
             report_path=args.report,
+            repo_root=args.repo_root,
+            backup_parent=args.backup_parent,
             run_evidence=load_run_evidence(args.run_evidence)
             if args.run_evidence is not None
             else None,

@@ -16,6 +16,7 @@ from zcu_tools.resources.entry import (
     writeback,
 )
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 
 
@@ -122,7 +123,7 @@ def test_sample_failure_keeps_prior_parameter_and_sample_and_stops(
     assert event.kind == "accepted"
     assert caught.value.event_id == event.id
     assert caught.value.applied == 2
-    assert isinstance(caught.value.__cause__, IsADirectoryError)
+    assert isinstance(caught.value.__cause__, DIRECTORY_OPEN_ERROR)
     point.refresh()
     assert point.description == "retained"
     assert entry.samples("Q1").read().iloc[0]["source"] == event.id

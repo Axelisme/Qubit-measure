@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
+
 from ._start_fakes import StartHarness
 from ._window_support import WindowSession, bind_point, form_editable, install_soc
 
@@ -60,7 +62,7 @@ def assert_close_rejected_with_diagnostic(
     assert any(
         record.name == "zcu_tools.gui.app.workflows.window"
         and record.exc_info is not None
-        and isinstance(record.exc_info[1], IsADirectoryError)
+        and isinstance(record.exc_info[1], DIRECTORY_OPEN_ERROR)
         and record.exc_info[1].filename == str(journal)
         for record in caplog.records
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -161,23 +162,44 @@ def test_metadata_lookup_failure_restores_default_with_error(
     assert originator.restored == _State()
 
 
-def test_safe_cache_root_falls_back_when_platform_lookup_fails(
-    monkeypatch: pytest.MonkeyPatch,
+def test_default_cache_uses_shared_root_for_save_and_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # cache_dir bypasses this imported platform boundary instead of exercising lookup failure.
-    monkeypatch.setattr(
-        persistence_module,
-        "user_cache_dir",
-        lambda *args: (_ for _ in ()).throw(RuntimeError("platform failure")),
-    )
-    # Control the imported OS fallback path without using the user cache.
-    monkeypatch.setattr(persistence_module, "gettempdir", lambda: "/fallback")
-
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
     caretaker = SingleFileCaretaker(
-        _Originator(), codec=_Codec(), filename="state.json"
+        _Originator(_State(7)), codec=_Codec(), filename="state.json"
     )
+    assert caretaker.state_path == tmp_path / "gui" / "state.json"
+    caretaker.flush()
 
-    assert caretaker.state_path == Path("/fallback/.zcu_tools_gui/state.json")
+    receiver = _Originator()
+    outcome = SingleFileCaretaker(
+        receiver, codec=_Codec(), filename="state.json"
+    ).restore_all()
+    assert outcome.load_error is None
+    assert receiver.restored == _State(7)
+
+
+@pytest.mark.parametrize("override", ["", "relative/cache"])
+def test_invalid_cache_override_fails_at_caretaker_entry(
+    override: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", override)
+    with pytest.raises(ValueError, match="ZCU_TOOLS_CACHE_DIR"):
+        SingleFileCaretaker(_Originator(), codec=_Codec(), filename="state.json")
+
+
+@pytest.mark.parametrize("override", ["", "relative/cache"])
+def test_explicit_cache_dir_bypasses_invalid_cache_override(
+    tmp_path: Path, override: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", override)
+    caretaker = _caretaker(_Originator(_State(8)), tmp_path)
+    assert caretaker.state_path == tmp_path / "state.json"
+    caretaker.flush()
+    receiver = _Originator()
+    _caretaker(receiver, tmp_path).restore_all()
+    assert receiver.restored == _State(8)
 
 
 def test_load_false_does_not_read_or_replace_existing_file(tmp_path: Path) -> None:
@@ -296,6 +318,54 @@ def test_temporary_file_failures_are_typed_and_cleanup_created_file(
     assert raised.value.__cause__ is expected
     assert caretaker.state_path.read_text(encoding="utf-8") == "old"
     assert not temp_path.exists()
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+def test_windows_lock_retry_preserves_snapshot_and_owner_error_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, persistent: bool
+) -> None:
+    caretaker = _caretaker(_Originator(_State(2)), tmp_path)
+    caretaker.state_path.write_text('{"value": 1}', encoding="utf-8")
+
+    class WindowsLockError(OSError):
+        winerror = 32
+
+    expected = WindowsLockError("snapshot briefly locked")
+    original_replace = Path.replace
+    attempts = 0
+    elapsed = 0.0
+
+    def advance(seconds: float) -> None:
+        nonlocal elapsed
+        elapsed += seconds
+
+    def replace_snapshot(source: Path, target: Path) -> Path:
+        nonlocal attempts
+        attempts += 1
+        if persistent or attempts == 1:
+            assert json.loads(target.read_text(encoding="utf-8")) == {"value": 1}
+            raise expected
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", replace_snapshot)
+    monkeypatch.setattr(time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(time, "sleep", advance)
+    failure: PersistenceError | None = None
+    try:
+        caretaker.flush()
+    except PersistenceError as error:
+        failure = error
+
+    if persistent:
+        assert failure is not None
+        assert failure.__cause__ is expected
+        assert json.loads(caretaker.state_path.read_text()) == {"value": 1}
+        assert 0.45 <= elapsed <= 0.55
+    else:
+        assert failure is None, "a transient sharing violation must recover"
+        assert json.loads(caretaker.state_path.read_text()) == {"value": 2}
+    assert attempts > 1
+    assert list(tmp_path.iterdir()) == [caretaker.state_path]
 
 
 def test_replace_failure_preserves_target_and_cleans_temporary_file(
