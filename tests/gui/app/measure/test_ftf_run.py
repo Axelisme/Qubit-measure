@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import ClassVar
 
 import numpy as np
+import pytest
 import yaml
 from qtpy.QtWidgets import QDialog
 from zcu_tools.datafile import load_run_data
@@ -27,6 +28,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.experiment._saving_support import SavingResult
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure.remote._helpers import call, open_client
@@ -69,7 +71,9 @@ class FTFAcquisitionAdapter(SavingAdapter):
         )
 
 
-def test_ftf_yaml_environment_runs_and_saves_only_public_iq(qapp, tmp_path):
+@pytest.fixture
+def ftf_window(qapp, tmp_path):
+    """Own the FTF runtime until accepted operations and Qt deliveries drain."""
     (tmp_path / "ftf.yaml").write_text(yaml.safe_dump(ftf_document()), encoding="utf-8")
     registry = Registry()
     registry.register("ftf", FTFAcquisitionAdapter)
@@ -95,44 +99,65 @@ def test_ftf_yaml_environment_runs_and_saves_only_public_iq(qapp, tmp_path):
     env = ftf(tmp_path / "ftf.yaml", workers=1, warmup=False)
     try:
         ctrl.install_soc(env.soc, env.soccfg)
-        ctrl.setup_control.new_entry(EntryRequest("offline"))
-        ctrl.setup_control.new_point(
-            PointCreateRequest("point", "", CommandOrigin("gui"))
-        )
-        tab = ctrl.new_tab("ftf")
         sock = open_client(remote.start())
-        started = call(sock, "tab.run_start", {"tab_id": tab})["result"]["operation_id"]
-        # Run was submitted; its worker must deliver the matching terminal reply.
-        # Both timeouts are deadlock watchdogs, not acquisition performance limits.
-        terminal = call(
-            sock,
-            "operation.await",
-            {"operation_id": started, "timeout": 15},
-            timeout_s=20,
-        )["result"]
-        assert terminal["status"] == "finished", terminal
-        saved = call(sock, "tab.save_data", {"tab_id": tab})
-        assert saved["ok"], saved
-        runs = ctrl.save_control.list_saved_runs()
-        assert len(runs) == 1 and runs[0].data_path is not None
-        stored = load_run_data(runs[0].data_path)
-        values = next(iter(stored.payload.variables.values())).data.values
-        assert np.isfinite(values).all()
-        assert np.any(values != 0)
-        assert stored.metadata.completion == "complete"
-        assert stored.metadata.provenance is not None
-        assert stored.metadata.provenance.simulation_id is not None
+        yield ctrl, sock
     finally:
-        if sock is not None:
-            sock.close()
         try:
+            # Assertion failures still own the Run. Request cancellation, then
+            # observe settlement before the normal 5000ms worker/delivery drain.
+            for operation in ctrl.operation_control.active_operations():
+                ctrl.operation_control.cancel_operation(operation.op)
+            qt_until(
+                lambda: ctrl.active_operation_count() == 0,
+                label="FTF teardown terminal delivery",
+                watchdog_ms=60_000,
+            )
             behavior.close(assembly)
+            # Only a successful drain permits releasing caller resources or Qt
+            # owners. A timeout must leave them alive, not dispose a live QThread.
+            try:
+                env.devices.close_all_devices()
+            finally:
+                for dialog in window.findChildren(QDialog):
+                    dialog.reject()
+                window.dispose_control_watches()
+                window.deleteLater()
+                qapp.processEvents()
         finally:
-            # The board and its source resources remain caller-owned.
-            env.devices.close_all_devices()
-        for dialog in window.findChildren(QDialog):
-            dialog.reject()
-        window.dispose_control_watches()
-        window.deleteLater()
-        sys.excepthook = old_hook
-        qapp.processEvents()
+            sys.excepthook = old_hook
+            if sock is not None:
+                sock.close()
+
+
+def test_ftf_yaml_environment_runs_and_saves_only_public_iq(ftf_window):
+    ctrl, sock = ftf_window
+    ctrl.setup_control.new_entry(EntryRequest("offline"))
+    ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
+    tab = ctrl.new_tab("ftf")
+    started = call(sock, "tab.run_start", {"tab_id": tab})["result"]["operation_id"]
+    # The accepted Run must settle. Cold Numba compilation can outlast the
+    # RPC wait; 60s only guards deadlock, not acquisition performance.
+    qt_until(
+        lambda: ctrl.active_operation_count() == 0,
+        label="FTF Run terminal delivery",
+        watchdog_ms=60_000,
+    )
+    terminal = call(
+        sock,
+        "operation.await",
+        {"operation_id": started, "timeout": 15},
+        timeout_s=20,
+    )["result"]
+    assert terminal["reason"] == "completed", terminal
+    assert terminal["status"] == "finished", terminal
+    saved = call(sock, "tab.save_data", {"tab_id": tab})
+    assert saved["ok"], saved
+    runs = ctrl.save_control.list_saved_runs()
+    assert len(runs) == 1 and runs[0].data_path is not None
+    stored = load_run_data(runs[0].data_path)
+    values = next(iter(stored.payload.variables.values())).data.values
+    assert np.isfinite(values).all()
+    assert np.any(values != 0)
+    assert stored.metadata.completion == "complete"
+    assert stored.metadata.provenance is not None
+    assert stored.metadata.provenance.simulation_id is not None
