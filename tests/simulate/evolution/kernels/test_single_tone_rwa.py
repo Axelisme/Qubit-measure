@@ -25,8 +25,11 @@ from zcu_tools.simulate.evolution.kernel import (
     SegmentTable,
 )
 from zcu_tools.simulate.evolution.kernels import REGISTRY
+from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 from zcu_tools.simulate.evolution.kernels.multitone_rwa import rwa_coefficients
 from zcu_tools.simulate.evolution.workplan import FactKey, WorkPlan
+
+from tests.simulate.evolution.contract.kernel_suite import KernelCase, reference
 
 
 def source_for(energies, x):
@@ -202,11 +205,14 @@ def test_constant_resonant_probe_uses_block_family():
     with closing(Engine(1, 1000000)) as engine:
         result = engine.evolve(src, (batch_for(table_for()),), cancel=Event())
     assert result.paths.segments_by_kernel == {"single_tone_rwa": 1}
-    with closing(Engine(1, 1000000)) as engine:
-        strict = engine.evolve(
-            src, (batch_for(table_for()),), budget=1e-7, cancel=Event()
-        )
-    np.testing.assert_allclose(result.densities, strict.densities, atol=0.002, rtol=0)
+    # The independent oracle only needs full lab DOP853 evolution, not JIT
+    # compilation of Floquet/Magnus or a second production integrator. Its
+    # local controls are tighter than this strict case's 1e-7 allowance.
+    case = KernelCase(
+        DOP853Kernel(), src, table_for(), src.initial_density[None].copy(), budget=1e-7
+    )
+    strict = reference(case, 0, case.states[0])[None]
+    np.testing.assert_allclose(result.densities, strict, atol=0.002, rtol=0)
 
 
 @pytest.mark.parametrize("complex_input", [False, True])
@@ -450,33 +456,3 @@ def test_restored_graph_over_block_limit_keeps_original_route():
         result = engine.evolve(src, (batch_for(table),), cancel=Event())
     assert result.paths.segments_by_kernel == expected.paths.segments_by_kernel
     np.testing.assert_array_equal(result.densities, expected.densities)
-
-
-def test_dual_constant_uses_the_same_omitted_one_photon_admission():
-    src = source_for([0.0, 7.051], [[0, 0.04], [0.04, 0]])
-    model = src.model((0,))
-    model = replace(
-        model,
-        drives=(
-            *model.drives,
-            SecularDrive(
-                "spectator", np.zeros((2, 2), complex), np.zeros((2, 2), complex)
-            ),
-        ),
-    )
-    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
-    table = table_for(7.0, 1.0, 1000.0)
-    table = replace(
-        table,
-        tones=np.array([2]),
-        tone_port=np.array([[0, 1]]),
-        tone_frequency_ghz=np.array([[7.0, 8.5]]),
-        tone_amplitude=np.array([[1.0, 1.0]]),
-        tone_theta_rad=np.array([[0.7, 0.0]]),
-        tone_envelope=np.array([[0, 0]]),
-        tone_envelope_offset_ns=np.array([[0.0, 0.0]]),
-    )
-    kernel = next(k for k in REGISTRY if k.name == "multitone_rwa")
-    assert kernel.guard(
-        table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
-    ).tolist() == [False]

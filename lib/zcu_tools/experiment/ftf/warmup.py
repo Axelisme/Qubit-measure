@@ -40,6 +40,7 @@ COVERAGE = (
     "shaped_direct",
     "shaped_complex",
     "multitone_rwa",
+    "multitone_constant",
     "multitone_direct",
     "multitone_gate",
     "single_tone_gate",
@@ -207,7 +208,9 @@ def _multitone(name: str) -> None:
     envelope = EnvelopeSpec(
         "sampled", np.exp(-(((times - 64) / 32) ** 2) / 2).astype(complex), times
     )
-    if name == "multitone_direct":
+    if name == "multitone_constant":
+        envelope = EnvelopeSpec("constant")
+    elif name == "multitone_direct":
         envelope = EnvelopeSpec(
             "sampled",
             np.array([0.0, 1.0j, 0.01], complex),

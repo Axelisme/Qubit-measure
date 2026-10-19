@@ -335,6 +335,7 @@ def test_window_excluded_edges_accumulate_envelope_squared_phase(frequency, scal
 
 def test_gate_cache_and_row_rwa_share_window_excluded_shifts():
     from zcu_tools.simulate.evolution.kernel import ApplyContext
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import RWAPrepared
 
     # No retained Fourier edges: the analytic answer is entirely the virtual
     # shift. Agreement alone would miss both paths silently omitting it.
@@ -368,14 +369,15 @@ def test_gate_cache_and_row_rwa_share_window_excluded_shifts():
         tones=np.full(count, 2),
         tone_port=np.tile([0, 1], (count, 1)),
         tone_frequency_ghz=np.tile([0.6, 0.3], (count, 1)),
-        tone_amplitude=np.tile([-0.4, 0.3], (count, 1)),
+        # Keep the one-photon transfer below threshold: this case tests only shifts.
+        tone_amplitude=np.tile([-0.3, 0.3], (count, 1)),
         tone_theta_rad=np.arange(count * 2, dtype=np.float64).reshape(count, 2) * 0.13,
         tone_envelope=np.zeros((count, 2), dtype=np.int64),
         tone_envelope_offset_ns=np.zeros((count, 2)),
         envelopes=(env,),
     )
     integral = duration * (0.5**2 + 0.5 * 1.0 + 1.0**2) / 3
-    shift_a = (-0.4 * 0.01) ** 2 / (0.6 - 0.7) * integral
+    shift_a = (-0.3 * 0.01) ** 2 / (0.6 - 0.7) * integral
     shift_b = (0.3 * 0.008) ** 2 / (0.3 - 1.2) * integral
     shifts = np.array([shift_a + shift_b, -shift_a, -shift_b])
     phase = np.exp(-2j * np.pi * (energies * duration + shifts))
@@ -392,6 +394,10 @@ def test_gate_cache_and_row_rwa_share_window_excluded_shifts():
                 keys, return_index=True, return_inverse=True
             )
             prepared = kernel.prepare(keys[indices], table, rows[indices], context)
+            if name == "multitone_rwa":
+                assert isinstance(prepared, RWAPrepared)
+                assert not np.any(prepared.positive)
+                assert not np.any(prepared.negative)
             actual = np.repeat(initial[None], count, axis=0)
             kernel.apply(prepared, inverse, table, rows, actual, ApplyContext(1e-3))
         np.testing.assert_allclose(
@@ -575,7 +581,7 @@ def test_connected_retained_graph_over_block_limit_declines():
     model = SecularModel(
         (0,),
         "connected-chain",
-        np.arange(size) * 0.3,
+        np.arange(size, dtype=np.float64) * 0.3,
         np.eye(size, dtype=np.complex128),
         (drive, replace(drive, name="b")),
         np.zeros((size, size)),
