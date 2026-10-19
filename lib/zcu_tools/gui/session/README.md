@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，device 連線失敗與重試
+**Last updated:** 2026-10-19，device 連線失敗、重試與未連線改名
 
 # gui/session/ — 量測 session core
 
@@ -107,6 +107,10 @@ Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提�
 
 首次 device 連線失敗保留 `MEMORY_ONLY` snapshot 與 error，operation handle 回報 failed。
 GUI 與 remote 查詢讀取同一個失敗原因。Dialog 保留失敗的名稱與 address，使用者修改 address 後可再次 Add Device。
+
+## Disconnected device rename
+
+`DeviceService.rename_device(old_name, new_name)` 在 owner loop 同次改名 idle `MEMORY_ONLY` row，提交後刷新 live value sources。Settings owner 從已提交 State 保存新名。連線中或有進行中操作時拒絕，即使新舊名相同。空字串、全空白與名稱衝突也拒絕，不改任何狀態。其他名稱原樣保留，不新增字元限制。DeviceDialog 的 Rename 欄位與按鈕只在未連線且可編輯時啟用。改名不更新 alias、已開 tab 或歷史紀錄，見 ADR-0076。
 
 ## Analysis-only operations
 

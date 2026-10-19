@@ -16,7 +16,7 @@ from zcu_tools.device import DeviceActivity, DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
@@ -626,6 +626,42 @@ class DeviceService:
                     remember=True,
                 )
             )
+
+    def rename_device(self, old_name: str, new_name: str) -> None:
+        """Rename a MEMORY_ONLY device on the session owner thread, without I/O.
+
+        Names are preserved verbatim. Empty or all-whitespace names and names
+        already used by another device raise InvalidInputError. Unknown, live,
+        or in-flight devices raise FailedPreconditionError, even for a same-name
+        request. A same-name request on an idle memory row is a silent no-op.
+        Rejection leaves all state unchanged. Success preserves the row's other
+        fields and publishes one whole-device-set change after both keys have
+        been updated, refreshing value sources and future settings captures.
+        Aliases, open tabs and historical captures are not rewritten.
+        """
+        dev = self._require_device(old_name)
+        if old_name in self._inflight or self._gate.is_device_mutating(old_name):
+            raise FailedPreconditionError(
+                f"Device {old_name!r} has an in-flight operation; wait before renaming"
+            )
+        if not dev.is_memory_only():
+            raise FailedPreconditionError(
+                f"Disconnect device {old_name!r} before renaming"
+            )
+        if not new_name or not new_name.strip():
+            raise InvalidInputError("Device name must not be empty or all whitespace")
+        if new_name == old_name:
+            return
+        if (
+            self._state.has_device(new_name)
+            or new_name in self._registry.get_all_devices()
+        ):
+            raise InvalidInputError(f"Device name {new_name!r} is already in use")
+        # No callbacks or I/O between the two writes: observers see only the
+        # committed set, and MEMORY_ONLY has no driver or lease key to migrate.
+        self._state.remove_device(old_name)
+        self._state.put_device(replace(dev, name=new_name))
+        self._bus.emit(DeviceChangedPayload(name=None))
 
     def forget_device(self, name: str) -> None:
         dev = self._require_device(name)
