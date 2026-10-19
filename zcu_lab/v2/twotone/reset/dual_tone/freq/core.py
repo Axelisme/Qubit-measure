@@ -106,63 +106,19 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         tag="twotone/reset/dual_tone/freq",
     )
 
-    def run_soft(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+    def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        """Map the averaged readout response against both reset-tone frequencies.
+
+        Apply the optional reset and preparation pulse, the tested two-pulse
+        reset, then read out. Soft mode scans frequency 2 on the host and sweeps
+        frequency 1 in hardware; hard mode sweeps both in hardware. Return the
+        quantized MHz axes and mean complex IQ shaped (Nfreq1, Nfreq2).
+        Cancellation leaves unacquired points as NaN.
+        """
+        # 1. Prepare hardware-grid axes without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
-
-        freq1_sweep = cfg.sweep.freq1
-        freq2_sweep = cfg.sweep.freq2
-
-        reset_cfg = modules.tested_reset
-        freqs1 = sweep2array(
-            freq1_sweep,
-            "freq",
-            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse1_cfg.ch},
-        )
-        freqs2 = sweep2array(
-            freq2_sweep,
-            "freq",
-            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
-            allow_array=True,
-        )
-
-        viewer = context.plots.liveplot_2d_with_line(
-            "measurement", "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
-        )
-        signals_buffer = SignalBuffer(
-            (len(freqs2), len(freqs1)),
-            on_update=lambda data: viewer.update(
-                freqs1, freqs2, dual_reset_signal2real(data.T)
-            ),
-        )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
-            for freq2, step in sched.scan("freq2", freqs2.tolist()):
-                modules = step.cfg.modules
-                modules.tested_reset.set_param("freq2", freq2)
-                modules.tested_reset.set_param(
-                    "freq1", sweep2param("freq1", step.cfg.sweep.freq1)
-                )
-                _ = (
-                    step.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        TwoPulseReset("tested_reset", modules.tested_reset),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("freq1", step.cfg.sweep.freq1)
-                    .build_and_acquire()
-                )
-
-        return FreqResult(freqs1, freqs2, signals_buffer.array.T)
-
-    def run_hard(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
-        cfg = deepcopy(cfg)
-        soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
-
-        reset_cfg = modules.tested_reset
+        reset_cfg = cfg.modules.tested_reset
         freqs1 = sweep2array(
             cfg.sweep.freq1,
             "freq",
@@ -172,14 +128,51 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg.sweep.freq2,
             "freq",
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
+            allow_array=cfg.method == "soft",
         )
 
-        viewer = context.plots.liveplot_2d(
+        if cfg.method == "soft":
+            # 2. Scan frequency 2 on the host; keep frequency 1 as the inner loop.
+            soft_viewer = context.plots.liveplot_2d_with_line(
+                "measurement", "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
+            )
+            signals_buffer = SignalBuffer(
+                (len(freqs2), len(freqs1)),
+                on_update=lambda data: soft_viewer.update(
+                    freqs1, freqs2, dual_reset_signal2real(data.T)
+                ),
+            )
+            with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+                for freq2, step in sched.scan("freq2", freqs2.tolist()):
+                    modules = step.cfg.modules
+                    modules.tested_reset.set_param("freq2", freq2)
+                    modules.tested_reset.set_param(
+                        "freq1", sweep2param("freq1", step.cfg.sweep.freq1)
+                    )
+
+                    # 3. Prepare, apply the tested reset, and collect averaged IQ.
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Pulse("init_pulse", modules.init_pulse),
+                            TwoPulseReset("tested_reset", modules.tested_reset),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("freq1", step.cfg.sweep.freq1)
+                        .build_and_acquire()
+                    )
+
+            # Host rows are frequency 2; restore the canonical frequency-1 rows.
+            return FreqResult(freqs1, freqs2, signals_buffer.array.T)
+
+        # 2. Sweep both frequencies in hardware, frequency 1 outside frequency 2.
+        hard_viewer = context.plots.liveplot_2d(
             "measurement", "Frequency1 (MHz)", "Frequency2 (MHz)"
         )
         signals_buffer = SignalBuffer(
             (len(freqs1), len(freqs2)),
-            on_update=lambda data: viewer.update(
+            on_update=lambda data: hard_viewer.update(
                 freqs1, freqs2, dual_reset_signal2real(data)
             ),
         )
@@ -191,6 +184,8 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             modules.tested_reset.set_param(
                 "freq2", sweep2param("freq2", sched.cfg.sweep.freq2)
             )
+
+            # 3. Prepare, apply the tested reset, and collect the averaged IQ map.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -206,11 +201,6 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
         return FreqResult(freqs1, freqs2, signals_buffer.array)
 
-    def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
-        if cfg.method == "soft":
-            return self.run_soft(cfg, context=context)
-        return self.run_hard(cfg, context=context)
-
     def analyze(
         self,
         source: RunRecord[FreqCfg, FreqResult],
@@ -218,11 +208,18 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
+        """Find the reset-tone pair with the largest smoothed IQ contrast.
+
+        Smooth the two-frequency map using options, then subtract either its
+        first corner or the estimated background. Return the peak coordinates
+        in MHz and plot the measured IQ map; this contrast is not reset fidelity.
+        The source cfg may be absent.
+        """
         result = source.result
 
         freqs1, freqs2, signals = result.freqs1, result.freqs2, result.signals
 
-        # Apply smoothing for peak finding
+        # 1. Smooth the measured map before selecting a peak.
         signals_smooth = smooth_signal_nd(
             signals,
             method=options.smooth_method,
@@ -232,7 +229,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             wavelet_level=options.wavelet_level,
         )
 
-        # Find peak in amplitude
+        # 2. Select the largest contrast against the chosen background.
         if options.corner_as_background:
             amps = np.abs(signals_smooth - signals_smooth[0, 0])
         else:
@@ -241,6 +238,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         freq1_opt = freqs1[np.argmax(np.max(amps, axis=1))]
         freq2_opt = freqs2[np.argmax(np.max(amps, axis=0))]
 
+        # 3. Mark the selected pair on the original, unsmoothed IQ map.
         fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.imshow(

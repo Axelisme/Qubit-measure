@@ -1,6 +1,6 @@
 # v2 experiment authoring
 
-**Last updated:** 2026-10-19，實驗與 recipe 的四條可讀性規則
+**Last updated:** 2026-10-19，分析政策也由各實驗 core 明示
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。
 
@@ -13,7 +13,7 @@ GUI adapter 的 module writeback 直接提出持久 ModuleSpec，由共用 Form 
 以下四條規則適用於 `zcu_lab` 的實驗與 recipes。序列與流程由各實驗自己寫出，
 不要為了減少相似程式碼，把使用者要讀的步驟藏到共用 helper。
 
-### 1. 在 run 直接寫出 pulse 序列
+### 1. 在 core 直接寫出 pulse 序列與分析政策
 
 `core.py` 的 `run()` 直接列出 `Pulse`、`Delay`、`Join` 與 readout 的先後關係。
 共用 helper 只做驗證、資料整形、平均等機械工作，不用 mode 或旗標切換不同實驗。
@@ -40,6 +40,11 @@ builder = (
 
 短 branch 等最長 branch 結束才 readout，不把短 pulse 的末端對齊到最長 pulse。
 Ramsey 與 Echo 也各自列出 pulse 與 delay，不能交給 `acquire(mode="ramsey")` 選序列。
+
+同一條規則也適用 `analyze()`。Echo 在自己的 core 明示跳過第 1 點，Ramsey 在自己的
+core 依資料選固定 0°／180° 相位。共用 fitting helper 只接收明確的 skip、phase 等
+擬合參數，不用實驗名稱或 mode 選擇不同實驗的政策。phase 只傳數值或代表自由擬合的
+`None`，不傳選政策的 callback。搬移政策時，保持數值結果與失敗語義不變。
 
 ### 2. 在 recipe 函式本體寫出操作流程
 

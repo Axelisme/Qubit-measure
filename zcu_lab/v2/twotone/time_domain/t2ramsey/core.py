@@ -51,6 +51,13 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 
 @dataclass(frozen=True)
 class T2RamseyResult:
+    """Free-evolution delays in us and mean complex IQ, one sample per delay.
+
+    true_activate_detune is the phase-ramp frequency in MHz after hardware
+    time/phase rounding, not a fitted qubit detuning. It is run-only metadata
+    and is None after canonical load.
+    """
+
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
     true_activate_detune: float | None = None
@@ -101,6 +108,16 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
     )
 
     def run(self, cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
+        """Measure Ramsey fringes and free-evolution coherence decay.
+
+        After optional reset, apply pi/2, wait the swept delay, then apply the
+        final pi/2 and read out. cfg supplies the pulses and delay sweep in us.
+        detune in MHz ramps the final pi/2 phase with delay to add fringes;
+        it does not change the drive frequency. Return hardware-rounded delays
+        and mean complex IQ. analyze fits the envelope to estimate T2 Ramsey
+        and, for a fringe fit, the observed oscillation frequency.
+        """
+        # 1. Prepare the delay grid and the realized phase-ramp frequency.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         detune = cfg.detune
@@ -118,6 +135,7 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
             time_scaler=1.0,
         )
 
+        # 2. Display the IQ projection while averaging the delay sweep.
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
         viewer = context.plots.liveplot_1d(
             "measurement", "Time (us)", "Real Signal", title=title
@@ -134,6 +152,7 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
             length_param = sweep2param("length", length_sweep)
             detune_param = 360 * detune * length_param
 
+            # 3. Let coherence evolve freely, then project with the phase ramp.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -152,6 +171,7 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
                 .build_and_acquire()
             )
 
+        # Keep measured IQ separate from fitted coherence times and fringe frequency.
         return T2RamseyResult(
             times=lengths,
             signals=signals_buffer.array,
@@ -165,7 +185,16 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
         *,
         plots: Plots,
     ) -> T2RamseyAnalysis:
-        """fit_phase frees the fringe phase; decay-only fits ignore this option."""
+        """Fit T2 Ramsey in us and optionally the observed fringe frequency.
+
+        Project source IQ onto its signal axis. fit_fringe selects a decaying
+        fringe instead of a pure decay. fit_phase frees the fringe phase;
+        otherwise the near-zero-delay signal selects a fixed 0/180 degree
+        phase. Decay-only fits ignore fit_phase and return zero detune.
+        Fringe detune is in MHz and includes the applied phase ramp, not a
+        corrected qubit detuning. Return uncertainties and quality, and draw
+        the fit using the same samples.
+        """
         result = source.result
         fit_fringe = options.fit_fringe
         fit_phase = options.fit_phase
@@ -174,6 +203,7 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
 
         real_signals = t2ramsey_signal2real(signals)
 
+        # Choose whether to fit oscillations as well as their decay envelope.
         if fit_fringe:
             fixedparams: list[float | None] | None = None
             if not fit_phase:

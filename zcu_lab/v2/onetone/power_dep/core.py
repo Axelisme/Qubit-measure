@@ -76,6 +76,19 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
     )
 
     def run(self, config: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
+        """Map the resonator spectrum versus readout gain.
+
+        For each host-side gain, apply optional reset and sweep the readout
+        frequency on the board. Return hardware-rounded gains (a.u.),
+        frequencies (MHz), and mean complex IQ shaped (Ngain, Nfreq).
+        Gain-dependent resonance changes appear in this map; gain is not
+        a calibrated power in watts.
+
+        cfg.earlystop_snr can end averaging of the current gain's trace
+        once its SNR reaches the threshold; None disables this early stop.
+        """
+
+        # Prepare the gain points and matched generator/ADC frequency grid.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -99,6 +112,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
             },
         )
 
+        # Normalize magnitude only for display and the per-trace SNR check.
         current_snr = 0.0
 
         def update_snr(snr: float) -> None:
@@ -126,6 +140,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
                 freq_sweep = cfg.sweep.freq
                 modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
+                # Repeat reset/readout across frequency at this fixed gain.
                 _ = (
                     step.prog_builder(soc, soccfg)
                     .add_reset("reset", modules.reset)
@@ -141,6 +156,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
                     )
                 )
 
+        # Keep the acquired complex response, not the normalized preview.
         return PowerDepResult(
             gains=gains,
             freqs=freqs,

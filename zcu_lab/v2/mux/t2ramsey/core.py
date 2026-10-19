@@ -31,11 +31,14 @@ from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2._support.mux_coherence import (
     MuxCoherenceResult,
     MuxCoherenceToneCfg,
+    validate_coherence_result,
     validate_coherence_scan,
 )
 from zcu_lab.v2._support.mux_coherence_analysis import (
     MuxCoherenceFit,
-    analyze_coherence,
+    fit_coherence_trace,
+    prepare_coherence_trace,
+    project_coherence_trace,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
 from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
@@ -201,13 +204,56 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         and fit quality, or a failure reason, for each original tone index.
         Draw fit_i in plots; invalid sources raise.
         """
-        return analyze_coherence(
-            source.result,
-            mode="ramsey",
-            fit_fringe=options.fit_fringe,
-            fit_phase=options.fit_phase,
-            plots=plots,
-        )
+        # 1. Validate the saved source before opening per-tone fit figures.
+        validate_coherence_result(source.result)
+        outcomes: list[MuxCoherenceFit | MuxFitFailure] = []
+        for row, raw_index in enumerate(source.result.tone_indices):
+            trace = prepare_coherence_trace(
+                int(raw_index), source.result.times, source.result.signals[row], skip=0
+            )
+            fig, ax = plots.subplots(f"fit_{trace.index}", figsize=(8, 5))
+            ax.set(xlabel="Requested delay (us)", ylabel="Signal real (a.u.)")
+            fig.suptitle(f"ramsey tone {trace.index}")
+            try:
+                real = project_coherence_trace(
+                    trace, minimum_points=6 if options.fit_fringe else 4
+                )
+
+                # 2. Fix Ramsey phase from the nearest-zero acquired delay unless free.
+                phase = None
+                if options.fit_fringe and not options.fit_phase:
+                    zero = real[np.argmin(np.abs(trace.times))]
+                    phase = 0.0 if zero > 0.5 * (np.max(real) + np.min(real)) else 180.0
+                outcome, fitted = fit_coherence_trace(
+                    trace, real, fit_fringe=options.fit_fringe, phase=phase
+                )
+            except (
+                ValueError,
+                RuntimeError,
+                ArithmeticError,
+                np.linalg.LinAlgError,
+            ) as exc:
+                ax.plot(
+                    trace.times, np.abs(trace.signal), "o", label="acquired magnitude"
+                )
+                ax.text(
+                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                )
+                outcomes.append(MuxFitFailure(trace.index, str(exc)))
+            else:
+                ax.plot(trace.times, real, "o", label="measured")
+                ax.plot(trace.times, fitted, label="fit")
+                ax.set_title(
+                    f"T2 = {outcome.t2:.4g} ± {outcome.t2_err:.2g} us; "
+                    f"fringe = {outcome.detune:.4g} MHz"
+                )
+                outcomes.append(outcome)
+
+            # 3. Keep each tone's fit or failure visible without stopping other fits.
+            ax.legend()
+            ax.grid(True)
+            fig.tight_layout()
+        return tuple(outcomes)
 
 
 def _averaged_signal(

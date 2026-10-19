@@ -18,17 +18,18 @@ from .mux_coherence import MuxCoherenceResult, validate_coherence_result
 def coherence_spec[T: ExpCfgModel](
     cfg_type: type[T], *, tag: str
 ) -> GroupedAxesSpec[MuxCoherenceResult, T]:
-    """Declare IQ on delay/tone axes and MHz metadata on the same tone axis.
+    """Map Ramsey/Echo IQ versus delay and per-tone frequencies to saved grids.
 
     cfg_type restores the full leaf cfg; tag identifies Ramsey or Echo. Memory
     uses us/MHz, disk uses seconds/Hz. Labber uses independent variable grids.
     Requested delay is stored once as the IQ axis, never reconstructed from
-    current cfg. No I/O occurs. Invalid declaration
-    or mismatched loaded tone axes raises ValueError via native persistence.
+    current cfg. No I/O occurs. Invalid declarations or mismatched loaded tone
+    axes raise ValueError via native persistence.
     """
     tone = VariableAxisSpec("Tone", "", field_name="tone_indices", dtype=np.int64)
 
     def build(data: GroupedLoadData[T]) -> MuxCoherenceResult:
+        # Align IQ and frequency metadata by the saved original tone indices.
         signals = data.variable("signals")
         detunes = data.variable("actual_detunes")
         frequencies = data.variable("source_frequencies")
@@ -39,6 +40,7 @@ def coherence_spec[T: ExpCfgModel](
             raise ValueError(
                 "Coherence variables must preserve the same original tone axis"
             )
+
         result = MuxCoherenceResult(
             signals.axes[1].astype(np.int64),
             signals.axes[0].astype(np.float64),
@@ -49,6 +51,7 @@ def coherence_spec[T: ExpCfgModel](
         validate_coherence_result(result)
         return result
 
+    # Save the delay grid and per-tone metadata independently, without broadcasting.
     return GroupedAxesSpec(
         variables=(
             VariableSpec(

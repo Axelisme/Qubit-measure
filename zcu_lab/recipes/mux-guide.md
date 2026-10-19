@@ -1,6 +1,6 @@
 # Mux qubit recipes
 
-**Last updated:** 2026-10-19, readable experiment and recipe authoring
+**Last updated:** 2026-10-19, explicit core sequences and analysis policies
 
 These recipes use the native mux Forms and numeric cores. Bind a complete MuxGroup,
 open an entry and point, and connect an authorized acquisition environment first.
@@ -13,7 +13,7 @@ These four rules apply to all `zcu_lab` experiments and recipes. Keep the pulse
 sequence in its core and the measurement procedure in its recipe. A reader
 should not need to open a shared helper to discover either one.
 
-### 1. Write the pulse sequence in run
+### 1. Write sequences and analysis policies in each core
 
 Each core's `run()` lists its `Pulse`, `Delay`, `Join` and readout operations.
 Share validation, reshaping and averaging mechanics, not a sequence builder that
@@ -23,8 +23,15 @@ For example, [mux Amp Rabi](../v2/mux/amp_rabi/core.py) writes reset,
 `Join(Pulse(...), ...)`, then `MuxReadout` inside `run()`. Drives start together;
 readout waits for the longest branch. Ramsey writes its own x90, delay, x90 and
 readout stages instead of calling `acquire(mode="ramsey")`. The
-[core authoring guide](../v2/experiment-authoring.md#1-在-run-直接寫出-pulse-序列)
+[core authoring guide](../v2/experiment-authoring.md#1-在-core-直接寫出-pulse-序列與分析政策)
 shows a short sequence fragment.
+
+The same rule applies to `analyze()`. Echo states its first-point omission in
+its core. Ramsey chooses its fixed 0/180-degree phase from the data in its core.
+Shared fitting helpers receive explicit parameters such as skip and phase;
+they do not choose policies by experiment name or mode. Phase is a numeric value
+or `None` for a free fit, not a policy callback. Moving a policy must preserve
+numeric results and failure behavior.
 
 ### 2. Write each recipe step in the function body
 

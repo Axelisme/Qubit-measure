@@ -33,12 +33,11 @@ def _points(expts: object) -> None:
 def retain_scalar(tab: RecipeTab, field: RecipeFieldPath) -> None:
     """Retain one available logical scalar and its captured source label.
 
-    tab is an opened recipe tab; field is a complete logical scalar path.
-    Field segments are str names or int original list indexes.
-    A captured source records library:<actual-key> from the owner observation.
-    Otherwise set(None) retains authored input and records gui_default.
-    Missing/unavailable values or directed errors raise GuiRpcError(invalid_cfg).
-    Path/source/connection errors propagate. No selector is copied or changed.
+    tab is opened; field uses str names or int original list indexes.
+    Record library:<actual-key> for a captured source; otherwise retain authored
+    input with gui_default provenance. Unavailable values or field errors raise
+    GuiRpcError(invalid_cfg); path/source/connection errors propagate.
+    No selector is copied or changed.
     """
     state = tab.read_field(field)
     if state.value_status != "available" or state.errors:
@@ -75,19 +74,18 @@ def choose_frequency(
 ) -> FrequencyChoice:
     """Choose an explicit, captured-library, or calibrated scalar frequency in MHz.
 
-    tab is opened; field is a complete logical scalar path, for example
-    ("modules", "readout", "freq"). Segments are str names or int original list
-    indexes. calibration is a caller-owned logical scalar path such as
-    $resonator.freq, not a formula. required names the missing tool input.
-    Explicit finite nonboolean frequency_mhz wins and produces an explicit edit.
-    Otherwise prefer_library retains an available finite error-free captured
-    scalar, records library:<actual-key>, and returns a choice without an edit.
-    Otherwise a finite calibration produces an expression edit labeled with
-    calibration. No usable source returns a choice with the missing required
-    parameter and no edit. Missing decisions do not change input or provenance.
-    Invalid explicit values raise ValueError; source/connection errors propagate
-    without refresh or retry. No selector is copied or edited here. The recipe
-    must explicitly use_inline on each selector ancestor before apply_frequency.
+    tab is opened; field is a scalar path of str names or int original list
+    indexes, such as ("modules", "readout", "freq"). calibration is a logical
+    scalar path such as $resonator.freq, not a formula; required names the tool
+    input to report when no source is usable.
+
+    A finite nonboolean frequency_mhz wins. Otherwise, when prefer_library is
+    true, retain a finite error-free captured library scalar and record
+    library:<actual-key>. Otherwise use a finite calibration as an expression
+    edit labeled with its path. No usable source returns missing without edits
+    or provenance changes. Invalid explicit values raise ValueError;
+    source/connection errors propagate. Call use_inline on selector ancestors
+    before applying a returned edit; this function copies no selectors.
     """
     if frequency_mhz is not None:
         if not _finite(frequency_mhz):
@@ -120,14 +118,13 @@ def choose_frequency(
 
 
 def apply_frequency(tab: RecipeTab, edit: RecipeFieldEdit) -> None:
-    """Apply a choose_frequency edit after the recipe explicitly copies ancestors.
+    """Apply a choose_frequency edit and require a valid MHz scalar.
 
-    tab is opened; edit carries one logical MHz scalar path, supplied value or
-    calibration expression, and its source label. Write one scalar batch, then
-    require an available finite nonboolean frequency without directed errors.
-    Invalid values raise GuiRpcError(invalid_cfg); owner admission, validation
-    and connection failures propagate. No selector is copied, no retry occurs,
-    and a previously committed copy or invalid draft is not rolled back.
+    tab is opened; edit carries the scalar path, value or calibration expression,
+    and source label. Call use_inline on selector ancestors first.
+    Write the edit, then require an available finite nonboolean value without
+    field errors; otherwise raise GuiRpcError(invalid_cfg). Admission,
+    validation and connection failures propagate; no selector is copied here.
     """
     tab.set_fields([edit])
     state = tab.read_field(edit.field)
@@ -195,17 +192,19 @@ def set_frequency_sweep(
 ) -> tuple[MissingParameter, ...]:
     """Write numeric MHz endpoints using explicit values or current calibration.
 
-    tab is an opened recipe tab; field is its typed sweep path, with str names
-    or int original list indexes. calibration is the caller-owned path/full-width
-    policy described by FrequencySweepCalibration.
-    Missing center/span reads these paths now, then computes center +/- span/2.
-    expts must be an integer >=2; None retains the GUI count. Explicit values
-    carry explicit provenance; derived edges retain calibration/linewidth labels.
-    Missing/nonfinite center or nonpositive/nonfinite/bool linewidth reports all
-    missing center_mhz/span_mhz as a tuple of MissingParameter without sweep edits.
-    Return an empty tuple after a successful sweep edit.
-    Invalid explicit inputs raise ValueError before reads/edits. Source errors
-    propagate without fallback/retry. Native cfg failures propagate from tab.
+    tab is opened; field uses str names or int original list indexes.
+    calibration supplies frequency/linewidth paths and a full-span multiplier.
+    Explicit center/span win; omitted values read calibration now. Write
+    center +/- span/2. expts is an integer >=2 or None to retain the GUI count.
+    Explicit edges carry explicit provenance; derived edges retain their
+    calibration/linewidth labels.
+
+    Return all missing center_mhz/span_mhz inputs as MissingParameter values
+    without sweep edits when center is unavailable/nonfinite or the required
+    linewidth is boolean, nonfinite or nonpositive. Return () after success.
+    Invalid explicit inputs, policy, range or sweep path raise ValueError;
+    explicit inputs and policy are checked before reads/edits.
+    Source and native cfg failures propagate.
     """
     _validate_frequency_sweep_inputs(calibration, center_mhz, span_mhz, expts)
     state = tab.read_field(field)
@@ -264,12 +263,11 @@ def set_flux_sweep(
 ) -> None:
     """Write explicit distinct native flux endpoints, without unit conversion.
 
-    tab is opened; field is a typed sweep path with str names or int original
-    list indexes. start/stop are finite nonboolean native coordinates in either
-    direction. expts is integer >=2 or None to
-    retain GUI count. Invalid endpoints/count raise ValueError before any edit.
-    Native cfg/connection errors propagate without retry. Sources are explicit
-    for supplied values and gui_default for omitted count.
+    tab is opened; field uses str names or int original list indexes.
+    start/stop must be finite nonboolean native coordinates in either direction.
+    expts is an integer >=2 or None to retain the GUI count. Invalid endpoints
+    or count raise ValueError before edits; native cfg/connection errors propagate.
+    Supplied values have explicit provenance; an omitted count has gui_default.
     """
     _points(expts)
     if not _finite(start) or not _finite(stop) or start == stop:
@@ -286,11 +284,12 @@ def set_flux_sweep(
 def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
     """Select a registered flux device after exact cached-snapshot unit validation.
 
-    tab is opened; name/unit are nonblank strings. unit must match snapshot unit
-    exactly, including explicitly requested native. Missing/blank/none snapshot
-    units or mismatch raise GuiRpcError(invalid_device); unknown-device errors
-    propagate from the owner. Validate before editing flux_dev/flux_unit.
-    Never connect/setup a device, convert coordinates, or retry failures.
+    tab is opened; name/unit must be nonblank strings or raise ValueError.
+    unit must exactly match the cached snapshot unit, including native.
+    Missing/blank/none snapshot units or a mismatch raise
+    GuiRpcError(invalid_device); unknown-device and field errors propagate.
+    Validate before editing flux_dev/flux_unit. No device connection or
+    coordinate conversion occurs.
     """
     if not name or not name.strip():
         raise ValueError("flux device name must be non-empty")
