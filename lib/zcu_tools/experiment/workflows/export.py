@@ -137,6 +137,7 @@ def write_outputs(
                 result_path=manifest.roots.metadata_root,
                 database_path=database,
                 run_id=manifest.identity.run_id,
+                experiment=manifest.workflow,
                 point=snapshot.point,
                 saved_at=datetime.now(UTC),
             )

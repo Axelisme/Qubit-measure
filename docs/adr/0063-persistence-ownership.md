@@ -41,9 +41,11 @@ MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不
 
 ### Run 輸出位置與 writer 權責
 
-`resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `results/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
+`resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `results/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、前端啟動實驗的名稱、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
 
-新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<run_id>/`。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域副本，對等 paths 使用同一份 bytes。Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取新檔名，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
+新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<run_id>/`。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域副本，對等 paths 使用同一份 bytes。Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取 `<experiment>_<id6>_<序號>.hdf5` 新檔名。實驗名中的 `/` 轉 `_`，id6 是 run_id 的後六碼。序號從 1 起避讓既有檔案，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
+
+使用者於 2026-10-19 表示：「Labber的檔名是run_id對人太不友善了，應該要有實驗名比較好，id可能取後6位用於grep」，並裁決「採用建議」。實驗名使用各前端啟動名稱，GUI 用 adapter 名稱，workflow 用 manifest.workflow，Notebook 用 spec.tag。Migration 傳入 legacy.experiment 計算 native 位置，不重命名舊 Labber 檔。
 
 `experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。`experiment.artifacts` 的共用保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
 

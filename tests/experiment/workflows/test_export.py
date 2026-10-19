@@ -69,10 +69,11 @@ def test_saved_export_roundtrip_overwrite_and_new_labber(
         )
         for _ in range(2)
     ]
-    for native, labber in attempts:
+    for sequence, (native, labber) in enumerate(attempts, start=1):
         assert native.status == labber.status == "saved"
         assert native.path == manifest.roots.data_root / "merged.h5"
         assert labber.path is not None
+        assert labber.path.name == f"synthetic_a1b2c3_{sequence}.hdf5"
         assert native.path is not None
         stored = load_run_data(native.path)
         assert stored.metadata.completion == completion

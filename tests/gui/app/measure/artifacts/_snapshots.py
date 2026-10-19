@@ -49,6 +49,7 @@ def with_artifacts(snapshot: TabSnapshot) -> TabSnapshot:
         result_path=Path(".pytest-tmp/view-artifacts/Result"),
         database_path=Path(".pytest-tmp/view-artifacts/Database"),
         run_id="view-specimen",
+        experiment="synthetic",
         point="p",
         saved_at=datetime(2026, 10, 8, tzinfo=timezone.utc),
     )

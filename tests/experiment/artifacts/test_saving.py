@@ -63,6 +63,7 @@ def storage(tmp_path: Path) -> tuple[RunMetadata, SaveLayout, RecordsLedger]:
         result_path=entry.result_path,
         database_path=entry.database_path,
         run_id=metadata.run_id,
+        experiment="synthetic",
         point="sweet",
         saved_at=datetime.now(UTC),
     )

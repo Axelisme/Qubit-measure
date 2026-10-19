@@ -109,8 +109,8 @@ def workflow_roots(
 class SaveLayout:
     """Calculate run and member destinations without publishing files or directories.
 
-    Paths carry no experiment semantics. Fixed run/figure/JSON destinations may
-    already exist; callers own replacement. Labber names are selected by checking
+    Experiment names label Labber exports only. Fixed run/figure/JSON destinations
+    may already exist; callers own replacement. Labber names are selected by checking
     existing files, not atomically reserved. Writers and save orchestration own
     serialization, locking and failure isolation.
     """
@@ -121,17 +121,22 @@ class SaveLayout:
         result_path: Path,
         database_path: Path,
         run_id: str,
+        experiment: str,
         point: str | None,
         saved_at: datetime,
     ) -> None:
-        """Bind exact entry paths and opaque run/point identities.
+        """Bind exact entry paths, experiment name and opaque run/point identities.
 
         result_path and database_path resolve to absolute entry directories, not
-        parent roots; they need not exist. run_id and non-None point must be
-        nonempty single components without dot traversal, slash/backslash, NUL
-        or POSIX/Windows anchors. saved_at must be timezone-aware; its local date
-        selects the Labber date tree. Invalid identities/time raise ValueError.
+        parent roots; they need not exist. experiment is the frontend's launch
+        name, with slash replaced by underscore for Labber filenames. The result,
+        run_id and non-None point must be nonempty single components without dot
+        traversal, slash/backslash, NUL or POSIX/Windows anchors. saved_at must be
+        timezone-aware; its local date selects the Labber date tree. Invalid
+        names, identities or time raise ValueError before filesystem lookup.
         """
+        experiment = experiment.replace("/", "_")
+        validate_path_segment(experiment, field="experiment")
         validate_path_segment(run_id, field="run_id")
         if point is not None:
             validate_path_segment(point, field="point")
@@ -139,13 +144,16 @@ class SaveLayout:
         self._result_path = result_path.resolve()
         self._database_path = database_path.resolve()
         self._run_id = run_id
+        self._experiment = experiment
         self._point = point
         self._saved_at = saved_at
 
     def outputs(self, key: ArtifactKey) -> tuple[Output, ...]:
         """Return ordered destinations for one ArtifactKey without writing them.
 
-        Data returns canonical data_h5 then a new Labber filename. Multiple data
+        Data returns canonical data_h5 then <experiment>_<run_id last six>_N.hdf5
+        in the Labber date tree, starting at N=1 and skipping existing files.
+        Run IDs shorter than six characters are kept whole. Multiple data
         artifacts share the run's data.h5. Figure returns run PNG then point/global
         PNG copy. Analysis returns analysis/<member_name>.json; section/name do
         not affect that destination. Producers supply their pane as member_name.
@@ -162,7 +170,7 @@ class SaveLayout:
                 / f"{local.year:04d}"
                 / f"{local.month:02d}"
                 / f"Data_{local.month:02d}{local.day:02d}"
-                / f"{self._run_id}_1.hdf5"
+                / f"{self._experiment}_{self._run_id[-6:]}_1.hdf5"
             )
             initial = _checked_path(self._database_path, labber)
             labber_path = Path(reserve_labber_filepath(str(initial)))

@@ -199,6 +199,7 @@ def _convert_run(
         result_path=destination.result_path,
         database_path=destination.database_path,
         run_id=assignment.run_id,
+        experiment=legacy.experiment,
         point=legacy.snapshot.point,
         saved_at=assignment.assigned_at,
     )
