@@ -2,25 +2,35 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from qtpy.QtWidgets import QPushButton
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui import launcher
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.session.context_types import CommandOrigin, EntryRequest, PointCreateRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.resources.entry import component_registry
 
 from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
+from tests.gui.app.measure._components import QubitSchema
 from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.resources.entry.fakes import registry_state, restore_registry
 
 
 class ClosingDevice(FakeDevice):
@@ -33,17 +43,30 @@ class ClosingDevice(FakeDevice):
         super().close()
 
 
+class StartupProbe(ModuleType):
+    calls: list[str]
+    started: threading.Event
+    release: threading.Event
+    worker_ids: list[int]
+    driver: ClosingDevice
+    soccfg: object
+    tab: str
+
+
 @pytest.fixture
 def startup_app(qapp, tmp_path, monkeypatch):
     registry = Registry()
     registry.register("sample", SampleAdapter)
     previous_hook = sys.excepthook
-    behavior = MeasureGuiBehavior(lambda: (registry, Loader()), clean=True, project_root=str(tmp_path))
+    behavior = MeasureGuiBehavior(
+        lambda: (registry, Loader()), clean=True, project_root=str(tmp_path)
+    )
     assembly = behavior.assemble(None)
+    behavior.before_show(assembly)
     ctrl = assembly.controller
     window = assembly.window
     assert isinstance(ctrl, Controller) and isinstance(window, MainWindow)
-    probe = ModuleType("startup_probe")
+    probe = StartupProbe("startup_probe")
     probe.calls = []
     probe.started = threading.Event()
     probe.release = threading.Event()
@@ -66,44 +89,76 @@ def startup_app(qapp, tmp_path, monkeypatch):
 
 def write_script(tmp_path: Path, body: str) -> Path:
     path = tmp_path / "startup.py"
-    path.write_text("import startup_probe as p\nimport threading\n\ndef startup(ctx):\n" + body, encoding="utf-8")
+    path.write_text(
+        "import startup_probe as p\nimport threading\n\ndef startup(ctx):\n" + body,
+        encoding="utf-8",
+    )
     return path
 
 
 def test_script_selection_uses_only_default_custom_or_clean(tmp_path):
     default = tmp_path / "default.py"
     custom = tmp_path / "custom.py"
-    assert launcher.select_startup_script(clean=False, script=None, default_script=default) == default
-    assert launcher.select_startup_script(clean=False, script=custom, default_script=default) == custom
-    assert launcher.select_startup_script(clean=True, script=None, default_script=default) is None
+    assert (
+        launcher.select_startup_script(clean=False, script=None, default_script=default)
+        == default
+    )
+    assert (
+        launcher.select_startup_script(
+            clean=False, script=custom, default_script=default
+        )
+        == custom
+    )
+    assert (
+        launcher.select_startup_script(clean=True, script=None, default_script=default)
+        is None
+    )
     with pytest.raises(ValueError, match="--clean.*--script"):
-        launcher.select_startup_script(clean=True, script=custom, default_script=default)
+        launcher.select_startup_script(
+            clean=True, script=custom, default_script=default
+        )
 
 
 def test_background_facets_lock_run_and_keep_completed_work(startup_app, tmp_path):
     _behavior, _assembly, ctrl, _window, probe = startup_app
-    path = write_script(tmp_path, "    p.worker_ids.append(threading.get_ident())\n    ctx.soc.install(p.soccfg, p.soccfg)\n    ctx.devices.register('synthetic', p.driver)\n    ctx.setup.open_entry('synthetic')\n    ctx.setup.use_point('first')\n    ctx.context.set_alias_rows(())\n    p.tab = ctx.tabs.new_tab('sample')\n    ctx.progress('Waiting for synthetic source')\n    p.started.set()\n    p.release.wait()\n")
+    path = write_script(
+        tmp_path,
+        "    p.worker_ids.append(threading.get_ident())\n    ctx.soc.install(p.soccfg, p.soccfg)\n    ctx.devices.register('synthetic', p.driver)\n    ctx.setup.open_entry('synthetic')\n    ctx.setup.use_point('first')\n    ctx.context.set_alias_rows(())\n    p.tab = ctx.tabs.new_tab('sample')\n    ctx.progress('Waiting for synthetic source')\n    p.started.set()\n    p.release.wait()\n",
+    )
     token = ctrl.start_startup(path)
     try:
         qt_until(probe.started.is_set, label="startup owner operations")
         assert probe.worker_ids != [threading.get_ident()]
         assert ctrl.has_soc()
-        assert ctrl.device_control.get_device_info("synthetic") == probe.driver.get_info()
+        assert (
+            ctrl.device_control.get_device_info("synthetic") == probe.driver.get_info()
+        )
         assert ctrl.get_tab_snapshot(probe.tab).interaction.startup_active
         with pytest.raises(OperationConflictError, match="startup"):
             ctrl.start_run(probe.tab)
     finally:
         probe.release.set()
-    qt_until(lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed", label="startup terminal")
+    qt_until(
+        lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed",
+        label="startup terminal",
+    )
     assert not ctrl.get_tab_snapshot(probe.tab).interaction.startup_active
     assert ctrl.has_tab(probe.tab)
 
 
-def test_partial_failure_reports_script_line_and_retains_callbacks(startup_app, tmp_path, caplog):
+def test_partial_failure_reports_script_line_and_retains_callbacks(
+    startup_app, tmp_path, caplog
+):
     behavior, assembly, ctrl, _window, probe = startup_app
-    path = write_script(tmp_path, "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: p.calls.append('first'))\n    def broken():\n        p.calls.append('broken')\n        raise ValueError('callback failure')\n    ctx.on_close(broken)\n    ctx.on_close(lambda: p.calls.append('last'))\n    p.tab = ctx.tabs.new_tab('sample')\n    raise ValueError('script failure')\n")
+    path = write_script(
+        tmp_path,
+        "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: p.calls.append('first'))\n    def broken():\n        p.calls.append('broken')\n        raise ValueError('callback failure')\n    ctx.on_close(broken)\n    ctx.on_close(lambda: p.calls.append('last'))\n    p.tab = ctx.tabs.new_tab('sample')\n    raise ValueError('script failure')\n",
+    )
     token = ctrl.start_startup(path)
-    qt_until(lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed", label="failed startup")
+    qt_until(
+        lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed",
+        label="failed startup",
+    )
     outcome = ctrl.operation_control.await_operation(token, 0).outcome
     assert outcome is not None and outcome.status == "failed"
     assert outcome.error is not None
@@ -116,9 +171,14 @@ def test_partial_failure_reports_script_line_and_retains_callbacks(startup_app, 
     assert "callback failure" in caplog.text
 
 
-def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(startup_app, tmp_path):
+def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
+    startup_app, tmp_path
+):
     behavior, assembly, ctrl, _window, probe = startup_app
-    path = write_script(tmp_path, "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: (ctx.context.set_alias_rows(()), p.calls.append('callback')))\n    p.started.set()\n    p.release.wait()\n    ctx.context.set_alias_rows(())\n    p.calls.append('worker finished')\n")
+    path = write_script(
+        tmp_path,
+        "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: (ctx.context.set_alias_rows(()), p.calls.append('callback')))\n    p.started.set()\n    p.release.wait()\n    ctx.context.set_alias_rows(())\n    p.calls.append('worker finished')\n",
+    )
     ctrl.start_startup(path)
     qt_until(probe.started.is_set, label="startup waiting")
     with pytest.raises(TimeoutError):
@@ -127,3 +187,167 @@ def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(start
     probe.release.set()
     behavior.close(assembly)
     assert probe.calls == ["worker finished", "callback", "hardware"]
+
+
+def test_component_and_alias_facets_commit_through_context_owner(startup_app, tmp_path):
+    _behavior, _assembly, ctrl, _window, _probe = startup_app
+    before = registry_state()
+    try:
+        component_registry.register("startup/qubit", QubitSchema)
+        path = write_script(
+            tmp_path,
+            "    from zcu_tools.gui.session.aliases import AliasRow\n"
+            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25})\n"
+            "    ctx.context.set_alias_rows((AliasRow('qubit', 'Q1'),))\n",
+        )
+        token = ctrl.start_startup(path)
+        qt_until(
+            lambda: (
+                ctrl.operation_control.await_operation(token, 0).reason == "completed"
+            ),
+            label="component startup",
+        )
+        outcome = ctrl.operation_control.await_operation(token, 0).outcome
+        assert outcome is not None and outcome.status == "finished"
+        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+        assert "Q1" in ctrl.context_control.inspect_document().components
+    finally:
+        restore_registry(before)
+        assert registry_state() == before
+
+
+@pytest.mark.parametrize("selection", ["default", "custom", "clean"])
+def test_composition_starts_only_selected_synthetic_script(
+    startup_app, tmp_path, qapp, selection
+):
+    _old_behavior, _old_assembly, _ctrl, _window, probe = startup_app
+    default = tmp_path / "default.py"
+    custom = tmp_path / "custom.py"
+    for path, label in ((default, "default"), (custom, "custom")):
+        path.write_text(
+            f"import startup_probe as p\ndef startup(ctx):\n    p.calls.append('{label}')\n    p.started.set()\n",
+            encoding="utf-8",
+        )
+    selected = launcher.select_startup_script(
+        clean=selection == "clean",
+        script=custom if selection == "custom" else None,
+        default_script=default,
+    )
+    behavior = MeasureGuiBehavior(
+        lambda: (Registry(), Loader()),
+        clean=selection == "clean",
+        startup_script=selected,
+        project_root=str(tmp_path),
+    )
+    assembly = behavior.assemble(None)
+    assert isinstance(assembly.window, MainWindow)
+    window = assembly.window
+    try:
+        window.show()
+        behavior.after_show(assembly)
+        delivered = threading.Event()
+        if not isinstance(assembly.controller, Controller):
+            raise AssertionError("composition needs a Controller")
+        assembly.controller.owner_scheduler.post(delivered.set)
+        qt_until(delivered.is_set, label="after-show owner turn")
+        if selection == "clean":
+            assert probe.calls == []
+        else:
+            qt_until(probe.started.is_set, label="selected script")
+            driver = ComponentDriver(window)
+            qt_until(
+                lambda: driver.status().text == "Startup complete",
+                label="startup UI terminal",
+            )
+            assert probe.calls == [selection]
+    finally:
+        behavior.close(assembly)
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_programmatic_shutdown_runs_callbacks_before_driver_close(
+    startup_app, tmp_path
+):
+    _behavior, _assembly, ctrl, window, probe = startup_app
+    path = write_script(
+        tmp_path,
+        "    ctx.devices.register('synthetic', p.driver)\n"
+        "    ctx.on_close(lambda: p.calls.append('callback'))\n",
+    )
+    token = ctrl.start_startup(path)
+    qt_until(
+        lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed",
+        label="shutdown startup",
+    )
+    window.show()
+    window.request_shutdown()
+    qt_until(lambda: not window.isVisible(), label="programmatic app shutdown")
+    assert probe.calls == ["callback", "hardware"]
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["complete", "partial-failure"])
+def test_startup_progress_and_run_lock_with_user_input(
+    startup_app, tmp_path, qapp, fails
+):
+    _behavior, _assembly, ctrl, window, probe = startup_app
+    # Composition and the external synthetic source barrier are fixture setup.
+    # Clicking the real Refresh button makes that source ready, independently
+    # of the startup runner's own admission/progress logic.
+    ctrl.new_tab("sample")
+    window.show()
+    refresh = next(
+        button
+        for button in window.findChildren(QPushButton)
+        if button.text() == "Refresh"
+    )
+    refresh.clicked.connect(probe.release.set)
+    path = write_script(
+        tmp_path,
+        "    ctx.progress('Waiting for synthetic source')\n"
+        "    p.started.set()\n"
+        "    p.release.wait()\n"
+        + ("    raise ValueError('synthetic partial failure')\n" if fails else ""),
+    )
+    ctrl.start_startup(path)
+    qt_until(probe.started.is_set, label="UI startup progress")
+    driver = ComponentDriver(window)
+    evidence = Path(os.environ.get("STARTUP_UI_EVIDENCE", str(tmp_path))) / (
+        "partial-failure" if fails else "complete"
+    )
+    assert driver.status().text == "Waiting for synthetic source"
+    assert not driver.observe("Run").enabled
+    assert driver.observe("Run").tooltip == "Startup script is running"
+    driver.screenshot(evidence / "01-progress.png")
+    driver.click("Run")
+    assert not driver.observe("Run").enabled
+    driver.screenshot(evidence / "02-run-blocked.png")
+    driver.click("Refresh")
+    if fails:
+        qt_until(
+            lambda: any(
+                dialog.title == "Startup script failed" for dialog in driver.dialogs()
+            ),
+            label="startup error dialog",
+        )
+        dialog = next(
+            dialog
+            for dialog in driver.dialogs()
+            if dialog.title == "Startup script failed"
+        )
+        assert any(
+            str(path) in text
+            and "line 8" in text
+            and "synthetic partial failure" in text
+            for text in dialog.texts
+        )
+        driver.screenshot(evidence / "03-error.png")
+        driver.click("OK")
+        assert "Startup failed:" in driver.status().text
+    else:
+        qt_until(
+            lambda: driver.status().text == "Startup complete",
+            label="startup completed UI",
+        )
+    assert driver.observe("Run").enabled
+    driver.screenshot(evidence / "04-unlocked.png")

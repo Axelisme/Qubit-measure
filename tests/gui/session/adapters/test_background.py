@@ -14,9 +14,9 @@ from __future__ import annotations
 import threading
 
 import pytest
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError
-from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.scopes import progress_ambient
 
 from tests.gui._qt_waits import qt_until
@@ -184,7 +184,9 @@ def test_terminal_admission_drains_accepted_delivery_and_rejects_submit(
 
 @pytest.mark.parametrize("run_in_pool", [True, False])
 @pytest.mark.parametrize("owner_fails", [True, False])
-def test_quiesce_pumps_owner_calls_before_joining_workers(qapp, run_in_pool, owner_fails):
+def test_quiesce_pumps_owner_calls_before_joining_workers(
+    qapp, run_in_pool, owner_fails
+):
     bg = _bg()
     scheduler = QtOwnerScheduler()
     reached = threading.Event()
@@ -206,14 +208,21 @@ def test_quiesce_pumps_owner_calls_before_joining_workers(qapp, run_in_pool, own
         release.wait()
         return scheduler.call(owner_command)
 
-    bg.submit(work, run_in_pool=run_in_pool, on_done=delivered.append, on_error=delivered.append)
+    bg.submit(
+        work,
+        run_in_pool=run_in_pool,
+        on_done=delivered.append,
+        on_error=delivered.append,
+    )
     try:
         qt_until(reached.is_set, label="worker reached external barrier")
         bg.stop_accepting()
         assert not bg.quiesce(timeout_ms=0)
         assert delivered == [] and owner_calls == []
         release.set()
-        assert bg.quiesce(timeout_ms=1000), "drain must service owner calls while work is live"
+        assert bg.quiesce(timeout_ms=1000), (
+            "drain must service owner calls while work is live"
+        )
         assert delivered == [failure if owner_fails else 7]
         assert owner_calls == [threading.get_ident()]
         assert bg.quiesce(timeout_ms=0)
