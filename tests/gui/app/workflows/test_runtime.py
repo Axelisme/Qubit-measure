@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
+from typing import Self
 
 import pytest
 from pydantic import Field, ValidationError
@@ -40,6 +41,10 @@ class RecordingDriver(FakeDevice):
     """Real native setup with observable cfg, event, reads and injected I/O cause."""
 
     info_model = ExtendedInfo
+
+    def __new__(cls) -> Self:
+        """Keep this test driver's no-argument constructor anonymous."""
+        return super().__new__(cls)
 
     def __init__(self) -> None:
         super().__init__(fast_mode=True)

@@ -11,6 +11,11 @@
 It returns a bound SoC, its matching compile config, the exact populated
 `DeviceManager` and a public description. GUI and Notebook share this bundle;
 there is no controller argument, registry discovery or runtime mode switch.
+`create_device(type_name, address)` retrieves explicitly addressed startup
+FakeDevices from their process-wide class container, preserving model bindings
+and settings after disconnect/name changes. The environment keeps only modeled
+address metadata, not another instance registry. Unknown types/addresses fail
+explicitly. Anonymous startup devices have no reconnect identity.
 Successful builder return transfers cleanup to the host. Read the
 [acquisition environment contract](../program/v2/simulation/README.md) before
 writing a builder or numeric source. Public Run metadata contains only the

@@ -14,7 +14,7 @@ from typing import (
 
 from zcu_tools.device import DeviceActivity, DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
-from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
@@ -175,12 +175,10 @@ class _InflightOp:
     terminal path needs for that device's operation, independent of any other:
 
     - ``token``: the operation token (handle + gate lease key), unique per op.
-    - ``kind``: the operation kind — outcome handling branches on it
-      (``_on_operation_failed`` distinguishes a failed first-connect from a
-      failed mutation of an existing device).
+    - ``kind``: the operation kind, used to distinguish setup from other mutations.
     - ``prior``: the device-state rollback buffer captured at begin (the State
-      entry before the optimistic write); ``None`` when there was no prior entry
-      (a brand-new connect), which the rollback paths interpret as "remove".
+      entry before the optimistic write); ``None`` for a brand-new connect.
+      Failed first connections retain a memory-only row with the error.
     """
 
     token: int
@@ -214,6 +212,8 @@ def list_supported_device_types() -> list[str]:
 def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     if type_name not in _DEVICE_TYPE_REGISTRY:
         raise DeviceRegistrationError(f"Unknown device type: {type_name!r}")
+    if type_name == "FakeDevice":
+        return FakeDevice(address=address)
     class_path, requires_address = _DEVICE_TYPE_REGISTRY[type_name]
     module_path, cls_name = class_path.rsplit(".", 1)
     cls = getattr(importlib.import_module(module_path), cls_name)
@@ -288,6 +288,12 @@ class DeviceService:
             self._emit_device_changed(name)
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
+        """Start an off-main connection and return its operation token.
+
+        Live or busy names raise FailedPreconditionError. Driver failures settle
+        the operation as failed and retain an offline snapshot with the reason,
+        allowing callers to submit the same name with a corrected address.
+        """
         current = self._state.get_device(req.name)
         if current is not None and current.is_live():
             raise FailedPreconditionError(
@@ -341,16 +347,8 @@ class DeviceService:
 
         def _on_operation_failed(message: str, settle: SettleFn) -> None:
             logger.warning("device operation failed: name=%r error=%s", name, message)
-            op = self._inflight.pop(name, None)
-            # first-connect fail (no prior) → remove; mutation fail → restore prior
-            if (
-                op is not None
-                and op.kind is OperationKind.DEVICE_CONNECT
-                and prior is None
-            ):
-                self._state.remove_device(name)
-            else:
-                self._restore_prior_device_from(name, prior, message)
+            self._inflight.pop(name, None)
+            self._restore_prior_device_from(name, prior, message)
             # State is observable before settle.
             settle(OperationOutcome("failed", message))
             self._emit_device_changed(name)

@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0076 — Device 活動快照與 run 後讀回
 
-**Last updated:** 2026-10-19，未連線 device 改名
+**Last updated:** 2026-10-19，未連線 device 改名與 FakeDevice address 身分
 
 關聯 [[0062]] 的 acquisition capture、[[0067]] 的 Session／State 分工，以及 [[0066]] 的 operation 生命週期。保存權威見 [[0063]]，分層見 [[0072]]。
 
@@ -41,6 +41,14 @@ Dialog Apply、experiment、MCP 與 workflow 經由公開 driver 操作時，都
 使用者於 2026-10-19 裁定：「1可以，2不用」。此裁決採用只允許未連線 device 改名的方案，並明確不自動更新 alias。DeviceDialog 提供改名入口。DeviceService 只接受沒有進行中操作的 `MEMORY_ONLY` row，連線中必須先斷線。同名請求也先檢查這些前置條件，符合後不做任何修改。
 
 名稱沿用建立／連線時接受的範圍，拒絕空字串、全空白和既有名稱衝突，不另加字元語法限制，也不自動刪除前後空白。Owner 同次提交新舊鍵後發布集合變更，live value sources 與後續 preferences 保存使用新名。`MEMORY_ONLY` 沒有已登記 driver，不需要 DeviceManager 換鍵或新的 MCP rename RPC。改名不更新 `aliases.yaml`、已開 tab 或歷史 snapshot、samples、ledger。使用者自行調整 alias，已開 tab 保留固定輸入。
+
+## FakeDevice 的 address 身分
+
+2026-10-19，使用者裁定：「FakeDevice採用以address為分辨的單例模式」，並指定「存在FakeDevice的類容器裡」。只有顯式 address 進入 process 共享的 class 容器。同 address 取回同一個 driver，保留模擬綁定、單位與設定。省略 address 的 anonymous instance 沒有可比較的身分，每次獨立建立，不進容器。真實 driver 不受影響。
+
+使用者說明上限「可以很大」，再修正「可能也不丟了，創建時報錯」。容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額時拒絕新 address，既有 address 仍可取回，不淘汰。測試使用公開 isolation scope，結束時清空測試建立的容器並還原原 scope。
+
+單名稱 registry 規則維持不變。同 address 的 driver 已連線時，第二個名稱的連線明確失敗。先斷開舊名再用新名連線，則取回同一實例。FTF source 以 source name 作 address，數值 owner 保留原 source 身分，不隨 GUI registry 改名。SimulationEnvironment 只保存可建模的 address metadata；composition 注入其 lookup，未知 type 或 address 明確失敗，不建立無作用的 FakeDevice。
 
 ## 活動資訊與數值讀回
 

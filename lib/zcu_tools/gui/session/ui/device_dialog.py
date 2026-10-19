@@ -573,10 +573,16 @@ class DeviceDialog(QDialog):
                     break
 
         self._on_selection_changed(self._list.currentRow())
-        # refresh default name so it stays unique after any list change
-        dtype = self._type_combo.currentText()
-        existing = {e.name for e in entries}
-        self._name_edit.setText(self._unique_name(dtype.lower(), existing))
+        # Keep the submitted name while connecting or failed so editing only
+        # the address retries that device. Suggest a new name after success.
+        name = self._name_edit.text()
+        if not name or any(
+            entry.name == name and entry.status == DeviceStatus.CONNECTED.value
+            for entry in entries
+        ):
+            dtype = self._type_combo.currentText()
+            existing = {e.name for e in entries}
+            self._name_edit.setText(self._unique_name(dtype.lower(), existing))
 
     def _refresh_activity_markers(self) -> None:
         activity = self._dev.activity_snapshot()

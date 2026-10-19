@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.persistence import SingleFileCaretaker
     from zcu_tools.gui.session.ports import (
         DeviceRegistryPort,
+        DriverFactoryPort,
         OwnerScheduler,
         ProgressTransport,
     )
@@ -281,8 +282,13 @@ class Controller(SessionControllerMixin):
         *,
         alias_presets: AliasPresets | None = None,
         device_registry: DeviceRegistryPort | None = None,
+        driver_factory: DriverFactoryPort | None = None,
     ) -> None:
         """Compose services for state/registry with an optional view and adapters.
+
+        driver_factory creates device drivers; None selects the real hardware
+        factory. Simulation composition supplies its environment-owned lookup.
+        device_registry owns registered drivers and their eventual cleanup.
 
         ``alias_presets`` maps names to ordered caller-owned alias rows. None
         or omission means no catalog and an empty initial table. A supplied
@@ -348,6 +354,7 @@ class Controller(SessionControllerMixin):
             params_for=params_for,
             alias_presets=alias_presets,
             device_registry=device_registry,
+            driver_factory=driver_factory,
         )
         self._bind_services(services)
         # App-level PersistenceCaretaker, injected by runtime behavior via

@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-18，driver 活動狀態與 manager 快照
+**Last updated:** 2026-10-19，FakeDevice address 身分與 class 容器
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -238,7 +238,11 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 `FakeDevice` 用於本地流程測試，不需要真實儀器連線：
 
-- **`__init__(*, fast_mode=False, value_unit="native")` 不接受 `rm` 參數**；value_unit 可為 native、V 或 A，建立後固定，不做數值換算。它呼叫 `BaseDevice.__init__("none", rm=None)`，並由 `_open_session()` override 回傳 `None`。因此 Fake 不開 pyvisa session、不呼叫 `connect_message()`，但仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
+- **`FakeDevice(*, address=None, fast_mode=False, value_unit="native")` 不接受 `rm` 參數**。顯式 address 從 process 共享的 class 容器取得同一實例。首次建立固定單位與 fast_mode，重取保留 value、output、ramp 與模擬綁定。
+- 省略 address 每次建立獨立 anonymous instance，不進容器。它的 Info address 是 `"none"`，與顯式 address `"none"` 的身分不同。
+- Class 容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額拒絕新 address，不淘汰，既有 address 仍可取回。`close()` 不移除身分。真實 driver 不受影響，見 ADR-0076。
+- `isolated_instances()` 在無工作執行時建立空 scope，退出後還原原容器。測試使用它隔離 process 共享狀態。
+- Fake 不開 pyvisa session，但首次建立仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`。`value_unit` 為 native、V 或 A，不做數值換算。
 - `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`、`value_unit: Literal["native", "V", "A"] = "native"`。Value 與 rampstep 使用相同固定單位。Setup 單位不同時在任何寫入前拒絕；換單位須重建裝置。Dump 與 GUI snapshot 保留實際單位。RF 裝置的 Hz／dBm 量各有固定單位，不新增 `value_unit`。
 - 提供 `get_output/set_output/output_on/output_off` 與 `get_value/set_value` 方法（記憶體狀態操作）。
 - `_set_value_smart(value, stop_event=None, *, progress=False)`：以 `_rampstep` 為實際步長，透過同一個 private ramp helper 做 `np.linspace` stepping + make_pbar；Fake 保留跳過起始點的 mock 行為，每步前 check `stop_event.is_set()`，協作中止。
