@@ -451,9 +451,8 @@ def test_resume_rejects_changed_jpa_assumption_before_writes(
 def test_invalid_jpa_assumption_is_rejected_before_any_entry_or_backup(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping, unit: JsonValue
 ) -> None:
-    with pytest.raises(ValueError):
-        request = declare_request(request_data, assume_jpa_flux_unit=unit)
-        migrate(request, metadata_mapping)
+    with pytest.raises(ValueError, match="assume_jpa_flux_unit"):
+        migrate(declare_request(request_data, assume_jpa_flux_unit=unit), metadata_mapping)
     assert not (request_data.results_root / request_data.name).exists()
     assert not backup_path(request_data).exists()
 
