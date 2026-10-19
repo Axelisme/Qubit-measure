@@ -185,7 +185,25 @@ def test_failed_connect_never_reports_success_or_registers_device(
     outcome = invoke("wait", {"op": started["handle"], "timeout": 30})
     assert outcome["status"] == "failed"
     assert outcome["error"]
-    assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
+    assert invoke("rpc_call", {"method": "device.list"}) == {
+        "devices": [
+            {"name": "broken", "type_name": "UnknownDriver", "status": "memory_only"}
+        ]
+    }
+    snapshot = invoke(
+        "rpc_call", {"method": "device.snapshot", "params": {"name": "broken"}}
+    )["snapshot"]
+    assert snapshot["status"] == "memory_only"
+    assert snapshot["address"] == "none"
+    assert snapshot["error"] == outcome["error"]["message"]
+    assert "UnknownDriver" in snapshot["error"]
+    assert snapshot["info"] is None
+    assert snapshot["fields"] == []
+    with pytest.raises(GuiRpcError, match="no Info model"):
+        invoke(
+            "rpc_call",
+            {"method": "device.setup", "params": {"name": "broken", "cfg": {}}},
+        )
 
 
 def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> None:

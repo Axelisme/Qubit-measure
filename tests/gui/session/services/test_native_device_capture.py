@@ -76,13 +76,13 @@ def test_live_capture_reads_all_connected_drivers_instead_of_cached_values() -> 
     harness = StartHarness()
     service = harness.services.device
     for name, value in (("flux", 0.12), ("readout", 0.34)):
-        service.start_connect_device(ConnectDeviceRequest("FakeDevice", name, "none"))
+        service.start_connect_device(ConnectDeviceRequest("FakeDevice", name, name))
         harness.background.execute()
         harness.background.deliver()
         driver = service.get_connected_devices()[name]
         assert isinstance(driver, FakeDevice)
         driver.value = value
-        harness.state.set_device_info(name, FakeDeviceInfo(address="none", value=-1.0))
+        harness.state.set_device_info(name, FakeDeviceInfo(address=name, value=-1.0))
     harness.state.put_device(
         DeviceState(
             name="remembered",
