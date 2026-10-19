@@ -1,6 +1,6 @@
 """Named single-tone domain of the shared covariant RWA gate algorithm."""
 
-from ._rwa_gate import CovariantGateKernel
+from ._rwa_gate import SINGLE_GATE_POLICY, CovariantGateKernel
 
 
 class SingleToneGateKernel(CovariantGateKernel):
@@ -14,4 +14,5 @@ class SingleToneGateKernel(CovariantGateKernel):
     """
 
     name = "single_tone_gate"
+    revision = SINGLE_GATE_POLICY
     single_tone = True

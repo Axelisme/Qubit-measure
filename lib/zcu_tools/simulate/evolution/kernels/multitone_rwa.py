@@ -724,7 +724,7 @@ def multitone_retention(
 ) -> RWARetention:
     """Resolve a row's omitted channels using peak-weighted envelope bounds.
 
-    Caller establishes the multitone fixed-flux/smooth/carrier domain. The
+    Caller establishes the shaped-single or multitone fixed-flux/smooth domain. The
     row-local fact includes signed carriers, gains, peaks and duration; it never
     depends on other scan rows or input densities. Keys and preparation reuse
     the final mask. Phase and dimension limits are part of its policy identity.
@@ -783,8 +783,8 @@ def admit_single_rows(
 ) -> NDArray[np.bool_]:
     """Admit exactly one shaped tone for covariant gates, not row RWA routing.
 
-    Uses the same smoothness, fixed-flux, strength, phase-proxy and budget
-    policy as simultaneous RWA without relaxing its public multi-tone domain.
+    Uses shared omission-driven retention with calibrated transfer, residual
+    phase and block limits. Smoothness, fixed-flux and budget still apply.
     """
     return _admit_rows(table, rows, context, single_tone=True)
 
@@ -851,9 +851,9 @@ def _admit_rows(
         ):
             continue
         model = context.source.model(tuple(int(v) for v in table.level[row]))
-        if adaptive_multitone:
+        if adaptive_multitone or (single_tone and not constant_single):
             resolved = multitone_retention(table, int(row), context)
-            # Ordinary multitone requests both calibrated limits.
+            # Shaped single gates and ordinary multitone request both limits.
             assert (
                 resolved.dimension is not None and resolved.omission_phase is not None
             )

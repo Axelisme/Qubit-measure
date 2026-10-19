@@ -429,7 +429,9 @@ def test_omission_admission_builds_strong_shaped_gates_with_restored_dynamics(
         expected = reference(case, int(row), case.states[row])
         # 100x stricter than the contract: distinguish missing-mask error (0.953)
         # from normal integration error without tightening the production solver.
-        np.testing.assert_allclose(actual[row], expected, atol=case.budget / 100, rtol=0)
+        np.testing.assert_allclose(
+            actual[row], expected, atol=case.budget / 100, rtol=0
+        )
 
 
 def test_shaped_gate_declines_connected_retained_graph_over_block_limit():
@@ -456,38 +458,6 @@ def test_mixed_inventory_does_not_charge_rejected_gate_builds_to_usable_keys():
         # Complete-inventory cold costs still reject genuinely unamortized runs.
         small = engine.evolve(source(), (batch(2),), cancel=Event())
         assert small.paths.segments_by_kernel.get("shaped_sambe") == 2
-
-
-def test_admission_uses_sum_of_quadrature_norms_not_their_maximum():
-    src = source()
-    model = src.model((0,))
-    drive = model.drives[0]
-    # Off-resonant edges eliminate the phase proxy, isolating the full norm ratio.
-    model = replace(
-        model,
-        identity="two-quadrature-admission",
-        energies_ghz=np.array([0.0, 0.9, 1.8]),
-        drives=(replace(drive, quadrature_ghz=drive.in_phase_ghz),),
-    )
-    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
-    b = batch(1)
-    table = SegmentTable(
-        np.array([0]),
-        np.array([0.0]),
-        np.array([128.0]),
-        np.zeros((1, 1), dtype=np.int64),
-        np.ones(1, dtype=np.int64),
-        np.zeros((1, 1), dtype=np.int64),
-        np.array([[0.6]]),
-        np.array([[40.0]]),
-        np.zeros((1, 1)),
-        np.zeros((1, 1), dtype=np.int64),
-        np.zeros((1, 1)),
-        b.tracks[0].envelopes,
-    )
-    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
-    with closing(WorkPlan()) as plan:
-        assert not kernel.guard(table, np.array([0]), KernelContext(src, 1e-3, plan))[0]
 
 
 @pytest.mark.parametrize("workers", [1, 2])
