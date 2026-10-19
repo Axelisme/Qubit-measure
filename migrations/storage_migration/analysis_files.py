@@ -2,11 +2,11 @@
 
 import json
 from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, JsonValue, ValidationError
 from zcu_tools.datafile import JsonObject
+from zcu_tools.resources.analysis_source import AnalysisSource
 from zcu_tools.resources.dispersive_file import (
     DispersiveFile,
     load_dispersive_file,
@@ -25,18 +25,18 @@ from .state import MigrationSession
 
 
 def proven_created_at(value: object) -> str | None:
-    """Return original timezone-aware ISO timestamp text, or None if unproven.
+    """Return owner-validated timestamp text, or None if unproven.
 
-    Non-strings, dates without time, invalid ISO text and naive timestamps are
-    unknown. Never infer a timezone, normalize the text or substitute now.
+    Accept YYYY-MM-DDTHH:MM[:SS[.ffffff]] with Z or +/-HH:MM timezone under
+    AnalysisSource validation. Non-strings and invalid timestamps are unknown.
+    Never infer a timezone, normalize the text or substitute now.
     """
-    if not isinstance(value, str) or "T" not in value.upper():
+    if not isinstance(value, str):
         return None
     try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
+        return AnalysisSource(run_id=None, created_at=value).created_at
+    except ValidationError:
         return None
-    return value if parsed.utcoffset() is not None else None
 
 
 def _publish[Fit: BaseModel](
@@ -121,7 +121,7 @@ def convert_analysis_files(
     name is the unique migrated qubit, and values is the parsed JSON object.
     Format owners validate known content; invalid sections remain located pending
     without a file. Unknown section fields remain in the caller's verbatim ext
-    preservation. Timestamp provenance uses only timezone-aware ISO evidence;
+    preservation. Timestamp provenance uses only proven_created_at evidence;
     run_id stays null. Transition-only input creates a dispersive file with no
     invented g/bare_rf. Dry-run validates/reports without writes. An unfinished
     resume accepts equal owner-loaded files unchanged and rejects conflicts;
