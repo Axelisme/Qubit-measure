@@ -4,6 +4,7 @@ from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
 from .lookback import DEFINITION as LOOKBACK
+from .mist_power_trace import DEFINITION as MIST_POWER_TRACE
 from .mux_amp_rabi import DEFINITION as MUX_AMP_RABI
 from .mux_freq import DEFINITION as MUX_FREQ
 from .mux_len_rabi import DEFINITION as MUX_LEN_RABI
@@ -23,6 +24,7 @@ from .twotone_spectrum import DEFINITION as TWOTONE_SPECTRUM
 
 RECIPES: tuple[RecipeDefinition, ...] = (
     LOOKBACK,
+    MIST_POWER_TRACE,
     ONETONE_SPECTRUM,
     ONETONE_FLUX,
     ONETONE_POWER,

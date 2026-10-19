@@ -21,6 +21,7 @@ from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
 from zcu_lab.v2.lookback.gui import LookbackAdapter
+from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
 from zcu_lab.v2.mux.freq.gui import MuxFreqAdapter
 from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
@@ -90,6 +91,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/local_z": LocalZAdapter,
     "ftf/rb": TwoQubitRBAdapter,
     "lookback": LookbackAdapter,
+    "mist/power_dep/single_trace": MistTraceAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,
