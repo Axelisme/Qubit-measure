@@ -33,12 +33,19 @@ class RelaxingKernel(RecordingKernel):
 
 
 def gate_train(n: int, gates: int = 40, *, simultaneous: bool = False):
+    # Cold gate selection includes numerical admission. Use a smooth 128 ns
+    # ramp, not a 3 ns spike that must fall back despite the injected guard.
+    # Forty uses also amortize the gate build for the single-timeline case.
+    duration = 128
+    spacing = duration + 1
     envelope = EnvelopeSpec(
-        "sampled", np.array([0, 1, 0], dtype=np.complex128), np.array([0.0, 1.5, 3.0])
+        "sampled",
+        np.array([0, 1, 0], dtype=np.complex128),
+        np.array([0.0, duration / 2, duration]),
     )
     tracks = tuple(
         replace(
-            track(n, envelope, start=1 + 4 * gate),
+            track(n, envelope, start=1 + spacing * gate, duration=duration),
             frequency_ghz=np.full(n, 1.1),
             amplitude=np.full(n, 0.001),
         )
@@ -46,7 +53,7 @@ def gate_train(n: int, gates: int = 40, *, simultaneous: bool = False):
     )
     if simultaneous:
         tracks += tuple(replace(item, frequency_ghz=np.full(n, 0.7)) for item in tracks)
-    return replace(batch(n, duration=4 * gates + 1), tracks=tracks)
+    return replace(batch(n, duration=spacing * gates + 1), tracks=tracks)
 
 
 def evolve_train(
