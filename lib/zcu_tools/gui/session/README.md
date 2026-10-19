@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-19，runtime SoC／device 註冊與逐台關閉
+**Last updated:** 2026-10-20，runtime 資源生命週期與手動 FakeDevice 禁令
 
 # gui/session/ — 量測 session core
 
@@ -110,6 +110,13 @@ Host 在工作 drain 及 caller callbacks 完成後呼叫 `close_all_devices()`�
 每台 driver 各嘗試一次，成功轉 MEMORY_ONLY，失敗保留 CONNECTED 與 error，最後
 拋彙整 ExceptionGroup。Measure 的 `Controller.close()` 只 drain，`close_hardware()`
 才逐台關閉並卸載 SoC。後者記錄關閉錯誤而不阻擋 GUI 結束，重呼不自動重試。
+使用者不能手動新增 FakeDevice。Add Device 類型選單只列硬體 driver，
+已發布 FakeDevice 仍使用專屬 panel。只有 `publish_initial_devices()` 發布的
+FakeDevice rows 可在原 address 重連，未連線改名後仍保留這項授權。
+Remembered preferences 不授權建立 FakeDevice。目前 `register_device()` 不授予
+這項重連權限，經它註冊的 FakeDevice 在斷線後不能直接 Reconnect。
+顯式 FakeDevice address 取回 process-shared instance，不重設設定或模型綁定。
+Session 不載入 simulation environment，也不組裝模擬資源。
 
 Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提供獨立 `value_unit` 編輯。完整 cfg 的單位由 Info 驗證，snapshot 與 recipe 沿同一儲存事實。
 

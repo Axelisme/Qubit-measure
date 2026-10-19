@@ -209,7 +209,8 @@ def _extract_numeric_device_value(info: BaseDeviceInfo | None) -> float | None:
 
 
 def list_supported_device_types() -> list[str]:
-    return list(_DEVICE_TYPE_REGISTRY.keys())
+    """Return driver types users may add manually; simulation publishes its own."""
+    return [name for name in _DEVICE_TYPE_REGISTRY if name != "FakeDevice"]
 
 
 def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
@@ -266,6 +267,8 @@ class DeviceService:
         # per-name operation transients. The gate prevents concurrent mutations
         # of the same device. ProgressService owns per-operation setup progress.
         self._inflight: dict[str, _InflightOp] = {}
+        # Restored preferences cannot grant simulation publication provenance.
+        self._published_fake_devices: set[str] = set()
 
     def register_device(self, name: str, driver: BaseDevice[Any]) -> None:
         """Adopt an already built driver and publish its current info on owner thread.
@@ -372,7 +375,8 @@ class DeviceService:
 
         No drivers are reconstructed or connected. Read failure propagates;
         the caller must drain work and close the service's registered drivers.
-        Existing published rows are rejected rather than overwritten.
+        Existing published rows are rejected rather than overwritten. Published
+        FakeDevice rows may reconnect at their stored address, also after rename.
         """
         entries = self._registry.get_all_devices()
         infos = {name: driver.get_info() for name, driver in entries.items()}
@@ -389,19 +393,35 @@ class DeviceService:
                     info=info,
                 )
             )
+            if info.type == "FakeDevice":
+                self._published_fake_devices.add(name)
             self._emit_device_changed(name)
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
         """Start an off-main connection and return its operation token.
 
-        Live or busy names raise FailedPreconditionError. Driver failures settle
-        the operation as failed and retain an offline snapshot with the reason,
+        New FakeDevice rows raise FailedPreconditionError in every session.
+        Only simulation-published FakeDevice rows may reconnect at their stored
+        address, including after rename. Remembered preferences do not publish
+        devices. Live or busy names also raise FailedPreconditionError.
+        Driver failures settle the operation as failed and retain an offline
+        snapshot with the reason,
         allowing callers to submit the same name with a corrected address.
         """
         current = self._state.get_device(req.name)
         if current is not None and current.is_live():
             raise FailedPreconditionError(
                 f"Device {req.name!r} is already connected or busy"
+            )
+        if req.type_name == "FakeDevice" and (
+            req.name not in self._published_fake_devices
+            or current is None
+            or current.type_name != "FakeDevice"
+            or req.address != current.address
+        ):
+            raise FailedPreconditionError(
+                "FakeDevice cannot be added manually; the simulation environment "
+                "must publish it through publish_initial_devices."
             )
         initial = current or DeviceState(
             name=req.name,
@@ -541,6 +561,7 @@ class DeviceService:
                 )
             else:
                 self._state.remove_device(name)
+                self._published_fake_devices.discard(name)
             logger.info("device disconnect succeeded: name=%r", name)
             self._inflight.pop(name, None)
             # State is observable before settle.
@@ -767,6 +788,9 @@ class DeviceService:
         # committed set, and MEMORY_ONLY has no driver or lease key to migrate.
         self._state.remove_device(old_name)
         self._state.put_device(replace(dev, name=new_name))
+        if old_name in self._published_fake_devices:
+            self._published_fake_devices.remove(old_name)
+            self._published_fake_devices.add(new_name)
         self._bus.emit(DeviceChangedPayload(name=None))
 
     def forget_device(self, name: str) -> None:
@@ -776,6 +800,7 @@ class DeviceService:
                 f"Device {name!r} is not a memory-only device"
             )
         self._state.remove_device(name)
+        self._published_fake_devices.discard(name)
         self._emit_device_changed(name)
 
     def _project(self, dev: DeviceState) -> DeviceSnapshot:
