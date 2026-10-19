@@ -138,6 +138,7 @@ def test_invalid_version_locates_document(tmp_path: Path, version: str) -> None:
         ("source_hash", "A" * 64, "source_hash"),
         ("experiment", "", "experiment"),
         ("run_id", "", "run_id"),
+        ("run_id", "historical-run-42", "run_id"),
         ("run_id", "../escape", "run_id"),
         ("run_id", "unsafe/path", "run_id"),
         ("run_id", True, "run_id"),

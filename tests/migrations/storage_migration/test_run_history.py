@@ -148,7 +148,7 @@ def test_trusted_historical_identity_and_times_survive_native_conversion(
     request = history_request(
         request,
         {
-            "run_id": "historical-run-42",
+            "run_id": "20251001T000000Z-abc123",
             "started_at": "2025-10-01T00:00:00Z",
             "finished_at": "2025-10-01T00:00:01Z",
             "completion": "complete",
@@ -163,7 +163,7 @@ def test_trusted_historical_identity_and_times_survive_native_conversion(
         ),
     )
     metadata = load_run_data(report.converted_files[0].destination).metadata
-    assert metadata.run_id == "historical-run-42"
+    assert metadata.run_id == "20251001T000000Z-abc123"
     assert metadata.started_at == "2025-10-01T00:00:00Z"
     assert metadata.finished_at == "2025-10-01T00:00:01Z"
     assert metadata.completion == "complete"
