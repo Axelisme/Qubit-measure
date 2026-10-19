@@ -256,7 +256,7 @@ metadata:
 - 未知數值填 `null` 或省略，不補 0。已知數值必須是有限數字，不接受 bool 或數字字串。
 - 格式檔只放在 entry 層，不複製到 points。原區塊仍在 `legacy_params` 與備份裡。
 
-寫完每個檔都要用 JSON parser 讀回一次。格式 owner 的 Python 模組 land 後，改用它們的 `load_*`、`save_*` 讀寫與驗證，見 [resources README](../lib/zcu_tools/resources/README.md)。
+寫完每個檔都要用 owner 讀回一次：predictor 用 `zcu_tools.resources.predictor_file.load_predictor_file(path)`，它會驗證欄名、數值與 source。dispersive、t1_curve 的 owner 模組 land 前，先用 JSON parser 讀回，land 後改用對應的 `load_*`。見 [resources README](../lib/zcu_tools/resources/README.md)。
 
 ### predictor：`predictors/<Q>.json`
 
