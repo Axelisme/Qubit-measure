@@ -87,6 +87,15 @@ class AccPhaseExp(PersistableExperiment[AccPhaseResult, AccPhaseCfg]):
     )
 
     def run(self, config: AccPhaseCfg, *, context: RunContext) -> AccPhaseResult:
+        """Measure flux-induced accumulated phase versus the first π/2 start time.
+
+        After reset, run flux, wait→first π/2, and readout_t in parallel. Apply
+        the phase-swept second π/2 only after all three branches finish, then
+        read out. readout_t is a minimum join duration in us, not an exact read
+        time. Return wait times in us, projection phases in degrees and mean
+        complex IQ shaped (wait, phase); analyze derives phase and detuning.
+        """
+        # Quantize wait and projection-phase axes on the configured hardware.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -101,6 +110,7 @@ class AccPhaseExp(PersistableExperiment[AccPhaseResult, AccPhaseCfg]):
             phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
+        # Keep one mean IQ value for each wait/projection-phase pair.
         viewer = context.plots.liveplot_2d("measurement", "Time (us)", "Phase (deg)")
         signals_buffer = SignalBuffer(
             (len(lengths), len(phases)),
@@ -108,10 +118,13 @@ class AccPhaseExp(PersistableExperiment[AccPhaseResult, AccPhaseCfg]):
                 lengths, phases, acc_phase_signal2real(data)
             ),
         )
+
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             length_param = sweep2param("length", sched.cfg.sweep.length)
             phase_param = sweep2param("phase", sched.cfg.sweep.phase)
+
+            # End the free phase accumulation with a projection after the join.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -144,6 +157,12 @@ class AccPhaseExp(PersistableExperiment[AccPhaseResult, AccPhaseCfg]):
         *,
         plots: Plots,
     ) -> AccPhaseAnalysis:
+        """Extract unwrapped phase (rad) and its negative time slope (MHz).
+
+        Fit sine/cosine coefficients across projection phase at each wait.
+        Times refer to the first π/2 center; detuning is -dphase/dt/(2π).
+        Require source.cfg for pulse timing, otherwise raise ValueError.
+        """
         del options  # This analysis has no configurable options.
         result = source.result
 
