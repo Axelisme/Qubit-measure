@@ -1,4 +1,8 @@
-"""Native algebra for the common-frame owner; frequencies are cycles/ns."""
+"""Model-only NumPy builders and native common-frame apply algebra.
+
+Small coefficient/remainder builds use NumPy directly to avoid cold JIT work.
+Only repeated row admission and propagation are compiled. Frequencies use GHz.
+"""
 
 from typing import NamedTuple
 
@@ -22,70 +26,60 @@ class Channels(NamedTuple):
     denominator_min: float
 
 
-@njit(cache=True, nogil=True)
-def _beat_element(energies, signed, labels, frequencies, indices):
-    a, b, i, j = indices
-    sign_a, sign_b = 1 - 2 * (a % 2), 1 - 2 * (b % 2)
-    result = 0j
-    for m in range(len(energies)):
-        if labels[i] - labels[m] + sign_a == 0:
-            continue
-        da = energies[i] - energies[m] + sign_a * frequencies[a // 2]
-        db = energies[j] - energies[m] - sign_b * frequencies[b // 2]
-        if abs(da) > 1e-10 and abs(db) > 1e-10:
-            result += 0.5 * signed[a, i, m] * signed[b, m, j] * (1 / da + 1 / db)
-    return result
-
-
-@njit(cache=True, nogil=True)
-def coefficients(energies, full, frequencies):
-    size = len(energies)
-    count = 2 * len(frequencies)
-    carrier = np.mean(frequencies)
+def coefficients(energies, full, frequencies) -> Channels:
+    size, count = len(energies), 2 * len(frequencies)
+    carrier = float(np.mean(frequencies))
     labels = np.rint(energies / carrier)
+    difference = energies[:, None] - energies[None, :]
+    label_difference = labels[:, None] - labels[None, :]
+    signs = np.tile([1, -1], len(frequencies))
+    signed_frequencies = signs * np.repeat(frequencies, 2)
     signed = np.empty((count, size, size), np.complex128)
-    operators = np.zeros((count + count * count, size, size), np.complex128)
-    omega = np.zeros(len(operators))
-    first = np.empty(len(operators), np.int64)
-    second = np.full(len(operators), -1, np.int64)
+    signed[::2], signed[1::2] = full, full.conj().transpose(0, 2, 1)
+    retained = label_difference + signs[:, None, None] == 0
+    denominators = difference + signed_frequencies[:, None, None]
+    fast = ~retained & (np.abs(signed) > 1e-16)
+    minimum = float(np.min(np.abs(denominators[fast]), initial=np.inf))
     generators = np.zeros_like(signed)
-    minimum = np.inf
+    np.divide(
+        signed,
+        denominators,
+        out=generators,
+        where=fast & (np.abs(denominators) > 1e-10),
+    )
+    operators = np.zeros((count + count * count, size, size), np.complex128)
+    operators[:count] = np.where(retained, signed, 0)
+    omega = np.zeros(len(operators))
+    omega[:count] = 2 * np.pi * (signed_frequencies - signs * carrier)
+    first = np.empty(len(operators), np.int64)
+    first[:count] = np.arange(count)
+    second = np.full(len(operators), -1, np.int64)
     for a in range(count):
-        sign = 1 - 2 * (a % 2)
-        signed[a] = full[a // 2] if sign == 1 else full[a // 2].conj().T
-        omega[a] = 2 * np.pi * sign * (frequencies[a // 2] - carrier)
-        first[a] = a
-        for i in range(size):
-            for j in range(size):
-                if labels[i] - labels[j] + sign == 0:
-                    operators[a, i, j] = signed[a, i, j]
-                elif abs(signed[a, i, j]) > 1e-16:
-                    denominator = energies[i] - energies[j] + sign * frequencies[a // 2]
-                    minimum = min(minimum, abs(denominator))
-                    if abs(denominator) > 1e-10:
-                        generators[a, i, j] = signed[a, i, j] / denominator
-    for a in range(count):
-        sign_a = 1 - 2 * (a % 2)
+        da = denominators[a]
+        left = np.where(~retained[a] & (np.abs(da) > 1e-10), signed[a], 0)
+        left_divided = np.zeros_like(left)
+        np.divide(left, da, out=left_divided, where=np.abs(da) > 1e-10)
         for b in range(count):
-            sign_b = 1 - 2 * (b % 2)
             k = count + a * count + b
             first[k], second[k] = a, b
             omega[k] = (
                 2
                 * np.pi
                 * (
-                    sign_a * frequencies[a // 2]
-                    + sign_b * frequencies[b // 2]
-                    - (sign_a + sign_b) * carrier
+                    signed_frequencies[a]
+                    + signed_frequencies[b]
+                    - (signs[a] + signs[b]) * carrier
                 )
             )
-            for i in range(size):
-                for j in range(size):
-                    if labels[i] - labels[j] + sign_a + sign_b != 0:
-                        continue
-                    operators[k, i, j] = _beat_element(
-                        energies, signed, labels, frequencies, (a, b, i, j)
-                    )
+            # db[j,m] belongs to the right factor's transposed coordinates.
+            db = (difference - signed_frequencies[b]).T
+            right = np.where(np.abs(db) > 1e-10, signed[b], 0)
+            right_divided = np.zeros_like(right)
+            np.divide(right, db, out=right_divided, where=np.abs(db) > 1e-10)
+            beat = (left_divided @ right + left @ right_divided) / 2
+            operators[k] = np.where(
+                label_difference + signs[a] + signs[b] == 0, beat, 0
+            )
     return Channels(
         energies - labels * carrier,
         operators,
@@ -99,7 +93,6 @@ def coefficients(energies, full, frequencies):
     )
 
 
-@njit(cache=True, nogil=True)
 def remainder_channels(channels, labels, groups, powers):
     """Aggregate absolute ordered SW remainders by equal signed monomials.
 
