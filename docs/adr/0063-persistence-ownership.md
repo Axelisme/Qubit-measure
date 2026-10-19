@@ -12,7 +12,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 ### 保存目的與 owner
 
-- App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 提供單檔 I/O、格式錯誤的 default degradation 與 atomic replace。measure GUI 目前在 lifecycle close 保存，autofluxdep GUI 另有 debounce 與 terminal 保存；shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
+- App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 提供單檔 I/O、格式錯誤的 default degradation 與 atomic replace。Measure framework 只在 lifecycle close 保存 Qt 視窗尺寸與左面板寬度，不保存或還原 domain session。SoC、device、entry／point、tabs／input 的檔案與重開政策由啟動腳本擁有，見 [[0064]]；entry aliases.yaml 仍由 entry 擁有。Autofluxdep GUI 另有 debounce 與 terminal 保存；shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
 - Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow run 保存跨步驟的提交與 audit。Engine 擁有 manifest、journal 與 best-effort iteration record.json；workflow 擁有 native 量測檔及圖形，並在 point record 記錄用途與檔名。Engine 每輪提供唯讀 absolute iteration_dir，不保存、追蹤或保證 workflow 檔案。單次量測 Completed 與保存分開，責任與失敗規則見 [[0062]]。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。

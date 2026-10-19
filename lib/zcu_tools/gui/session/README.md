@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，instrument adapters、既有 row Reconnect、live preferences、app layout persistence 與 runtime 資源生命週期
+**Last updated:** 2026-10-20，腳本與 entry 保存分界、儀器 adapters 與關閉順序
 
 # gui/session/ — 量測 session core
 
@@ -36,7 +36,9 @@ DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，�
 schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
 JSON／UTF-8 或 codec 格式錯誤時，caretaker 以 defaults 開啟，透過
 `RestoreOutcome.load_error` 交給 host 顯示。載入不改寫或備份原檔，正常保存時機不變。
-Provider 和其他 restore 故障仍傳播。Measure 的 framework caretaker 只保存 Qt 外觀。Session preferences 是目前程序的 Setup 預填值，不負責 domain session 檔案。FormInput 的 RAM reload 使用共用遞迴還原，見 ADR-0063、ADR-0079。
+Provider 和其他 restore 故障仍傳播。Measure 的 framework caretaker 只保存 `measure_layout_v1.json` 的視窗尺寸與左面板寬度，不保存、還原或遷移 SoC、devices、entry／point、tabs／input。Session preferences 是目前程序的 Setup 預填值，不負責 domain session 檔案。Workspace 快照與 FormInput reload 只在 RAM 中重建，不是持久 session schema，見 ADR-0063、ADR-0064、ADR-0079。
+
+Measure 的預設 zcu_lab 腳本自行保存 user cache，依序嘗試連線 SoC、devices，再開 entry／point 與帶 input 的 tabs。失敗的 device 可 remember 為未連線列；略過的 tabs 不延後等待來源。Alias 仍屬 entry 的 `aliases.yaml`，開 entry 載入、Inspect Apply 保存，預設腳本不另存或恢復。Session 只提供 live read/build 能力，不選擇保存領域或讀取腳本檔案。腳本選擇與背景 runner 屬 [measure app](../app/measure/README.md)。
 
 ```
 session/
@@ -106,7 +108,7 @@ Run 或同名 mutation 中拒絕；失敗不接管或關閉候選 driver。通�
 仍服務手動連線；注入 registry 可用 `publish_initial_devices()` 發布既有 drivers。
 Live rows 優先於同名 remembered rows，其他 remembered rows 不自動連線。
 
-Host 在工作 drain 及 caller callbacks 完成後呼叫 `close_all_devices()`。
+Host 在工作 drain 及 caller callbacks 完成後呼叫 `close_all_devices()`。Measure 透過 `finish_close()` 共用此順序，script callbacks 在 owner thread 反序執行一次，單一失敗記 log 後繼續。Drain 逾時不先消耗 callbacks 或關閉硬體。
 每台 driver 各嘗試一次，成功轉 MEMORY_ONLY，失敗保留 CONNECTED 與 error，最後
 拋彙整 ExceptionGroup。Measure 的 `Controller.close()` 只 drain，`close_hardware()`
 才逐台關閉並卸載 SoC。後者記錄關閉錯誤而不阻擋 GUI 結束，重呼不自動重試。

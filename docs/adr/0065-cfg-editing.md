@@ -60,7 +60,9 @@ Read、preview、result 與 accept 不捕捉來源。通知期間允許讀取，
 
 Run 只接受目前有效的 Form result，不收 cfg ref 或 expected revision，也不回退上次有效 cfg。Accepted config 深層隔離執行值與來源 provenance。後續 Edit、全域來源變更與 Reset 都不改已接受 Run。控制身份見 [[0070]]，hardware guard、lease 與 operation lifecycle 見 [[0066]]。
 
-Tab 建立時就能 headless 編輯。Qt attach/detach 只管理 view 與訂閱。Idle close 撤銷舊 handle，重建同名 tab 建立新資源。Active Run 禁止同 tab 的人工 Edit、Reset、replacement 與 close，其他 tab 仍可編輯。Load 只載既有結果及分析來源，保留表單原輸入與固定來源。有效、Invalid 與未完成的 draft 都不被改寫，Load 不要求 current 有效，也不從 native cfg 推回 extras。Wire 回覆保留結果與分析準備 facts，不提供回填狀態。原始 cfg 保存在 native 資料檔，透過公開 datafile.load_run_data 離線讀取為 StoredRun，GUI 不提供檢視入口，見 [[0063]]。
+Tab 在來源就緒後建立，建立時 capture 一次，隨即能 headless 編輯。腳本可用 `tabs.new_tab(adapter, input=TabInput(form_json))` 交回 opaque authored input，由 Form owner 解碼及還原，不由腳本重建 form 或來源。`TabInput` 保存 data、expression 原稿、一般 invalid draft 與 explicit selections，不含結果或來源，也不是 framework session 磁碟 schema。不相容路徑由既有 restore 政策丟棄並記 log，未知 adapter、無效 JSON 或來源建立失敗在 tab 發布前報錯。框架沒有 pending 還原；腳本選擇何時建 tab，見 [[0064]]。
+
+Qt attach/detach 只管理 view 與訂閱。Idle close 撤銷舊 handle，重建同名 tab 建立新資源。Active Run 禁止同 tab 的人工 Edit、Reset、replacement 與 close，其他 tab 仍可編輯。Load 只載既有結果及分析來源，保留表單原輸入與固定來源。有效、Invalid 與未完成的 draft 都不被改寫，Load 不要求 current 有效，也不從 native cfg 推回 extras。Wire 回覆保留結果與分析準備 facts，不提供回填狀態。原始 cfg 保存在 native 資料檔，透過公開 datafile.load_run_data 離線讀取為 StoredRun，GUI 不提供檢視入口，見 [[0063]]。
 
 ## 固定來源與 Form library key
 
@@ -100,6 +102,8 @@ MCP 直接呼叫 owning context，不開 dialog、不切頁或焦點。`context.
 
 ## 取捨與相鄰責任
 
-單一表單核心讓各宿主共用 input、驗證與 editor，宿主仍決定 lifetime、來源捕捉與提交時機。來源變更不提示、不自動更新；Measure 要最新值就明確 Reset。Source basis 記錄 provenance，不是 cfg admission 門檻。這不取代 [[0079]] 還原時的型別與元素 identity 檢查；library 內容版本不同本身不是 identity mismatch。舊 `@{}` 補全、eval／value_ref wire tags 與 editor.* 事件／RPC 不再提供。`value.list`／`value.read` 與內部 ValueRef／resolve_value_ref 保留，見 [[0037]]。
+單一表單核心讓各宿主共用 input、驗證與 editor，宿主仍決定 lifetime、來源捕捉與提交時機。來源變更不提示、不自動更新。Measure 要保留目前 input 並取新來源就明確 Refresh，要重算初值就 Reset。
+
+使用者於 2026-10-19 裁定：「Reset/Refresh應該是不同分工，而不是捆綁」「我認為Reset可以包含Refresh，這樣方便」。Source basis 記錄 provenance，不是 cfg admission 門檻。這不取代 [[0079]] 還原時的型別與元素 identity 檢查；library 內容版本不同本身不是 identity mismatch。舊 `@{}` 補全、eval／value_ref wire tags 與 editor.* 事件／RPC 不再提供。`value.list`／`value.read` 與內部 ValueRef／resolve_value_ref 保留，見 [[0037]]。
 
 參數容器與 Library 寫入權由 [[0067]] 定義；保存與 crash durability 歸 [[0063]]；workflow run 與 patches 歸 [[0062]]；wire、guard 與 delivery failure 見 [[0068]]。模組入口見 [Form](../../lib/zcu_tools/gui/form/README.md)、[生成器](../../lib/zcu_tools/gui/form_adapter/README.md)、[session](../../lib/zcu_tools/gui/session/README.md) 與 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)。
