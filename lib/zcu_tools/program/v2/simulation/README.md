@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-19，no-op integrated upload removal、frontend lowering 與 binding-owned envelope reuse
+**Last updated:** 2026-10-19，SoC-owned statistics validation certificates
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -176,7 +176,12 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   or `RoundSignals` for decimated mode. Mode/result mismatches raise.
 - Integrated statistics contain per-point totals over reps, shared state counts,
   conditional per-shot sums and receiver covariance. The adapter validates and
-  detaches these arrays. Without threshold, classification or trackers, it divides
+  detaches these arrays. Each SimulationSoc retains at most 64 KiB of successful
+  conditional-sum/covariance validation certificates, keyed by shape, dtype and
+  exact bytes, not borrowed array identity. Counts, layout and noisy totals are
+  checked each round, and every returned array is detached even on a certificate
+  hit. Certificates live with the SoC and do not cross the core/backend boundary.
+  Without threshold, classification or trackers, it divides
   totals by reps and readout length, removes QICK offsets and moves reads first,
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
   Threshold, classification, trackers and `get_raw()` materialize deterministic
