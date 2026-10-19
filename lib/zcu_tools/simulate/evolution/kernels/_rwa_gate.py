@@ -1,4 +1,4 @@
-"""Phase-covariant four-subsegment gates over the shared joint RWA graph."""
+"""Phase-covariant, adaptively split gates over the shared joint RWA graph."""
 
 from dataclasses import dataclass
 from hashlib import sha256
@@ -27,14 +27,22 @@ from .multitone_rwa import (
     rwa_coefficients,
 )
 
-GATE_POLICY = ("joint-covariant-pruned-v1", RWA_GRAPH_POLICY, 4, 4.0, 1e-9, 1e-11)
+GATE_POLICY = (
+    "joint-covariant-adaptive-v2",
+    RWA_GRAPH_POLICY,
+    4,
+    0.01,
+    4.0,
+    1e-9,
+    1e-11,
+)
 
 
 @dataclass(frozen=True)
 class GatePrepared:
     """Owned, read-only joint products aligned with representative keys.
 
-    unitaries: (keys,4,M,M) canonical rotating-frame Hilbert propagators.
+    unitaries: (keys,max(segments),M,M) canonical Hilbert propagators, zero padded.
     populations/coherences: (keys,M,M) half-subsegment secular maps.
     charges: (keys,M,tones) integer dressed phase charges, not bare-qubit Z.
     """
@@ -43,12 +51,20 @@ class GatePrepared:
     populations: NDArray[np.float64]
     coherences: NDArray[np.float64]
     charges: NDArray[np.int64]
+    segments: NDArray[np.int64]
+    """Number of active Strang subsegments for each representative key."""
 
     @property
     def nbytes(self) -> int:
         return sum(
             a.nbytes
-            for a in (self.unitaries, self.populations, self.coherences, self.charges)
+            for a in (
+                self.unitaries,
+                self.populations,
+                self.coherences,
+                self.charges,
+                self.segments,
+            )
         )
 
 
@@ -151,7 +167,7 @@ def _admit_physics(
     *,
     single_tone: bool,
 ) -> NDArray[np.bool_]:
-    """Evaluate the unchanged RWA/graph/split formulas once per physics key."""
+    """Evaluate RWA and phase-graph validity once per physics key."""
     accepted = (admit_single_rows if single_tone else admit_rows)(table, rows, context)
     peaks = envelope_bounds(table, context.work_plan).peaks
     for index in np.flatnonzero(accepted):
@@ -165,25 +181,49 @@ def _admit_physics(
             np.abs(table.tone_amplitude[row, :count])
             * peaks[table.tone_envelope[row, :count]]
         )
+        accepted[index] = pruning_admitted(
+            graph, amplitudes, float(table.duration_ns[row]), context.budget
+        )
+    return accepted
+
+
+def gate_segments(table: SegmentTable, row: int, context: KernelContext) -> int:
+    """Return the least n >= 4 with duration**3*Gamma*V**2/n**2 <= 0.01.
+
+    This density-free, calibrated Strang proxy uses retained off-diagonal drive
+    only: diagonal shifts commute with the secular dissipator. Numerical RWA
+    and pruning admission remain separate. The result is shared per physics key.
+    """
+    key = FactKey(
+        ("covariant-gate-segments", canonical_key(table, row, context.source)), int
+    )
+
+    def build() -> int:
+        graph = _row_graph(table, row, context)
         model = context.source.model(tuple(int(v) for v in table.level[row]))
+        peaks = envelope_bounds(table, context.work_plan).peaks
+        amplitudes = (
+            np.abs(table.tone_amplitude[row, : table.tones[row]])
+            * peaks[table.tone_envelope[row, : table.tones[row]]]
+        )
         gamma = max(
             float(np.max(coherence_decay(model))),
             float(np.max(model.rates_per_ns.sum(axis=0))),
         )
-        # Diagonal shifts commute with secular D; only off-diagonal drive
-        # contributes to this D-U-D splitting proxy.
         strength = sum(
             amplitudes[k] * 2 * np.linalg.norm(graph.positive[k], 2)
-            for k in range(count)
+            for k in range(table.tones[row])
         )
-        split = table.duration_ns[row] ** 3 * gamma * strength**2 / 16
-        accepted[index] = (
-            pruning_admitted(
-                graph, amplitudes, float(table.duration_ns[row]), context.budget
-            )
-            and split <= 0.01
+        return max(
+            4,
+            int(
+                np.ceil(
+                    np.sqrt(table.duration_ns[row] ** 3 * gamma * strength**2 / 0.01)
+                )
+            ),
         )
-    return accepted
+
+    return context.work_plan.fact(key, build)
 
 
 class _SingleContext(NamedTuple):
@@ -245,8 +285,43 @@ def _single_unitaries(context, duration_ns):
     return result
 
 
+@njit(nogil=True, cache=True)
+def _adaptive_unitaries(context, duration_ns, segments):
+    size = len(context.energy)
+    result = np.empty((segments, size, size), dtype=np.complex128)
+    boundaries = np.linspace(0.0, duration_ns, segments + 1)
+    for segment in range(segments):
+        start, end = boundaries[segment], boundaries[segment + 1]
+        interval = _SingleContext(
+            context.energy,
+            context.coefficients,
+            context.times,
+            context.samples,
+            context.gain,
+            context.offset_ns,
+            start,
+        )
+        state = integrate(
+            _single_rhs,
+            interval,
+            np.eye(size, dtype=np.complex128).ravel(),
+            end - start,
+            Tolerances(1e-9, 1e-11, 4.0),
+            1.0,
+        )
+        endpoint = state.reshape(size, size)
+        endpoint *= np.exp(-2j * np.pi * context.energy * end)[:, None]
+        endpoint *= np.exp(2j * np.pi * context.energy * start)[None, :]
+        result[segment] = endpoint
+    return result
+
+
 def _build_unitaries(
-    table: SegmentTable, row: int, context: KernelContext, graph: PhaseGraph
+    table: SegmentTable,
+    row: int,
+    context: KernelContext,
+    graph: PhaseGraph,
+    segments: int,
 ) -> NDArray[np.complex128]:
     model = context.source.model(tuple(int(v) for v in table.level[row]))
     count = table.tones[row]
@@ -267,18 +342,19 @@ def _build_unitaries(
 
     if count == 1:
         env = table.envelopes[table.tone_envelope[row, 0]]
-        return _single_unitaries(
-            _SingleContext(
-                energy,
-                coefficients,
-                env.sample_ns,
-                env.samples,
-                float(table.tone_amplitude[row, 0]),
-                float(table.tone_envelope_offset_ns[row, 0]),
-                0.0,
-            ),
-            float(table.duration_ns[row]),
+        single_context = _SingleContext(
+            energy,
+            coefficients,
+            env.sample_ns,
+            env.samples,
+            float(table.tone_amplitude[row, 0]),
+            float(table.tone_envelope_offset_ns[row, 0]),
+            0.0,
         )
+        duration = float(table.duration_ns[row])
+        if segments == 4:
+            return _single_unitaries(single_context, duration)
+        return _adaptive_unitaries(single_context, duration, segments)
 
     def rhs(time, state):
         amplitudes = np.empty(count, dtype=np.complex128)
@@ -293,8 +369,8 @@ def _build_unitaries(
 
     result = []
     for start, end in zip(
-        np.linspace(0, table.duration_ns[row], 5)[:-1],
-        np.linspace(0, table.duration_ns[row], 5)[1:],
+        np.linspace(0, table.duration_ns[row], segments + 1)[:-1],
+        np.linspace(0, table.duration_ns[row], segments + 1)[1:],
         strict=True,
     ):
         solution = scipy.integrate.solve_ivp(
@@ -347,13 +423,45 @@ def _play(
         states[row] = rho * end[:, None] * end.conj()[None, :]
 
 
-class CovariantGateKernel:
-    """Shared four-U builder and playback for named single/multi-tone families.
+@njit(nogil=True, cache=True)
+def _adaptive_play(
+    data,
+    keys,
+    playback,
+    states,
+):
+    unitaries, populations, coherences, charges, segments = data
+    theta, frequency, duration, tones = playback
+    for row in range(len(states)):
+        key = keys[row]
+        count = tones[row]
+        size = states.shape[-1]
+        start = np.empty(size, dtype=np.complex128)
+        end = np.empty(size, dtype=np.complex128)
+        for i in range(size):
+            initial, final = 0.0, 0.0
+            for k in range(count):
+                initial += charges[key, i, k] * theta[row, k]
+                final += charges[key, i, k] * (
+                    theta[row, k] + 2 * np.pi * frequency[row, k] * duration[row]
+                )
+            start[i] = np.exp(1j * initial)
+            end[i] = np.exp(1j * final)
+        rho = states[row] * start.conj()[:, None] * start[None, :]
+        for segment in range(segments[key]):
+            rho = split_step(
+                rho, unitaries[key, segment], populations[key], coherences[key]
+            )
+        states[row] = rho * end[:, None] * end.conj()[None, :]
 
-    Numerical guard checks shared calibrated RWA, bounded phase-graph pruning
-    and secular splitting. Multi-tone gates additionally require coextensive
+
+class CovariantGateKernel:
+    """Shared adaptive U builder and playback for single/multi-tone families.
+
+    Numerical guard checks shared calibrated RWA and bounded phase-graph pruning.
+    Preparation refines secular splitting without relaxing its proxy threshold. Multi-tone gates additionally require coextensive
     sampled support. Single-tone gates allow slices and final sample hold,
-    and compile four-U integration through the shared DOP853 solver.
+    and compile Hilbert integration through the shared DOP853 solver.
     Dispatch/family wrappers own acquire-wide cost and reuse decisions.
     """
 
@@ -376,21 +484,20 @@ class CovariantGateKernel:
         or consume a phase-reduced product. Source identity covers quadratures,
         dressed basis and all model parameters; bath bytes are also explicit.
         """
-        return np.array(
-            [
-                np.void(
-                    sha256(
-                        canonical_key(table, int(row), context.source)
-                        + repr(context.budget).encode()
-                    ).digest()
-                )
-                for row in rows
-            ],
-            dtype="V32",
-        )
+        by_physics: dict[bytes, bytes] = {}
+        keys = []
+        for row in rows:
+            physics = canonical_key(table, int(row), context.source)
+            if physics not in by_physics:
+                segments = gate_segments(table, int(row), context)
+                by_physics[physics] = sha256(
+                    physics + repr((context.budget, segments)).encode()
+                ).digest()
+            keys.append(np.void(by_physics[physics]))
+        return np.array(keys, dtype="V32")
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
-        """Four joint matrix actions per admitted row, independent of duration."""
+        """Four-step baseline work; the cold planner also charges adaptive n."""
         del table
         return np.full(len(rows), 4.0)
 
@@ -401,7 +508,7 @@ class CovariantGateKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> Prepared:
-        """Build four U and half-step D per representative; failures propagate."""
+        """Build n U and half-step D per representative; failures propagate."""
         if (
             len(keys) != len(rows)
             or not _admitted(table, rows, context, single_tone=self.single_tone).all()
@@ -409,22 +516,41 @@ class CovariantGateKernel:
             raise ValueError(
                 "joint gate preparation requires admitted key-aligned rows"
             )
+        segments = np.array(
+            [gate_segments(table, int(row), context) for row in rows], dtype=np.int64
+        )
         unitaries, populations, coherences, charges = [], [], [], []
         width = int(np.max(table.tones[rows], initial=0))
-        for row in rows:
+        for row, count in zip(rows, segments, strict=True):
             graph = _row_graph(table, int(row), context)
             model = context.source.model(tuple(int(v) for v in table.level[row]))
-            unitaries.append(_build_unitaries(table, int(row), context, graph))
-            half = table.duration_ns[row] / 8
+            u = _build_unitaries(table, int(row), context, graph, int(count))
+            padding = int(segments.max() - count)
+            unitaries.append(
+                np.pad(u, ((0, padding), (0, 0), (0, 0))) if padding else u
+            )
+            half = table.duration_ns[row] / (2 * count)
             populations.append(expm(population_generator(model.rates_per_ns) * half))
             coherences.append(np.exp(-coherence_decay(model) * half))
             charges.append(
                 np.pad(graph.charges, ((0, 0), (0, width - graph.charges.shape[1])))
             )
-        arrays = [np.array(a) for a in (unitaries, populations, coherences, charges)]
-        for a in arrays:
+        prepared = GatePrepared(
+            np.array(unitaries, dtype=np.complex128),
+            np.array(populations, dtype=np.float64),
+            np.array(coherences, dtype=np.float64),
+            np.array(charges, dtype=np.int64),
+            segments,
+        )
+        for a in (
+            prepared.unitaries,
+            prepared.populations,
+            prepared.coherences,
+            prepared.charges,
+            prepared.segments,
+        ):
             a.setflags(write=False)
-        return GatePrepared(*arrays)
+        return prepared
 
     def admit_prepared(
         self,
@@ -460,7 +586,7 @@ class CovariantGateKernel:
         states: NDArray[np.complex128],
         context: ApplyContext,
     ) -> NDArray[np.bool_]:
-        """Play four D-U-D steps and restore lab/DC frame at every endpoint.
+        """Play n D-U-D steps and restore lab/DC frame at every endpoint.
 
         theta is the actual row-start phase, including absolute carrier origin.
         No clipping, trace correction, independent-qubit product or retry occurs.
@@ -476,13 +602,27 @@ class CovariantGateKernel:
             or np.any(key_index >= len(prepared.unitaries))
         ):
             raise ValueError("joint gate state/index shape mismatch")
-        _play(
-            (
-                prepared.unitaries,
-                prepared.populations,
-                prepared.coherences,
-                prepared.charges,
-            ),
+        data = (
+            prepared.unitaries,
+            prepared.populations,
+            prepared.coherences,
+            prepared.charges,
+        )
+        if prepared.unitaries.shape[1] == 4:
+            _play(
+                data,
+                key_index,
+                (
+                    table.tone_theta_rad[rows],
+                    table.tone_frequency_ghz[rows],
+                    table.duration_ns[rows],
+                    table.tones[rows],
+                ),
+                states,
+            )
+            return np.zeros(len(rows), dtype=bool)
+        _adaptive_play(
+            (*data, prepared.segments),
             key_index,
             (
                 table.tone_theta_rad[rows],

@@ -271,9 +271,16 @@ def test_admission_keeps_row_flux_and_budget_outside_covariant_equivalence(frequ
                 kernel.guard(table, rows, context), np.array([True, False, True])[rows]
             )
             assert not kernel.guard(table, rows, replace(context, budget=1e-4)).any()
-        # A long support fails splitting even though its envelope holds DC.
+        # Long held support refines the calibrated Strang estimate, not a veto.
         long = replace(table, duration_ns=np.full(3, 100_000.0))
-        assert not kernel.guard(long, np.arange(3), context).any()
+        np.testing.assert_array_equal(
+            kernel.guard(long, np.arange(3), context), [True, False, True]
+        )
+        long_keys = kernel.prepare_keys(long, np.array([0]), context)
+        long_gate = kernel.prepare(long_keys, long, np.array([0]), context)
+        assert isinstance(long_gate, GatePrepared)
+        # tau=100000, Gamma=2.5e-5, V=1.6e-4: ceil(sqrt(64000)).
+        assert long_gate.unitaries.shape[1] == 253
         shifted = replace(table, tone_envelope_offset_ns=np.full((3, 1), 8.0))
         assert np.all(
             kernel.prepare_keys(shifted, np.arange(3), context)
@@ -321,14 +328,21 @@ def test_strang_split_adapts_without_changing_the_four_step_control(
         assert prepared.unitaries.shape[1] == segments
         actual = np.repeat(src.initial_density[None], 2, axis=0)
         kernel.apply(
-            prepared, np.zeros(2, dtype=np.int64), table, rows, actual, ApplyContext(1e-3)
+            prepared,
+            np.zeros(2, dtype=np.int64),
+            table,
+            rows,
+            actual,
+            ApplyContext(1e-3),
         )
         direct = next(k for k in REGISTRY if k.name == "dop853")
         from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
 
         reference = np.repeat(src.initial_density[None], 2, axis=0)
         direct.apply(
-            direct.prepare(direct.prepare_keys(table, rows, context), table, rows, context),
+            direct.prepare(
+                direct.prepare_keys(table, rows, context), table, rows, context
+            ),
             rows,
             table,
             rows,
@@ -337,7 +351,9 @@ def test_strang_split_adapts_without_changing_the_four_step_control(
                 1e-6, DOP853Plan(np.full(2, "lab"), np.full(2, -1, dtype=np.int64))
             ),
         )
-        assert np.max(np.abs(np.diagonal(actual - reference, axis1=-2, axis2=-1))) < 1e-2
+        assert (
+            np.max(np.abs(np.diagonal(actual - reference, axis1=-2, axis2=-1))) < 1e-2
+        )
 
 
 def test_mixed_inventory_does_not_charge_rejected_gate_builds_to_usable_keys():

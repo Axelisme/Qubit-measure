@@ -51,6 +51,7 @@ COVERAGE = (
     "multitone_direct",
     "multitone_gate",
     "single_tone_gate",
+    "single_tone_gate_adaptive",
     "single_tone_rwa",
     "floquet_probe_windows",
     "dyson_gain_batch",
@@ -162,7 +163,7 @@ def _single_track(name: str) -> None:
     elif name == "single_tone_rwa":
         duration = 200.0
         gains = np.array([0.5])
-    elif name == "single_tone_gate":
+    elif name in ("single_tone_gate", "single_tone_gate_adaptive"):
         duration = 128.0
         times = np.linspace(0.0, duration, 129)
         envelope = EnvelopeSpec(
@@ -201,6 +202,10 @@ def _single_track(name: str) -> None:
             batch, tracks=(prefix, probe), end_ns=np.full(len(gains), duration + 6)
         )
     source = _source()
+    if name == "single_tone_gate_adaptive":
+        model = source.model((0,))
+        model = replace(model, rates_per_ns=model.rates_per_ns * 20_000)
+        source = ModelSource(source.initial_density, lambda _: model)
     if name in ("floquet_low_carrier", "floquet_cf4"):
         # A remote spectator makes spectral construction cheaper than CF4;
         # the narrow spectrum independently exercises the CF4 builder.

@@ -38,18 +38,20 @@ from .secular import ModelSource
 from .workplan import WorkPlan
 
 
-def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
+def create_work_plan(
+    table: SegmentTable, source: ModelSource, budget: float = 1e-3
+) -> WorkPlan:
     """Create ownership for the complete evolve before prefix/worker planning.
 
     table is the full immutable geometry and source owns model identity.
     Algorithm-specific group planners populate this plan before workers start;
-    no numerical routing or expensive candidate graph is constructed here.
+    budget is the numerical admission budget for cold mixed gate plans.
     """
     plan = WorkPlan()
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)
-    populate_single_gate_plan(table, source, plan)
+    populate_single_gate_plan(table, source, plan, budget)
     return plan
 
 
