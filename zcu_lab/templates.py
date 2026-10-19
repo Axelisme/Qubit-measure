@@ -189,6 +189,19 @@ TEMPLATES: dict[str, TemplateDef] = {
         {"length": 1.0},
         default_name="ro_waveform",
     ),
+    "flux_pulse": TemplateDef(
+        PulseSpec,
+        "Flux pulse",
+        {
+            "ch": Expr("{qubit}.wiring.lo_flux_ch"),
+            "freq": 0.0,
+            "gain": 1.0,
+            "nqz": 2,
+            "waveform.style": "const",
+            "waveform.length": 1.0,
+        },
+        default_name="flux_pulse",
+    ),
     "pulse:blank": TemplateDef(
         PulseSpec,
         "Blank: pulse",

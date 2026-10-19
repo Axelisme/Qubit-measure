@@ -5,6 +5,7 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
+from zcu_lab.v2.fastflux.distortion.acc_phase.gui import AccPhaseAdapter
 from zcu_lab.v2.fastflux.twotone.gui import TwoToneAdapter
 from zcu_lab.v2.ftf.chevron.gui import ChevronAdapter
 from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
@@ -81,6 +82,7 @@ from zcu_lab.v2.twotone.zigzag_sweep.gui import (
 )
 
 ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
+    "fastflux/distortion/acc_phase": AccPhaseAdapter,
     "ftf/joint_readout": JointReadoutAdapter,
     "ftf/idle_zz": IdleZZAdapter,
     "ftf/conditional_spectroscopy": SpectroscopyAdapter,
