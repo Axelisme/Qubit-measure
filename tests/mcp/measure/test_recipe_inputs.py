@@ -52,6 +52,38 @@ def test_recipe_inputs_preserve_null_defaults_and_normalize_numeric_arrays():
     ) == {"label": "capture", "frequency": None, "values": None}
 
 
+def test_recipe_inputs_preserve_integers_when_schema_also_allows_numbers():
+    schema: RecipeInputSchema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "mixed": {"type": ["integer", "number"]},
+            "number": {"type": "number"},
+            "integer": {"type": "integer"},
+        },
+    }
+    inputs = RecipeInputs(schema)
+
+    normalized = inputs.normalize({"mixed": 128, "number": 128, "integer": 128})
+
+    assert type(normalized["mixed"]) is int
+    assert normalized["mixed"] == 128
+    assert type(normalized["number"]) is float
+    assert normalized["number"] == 128.0
+    assert type(normalized["integer"]) is int
+    for value in (128.0, 128.5):
+        normalized_float = inputs.normalize({"mixed": value, "number": value})
+        assert type(normalized_float["mixed"]) is float
+        assert normalized_float["mixed"] == value
+        assert type(normalized_float["number"]) is float
+        assert normalized_float["number"] == value
+    with pytest.raises(ValueError, match="integer"):
+        inputs.normalize({"integer": 128.0})
+    for field in ("mixed", "number", "integer"):
+        with pytest.raises(ValueError, match=field):
+            inputs.normalize({field: True})
+
+
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [
