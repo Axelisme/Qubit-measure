@@ -38,6 +38,8 @@ from zcu_tools.utils.process import rotate2real
 
 @dataclass(frozen=True)
 class PhaseResult:
+    """Absolute pi/2 phases in degrees and mean complex IQ (phase,)."""
+
     phases: NDArray[np.float64]
     signals: NDArray[np.complex128]
 
@@ -84,6 +86,16 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         *,
         context: RunContext,
     ) -> PhaseResult:
+        """Measure the bath-reset response to the final pi/2 phase.
+
+        Apply optional reset and initialization, start the cavity and qubit
+        tones together, apply the phase-swept pi/2 pulse after the cavity
+        tone, then read out.
+        Return phases in degrees and mean complex IQ shaped (Nphase,).
+        The resulting fringe selects opposite preparation directions through
+        cosine analysis; it does not measure reset fidelity.
+        """
+        # Quantize the final pi/2 phase on its own generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -97,6 +109,7 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             },
         )
 
+        # Display the phase fringe without discarding the complex IQ response.
         viewer = context.plots.liveplot_1d(
             "measurement", "Phase (deg)", "Signal (a.u.)"
         )
@@ -104,6 +117,8 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             (len(phases),),
             on_update=lambda data: viewer.update(phases, bathreset_signal2real(data)),
         )
+
+        # Sweep only the final rotation; keep the simultaneous bath tones fixed.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
@@ -130,6 +145,12 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         *,
         plots: Plots,
     ) -> PhaseAnalysis:
+        """Fit a 360-degree cosine to the projected IQ phase fringe.
+
+        Return max_phase and min_phase in degrees, each wrapped to the nearest
+        zero-centered turn, and publish fit. These are extrema of the IQ
+        projection, not calibrated populations; source.cfg may be None.
+        """
         del options
         result = source.result
 
