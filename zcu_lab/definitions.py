@@ -21,6 +21,7 @@ from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
 from zcu_lab.v2.lookback.gui import LookbackAdapter
+from zcu_lab.v2.mist.flux_dep.gui import MistFluxDepAdapter
 from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
 from zcu_lab.v2.mux.freq.gui import MuxFreqAdapter
@@ -141,6 +142,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "singleshot/t1_tone_sweep_gain": SsT1ToneSweepGainAdapter,
     "singleshot/t1_tone_sweep_freq": SsT1ToneSweepFreqAdapter,
     "singleshot/ac_stark": SsAcStarkAdapter,
+    "mist/flux_dep": MistFluxDepAdapter,
     "mist/power_dep/drive_freq": DriveFreqAdapter,
     "singleshot/mist/freq": MistFreqAdapter,
     "singleshot/mist/power": MistPowerAdapter,
