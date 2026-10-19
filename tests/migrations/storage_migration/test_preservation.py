@@ -11,6 +11,7 @@ from migrations.storage_migration import (
     MigrationRequest,
     migrate_storage,
 )
+from tests._filesystem import symlink_or_skip
 from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
@@ -67,7 +68,8 @@ def test_writes_inside_entire_old_result_root_are_refused(
     write_meta(request_data, "context", {"old_frequency": 8.0})
     root = request_data.result_root
     alias = root.parent / "result-alias"
-    alias.symlink_to(root, target_is_directory=True)
+    if placement in ("results_alias", "report_alias"):
+        symlink_or_skip(alias, root, target_is_directory=True)
     request = request_data
     if placement == "same_root":
         request = replace(request, results_root=root)
@@ -86,7 +88,7 @@ def test_writes_inside_entire_old_result_root_are_refused(
         (database / "chip" / "qubit" / "retained.txt").write_bytes(b"legacy bytes")
         if placement == "database_alias":
             database_alias = root.parent / "database-alias"
-            database_alias.symlink_to(database, target_is_directory=True)
+            symlink_or_skip(database_alias, database, target_is_directory=True)
             database = database_alias
         request = replace(request, database_root=database)
     before = {
@@ -126,7 +128,7 @@ def test_removed_source_identity_survives_reused_path(
     external = request.result_root.parent / "new-acquisition.hdf5"
     external.write_bytes(b"new unrelated acquisition")
     if reuse == "symlink":
-        source.symlink_to(external)
+        symlink_or_skip(source, external)
     else:
         source.write_bytes(external.read_bytes())
     second = migrate_storage(

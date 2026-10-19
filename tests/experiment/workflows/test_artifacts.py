@@ -48,6 +48,8 @@ from zcu_tools.experiment.workflows.models import (
     RunPaths,
 )
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR, symlink_or_skip
+
 from ._engine_fakes import (
     START,
     Plan,
@@ -341,7 +343,7 @@ def test_journal_io_failure_is_not_followed_by_invented_success(
 ) -> None:
     artifacts.journal_path.unlink()
     artifacts.journal_path.mkdir()
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(DIRECTORY_OPEN_ERROR):
         artifacts.append(Paused(None, 0))
     with pytest.raises(RuntimeError, match="unusable after an I/O failure"):
         artifacts.append(RunEnded("failed", "journal broken", None, 0))
@@ -714,7 +716,7 @@ def test_iteration_record_publication_replaces_instead_of_editing_destination(
     ) -> Step[State, int]:
         yield from env.wait_until(START)
         # A real destination symlink distinguishes replace from in-place writes.
-        (env.iteration_dir / "record.json").symlink_to(external)
+        symlink_or_skip(env.iteration_dir / "record.json", external)
         return Done()
 
     rig.start(step)

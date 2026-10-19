@@ -25,6 +25,7 @@ from zcu_tools.experiment.workflows.export import (
 )
 from zcu_tools.experiment.workflows.saved_run import SavedManifest
 
+from tests._filesystem import symlink_or_skip
 from tests._native_support import native_cfg, native_metadata, native_payload
 
 
@@ -163,7 +164,7 @@ def test_labber_allocation_failure_keeps_native_and_unallocated_path(tmp_path: P
     database, outside = tmp_path / "database", tmp_path / "outside"
     database.mkdir()
     outside.mkdir()
-    (database / "Labber").symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(database / "Labber", outside, target_is_directory=True)
     native, labber = write_outputs(
         manifest, prepared, snapshot, merged=True, database=database
     )

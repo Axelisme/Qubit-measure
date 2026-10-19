@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，arb 資產直接使用目前 entry 的目錄
+**Last updated:** 2026-10-20，shared user cache root 與 entry-scoped arb 資產
 
 # gui/session/ — 量測 session core
 
@@ -34,6 +34,10 @@ DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，�
 
 `persistence.py` 是 app-neutral、強型別的 single-file caretaker；app 注入 codec 並保留
 schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
+預設存放於 `utils.cache.user_cache_root()/gui`，與 session discovery 共用 user cache 根目錄。
+`ZCU_TOOLS_CACHE_DIR` 指定非空絕對根路徑，空字串或相對路徑會在建立 caretaker 時 raise ValueError。
+顯式 `cache_dir` 仍直接指定保存目錄，不讀取這個 override。
+根目錄的 platformdirs 預設與 tempdir fallback 見 [utils README](../../utils/README.md#user-cache-root)。
 JSON／UTF-8 或 codec 格式錯誤時，caretaker 以 defaults 開啟，透過
 `RestoreOutcome.load_error` 交給 host 顯示。載入不改寫或備份原檔，正常保存時機不變。
 Provider 和其他 restore 故障仍傳播。FormInput 的啟動、RAM 與 source reload

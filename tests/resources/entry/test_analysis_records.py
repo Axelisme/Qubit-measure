@@ -7,6 +7,8 @@ from uuid import UUID
 import pytest
 from zcu_tools.resources.entry import AnalyzedPayload, JsonObject, ResultEntry
 
+from tests._filesystem import DIRECTORY_OPEN_ERROR
+
 
 @pytest.mark.parametrize(
     "record",
@@ -56,7 +58,7 @@ def test_record_analysis_propagates_ledger_io_failure(entry: ResultEntry) -> Non
     ledger_path = entry.result_path / "records" / "ledger.jsonl"
     ledger_path.mkdir()
 
-    with pytest.raises(IsADirectoryError) as failure:
+    with pytest.raises(DIRECTORY_OPEN_ERROR) as failure:
         entry.record_analysis("t1_curve", run_ids=["unresolved-run"], summary={})
 
     assert failure.value.filename == str(ledger_path)
