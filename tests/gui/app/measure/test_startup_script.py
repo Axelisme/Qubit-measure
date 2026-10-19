@@ -351,7 +351,7 @@ def test_tab_input_roundtrip_preserves_expression_selection_and_invalid_draft(st
     original = ctrl.new_tab("sample")
     resource = ctrl.cfg_resources.lookup(original)
     resource.write({("gain",): "{unfinished", ("reps",): "not-an-int"})
-    resource.select(("sweep",), {"kind": "start_stop"})
+    resource.select(("sweep",), {"kind": "center"})
     expected = resource.input.to_json()
     run_script(ctrl, write_script(
         tmp_path,
