@@ -94,9 +94,6 @@ def _ctrl() -> MagicMock:
     )
     ctrl.get_session_env.return_value = MagicMock(
         active_label="ctx001",
-        chip_name="chip",
-        qub_name="qubit",
-        res_name="res",
         database_path="/tmp/db",
         result_dir="/tmp/result",
         is_active=lambda: True,

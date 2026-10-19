@@ -1,9 +1,12 @@
 # Shared GUI widgets
 
-**Last updated:** 2026-10-16, semantic foreground colours
+**Last updated:** 2026-10-20, neutral file-dialog paths
 
 `gui.widgets` owns app-independent Qt presentation helpers. Hosts keep domain
 state and commands. The shared Form editor has its own [README](form/README.md).
+
+`file_dialog.nearest_existing` chooses the deepest existing ancestor for a
+file-dialog starting directory. It has no project identity or app dependency.
 
 ## Colours
 

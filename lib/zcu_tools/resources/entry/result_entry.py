@@ -6,7 +6,6 @@ import errno
 import os
 import shutil
 from collections.abc import Sequence
-from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -239,7 +238,8 @@ class ResultEntry:
 
         label is a safe single path segment; existing destinations raise
         DestinationExistsError before writes.
-        Without clone_from, copy the latest setup components and metadata.
+        Copy the complete published source YAML: setup.yaml without clone_from,
+        otherwise the source point.yaml. Renew created_at in the independent copy.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
         PointView using the same resolved result/database roots. Reload published
         point and module_cfg and renew creation time. Point values and opaque
@@ -247,7 +247,7 @@ class ResultEntry:
         cross-entry nonmanual library sources become local import events with
         copied JSON attachments, and library sources mark the direct clone
         origin. origin identifies the importing frontend as gui, notebook or mcp.
-        description=None preserves seed/clone metadata; a string explicitly sets it,
+        description=None preserves the source description; a string explicitly sets it,
         including empty text, within this creation/cleanup scope.
         Reading the source library may first back up its original bytes and
         clean invalid entries and their sources from its module_cfg. Clone copies
@@ -281,26 +281,16 @@ class ResultEntry:
         with self._setup_store.locked():
             self._setup_store.refresh()
             components = self._setup_store.snapshot().components
-            yaml = YAML(typ="rt")
-            with (self._result_path / "setup.yaml").open(encoding="utf-8") as stream:
-                template = yaml.load(stream)
-            document = {
-                "format": template["format"],
-                "format_version": template["format_version"],
-                "general": {
-                    "created_at": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z")
-                },
-                "components": deepcopy(template.get("components", {})),
-                "metadata": deepcopy(template.get("metadata", {})),
-            }
-            with (destination / "point.yaml").open("x", encoding="utf-8") as stream:
-                yaml.dump(document, stream)
+            shutil.copyfile(
+                self._result_path / "setup.yaml", destination / "point.yaml"
+            )
             # Missing YAML defaults may have been generated in the template's
             # native model. Copy those values too, in the same working units.
             with self._point_store(destination / "point.yaml").edit() as draft:
                 draft.components = components
+                draft.general.created_at = (
+                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                )
         from zcu_tools.resources.context.library import (
             MODULE_LIBRARY_FORMAT,
             MODULE_LIBRARY_VERSION,
