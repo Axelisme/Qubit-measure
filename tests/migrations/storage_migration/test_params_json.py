@@ -242,18 +242,45 @@ def test_entry_explicit_unit_beats_assumption_and_reports_its_file(
 def test_point_unit_override_clears_only_unreplaced_inherited_group_values(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping
 ) -> None:
-    write_meta(request_data, "", {
-        "flux_unit": "V", "local_flux_unit": "A", "flx_half": 0.2,
-        "flx_period": 0.4, "flx_int": 0.1, "cur_A": 0.5, "flux_bias": 0.6,
-        "jpa_flux_unit": "V", "best_jpa_flux": 1.0,
-    })
-    point_meta = write_meta(request_data, "bias", {
-        "flux_unit": "A", "flx_half": 0.3, "local_flux_unit": "V"
-    })
+    metadata_mapping = replace(
+        metadata_mapping,
+        rules=(
+            *metadata_mapping.rules,
+            KeyRule(
+                old_key="period_error",
+                target_path="Q1.flux_period",
+                action="stderr",
+                reason="Synthetic uncertainty in the value working unit",
+            ),
+        ),
+    )
+    write_meta(
+        request_data,
+        "",
+        {
+            "flux_unit": "V",
+            "local_flux_unit": "A",
+            "flx_half": 0.2,
+            "flx_period": 0.4,
+            "period_error": 0.02,
+            "flx_int": 0.1,
+            "cur_A": 0.5,
+            "flux_bias": 0.6,
+            "jpa_flux_unit": "V",
+            "best_jpa_flux": 1.0,
+        },
+    )
+    point_meta = write_meta(
+        request_data,
+        "bias",
+        {"flux_unit": "A", "flx_half": 0.3, "local_flux_unit": "V"},
+    )
     report = migrate(request_data, metadata_mapping)
     point = snapshot(open_entry(request_data).use_point("bias"))
     assert document_value(point, "Q1.flux_half") == 0.3
     assert document_value(point, "Q1.flux_period") is None
+    assert open_entry(request_data).setup.meta("Q1.flux_period") == {"stderr": 0.02}
+    assert open_entry(request_data).use_point("bias").meta("Q1.flux_period") == {}
     assert document_value(point, "Q1.flux_int") is None
     assert document_value(point, "general.ext") == {"flux_unit": "A"}
     assert document_value(point, "Q1.ext") == {}
@@ -277,9 +304,15 @@ def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping
 ) -> None:
     write_params(request_data, {"flux_unit": "A"})
-    source = write_meta(request_data, "", {
-        "best_jpa_flux": 0.2, "local_flux_unit": "mA", "flx_half": 0.3,
-    })
+    source = write_meta(
+        request_data,
+        "",
+        {
+            "best_jpa_flux": 0.2,
+            "local_flux_unit": "mA",
+            "flx_half": 0.3,
+        },
+    )
     report = migrate_with_unit_pending(request_data, metadata_mapping)
     setup = snapshot(open_entry(request_data).setup)
     assert any(
@@ -291,21 +324,26 @@ def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
         for item in report.pending
     )
     assert document_value(setup, "Q1.flux_half") == 0.3
-    assert document_value(setup, "J1")["flux"] is None
+    assert getattr(open_entry(request_data).setup.J1, "flux", None) is None
 
 
 def test_invalid_jpa_unit_keeps_whole_group_pending_without_conversion(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping
 ) -> None:
-    source = write_meta(request_data, "", {
-        "jpa_flux_unit": "mA", "best_jpa_flux": 2.0,
-    })
+    source = write_meta(
+        request_data,
+        "",
+        {
+            "jpa_flux_unit": "mA",
+            "best_jpa_flux": 2.0,
+        },
+    )
     report = migrate_with_unit_pending(request_data, metadata_mapping)
     assert {item.location for item in report.pending if item.source == source} >= {
-        "jpa_flux_unit", "best_jpa_flux"
+        "jpa_flux_unit",
+        "best_jpa_flux",
     }
-    setup = snapshot(open_entry(request_data).setup)
-    assert document_value(setup, "J1")["flux"] is None
+    assert getattr(open_entry(request_data).setup.J1, "flux", None) is None
 
 
 def test_conflicting_entry_units_block_values_instead_of_using_assumption(
