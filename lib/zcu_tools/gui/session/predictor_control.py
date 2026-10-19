@@ -16,7 +16,6 @@ if TYPE_CHECKING:
         PredictorService,
     )
     from zcu_tools.resources.predictor_file import PredictorFile
-    from zcu_tools.simulate.parameters import ModelParams
     from zcu_tools.simulate.predictor import PredictorParams
 
 
@@ -33,10 +32,6 @@ class PredictorControlPort(Protocol):
 
     def load_file(self, filename: str) -> PredictorFile:
         """Read one entry predictor filename; see PredictorService.load_file."""
-        ...
-
-    def params_for_qubit(self, qubit: str) -> ModelParams:
-        """Read current concrete component inputs; see PredictorService.params_for_qubit."""
         ...
 
     def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
@@ -75,10 +70,6 @@ class PredictorControlFacet:
     def load_file(self, filename: str) -> PredictorFile:
         """Read one entry predictor filename; see PredictorService.load_file."""
         return self._predictor.load_file(filename)
-
-    def params_for_qubit(self, qubit: str) -> ModelParams:
-        """Read current concrete inputs; see PredictorService.params_for_qubit."""
-        return self._predictor.params_for_qubit(qubit)
 
     def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
         """Return MHz; see PredictorService.predict_freq."""

@@ -1174,10 +1174,7 @@ class PredictorDialog(QDialog):
             self._set_status(reason, error=is_error)
             self._sync_calibration_button()
             return
-        from zcu_tools.gui.session.services.predictor import (
-            CalibrateFluxBiasRequest,
-            PredictorLoadError,
-        )
+        from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
 
         frequency_mhz = self._resolve_calibration_frequency_mhz()
         if frequency_mhz is None:
@@ -1191,7 +1188,7 @@ class PredictorDialog(QDialog):
         )
         try:
             result = self._pred.calibrate_flux_bias(self.parameters(), req)
-        except (PredictorLoadError, PredictorInputError) as exc:
+        except PredictorInputError as exc:
             self._set_status(str(exc), error=True)
             return
         except Exception as exc:

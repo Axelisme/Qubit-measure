@@ -1,4 +1,4 @@
-"""Independent simulator queries and read-only component/file parameter prefill.
+"""Independent simulator queries and read-only predictor file loading.
 
 No installed model, dialog state, hardware access, context mutation or events.
 Each computation builds a fresh model from the explicit named parameters.
@@ -6,7 +6,6 @@ Each computation builds a fresh model from the explicit named parameters.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -15,25 +14,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.resources.entry.schema import ComponentSchema
-from zcu_tools.resources.entry.views import ComponentView
 from zcu_tools.resources.predictor_file import PredictorFile, load_predictor_file
-from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
-from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
-from zcu_tools.simulate.parameters import ModelParams
 from zcu_tools.simulate.predictor import CalibrationResult as CalibrateFluxBiasResult
 from zcu_tools.simulate.predictor import (
     MatrixPredictor,
-    PredictorInputError,
     PredictorParams,
 )
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
-
-# The user package owns component field meanings. The framework only passes the
-# captured component; no factory metadata, write paths or schema guessing.
-ParamsFor = Callable[[ComponentSchema | ComponentView], ModelParams]
 
 
 @dataclass(frozen=True)
@@ -98,42 +87,19 @@ class PredictMatrixCurveResult:
     mags: NDArray[np.float64]
 
 
-class PredictorLoadError(FailedPreconditionError):
-    """Expected failure reading the legacy params.json prefill source."""
-
-
-def read_fluxdep_fit_params(path: str) -> FluxoniumParams:
-    """Read fluxdep_fit from an existing params.json; never write the file.
-
-    Return GHz energies and native affine anchors. The legacy file has no bias,
-    so its documented prefill bias is 0.0. flux_int is alignment-only, not an
-    input to the simulator. I/O/missing-fit errors become PredictorLoadError.
-    """
-    try:
-        model = QubitParams(path, readonly=True).require_fluxonium_model()
-    except (OSError, QubitParamsError) as exc:
-        raise PredictorLoadError(f"Failed to read params file: {exc}") from exc
-    return FluxoniumParams(
-        model.EJ, model.EC, model.EL, model.flux_half, model.flux_period, 0.0
-    )
-
-
 class PredictorService:
     """Read-only computations, independent of dialog and session model state.
 
-    context supplies a current point capture on its owner thread; params_for is
-    injected by app composition and owns component→named-input conversion.
-    Either may be None for standalone explicit-parameter queries. Every query
+    context supplies the current entry's predictor directory on its owner thread.
+    It may be None for standalone explicit-parameter queries. Every query
     leaves parameters, components, files and session versions unchanged.
     """
 
     def __init__(
         self,
         context: ContextControlPort | None = None,
-        params_for: ParamsFor | None = None,
     ) -> None:
         self._context = context
-        self._params_for = params_for
 
     def list_files(self) -> tuple[str, ...]:
         """Return sorted *.json filenames in the current entry predictor directory.
@@ -173,26 +139,6 @@ class PredictorService:
         if root is None:
             raise FailedPreconditionError("Open an entry to load predictor files")
         return load_predictor_file(root / filename)
-
-    def params_for_qubit(self, qubit: str) -> ModelParams:
-        """Read named inputs for one concrete component at the current point.
-
-        Names must be public Python identifiers (e.g. Q2), not aliases/paths.
-        PredictorInputError names invalid/unknown components or unsupported physics kinds.
-        Missing provider/context raises FailedPreconditionError. EMPTY/source
-        faults from ContextService propagate. Missing fields remain None.
-        No read refreshes a source, changes aliases or binds a dialog to a qubit.
-        """
-        if not qubit.isidentifier() or qubit.startswith("_"):
-            raise PredictorInputError(f"Invalid concrete qubit name: {qubit}")
-        if self._context is None or self._params_for is None:
-            raise FailedPreconditionError(
-                "Component parameter prefill is not configured"
-            )
-        document = self._context.read_context().document()
-        if qubit not in document.components:
-            raise PredictorInputError(f"Unknown qubit component: {qubit}")
-        return self._params_for(document.components[qubit])
 
     def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
         """Return MHz for the explicit params/request; PredictorInputError rejects missing/invalid inputs."""

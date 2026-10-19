@@ -132,19 +132,17 @@ def test_dialog_trial_calibration_leaves_real_point_unchanged(
         )
         context.install_entry(entry)
         context.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
-        query = PredictorService(
-            ContextControlFacet(context=context), components.params_for
-        )
+        query = PredictorService(ContextControlFacet(context=context))
         before = context.read_context().document()
         dialog = PredictorDialog(
-            PredictorControlFacet(query), params=query.params_for_qubit("Q1")
+            PredictorControlFacet(query),
+            params=FluxoniumParams(5.0, 1.0, 0.5, 0.0, 1.0, 0.0),
         )
         try:
             measured = dialog.predict_frequency(0.1)
             bias = dialog.calibrate(0.101, measured)
             assert bias == pytest.approx(-0.001, abs=1e-4)
             assert dialog.parameters().flux_bias == pytest.approx(bias)
-            assert query.params_for_qubit("Q1").flux_bias == 0.0
             assert context.read_context().document() == before
         finally:
             dialog.close()
@@ -252,9 +250,7 @@ def test_dialog_displays_actual_calibration_and_clamping_without_point_writes(
     from qtpy.QtWidgets import QLabel
     from zcu_tools.simulate.transmon import TransmonParams
 
-    query = PredictorService(
-        ContextControlFacet(context=component_context), components.params_for
-    )
+    query = PredictorService(ContextControlFacet(context=component_context))
     before = component_context.read_context().document()
     params = (
         FluxoniumParams(5.0, 1.0, 0.5, 0.0, 1.0, 0.0)
