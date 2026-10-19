@@ -24,3 +24,16 @@ def test_metadata_consumes_capacity_and_eviction_keeps_array_bytes_separate():
     assert cache.bytes < cache.charged_bytes <= cache.limit
     cache.clear()
     assert cache.bytes == cache.charged_bytes == 0
+
+
+def test_capacity_reclamation_releases_multiple_empty_key_allocations():
+    # Two tiny metadata-bearing products fit, but both must yield to 4000 bytes.
+    cache = PrepareCache(10000)
+    namespace = ("synthetic", "model", 0.001)
+    cache.add(namespace, PreparedPayload(TinyProduct(), ()))
+    cache.add(namespace, PreparedPayload(TinyProduct(), ()))
+    replacement = PreparedPayload(TinyProduct(4000), (b"large",))
+    cache.add(namespace, replacement)
+    assert cache.bytes == 4000
+    assert cache.find(namespace, {b"large"}) == [replacement]
+    assert cache.charged_bytes <= cache.limit
