@@ -18,7 +18,7 @@ Windows、macOS、Linux 使用相同的 Python 入口與命令，不需要 shell
 2. 在 **Remotes → Add New Remote** 選 **Google Drive**，例如取名 `lab-drive`，
    依瀏覽器登入與同意畫面完成授權。已連結的帳號可直接重用。
 3. 進入 **Explorer**，點選左側該 remote，逐層進入要用的**雲端父資料夾**，按 **Refresh**。
-   若日後想傳輸 `results/Si001`，這裡選擇雲端 `measurement-results/`，
+   若日後想傳輸 `result/Si001`，這裡選擇雲端 `measurement-results/`，
    不要進入它底下的 `Si001/`。
 4. 回到終端機，核對顯示的 `Selected cloud parent: lab-drive:measurement-results`。
    確定後按 **Enter** 保存；按 Ctrl+C 可取消。
@@ -50,36 +50,37 @@ Setup 只用來授權及選位置，不會複製／移動／刪除雲端資料�
 
 ## 日常從 CLI 上傳／下載
 
-首次設定完成後，直接指定 entry 名稱：
+新格式本地布局統一為 `result/<name>/`。本指南用 `--local-root` 明確指定 `result/`，
+不依賴入口預設值。共同選項放在子命令前。首次設定完成後，指定 entry 名稱：
 
 ```bash
-# results/Si001 → 已保存的雲端父資料夾/Si001
-uv run --directory . --no-sync -- python scripts/transfer_results.py upload Si001
+# result/Si001 → 已保存的雲端父資料夾/Si001
+uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root "$PWD/result" upload Si001
 
-# 雲端父資料夾/Si001 → results/Si001
-uv run --directory . --no-sync -- python scripts/transfer_results.py download Si001
+# 雲端父資料夾/Si001 → result/Si001
+uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root "$PWD/result" download Si001
 
 # 多個 entry；每次最多 8 個檔案並行
-uv run --directory . --no-sync -- python scripts/transfer_results.py upload Si001 Si002 -j 8
+uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root "$PWD/result" upload Si001 Si002 -j 8
 
 # 先預覽，不寫目的地資料
-uv run --directory . --no-sync -- python scripts/transfer_results.py upload Si001 --dry-run
+uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root "$PWD/result" upload Si001 --dry-run
 
 # 所有 entry（只列出來源父目錄下的資料夾）
-uv run --directory . --no-sync -- python scripts/transfer_results.py upload --all
-uv run --directory . --no-sync -- python scripts/transfer_results.py download --all
-uv run --directory . --no-sync -- python scripts/transfer_results.py download --all --dry-run
+uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root "$PWD/result" upload --all
+uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root "$PWD/result" download --all
+uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root "$PWD/result" download --all --dry-run
 ```
 
 GUI 關閉、主機重新開機後仍可使用。OAuth token 由 rclone 在需要時更新；
 帳號授權被撤銷時，CLI 會報錯，需要回桌面重新設定／授權，不會自行開瀏覽器。
 
-本地預設永遠是**執行入口所屬 checkout 的 `results/`**，雲端父資料夾在同一使用者的
-不同 checkout 間共用。不保存前一次 checkout 的絕對本地路徑。
-要用另一個本地父資料夾，將共同選項放在子命令前面：
+雲端父資料夾在同一使用者的不同 checkout 間共用。不保存前一次 checkout 的絕對本地路徑。
+每次明填本地根目錄。上例在 repo root 執行，以 `$PWD/result` 指向當前 checkout；
+要用另一個本地父資料夾，也在子命令前提供 `--local-root`：
 
 ```bash
-uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root /data/results download Si001
+uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root /data/result download Si001
 ```
 
 ## Agent／Bash 使用
@@ -87,15 +88,15 @@ uv run --directory . --no-sync -- python scripts/transfer_results.py --local-roo
 從任何工作目錄呼叫同一入口即可，不必啟動桌面或 GUI：
 
 ```bash
-uv run --directory /workspace/Qubit-measure --no-sync -- python scripts/transfer_results.py status --json
-uv run --directory /workspace/Qubit-measure --no-sync -- python scripts/transfer_results.py download Si001 --dry-run
-uv run --directory /workspace/Qubit-measure --no-sync -- python scripts/transfer_results.py download Si001
+uv run --directory /workspace/Qubit-measure --no-sync -- python scripts/transfer_results.py --local-root /workspace/Qubit-measure/result status --json
+uv run --directory /workspace/Qubit-measure --no-sync -- python scripts/transfer_results.py --local-root /workspace/Qubit-measure/result download Si001 --dry-run
+uv run --directory /workspace/Qubit-measure --no-sync -- python scripts/transfer_results.py --local-root /workspace/Qubit-measure/result download Si001
 ```
 
 `status --json` 只輸出非機密設定，例如：
 
 ```json
-{"configured": true, "remote_parent": "lab-drive:measurement-results", "local_root": "/workspace/Qubit-measure/results", "config_dir": "/home/user/.config/qubit-measure/result-transfer"}
+{"configured": true, "remote_parent": "lab-drive:measurement-results", "local_root": "/workspace/Qubit-measure/result", "config_dir": "/home/user/.config/qubit-measure/result-transfer"}
 ```
 
 它檢查設定檔存在與格式，不代表網路或 Google token 仍然可用。
