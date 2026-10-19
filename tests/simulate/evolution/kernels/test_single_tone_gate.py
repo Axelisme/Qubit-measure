@@ -281,6 +281,80 @@ def test_admission_keeps_row_flux_and_budget_outside_covariant_equivalence(frequ
         )
 
 
+@pytest.mark.parametrize("bath_scale,segments", [(1.0, 4), (1500.0, 5)])
+def test_strang_split_adapts_without_changing_the_four_step_control(
+    bath_scale, segments
+):
+    src = source()
+    model = src.model((0,))
+    model = replace(
+        model,
+        identity=f"adaptive-bath-{bath_scale}",
+        rates_per_ns=model.rates_per_ns * bath_scale,
+        dephasing_per_ns=model.dephasing_per_ns * bath_scale,
+    )
+    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
+    table = SegmentTable(
+        timeline=np.arange(2),
+        start_ns=np.array([0.0, 37.0]),
+        duration_ns=np.full(2, 128.0),
+        level=np.zeros((2, 1), dtype=np.int64),
+        tones=np.ones(2, dtype=np.int64),
+        tone_port=np.zeros((2, 1), dtype=np.int64),
+        tone_frequency_ghz=np.full((2, 1), 0.6),
+        tone_amplitude=np.full((2, 1), 0.8),
+        tone_theta_rad=np.array([[0.0], [0.713]]),
+        tone_envelope=np.zeros((2, 1), dtype=np.int64),
+        tone_envelope_offset_ns=np.zeros((2, 1)),
+        envelopes=(envelope(),),
+    )
+    rows = np.arange(2)
+    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+        assert kernel.guard(table, rows, context).all(), (
+            "a split-only rejection must refine the secular time steps"
+        )
+        keys = kernel.prepare_keys(table, rows, context)
+        prepared = kernel.prepare(keys[:1], table, rows[:1], context)
+        assert isinstance(prepared, GatePrepared)
+        assert prepared.unitaries.shape[1] == segments
+        actual = np.repeat(src.initial_density[None], 2, axis=0)
+        kernel.apply(
+            prepared, np.zeros(2, dtype=np.int64), table, rows, actual, ApplyContext(1e-3)
+        )
+        direct = next(k for k in REGISTRY if k.name == "dop853")
+        from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
+
+        reference = np.repeat(src.initial_density[None], 2, axis=0)
+        direct.apply(
+            direct.prepare(direct.prepare_keys(table, rows, context), table, rows, context),
+            rows,
+            table,
+            rows,
+            reference,
+            ApplyContext(
+                1e-6, DOP853Plan(np.full(2, "lab"), np.full(2, -1, dtype=np.int64))
+            ),
+        )
+        assert np.max(np.abs(np.diagonal(actual - reference, axis1=-2, axis2=-1))) < 1e-2
+
+
+def test_mixed_inventory_does_not_charge_rejected_gate_builds_to_usable_keys():
+    original = batch(161)
+    track = original.tracks[0]
+    gains = track.amplitude.copy()
+    gains[-1] = 40.0  # Same carrier/shape domain, but outside numerical RWA admission.
+    mixed = replace(original, tracks=(replace(track, amplitude=gains),))
+    with closing(Engine(1, 1_000_000)) as engine:
+        result = engine.evolve(source(), (mixed,), cancel=Event())
+        assert result.paths.segments_by_kernel.get("single_tone_gate") == 160
+        assert sum(result.paths.segments_by_kernel.values()) == 321
+        # Complete-inventory cold costs still reject genuinely unamortized runs.
+        small = engine.evolve(source(), (batch(2),), cancel=Event())
+        assert small.paths.segments_by_kernel.get("shaped_sambe") == 2
+
+
 def test_admission_uses_sum_of_quadrature_norms_not_their_maximum():
     src = source()
     model = src.model((0,))
