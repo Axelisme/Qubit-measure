@@ -47,6 +47,22 @@ if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
 
 
+def _create_empty_library(path: Path) -> None:
+    from zcu_tools.resources.context.library import (
+        MODULE_LIBRARY_FORMAT,
+        MODULE_LIBRARY_VERSION,
+    )
+
+    with path.open("x", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(
+            {
+                "format": MODULE_LIBRARY_FORMAT,
+                "format_version": f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
+            },
+            stream,
+        )
+
+
 def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -> Path:
     validate_path_segment(name, field="name")
     root_path = Path(root)
@@ -291,19 +307,7 @@ class ResultEntry:
                 draft.general.created_at = (
                     datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
-        from zcu_tools.resources.context.library import (
-            MODULE_LIBRARY_FORMAT,
-            MODULE_LIBRARY_VERSION,
-        )
-
-        with (destination / "module_cfg.yaml").open("x", encoding="utf-8") as stream:
-            YAML(typ="rt").dump(
-                {
-                    "format": MODULE_LIBRARY_FORMAT,
-                    "format_version": f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
-                },
-                stream,
-            )
+        _create_empty_library(destination / "module_cfg.yaml")
 
     def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
         result_root = self._result_path.parent
@@ -468,11 +472,13 @@ class ResultEntry:
         )
 
     def module_library(
-        self, label: str, *, assets: WaveformAssetInfo | None = None
+        self, label: str | None = None, *, assets: WaveformAssetInfo | None = None
     ) -> ModuleLibrary:
-        """Open a point-local library with this entry's ledger and optional assets.
+        """Open the setup or point library with this entry's ledger and optional assets.
 
-        label follows use_point's safe single-segment rules. Only module_cfg.yaml
+        None selects entry/module_cfg.yaml, initialized by create. A string
+        selects a point library and follows use_point's safe single-segment rules.
+        Only module_cfg.yaml
         is loaded; the point and assets are not read and no active point is selected.
         Omit assets for Spec-only reads/edits; materializing Arb requires a provider.
         The existing library must have a valid header and container. Invalid
@@ -484,7 +490,11 @@ class ResultEntry:
         # Avoid the library -> entry.provenance -> ResultEntry import cycle.
         from zcu_tools.resources.context.library import ModuleLibrary
 
-        directory = _entry_path(self._result_path / "points", label)
+        directory = (
+            self._result_path
+            if label is None
+            else _entry_path(self._result_path / "points", label)
+        )
         return ModuleLibrary(
             directory / "module_cfg.yaml",
             assets=assets,
@@ -546,6 +556,7 @@ class ResultEntry:
             }
             with (result_path / "setup.yaml").open("x", encoding="utf-8") as stream:
                 YAML(typ="rt").dump(document, stream)
+            _create_empty_library(result_path / "module_cfg.yaml")
             return cls(result_path, database_path)
         except BaseException:
             # These entry directories belong to this call, not to the caller's roots.

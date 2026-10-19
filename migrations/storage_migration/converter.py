@@ -31,9 +31,14 @@ def migrate_storage(
     optional acquisition evidence. mapping supplies complete registered seeds,
     explicit key rules, disk schemas and native-tag renames; register kinds in entry's shared registry
     before calling. Values/stderr keep working units; expressions are not evaluated.
-    Point-local module_cfg uses typed Spec owners and explicit module/waveform
-    rules. Unmapped/unsupported entries and root libraries without a point remain
+    Root/point module_cfg uses typed Spec owners and explicit module/waveform
+    rules. Root libraries belong to setup. Unsupported Specs/references remain
     located pending; no child references or asset values are inferred/evaluated.
+    Component flux groups use located explicit evidence before the declared
+    assumption. Point unit overrides clear unreplaced inherited group values and
+    metadata in one context edit. Owner-incompatible groups stay pending without
+    conversion. CSV samples use independent declarations and the sample_csv owner,
+    then publish prepared JSONL through the manifest; originals remain in backup.
     validate_cfg receives the known historical source tag and CfgSnapshot.
     It must check cfg_type, schema_version and values with the concrete cfg owner,
     return None without mutation, and raise ValueError for unconvertible cfg.

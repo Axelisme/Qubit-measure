@@ -49,6 +49,14 @@ def _validate_file_paths(
         )
         if state.destination != expected:
             raise MigrationInputError("manifest: invalid Labber move destination")
+    elif state.operation == "samples":
+        if (
+            state.source != source.result_path / "samples.csv"
+            or state.destination.parent != destination.result_path / "samples"
+            or state.destination.suffix != ".jsonl"
+        ):
+            raise MigrationInputError("manifest: invalid samples publication paths")
+        validate_segment(state.destination.stem, "sample component")
     elif state.operation == "native":
         assignment = next(
             (run for run in manifest.runs if run.source == state.source), None
@@ -143,7 +151,11 @@ def _validate_module_publication(
     if (
         not source.is_absolute()
         or contained_path(source, source_root) != source
-        or source.parent.parent != source_root
+        or not (
+            source.parent == source_root
+            or source.parent.parent == source_root
+            or source.parent.parent == source_root / "exps"
+        )
         or source.name != "module_cfg.yaml"
     ):
         raise MigrationInputError("manifest: invalid point-local module source")
@@ -166,7 +178,9 @@ def _validate_module_publication(
             f"{publication.destination}: module destination hash changed"
         )
     # Check the recorded hash before opening the library, which validates its schema.
-    expected = entry.module_library(source.parent.name).source_path
+    expected = entry.module_library(
+        None if source.parent == source_root else source.parent.name
+    ).source_path
     if publication.destination != expected:
         raise MigrationInputError("manifest: invalid point-local module destination")
 

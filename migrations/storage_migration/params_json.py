@@ -71,7 +71,11 @@ def _setup_context(
     )
 
 
-def _flux_unit(values: JsonObject, fit: JsonObject) -> tuple[str | None, str | None]:
+def _flux_unit(
+    values: JsonObject, fit: JsonObject, assumed: str | None
+) -> tuple[str | None, str | None]:
+    if "flux_unit" not in values and "flux_unit" not in fit and assumed is not None:
+        return assumed, None
     root_unit, fit_unit = values.get("flux_unit"), fit.get("flux_unit")
     if "flux_unit" in values and "flux_unit" in fit and root_unit != fit_unit:
         return None, "params.json flux_unit and fluxdep_fit.flux_unit disagree"
@@ -172,7 +176,8 @@ def _project_fit(
                 reason=reason or "Preserve legacy fluxonium parameter in native units",
             )
         )
-    unit, unit_error = _flux_unit(values, fit)
+    assumed = session.manifest.report.declarations.assume_flux_unit
+    unit, unit_error = _flux_unit(values, fit, assumed)
     created_at = _created_at(fit.get("timestamp"))
     backup = session.manifest.report.backup_path
     original = (
@@ -199,7 +204,15 @@ def _project_fit(
                 new_file=target,
                 new_path=path,
                 action="pending" if reason else "value",
-                reason=reason or "Preserve explicit legacy source metadata",
+                reason=reason
+                or (
+                    f"假設單位: {assumed}; operator supplied, no numeric conversion"
+                    if key == "fluxdep_fit.flux_unit"
+                    and assumed is not None
+                    and "flux_unit" not in values
+                    and "flux_unit" not in fit
+                    else "Preserve explicit legacy source metadata"
+                ),
             )
         )
     document: JsonObject = {
@@ -261,7 +274,8 @@ def convert_params_json(
     documented fluxonium model and zero bias; flux_int is alignment-only. An
     explicit model is unsupported and stays pending. Unknown/invalid numbers
     remain unknown, with invalid values located in pending. Units only come from
-    explicit root/fit flux_unit; missing/conflicting units become null and pending,
+    explicit root/fit flux_unit, or the declared assumption only when both keys
+    are absent. Otherwise missing/conflicting units become null and pending,
     without conversion. Source run_id is unknown; only a timezone-aware ISO 8601
     timestamp supplies created_at. Preserve full raw sections and metadata in
     component.ext.legacy_params with located pending. Predictors remain entry

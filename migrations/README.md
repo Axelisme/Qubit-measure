@@ -24,9 +24,24 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
 
 正式執行前，依遷移說明書核對報告與備份位置。`--qubit-kind` 須符合來源元件，不由工具推論。
 
+需要操作者宣告單位或 CSV 欄位時，在首次 dry-run 與正式執行明填：
+
+```text
+--assume-flux-unit mA --assume-jpa-flux-unit V
+--sample-value-column "calibrated mA" --sample-source-unit mA
+```
+
+這批舊 CSV 使用上述欄名與單位。其他資料請按來源證據填寫，不從欄名猜單位。
+
+`--assume-flux-unit` 只補缺少的 global/predictor 單位證據，報告標「假設單位」，不改明示值，也不換算 component 數字。Global 磁通取同檔、根 meta_info、params 根的 `flux_unit`，之後才用假設。JPA 只取同檔或根 meta_info 的 `jpa_flux_unit`，之後才用獨立的 `--assume-jpa-flux-unit A|V`。未提供這個選項就保持 pending，不借 global 假設。Point 本檔單位可覆寫繼承單位，同組未覆寫的 setup 數字與 metadata 會清除。`local_flux_unit` 只照抄，不影響 global 數值。Owner 不接受的單位或同層明示衝突使該組 pending。Predictor 仍只採 params 根與 fit 的單位證據。
+
+樣本單位獨立由 `--sample-source-unit` 宣告。缺 legacy CSV 宣告或資料非法時，報告按列定位 pending。合法列轉進唯一 qubit 的 `samples/<component>.jsonl`。V2 CSV 自帶 `dev_value/dev_unit`，不需要 legacy 宣告。Resume 沿用首次提供的四個選項，不能中途改單位或欄位。兩種假設都不能修補非法或衝突的明示單位。API 與 CLI 在任何寫入前拒絕不合法的假設輸入。
+
+根 `module_cfg.yaml` 寫成 setup library。Exps 外的 `image/` 保留完整來源相對路徑，發布到 `result/<entry>/figures/`。Autofluxdep 圖片與其他舊 workflow 檔仍放 preserved。`params.json` 不在新 entry 留副本，原文由完整備份保存。
+
 ## Sample CSV → JSONL
 
-`migrations.sample_csv.convert_sample_csv` 接受一或多份 CSV、已開啟的 `ResultEntry` 與元件名，追加到該條目的 `samples/<component>.jsonl`。來源位元組不變。公開函式回傳 `MigrationReport`，列出追加列數、待判斷列及原因、輸出路徑。
+`migrations.sample_csv.convert_sample_csv` 接受一或多份 CSV、已開啟的 `ResultEntry` 與元件名，追加到該條目的 `samples/<component>.jsonl`。來源位元組不變。公開函式回傳 `MigrationReport`，列出追加列數、待判斷列及原因、輸出路徑。`plan_sample_csv` 使用相同欄位與單位宣告，回傳 `SampleCsvPlan(rows, pending)`，不取得 entry 或寫檔。Storage migration 與直接追加工具共用這個 owner 規劃介面。
 
 ```python
 from migrations.sample_csv import convert_sample_csv

@@ -60,6 +60,10 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="External parent for <name>-backup (default: checkout parent)",
     )
+    parser.add_argument("--assume-flux-unit", choices=("A", "mA", "V", "mV"))
+    parser.add_argument("--assume-jpa-flux-unit", choices=("A", "V"))
+    parser.add_argument("--sample-value-column")
+    parser.add_argument("--sample-source-unit", choices=("A", "mA", "V", "mV"))
     parser.add_argument("--run-evidence", type=Path)
     return parser
 
@@ -124,6 +128,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             report_path=args.report,
             repo_root=args.repo_root,
             backup_parent=args.backup_parent,
+            assume_flux_unit=args.assume_flux_unit,
+            assume_jpa_flux_unit=args.assume_jpa_flux_unit,
+            sample_value_column=args.sample_value_column,
+            sample_source_unit=args.sample_source_unit,
             run_evidence=load_run_evidence(args.run_evidence)
             if args.run_evidence is not None
             else None,
