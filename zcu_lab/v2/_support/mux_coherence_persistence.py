@@ -21,8 +21,9 @@ def coherence_spec[T: ExpCfgModel](
     """Declare IQ on delay/tone axes and MHz metadata on the same tone axis.
 
     cfg_type restores the full leaf cfg; tag identifies Ramsey or Echo. Memory
-    uses us/MHz, disk uses seconds/Hz. Requested delay is stored once as the IQ
-    axis, never reconstructed from current cfg. No I/O occurs. Invalid declaration
+    uses us/MHz, disk uses seconds/Hz. Labber uses independent variable grids.
+    Requested delay is stored once as the IQ axis, never reconstructed from
+    current cfg. No I/O occurs. Invalid declaration
     or mismatched loaded tone axes raises ValueError via native persistence.
     """
     tone = VariableAxisSpec("Tone", "", field_name="tone_indices", dtype=np.int64)
@@ -89,4 +90,5 @@ def coherence_spec[T: ExpCfgModel](
         result_builder=build,
         result_validator=validate_coherence_result,
         cfg_schema_version="1.0",
+        labber_layout="independent",
     )

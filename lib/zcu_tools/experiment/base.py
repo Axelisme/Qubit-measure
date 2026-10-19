@@ -129,8 +129,10 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
 
         source.cfg must be present. comment is appended to its JSON cfg comment;
         tag overrides the declaration's Labber tag. Single mappings write one
-        log, grouped mappings require a common grid. Invalid arrays or missing
-        cfg raise ValueError; existing paths raise FileExistsError and I/O
+        log. Grouped exports follow spec.labber_layout: the default common layout
+        requires a common grid; explicit independent layout preserves each
+        variable's own 1D or 2D axes. Invalid arrays or missing cfg raise
+        ValueError; existing paths raise FileExistsError and I/O
         errors propagate. This entry neither selects a path nor writes native.
         """
         from zcu_tools.datafile import (
