@@ -25,6 +25,7 @@ def test_full_quantum_upto_is_required() -> None:
 
 def test_calc_branch_population_rejects_non_positive_upto() -> None:
     with pytest.raises(ValueError, match="upto must be positive"):
+        # tolerated(cast): object() proves upto=0 fails before HilbertSpace access.
         calc_branch_population(cast(Any, object()), [0], upto=0)
 
 
