@@ -1,4 +1,4 @@
-"""Numeric full-tone cfg admission shared by mux frequency and Amp Rabi."""
+"""Validate named drive tones and participant order for mux measurements."""
 
 import math
 from collections.abc import Sequence
@@ -44,11 +44,13 @@ class MuxToneCfg(ConfigBase):
     @model_validator(mode="after")
     def validate_tone(self) -> Self:
         """Reject a nonfinite sweep or a nonfinite/swept drive for every element."""
+        # Sweeps describe the scan; source pulses must stay fixed until preparation.
         if not all(
             math.isfinite(v)
             for v in (self.sweep.start, self.sweep.stop, self.sweep.step)
         ):
             raise ValueError("sweep start/stop/step must be finite")
+
         drive = self.drive
         for name in ("freq", "gain", "phase", "pre_delay", "post_delay"):
             value = getattr(drive, name)
@@ -77,6 +79,7 @@ def validate_mux_scan(
     be distinct and different from readout.gen_ch. Raise ValueError with original
     indices/actual values; never read bindings or change inputs.
     """
+    # Check shared averaging and readout dimensions before indexing full tones.
     if cfg.reps <= 0 or cfg.rounds <= 0:
         raise ValueError("reps and rounds must be positive")
     if any(not math.isfinite(v) or v < 0 for v in (cfg.initial_delay, cfg.relax_delay)):
@@ -86,6 +89,8 @@ def validate_mux_scan(
             f"tones length={len(tones)}; full readout count={len(modules.readout.tones)}"
         )
     participant_indices([tone.name for tone in tones], participants)
+
+    # All tones share a zip point count but use independent drive channels.
     count = tones[0].sweep.expts
     channels: dict[int, int] = {}
     for i, tone in enumerate(tones):
@@ -109,6 +114,7 @@ def participant_indices(names: Sequence[str], participants: Sequence[str]) -> li
     and contain only names in names. Raise ValueError with the offending name
     or position. Never sort, mutate inputs or consult a capture/library.
     """
+    # Resolve against the complete list so subset order never changes identities.
     index_of: dict[str, int] = {}
     for index, name in enumerate(names):
         if not name or name in index_of:
@@ -116,6 +122,8 @@ def participant_indices(names: Sequence[str], participants: Sequence[str]) -> li
                 f"tones[{index}].name={name!r}: empty or duplicate name; prior index={index_of.get(name)}"
             )
         index_of[name] = index
+
+    # Retain the requested order while rejecting unknown or repeated participants.
     if not participants:
         raise ValueError("participants must be nonempty")
     seen: set[str] = set()
