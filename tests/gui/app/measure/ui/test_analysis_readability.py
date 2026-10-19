@@ -219,11 +219,11 @@ def test_analysis_parameter_text_remains_readable_after_hydration(
         flow.screenshot(tmp_path / "01-hydrated.png")
         extents = flow.parameter_text()
         assert {item.text for item in extents} >= {"threshold:", "cutoff:"}
-        assert len(extents) == 4
         assert all(
             item.available_height >= item.font_height and item.fully_visible
             for item in extents
         ), f"Analysis parameter text is vertically clipped: {extents}"
+        assert len(extents) == 4
         assert flow.observe("Analyze").fully_visible
         assert flow.observe("Analyze").enabled
 
