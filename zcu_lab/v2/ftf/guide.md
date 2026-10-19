@@ -20,6 +20,10 @@ MuxGroup 綁定、tone-ordered raw、雙線 drive 配置與 FTF mux acquire 能�
 
 不要為了先跑通而另寫 raw parser、猜 ADC 排序，或從 simulator truth 補校準。本指南也不提供模擬器配置或啟動命令。
 
+## 第二批 paired RB／IRB
+
+`ftf/rb` 提供 two-qubit Clifford reference／CZ-interleaved 配對序列、逐序列 virtual-Z frame、獨立 recovery 與保留 round 軸的同 shot mux raw。分析以 saved GE centers 計數 joint00，重用 paired-seed decay／bootstrap，按 d=4 回報 error estimate，不裁負值。必要 pulse 或 component-named phase pair 缺失時不補值，fit 不可辨識時明示原因。操作與限制見 [RB 指南](rb/guide.md)。本定義的交付不代表 FTF／GUI 控制鏈或物理校準已接受。
+
 ## Capture、Reset 與人工 Apply
 
 Open 或表單的 Reset 會固定捕捉當時的 aliases、parameters 與 ModuleLibrary，並建立可覆寫的初值。Run 使用已解析的 cfg，不在執行時重新綁角色。表單 Reset 是重新取初值，與實驗中的 reset pulse 不同。

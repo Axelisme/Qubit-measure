@@ -13,6 +13,7 @@ from zcu_lab.v2.ftf.cz_amplitude.gui import CZAmplitudeAdapter
 from zcu_lab.v2.ftf.idle_zz.gui import IdleZZAdapter
 from zcu_lab.v2.ftf.joint_readout.gui import JointReadoutAdapter
 from zcu_lab.v2.ftf.local_z.gui import LocalZAdapter
+from zcu_lab.v2.ftf.rb.gui import TwoQubitRBAdapter
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
 from zcu_lab.v2.jpa.flux.gui import JpaFluxAdapter
@@ -80,6 +81,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "ftf/cz_amplitude": CZAmplitudeAdapter,
     "ftf/conditional_phase": ConditionalPhaseAdapter,
     "ftf/local_z": LocalZAdapter,
+    "ftf/rb": TwoQubitRBAdapter,
     "lookback": LookbackAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
