@@ -1,9 +1,23 @@
 """Startup and data-root options configure new processes, never attached GUIs."""
 
+from typing import Never
+
 import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
+
+
+@pytest.fixture(autouse=True)
+def forbid_socket_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """All launch/attach collaborators here are recording in-process adapters."""
+
+    def unexpected_connection(*args: object, **kwargs: object) -> Never:
+        pytest.fail(
+            f"Startup option validation attempted a socket connection: {args!r}"
+        )
+
+    monkeypatch.setattr("socket.create_connection", unexpected_connection)
 
 
 def orientation(method, params):
