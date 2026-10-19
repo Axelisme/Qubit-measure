@@ -7,7 +7,7 @@ from zcu_tools.datafile import CfgSnapshot
 
 from .backup import finish_cleanup
 from .bootstrap import prepare_session, publish_report, validate_mapping
-from .evidence import select_run_evidence
+from .evidence import select_run_evidence, validate_run_evidence
 from .models import (
     MigrationMapping,
     MigrationReport,
@@ -73,6 +73,7 @@ def migrate_storage(
     validate_mapping(mapping)
     session, entry = prepare_session(request, mapping)
     if session.manifest.cleanup_phase != "pending":
+        validate_run_evidence(request, session)
         finish_cleanup(session)
         publish_report(session)
         return session.manifest.report

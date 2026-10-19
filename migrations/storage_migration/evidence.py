@@ -191,16 +191,19 @@ def _typed_projection(document: MigrationRunEvidenceDocument) -> JsonObject:
     )
 
 
-def select_run_evidence(
+def validate_run_evidence(
     request: MigrationRequest,
     session: MigrationSession,
 ) -> MigrationRunEvidenceDocument | None:
-    """Select stored/supplemental historical evidence and checkpoint its complete raw document.
+    """Validate and merge caller evidence against the session's stored document.
 
-    request may extend only unplanned sources; session owns the existing snapshot.
-    Reject changed planned evidence, typed/raw disagreement, escaped or missing
-    sources with MigrationInputError. Return the selected document or None.
-    dry_run updates memory only; filesystem/checkpoint failures propagate."""
+    Reject typed/raw disagreement and changed planned entries, including unknown
+    fields, with MigrationInputError. Unplanned entries may supplement the returned
+    document. Return stored evidence when incoming evidence is omitted, or None
+    when neither exists. Do not access legacy sources, change the session or write
+    checkpoints. Cleanup-only resume uses this validation without adopting new
+    evidence or rerunning conversions.
+    """
     stored = session.manifest.evidence
     incoming = request.run_evidence
     if incoming is None:
@@ -261,6 +264,23 @@ def select_run_evidence(
         checked = parse_run_evidence(
             json.dumps(raw, allow_nan=False), source=session.path
         )
+    return checked
+
+
+def select_run_evidence(
+    request: MigrationRequest,
+    session: MigrationSession,
+) -> MigrationRunEvidenceDocument | None:
+    """Select historical evidence and checkpoint its complete raw document.
+
+    Validate with validate_run_evidence, then require supplied sources to be
+    contained and present unless their durable move removed them. Reject escaped
+    or missing sources with MigrationInputError. Return the selected document or
+    None. dry_run updates memory only; I/O/checkpoint failures propagate.
+    """
+    checked = validate_run_evidence(request, session)
+    if checked is None or request.run_evidence is None:
+        return checked
     source_root = session.manifest.report.source.database_path
     for entry in checked.entries:
         source = source_identity(source_root / entry.source, session.manifest)
