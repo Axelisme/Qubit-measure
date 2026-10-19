@@ -263,6 +263,16 @@ def test_point_unit_override_clears_only_unreplaced_inherited_group_values(
     assert not any(item.source == point_meta for item in report.pending)
 
 
+def migrate_with_unit_pending(
+    request: MigrationRequest, mapping: MigrationMapping
+) -> MigrationReport:
+    """Unit incompatibility is located pending, not an entry-wide schema abort."""
+    try:
+        return migrate(request, mapping)
+    except ValueError as exc:
+        pytest.fail(f"Unit incompatibility must become located pending: {exc}")
+
+
 def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping
 ) -> None:
@@ -270,7 +280,7 @@ def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
     source = write_meta(request_data, "", {
         "best_jpa_flux": 0.2, "local_flux_unit": "mA", "flx_half": 0.3,
     })
-    report = migrate(request_data, metadata_mapping)
+    report = migrate_with_unit_pending(request_data, metadata_mapping)
     setup = snapshot(open_entry(request_data).setup)
     assert any(
         item.source == source and item.location == "best_jpa_flux"
@@ -290,7 +300,7 @@ def test_invalid_jpa_unit_keeps_whole_group_pending_without_conversion(
     source = write_meta(request_data, "", {
         "jpa_flux_unit": "mA", "best_jpa_flux": 2.0,
     })
-    report = migrate(request_data, metadata_mapping)
+    report = migrate_with_unit_pending(request_data, metadata_mapping)
     assert {item.location for item in report.pending if item.source == source} >= {
         "jpa_flux_unit", "best_jpa_flux"
     }
