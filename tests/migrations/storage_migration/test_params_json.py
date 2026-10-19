@@ -4,6 +4,7 @@ Remove with the offline migrations package once legacy entries are converted.
 """
 
 import json
+import shutil
 from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
@@ -22,12 +23,14 @@ from zcu_tools.resources.entry import (
 
 from migrations.storage_migration import (
     KeyRule,
+    MigrationInputError,
     MigrationMapping,
     MigrationReport,
     MigrationRequest,
     migrate_storage,
 )
 from tests.migrations.storage_migration.fakes import (
+    manifest_path,
     noop_validation,
     validate_cfg,
     write_meta,
@@ -408,6 +411,89 @@ def test_undefined_transmon_parameter_shape_stays_pending(
         )
         == fit
     )
+
+
+@pytest.fixture
+def interrupted_predictor(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    source = write_params(request_data, {"flux_unit": "mV", "fluxdep_fit": legacy_fit})
+    destination = request_data.results_root / request_data.name
+    copyfile = shutil.copyfile
+
+    def interrupted_copy(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
+        if src == source and dst.parent == destination:
+            raise OSError("parameter copy interrupted")
+        return copyfile(src, dst, follow_symlinks=follow_symlinks)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(shutil, "copyfile", interrupted_copy)
+        with pytest.raises(OSError, match="parameter copy interrupted"):
+            migrate(request_data, analysis_mapping)
+    predictor = destination / "predictors/Qlegacy.json"
+    assert predictor.is_file(), "interruption must follow predictor publication"
+    manifest = TypeAdapter(JsonObject).validate_json(
+        manifest_path(request_data).read_text(encoding="utf-8")
+    )
+    assert manifest["parameters_complete"] is False
+    return predictor
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("version", True),
+        ("version", 1.0),
+        ("flux_period", True),
+        ("flux_bias", False),
+        ("EJ", 9.0),
+    ],
+)
+def test_unfinished_resume_rejects_changed_or_schema_invalid_predictor(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    interrupted_predictor: Path,
+    field: str,
+    value: bool | float,
+) -> None:
+    document = read_predictor(request_data)
+    if field == "version":
+        document[field] = value
+    else:
+        params = predictor_params(request_data)
+        params[field] = value
+        document["params"] = params
+    interrupted_predictor.write_text(json.dumps(document), encoding="utf-8")
+    before = interrupted_predictor.read_bytes()
+    with pytest.raises(MigrationInputError, match="predictor"):
+        migrate(replace(request_data, resume=True), analysis_mapping)
+    assert interrupted_predictor.read_bytes() == before
+
+
+def test_unfinished_resume_accepts_same_predictor_without_rewriting(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    interrupted_predictor: Path,
+) -> None:
+    document = read_predictor(request_data)
+    params = predictor_params(request_data)
+    params["flux_period"] = 1
+    document["params"] = params
+    interrupted_predictor.write_text(
+        json.dumps(document, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+    )
+    before = interrupted_predictor.read_bytes()
+    migrate(replace(request_data, resume=True), analysis_mapping)
+    assert interrupted_predictor.read_bytes() == before
+    assert (request_data.results_root / request_data.name / "params.json").is_file()
+    document["flux_unit"] = "V"
+    interrupted_predictor.write_text(json.dumps(document), encoding="utf-8")
+    edited = interrupted_predictor.read_bytes()
+    migrate(replace(request_data, resume=True), analysis_mapping)
+    assert interrupted_predictor.read_bytes() == edited
 
 
 def test_dry_run_predictor_plan_matches_apply_and_completed_resume_keeps_edits(

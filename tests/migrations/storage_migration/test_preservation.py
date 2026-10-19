@@ -50,6 +50,50 @@ def test_resume_report_inside_source_is_refused_before_publication(
     assert manifest_file.read_bytes() == before
 
 
+@pytest.mark.parametrize("source_root", ["result", "Database"])
+@pytest.mark.parametrize("link_segment", ["chip", "qubit"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_selected_source_symlink_is_refused_without_writes(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    source_root: str,
+    link_segment: str,
+    dry_run: bool,
+) -> None:
+    roots = (request_data.result_root, request_data.database_root)
+    for root in roots:
+        (root / "chip/qubit/retained.bin").write_bytes(b"legacy bytes")
+    root = roots[0] if source_root == "result" else roots[1]
+    link = root / "chip" if link_segment == "chip" else root / "chip/qubit"
+    target = root / "actual-source"
+    link.rename(target)
+    symlink_or_skip(link, target, target_is_directory=True)
+    linked_file = root / "chip/qubit/retained.bin"
+    target_file = target / (
+        "qubit/retained.bin" if link_segment == "chip" else "retained.bin"
+    )
+    before = {
+        path: path.read_bytes()
+        for source in roots
+        for path in source.rglob("*")
+        if path.is_file()
+    }
+    with pytest.raises(MigrationInputError, match="symlink"):
+        migrate_storage(
+            replace(request_data, dry_run=dry_run),
+            mapping=mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        )
+    assert link.is_symlink()
+    assert link.readlink() == target
+    assert linked_file.read_bytes() == target_file.read_bytes() == b"legacy bytes"
+    assert {path: path.read_bytes() for path in before} == before
+    assert not (request_data.results_root / request_data.name).exists()
+    assert not (request_data.database_root / request_data.name).exists()
+    assert not (root.parent.parent / f"{request_data.name}-backup").exists()
+
+
 @pytest.mark.parametrize(
     "placement",
     [
