@@ -116,31 +116,27 @@ def _status(
 
 
 def build_copy_arguments(
-    remote_parent: str,
-    local_root: Path,
+    source: str,
+    destination: str,
     entries: list[str],
     *,
-    action: str,
     jobs: int,
     dry_run: bool,
+    live: bool,
 ) -> list[str]:
     """Return rclone copy arguments (after the binary) for all named entries.
 
     The caller prepends the rclone binary and --config.
 
-    action is "upload" (local_root -> remote_parent) or "download" (reverse).
-    entries are already-validated folder names; a filter list selects them, so
+    source and destination are the entry parents: the local root and the remote
+    parent, in transfer direction. entries are already-validated folder names; a filter list selects them, so
     one process lists the tree once and reuses its folder-ID cache across
     entries. --fast-list and a relaxed Drive pacer cut per-directory API
     latency; rclone backs off on rate-limit replies. Empty source directories
-    are not created. Unknown action raises ValueError.
+    are not created. Every copied, updated or skipped file is logged (-v).
+    live=True (a terminal) adds rclone's continuously refreshed progress view;
+    otherwise a one-line summary is printed every 10 s.
     """
-    if action == "upload":
-        source, destination = str(local_root), remote_parent
-    elif action == "download":
-        source, destination = remote_parent, str(local_root)
-    else:
-        raise ValueError(f"Unknown transfer action: {action!r}")
     command = [
         "copy",
         source,
@@ -156,15 +152,14 @@ def build_copy_arguments(
         "10ms",
         "--drive-pacer-burst",
         "200",
-        "--stats",
-        "10s",
-        "--stats-one-line",
+        "-v",
         "--filter",
         "- *.lock",
     ]
     for entry in entries:
         command += ["--filter", f"+ /{entry}/**"]
     command += ["--filter", "- **"]
+    command += ["--progress"] if live else ["--stats", "10s", "--stats-one-line"]
     if dry_run:
         command.append("--dry-run")
     return command
@@ -177,17 +172,18 @@ def _transfer(
     local_root: Path,
     args: argparse.Namespace,
 ) -> int:
-    command = [
-        str(binary),
-        "--config",
-        str(config_dir / "rclone.conf"),
-    ] + build_copy_arguments(
-        selection.remote_parent,
-        local_root,
+    local, remote = str(local_root), selection.remote_parent
+    source, destination = (
+        (local, remote) if args.action == "upload" else (remote, local)
+    )
+    command = [str(binary), "--config", str(config_dir / "rclone.conf")]
+    command += build_copy_arguments(
+        source,
+        destination,
         args.entries,
-        action=args.action,
         jobs=args.jobs,
         dry_run=args.dry_run,
+        live=sys.stdout.isatty(),
     )
     print(f"{args.action}: {' '.join(args.entries)}", flush=True)
     with subprocess.Popen(command, stdin=subprocess.DEVNULL) as process:
