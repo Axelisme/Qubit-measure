@@ -1045,6 +1045,9 @@ class MultitoneRWAKernel:
     is faster than same-budget DOP853 in all four envelope/duration probes.
     These are empirical admission rules, not arbitrary-input or sequence error
     certificates. Constant rows use a 16 ns ceiling; sampled rows retain 4 ns.
+    Dispatch may prefer full-drive DOP853 even after numerical admission when
+    restoring fast edges makes cold prepare/guard/apply more expensive. That
+    choice does not change these omission bounds or the retained-dimension cap.
     No density reduction, dissipator change, clipping or normalization occurs.
     """
 

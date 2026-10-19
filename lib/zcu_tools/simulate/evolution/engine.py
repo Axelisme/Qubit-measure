@@ -310,8 +310,10 @@ class Engine:
     resource survives an evolve call. The prepare cache persists across evolve
     calls; multi-timeline work opens and closes its own joblib threading pool.
     Exact-input memo hits skip geometry only for inventories without cumulative
-    single-tone shaped gate candidates: their routes do not depend on history.
-    Other inventories count source usage and select gate keys before memo lookup.
+    single-tone shaped gate or multitone candidates: their routes do not depend
+    on history.
+    Other inventories count source usage and select gate keys and multitone routes
+    before memo lookup.
     Acquires sharing a source must serialize, including across Engine instances.
     Empty work, a single timeline, and workers=1 run inline without a pool.
     Native BLAS uses one thread throughout evolve, coordinated across engines.
@@ -385,7 +387,7 @@ class Engine:
         from ._planning import plan
         from ._prefix import PrefixResolver
         from ._resident import ResidentAdmission
-        from ._result_memo import input_key, single_gate_key
+        from ._result_memo import input_key, route_key
         from ._schedule import Schedule
         from .kernel import KernelContext
 
@@ -420,7 +422,7 @@ class Engine:
             with closing(create_work_plan(geometry.table, source, budget)) as work_plan:
                 context = KernelContext(source, budget, work_plan)
                 if key is not None:
-                    key = single_gate_key(key, geometry.table, context)
+                    key = route_key(key, geometry.table, context)
                     cached = self._cached_result(key, cancel)
                     if cached is not None:
                         return cached

@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from ._carrier_plan import populate_carrier_plan
 from ._dop853_dispatch import direct_plans
 from ._gain_plan import plan_gain_groups
+from ._multitone_dispatch import populate_multitone_plan
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
@@ -34,6 +35,7 @@ from .kernel import (
 from .kernels.floquet import FloquetKernel, FloquetPlan
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.multitone_gate import populate_gate_inventory
+from .kernels.multitone_rwa import MultitoneRWAKernel
 from .secular import ModelSource
 from .workplan import WorkPlan
 
@@ -52,6 +54,7 @@ def create_work_plan(
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)
     populate_single_gate_plan(table, source, plan, budget)
+    populate_multitone_plan(table, source, plan, budget)
     return plan
 
 
@@ -655,11 +658,29 @@ class _Classifier:
             self.classify_two_tone(two_tone)
         domain = self.domains["multiple"]
         multiple = rows[domain.mask[rows]]
-        # Each calibrated approximation is optional; the direct terminal is
-        # required even when neither fast path is present in a custom registry.
-        optional = tuple(name for name in domain.families[:-1] if name in self.kernels)
-        self.accept(multiple, (*optional, domain.families[-1]))
+        self.classify_multiple(multiple)
         return self._result()
+
+    def expanded_direct(self, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
+        """Borrow the cold comparison only when both families are available."""
+        if not isinstance(self.kernels.get("multitone_rwa"), MultitoneRWAKernel) or (
+            "dop853" not in self.kernels
+        ):
+            return np.zeros(len(rows), dtype=bool)
+        direct = populate_multitone_plan(
+            self.table, self.source, self.context.work_plan, self.budget
+        )
+        return np.array([int(row) in direct for row in rows], dtype=bool)
+
+    def classify_multiple(self, rows: NDArray[np.int64]) -> None:
+        """Try reusable gates, then the cheaper admitted RWA/direct alternative."""
+        gate, rwa, direct = self.domains["multiple"].families
+        if gate in self.kernels and len(rows):
+            rows = self.try_kernel(self.kernels[gate], rows)
+        preferred = self.expanded_direct(rows)
+        optional = (rwa,) if rwa in self.kernels else ()
+        self.accept(rows[preferred], (direct, *optional))
+        self.accept(rows[~preferred], (*optional, direct))
 
     def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
         """Fix acquire-wide costs before either guard; workers borrow the plan."""
@@ -669,9 +690,12 @@ class _Classifier:
                 self.table, rows, self.context
             )
         selected = rows[self.scope[rows]]
-        direct = self.two_tone_direct[selected]
+        expanded = self.expanded_direct(selected)
         rwa, floquet, dop853 = self.domains["two"].families
         prefix = (rwa,) if rwa in self.kernels else ()
+        self.accept(selected[expanded], (dop853, *prefix, floquet))
+        selected = selected[~expanded]
+        direct = self.two_tone_direct[selected]
         # Production DOP853 accepts every valid row and is terminal here.
         # Keep the Floquet tail for injected same-name kernels that may reject.
         self.accept(selected[direct], (*prefix, dop853, floquet))
