@@ -99,7 +99,10 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     session = native_session
     assert session.state.get_tab("tab").run.confirmed_run_id is None
     planned = session.state.get_artifact_snapshots("tab")
-    assert planned[0].artifacts[0].members[0].outputs[1].path.name == "saving_a1b2c3_1.hdf5"
+    assert (
+        planned[0].artifacts[0].members[0].outputs[1].path.name
+        == "saving_a1b2c3_1.hdf5"
+    )
     first = session.save()
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     native, labber = first.outputs

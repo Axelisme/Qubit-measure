@@ -103,6 +103,7 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
         result_path=storage.result_path,
         database_path=storage.database_path,
         run_id="run-a",
+        experiment="synthetic",
         point=storage.point,
         saved_at=datetime(2026, 10, 8, tzinfo=timezone.utc),
     )

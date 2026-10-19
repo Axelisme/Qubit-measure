@@ -286,7 +286,8 @@ def test_relative_roots_become_absolute_without_requiring_entry_directories(
         Output("data_h5", tmp_path / "Database/entry/runs/no-meaning/data.h5"),
         Output(
             "labber",
-            tmp_path / "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_eaning_1.hdf5",
+            tmp_path
+            / "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_eaning_1.hdf5",
         ),
     )
     assert list(tmp_path.iterdir()) == []
@@ -306,8 +307,12 @@ UNSAFE = [
 ]
 
 
-@pytest.mark.parametrize("experiment", ["", ".", "..", "bad\\name", "bad\x00name", "C:drive"])
-def test_layout_rejects_unsafe_experiment_names(tmp_path: Path, experiment: str) -> None:
+@pytest.mark.parametrize(
+    "experiment", ["", ".", "..", "bad\\name", "bad\x00name", "C:drive"]
+)
+def test_layout_rejects_unsafe_experiment_names(
+    tmp_path: Path, experiment: str
+) -> None:
     with pytest.raises(ValueError, match="experiment"):
         layout(tmp_path, experiment=experiment)
     assert list(tmp_path.iterdir()) == []
