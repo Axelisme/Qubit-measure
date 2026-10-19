@@ -1144,6 +1144,39 @@ def test_unfinished_resume_rejects_changed_or_schema_invalid_predictor(
     assert interrupted_predictor.read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    "legacy_fit",
+    [{"params": {"EC": -1.0, "EL": None}, "flux_period": 0.0}],
+)
+@pytest.mark.parametrize("unknown_representation", ["omitted", "null"])
+def test_unfinished_resume_compares_unknown_predictor_values_semantically(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    interrupted_predictor: Path,
+    unknown_representation: str,
+) -> None:
+    document = read_predictor(request_data)
+    params = predictor_params(request_data)
+    if unknown_representation == "omitted":
+        params.pop("EL")
+    else:
+        params["EJ"] = None
+    document["params"] = params
+    interrupted_predictor.write_text(json.dumps(document), encoding="utf-8")
+    before = interrupted_predictor.read_bytes()
+
+    conflict = None
+    try:
+        migrate(replace(request_data, resume=True), analysis_mapping)
+    except MigrationInputError as error:
+        conflict = str(error)
+
+    assert conflict is None, (
+        "Unknown numeric omissions and nulls describe the same predictor"
+    )
+    assert interrupted_predictor.read_bytes() == before
+
+
 def test_unfinished_resume_accepts_same_predictor_without_rewriting(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
