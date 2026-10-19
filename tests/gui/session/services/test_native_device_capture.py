@@ -3,7 +3,6 @@
 import pytest
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 from tests.gui.app.workflows._start_fakes import StartHarness
@@ -14,9 +13,7 @@ def test_capture_uses_cached_native_models_not_live_drivers(
 ) -> None:
     harness = StartHarness()
     service = harness.services.device
-    service.start_connect_device(ConnectDeviceRequest("FakeDevice", "flux", "none"))
-    harness.background.execute()
-    harness.background.deliver()
+    harness.publish_devices("flux")
     assert harness.state.get_device("flux") is not None
     harness.state.set_device_info("flux", FakeDeviceInfo(address="none", value=0.12))
     driver = service.get_connected_devices()["flux"]
@@ -75,10 +72,8 @@ def test_live_device_without_native_cached_info_fails_instead_of_disappearing(
 def test_live_capture_reads_all_connected_drivers_instead_of_cached_values() -> None:
     harness = StartHarness()
     service = harness.services.device
+    harness.publish_devices("flux", "readout")
     for name, value in (("flux", 0.12), ("readout", 0.34)):
-        service.start_connect_device(ConnectDeviceRequest("FakeDevice", name, name))
-        harness.background.execute()
-        harness.background.deliver()
         driver = service.get_connected_devices()[name]
         assert isinstance(driver, FakeDevice)
         driver.value = value
@@ -110,9 +105,7 @@ def test_live_capture_names_failed_device_without_cached_fallback(
 ) -> None:
     harness = StartHarness()
     service = harness.services.device
-    service.start_connect_device(ConnectDeviceRequest("FakeDevice", "flux", "none"))
-    harness.background.execute()
-    harness.background.deliver()
+    harness.publish_devices("flux")
     harness.state.set_device_info("flux", FakeDeviceInfo(address="none", value=0.12))
     driver = service.get_connected_devices()["flux"]
 
@@ -134,9 +127,7 @@ def test_live_capture_rejects_non_native_info_with_device_name(
 ) -> None:
     harness = StartHarness()
     service = harness.services.device
-    service.start_connect_device(ConnectDeviceRequest("FakeDevice", "flux", "none"))
-    harness.background.execute()
-    harness.background.deliver()
+    harness.publish_devices("flux")
     driver = service.get_connected_devices()["flux"]
 
     def unsupported_read() -> BaseDeviceInfo:

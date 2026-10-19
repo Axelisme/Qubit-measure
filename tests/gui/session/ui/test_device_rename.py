@@ -15,8 +15,7 @@ from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.ports import DeviceMemoryInfo
-from zcu_tools.gui.session.services.device import DeviceService
+from zcu_tools.gui.session.services.device import DeviceService, DisconnectDeviceRequest
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -36,7 +35,12 @@ def rename_ui(qapp, request: pytest.FixtureRequest) -> Iterator[ComponentDriver]
     progress = ProgressService(QtProgressTransport())
     runner = OperationRunner(gate, handles, progress, background, bus)
     manager = DeviceManager()
-    manager.register_device("live", FakeDevice(fast_mode=True))
+    drivers = {
+        name: FakeDevice(address=name, fast_mode=True)
+        for name in ("live", "old", "occupied")
+    }
+    for name, driver in drivers.items():
+        manager.register_device(name, driver)
     device = DeviceService(
         bus,
         state,
@@ -44,16 +48,16 @@ def rename_ui(qapp, request: pytest.FixtureRequest) -> Iterator[ComponentDriver]
         background,
         runner,
         handles,
-        driver_factory=lambda type_name, address: FakeDevice(fast_mode=True),
+        driver_factory=lambda type_name, address: drivers[address],
         device_registry=manager,
     )
     device.publish_initial_devices()
-    device.register_remembered_devices(
-        [
-            DeviceMemoryInfo(type_name="FakeDevice", name=name, address="synthetic")
-            for name in ("old", "occupied")
-        ]
-    )
+    for name in ("old", "occupied"):
+        device.start_disconnect_device(DisconnectDeviceRequest(name))
+        qt_until(
+            lambda: not device.get_active_device_operations(),
+            label="published device disconnected",
+        )
     facet = DeviceControlFacet(bus=bus, device=device, progress=progress)
     dialog = DeviceDialog(facet, parameter_provider=lambda: None)
     if getattr(request, "param", False):

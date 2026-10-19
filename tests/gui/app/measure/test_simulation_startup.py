@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure.services.persistence_types import (
     PersistedStartup,
 )
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
@@ -255,7 +256,7 @@ def test_reconnected_device_retains_state_and_drives_simulation(
         np.testing.assert_allclose(bias_trace(env), 5.0)
 
 
-def test_new_name_at_same_address_drives_original_simulation(
+def test_renamed_published_device_drives_original_simulation(
     qapp, tmp_path, monkeypatch
 ):
     env = bias_environment()
@@ -270,12 +271,9 @@ def test_new_name_at_same_address_drives_original_simulation(
             ),
         )
         assert outcome.status == "finished", outcome.error
-        ctrl.device_control.forget_device("bias")
+        ctrl.device_control.rename_device("bias", "renamed_bias")
         outcome = completed_operation(
-            ctrl,
-            ctrl.device_control.start_connect_device(
-                ConnectDeviceRequest("FakeDevice", "renamed_bias", "bias")
-            ),
+            ctrl, ctrl.device_control.start_reconnect_device("renamed_bias")
         )
         assert outcome.status == "finished", outcome.error
         assert ctrl.device_control.get_cached_device_value("renamed_bias") == 2.0
@@ -284,7 +282,7 @@ def test_new_name_at_same_address_drives_original_simulation(
         np.testing.assert_allclose(bias_trace(env), 3.0)
 
 
-@pytest.mark.parametrize("reconnect", [True, False], ids=["reconnect", "new-name"])
+@pytest.mark.parametrize("reconnect", [True, False], ids=["reconnect", "rename"])
 def test_ftf_address_binding_preserves_source_state_and_units(
     qapp, tmp_path, monkeypatch, reconnect
 ):
@@ -303,13 +301,9 @@ def test_ftf_address_binding_preserves_source_state_and_units(
         initial = ctrl.device_control.get_device_snapshot("bias")
         if initial is None:
             raise AssertionError("disconnected device must retain its address")
-        token = (
-            ctrl.device_control.start_reconnect_device("bias")
-            if reconnect
-            else ctrl.device_control.start_connect_device(
-                ConnectDeviceRequest("FakeDevice", name, initial.address)
-            )
-        )
+        if not reconnect:
+            ctrl.device_control.rename_device("bias", name)
+        token = ctrl.device_control.start_reconnect_device(name)
         outcome = completed_operation(ctrl, token)
         assert outcome.status == "finished", outcome.error
         assert ctrl.device_control.get_cached_device_value(name) == 0.3
@@ -321,14 +315,11 @@ def test_ftf_address_binding_preserves_source_state_and_units(
 def test_unmodeled_simulation_device_reports_failure(qapp, tmp_path, monkeypatch):
     env = white_noise(std_adc=0)
     with assembled_environment(qapp, tmp_path, monkeypatch, env) as ctrl:
-        outcome = completed_operation(
-            ctrl,
+        with pytest.raises(FailedPreconditionError, match="simulation.*publish"):
             ctrl.device_control.start_connect_device(
                 ConnectDeviceRequest("FakeDevice", "unmodeled", "none")
-            ),
-        )
-        assert outcome.status == "failed", "unmodeled device must not silently connect"
-        assert outcome.error is not None and "cannot bind" in outcome.error.lower()
+            )
+        assert ctrl.device_control.get_device_snapshot("unmodeled") is None
         assert "unmodeled" not in env.devices.get_all_devices()
 
 
@@ -336,14 +327,11 @@ def test_second_connected_name_at_same_address_is_rejected(qapp, tmp_path, monke
     env = bias_environment()
     with assembled_environment(qapp, tmp_path, monkeypatch, env) as ctrl:
         setup_bias(ctrl, "bias", 2.0)
-        outcome = completed_operation(
-            ctrl,
+        with pytest.raises(FailedPreconditionError, match="simulation.*publish"):
             ctrl.device_control.start_connect_device(
                 ConnectDeviceRequest("FakeDevice", "duplicate_bias", "bias")
-            ),
-        )
-        assert outcome.status == "failed", "one driver cannot have two connected names"
-        assert outcome.error is not None and "already registered" in outcome.error
+            )
+        assert ctrl.device_control.get_device_snapshot("duplicate_bias") is None
         setup_bias(ctrl, "bias", 3.0)
         np.testing.assert_allclose(bias_trace(env), 3.0)
 

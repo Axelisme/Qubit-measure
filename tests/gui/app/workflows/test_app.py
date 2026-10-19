@@ -77,6 +77,7 @@ def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior[Con
             registrations=build_registry(),
             alias_presets={"default": ALIAS_PRESET},
             project_root=str(tmp_path),
+            driver_factory=lambda type_name, address: FakeDevice(address=address),
         )
         try:
             yield behavior
@@ -463,7 +464,7 @@ def test_window_close_drains_and_closes_its_session_registry(
 ) -> None:
     app.assemble(None)
     token = app.services.device.start_connect_device(
-        ConnectDeviceRequest("FakeDevice", "flux", "none")
+        ConnectDeviceRequest("YOKOGS200", "flux", "none")
     )
     # start_connect_device accepted a FakeDevice worker and queued owner delivery.
     qt_until(
@@ -517,7 +518,7 @@ def test_window_close_rejects_queued_connect_before_driver_registration(
         try:
             accepted.append(
                 app.services.device.start_connect_device(
-                    ConnectDeviceRequest("FakeDevice", "late", "none")
+                    ConnectDeviceRequest("YOKOGS200", "late", "none")
                 )
             )
         except RuntimeError as error:
@@ -571,7 +572,7 @@ def test_window_close_drains_accepted_connect_and_delivery_before_driver_close(
             app.services.device, lambda _name: events.append("delivery")
         )
         app.services.device.start_connect_device(
-            ConnectDeviceRequest("FakeDevice", "flux", "none")
+            ConnectDeviceRequest("YOKOGS200", "flux", "none")
         )
         try:
             # start_connect_device accepted the worker that calls the driver above.
@@ -605,7 +606,7 @@ def test_failed_window_close_keeps_terminal_admission_closed_and_can_retry(
         caught: Exception | None = None
         try:
             app.services.device.start_connect_device(
-                ConnectDeviceRequest("FakeDevice", "late", "none")
+                ConnectDeviceRequest("YOKOGS200", "late", "none")
             )
         except RuntimeError as error:
             caught = error
@@ -615,6 +616,6 @@ def test_failed_window_close_keeps_terminal_admission_closed_and_can_retry(
     assert app.window.close()
     with pytest.raises(RuntimeError, match="background") as rejected:
         app.services.device.start_connect_device(
-            ConnectDeviceRequest("FakeDevice", "after", "none")
+            ConnectDeviceRequest("YOKOGS200", "after", "none")
         )
     assert type(rejected.value).__name__ == "BackgroundAdmissionClosedError"
