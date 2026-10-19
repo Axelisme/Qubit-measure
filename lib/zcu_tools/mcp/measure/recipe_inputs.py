@@ -1,8 +1,10 @@
 """Validate handwritten recipe inputs and detach typed keyword arguments.
 
 JSON Schema validation belongs to jsonschema. This adapter adds the recipe's
-finite leaf boundary and existing number-to-float normalization; it does not
-derive schemas from Python signatures or interpret experiment-specific rules.
+finite leaf boundary. JSON ints stay ints when the schema admits integer;
+otherwise numeric inputs normalize to float when the schema admits number.
+It does not derive schemas from Python signatures or interpret
+experiment-specific rules.
 """
 
 from collections.abc import Mapping
@@ -81,10 +83,12 @@ def _scalar(
     if isinstance(value, float) and not isfinite(value):
         raise ValueError(f"{name} must be a finite number")
     types = _types(schema) if schema is not None else ()
+    if "integer" in types and isinstance(value, int):
+        return value
     if "number" in types:
         return _number(value, name)
     # Keep the existing integer-input contract: integral floats are not integers.
-    if "integer" in types and not isinstance(value, int):
+    if "integer" in types:
         raise ValueError(f"{name} must be an integer")
     return value
 
