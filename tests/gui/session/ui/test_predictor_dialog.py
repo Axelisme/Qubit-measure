@@ -138,7 +138,7 @@ def test_predictor_dialog_browse_cancel_is_noop(qapp):
     before_state = dialog.capture_state()
 
     with patch(
-        "zcu_tools.gui.session.ui.predictor_dialog.QFileDialog.getOpenFileName",
+        "qtpy.QtWidgets.QFileDialog.getOpenFileName",
         return_value=("", ""),
     ):
         _button(dialog, "Browse").click()
@@ -153,7 +153,7 @@ def test_predictor_dialog_browse_error_shown_in_status(qapp, tmp_path):
     missing = tmp_path / "params.json"
 
     with patch(
-        "zcu_tools.gui.session.ui.predictor_dialog.QFileDialog.getOpenFileName",
+        "qtpy.QtWidgets.QFileDialog.getOpenFileName",
         return_value=(str(missing), ""),
     ):
         _button(dialog, "Browse").click()

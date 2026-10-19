@@ -2,7 +2,7 @@
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-18，device 活動快照與 run 後 cache 讀回
+**Last updated:** 2026-10-19，獨立 predictor 的控件與局部 state owner
 
 ## 問題與決策
 
@@ -59,6 +59,11 @@ Predictor 不持有 installed session model，不參與 Run 或 Analyze／Post-a
 app composition 顯式注入。Framework 不 import 使用者套件（C16）；simulate 不新增容器讀取依賴（C9）。
 Dialog 的試算參數是獨立 owner，不寫回元件。Service／remote 明確取得參數或具體元件名，
 不讀 dialog。Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 devices。
+
+2026-10-19，使用者裁決：「採 B，只限 PredictorDialog。依 repo 規則，新 class 有理由：它們各自隱藏真實的控件與局部 state 協調（參數編輯、曲線互動），不是轉接層。照你列的硬邊界（PredictorControlPort／ModelParams／物理 owner 不變、public 行為與文字版面不變、無 Protocol/factory/mixin、callers/tests 同票）。外觀不得改變；ComponentDriver 情境＋逐步 PNG 你親看即可，不需交使用者。」
+
+`PredictorParameterEditor` 持有 model 選擇、nullable 參數與已知欄位控件，以及顯式 component／file 預填。`PredictorCurveTabs` 持有三張 canvas、toolbars、matrix capability 與跨圖 marker／highlight／xlim 協調。兩者是 dialog-owned 的具體 child QWidget，不取得整個 dialog，也不跨 owner 存取私有狀態。
+Dialog 保留 cache、device 訂閱、calibration、tracked table 與生命週期。子元件沿用原 predictor queries 與物理參數型別。Programmatic 預填以同步 callback 保留立即刷新、保存與例外傳遞；不以 Qt signal 隔離取代同步呼叫。這個責任劃分只適用 PredictorDialog。
 
 ## Adapter capability 與事件
 
