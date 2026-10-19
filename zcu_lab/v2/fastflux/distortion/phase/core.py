@@ -85,6 +85,15 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
     )
 
     def run(self, config: PhaseCfg, *, context: RunContext) -> PhaseResult:
+        """Measure the phase response of a delayed π/2 pair to a flux transient.
+
+        After reset, run flux alongside wait→π/2→phase-swept π/2 and a
+        readout_t wait. Both π/2 pulses stay inside the same branch, with no
+        added free-evolution delay between them. Read out after the longest
+        branch; readout_t is a minimum duration in us. Return waits in us,
+        phases in degrees and mean complex IQ shaped (wait, phase).
+        """
+        # Quantize the pair start time and the second pulse projection phase.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -99,6 +108,7 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
+        # Keep one mean IQ value for each pair-start/projection-phase setting.
         viewer = context.plots.liveplot_2d("measurement", "Time (us)", "Phase (deg)")
         signals_buffer = SignalBuffer(
             (len(lengths), len(phases)),
@@ -106,10 +116,13 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
                 lengths, phases, phase_signal2real(data)
             ),
         )
+
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             length_param = sweep2param("length", sched.cfg.sweep.length)
             phase_param = sweep2param("phase", sched.cfg.sweep.phase)
+
+            # Move the whole π/2 pair through the independently scheduled flux pulse.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -142,6 +155,13 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         *,
         plots: Plots,
     ) -> PhaseAnalysis:
+        """Extract unwrapped phase in degrees versus the π/2-pair midpoint (us).
+
+        Fit sine/cosine coefficients across projection phase at each wait.
+        Require source.cfg for pair/flux timing, otherwise raise ValueError.
+        The overlaid rectangular curve is a timing reference, not a fitted
+        transfer function.
+        """
         del options  # This analysis has no configurable options.
         result = source.result
 

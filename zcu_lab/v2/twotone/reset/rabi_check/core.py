@@ -23,7 +23,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
-    Module,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -75,28 +74,6 @@ class RabiCheckCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: RabiCheckSweepCfg
 
 
-def _rabi_check_sequence(
-    modules: RabiCheckModuleCfg, gain_sweep: SweepCfg
-) -> tuple[Module, ...]:
-    # Both Pulse instances copy this swept cfg, so the post-reset drive follows
-    # the same gain axis while keeping a distinct module name in diagnostics.
-    modules.rabi_pulse.set_param("gain", sweep2param("gain", gain_sweep))
-    return (
-        Reset("reset", modules.reset),
-        Pulse("rabi_pulse", modules.rabi_pulse),
-        Branch(
-            "reset_sel",
-            [],
-            Reset("tested_reset_1", modules.tested_reset),
-            [
-                Reset("tested_reset_2", modules.tested_reset),
-                Pulse("rabi_pulse_after_reset", modules.rabi_pulse),
-            ],
-        ),
-        Readout("readout", modules.readout),
-    )
-
-
 class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
     AXES_SPEC = AxesSpec(
         axes=(
@@ -111,6 +88,15 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
     )
 
     def run(self, cfg: RabiCheckCfg, *, context: RunContext) -> RabiCheckResult:
+        """Compare averaged IQ before reset, after reset, and after reset + Rabi.
+
+        Prepare with the optional reset, then sweep the Rabi pulse gain. Select
+        no tested reset, tested reset alone, or tested reset followed by the same
+        swept pulse, and read out. Return quantized gains and mean complex IQ
+        with shape (3, number of gains), in that branch order. These curves
+        describe relative contrast, not reset fidelity; unacquired data stay NaN.
+        """
+        # 1. Prepare the quantized gain axis without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -121,6 +107,7 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
             {"soccfg": soccfg, "gen_ch": modules.rabi_pulse.ch},
         )
 
+        # 2. Project all three mean-IQ curves onto the before-reset IQ axis.
         viewer = context.plots.liveplot_1d(
             "measurement", "Pulse gain", "Amplitude", num_lines=3
         )
@@ -129,13 +116,33 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
             on_update=lambda data: viewer.update(gains, reset_rabi_signal2real(data)),
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
-            _ = (
+            # 3. Both drives use the same gain sweep but distinct module names.
+            modules = sched.cfg.modules
+            modules.rabi_pulse.set_param(
+                "gain", sweep2param("gain", sched.cfg.sweep.gain)
+            )
+            builder = (
                 sched.prog_builder(soc, soccfg)
-                .add(*_rabi_check_sequence(sched.cfg.modules, sched.cfg.sweep.gain))
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("rabi_pulse", modules.rabi_pulse),
+                    Branch(
+                        "reset_sel",
+                        [],  # 0: Before the tested reset.
+                        Reset("tested_reset_1", modules.tested_reset),  # 1: Reset only.
+                        [  # 2: Reset followed by a second swept Rabi pulse.
+                            Reset("tested_reset_2", modules.tested_reset),
+                            Pulse("rabi_pulse_after_reset", modules.rabi_pulse),
+                        ],
+                    ),
+                    Readout("readout", modules.readout),
+                )
                 .declare_sweep("reset_sel", 3)
                 .declare_sweep("gain", sched.cfg.sweep.gain)
-                .build_and_acquire()
             )
+
+            # 4. Acquire all branches and average using the existing reps/rounds.
+            _ = builder.build_and_acquire()
 
         return RabiCheckResult(gains, signals_buffer.array)
 

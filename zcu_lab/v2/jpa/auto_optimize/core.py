@@ -46,6 +46,12 @@ from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
 
 @dataclass(frozen=True)
 class JPAOptimizeResult:
+    """Sampled [flux device value, MHz, dBm] rows, optimizer phases, and GE SNR.
+
+    All arrays follow iteration order; unmeasured params/signals remain NaN.
+    Phase labels record the search stage, not a physical pulse phase.
+    """
+
     params: NDArray[np.float64]
     phases: NDArray[np.int32]
     signals: NDArray[np.float64]
@@ -298,6 +304,21 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
     AXES_SPEC = JPA_AUTO_GROUPED_AXES_SPEC
 
     def run(self, cfg: JPAOptCfg, *, context: RunContext) -> JPAOptimizeResult:
+        """Search JPA flux, pump frequency, and pump power for high readout SNR.
+
+        For each candidate, set flux/frequency/power, reset, select no pulse
+        or a pi pulse, and read out both preparation branches. Their IQ
+        moments give SNR with the configured skew penalty, not assignment
+        fidelity. Feed the previous SNR to the optimizer for the next point.
+        Return sampled [flux device value, MHz, dBm], search phases, and SNR.
+
+        Sweep bounds and relative resolution hints guide the search; they
+        do not define a Cartesian scan. ``num_points`` is an integer budget
+        of at least four evaluations. Both device names must exist in
+        ``context.devices``; ``flux_unit`` is used without conversion.
+        Optimizer exhaustion before the budget is consumed is an error.
+        """
+        # 1. Allocate the search budget and iteration-aligned result arrays.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         num_points = cfg.num_points
@@ -309,6 +330,7 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
         point_indices = np.arange(num_points, dtype=np.float64)
+        # Show SNR versus iteration and each candidate parameter, colored by phase.
         figure, initial_ax = context.plots.subplots("measurement", figsize=(8, 5))
         initial_ax.remove()
         figure.suptitle("JPA Auto Optimization")
@@ -352,6 +374,8 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
         signals_buffer = SignalBuffer(
             (num_points,), dtype=np.float64, on_update=plot_fn
         )
+
+        # 2. Use the previous SNR to choose and apply the next pump/bias setting.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for idx, step in sched.scan("Iteration", range(num_points)):
                 current_index = idx
@@ -379,6 +403,8 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
                     context.devices[step.cfg.jpa_rf_dev], 1e6 * params[idx, 1]
                 )
                 set_rf_power(context.devices[step.cfg.jpa_rf_dev], params[idx, 2])
+
+                # 3. Compare reset-only and pi-prepared readout for this candidate.
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (
@@ -398,6 +424,8 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
                         trackers=[tracker],
                     )
                 )
+
+        # 4. Keep candidates, search phases, and measured SNR paired by iteration.
         return JPAOptimizeResult(
             params=params, phases=phases, signals=signals_buffer.array
         )
@@ -409,6 +437,12 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
         *,
         plots: Plots,
     ) -> JPAOptimizeAnalysis:
+        """Return the measured candidate with peak SNR and plot four projections.
+
+        Use ``source`` data and None options, with no interpolation. The
+        returned flux is a device value, frequency is MHz, and power is dBm.
+        All-NaN SNR fails rather than proposing an unmeasured candidate.
+        """
         result = source.result
 
         params = result.params
@@ -463,6 +497,11 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
     def plot_sample_params(
         self, source: RunRecord[JPAOptCfg, JPAOptimizeResult], *, plots: Plots
     ) -> None:
+        """Plot ``source`` candidates in flux/MHz/dBm space for search diagnosis.
+
+        Color marks the optimizer phase; opacity scales with measured SNR.
+        This view does not select or apply a pump setting.
+        """
         result = source.result
 
         params = result.params

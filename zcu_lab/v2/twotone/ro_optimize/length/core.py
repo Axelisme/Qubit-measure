@@ -40,6 +40,8 @@ from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
 
 @dataclass(frozen=True)
 class LengthResult:
+    """ADC integration windows in us and moment-SNR scores (length,)."""
+
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
 
@@ -96,6 +98,17 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> LengthResult:
+        """Measure readout SNR versus the ADC integration window.
+
+        Host-scan the window in us. At each point, apply optional reset,
+        omit or apply qub_pulse, then read out. Configure qub_pulse for the
+        intended excitation. Keep the RF pulse at the largest window plus
+        0.11 us throughout the scan. Return lengths and moment-based SNR
+        shaped (Nlength,), optionally reduced by skew_penalty for distorted
+        IQ distributions. SNR is not assignment fidelity.
+        acquire_kwargs is forwarded to acquisition.
+        """
+        # Quantize integration windows on the ADC clock, not the generator clock.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -107,6 +120,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             {"soccfg": soccfg, "ro_ch": readout_cfg.ro_ch},
         )
 
+        # Display the score for each integration window, not averaged state IQ.
         viewer = context.plots.liveplot_1d(
             "measurement",
             "Readout Length (us)",
@@ -117,6 +131,8 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(lengths, np.abs(data)),
         )
+
+        # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
                 modules = step.cfg.modules
@@ -144,6 +160,8 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
                         **(acquire_kwargs or {}),
                     )
                 )
+
+        # Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
         return LengthResult(lengths, signals)
@@ -155,6 +173,14 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         *,
         plots: Plots,
     ) -> LengthAnalysis:
+        """Choose the integration window from the smoothed SNR curve.
+
+        options controls smoothing and t0 (us). None or zero selects pure SNR;
+        positive t0 maximizes SNR/sqrt(length + t0), favoring shorter windows
+        more strongly for smaller t0. Negative t0 raises ValueError.
+        NaN scores become zero before smoothing. Return best_length in us
+        and publish fit. source.cfg may be None.
+        """
         result = source.result
         if options.t0 is not None and options.t0 < 0.0:
             raise ValueError("t0 duration normalization must be non-negative")

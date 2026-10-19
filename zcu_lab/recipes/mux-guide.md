@@ -1,9 +1,119 @@
 # Mux qubit recipes
 
+**Last updated:** 2026-10-19, explicit core sequences and analysis policies
+
 These recipes use the native mux Forms and numeric cores. Bind a complete MuxGroup,
 open an entry and point, and connect an authorized acquisition environment first.
 A recipe does not connect devices, repair bindings or infer a new scan range.
 Small synthetic or truncated FTF runs check integration, not calibration quality.
+
+## Authoring readable experiments and recipes
+
+These four rules apply to all `zcu_lab` experiments and recipes. Keep the pulse
+sequence in its core and the measurement procedure in its recipe. A reader
+should not need to open a shared helper to discover either one.
+
+### 1. Write sequences and analysis policies in each core
+
+Each core's `run()` lists its `Pulse`, `Delay`, `Join` and readout operations.
+Share validation, reshaping and averaging mechanics, not a sequence builder that
+switches experiments with a mode or flag.
+
+For example, [mux Amp Rabi](../v2/mux/amp_rabi/core.py) writes reset,
+`Join(Pulse(...), ...)`, then `MuxReadout` inside `run()`. Drives start together;
+readout waits for the longest branch. Ramsey writes its own x90, delay, x90 and
+readout stages instead of calling `acquire(mode="ramsey")`. The
+[core authoring guide](../v2/experiment-authoring.md#1-在-core-直接寫出-pulse-序列與分析政策)
+shows a short sequence fragment.
+
+The same rule applies to `analyze()`. Echo states its first-point omission in
+its core. Ramsey chooses its fixed 0/180-degree phase from the data in its core.
+Shared fitting helpers receive explicit parameters such as skip and phase;
+they do not choose policies by experiment name or mode. Phase is a numeric value
+or `None` for a free fit, not a policy callback. Moving a policy must preserve
+numeric results and failure behavior.
+
+### 2. Write each recipe step in the function body
+
+Open the tab, choose library entries, edit fields, Run, Analyze and ask about
+writeback in the recipe itself. A shared helper may perform one step, such as
+one library selection. It must not hide setup plus Run, or Run plus Analyze
+and writeback.
+
+For example, the normal completion path of
+[mux Amp Rabi](mux_amp_rabi.py) has the following shape. This fragment assumes
+a valid bound group with Q1 at complete-list position 0 and the named library
+pulse. It omits other input edits; keep cancellation checks when adding steps.
+
+```python
+# 1. Configure the selected qubit before acquisition.
+tab = session.open_tab("mux/amp_rabi", aliases={"mux": target})
+tab.use_library(("tones", 0, "drive"), "Q1.pulses.pi")
+tab.set_fields([RecipeFieldEdit(("participants",), ["Q1"])])
+
+# 2. Acquire and save IQ so the fit has a recorded source.
+result = yield from tab.run_step()
+run = result.run
+if result.status == "cancelled" or run is None:
+    return
+run.save_raw()
+
+# 3. Fit the gain sweep to locate pi and pi/2 rotations.
+analysis = yield from run.analyze_step("primary")
+if analysis.status == "cancelled":
+    return
+
+# 4. Ask before applying the proposed pulse calibration.
+decision = yield from ask(run.propose_writeback())
+if decision.status == "cancelled":
+    return
+if decision.decision == "accepted":
+    tab.accept()
+```
+
+The recipe's input schema and reporting shape stay unchanged when moving these
+steps into the body. GE also writes its Post analysis step explicitly.
+
+### 3. Describe the measurement in docstrings
+
+Say what is measured, which sequence is applied and what the results mean.
+Keep units, input meanings and necessary failure conditions. Mention lifecycle,
+rollback or caller duties in one sentence only when needed; link to framework
+documentation for the details.
+
+For example, a [mux Amp Rabi recipe](mux_amp_rabi.py) docstring can start with:
+
+```python
+"""Sweep drive gain on selected qubits with simultaneous mux readout.
+
+Fit the resulting Rabi oscillations to estimate pi and pi/2 gains.
+Ask whether to apply the proposed pulse calibrations; skipping writes nothing.
+"""
+```
+
+Document the tool inputs after this measurement description. Do not replace it
+with a list of transport, resource ownership and rollback clauses.
+
+### 4. Separate stages with comments and blank lines
+
+Use a blank line between setup, acquisition, analysis and writeback stages.
+Explain each stage's purpose or a timing constraint, rather than narrating
+individual assignments. Keep code comments in English.
+
+For example, [mux GE](mux_singleshot_ge.py) needs distinct analysis stages:
+
+```python
+# Fit the paired probe-off/on IQ clouds before deriving discrimination settings.
+analysis = yield from run.analyze_step("primary")
+...
+
+# Use the primary calibration to choose the Post discrimination radius.
+analysis = yield from run.analyze_step("post")
+...
+```
+
+This is a stage-layout sketch, not a complete recipe. Keep the cancellation
+checks and writeback question visible in the actual function.
 
 ## Recipe names and inputs
 
