@@ -29,6 +29,7 @@ from migrations.storage_migration import (
     load_run_evidence,
     migrate_storage,
 )
+from tests._native_support import hdf_group
 from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
@@ -278,7 +279,9 @@ def test_instrument_snapshot_preserves_values_or_reports_isolated_pending(
 ) -> None:
     request_data, source = write_run(request_data)
     with h5.File(source, "r+") as file:
-        instrument = file["Instrument config"].create_group("synthetic source")
+        instrument = hdf_group(file, "Instrument config").create_group(
+            "synthetic source"
+        )
         instrument.attrs["frequency"] = np.float64(5.25e9)
         instrument.attrs["enabled"] = np.bool_(True)
         instrument.attrs["label"] = np.bytes_(b"offline")
@@ -294,7 +297,9 @@ def test_instrument_snapshot_preserves_values_or_reports_isolated_pending(
     request_data = replace(request_data, run_evidence=load_run_evidence(evidence_path))
     original = source.read_bytes()
     report = migrate_storage(
-        request_data, mapping=mapping, validate_cfg=validate_cfg,
+        request_data,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     native = next(
@@ -303,23 +308,37 @@ def test_instrument_snapshot_preserves_values_or_reports_isolated_pending(
     stored = load_run_data(native)
     if unsupported:
         assert stored.metadata.device_snapshot is None
-        pending = [item for item in report.pending if item.location == "device snapshot pending"]
+        pending = [
+            item
+            for item in report.pending
+            if item.location == "device snapshot pending"
+        ]
         assert len(pending) == 1
         assert "reference" in pending[0].reason
     else:
         assert stored.metadata.device_snapshot is not None
         assert stored.metadata.device_snapshot["synthetic source"] == {
-            "frequency": 5.25e9, "enabled": True, "label": "offline",
-            "points": [{"real": 1.0, "imag": 2.0},
-                       {"real": {"nonfinite": "inf"}, "imag": {"nonfinite": "nan"}}],
-            "bounds": [{"nonfinite": "nan"}, {"nonfinite": "inf"}, {"nonfinite": "-inf"}],
+            "frequency": 5.25e9,
+            "enabled": True,
+            "label": "offline",
+            "points": [
+                {"real": 1.0, "imag": 2.0},
+                {"real": {"nonfinite": "inf"}, "imag": {"nonfinite": "nan"}},
+            ],
+            "bounds": [
+                {"nonfinite": "nan"},
+                {"nonfinite": "inf"},
+                {"nonfinite": "-inf"},
+            ],
             "empty": [],
         }
         assert not report.pending
     np.testing.assert_array_equal(
         stored.payload.variables[DataVariable("signal")].z, [1 + 2j, 3 + 4j]
     )
-    assert (request_data.database_root / request_data.name / "Labber/2025/10/scan.hdf5").read_bytes() == original
+    assert (
+        request_data.database_root / request_data.name / "Labber/2025/10/scan.hdf5"
+    ).read_bytes() == original
     assert not report.failures
 
 
@@ -329,7 +348,9 @@ def test_native_links_to_preserved_labber_relative_to_entry_database(
     request_data, source = write_run(request_data)
     original = source.read_bytes()
     report = migrate_storage(
-        request_data, mapping=mapping, validate_cfg=validate_cfg,
+        request_data,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     native = next(

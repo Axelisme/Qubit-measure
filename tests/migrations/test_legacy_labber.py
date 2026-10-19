@@ -17,6 +17,7 @@ from zcu_tools.datafile import (
 )
 
 from migrations.legacy_labber import load_legacy_labber_payload
+from tests._native_support import hdf_dataset
 
 
 @pytest.mark.parametrize("representation", ["single", "grouped"])
@@ -96,29 +97,43 @@ def test_unmarked_file_does_not_guess_multiple_variable_identities(
 def unmarked_logs(tmp_path: Path) -> tuple[Path, tuple[VariableSchema, ...]]:
     source = tmp_path / "old.hdf5"
     schemas: list[VariableSchema] = []
-    for index, (name, axis, values, signal) in enumerate([
-        ("first", "time", [0.0, 1.0], [1.0, 2.0]),
-        ("second", "frequency", [3.0, 4.0, 5.0], [6.0, 7.0, 8.0]),
-    ]):
+    for index, (name, axis, values, signal) in enumerate(
+        [
+            ("first", "time", [0.0, 1.0], [1.0, 2.0]),
+            ("second", "frequency", [3.0, 4.0, 5.0], [6.0, 7.0, 8.0]),
+        ]
+    ):
         path = source if index == 0 else tmp_path / "additional.hdf5"
         payload = ExperimentPayload(
-            variables={DataVariable(name): LabberPayload(
-                (name, "V", np.asarray(signal)), [(axis, "s", np.asarray(values))],
-                timestamps=np.array([1759276800.0 + index]),
-            )}, metadata=LabberMetadata(tags=["offline"], creation_time=1759276800.0),
+            variables={
+                DataVariable(name): LabberPayload(
+                    (name, "V", np.asarray(signal)),
+                    [(axis, "s", np.asarray(values))],
+                    timestamps=np.array([1759276800.0 + index]),
+                )
+            },
+            metadata=LabberMetadata(tags=["offline"], creation_time=1759276800.0),
             representation="single",
         )
-        write_labber(path, payload, cfg=CfgSnapshot(values={}, cfg_type="Synthetic", schema_version="1.0"))
+        write_labber(
+            path,
+            payload,
+            cfg=CfgSnapshot(values={}, cfg_type="Synthetic", schema_version="1.0"),
+        )
         if index:
             with h5.File(source, "r+") as root, h5.File(path, "r") as extra:
                 group = root.create_group("Log_2")
                 for key in ("Data", "Channels", "Log list"):
                     extra.copy(key, group)
-        schemas.append(VariableSchema(
-            variable=DataVariable(name),
-            axes=(AxisSchema(name=axis, unit="s", dtype=np.dtype("float64")),),
-            signal_name=name, signal_unit="V", signal_dtype=np.dtype("float64"),
-        ))
+        schemas.append(
+            VariableSchema(
+                variable=DataVariable(name),
+                axes=(AxisSchema(name=axis, unit="s", dtype=np.dtype("float64")),),
+                signal_name=name,
+                signal_unit="V",
+                signal_dtype=np.dtype("float64"),
+            )
+        )
     return source, tuple(schemas)
 
 
@@ -134,9 +149,15 @@ def test_unmarked_logs_follow_explicit_schema_order_with_independent_grids(
     assert loaded.representation == "grouped"
     assert loaded.metadata.tags == ["offline"]
     np.testing.assert_array_equal(loaded.variables[DataVariable("first")].z, [1.0, 2.0])
-    np.testing.assert_array_equal(loaded.variables[DataVariable("second")].z, [6.0, 7.0, 8.0])
-    np.testing.assert_array_equal(loaded.variables[DataVariable("second")].x, [3.0, 4.0, 5.0])
-    np.testing.assert_array_equal(loaded.variables[DataVariable("second")].timestamps, [1759276801.0])
+    np.testing.assert_array_equal(
+        loaded.variables[DataVariable("second")].z, [6.0, 7.0, 8.0]
+    )
+    np.testing.assert_array_equal(
+        loaded.variables[DataVariable("second")].x, [3.0, 4.0, 5.0]
+    )
+    np.testing.assert_array_equal(
+        loaded.variables[DataVariable("second")].timestamps, [1759276801.0]
+    )
     assert source.read_bytes() == original
 
 
@@ -152,13 +173,15 @@ def test_unmarked_log_schema_mismatch_is_located(
             if mismatch == "shape":
                 file["Log_2/Data"].attrs["Step dimensions"] = np.array([99])
             elif mismatch == "signal":
-                rows = file["Log_2/Log list"][()]
+                dataset = hdf_dataset(file, "Log_2/Log list")
+                rows = dataset[()]
                 rows[0]["channel_name"] = "wrong"
-                file["Log_2/Log list"][...] = rows
+                dataset[...] = rows
             else:
-                rows = file["Log_2/Channels"][()]
+                dataset = hdf_dataset(file, "Log_2/Channels")
+                rows = dataset[()]
                 rows[0]["name" if mismatch == "axis" else "unitPhys"] = "wrong"
-                file["Log_2/Channels"][...] = rows
+                dataset[...] = rows
     with pytest.raises(ValueError, match="log count|/second|Log_2"):
         load_legacy_labber_payload(source, schema=schema)
 

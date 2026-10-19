@@ -475,9 +475,7 @@ def test_full_metadata_load_preserves_historical_evidence(
 
 
 @pytest.mark.parametrize("entry", ["load_run", "load_run_with_metadata", "from_stored"])
-def test_typed_readers_keep_labber_metadata(
-    tmp_path: Path, entry: str
-) -> None:
+def test_typed_readers_keep_labber_metadata(tmp_path: Path, entry: str) -> None:
     record = RunRecord(
         cfg=NativeCfg(), result=SingleResult(np.array([4000.0]), np.array([1j]))
     )
@@ -491,8 +489,10 @@ def test_typed_readers_keep_labber_metadata(
     )
     path = tmp_path / "native.h5"
     save_run_data(
-        path, replace(prepared.payload, metadata=labber),
-        native_metadata(SINGLE.tag), cfg=prepared.cfg,
+        path,
+        replace(prepared.payload, metadata=labber),
+        native_metadata(SINGLE.tag),
+        cfg=prepared.cfg,
     )
     if entry == "load_run":
         loaded, _snapshot = load_run(path, spec=SINGLE)
