@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._qt_waits import qt_until
@@ -15,7 +16,17 @@ pytestmark = pytest.mark.uses_wall_clock
 
 @pytest.fixture()
 def device_client(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    fx = Fixture()
+    manager = DeviceManager()
+    drivers = {
+        name: FakeDevice(address=name, fast_mode=False)
+        for name in ("bias", "ramp", "slow")
+    }
+    for name, driver in drivers.items():
+        manager.register_device(name, driver)
+    fx = Fixture(
+        device_registry=manager,
+        driver_factory=lambda type_name, address: drivers[address],
+    )
     fx.start()
     # Status is outside this device seam; Fixture has no real SoC.
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
@@ -28,20 +39,44 @@ def device_client(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         # Fixture teardown must drain the Controller-owned runner before GC.
         fx.ctrl.close()
         fx.stop()
+        manager.close_all_devices()
+
+
+def test_manual_fake_device_is_rejected_through_mcp(device_client) -> None:
+    invoke = device_client
+    before = invoke("rpc_call", {"method": "device.list"})
+    with pytest.raises(GuiRpcError, match="simulation.*publish"):
+        invoke(
+            "rpc_call",
+            {
+                "method": "device.connect",
+                "params": {
+                    "name": "manual",
+                    "type_name": "FakeDevice",
+                    "address": "none",
+                },
+            },
+        )
+    assert invoke("rpc_call", {"method": "device.list"}) == before
+    assert invoke("rpc_call", {"method": "device.active_operations"}) == {
+        "operations": []
+    }
 
 
 def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) -> None:
     invoke = device_client
-    assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
+    disconnected = invoke(
+        "rpc_call", {"method": "device.disconnect", "params": {"name": "bias"}}
+    )
+    assert (
+        invoke("wait", {"op": disconnected["handle"], "timeout": 30})["status"]
+        == "finished"
+    )
     started = invoke(
         "rpc_call",
         {
-            "method": "device.connect",
-            "params": {
-                "name": "bias",
-                "type_name": "FakeDevice",
-                "address": "none",
-            },
+            "method": "device.reconnect",
+            "params": {"name": "bias"},
         },
     )
     # The admitted synthetic operation must publish terminal; 30s only guards a hang.
@@ -59,7 +94,7 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
         assert connected["name"] == "bias"
         assert connected["type_name"] == "FakeDevice"
         assert connected["status"] == "connected"
-        assert connected["address"] == "none"
+        assert connected["address"] == "bias"
         fields = {field["name"]: field for field in connected["fields"]}
         assert fields["value"]["current"] == 0.0
         assert fields["address"]["settable"] is False
@@ -163,7 +198,9 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
             invoke("wait", {"op": disconnected["handle"], "timeout": 30})["status"]
             == "finished"
         )
-    assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
+    assert "bias" not in {
+        row["name"] for row in invoke("rpc_call", {"method": "device.list"})["devices"]
+    }
 
 
 def test_failed_connect_never_reports_success_or_registers_device(
@@ -208,22 +245,6 @@ def test_failed_connect_never_reports_success_or_registers_device(
 
 def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> None:
     invoke = device_client
-    connected = invoke(
-        "rpc_call",
-        {
-            "method": "device.connect",
-            "params": {
-                "name": "ramp",
-                "type_name": "FakeDevice",
-                "address": "none",
-            },
-        },
-    )
-    # The admitted synthetic operation must publish terminal; 30s only guards a hang.
-    assert (
-        invoke("wait", {"op": connected["handle"], "timeout": 30})["status"]
-        == "finished"
-    )
     op = None
     try:
         before = invoke(
@@ -295,26 +316,27 @@ def test_connect_wait_timeout_does_not_cancel_operation(
     entered = threading.Event()
     release = threading.Event()
 
-    def held_fake_open(_device, _resource_manager) -> None:
+    original_info = FakeDevice.get_info
+
+    def held_fake_info(device: FakeDevice):
         entered.set()
         # The test finally releases the held collaborator.
         if not release.wait(30):
             raise TimeoutError("fake driver was not released")
+        return original_info(device)
 
-    monkeypatch.setattr(
-        "zcu_tools.device.fake.FakeDevice._open_session", held_fake_open
+    monkeypatch.setattr("zcu_tools.device.fake.FakeDevice.get_info", held_fake_info)
+    disconnected = invoke(
+        "rpc_call", {"method": "device.disconnect", "params": {"name": "slow"}}
+    )
+    assert (
+        invoke("wait", {"op": disconnected["handle"], "timeout": 30})["status"]
+        == "finished"
     )
     try:
         started = invoke(
             "rpc_call",
-            {
-                "method": "device.connect",
-                "params": {
-                    "name": "slow",
-                    "type_name": "FakeDevice",
-                    "address": "none",
-                },
-            },
+            {"method": "device.reconnect", "params": {"name": "slow"}},
         )
         op = started["handle"]
         assert isinstance(op, int) and op > 0
@@ -361,19 +383,7 @@ def test_connect_wait_timeout_does_not_cancel_operation(
 
 def test_fake_device_snapshot_reports_stored_native_unit(device_client) -> None:
     invoke = device_client
-    started = invoke(
-        "rpc_call",
-        {
-            "method": "device.connect",
-            "params": {"name": "bias", "type_name": "FakeDevice", "address": "none"},
-        },
-    )
     try:
-        # The admitted synthetic operation must publish terminal; 30s only guards a hang.
-        assert (
-            invoke("wait", {"op": started["handle"], "timeout": 30})["status"]
-            == "finished"
-        )
         snapshot = invoke(
             "rpc_call", {"method": "device.snapshot", "params": {"name": "bias"}}
         )["snapshot"]

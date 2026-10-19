@@ -665,7 +665,7 @@ def test_device_connect_updates_state_and_presents_ui_feedback(
 ):
     """The default FakeDevice connects through the public device control facet."""
     cf.ctrl.device_control.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
+        ConnectDeviceRequest(type_name="YOKOGS200", name="flux", address="addr")
     )
     _wait_for(lambda: not cf.ctrl.device_control.get_active_device_operations())
 

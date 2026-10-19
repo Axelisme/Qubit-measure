@@ -11,7 +11,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.device import FakeDevice, FakeDeviceInfo
+from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -87,7 +87,7 @@ def _connect(svc: DeviceService) -> None:
     on_device_connected(svc, connected.append)
     on_device_operation_failed(svc, lambda _name, error: errors.append(error))
     svc.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name="test_dev", address="none")
+        ConnectDeviceRequest(type_name="YOKOGS200", name="test_dev", address="none")
     )
     qt_until(lambda: bool(connected or errors), label="connect test_dev")
     assert not errors
@@ -161,8 +161,10 @@ def test_device_service_emits_started_and_finished_events(qapp):
 # ---------------------------------------------------------------------------
 
 
-def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]:
+def _make_real_svc(driver: FakeDevice | None = None) -> tuple[DeviceService, object]:
     fake_device = driver if driver is not None else FakeDevice(fast_mode=True)
+    manager = DeviceManager()
+    manager.register_device("flux", fake_device)
     gate = OperationGate(EventBus())
     bg = _bg()
     handles = OperationHandles()
@@ -178,17 +180,13 @@ def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]
         runner,
         handles,
         driver_factory=lambda _type, _address: fake_device,  # type: ignore[arg-type]
+        device_registry=manager,
     )
     return svc, fake_device
 
 
 def _register(svc: DeviceService, name: str = "flux") -> None:
-    loop = _workers.completion()
-    on_device_connected(svc, lambda _request: loop.quit())
-    svc.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name=name, address="")
-    )
-    loop.exec()
+    svc.publish_initial_devices()
 
 
 def _disconnect(svc: DeviceService, name: str = "flux") -> None:
@@ -308,7 +306,7 @@ def test_direct_poll_skips_terminal_admission_without_reading_driver(qapp) -> No
         device_registry=FakeDeviceRegistry(),
     )
     try:
-        svc.start_connect_device(ConnectDeviceRequest("FakeDevice", "test_dev", "none"))
+        svc.start_connect_device(ConnectDeviceRequest("YOKOGS200", "test_dev", "none"))
         # The accepted connect worker posts its terminal to this manual owner.
         assert scheduler.pump_once(block=True, timeout=30)
         assert svc.get_connected_devices()
