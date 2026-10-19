@@ -308,7 +308,7 @@ def test_unproven_time_is_null_with_pending_at_verified_backup_original(
         "run_id": None,
         "created_at": None,
     }
-    backup_source = backup_path(request_data) / "result/chip/qubit/params.json"
+    backup_source = backup_path(request_data) / "result/params.json"
     pending = [
         item
         for item in report.pending
@@ -385,6 +385,28 @@ def test_undefined_explicit_model_contract_remains_located_pending(
             "Qlegacy.ext.legacy_params.fluxdep_fit",
         )
         == legacy_fit
+    )
+
+
+def test_undefined_transmon_parameter_shape_stays_pending(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+) -> None:
+    fit: JsonObject = {"params": {"EJmax": 12.0, "EC": 0.3, "d": 0.2}}
+    source = write_params(request_data, {"fluxdep_fit": fit})
+    report = migrate(request_data, analysis_mapping)
+    assert any(
+        item.source == source
+        and item.location == "fluxdep_fit.params"
+        and "legacy" in item.reason.lower()
+        for item in report.pending
+    )
+    assert (
+        document_value(
+            snapshot(open_entry(request_data).setup),
+            "Qlegacy.ext.legacy_params.fluxdep_fit",
+        )
+        == fit
     )
 
 
