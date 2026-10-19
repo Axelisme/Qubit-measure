@@ -44,7 +44,7 @@
 5. 組合根：使用者入口在 `scripts/`，agent MCP 入口在 `mcp_servers/`
 
 - `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
-- tests 不依賴 `zcu_lab`，不 import、不使用其 fake 實驗、不綁定實驗流程或預設值。
+- tests 不依賴 `zcu_lab`，不 import、不綁定實驗流程或預設值。
 
 框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。實驗定義錯誤由 GUI 啟動或載入時回報，不另維護個別實驗測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
 
