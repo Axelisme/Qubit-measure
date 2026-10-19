@@ -180,9 +180,7 @@ def test_connect_bumps_soc_not_context_version(qapp, real_bg):
 
 
 def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
-    """connect_sync runs inline (no bg), sets the soc, and emits SocChangedPayload
-    synchronously (the hook the MockFluxProvisioner rides). It returns the handles
-    directly and releases the SOC_CONNECT lease."""
+    """Synchronous connect publishes board identity and releases its lease."""
     gate = OperationGate(EventBus())
     state = _make_state()
     bus = EventBus()
@@ -200,7 +198,7 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     # The shared _apply_connection side effects fired synchronously.
     assert state.version.get("soc") == soc_before + 1
     assert len(payloads) == 1
-    assert payloads[0].is_mock is False
+    assert payloads[0].is_mock is True
     # Lease released, no lingering active token.
     assert not gate.has_active(OperationKind.SOC_CONNECT)
     assert not svc.is_connect_active()
@@ -222,7 +220,7 @@ def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
 
     monkeypatch.setattr(remote, "make_soc_proxy", proxy)
     svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
-    assert not svc.is_mock_soc()
+    assert svc.is_mock_soc()
     assert svc.connected_endpoint() == {"address": "192.0.2.1", "port": 8888}
 
     def fail(ip: str, port: int):
@@ -232,7 +230,7 @@ def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
     with pytest.raises(ConnectionRefusedError, match="offline"):
         svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
     assert svc.has_soc()
-    assert not svc.is_mock_soc()
+    assert svc.is_mock_soc()
     assert svc.connected_endpoint() == {"address": "192.0.2.1", "port": 8888}
 
 
@@ -252,6 +250,93 @@ def test_gui_async_remote_connect_updates_the_successful_endpoint(qapp, monkeypa
     background.deliver_result()
     assert svc.has_soc()
     assert svc.connected_endpoint() == {"address": "192.0.2.3", "port": 8000}
+
+
+def test_runtime_soc_replacement_and_uninstall_forward_board_identity(monkeypatch):
+    """Board identity belongs to the installed SoC, not its acquisition path."""
+    import zcu_tools.qick_remote as remote
+
+    class Board:
+        def __init__(self, is_mock: bool) -> None:
+            self.is_mock = is_mock
+
+        def get_cfg(self) -> dict[str, object]:
+            return {}
+
+    state = _make_state()
+    bus = EventBus()
+    svc, _background, _handles = _make_svc(state=state, bus=bus)
+    facts: list[SocChangedPayload] = []
+    bus.subscribe(SocChangedPayload, facts.append)
+    remote_board = Board(is_mock=True)
+    config = MagicMock()
+    monkeypatch.setattr(remote, "make_soc_proxy", lambda *_: (remote_board, config))
+
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    assert svc.is_mock_soc() is True
+    assert facts[-1].is_mock is True
+
+    context_version = state.version.get("context")
+    soc_version = state.version.get("soc")
+    local_board = Board(is_mock=False)
+    svc.install_soc(local_board, config)
+    assert state.session_env.soc is local_board
+    assert svc.get_soccfg() is config
+    assert svc.is_mock_soc() is False
+    assert svc.connected_endpoint() == {"address": None, "port": None}
+    assert state.version.get("soc") == soc_version + 1
+    assert state.version.get("context") == context_version
+    assert facts[-1].soc is local_board
+    assert facts[-1].is_mock is False
+
+    svc.uninstall_soc()
+    assert svc.has_soc() is False
+    assert svc.get_soccfg() is None
+    assert svc.is_mock_soc() is False
+    assert state.version.get("soc") == soc_version + 2
+    assert state.version.get("context") == context_version
+    assert facts[-1].soc is None
+    assert facts[-1].soccfg is None
+    assert facts[-1].is_mock is False
+
+    # Uninstalling does not permanently lock the connection owner.
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
+    assert svc.has_soc() is True
+    assert svc.is_mock_soc() is True
+
+
+@pytest.mark.parametrize("busy", ["run", "connect"])
+def test_runtime_soc_changes_reject_busy_gate_without_losing_installed_pair(busy):
+    state = _make_state()
+    bus = EventBus()
+    gate = OperationGate(bus)
+    svc, bg, _handles = _make_svc(gate=gate, state=state, bus=bus)
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    before = state.session_env
+    endpoint = svc.connected_endpoint()
+    version = state.version.get("soc")
+    facts: list[SocChangedPayload] = []
+    bus.subscribe(SocChangedPayload, facts.append)
+    if busy == "connect":
+        svc.start_connect(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
+    else:
+        gate.register(
+            999, MeasureOpKind.RUN, owner_id="tab", origin_kind="user", note="running"
+        )
+    try:
+        with pytest.raises(OperationConflictError):
+            svc.install_soc(MagicMock(), MagicMock())
+        with pytest.raises(OperationConflictError):
+            svc.uninstall_soc()
+        assert state.session_env is before
+        assert svc.connected_endpoint() == endpoint
+        assert state.version.get("soc") == version
+        assert facts == []
+    finally:
+        if busy == "connect":
+            bg.deliver_result()
+        else:
+            gate.release(999)
 
 
 def test_connect_sync_rejects_concurrent_calls(qapp):

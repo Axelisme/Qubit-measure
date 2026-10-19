@@ -15,6 +15,25 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from zcu_tools.gui.runtime import GuiLaunchOptions
 
+
+def select_startup_script(
+    *, clean: bool, script: Path | None, default_script: Path
+) -> Path | None:
+    """Select exactly one trusted script, or None for clean startup.
+
+    script is the explicit CLI path; default_script is supplied by composition,
+    never inferred from a user package in lib. clean skips both scripts and
+    conflicts with script, raising ValueError before GUI assembly. No file is
+    loaded or validated here; the background runner reports path/load failures.
+    This pure selection function has no thread or resource ownership requirement.
+    """
+    if clean and script is not None:
+        raise ValueError("--clean and --script are mutually exclusive")
+    if clean:
+        return None
+    return default_script if script is None else script
+
+
 DEFAULT_LOG_FILE_HELP = "Override the DEBUG log file path"
 DEFAULT_NO_LOG_HELP = "Disable file logging"
 DEFAULT_NO_CONTROL_HELP = (
@@ -83,4 +102,8 @@ def runtime_options_from_args(
     )
 
 
-__all__ = ["add_runtime_cli_options", "runtime_options_from_args"]
+__all__ = [
+    "add_runtime_cli_options",
+    "runtime_options_from_args",
+    "select_startup_script",
+]

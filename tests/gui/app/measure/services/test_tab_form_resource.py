@@ -313,6 +313,73 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
     assert resource.input.data["amount"] == {"expr": "unfinished +"}
 
 
+def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
+    latest = 2.0
+    captures: list[Mapping[str, str] | None] = []
+
+    def capture(aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
+        captures.append(aliases)
+        return resource_api.TabFormSources(captured_env(latest))
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(ScalarCore, {"amount": Expr("general.ext.amount * 2")}),
+        capture=capture,
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "refresh_sources"), (
+        "Tabs need an explicit capture-only command that preserves authored input"
+    )
+    published: list[object] = []
+    resource.subscribe(lambda: published.append(resource.preview().values[("amount",)]))
+    latest = 5.0
+    resource.refresh_sources(aliases={"selected": "Q2"})
+    assert resource.input.data == {"amount": 4.0}
+    assert resource.result() == ScalarCore(amount=4.0)
+    resource.write({("amount",): {"expr": "general.ext.amount * 3"}})
+    assert resource.result() == ScalarCore(amount=15.0)
+    before = resource.input.to_json()
+    latest = 7.0
+    resource.refresh_sources()
+    assert resource.input.to_json() == before
+    assert resource.result() == ScalarCore(amount=21.0)
+    assert published == [4.0, 15.0, 21.0]
+    assert captures == [None, {"selected": "Q2"}, None]
+    resource.reset()
+    assert resource.input.data == {"amount": 14.0}
+    assert resource.result() == ScalarCore(amount=14.0)
+    assert captures == [None, {"selected": "Q2"}, None, None]
+
+
+def test_refresh_retains_explicit_selections_and_reports_missing_library_source() -> (
+    None
+):
+    from tests.gui.form_adapter._indexed_models import indexed_env, indexed_form
+
+    env = indexed_env()
+    resource = resource_api.TabFormResource(
+        lambda _ctx: indexed_form(),
+        capture=lambda _aliases: resource_api.TabFormSources(env),
+        mutation_allowed=lambda: True,
+    )
+    try:
+        resource.select(("tones", 1, "sweep"), {"kind": "center"})
+        resource.write({("tones", 0, "phase"): {"expr": "unfinished +"}})
+        original = resource.input
+        env = FormEnv()
+        resource.refresh_sources()
+        assert resource.input.data == original.data
+        assert resource.input.selections == original.selections
+        assert resource.input.selections[("tones", 1, "sweep")] == {"kind": "center"}
+        errors = resource.preview().errors
+        assert errors is not None
+        assert ("tones", 0, "phase") in errors.messages
+        assert any("drive" in path for path in errors.messages)
+        with pytest.raises(CfgPreconditionError):
+            resource.accept()
+    finally:
+        resource.revoke()
+
+
 def test_describe_keeps_fixed_capture_and_revokes_retained_handle() -> None:
     captures: list[Mapping[str, str] | None] = []
     current = 2.0
@@ -440,6 +507,7 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
         for command in (
             lambda: second.write({("amount",): 9.0}),
             second.reset,
+            second.refresh_sources,
             second.accept,
             lambda: pool.retire("second"),
             lambda: pool.create("third", lambda _ctx: form, capture=capture),
@@ -451,13 +519,14 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
 
     first.subscribe(notification)
     first.write({("amount",): 4.0})
-    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 5
+    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 6
     assert second.result() == ScalarCore(amount=1.0)
     allowed = False
     for command in (
         lambda: second.write({("amount",): 9.0}),
         lambda: second.restore_input(FormInput(second.input.model, {"amount": 9.0})),
         second.reset,
+        second.refresh_sources,
     ):
         with pytest.raises(CfgPreconditionError) as caught:
             command()
@@ -465,15 +534,19 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
     assert second.result() == ScalarCore(amount=1.0)
     allowed = True
     pool.retire("second")
-    with pytest.raises(CfgPreconditionError) as caught:
-        second.write({("amount",): 9.0})
-    assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
+    for command in (lambda: second.write({("amount",): 9.0}), second.refresh_sources):
+        with pytest.raises(CfgPreconditionError) as caught:
+            command()
+        assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
     assert pool.create(
         "second", lambda _ctx: form, capture=capture
     ).result() == ScalarCore(amount=1.0)
 
 
-def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> None:
+@pytest.mark.parametrize("command", ["reset", "refresh_sources"])
+def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources(
+    command: str,
+) -> None:
     assert hasattr(resource_api, "TabFormResources"), (
         "Missing state-owned Form resource pool"
     )
@@ -496,8 +569,9 @@ def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> No
     )
     resource.write({("amount",): 5.0})
     amount, fail_capture = 2.0, True
+    recapture = resource.reset if command == "reset" else resource.refresh_sources
     with pytest.raises(RuntimeError, match="capture failed"):
-        resource.reset()
+        recapture()
     assert resource.result() == ScalarCore(amount=5.0)
     assert resource.input.data == {"amount": 5.0}
     parameters = resource.env.parameters
@@ -505,8 +579,8 @@ def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> No
     assert parameters.value("general.ext.amount") == 1.0
     assert captures == 2
     fail_capture = False
-    resource.reset()
-    assert resource.result() == ScalarCore(amount=2.0)
+    recapture()
+    assert resource.result() == ScalarCore(amount=2.0 if command == "reset" else 5.0)
     assert captures == 3
 
 

@@ -228,6 +228,8 @@ class TabInteractionState:
     # is enabled once a primary analyze result exists; the post figure/summary
     # render once a post result exists.
     has_post_analyze_result: bool = False
+    # True while a startup script owns admission; only Run is unavailable.
+    startup_active: bool = False
 
 
 class State(SessionState):
@@ -244,6 +246,7 @@ class State(SessionState):
         self.tabs: dict[str, Session[Any, Any, Any, Any]] = {}
         self.active_tab_id: str | None = None
         self.running_tab_id: str | None = None
+        self._startup_active = False
 
     def add_tab(
         self,
@@ -813,6 +816,20 @@ class State(SessionState):
         self._assert_owner()
         logger.debug("set_tab_analyzing: tab_id=%r analyzing=%s", tab_id, analyzing)
         self.tabs[tab_id].is_analyzing = analyzing
+
+    def set_startup_active(self, *, active: bool) -> None:
+        """Publish startup activity on-owner for tab Run availability.
+
+        active is True from script admission until owner terminal delivery.
+        This memory-only fact does not acquire or release the hardware gate.
+        Foreign-thread mutation raises RuntimeError.
+        """
+        self._assert_owner()
+        self._startup_active = active
+
+    def is_startup_active(self) -> bool:
+        """Read the current memory-only startup Run lock without I/O, on-owner."""
+        return self._startup_active
 
     def is_run_active(self) -> bool:
         return self.running_tab_id is not None

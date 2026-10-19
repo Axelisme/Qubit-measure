@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from weakref import ref
 
 from pydantic import JsonValue
+from pydantic_core import PydanticCustomError
 from PyQt6 import sip
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QSignalBlocker, Qt, QThread
@@ -75,6 +76,9 @@ class FormEditor[F: FormModel](QWidget):
     Uncommitted text changes neither state nor validity, and an external state
     publication redraws it with the state's input. Evaluation, choices, branch
     defaults and model validation belong to state.
+    WriteRejected, FormConversionError, FormInputRejected and source errors
+    expressed as PydanticCustomError become field-local errors, retaining the
+    previous committed state; other failures propagate.
     No Engine update, revision check, source capture, persistence or I/O occurs.
 
     Public child object names use model-field paths and indexes joined by dots:
@@ -622,7 +626,12 @@ class FormEditor[F: FormModel](QWidget):
                 state.write(batch, self._require_env())
             else:
                 self._host_write(batch)
-        except (WriteRejected, FormConversionError, FormInputRejected) as exc:
+        except (
+            WriteRejected,
+            FormConversionError,
+            FormInputRejected,
+            PydanticCustomError,
+        ) as exc:
             # Both routes installed nothing. Redraw the committed selector,
             # retaining unrelated local text; never retry a refused conversion.
             message = exc.message if isinstance(exc, WriteRejected) else str(exc)
@@ -642,7 +651,12 @@ class FormEditor[F: FormModel](QWidget):
                 state.select(path, selection, self._require_env())
             else:
                 self._host_select(path, selection)
-        except (WriteRejected, FormConversionError, FormInputRejected) as exc:
+        except (
+            WriteRejected,
+            FormConversionError,
+            FormInputRejected,
+            PydanticCustomError,
+        ) as exc:
             message = exc.message if isinstance(exc, WriteRejected) else str(exc)
             self._local[path] = self._rows[path].rejected_input(message)
         if self._publication_count == publication:
@@ -685,7 +699,7 @@ class FormEditor[F: FormModel](QWidget):
                 self._require_state().run_command(path, name, self._require_env())
             else:
                 self._host_command(path, name)
-        except (WriteRejected, FormInputRejected) as exc:
+        except (WriteRejected, FormInputRejected, PydanticCustomError) as exc:
             message = exc.message if isinstance(exc, WriteRejected) else str(exc)
             self._local[path] = self._rows[path].rejected_input(message)
         except FormCommandError:

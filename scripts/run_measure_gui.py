@@ -3,7 +3,8 @@
 Examples:
     uv run python run_measure_gui.py                          # default file logging; opens control socket on port 8765
     uv run python run_measure_gui.py --no-log                 # no file log
-    uv run python run_measure_gui.py --clean                  # don't restore the previous persisted session
+    uv run python run_measure_gui.py --clean                  # skip all startup scripts
+    uv run python run_measure_gui.py --script startup.py      # run only this trusted startup(ctx)
     uv run python run_measure_gui.py --no-control             # disable the remote-control socket entirely
     uv run python run_measure_gui.py --control-port 0         # start remote control on an ephemeral loopback port
     uv run python run_measure_gui.py --control-port 8765 --control-token <hex>
@@ -15,7 +16,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from zcu_tools.gui.launcher import add_runtime_cli_options, runtime_options_from_args
+from zcu_tools.gui.launcher import (
+    add_runtime_cli_options,
+    runtime_options_from_args,
+    select_startup_script,
+)
 
 # Code, catalogs and logs stay anchored at the repo, not the data project.
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -59,22 +64,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
         allow_external=True,
     )
-    parser.add_argument(
+    startup = parser.add_mutually_exclusive_group()
+    startup.add_argument(
         "--clean",
         action="store_true",
-        help=(
-            "Start without restoring the previous persisted session "
-            "(gui_state_v1.json is left untouched at startup; a normal close "
-            "still flushes over it)."
-        ),
+        help="Skip all startup scripts, including the default script.",
     )
-    parser.add_argument(
-        "--simulate",
+    startup.add_argument(
+        "--script",
         type=Path,
-        help=(
-            "Trusted Python environment defining build_environment(); fixed for this "
-            "process. Example: --simulate zcu_lab/simulation_envs/FTF/environment.py"
-        ),
+        help="Run only this trusted Python file defining startup(ctx).",
     )
     parser.add_argument(
         "--project-root",
@@ -83,7 +82,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Data project root: an absolute path to an existing directory "
             "(default: repo root). Entry owners manage result/ and Database/; "
-            "code, catalogs and simulation paths keep their existing resolution."
+            "code, catalogs and startup-script paths keep their existing resolution."
         ),
     )
     return parser.parse_args(argv)
@@ -138,7 +137,11 @@ def main(argv: list[str] | None = None) -> int:
         registry_factory=_build_measure_catalogs,
         alias_presets=load_alias_presets(),
         clean=args.clean,
-        simulate=args.simulate,
+        startup_script=select_startup_script(
+            clean=args.clean,
+            script=args.script,
+            default_script=REPO_ROOT / "zcu_lab" / "startup.py",
+        ),
         project_root=str(args.project_root),
     )
 

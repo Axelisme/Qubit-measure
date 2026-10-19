@@ -47,19 +47,20 @@ class GuiRpcError(GuiInvocationError):
 class GuiStartupPaths:
     """Launch-only paths, forwarded verbatim for the GUI launcher to validate.
 
-    simulate selects a trusted environment Python file; None uses normal mode.
+    script selects trusted startup(ctx) code; None uses the launcher default.
+    clean=True in connect_to_gui skips all scripts and rejects an explicit script.
     project_root selects the data root; None uses the repo-root default.
     Neither field changes code/catalog lookup or an existing GUI process.
     """
 
-    simulate: str | None = None
+    script: str | None = None
     project_root: str | None = None
 
     def cli_args(self) -> list[str]:
         """Encode explicit paths as GUI launch arguments, preserving their strings."""
         args: list[str] = []
-        if self.simulate is not None:
-            args.extend(["--simulate", self.simulate])
+        if self.script is not None:
+            args.extend(["--script", self.script])
         if self.project_root is not None:
             args.extend(["--project-root", self.project_root])
         return args
@@ -71,15 +72,11 @@ _DEFAULT_STARTUP_PATHS = GuiStartupPaths()
 def _reject_launch_options_attach(
     paths: GuiStartupPaths, launch: str, *, existing: bool
 ) -> None:
-    """Environment and data-root options may only select a new GUI process."""
-    if (
-        paths.simulate is not None
-        and launch != "new"
-        and (launch == "never" or existing)
-    ):
+    """Script and data-root options may only select a new GUI process."""
+    if paths.script is not None and launch != "new" and (launch == "never" or existing):
         raise GuiRpcError(
-            'Existing GUI unchanged; close it first, then use launch="new" with simulate.',
-            reason="environment_requires_new_gui",
+            'Existing GUI unchanged; close it first, then use launch="new" with script.',
+            reason="script_requires_new_gui",
         )
     if (
         paths.project_root is not None
@@ -465,7 +462,13 @@ class MeasureMcpSession:
         Auth/wire failures discard the socket. A GUI lock does not fail connect.
         startup_paths configures a new process only; attach rejects explicit paths
         without changing the GUI. Paths are forwarded for launcher validation.
+        clean skips every script; combining it with startup_paths.script raises
+        ValueError before network work. Trusted scripts may connect hardware.
+        Call synchronously from the MCP caller thread; this session owns the
+        connection, not the script or its resources.
         """
+        if clean and startup_paths.script is not None:
+            raise ValueError("clean and script are mutually exclusive")
         with self._rpc_lock:
             self._require_open()
             connection_identity = identity.resolve(self._control_connection)

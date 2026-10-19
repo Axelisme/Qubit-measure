@@ -1,8 +1,10 @@
 # zcu_lab
 
-**Last updated:** 2026-10-20，predictor 與 component 解耦
+**Last updated:** 2026-10-20，預設 startup session policy、mux recipes、逐元素來源摘要與 predictor／component 解耦
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
+
+`startup.py` 是 Measure composition 注入的預設腳本。它在 user cache 的 `gui/measure-session.json` 保存自己的 session 紀錄，不使用 repo config 或 cwd。啟動依序嘗試 SoC、各 device、entry／point，再開帶 authored input 的 tabs。每項失敗寫 log，device 失敗保留未連線列，entry／point 失敗就跳過 tabs，不等之後補來源。最後狀態列列出 restored／failed／skipped 數。正常關閉時，腳本在 driver 關閉前讀取當時的狀態並原子寫回。Alias 仍由 entry 的 `aliases.yaml` 擁有，這份 cache 不保存 alias、硬體設定或量測資料。`--clean` 不執行腳本，`--script` 完全取代預設腳本。
 
 `v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬環境、參數檔與離線建庫入口。
 

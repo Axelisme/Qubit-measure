@@ -16,7 +16,6 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
-from zcu_tools.gui.app.measure.services.persistence_types import AppPersistedState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
@@ -52,13 +51,10 @@ def launched_measure_app(
     qapp: QApplication,
     tmp_path: Path,
     *,
-    restore: AppPersistedState | None = None,
     registry: Registry | None = None,
 ) -> Generator[LaunchedMeasureApp]:
     """Run launch and attach readonly MCP without taking the open Setup modal.
 
-    ``restore`` stands in for the saved settings the persistence caretaker would
-    load in ``before_show``; it goes through the Controller's memento restore.
     ``registry`` supplies the caller's synthetic catalog instead of an empty one.
     """
     previous_hook = sys.excepthook
@@ -90,8 +86,6 @@ def launched_measure_app(
             assembly.window,
             assembly.control_adapter,
         )
-        if restore is not None:
-            controller.restore_persisted_state(restore)
         window.show()
         port = remote.start()
         behavior.after_show(assembly)

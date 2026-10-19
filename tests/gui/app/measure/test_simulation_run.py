@@ -65,7 +65,7 @@ class NoiseAdapter(SavingAdapter):
 
 
 @pytest.fixture
-def noise_run(qapp, tmp_path, monkeypatch, outcome):
+def noise_run(qapp, tmp_path, outcome):
     env = white_noise(std_adc=0, seed=17)
     source = env.soc.binding.execute
     entered, release = Event(), Event()
@@ -86,15 +86,9 @@ def noise_run(qapp, tmp_path, monkeypatch, outcome):
     env.soc.binding.execute = execute
     registry = Registry()
     registry.register("noise", NoiseAdapter)
-    monkeypatch.setattr(sys, "_noise_run_environment", env, raising=False)
-    path = tmp_path / "environment.py"
-    path.write_text(
-        "import sys\ndef build_environment():\n    return sys._noise_run_environment\n"
-    )
     old_hook = sys.excepthook
     behavior = MeasureGuiBehavior(
         lambda: (registry, Loader()),
-        simulate=path,
         clean=True,
         project_root=str(tmp_path),
     )
@@ -114,6 +108,7 @@ def noise_run(qapp, tmp_path, monkeypatch, outcome):
         )
     sock = None
     try:
+        ctrl.install_soc(env.soc, env.soccfg)
         ctrl.setup_control.new_entry(EntryRequest("offline"))
         ctrl.setup_control.new_point(
             PointCreateRequest("point", "", CommandOrigin("gui"))
@@ -125,7 +120,11 @@ def noise_run(qapp, tmp_path, monkeypatch, outcome):
         release.set()
         if sock is not None:
             sock.close()
-        behavior.close(assembly)
+        try:
+            behavior.close(assembly)
+        finally:
+            # The board and its source resources remain caller-owned.
+            env.devices.close_all_devices()
         for dialog in window.findChildren(QDialog):
             dialog.reject()
         window.dispose_control_watches()
