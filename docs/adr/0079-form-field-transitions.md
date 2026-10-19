@@ -33,6 +33,14 @@ Command 掛在欄位上，只能替換這個欄位及 descendants。它可以回
 
 使用者於 2026-10-19 問「為什麼不是總是覆寫path位置的值？」，並對統一覆寫、converter 僅用於選項切換的方案回答「同意」。因此不另提供 replacement operation 或 operation 欄位。
 
+### 宣告唯讀與子樹
+
+`Display(readonly=True)` 是 Form core 執行的寫入限制。`FieldMeta(readonly=True)` 由生成器投影成相同宣告。同值寫入通過，不同值拒絕，Qt、MCP 與 RPC 共用此規則。完整父層替換與批次寫入不能繞過唯讀子欄位。
+
+唯讀只作用於被宣告欄位的子樹，不固定祖先選擇。Module 子欄位唯讀不移除 library key 選項。Module 節點本身標唯讀則固定整個 module 子樹，包含 ref／inline 選擇與所有子欄位，不論初值是 ref 或 inline。不另設 selector-only 宣告，也不自動強制 inline。固定欄位的初值可逐 list 位置不同，不以生成單值 Literal 實作唯讀。範本的非 lock 初值與 input projection 沿 [[0073]] 保留。
+
+使用者於 2026-10-19 裁定：「那為什麼不直接都用ReadOnly就好？」「我會選B，lock應該被認知為只對子樹作用。」固定值的生成與 cfg-only 欄位分工見 [[0073]]，remote 拒絕格式見 [[0065]]。
+
 ### 原始草稿、求值與失敗
 
 Callable 接收具名唯讀 old snapshot，包含 selection、子表單結構與原始 input。它不要求整份 Form 有效。具名 context 提供 `evaluate(path)`，只求值 callable 所需欄位。宣告者在宣告時綁定來源讀取能力，宿主管理其生命週期，Core 不接管 library 或 group。
@@ -65,17 +73,19 @@ Gauss length=0.8、sigma=0.2 切 Drag 時保留 length／sigma，delta／alpha �
 
 FormInput 的 JSON 固定為 `{data, selections}`。data 保存 raw input，selections 是 `[{path, value}]`，path 保留字串與整數。沒有 override 時仍寫空 list。真實表單欄位在 data 內，不與兩個外層名稱衝突。不保存版本、型別 identity、domain metadata、callable 或動態 class。Host 只保留必要的表單容器，不再包一層版本。舊 raw-only 或 versioned 格式不雙讀。
 
-啟動讀檔、source reload 與 RAM switching 共用 `FormState.restore_input`。Model 按現行同名欄位遞迴，缺值用 defaults，多出欄位列 dropped。List 按位置遞迴，長度照存檔。Union／Literal 的 selection 仍為 annotation 接受的選項就保留，否則用 defaults 並列 dropped。沒有 discriminator 的 union 不猜 branch，raw 照搬。葉欄位保留 expression、缺席與 invalid raw，交一般驗證處理。形狀不符的內容丟棄並列 dropped，host 將清單顯示給使用者。還原與 Reset 不走普通 mutation 的 owner input-change 檢查。
+啟動讀檔、source reload 與 RAM switching 共用 `FormState.restore_input`。Model 按現行同名欄位遞迴，缺值用 defaults，多出欄位列 dropped。List 按位置遞迴，長度照存檔。Union／Literal 的 selection 仍為 annotation 接受的選項就保留，否則用 defaults 並列 dropped。沒有 discriminator 的 union 不猜 branch，raw 照搬。葉欄位保留 expression、缺席與 invalid raw，交一般驗證處理。唯讀欄位沿同一形狀規則保留存檔值，不從宣告重算，也不因初值不同而丟棄。形狀不符的內容丟棄並列 dropped，host 將清單顯示給使用者。還原與 Reset 不走普通 mutation 的 owner input-change 檢查。
 
 還原不執行 converter 或 options hook，也不讀 library。一般驗證檢查明確 selection override 的當前 hook membership。沒有 override 的 raw branch 不因選單未列出它而失效。Ref 不存在或 family 不符時，adapter 的一般驗證在欄位顯示錯誤，保留草稿並擋 Run。已 inline 的原稿不要求原 ref 仍存在，也不從改過的 library 重新複製。
 
 JSON 損壞或不符固定 FormInput 格式時，共用 caretaker 顯示錯誤並以 defaults 開啟，不備份。之後依原有時機正常保存。Provider 與其他 restore 故障仍傳播，read I/O 故障沿既有 error outcome，不轉譯成 JSON 格式錯誤。見 [[0063]]。
 
+使用者於 2026-10-19 確認唯讀還原政策：「1同樣值不報錯。2我選存檔的版本，因為有些lock值可能是生成的。能不能執行是另外一回事」。還原保留值，能否執行由後續驗證判定。
+
 使用者於 2026-10-18 要求簡化保存還原：「還有版本？太複雜了。我需要更簡單的機制」。看過依名與形狀的遞迴規則後回覆「好，可以」，並選擇固定 data／selections 兩欄的 JSON 方案。
 
 ### 固定具名元素與參與清單
 
-Core 對普通 `list[Model]` 提供中性描述、picker 與 indexed editing，不辨識固定元素或 participants。`Display` 只提供元素 label 與 readonly 呈現提示。固定政策集中在 `gui.form_adapter`，宣告 owner 列出 list path、名稱欄位及 participants path。新建與 Reset 從 capture 建表，重開及還原沿存檔的長度、位置與名稱，不與新 capture 比 identity。
+Core 對普通 `list[Model]` 提供中性描述、picker 與 indexed editing，不辨識固定元素或 participants。`Display(element_label=...)` 提供元素 label，`Display(readonly=True)` 由 Core 強制唯讀。具名元素的 identity 與 participants 政策集中在 `gui.form_adapter`，宣告 owner 列出 list path、名稱欄位及 participants path。新建與 Reset 從 capture 建表，重開及還原沿存檔的長度、位置與名稱，不與新 capture 比 identity。
 
 `FormModel.check_input_change(before, after)` 在普通 mutation 的完整候選安裝前執行宣告檢查，兩棵輸入都是複本。改名、增刪或重排以具名、帶原 typed path 的拒絕原子失敗，input、base、selections 與通知都不變。Widget 與 RPC 顯示可恢復錯誤。還原及 Reset 不經此檢查。Participants 非法值仍存成 invalid draft，由一般驗證報錯並擋 Run。
 

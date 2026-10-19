@@ -1,12 +1,14 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-18，遞迴還原、中性 model-list 與宣告 admission
+**Last updated:** 2026-10-19，Core 強制唯讀與存檔值還原
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
 `FormFieldDescription.can_expand` 表示目前結構可到達 model，不保證展開後 children 非空。普通 model 與選中且帶 fields 的 option 為 true；whole leaf、停用 nullable、no-match 與不帶 fields 的 option 為 false。判斷不執行 child hooks，也不建立 child metadata。固定欄位排除、動態宣告與 wrapper 攤平仍在實際展開時決定 children。
 
-`selection_fixed` 只表示 annotation 在本層允許一個非 null 選項分支，不凍結內部 choices。None 代表啟停，不算另一個分支；nullable 單分支在啟用與停用時都保持 selection_fixed=true。`fixed`／`fixed_value` 表示 leaf 或完整 option value 由宣告固定。固定外層 model 仍可有可切換的內層分支，此時 selection_fixed 為 true、fixed 為 false。兩種固定都不依當次 env 的選項數推定。
+`selection_fixed` 只表示 annotation 在本層允許一個非 null 選項分支，不凍結內部 choices。None 代表啟停，不算另一個分支；nullable 單分支在啟用與停用時都保持 selection_fixed=true。`fixed`／`fixed_value` 表示 leaf 或完整 option value 由宣告固定。固定外層 model 仍可有可切換的內層分支，此時 selection_fixed 為 true、fixed 為 false。兩種固定都不依當次 env 的選項數推定。Core cfg 自有的單值 Literal 仍算固定值，宣告唯讀不改 annotation 的值域。
+
+`Display(readonly=True)` 由 Form core 強制執行。寫入與目前值相同則通過，不同則以帶路徑及目前值的 readonly rejection 拒絕。Qt、MCP 與 RPC 共用這項規則，完整父層替換與批次寫入也不能繞過唯讀子欄位。唯讀只作用於被宣告欄位的子樹，不固定祖先選擇。
 
 Description 的 options 只列 detached value、label 與 command name／label。`selected` 是依 JSON 型別與 value 葉匹配的第一項 index，missing／no-match 為 None，不猜第一項。`options=None` 表示沒有 selector，空 tuple 則保留顯式空清單。Describe 與 `run_command` 共用 active ancestry、最深 local 覆蓋與選項解析，不查 inactive branches 的 hooks。普通缺值 model 可按型別列欄位；停用 nullable model 與 no-match option 只回 target。Unknown、whole-leaf descendant 與 inactive descendant 的 path 立即 raise `FormPathError(ValueError)`，其 `path` 欄位保留完整請求路徑。作者宣告、nonfinite 與其他非 path 失敗維持原例外類別。Describe 不求值、不套 defaults、不寫 input/base，也不抓取來源；宣告 hooks 只讀呼叫端固定 env。有限的 leaf constraints 是顯示提示，驗證仍由 result／preview 負責。
 
@@ -26,7 +28,7 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 沒有 converter 時，切換只改 selection，保留原有 branch 和 authored input。`FormInput.selections` 攜帶記憶體選項，`data` 保存實際 child input。`describe.selected` 顯示選項，`describe.branch` 標示實際子表單；兩者可以不同。Caller 用 `select(path, selection, env)` 明確切換選項；`prepare_selection` 只準備 detached candidate。值寫入與 tag 葉寫入都不執行 converter。純讀不執行 converter。預期的缺來源、參與值求值及結構 admission 拒絕使用 `FormConversionError`，保留 cause。任意 callable ValueError 或 provider 故障不轉成正常拒絕。`FormInput.to_json/from_json` 固定編解碼 `{data,selections}`，保留 raw branch 與明確選項的差異。沒有 override 時 selections 為空 list。不存版本、型別 identity 或 callable，也不雙讀舊格式。
 
-`FormState.restore_input(saved, env)` 接受具名 FormInput。啟動、source reload 與 RAM switching 共用這個入口。Model 按現行欄位名遞迴，缺值用 host 提供的 defaults，多出欄位列 dropped。List 照存檔位置與長度還原，逐元素補新欄位 defaults。合法 selection 保留，不合法則 default+dropped。無 discriminator 的 union 不猜 branch，raw 照搬。葉欄位保留 expression 與 invalid raw，由一般驗證處理。形狀不符列 dropped。還原不跑 converter、options hook、來源檢查或求值。成功時一次安裝，base 不變，完整草稿有變才通知一次。Provider/defaults 故障在安裝前傳播。還原與 Reset 不經普通 mutation 的 owner 檢查。
+`FormState.restore_input(saved, env)` 接受具名 FormInput。啟動、source reload 與 RAM switching 共用這個入口。Model 按現行欄位名遞迴，缺值用 host 提供的 defaults，多出欄位列 dropped。List 照存檔位置與長度還原，逐元素補新欄位 defaults。合法 selection 保留，不合法則 default+dropped。無 discriminator 的 union 不猜 branch，raw 照搬。葉欄位保留 expression 與 invalid raw，由一般驗證處理。唯讀欄位保留存檔值，不從宣告初值重算；能否執行由後續驗證判定。形狀不符列 dropped。還原不跑 converter、options hook、來源檢查或求值。成功時一次安裝，base 不變，完整草稿有變才通知一次。Provider/defaults 故障在安裝前傳播。還原與 Reset 不經普通 mutation 的 owner 檢查。
 
 有 env 的一般驗證只對 `FormInput.selections` 明確 overrides 檢查目前 options membership。不在選項中時，result／preview 回該欄位錯誤，保留原稿。沒有 override 的 raw branch 仍使用原有值契約，不把選單當作完整值域。Ref 的存在性與 family 由 adapter 的一般來源／choices 驗證處理，不參與還原 identity。
 
@@ -44,7 +46,7 @@ Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_a
 
 Editor 與 MCP 讀同一份 description options，照 label 列選項，透過明確 selection 操作選擇 option.value，首次展開才 describe 選中項目的 children。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 由 `form_adapter` 的集中 converter 決定繼承或新建 input。
 
-`list[Model]` 直接提供 indexed editing，不需要政策標記。`describe(("tones",), env)` 回 `kind="elements"`、目前各位置的 index、label 與 typed path，children 是元素 model。`Display(element_label="label")` 指定 picker 使用哪個字串欄位，未指定或非字串時顯示 index。`Display(readonly=True)` 只要求唯讀呈現，不限制 Core 寫入。數字字串、bool、負數與越界 index 都不是合法 path。字串 list 與其他 sequence、typed mapping 仍是整個 leaf。
+`list[Model]` 直接提供 indexed editing，不需要政策標記。`describe(("tones",), env)` 回 `kind="elements"`、目前各位置的 index、label 與 typed path，children 是元素 model。`Display(element_label="label")` 指定 picker 使用哪個字串欄位，未指定或非字串時顯示 index。各位置可有不同的唯讀初值，寫入仍遵守 Core 的唯讀限制。數字字串、bool、負數與越界 index 都不是合法 path。字串 list 與其他 sequence、typed mapping 仍是整個 leaf。
 
 `FormModel.check_input_change(before, after)` 由 root 宣告提供。Core 在普通 write、command 與選項切換的完整候選準備後呼叫它。兩棵 JSON tree 都是深複本，改動不會寫回 draft 或 base。宣告以 `FormInputRejected(path, message)` 拒絕時，整批 input、base、selections 與通知不變，原始請求 path 保留。`install_input` 會對 current input 重新檢查，保護直接傳入的候選。檢查不讀新來源、不執行 options 或 converter；一般值驗證仍由 Pydantic 處理。還原與 reset 不執行這個檢查。
 
@@ -66,6 +68,6 @@ FormState.preview 提供隔離的 ordinary leaf values 與完整 errors，供 vi
 
 WriteRejected 是 host 寫入入口拒絕一批輸入時 raise 的具名例外，message 由 host 寫給使用者看。Host 在寫入任何內容前 raise，FormState 維持原狀；model 會拒絕的值仍寫進 state，由 result 回報。Core 自己不 raise 它。Editor 收到時保留該欄輸入並顯示 message，其他例外照常拋出。
 
-Display 只承載欄位呈現資訊。順序沿欄位宣告，段落沿 nested model；collapsed 只用於子 model。`group` 是同層畫面群組名稱，空字串在建構時報錯。`decimals` 是 float 顯示精度，非 float 宣告在 describe 報錯，不改 input。`hidden=True` 不畫 controls，但值、預設與驗證保留。Nested model 沒有 label 時，title 是欄位名，底線換空白且只有首字母大寫。普通 model 的單值結構 tag 標 hidden；branch 身分從 annotation 判斷，包含其子類別。Union 位置的 tag 仍是 selector。`Display(selector=False)` 只隱藏 dropdown，仍保留 selector metadata 與 active branch。Editor、host 與 MCP 共用 description，但不反向成為 core dependency。
+Display 承載欄位呈現資訊與 readonly 寫入限制。順序沿欄位宣告，段落沿 nested model；collapsed 只用於子 model。`group` 是同層畫面群組名稱，空字串在建構時報錯。`decimals` 是 float 顯示精度，非 float 宣告在 describe 報錯，不改 input。`hidden=True` 不畫 controls，但值、預設與驗證保留。Nested model 沒有 label 時，title 是欄位名，底線換空白且只有首字母大寫。普通 model 的單值結構 tag 標 hidden；branch 身分從 annotation 判斷，包含其子類別。Union 位置的 tag 仍是 selector。`Display(selector=False)` 只隱藏 dropdown，仍保留 selector metadata 與 active branch。Editor、host 與 MCP 共用 description，但不反向成為 core dependency。
 
 跨模組契約見 ADR-0065、ADR-0062 與 ADR-0008。Measure、Library／Inspect、writeback 與 workflows 共用本核心，各宿主持有 state 並決定 capture、Apply 與保存。Core cfg 推導與持久 Spec 投影由上層 `gui.form_adapter` 組合，不放進本 package。Complex codec 直接使用 `core.complex_codec`，不經舊 cfg owner。

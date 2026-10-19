@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-19，完整元素 logical fields wire
+**Last updated:** 2026-10-19，Recipe via_ref 與宣告唯讀
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -56,9 +56,9 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 
 `tab.read_elements(path)` 在一次 readonly owner turn 回傳全部元素的 index、name、canonical path、authored input、可用 preview values 與定向 errors。Values 使用完整 canonical typed paths，不是 lowered native cfg。完整 Form errors 另列在最外層，包含 participants 錯誤。某個元素 invalid 不會隱藏其他元素。RPC 只序列化 owner 的 aggregate，不逐元素 describe/read 拼接，不改 picker、focus、capture 或草稿。Busy 與 observer reads 仍可用。可選 `fields` 是元素相對 logical typed paths，例如 `[["drive", "gain"], ["sweep", "start"]]`。每個 row 的 `fields` 按請求順序回同一 owner turn 的 RecipeFieldObservation，包含 FixedElements identity、ref source、value_status 與 errors。省略 fields 保留原 aggregate。錯誤 carrier/path 沿既有 Form 錯誤投影。
 
-Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref；readonly 表示穿過 ref 祖先，不代表 declaration lock。讀取不改 input、base、cfg version 或通知，也不授權寫入。
+Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref；via_ref 表示穿過 ref 祖先，與宣告 readonly 分開。讀取不改 input、base、cfg version 或通知，也不授權寫入。
 
-Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission。結構、source、ref ancestor 或 guard 拒絕不提交前綴。一般 invalid draft 可回 changed=true 加 logical preview errors。Select 回 changed 與同 turn 的 fresh field。Use_library 必須帶非空 actual key，其他 action 必須省略 key；explicit null 不等於省略。
+Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission。結構、source、宣告 readonly、ref ancestor 或 guard 拒絕不提交前綴。一般 invalid draft 可回 changed=true 加 logical preview errors。Select 回 changed 與同 turn 的 fresh field。Use_library 必須帶非空 actual key，其他 action 必須省略 key；explicit null 不等於省略。
 
 Handler 將 LogicalEditError 投影為 invalid_params 與原 reason，保留 path、edit_index、selector_path、available_keys。FormPathError 保留 form_path，LogicalSourceError 回 precondition_failed/library_source，並帶 consuming path 與來源身分。Cfg/control 失敗沿既有投影。ParamSpec primitive/required/enum 失敗維持原生 reason；handler carrier 與 action/key 語義失敗才回 form_errors。Unexpected provider/declaration failures 不重分類。
 
