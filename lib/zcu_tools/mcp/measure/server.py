@@ -91,14 +91,17 @@ when a recipe or shared tool covers it. Raw RPC does not aggregate tool
 results, decode PNG replies, or run the analysis artifact save pipeline.
 
 
-For an authorized offline launch, connect with launch='new' and simulate set to
-an environment Python path. Add project_root to isolate result/Database data;
-it must be an absolute path to an existing directory. Omit it to use the repo
-root. Code, catalogs and simulation paths keep their existing resolution.
-Explicit simulate or project_root options are refused when attaching; the
-existing GUI stays unchanged. Close it before selecting another environment or
-data root. Open a prebuilt isolated entry with entry.open(name=...), then select
-a point explicitly. Entry names remain single path segments.
+For an authorized launch, connect with launch='new' and script set to a trusted
+Python file defining startup(ctx). It replaces the default startup script;
+clean=True skips all scripts and cannot be combined with script. Scripts may
+connect hardware, so review the selected script and obtain authorization first.
+For offline FTF use zcu_lab/simulation_envs/FTF/startup.py after preparing its YAML.
+Add project_root to isolate result/Database data; it must be an absolute path to
+an existing directory. Omit it to use the repo root. Code, catalogs and script
+paths keep their existing resolution. Explicit script or project_root options
+are refused when attaching; the existing GUI stays unchanged and no startup is
+rerun. Close it before selecting another script or data root. Entry names remain
+single path segments.
 device_setup(name, cfg) accepts a partial Info patch, reads before, merges full
 cfg, submits once and waits at most 300 seconds. It has no timeout argument.
 YOKO value patches require caller-supplied value_unit; output/rampstep-only

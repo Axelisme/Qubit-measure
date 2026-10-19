@@ -17,8 +17,10 @@ from zcu_tools.gui.app.measure.services.tab_control import TabControlPort
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
     EntryInfo,
     EntryRequest,
+    PointCreateRequest,
     PointUseRequest,
     SavedPoint,
 )
@@ -93,6 +95,29 @@ class StartupSetup:
     calls: OwnerCalls
     control: SetupControlPort
 
+    def new_entry(self, name: str) -> EntryInfo:
+        """Create and open an empty entry named by one safe path segment.
+
+        Use the GUI's data roots; select no point. Existing destinations and
+        invalid names fail without overwriting. I/O errors propagate; an
+        installation failure retains the created entry for open_entry recovery.
+        The owner manages files/binding, with no cross-file rollback.
+        Synchronous from a worker or owner callback.
+        """
+        return self.calls.call(lambda: self.control.new_entry(EntryRequest(name)))
+
+    def new_point(self, label: str) -> SavedPoint:
+        """Create and select label in the opened entry, seeded from its setup.
+
+        label is one safe path segment. Use an empty description/library and GUI
+        attribution. Missing entry, invalid/existing label and I/O errors
+        propagate. Binding failure retains the new point and old selection for
+        use_point recovery; no rollback. The owner manages files/binding.
+        Synchronous from a worker or owner callback.
+        """
+        request = PointCreateRequest(label, "", CommandOrigin("gui"))
+        return self.calls.call(lambda: self.control.new_point(request))
+
     def open_entry(self, name: str) -> EntryInfo:
         """Open an existing entry by single-segment name; do not select a point.
 
@@ -124,6 +149,17 @@ class StartupParameters:
         disk aliases remain governed by Inspect Apply. Worker/owner safe.
         """
         self.calls.call(lambda: self.control.set_alias_rows(rows))
+
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Validate and persist ordered authored rows, then publish them in memory.
+
+        Save aliases.yaml in the opened entry; without an entry only change
+        memory. Unlike set_alias_rows, this commits entry-owned aliases. Invalid
+        rows and storage errors propagate, preserving the prior table/file.
+        The context owner manages validation and atomic file replacement.
+        Synchronous from a worker or owner callback.
+        """
+        self.calls.call(lambda: self.control.apply_alias_rows(rows))
 
     def add_component(
         self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
@@ -162,7 +198,7 @@ class StartupContext:
     """Capabilities passed to trusted startup(ctx), without persistent session state.
 
     soc installs caller-owned boards. devices transfers successfully registered
-    drivers to GUI ownership. setup selects existing entry/point. context edits
+    drivers to GUI ownership. setup creates or selects entry/point. context edits
     aliases/components. tabs creates tabs from ready sources. register_close
     records callbacks in the runner; report_progress publishes script progress.
     Both callbacks are owner commands, reached through calls. Facets and these

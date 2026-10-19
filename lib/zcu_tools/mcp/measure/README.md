@@ -1,29 +1,30 @@
-**Last updated:** 2026-10-19，Form readonly、via_ref 與 locked
+**Last updated:** 2026-10-20，MCP startup script selection
 
 # `zcu_tools/mcp/measure/`
 
 Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。GUI core 不 import MCP。GUI `RemoteMethodEntry` 擁有 wire schema、exposure、readonly 與 operation policy。MCP 每次連線讀取 live `rpc.catalog`，不複製 policy 表，也不依 catalog 動態建立 tools。
 
-## Startup environment
+## Startup scripts
 
-`connect(..., simulate="/absolute/path/environment.py")` forwards the path only
-when this call launches a new GUI. The Python file is trusted code with a
-zero-argument `build_environment`. Explicit paths on attach, including an
-already-connected early return or `if_missing` finding an existing GUI, fail with
-`environment_requires_new_gui`. The existing GUI is unchanged. Close it and use
-`launch="new"` to select another environment. Attach without a path is unchanged.
-There is no dynamic simulation tool or initialization RPC.
+`connect(..., script="/absolute/path/startup.py")` forwards trusted
+`startup(ctx)` code only when this call launches a new GUI. An explicit script
+replaces the composition-supplied default. Omitting it uses the default;
+`clean=True` skips all scripts and conflicts with an explicit script. Scripts
+may connect hardware; launch only reviewed code with the required authorization.
 
-`connect(launch="new", project_root="/absolute/existing/directory", simulate="...")`
-starts an offline GUI with a separate data root. Omit `project_root` to use the
-repo root. MCP checks only the supplied type and forwards the string unchanged.
-The launcher requires an absolute path to an existing directory before assembling
-the GUI. Entry owners create `result/` and `Database/` when needed. Code, lab
-catalogs, logs and simulation-path resolution keep their existing roots.
-An explicit data root on attach fails with `project_root_requires_new_gui`,
-including repeated connect and `if_missing` finding an existing GUI. No rebind or
-silent ignore occurs. Use `entry.open(name=...)` for a prebuilt entry under that
-root, then explicitly select a point; entry names remain single path segments.
+Explicit paths on attach, including an already-connected early return or
+`if_missing` finding an existing GUI, fail with `script_requires_new_gui`.
+The existing GUI is unchanged and startup never reruns on attach. Close it and
+use `launch="new"` to select another script.
+
+`connect(launch="new", project_root="/absolute/existing/directory", script="...")`
+selects a separate data root. Omit `project_root` to use the repo root. MCP
+forwards path strings unchanged; the launcher validates the data directory
+before assembly. Entry owners create `result/` and `Database/` when needed.
+Code, catalogs, logs and script-path resolution keep their existing roots.
+An explicit data root on attach fails with `project_root_requires_new_gui`.
+The [FTF startup example](../../../../zcu_lab/simulation_envs/FTF/README.md)
+creates its entry, first point and tab without a separate entry CLI or setup RPC.
 
 ## 固定工具與 RPC
 
@@ -237,7 +238,7 @@ MCP 以 `context.aliases_set` 整表套用 authored rows，以 `context.set_para
 
 ## 連線與觀察
 
-`connect` 可連既有 GUI 或依 launch 參數啟動，這一步不連硬體。首次 label 預設 `agent`，mode 預設 `owner`；`readonly` 永不取得控制權。Owner 在未鎖定 Local 自動取得。GUI 鎖定或別的在線 holder 不阻止連線，回覆的 `control` 顯示 `{holder, locked, online, me}`。身份初始化在認證與 wire 檢查之後、catalog 之前。省略 label/mode 的重連保留原身份，顯式換身份會重開 socket。
+`connect` 可連既有 GUI 或依 launch 參數啟動。啟動腳本可連硬體，執行前須審閱腳本並取得授權。首次 label 預設 `agent`，mode 預設 `owner`；`readonly` 永不取得控制權。Owner 在未鎖定 Local 自動取得。GUI 鎖定或別的在線 holder 不阻止連線，回覆的 `control` 顯示 `{holder, locked, online, me}`。身份初始化在認證與 wire 檢查之後、catalog 之前。省略 label/mode 的重連保留原身份，顯式換身份會重開 socket。
 
 `rpc_call` 提供 `control.status`、`control.acquire`、`control.release`。重複 connect 同一身份只查詢現在的控制狀態，不自動再 acquire。四種控制拒絕 `not_holder`、`control_locked`、`control_held`、`readonly_connection` 在 MCP `isError` 的文字 content 中保留 JSON `error`，包含原生 code、message、reason、data。GUI 負責每次 dispatch 的權限判定，MCP 不複製 holder 規則。
 
