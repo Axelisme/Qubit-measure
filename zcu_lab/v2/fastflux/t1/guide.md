@@ -24,7 +24,9 @@ with this sweep, so editing only the module gain does not change scanned gains.
 The core also replaces its pulse length with the length sweep. Use a waveform
 with a sweepable duration, such as const or flat_top, not a fixed arb asset.
 
-Length starts at 0 and ends at 5 times captured qubit T1 with 101 points.
+Length starts at 0.1 us and ends at 5 times captured qubit T1 with 101 points.
+The positive start avoids a zero-length pulse, which the generator compiler rejects.
+Check the minimum duration and sweep spacing on the actual generator's clock grid.
 Relax delay uses the same endpoint. Missing or null T1 uses a 30 us time scale,
 giving 150 us. Stored invalid T1 leaves the derived fields empty.
 These editable timing estimates are not written back as calibration.

@@ -29,7 +29,7 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
             },
             "sweep": {
                 "gain": Range.between(0.0, 0.0, expts=1),
-                "length": Range.between(0.0, relax_delay, expts=101),
+                "length": Range.between(0.1, relax_delay, expts=101),
             },
             "relax_delay": relax_delay,
             "initial_delay": Hidden(),
