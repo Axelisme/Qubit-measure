@@ -97,6 +97,12 @@ class Plot2DSegment(AbsSegment):
 
 
 class PlotNonUniform2DSegment(AbsSegment):
+    """Render nonuniform monotonic coordinates in either scan direction.
+
+    Updates accept signals shaped (len(xs), len(ys)) without changing inputs.
+    Each axis follows its input coordinate order; flip swaps the displayed axes.
+    """
+
     def __init__(
         self,
         xlabel: str,
@@ -155,9 +161,18 @@ class PlotNonUniform2DSegment(AbsSegment):
         dy = 0.5 * (ys[-1] - ys[0]) / max(1, len(ys) - 1)
         if self.flip:
             im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
-            im.set_data(ys, xs, signals)
         else:
             im.set_extent((xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy))
+
+        # NonUniformImage searches ascending centers. Keep the scan-order axis
+        # limits set above, but reverse centers and their data together.
+        if xs[-1] < xs[0]:
+            xs, signals = xs[::-1], signals[::-1, :]
+        if ys[-1] < ys[0]:
+            ys, signals = ys[::-1], signals[:, ::-1]
+        if self.flip:
+            im.set_data(ys, xs, signals)
+        else:
             im.set_data(xs, ys, signals.T)
 
         if self.vmin is not None or self.vmax is not None:
