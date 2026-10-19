@@ -209,7 +209,8 @@ origins retain the ordinary SegmentTable contract.
 The named `single_tone_gate` and `multitone_gate` approximations share the
 adaptive Hilbert builder and D-U-D playback in [kernels/_rwa_gate.py](kernels/_rwa_gate.py).
 Keys already inside the four-step split threshold retain the original fixed-four
-playback loop and single-tone compiled builder. Both families evaluate envelopes
+playback loop. Single-tone and simultaneous gates build joint Hilbert products
+through the shared compiled DOP853 solver. Both families evaluate envelopes
 only over the segment interval, using the same pulse-local offsets, interpolation
 and final sample hold as direct integration. The last DAC sample need not coincide
 with segment end; a quantized segment may end before or after that sample.
