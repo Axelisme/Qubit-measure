@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import NamedTuple
 
 import numpy as np
 import scipy.integrate
@@ -12,10 +13,13 @@ from scipy.linalg import expm
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import ModelSource
+from ..workplan import FactKey
+from ._dop853 import Tolerances, integrate, tolerances
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._secular import coherence_decay, population_generator, split_step
-from ._workload_facts import envelope_bounds
+from ._workload_facts import envelope_bounds, fixed_flux
 from .multitone_rwa import (
+    RWA_POLICY,
     RWACoefficients,
     admit_rows,
     admit_single_rows,
@@ -107,6 +111,47 @@ def _admitted(
     *,
     single_tone: bool,
 ) -> NDArray[np.bool_]:
+    tolerances(context.budget)
+    accepted = np.zeros(len(rows), dtype=np.bool_)
+    for index, row in enumerate(rows):
+        # Waveform support is not covariant: equal playback keys can have
+        # different flux motion, so this check must precede every fact lookup.
+        if not fixed_flux(table, int(row)):
+            continue
+        key = FactKey(
+            (
+                "covariant-gate-admission",
+                GATE_POLICY,
+                RWA_POLICY,
+                single_tone,
+                canonical_key(table, int(row), context.source),
+                context.budget,
+            ),
+            bool,
+        )
+
+        def build(row=int(row)) -> bool:
+            return bool(
+                _admit_physics(
+                    table,
+                    np.array([row], dtype=np.int64),
+                    context,
+                    single_tone=single_tone,
+                )[0]
+            )
+
+        accepted[index] = context.work_plan.fact(key, build)
+    return accepted
+
+
+def _admit_physics(
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    context: KernelContext,
+    *,
+    single_tone: bool,
+) -> NDArray[np.bool_]:
+    """Evaluate the unchanged RWA/graph/split formulas once per physics key."""
     accepted = (admit_single_rows if single_tone else admit_rows)(table, rows, context)
     peaks = envelope_bounds(table, context.work_plan).peaks
     for index in np.flatnonzero(accepted):
@@ -141,6 +186,65 @@ def _admitted(
     return accepted
 
 
+class _SingleContext(NamedTuple):
+    """Joint interaction data; start_ns shifts solver time to row-local ns."""
+
+    energy: NDArray[np.float64]
+    coefficients: RWACoefficients
+    times: NDArray[np.float64]
+    samples: NDArray[np.complex128]
+    gain: float
+    offset_ns: float
+    start_ns: float
+
+
+@njit(nogil=True, cache=True)
+def _single_rhs(time, state, context):
+    # The solver restarts at each subsegment; the Hamiltonian and envelope use
+    # row-local time, not solver-local time or absolute carrier start.
+    row_time = time + context.start_ns
+    amplitudes = np.empty(1, dtype=np.complex128)
+    amplitudes[0] = context.gain * sample_value(
+        row_time + context.offset_ns, context.times, context.samples
+    )
+    h = interaction_hamiltonian(
+        row_time, context.energy, context.coefficients, amplitudes
+    )
+    size = len(context.energy)
+    return (-2j * np.pi * h @ state.reshape(size, size)).ravel()
+
+
+@njit(nogil=True, cache=True)
+def _single_unitaries(context, duration_ns):
+    size = len(context.energy)
+    result = np.empty((4, size, size), dtype=np.complex128)
+    boundaries = np.linspace(0.0, duration_ns, 5)
+    for segment in range(4):
+        start, end = boundaries[segment], boundaries[segment + 1]
+        interval = _SingleContext(
+            context.energy,
+            context.coefficients,
+            context.times,
+            context.samples,
+            context.gain,
+            context.offset_ns,
+            start,
+        )
+        state = integrate(
+            _single_rhs,
+            interval,
+            np.eye(size, dtype=np.complex128).ravel(),
+            end - start,
+            Tolerances(1e-9, 1e-11, 4.0),
+            1.0,
+        )
+        endpoint = state.reshape(size, size)
+        endpoint *= np.exp(-2j * np.pi * context.energy * end)[:, None]
+        endpoint *= np.exp(2j * np.pi * context.energy * start)[None, :]
+        result[segment] = endpoint
+    return result
+
+
 def _build_unitaries(
     table: SegmentTable, row: int, context: KernelContext, graph: PhaseGraph
 ) -> NDArray[np.complex128]:
@@ -160,6 +264,21 @@ def _build_unitaries(
         np.ascontiguousarray(graph.positive.conj().transpose(0, 2, 1)),
         original.diagonal,
     )
+
+    if count == 1:
+        env = table.envelopes[table.tone_envelope[row, 0]]
+        return _single_unitaries(
+            _SingleContext(
+                energy,
+                coefficients,
+                env.sample_ns,
+                env.samples,
+                float(table.tone_amplitude[row, 0]),
+                float(table.tone_envelope_offset_ns[row, 0]),
+                0.0,
+            ),
+            float(table.duration_ns[row]),
+        )
 
     def rhs(time, state):
         amplitudes = np.empty(count, dtype=np.complex128)
@@ -233,7 +352,8 @@ class CovariantGateKernel:
 
     Numerical guard checks shared calibrated RWA, bounded phase-graph pruning
     and secular splitting. Multi-tone gates additionally require coextensive
-    sampled support. Single-tone gates allow slices and final sample hold.
+    sampled support. Single-tone gates allow slices and final sample hold,
+    and compile four-U integration through the shared DOP853 solver.
     Dispatch/family wrappers own acquire-wide cost and reuse decisions.
     """
 

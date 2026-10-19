@@ -36,6 +36,8 @@ class ObservedEngine(Engine):
 def observed_source():
     engine = ObservedEngine()
     source = FTFSource(settings(), DeviceManager(), engine=engine)
+    # Isolate physical facts; test_prepared_reuse covers the outer preparation cache.
+    source.preparation_cache.max_bytes = 0
     try:
         yield source, engine
     finally:

@@ -1,0 +1,245 @@
+"""Source-owned noiseless preparations, fresh per-acquire streams and bounded reuse."""
+
+from contextlib import ExitStack
+from dataclasses import replace
+
+import pytest
+from zcu_tools.core.simulation import RoundRequest
+from zcu_tools.device import DeviceManager
+from zcu_tools.experiment.ftf import FTFSource, replay
+
+from tests.experiment._ftf_templates import (
+    expect_statistics,
+    request,
+    settings,
+    snapshot,
+)
+
+
+def draw(source, acquire=None, snap=None):
+    return source.execute(
+        RoundRequest(
+            request() if acquire is None else acquire,
+            snapshot() if snap is None else snap,
+            0,
+        )
+    )
+
+
+def test_equal_content_acquires_skip_adc_preparation_and_keep_streams_exact():
+    source = FTFSource(settings(), DeviceManager())
+    reference = FTFSource(settings(), DeviceManager())
+    try:
+        first = expect_statistics(draw(source))
+        later = replace(request(), sequence=8)
+        second = expect_statistics(draw(source, later))
+        assert source.readout_cache.hits == 0, "equal content must skip ADC preparation"
+        assert source.preparation_cache.builds == 1
+        assert source.preparation_cache.hits == 1
+        expected = expect_statistics(draw(reference, later))
+        assert first.channels[0].sums.tobytes() != second.channels[0].sums.tobytes()
+        assert second.channels[0].sums.tobytes() == expected.channels[0].sums.tobytes()
+        assert second.state_counts.tobytes() == expected.state_counts.tobytes()
+        assert source.evaluations[0].acquire_sequence == 8
+        assert source.evaluations[0].round_index == 0
+        assert (
+            second.materialize_raw(later.reps, later.avg_level)[0].tobytes()
+            == expected.materialize_raw(later.reps, later.avg_level)[0].tobytes()
+        )
+    finally:
+        source.close()
+        reference.close()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "contents",
+        "envelope",
+        "snapshot",
+        "receiver",
+        "tolerance",
+        "revision",
+        "engine",
+        "mode",
+        "layout",
+        "reps",
+    ],
+)
+def test_changed_preparation_inputs_miss(change, monkeypatch):
+    source = FTFSource(settings(), DeviceManager())
+    cleanup = ExitStack()
+    try:
+        draw(source)
+        assert hasattr(source, "preparation_cache"), (
+            "source must own bounded preparations"
+        )
+        acquire, snap = request(), snapshot()
+        if change in ("contents", "envelope"):
+            t = acquire.templates[0]
+            event = t.events[0]
+            if change == "contents":
+                # Borrowed C1 arrays can change in place, even with the same record identity.
+                event.phase_deg[0] += 3
+            else:
+                env = event.envelopes[0]
+                assert env is not None
+                event = replace(event, envelopes=(replace(env, values=(1j, 1j)),))
+            acquire = replace(acquire, templates=(replace(t, events=(event,)),))
+        elif change == "snapshot":
+            snap = replace(snap, model_identity="changed")
+        elif change == "receiver":
+            source.readout = replace(
+                source.readout,
+                receivers=tuple(
+                    replace(r, gain=2 * r.gain) for r in source.readout.receivers
+                ),
+            )
+        elif change == "tolerance":
+            n = source.settings.numerics
+            source.settings = source.settings.model_copy(
+                update={
+                    "numerics": n.model_copy(
+                        update={
+                            "solver": n.solver.model_copy(
+                                update={"rtol": n.solver.rtol * 2}
+                            )
+                        }
+                    )
+                }
+            )
+        elif change == "revision":
+            monkeypatch.setattr(replay, "BACKEND_VERSION", "changed-backend")
+        elif change == "engine":
+            from zcu_tools.simulate.evolution import Engine
+
+            cleanup.callback(source.engine.close)
+            source.engine = Engine(1, 1024**2)
+        elif change == "mode":
+            acquire = request("decimated")
+        elif change == "layout":
+            acquire = replace(
+                acquire,
+                point_dims=(1, 2),
+                point_names=("outer", "inner"),
+                loop_dims=(3, 1, 2),
+            )
+        else:
+            acquire = replace(acquire, reps=4, loop_dims=(4, 2))
+        draw(source, acquire, snap)
+        assert source.preparation_cache.builds == 2
+        assert source.preparation_cache.hits == 0
+    finally:
+        source.close()
+        cleanup.close()
+
+
+def test_lru_budget_close_and_failed_preparation_release_residents():
+    source = FTFSource(settings(), DeviceManager())
+    try:
+        draw(source)
+        assert hasattr(source, "preparation_cache"), "preparations need a byte budget"
+        cache = source.preparation_cache
+        size = cache.resident_bytes
+        assert size > 0
+        cache.max_bytes = size * 2 + 1024
+        other = replace(request(), reps=4, loop_dims=(4, 2))
+        draw(source, other)
+        draw(source)  # Refresh first key.
+        third = replace(request(), reps=5, loop_dims=(5, 2))
+        draw(source, third)
+        assert cache.resident_bytes <= cache.max_bytes
+        builds = cache.builds
+        draw(source, other)
+        assert cache.builds == builds + 1, "least recently used key must be evicted"
+        invalid = replace(
+            request(), templates=(replace(request().templates[0], events=()),)
+        )
+        with pytest.raises(ValueError, match="readout"):
+            draw(source, invalid)
+        assert cache.resident_bytes == 0
+        assert source.readout_cache.resident_bytes == 0
+        draw(source)
+        source.close()
+        assert cache.resident_bytes == 0
+        with pytest.raises(RuntimeError, match="closed"):
+            source.open_acquire(request())
+    finally:
+        source.close()
+
+
+def test_preparation_hits_reemit_accuracy_warning_and_keep_numeric_identity():
+    from zcu_tools.simulate.evolution import Engine
+    from zcu_tools.simulate.evolution.kernels import REGISTRY
+    from zcu_tools.simulate.evolution.kernels.t4 import T4
+
+    class ExceedingIdle(T4):
+        def apply(self, prepared, key_index, table, rows, states, context):
+            result = super().apply(prepared, key_index, table, rows, states, context)
+            result[:] = True
+            return result
+
+    kernels = tuple(ExceedingIdle() if k.name == "t4" else k for k in REGISTRY)
+    source = FTFSource(
+        settings(), DeviceManager(), engine=Engine(1, 1024**2, kernels=kernels)
+    )
+    try:
+        with pytest.warns(RuntimeWarning, match="segment accuracy check exceeded"):
+            draw(source)
+        paths = source.evaluations[0].paths
+        with pytest.warns(RuntimeWarning, match="segment accuracy check exceeded"):
+            draw(source, replace(request(), sequence=8))
+        assert source.evaluations[0].paths == paths
+        assert source.evaluations[0].acquire_sequence == 8
+    finally:
+        source.close()
+
+
+def test_public_acquire_stop_reentry_and_delayed_raw_survive_preparation_hits():
+    from zcu_tools.experiment.ftf import ftf
+    from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+    from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+    from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+    env = ftf(settings())
+    try:
+        prog = ModularProgramV2(
+            env.soccfg,
+            ProgramV2Cfg(reps=3, rounds=3),
+            modules=[
+                PulseReadoutCfg(
+                    gen_ch=0,
+                    ro_ch=0,
+                    nqz=1,
+                    freq=6000,
+                    gain=0.1,
+                    waveform=ConstWaveformCfg(length=0.02),
+                    ro_length=0.02,
+                ).build("readout")
+            ],
+        )
+        observed = []
+
+        def hook(count, data, stop):
+            observed.append(count)
+            with pytest.raises(RuntimeError, match="active|reentr"):
+                prog.acquire(env.soc, progress=False)
+            stop.set()
+
+        prog.acquire(env.soc, progress=False, round_hook=hook)
+        first_request = env.soc.binding.last_request
+        assert first_request is not None
+        raw = prog.get_raw()
+        assert raw is not None
+        first_raw = raw[0].copy()
+        prog.acquire(env.soc, progress=False, round_hook=hook)
+        assert observed == [1, 1]
+        second_request = env.soc.binding.last_request
+        assert second_request is not None
+        assert second_request.sequence == first_request.sequence + 1
+        assert raw[0].tobytes() == first_raw.tobytes()
+        again = prog.get_raw()
+        assert again is not None
+        assert again[0].shape == first_raw.shape
+    finally:
+        env.devices.close_all_devices()

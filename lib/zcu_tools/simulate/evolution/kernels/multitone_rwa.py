@@ -14,7 +14,7 @@ from ..secular import SecularModel
 from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
-from ._workload_facts import envelope_bounds, packed_segments
+from ._workload_facts import envelope_bounds, fixed_flux, packed_segments
 
 # Calibrated on 128--512 ns Gaussian simultaneous gates in the 16-level
 # joint model: 50 MHz edges + 4 ns ceiling gave <= 1.76e-3 population change
@@ -387,26 +387,6 @@ def _smooth(table: SegmentTable, envelope: int, context: KernelContext) -> bool:
     )
 
 
-def _fixed_flux(table: SegmentTable, row: int) -> bool:
-    waveform = table.flux_waveform
-    point = table.timeline[row]
-    if waveform is None or (
-        table.flux_waveform_available is not None
-        and not table.flux_waveform_available[point]
-    ):
-        return True
-    first, last = waveform.offsets[point : point + 2]
-    times = waveform.time_ns[first:last]
-    flux = waveform.flux[first:last]
-    start = table.start_ns[row]
-    end = start + table.duration_ns[row]
-    active = np.r_[start, times[(times > start) & (times < end)], end]
-    return all(
-        np.ptp(np.interp(active, times, flux[:, loop])) == 0
-        for loop in range(flux.shape[1])
-    )
-
-
 def _retained_norm(
     model: SecularModel, port: int, frequency: float, context: KernelContext
 ) -> float:
@@ -480,7 +460,7 @@ def _admit_rows(
         if (
             context.budget < _MIN_BUDGET
             or (count != 1 if single_tone else count < 2)
-            or not _fixed_flux(table, int(row))
+            or not fixed_flux(table, int(row))
         ):
             continue
         envs = table.tone_envelope[row, :count]
@@ -587,14 +567,25 @@ def rwa_coefficients(
 class MultitoneRWAKernel:
     """Joint RWA C5 family with unchanged sampled and covariant-gate admission.
 
-    Requires fixed flux, real smooth envelopes, each |f|>=0.05 GHz and carrier
-    magnitudes separated by >=0.1 GHz, summed peak full-operator/carrier ratio
-    <=0.25 and budget>=1e-3. Sampled slope/curvature limits are 0.025/ns and
-    0.003/ns². The retained-edge phase proxy cap remains 0.06 rad for sampled
-    rows and gates; distinct-port dual constants use 0.16 rad. The latter was
-    calibrated on 96 strict-lab points (phase, gain, duration and four fluxes):
-    the smallest failing phase proxy was 0.338 rad, halved and rounded down.
-    Same-port constant spectra retain their full-drive route for peak accuracy.
+    Admission requires >=2 tones with a sampled envelope, or exactly two
+    constant envelopes on distinct ports, fixed flux,
+    real envelopes with peak-normalized slope <=0.025/ns and curvature
+    <=0.003/ns², each |f|>=0.05 GHz, pairwise ||f_i|-|f_j||>=0.1 GHz,
+    sum of peak |gain|*(||X||₂+||Y||₂)/|f| <=0.25, and cumulative
+    counter-rotating phase proxy 2π*duration*sum((peak*gain*||V_ret||₂)²/|f|)
+    <=0.06 rad for sampled rows, or <=0.16 rad for distinct-port dual constant
+    rows. The constant cap uses one 96-point scan of the 16-level joint model
+    against strict lab DOP853 (budget 1e-7): flux offsets
+    (0.48*f,0.2,0.49*f) Phi0 for f=0,0.4,0.8,1 between integer and near-half;
+    phases (0,0) and (0.7,-1.2) rad; full-operator/carrier ratios 0.03, 0.07,
+    0.14, 0.24; durations 128, 512, 1024 ns. Among all forced-RWA points,
+    including combination-guard rejects, the smallest proxy with population
+    error >0.1 was 0.338362529 rad. Halving and rounding down gives 0.16 rad
+    (2.11x margin). All 44 points below this cap had error <=0.08641; the 36
+    also passing the combination guard had error <=0.005062. This empirical
+    cap is not an arbitrary-input or whole-sequence certificate. Sampled
+    admission and covariant gate policies remain unchanged. Budgets below
+    1e-3 decline: this calibrated approximation is not a tight-error solver.
 
     Constant rows also use the unified omitted-edge transfer estimate documented
     in _omission_probability: window-excluded one-photon edges, same-tone and

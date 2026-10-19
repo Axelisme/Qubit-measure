@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 import numpy as np
 from qick.asm_v2 import QickParam, QickRawParam
@@ -28,6 +28,7 @@ from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
 from ..modules.util import round_timestamp
 from ..modules.waveform import ConstWaveformCfg, FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freq_from_word, readout_freq_from_words
+from ._envelope_pool import EnvelopeContent, EnvelopePool
 from ._mux import mux_parameters
 from .dependencies import register_access, validate_loop_hooks, validate_modules
 
@@ -36,19 +37,6 @@ def _minimum(value: float | QickParam) -> float:
     if is_qick_param(value):
         return value.minval()
     return float(value)
-
-
-@dataclass(frozen=True)
-class _EnvelopeContent:
-    """Exact compiled DAC inputs; playback duration matters only for flat-tops."""
-
-    dtype: str
-    shape: tuple[int, ...]
-    samples: bytes
-    maxv: float
-    fabric_mhz: float
-    samples_per_clock: int
-    flat_duration_us: float | None
 
 
 class TimelineInterpreter:
@@ -75,13 +63,22 @@ class TimelineInterpreter:
         table_readouts: Borrowed validated table modules by id for loop hooks.
     """
 
-    def __init__(self, prog: ModularProgramV2) -> None:
-        """Borrow a compiled program and initialize isolated execution state."""
+    def __init__(
+        self, prog: ModularProgramV2, *, envelope_pool: EnvelopePool | None = None
+    ) -> None:
+        """Borrow a compiled program and initialize isolated execution state.
+
+        envelope_pool optionally shares detached envelopes across preparations.
+        Names remain preparation-local; each preparation reads current DAC content.
+        Without a supplied pool, reuse lasts only for this interpreter.
+        """
         self.prog = prog
         # Compiled tables and clocks are fixed during one preparation. Names
         # are only local aliases; distinct names/channels can share exact content.
         self._envelope_names: dict[tuple[int, str, float | None], PulseEnvelope] = {}
-        self._envelope_contents: dict[_EnvelopeContent, PulseEnvelope] = {}
+        self._envelope_pool = (
+            envelope_pool if envelope_pool is not None else EnvelopePool()
+        )
         self.point: dict[str, int] = {}
         self.ref = 0.0
         self.events: list[PulseEvent] = []
@@ -421,8 +418,8 @@ class TimelineInterpreter:
         None; flat-top adds the half-gain plateau without sampling its interior.
         duration supplies the actual total quantized playback length, including
         both ramps. Returned tuples never borrow the compiled sample buffers.
-        Equal compiled contents share immutable tuples within this interpreter
-        only; names are not content identities across programs/preparations.
+        Equal compiled contents share immutable tuples through the supplied pool.
+        Names are only aliases within this preparation, never cross-acquire keys.
         """
         cfg = module.cfg
         if cfg is None or isinstance(cfg.waveform, ConstWaveformCfg):
@@ -441,7 +438,7 @@ class TimelineInterpreter:
         data = envelopes[name]["data"]
         clock = self.prog.soccfg["gens"][ch]
         maxv = self.prog.soccfg.get_maxv(ch)
-        key = _EnvelopeContent(
+        key = EnvelopeContent(
             data.dtype.str,
             data.shape,
             data.tobytes(),
@@ -450,8 +447,8 @@ class TimelineInterpreter:
             clock["samps_per_clk"],
             flat_duration,
         )
-        if key in self._envelope_contents:
-            envelope = self._envelope_contents[key]
+        envelope = self._envelope_pool.get(key)
+        if envelope is not None:
             self._envelope_names[alias] = envelope
             return envelope
         values = (data[:, 0] + 1j * data[:, 1]) / maxv
@@ -472,7 +469,7 @@ class TimelineInterpreter:
         envelope = PulseEnvelope(
             tuple(float(v) for v in axis), tuple(complex(v) for v in values)
         )
-        self._envelope_contents[key] = envelope
+        self._envelope_pool.put(key, envelope)
         self._envelope_names[alias] = envelope
         return envelope
 

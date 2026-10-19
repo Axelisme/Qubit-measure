@@ -135,3 +135,29 @@ def packed_segments(
     """
     key = FactKey(("dop853-segments", _TableIdentity(table), include_flux), Segments)
     return work_plan.fact(key, lambda: pack_segments(table, include_flux=include_flux))
+
+
+def fixed_flux(table: SegmentTable, row: int) -> bool:
+    """Return whether this row's actual interpolated flux is constant on support.
+
+    Check every row before using phase-covariant physics facts: equal model
+    levels and playback keys do not imply equal continuous flux waveforms.
+    Missing continuous samples retain quantized-model admission.
+    """
+    waveform = table.flux_waveform
+    point = table.timeline[row]
+    if waveform is None or (
+        table.flux_waveform_available is not None
+        and not table.flux_waveform_available[point]
+    ):
+        return True
+    first, last = waveform.offsets[point : point + 2]
+    times = waveform.time_ns[first:last]
+    flux = waveform.flux[first:last]
+    start = table.start_ns[row]
+    end = start + table.duration_ns[row]
+    active = np.r_[start, times[(times > start) & (times < end)], end]
+    return all(
+        np.ptp(np.interp(active, times, flux[:, loop])) == 0
+        for loop in range(flux.shape[1])
+    )

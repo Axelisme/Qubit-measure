@@ -112,3 +112,38 @@ def test_accepted_work_evicts_rejected_domains_before_ordinary_lru():
         assert guard.built.count(10) == 1, "a recent rejection is still first to evict"
         engine.evolve(src, (driven(20),), cancel=Event())
         assert guard.built.count(20) == 2, "accepted allocations replaced rejection"
+
+
+@pytest.mark.parametrize("timelines", [1, 2])
+def test_unretained_rejected_handoffs_release_before_fallback_apply(timelines):
+    """Cache admission, not the classification record, owns unused handoffs."""
+    from weakref import ref
+
+    class ObservedGuard(GuardDomain):
+        def __init__(self):
+            super().__init__()
+            self.products = []
+
+        def result(self, prepared, table, rows, context):
+            self.products.append(ref(prepared))
+            return super().result(prepared, table, rows, context)
+
+    guard = ObservedGuard()
+
+    class Fallback(RecordingKernel):
+        def __init__(self):
+            super().__init__("floquet_period")
+            self.live_rejections = []
+
+        def apply(self, prepared, key_index, table, rows, states, context):
+            self.live_rejections.append(sum(p() is not None for p in guard.products))
+            return super().apply(prepared, key_index, table, rows, states, context)
+
+    fallback = Fallback()
+    with closing(Engine(1, 16, kernels=(guard, fallback))) as engine:
+        result = engine.evolve(source(), (driven(20, timelines),), cancel=Event())
+    assert result.paths.segments_by_kernel == {"floquet_period": timelines}
+    assert guard.products, "exercise numerical guard handoff construction"
+    assert fallback.live_rejections == [0] * len(fallback.calls), (
+        "a rejected offer must release unused handoffs before fallback apply"
+    )

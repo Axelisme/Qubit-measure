@@ -25,6 +25,7 @@ from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
 from ..modules.util import merge_max_length, round_timestamp
 from ..modules.waveform import FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freqs_from_words
+from ._envelope_pool import EnvelopePool
 from ._mux import mux_parameters
 from .templates import FlatTopEnvelopes, select_candidates, take_slot
 from .timeline import TimelineInterpreter
@@ -64,9 +65,16 @@ class VectorInterpreter:
     flat_tops owns flat-top envelope lowering.
     """
 
-    def __init__(self, prog: ModularProgramV2) -> None:
+    def __init__(
+        self, prog: ModularProgramV2, *, envelope_pool: EnvelopePool | None = None
+    ) -> None:
+        """Borrow compiled controls, optionally reusing exact DAC envelopes.
+
+        envelope_pool retains immutable records only; all registers, point arrays
+        and name aliases remain local to this preparation.
+        """
         self._prog = prog
-        self._diagnostic = TimelineInterpreter(prog)
+        self._diagnostic = TimelineInterpreter(prog, envelope_pool=envelope_pool)
         self._names = tuple(n for n in prog.loop_dict if n != "reps")
         self._dims = tuple(prog.loop_dict[n] for n in self._names)
         self._size = prod(self._dims)

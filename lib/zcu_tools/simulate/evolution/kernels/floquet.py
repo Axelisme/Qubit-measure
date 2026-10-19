@@ -36,7 +36,6 @@ another kernel.
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from functools import partial
 from types import MappingProxyType
 from typing import Literal
 
@@ -1139,8 +1138,9 @@ class FloquetKernel:
 
         The complete table's same-key candidates decide whether construction
         needs sidebands. Full Fourier averages are consumed inside that build;
-        only the compact immutable entry is published in WorkPlan and resident
-        preparations. Probe-bin certificates remain guard-call products.
+        only the compact immutable entry survives in the returned preparation.
+        Frame ownership follows resident admission or the current active binding,
+        never an evolve-long fact. Probe-bin certificates remain guard products.
         """
         source, budget = context.source, context.budget
         if budget <= 0 or not np.array_equal(
@@ -1156,30 +1156,15 @@ class FloquetKernel:
         for key in keys:
             model = source.model(tuple(int(v) for v in key["level"]))
             parameters = _parameters(table, candidates[candidate_keys == key])
-            fact = FactKey(
-                (
-                    "floquet-frame",
-                    parameters.tobytes(),
-                    model.identity,
-                    model.level,
-                    key.tobytes(),
-                    budget,
-                ),
-                _Entry,
-            )
             try:
                 entries.append(
-                    context.work_plan.fact(
-                        fact,
-                        partial(
-                            _build,
-                            model,
-                            int(key["port"]),
-                            float(key["frequency"]),
-                            float(key["gain"]),
-                            parameters,
-                            budget,
-                        ),
+                    _build(
+                        model,
+                        int(key["port"]),
+                        float(key["frequency"]),
+                        float(key["gain"]),
+                        parameters,
+                        budget,
                     )
                 )
             except np.linalg.LinAlgError as error:

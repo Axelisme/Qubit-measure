@@ -1,5 +1,6 @@
 """FTF round snapshots, persistent engine ownership and compact readout sampling."""
 
+import warnings
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import prod
@@ -28,9 +29,9 @@ from zcu_tools.simulate.adc import (
     ChannelReadout,
     ConditionalSums,
     PopulationValidationError,
+    PreparedStatistics,
     ReadoutCache,
     normalize_populations,
-    round_statistics,
     sample_traces,
 )
 from zcu_tools.simulate.evolution import (
@@ -40,6 +41,7 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 
+from .preparation import PreparationCache, preparation_key
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
 from .template import FTFModelFacts, plan_template
@@ -66,6 +68,8 @@ class FTFNumericUse:
 class _Prepared:
     populations: NDArray[np.float64]
     channels: tuple[ChannelReadout, ...]
+    paths: PathDiagnostics
+    sampler: PreparedStatistics | None
 
 
 class FTFAcquire:
@@ -74,8 +78,9 @@ class FTFAcquire:
     Construct through FTFSource.open_acquire. sample_round takes a detached live
     snapshot and a zero-based software round index. Equal consecutive snapshots
     reuse density and conditional responses, but draw a fresh round stream.
-    Opening the next acquire invalidates this session and releases preparations;
-    using an invalidated session raises RuntimeError. Calls are synchronous and
+    Opening the next acquire invalidates this session and releases its references;
+    source-owned bounded noiseless records can survive. Using an invalidated
+    session raises RuntimeError. Calls are synchronous and
     must be serialized by the caller (the binding provides acquire admission).
     """
 
@@ -105,7 +110,16 @@ class FTFAcquire:
         if not self._active:
             raise RuntimeError("FTF acquire session is no longer active")
         if self._prepared is None or snapshot != self._snapshot:
-            prepared = self._prepare(snapshot, index)
+            try:
+                prepared = self._reuse_or_prepare(snapshot, index)
+            except Exception:
+                # Preparation may have filled only part of either deterministic
+                # cache. Do not keep any generation's partial products.
+                owner.preparation_cache.clear()
+                owner.readout_cache.clear()
+                self._prepared = None
+                self._snapshot = None
+                raise
             self._prepared, self._snapshot = prepared, snapshot
         prepared = self._prepared
         acquire = self.request
@@ -116,8 +130,12 @@ class FTFAcquire:
             round_index=index,
         )
         if acquire.mode == "integrated":
-            result = round_statistics(
-                prepared.populations, prepared.channels, **arguments
+            if prepared.sampler is None:
+                raise RuntimeError("integrated preparation requires a sampler")
+            result = prepared.sampler.draw(
+                seed=acquire.root_seed,
+                acquire_sequence=acquire.sequence,
+                round_index=index,
             )
         else:
             traces = sample_traces(prepared.populations, prepared.channels, **arguments)
@@ -143,6 +161,32 @@ class FTFAcquire:
                 index,
             )
         return result
+
+    def _reuse_or_prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
+        owner = self._source
+        # This check must precede every lookup, including equal-content requests.
+        owner.model_facts(snapshot)
+        key = preparation_key(self.request, owner.readout)
+        prepared = owner.preparation_cache.get(key)
+        if prepared is None:
+            prepared = self._prepare(snapshot, index)
+            owner.preparation_cache.put(key, prepared)
+        else:
+            owner.evaluations = (
+                FTFNumericUse(self.request.sequence, index, prepared.paths),
+            )
+            exceeded = prepared.paths.exceeded_by_kernel
+            if exceeded:
+                summary = ", ".join(
+                    f"{name}: {count}" for name, count in sorted(exceeded.items())
+                )
+                warnings.warn(
+                    f"segment accuracy check exceeded in {sum(exceeded.values())} segments "
+                    f"({summary}); results use the uncorrected approximation",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        return prepared
 
     def _prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
         acquire = self.request
@@ -210,9 +254,14 @@ class FTFAcquire:
                     first.batch.model.receiver,
                 )
             )
-        return _Prepared(
-            probabilities.reshape((*acquire.point_dims, state_count)), tuple(channels)
+        probabilities = probabilities.reshape((*acquire.point_dims, state_count))
+        probabilities.setflags(write=False)
+        sampler = (
+            PreparedStatistics(probabilities, tuple(channels), reps=acquire.reps)
+            if acquire.mode == "integrated"
+            else None
         )
+        return _Prepared(probabilities, tuple(channels), evolved.paths, sampler)
 
 
 class FTFSource:
@@ -226,9 +275,18 @@ class FTFSource:
     optionally supplies detached author capabilities, otherwise adapts settings.
     Replay rejects overrides that cannot be reconstructed from those settings.
 
-    open_acquire drops the previous session's density/conditional arrays. execute
+    open_acquire drops the previous session's preparation references. execute
     opens a session only when its request object changes, preserving preparation
     across equal-snapshot rounds. The engine/cache survives across acquires.
+    preparation_cache owns at most 4 MiB of read-only probabilities, conditionals,
+    content mappings, path diagnostics and deterministic integrated samplers.
+    Exact current C1 content, layout, mode, reps and readout values select entries.
+    Physical/numeric generation and engine replacement clear them before lookup.
+    Its public max_bytes may be adjusted between calls; zero disables residency.
+    Cumulative builds/hits and resident_bytes report reuse, never noisy results
+    or request sampling identities. A hit updates this acquire's numeric use and
+    reemits any report-only accuracy warning. Failed preparation clears both
+    deterministic caches. Active sessions/caller references are outside budgets.
     At most one complete snapshot's physical model survives across acquires;
     full settings and numeric revisions also participate in its exact key.
     readout_cache owns at most 8 MiB of physical ADC solvers and exact conditional
@@ -267,6 +325,8 @@ class FTFSource:
         self._session: FTFAcquire | None = None
         self._facts: FTFModelFacts | None = None
         self.readout_cache = ReadoutCache(8 * 1024**2)
+        self.preparation_cache: PreparationCache[_Prepared] = PreparationCache()
+        self._preparation_engine = self.engine
         self._closed = False
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> FTFModelFacts:
@@ -278,8 +338,12 @@ class FTFSource:
         """
         if self._closed:
             raise RuntimeError("FTF source is closed")
+        if self.engine is not self._preparation_engine:
+            self.preparation_cache.clear()
+            self._preparation_engine = self.engine
         if self._facts is None or not self._facts.matches(self.settings, snapshot):
             self.readout_cache.clear()
+            self.preparation_cache.clear()
             self._facts = None
             self._facts = FTFModelFacts(self.settings, snapshot)
         return self._facts
@@ -321,7 +385,7 @@ class FTFSource:
         return self._session
 
     def execute(self, request: RoundRequest) -> RoundStatistics | RoundSignals:
-        """Execute a detached round, reusing only this acquire's last equal snapshot."""
+        """Execute a detached round with bounded exact noiseless reuse and fresh draws."""
         if self._session is None or self._session.request is not request.acquire:
             self.open_acquire(request.acquire)
         session = self._session
@@ -336,6 +400,7 @@ class FTFSource:
             self._session = None
         self._facts = None
         self.readout_cache.clear()
+        self.preparation_cache.clear()
         self._closed = True
         self.engine.close()
 

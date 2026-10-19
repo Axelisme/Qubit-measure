@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives, simultaneous and single-tone covariant gate reuse, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and constant-tone block RWA
+**Last updated:** 2026-10-19, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA and unified omission admission
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -42,7 +42,9 @@ I/Q. ADC owns its probability tolerance and readout sums; see the
 ## Decision graph
 
 [Geometry construction](_planning.py) combines pulse, flux and readout events.
-Pulse support uses half-open absolute intervals. Flat-top plateaus of at least
+Pulse support uses half-open absolute intervals. Tone columns hold only the
+maximum simultaneously active count, packed in original track order, not the
+number of historical pulses. Flat-top plateaus of at least
 10 ns become constant rows; shorter plateaus stay shaped. Evolution stops at
 readout start. FTF readout then uses the DC model, ignoring residual flux tails
 and overlapping controls.
@@ -125,15 +127,19 @@ ports. Same-port constant Stark/probe spectra retain Floquet/DOP853 because
 small population errors can still shift a narrow resonance peak. Continuous
 flux must be constant over the complete row.
 Budgets below 1e-3 decline this approximation. Admission also requires
-`2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= 0.06 rad` for
-sampled rows and single constant RWA, or <=0.16 rad for distinct-port dual
-constants, where
-`V_ret = (X-iY)/2` after the positive-frequency edge mask. This row-local
+`2*pi*duration*sum((peak*gain*norm(V_ret,2))**2/abs(f)) <= phase_limit`, where
+`V_ret = (X-iY)/2` after the positive-frequency edge mask. Sampled rows and
+single constant RWA retain `phase_limit = 0.06 rad`. Distinct-port dual constant rows use `0.16 rad`,
+calibrated against strict lab populations with a twofold safety margin from
+the smallest failing proxy in a 96-point flux/phase/gain/duration scan.
+The kernel docstring records the grid and errors. This row-local
 counter-rotating phase proxy accounts for long pulses even at small
-strength/carrier ratios; it does not bound accumulated sequence error. In the integer 256 ns amplitude sweep, gain 0.4184
-had proxy 0.063 rad and population error above 1e-2. The 0.06 rad limit
-returns those high-gain rows to lab DOP853. This proxy is calibrated, not a
-rigorous Stark-shift bound. Its limit enters the policy identity and keys.
+strength/carrier ratios; it does not bound accumulated sequence error. In the
+integer 256 ns sampled amplitude sweep, gain 0.4184 had proxy 0.063 rad and
+population error above 1e-2. Those sampled rows still return to lab DOP853.
+This proxy is calibrated, not a rigorous Stark-shift bound. The constant cap
+enters only constant-row prepare keys; sampled and gate policy identities
+remain unchanged.
 
 Single and distinct-port dual constant rows share one omitted-coupling rule.
 It checks window-excluded one-photon terms and every same-tone/cross-tone
@@ -161,7 +167,7 @@ Shaped RWA and covariant gate admission do not use this constant-only rule.
 Dual constant integration retains the adaptive solver and its error estimator,
 with a 16 ns ceiling. Constant envelopes have no sampled internal features.
 The larger ceiling reduces work after the fast carrier phase has been removed;
-it does not relax the calibrated phase limits or drop the joint dissipator.
+it is independent of phase admission and does not drop the joint dissipator.
 
 The 50 MHz edge window and 4 ns ceiling come from simultaneous 128–512 ns
 Gaussian gate measurements on a 16-level joint model. The prototype's maximum
@@ -296,9 +302,13 @@ The registry kernels retain no evolve-local data.
 WorkPlan publishes each lazy fact once, including concurrent requests for the
 same key. WorkPlan copies builder results and publishes read-only arrays. The
 shared facts include envelope peak/slope/real flags, period split rates, packed
-DOP853 samples and compact two-tone Floquet frames. Floquet consumes full Fourier
-averages during frame construction; facts and residents retain only compact
-frame data and optional sideband candidates. Model facts include the full
+DOP853 samples, covariant gate admissions and small Floquet probe-bin certificate
+extensions. Gate admission facts use full canonical physics, budget and numerical
+policies. Each row still checks its own continuous flux support before borrowing an
+admission; only absolute start and covariant phase are omitted from the fact.
+Floquet consumes full Fourier averages during frame construction. Its compact
+frames and optional sideband candidates belong only to active preparations or
+budget-admitted cache ownership, never evolve-long facts. Model facts include the full
 physical coordinates in their identity. Table-indexed facts
 also include table identity, so renumbered prefix representatives cannot alias
 the complete table. DOP853 packing also distinguishes flux-inclusive samples.
@@ -328,6 +338,15 @@ consumers stay open until WorkPlan closes. Prefix preparation cannot seal a
 group needed by later timeline work. Gain and constant-CF4 carrier anchors share
 this admission and handoff mechanism. Carrier interaction-picture prefixes belong
 only to the evolve-local anchor resource, not to resident period payloads.
+Non-anchor carrier guards also share single-flight CF4 node eigensystems and
+adjacent eigenbasis overlaps, partitioned by exact model, port, gain, carrier
+sign and coarse phase grid. Each carrier still advances every coarse interval
+and checks the original nine probes at the same tolerance. A comparison within
+a grid/dimension-scaled roundoff margin of the threshold uses the original
+Padé coarse grid; rejected predictions also refine from that original grid.
+These spectral products follow the same admission, sealing and handoff lifetime
+as anchors. They do not enlarge resident period payloads. Standalone builds and
+gain interpolation retain their original Padé coarse guards.
 
 Carrier interpolation uses a mutable `CarrierWorkspace`, separate from immutable
 facts and resource products. WorkPlan creates it lazily from published carrier
@@ -373,7 +392,9 @@ After each schedule joins, the caller publishes pending products for later
 prefix/suffix lookups. After the evolve pool drains, it restores surviving stale
 residents as older than current work, even on failure or cancellation. Fully
 rejected guard handoffs stay separate from apply bindings and fill only idle
-capacity. Current row, probe-bin, domain and budget checks still run on every
+capacity. Schedule consumes Dispatch's rejected handoff queue on offer, so declined
+or evicted products have no remaining Dispatch owner. Current row, probe-bin,
+domain and budget checks still run on every
 evolve. The unified account bounds retained arrays, not transient builders,
 active nonretained/oversize bindings, input-bound data or process RSS.
 

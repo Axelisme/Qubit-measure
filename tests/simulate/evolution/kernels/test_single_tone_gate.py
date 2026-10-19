@@ -12,6 +12,7 @@ from zcu_tools.simulate.evolution import (
     Engine,
     EnvelopeSpec,
     FluxSchedule,
+    FluxWaveform,
     ModelSource,
     SecularDrive,
     SecularModel,
@@ -23,6 +24,7 @@ from zcu_tools.simulate.evolution.kernel import (
     SegmentTable,
 )
 from zcu_tools.simulate.evolution.kernels import REGISTRY
+from zcu_tools.simulate.evolution.kernels._rwa_gate import GatePrepared
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 
@@ -88,13 +90,20 @@ def test_inventory_amortizes_once_but_small_inventory_stays_sambe_even_when_warm
         for phase in (0.0, 0.713):
             result = engine.evolve(source(), (batch(1024, phase),), cancel=Event())
             assert result.paths.segments_by_kernel.get("single_tone_gate") == 1024
-        assert len(calls) == 4, (
-            "one canonical key builds four U only once across phases"
-        )
+        assert len(calls) == 0, "single-tone cold builds stay in compiled integration"
         warm_small = engine.evolve(source(), (batch(2, 0.713),), cancel=Event())
         assert (
             warm_small.paths.segments_by_kernel == cold_small.paths.segments_by_kernel
         )
+
+
+def test_compiled_cold_cost_admits_reference_inventory_but_not_small_inventory():
+    with closing(Engine(1, 1_000_000)) as engine:
+        for phase in (0.0, 0.713):
+            reference = engine.evolve(source(), (batch(160, phase),), cancel=Event())
+            assert reference.paths.segments_by_kernel.get("single_tone_gate") == 160
+            small = engine.evolve(source(), (batch(2, phase),), cancel=Event())
+            assert small.paths.segments_by_kernel.get("shaped_sambe") == 2
 
 
 @pytest.mark.parametrize("frequency", [0.6, -0.6])
@@ -156,3 +165,188 @@ def test_covariance_preserves_complex_density_for_sliced_support_and_key_domains
         changed = kernel.prepare_keys(replace(table, **{field: values}), rows, context)
         assert changed[0] != keys[0]
     assert not kernel.guard(table, rows, replace(context, budget=1e-4)).any()
+
+
+@pytest.mark.parametrize("frequency", [0.6, -0.6])
+def test_compiled_four_unitaries_match_scipy_at_sliced_absolute_intervals(
+    frequency, monkeypatch
+):
+    from zcu_tools.simulate.evolution.kernels.multitone_rwa import (
+        interaction_hamiltonian,
+        rwa_coefficients,
+    )
+
+    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
+    table = SegmentTable(
+        timeline=np.array([0]),
+        start_ns=np.array([37.0]),
+        duration_ns=np.array([126.0]),
+        level=np.zeros((1, 1), dtype=np.int64),
+        tones=np.ones(1, dtype=np.int64),
+        tone_port=np.zeros((1, 1), dtype=np.int64),
+        tone_frequency_ghz=np.array([[frequency]]),
+        tone_amplitude=np.array([[0.08]]),
+        tone_theta_rad=np.array([[0.713]]),
+        tone_envelope=np.zeros((1, 1), dtype=np.int64),
+        tone_envelope_offset_ns=np.array([[4.0]]),
+        envelopes=(envelope(),),
+    )
+    src = source()
+    rows = np.array([0])
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+        keys = kernel.prepare_keys(table, rows, context)
+        calls = []
+        solve = scipy.integrate.solve_ivp
+
+        def observed(*args, **kwargs):
+            calls.append(1)
+            return solve(*args, **kwargs)
+
+        monkeypatch.setattr(scipy.integrate, "solve_ivp", observed)
+        prepared = kernel.prepare(keys, table, rows, context)
+        assert isinstance(prepared, GatePrepared)
+        model = src.model((0,))
+        coefficients = rwa_coefficients(model, (0,), (frequency,))
+        energy = model.energies_ghz + prepared.charges[0, :, 0] * frequency
+        energy -= energy[0]
+        env = table.envelopes[0]
+
+        def rhs(time, state):
+            amplitude = 0.08 * np.interp(time + 4, env.sample_ns, env.samples)
+            h = interaction_hamiltonian(
+                time, energy, coefficients, np.array([amplitude])
+            )
+            return (-2j * np.pi * h @ state.reshape(3, 3)).ravel()
+
+        reference = []
+        boundaries = np.linspace(0, 126, 5)
+        for start, end in zip(boundaries[:-1], boundaries[1:], strict=True):
+            result = solve(
+                rhs,
+                (start, end),
+                np.eye(3, dtype=complex).ravel(),
+                method="DOP853",
+                rtol=1e-9,
+                atol=1e-11,
+                max_step=4.0,
+            )
+            assert result.success
+            endpoint = result.y[:, -1].reshape(3, 3)
+            endpoint *= np.exp(-2j * np.pi * energy * end)[:, None]
+            endpoint *= np.exp(2j * np.pi * energy * start)[None, :]
+            reference.append(endpoint)
+        np.testing.assert_allclose(prepared.unitaries[0], reference, atol=1e-7, rtol=0)
+        assert not calls, "single-tone preparation must use the compiled builder"
+
+
+@pytest.mark.parametrize("frequency", [0.6, -0.6])
+def test_admission_keeps_row_flux_and_budget_outside_covariant_equivalence(frequency):
+    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
+    # All rows share a playback key, but only timelines 0 and 2 have fixed flux.
+    table = SegmentTable(
+        np.arange(3),
+        np.array([0.0, 3.125, 71.0]),
+        np.full(3, 126.0),
+        np.zeros((3, 1), dtype=np.int64),
+        np.ones(3, dtype=np.int64),
+        np.zeros((3, 1), dtype=np.int64),
+        np.full((3, 1), frequency),
+        np.full((3, 1), 0.08),
+        np.array([[0.0], [0.713], [-1.2]]),
+        np.zeros((3, 1), dtype=np.int64),
+        np.full((3, 1), 4.0),
+        (envelope(),),
+        FluxWaveform(
+            np.arange(0, 7, 2),
+            np.array([0.0, 200.0] * 3),
+            np.array([[0.0], [0.0], [0.0], [0.001], [0.2], [0.2]]),
+        ),
+    )
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(source(), 1e-3, plan)
+        assert len(np.unique(kernel.prepare_keys(table, np.arange(3), context))) == 1
+        for rows in (np.array([0, 1, 2]), np.array([1, 2, 0]), np.array([2, 0, 1])):
+            np.testing.assert_array_equal(
+                kernel.guard(table, rows, context), np.array([True, False, True])[rows]
+            )
+            assert not kernel.guard(table, rows, replace(context, budget=1e-4)).any()
+        # A long support fails splitting even though its envelope holds DC.
+        long = replace(table, duration_ns=np.full(3, 100_000.0))
+        assert not kernel.guard(long, np.arange(3), context).any()
+        shifted = replace(table, tone_envelope_offset_ns=np.full((3, 1), 8.0))
+        assert np.all(
+            kernel.prepare_keys(shifted, np.arange(3), context)
+            != kernel.prepare_keys(table, np.arange(3), context)
+        )
+
+
+def test_admission_uses_sum_of_quadrature_norms_not_their_maximum():
+    src = source()
+    model = src.model((0,))
+    drive = model.drives[0]
+    # Off-resonant edges eliminate the phase proxy, isolating the full norm ratio.
+    model = replace(
+        model,
+        identity="two-quadrature-admission",
+        energies_ghz=np.array([0.0, 0.9, 1.8]),
+        drives=(replace(drive, quadrature_ghz=drive.in_phase_ghz),),
+    )
+    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
+    b = batch(1)
+    table = SegmentTable(
+        np.array([0]),
+        np.array([0.0]),
+        np.array([128.0]),
+        np.zeros((1, 1), dtype=np.int64),
+        np.ones(1, dtype=np.int64),
+        np.zeros((1, 1), dtype=np.int64),
+        np.array([[0.6]]),
+        np.array([[40.0]]),
+        np.zeros((1, 1)),
+        np.zeros((1, 1), dtype=np.int64),
+        np.zeros((1, 1)),
+        b.tracks[0].envelopes,
+    )
+    kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
+    with closing(WorkPlan()) as plan:
+        assert not kernel.guard(table, np.array([0]), KernelContext(src, 1e-3, plan))[0]
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_engine_covariant_density_is_bitwise_stable_under_point_permutation(workers):
+    original = batch(1024)
+    order = np.arange(1023, -1, -1)
+    t = original.tracks[0]
+    permuted = replace(
+        original,
+        points=original.points[order],
+        tracks=(
+            replace(
+                t,
+                **{
+                    name: getattr(t, name)[order]
+                    for name in (
+                        "start_ns",
+                        "duration_ns",
+                        "frequency_ghz",
+                        "phase_rad",
+                        "amplitude",
+                        "envelope_index",
+                        "active",
+                    )
+                },
+            ),
+        ),
+        end_ns=original.end_ns[order],
+    )
+    with closing(Engine(1, 0, chunks_per_worker=1)) as reference:
+        expected = reference.evolve(source(), (original,), cancel=Event())
+    with closing(Engine(workers, 0, chunks_per_worker=7)) as engine:
+        actual = engine.evolve(source(), (permuted,), cancel=Event())
+    assert actual.paths.segments_by_kernel == expected.paths.segments_by_kernel
+    assert actual.paths.segments_by_kernel["single_tone_gate"] == 1024
+    np.testing.assert_array_equal(
+        actual.densities[np.argsort(actual.points)],
+        expected.densities[np.argsort(expected.points)],
+    )
