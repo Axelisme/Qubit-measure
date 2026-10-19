@@ -208,7 +208,7 @@ PY
 2. **單位照抄，不換算。** 頻率 MHz、時間 us、能量 GHz。磁通數字分兩組：`flux_unit` 管 global 組（`cur_A`、`flx_half`、`flx_period`、`flx_int`、`flux_bias`），單位寫到 `general.ext.flux_unit`；`jpa_flux_unit` 管 `best_jpa_flux`，單位寫到 `J.flux_unit`。`local_flux_unit` 只照抄成 `Q.flux_unit`，不當任何數字的單位。每組依序取單位：
    1. 同一份 meta 明寫的單位。
    2. entry 已知的明寫單位：根層 meta_info 的同一個 key；沒有時用 `params.json` 根層的 `flux_unit`。JPA 只認 `jpa_flux_unit`，不借 qubit 的單位，所以跳過 `params.json` 這一項。
-   3. 使用者宣告的假設單位（本專案的資料用 `mA`），報告標「假設單位」。
+   3. 使用者宣告的假設單位，報告標「假設單位」。本專案的資料：global 組用 `mA`，JPA 組用 `V`。
    4. 以上都沒有：數字不寫入，列 pending。
 
    同一組、同一層的兩個明寫單位互相衝突時（例如根層 meta 與 `params.json` 不同），列 pending，不擇一。單位不符合欄位型別時（`J.flux_unit`、`Q.flux_unit` 只接受 A 或 V），不換算，整組列 pending。數字與單位一起寫入或一起 pending。報告記下實際採用的是哪份檔的單位。
