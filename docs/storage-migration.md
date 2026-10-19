@@ -472,7 +472,7 @@ Labber 與 native 都可能是 HDF5，但格式不同。把 `.hdf5` 改名為 `d
 - 缺可信 run_id 時，用公開的 `resources.entry.new_run_id()` 分配，報告標「遷移賦值」。ID 裡的 UTC 時戳是本次分配時間，不是歷史量測時間，不能拿來填 started_at。
 - 可信既有 run_id 與可證實歷史時間保留原證據。已知開始時間仍寫 UTC ISO；完成狀態只採證據支持的 complete/partial/stopped，未知用 unknown，不把可讀資料等同 complete。
 
-本節是手動流程，使用目前已公開的 native 2.1 API，不表示 `migrate_storage` 已支援這些未知歷史值。
+本節保留手動流程。`migrate_storage` 也遵循上述未知歷史規則，在 publication 前將來源/hash 與固定 ID 寫入自己的 manifest，resume 沿用該 ID。手動對照檔不等於工具 manifest，不能用來強迫工具接管。
 
 | 證據 | 要填的正式資料 |
 | --- | --- |

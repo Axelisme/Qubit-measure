@@ -42,6 +42,10 @@ def migrate_storage(
     validate_native receives the published native path, historical source tag and cfg_type;
     it must load against its declared experiment spec without modifying the file.
     It runs synchronously before the corresponding Labber source can be deleted.
+    Native readers must accept unknown lifecycle metadata, not require a complete
+    analysis result. Missing start writes native 2.1 None/unknown/None, preserving
+    original evidence in the manifest. Trusted run_id/time evidence is retained;
+    absent run_id uses new_run_id and is reported as 遷移賦值, never historical time.
 
     First execution verifies a complete external SHA256 backup before entry writes.
     Backup location comes from request.repo_root/backup_parent. Shared old/new
@@ -61,8 +65,9 @@ def migrate_storage(
     must keep this migration uninterrupted; a library write not yet recorded has
     no recovery procedure here. Delete its destination and rerun if that occurs.
     dry_run reads/validates sources and returns a report without any writes, moves
-    or native validation callback. Missing cfg identity/acquisition evidence or an undeclared
-    (tag, cfg_type) schema is pending; never fall back to a tag-only declaration.
+    or native validation callback. Missing cfg identity or other required evidence,
+    or an undeclared (tag, cfg_type) schema is pending; never fall back to a
+    tag-only declaration. Missing historical time/ID alone does not block native.
 
     Return the cumulative report of attempted parts. Normal runs persist manifest
     checkpoints and the fixed report location. Input/manifest/hash conflicts raise

@@ -29,7 +29,11 @@ if TYPE_CHECKING:
         LabberPayload,
     )
     from .native import load_run_data, save_run_data, validate_experiment_payload
-    from .native_metadata import json_values_equal, validate_cfg_snapshot
+    from .native_metadata import (
+        json_values_equal,
+        validate_cfg_snapshot,
+        validate_run_id,
+    )
     from .native_models import (
         AxisSchema,
         CfgSnapshot,
@@ -83,6 +87,7 @@ __all__ = [
     "load_run_data",
     "validate_experiment_payload",
     "validate_cfg_snapshot",
+    "validate_run_id",
     "Axis",
     "LabberPayload",
     "LabberMetadata",
@@ -133,6 +138,7 @@ _EXPORT_MODULES = {
     "validate_experiment_payload": ".native",
     "json_values_equal": ".native_metadata",
     "validate_cfg_snapshot": ".native_metadata",
+    "validate_run_id": ".native_metadata",
     "AxisSchema": ".native_models",
     "CfgSnapshot": ".native_models",
     "ExperimentPayload": ".native_models",

@@ -70,8 +70,8 @@ def _run_metadata(
         run_id=assignment.run_id,
         experiment=native_tag,
         started_at=legacy.started_at,
-        finished_at=legacy.finished_at,
-        completion=legacy.completion,
+        finished_at=None if legacy.started_at is None else legacy.finished_at,
+        completion="unknown" if legacy.started_at is None else legacy.completion,
         labber_path=None,
         snapshot=RunSnapshot(
             entry_id=entry_id,
@@ -117,17 +117,20 @@ def _load_payload(
 
 
 def _assignment(
-    session: MigrationSession, source: Path, source_hash: str
+    session: MigrationSession, source: Path, source_hash: str, historical_id: str | None
 ) -> RunAssignment:
     assignment = next(
         (item for item in session.manifest.runs if item.source == source), None
     )
     if assignment is None:
         at = datetime.now(timezone.utc)
+        run_id = new_run_id(at=at) if historical_id is None else historical_id
+        if any(item.run_id == run_id for item in session.manifest.runs):
+            raise MigrationInputError(f"{source}: duplicate run_id {run_id!r}")
         assignment = RunAssignment(
             source=source,
             source_hash=source_hash,
-            run_id=new_run_id(at=at),
+            run_id=run_id,
             assigned_at=at,
         )
         session.manifest = replace(
@@ -193,7 +196,7 @@ def _convert_run(
             record_pending(session, source, "run evidence", str(exc))
             return
     clear_pending(session, source, "run evidence")
-    assignment = _assignment(session, source, legacy.source_hash)
+    assignment = _assignment(session, source, legacy.source_hash, legacy.run_id)
     destination = session.manifest.report.destination
     layout = SaveLayout(
         result_path=destination.result_path,
@@ -209,7 +212,10 @@ def _convert_run(
     mappings = tuple(
         item
         for item in report.key_mappings
-        if (item.old_file, item.old_key) != (source, "snapshot.entry_id")
+        if not (
+            item.old_file == source
+            and item.old_key in ("snapshot.entry_id", "run_id", "started_at")
+        )
     )
     session.report(
         replace(
@@ -223,6 +229,30 @@ def _convert_run(
                     new_path="/meta/snapshot/entry_id",
                     action="value",
                     reason="Assign the new entry UUID; the legacy system did not record this historical UUID.",
+                ),
+                KeyMappingItem(
+                    old_file=source,
+                    old_key="run_id",
+                    new_file=native_path,
+                    new_path="/meta/run_id",
+                    action="value",
+                    reason=(
+                        f"遷移賦值: {assignment.run_id}; allocated by new_run_id, not a historical ID or acquisition time."
+                        if legacy.run_id is None
+                        else f"Preserve trusted historical run_id: {assignment.run_id}."
+                    ),
+                ),
+                KeyMappingItem(
+                    old_file=source,
+                    old_key="started_at",
+                    new_file=native_path,
+                    new_path="/meta/started_at",
+                    action="value",
+                    reason=(
+                        "Unproven start: native 2.1 started_at=None, completion=unknown, finished_at=None. Original evidence retained in migration manifest."
+                        if legacy.started_at is None
+                        else "Preserve proven historical times and completion; do not infer from the assigned ID."
+                    ),
                 ),
             ),
         )
@@ -276,7 +306,10 @@ def convert_data(
     validate_cfg purely checks the historical cfg before assignment/planning;
     ValueError is located pending, while other callback failures propagate.
     validate_native synchronously validates each published native before its source
-    can be removed. Missing/conflicting metadata is pending; execution, callback,
+    can be removed. Missing start uses native None/unknown/None. Missing run_id
+    receives a migration-assigned ID; trusted historical IDs are retained. Both
+    are fixed in the manifest before publication. Other missing/conflicting
+    metadata is pending; execution, callback,
     identity/hash and I/O failures propagate and retain owned recovery state.
     dry_run invokes only the pure cfg check and never writes or validates native."""
     preserve_result_files(session)
@@ -305,7 +338,7 @@ def convert_data(
                 session,
                 source,
                 "run evidence",
-                "Missing explicit historical snapshot/acquisition/completion evidence; Labber source retained",
+                "Missing explicit historical experiment/cfg/snapshot evidence; Labber source retained",
             )
             continue
         _convert_run(session, entry, mapping, legacy, validate_cfg, validate_native)
