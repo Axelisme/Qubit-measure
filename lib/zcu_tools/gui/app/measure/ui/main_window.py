@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.events.startup import StartupChangedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
@@ -660,6 +661,20 @@ class MainWindow(QMainWindow):
         else:
             self.show_status_message(message)
 
+    def refresh_startup(self, payload: StartupChangedPayload) -> None:
+        """Render owner-published script progress and failure, without losing tabs.
+
+        payload includes final path/line diagnostics on error. Run availability
+        follows the current startup lease; errors use a non-modal notification.
+        Call on the Qt owner thread only.
+        """
+        self.refresh_run_lock(self._ctrl.get_running_tab_id())
+        self.show_status_message(payload.message)
+        if payload.error is not None:
+            self._dialog_presenter.critical(
+                self, "Startup script failed", payload.error
+            )
+
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
         self._cfg_status_message = None
@@ -1284,7 +1299,7 @@ class MainWindow(QMainWindow):
             return
         self._draining_close = True
         try:
-            self._ctrl.close()
+            self._ctrl.finish_close()
         except TimeoutError:
             self._present_drain_timeout()
             return

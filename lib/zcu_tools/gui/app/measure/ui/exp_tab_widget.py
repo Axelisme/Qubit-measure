@@ -1296,6 +1296,7 @@ class ExpTabWidget(QWidget):
             writable
             and not local_busy
             and not state.global_run_active
+            and not state.startup_active
             and state.has_active_context
             and (not capabilities.requires_soc or state.has_soc)
             and cfg_valid
@@ -1305,6 +1306,8 @@ class ExpTabWidget(QWidget):
             self.run_btn.setToolTip("")
         elif local_busy:
             self.run_btn.setToolTip("Tab is busy")
+        elif state.startup_active:
+            self.run_btn.setToolTip("Startup script is running")
         elif state.global_run_active:
             self.run_btn.setToolTip("Another tab is running")
         elif not state.has_active_context:

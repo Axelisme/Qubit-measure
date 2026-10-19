@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from pydantic import JsonValue
@@ -821,6 +822,27 @@ class Controller(SessionControllerMixin):
         if self._hardware_close_attempted:
             raise FailedPreconditionError("GUI hardware has already closed")
         self._dev_svc.register_device(name, driver)
+
+    def start_startup(self, path: Path) -> int:
+        """Run trusted path's startup(ctx) off-owner after the Qt loop starts.
+
+        Owner-only; returns an operation token. Script failures publish a
+        path/line diagnostic and retain earlier commands. Repeated start raises
+        RuntimeError. The shared background drain includes this work.
+        """
+        return self._services.startup.start(path, self._services.startup_context)
+
+    def finish_close(self, timeout_ms: int = 5000) -> None:
+        """Drain, run script callbacks in reverse order, then close managed hardware.
+
+        Owner-only. timeout_ms bounds the normal drain; TimeoutError propagates
+        without callbacks or hardware cleanup, allowing a later retry. Each
+        callback/driver failure is logged and isolated. Successful repeated calls
+        do not repeat callbacks or driver close attempts. SoC remains caller-owned.
+        """
+        self.close(timeout_ms)
+        self._services.startup.close_callbacks()
+        self.close_hardware()
 
     def close_hardware(self) -> None:
         """Close managed drivers once, then unpublish the caller-owned SoC.

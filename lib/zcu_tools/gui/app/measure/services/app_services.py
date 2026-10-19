@@ -6,6 +6,15 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.artifacts import SaveControlFacet, SaveService
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
+from zcu_tools.gui.app.measure.startup_context import (
+    OwnerCalls,
+    StartupContext,
+    StartupDevices,
+    StartupParameters,
+    StartupSetup,
+    StartupSoc,
+    StartupTabs,
+)
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
@@ -34,6 +43,7 @@ from .operation_gate import OperationGate
 from .post_analyze import PostAnalyzeService
 from .run import RunService
 from .run_analyze_control import RunAnalyzeControlFacet
+from .startup import StartupService
 from .tab import TabService
 from .tab_control import TabControlFacet
 from .tab_form import TabFormResources, TabFormSources
@@ -77,6 +87,8 @@ class AppServices:
     is shared by run / analyze / post-analyze / device-setup operations.
     """
 
+    startup: StartupService
+    startup_context: StartupContext
     experiment_access: ExperimentAccess
     experiment_reload: ExperimentReloadService
     operation_gate: OperationGate
@@ -279,7 +291,21 @@ def build_app_services(
         active_operations=handles.live_count,
         access=access,
     )
+    startup = StartupService(runner, bus, state)
+    calls = OwnerCalls(owner_scheduler)
+    startup_context = StartupContext(
+        soc=StartupSoc(calls, session.soc_connection),
+        devices=StartupDevices(calls, device),
+        setup=StartupSetup(calls, session.setup_control),
+        context=StartupParameters(calls, session.context_control),
+        tabs=StartupTabs(calls, tab_control),
+        calls=calls,
+        register_close=startup.on_close,
+        report_progress=startup.progress,
+    )
     return AppServices(
+        startup=startup,
+        startup_context=startup_context,
         experiment_access=access,
         experiment_reload=reload_service,
         operation_gate=operation_gate,

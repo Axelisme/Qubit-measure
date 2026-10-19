@@ -9,6 +9,7 @@ GUI framework never imports the experiment-adapter layer.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, TypeGuard
 
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
@@ -41,8 +42,8 @@ def _make_empty_ctx() -> SessionEnv:
 class MeasureGuiBehavior(GuiRuntimeBehavior):
     """measure-gui wiring; params_for optionally injects user-owned component prefill.
 
-    registry_factory supplies catalogs after runtime setup. clean skips preference
-    restore; project_root anchors entry roots. Predictor queries never depend on
+    registry_factory supplies catalogs after runtime setup. clean skips saved
+    Qt layout and startup scripts; project_root anchors entry roots. Predictor queries never depend on
     dialog state. Assembly/source failures propagate without hidden retries.
     """
 
@@ -57,6 +58,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         registry_factory: RegistryFactory,
         *,
         clean: bool = False,
+        startup_script: Path | None = None,
         project_root: str | None = None,
         params_for: ParamsFor | None = None,
         alias_presets: AliasPresets | None = None,
@@ -64,7 +66,12 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         """Build caller catalogs and retain complete alias data for assembly.
 
         ``registry_factory`` returns the registry (including templates) and reload loader
-        after runtime setup. ``clean`` skips restoring persisted preferences;
+        after runtime setup. ``clean`` skips saved Qt layout and startup scripts.
+        ``startup_script`` is the already-selected trusted Python path, or None
+        to run no script and show Setup. Composition chooses the default, not
+        this module. clean with a script raises ValueError. The script runs on
+        a background worker after the Qt loop starts. Errors keep completed
+        commands and show path/line diagnostics. Callback teardown runs on-owner.
         ``project_root`` anchors default paths, or uses the working directory.
         ``alias_presets`` maps preset names to ordered authored rows. Omitted
         or None means no catalog and an empty initial table. An explicit mapping
@@ -83,7 +90,10 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         validate_alias_presets(alias_presets)
         install_global_exception_hook(show_error_dialog)
         self._registry, self._catalog_loader = registry_factory()
+        if clean and startup_script is not None:
+            raise ValueError("--clean and --script are mutually exclusive")
         self._clean = clean
+        self._startup_script = startup_script
         self._project_root = project_root
         self._params_for = params_for
         self.alias_presets: AliasPresets | None = alias_presets
@@ -146,8 +156,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             if _is_controller(assembly.controller):
                 ctrl = assembly.controller
         if ctrl is not None:
-            ctrl.close()
-            ctrl.close_hardware()
+            ctrl.finish_close()
 
     def before_show(self, assembly: GuiAssembly) -> None:
         from qtpy.QtWidgets import QApplication
@@ -174,7 +183,17 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         assert _is_main_window(parent)
         # The same Setup a toolbar click opens: non-modal so the Qt event loop
         # (and the remote control socket) keeps pumping while it is visible.
-        parent.open_dialog(DialogName.SETUP)
+        if self._startup_script is not None:
+            ctrl = assembly.controller
+            assert _is_controller(ctrl)
+            script = self._startup_script
+
+            def start_script() -> None:
+                ctrl.start_startup(script)
+
+            ctrl.owner_scheduler.post(start_script)
+        else:
+            parent.open_dialog(DialogName.SETUP)
 
     def _build_window(
         self,

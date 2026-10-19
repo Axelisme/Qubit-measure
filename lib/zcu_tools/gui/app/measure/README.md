@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-20，Refresh／Reset、純 Qt 版面保存與動態硬體生命週期
+**Last updated:** 2026-10-20，背景啟動腳本、owner facets 與關閉順序
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -40,9 +40,11 @@ persistence caretaker, and the app-local `RemoteControlAdapter`
 without loading board environments or owning process policy such as logging, rendering initialization,
 `QApplication`, control option construction, or exit-code handling. The
 standalone launcher is the process entrypoint; this module does not expose a
-second `run_app` path. After the window is shown, `after_show` opens the same
-Setup dialog through `MainWindow.open_dialog`, so a toolbar click focuses that
-instance instead of building another.
+second `run_app` path. The launcher selects one trusted `startup(ctx)` script.
+`--clean` skips all scripts and conflicts with `--script`. Otherwise an explicit
+script replaces the composition-supplied default. After showing the window,
+`after_show` queues the selected script for background execution on the Qt loop.
+Without a selected script, it opens the shared Setup dialog.
 
 `build_app_services()` constructs the app-local services and injects their driven
 ports. `Controller` is a facade over the service bundle; UI and remote code use
@@ -52,10 +54,21 @@ for setup/context/device/predictor/progress domains.
 `Controller.install_soc` / `uninstall_soc` publish a caller-built board on the
 owner thread. `register_device` adopts a built driver through DeviceService.
 `close()` only drains work, leaving resources available for caller callbacks.
-After those callbacks, `close_hardware()` closes every registered driver and
-unpublishes the board; close failures are logged without stopping GUI teardown.
-The behavior's runtime close hook calls both as a fallback. Boards remain
+`finish_close()` drains, runs startup callbacks in reverse order, then calls
+`close_hardware()` to close registered drivers and unpublish the board.
+MainWindow close, programmatic shutdown and the runtime fallback use this same
+ordering. Drain timeout preserves resources and raises for retry. Callback and
+driver failures are logged without skipping the remaining cleanup. Boards remain
 caller-owned and have no required close method.
+
+`StartupContext` exposes typed soc, device, setup, context and tab commands.
+Each facet calls the existing owner synchronously through `OwnerScheduler`.
+On-close callbacks run on-owner and use the same facets without self-queuing.
+`StartupService` shares the operation runner, handles and background drain.
+Its app-local startup lease blocks Run while allowing script hardware commands.
+Progress and terminal facts update the status bar and Run controls. Unhandled
+script errors report the script path and line while retaining completed work.
+The framework does not load lab environments or own script cache formats.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.

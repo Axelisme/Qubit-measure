@@ -125,6 +125,7 @@ class TabService:
         is_running = self._state.is_tab_running(tab_id)
         interaction = TabInteractionState(
             global_run_active=self._state.is_run_active() and not is_running,
+            startup_active=self._state.is_startup_active(),
             has_context=ctx.has_context(),
             has_active_context=ctx.is_active(),
             has_soc=ctx.has_soc(),
