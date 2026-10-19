@@ -174,6 +174,37 @@ def test_native_load_publishes_shared_restore_and_retains_previous_on_failure(
         adapter.acquisition_for(previous)
 
 
+def test_unknown_historical_evidence_loads_without_inventing_acquisition(
+    tmp_path: Path,
+) -> None:
+    core = NativeCore()
+    path = tmp_path / "unknown.h5"
+    source = RunRecord(
+        cfg=NativeCfg(gain=2.0),
+        result=NativeResult(np.array([4000.0, 5000.0]), np.array([4 + 6j, 8 - 10j])),
+    )
+    metadata = replace(
+        native_metadata(core.persistence_spec().tag),
+        started_at=None,
+        completion="unknown",
+    )
+    try:
+        core.save_run(source, path, metadata=metadata)
+        adapter = NotebookAdapter(host=NonPresentingHost())(core)
+        loaded = adapter.load(path)
+    except ValueError as error:
+        pytest.fail(
+            f"Unknown historical evidence must not prevent offline load: {error}"
+        )
+    assert adapter.last_run is loaded
+    assert loaded.cfg == NativeCfg(gain=2.0)
+    assert_loaded_result(loaded.result, grouped=False)
+    assert adapter.analyze(None).result == 12.0
+    with pytest.raises(ValueError, match="No acquisition evidence"):
+        adapter.acquisition_for(loaded)
+    assert load_run_data(path).metadata == metadata
+
+
 def test_labber_only_export_is_rejected_without_replacing_notebook_results(
     tmp_path: Path,
 ) -> None:

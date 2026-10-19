@@ -21,7 +21,7 @@ from zcu_tools.gui.runtime import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.project import ProjectInfo
+    from zcu_tools.gui.app.analysis_project.project import ProjectInfo
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 
 

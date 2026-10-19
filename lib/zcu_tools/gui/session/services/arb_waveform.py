@@ -30,7 +30,7 @@ ARB_WAVEFORMS_VERSION_KEY = "arb_waveforms"
 class ArbWaveformService:
     """Select a repository from the current session environment per operation.
 
-    The asset root follows state.session_env's database path and chip/qubit names.
+    The asset root is arb_waveforms under the current entry's database path.
     No root is retained between operations. Listing without project context
     returns an empty list; other operations raise
     FailedPreconditionError(reason_code="no_project"). Repository validation and
@@ -92,7 +92,7 @@ class ArbWaveformService:
 
 
 def resolve_arb_waveform_root(ctx: SessionEnv) -> Path:
-    """Resolve the qubit-scoped arbitrary waveform root from the active project."""
+    """Resolve arb_waveforms under the current entry database directory."""
 
     root = try_resolve_arb_waveform_root(ctx)
     if root is None:
@@ -103,19 +103,11 @@ def resolve_arb_waveform_root(ctx: SessionEnv) -> Path:
 
 
 def try_resolve_arb_waveform_root(ctx: SessionEnv) -> Path | None:
-    """Resolve the arbitrary waveform root, or ``None`` before project setup."""
+    """Resolve entry-scoped arb_waveforms, or ``None`` before entry setup."""
 
     if not ctx.database_path:
         return None
-    database_path = Path(ctx.database_path)
-    chip = ctx.chip_name
-    qub = ctx.qub_name
-    parts = database_path.parts
-    if chip and qub:
-        for index in range(len(parts) - 1):
-            if parts[index] == chip and parts[index + 1] == qub:
-                return Path(*parts[: index + 2]) / "arb_waveforms"
-    return database_path / "arb_waveforms"
+    return Path(ctx.database_path) / "arb_waveforms"
 
 
 def render_preview_png(

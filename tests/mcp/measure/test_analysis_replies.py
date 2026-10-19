@@ -108,9 +108,6 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
         ],
         "destination_context": {
             "active_label": "original",
-            "chip_name": "chip",
-            "qub_name": "q1",
-            "res_name": "r1",
             "project_loaded": True,
         },
     }
@@ -159,7 +156,6 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
     )
     assert initial.data["writeback"]["destination"] == {
         "context": {"active_label": "original"},
-        "project": {"chip_name": "chip", "qub_name": "q1", "res_name": "r1"},
     }
     full = client.call("status", {"execution": execution, "detail": "full"})
     assert full["writeback"] == proposal

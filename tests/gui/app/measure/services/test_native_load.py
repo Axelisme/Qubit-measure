@@ -465,21 +465,28 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
         writeback.teardown_draft(draft)
 
 
-@pytest.mark.parametrize("completion", ["complete", "partial", "stopped"])
+@pytest.mark.parametrize("started_at", [None, "2026-10-08T00:00:00+00:00"])
+@pytest.mark.parametrize("completion", ["complete", "partial", "stopped", "unknown"])
 def test_native_load_retains_history_and_resaves_captured_source(
     tmp_path: Path,
     qapp: QApplication,
-    completion: Literal["complete", "partial", "stopped"],
+    completion: Literal["complete", "partial", "stopped", "unknown"],
+    started_at: str | None,
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
-        session.metadata = replace(session.metadata, completion=completion)
+        session.metadata = replace(
+            session.metadata, completion=completion, started_at=started_at
+        )
         session.state.update_tab_result(
             "tab",
             session.state.get_tab("tab").run.result,
             metadata=session.metadata,
             parameters=session.state.get_tab("tab").run.parameters,
         )
-        session.save()
+        initial_report = session.save()
+        assert all(output.status == "saved" for output in initial_report.outputs), (
+            "Historical unknown evidence must be saveable"
+        )
         path = (
             session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
         )
