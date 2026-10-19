@@ -1,6 +1,6 @@
 """Secular models and quantized flux in ns/GHz, independent of model builders."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from threading import Lock
 from typing import Literal
@@ -241,6 +241,7 @@ class ModelSource:
         self._build = build
         self._expansion = expansion
         self._models: dict[FluxLevel, SecularModel] = {}
+        self._gate_usage: dict[bytes, int] = {}
         self._lock = Lock()
 
     @property
@@ -258,6 +259,41 @@ class ModelSource:
             if level not in self._models:
                 self._models[level] = self._build(level)
             return self._models[level]
+
+    @property
+    def gate_usage(self) -> dict[bytes, int]:
+        """Snapshot of cumulative canonical single-tone gate-key row counts.
+
+        Counts include complete inventories, even rejected or nonresident keys.
+        They persist across Engine replacement and reset only at source close.
+        """
+        with self._lock:
+            return self._gate_usage.copy()
+
+    def record_gate_usage(self, inventory: Mapping[bytes, int]) -> dict[bytes, int]:
+        """Add one complete acquire inventory and return its keys' new totals.
+
+        Keys are canonical gate physics digests; counts are nonnegative row
+        multiplicities. Cache hits replay the same increment as fresh planning.
+        Invalid counts raise ValueError without changing any totals. Callers
+        serialize acquires sharing a source, including across different Engines.
+        """
+        if any(count < 0 for count in inventory.values()):
+            raise ValueError("gate usage counts must be nonnegative")
+        with self._lock:
+            for key, count in inventory.items():
+                self._gate_usage[key] = self._gate_usage.get(key, 0) + count
+            return {key: self._gate_usage[key] for key in inventory}
+
+    def close(self) -> None:
+        """Release model caches and cumulative usage; idempotent, reusable.
+
+        Immutable builder/initial inputs remain valid. A later evolve starts a
+        new usage history. Call only after all work sharing this source drains.
+        """
+        with self._lock:
+            self._models.clear()
+            self._gate_usage.clear()
 
     def flux_expansion(self) -> FluxExpansion:
         """Return the exact supplied expansion, or raise ValueError if absent."""

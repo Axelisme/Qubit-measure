@@ -116,11 +116,15 @@ def test_source_acquire_order_has_same_routes_with_and_without_cache_retention()
         with closing(Engine(1, 1_000_000)) as persistent:
             for count, phase in ((160, 0.0), (2, 0.713), (2, 0.0)):
                 if retain:
-                    result = persistent.evolve(src, (batch(count, phase),), cancel=Event())
+                    result = persistent.evolve(
+                        src, (batch(count, phase),), cancel=Event()
+                    )
                 else:
                     # Replacing the Engine releases both caches, not source history.
                     with closing(Engine(1, 0)) as empty:
-                        result = empty.evolve(src, (batch(count, phase),), cancel=Event())
+                        result = empty.evolve(
+                            src, (batch(count, phase),), cancel=Event()
+                        )
                 run.append(result.paths.segments_by_kernel)
                 assert result.paths.segments_by_kernel.get("single_tone_gate") == count
         routes.append(run)
@@ -142,7 +146,8 @@ def test_repeated_identical_acquires_count_even_when_results_are_memoized():
     src = source()
     with closing(Engine(1, 1_000_000)) as engine:
         small = batch(2)
-        for _ in range(80):
+        result = engine.evolve(src, (small,), cancel=Event())
+        for _ in range(79):
             result = engine.evolve(src, (small,), cancel=Event())
         assert result.paths.segments_by_kernel.get("single_tone_gate") == 2
 

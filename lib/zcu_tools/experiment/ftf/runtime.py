@@ -70,6 +70,7 @@ class _Prepared:
     channels: tuple[ChannelReadout, ...]
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
+    gate_inventory: tuple[tuple[bytes, int], ...]
 
 
 class FTFAcquire:
@@ -165,7 +166,7 @@ class FTFAcquire:
     def _reuse_or_prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
         owner = self._source
         # This check must precede every lookup, including equal-content requests.
-        owner.model_facts(snapshot)
+        facts = owner.model_facts(snapshot)
         key = preparation_key(
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
@@ -174,6 +175,7 @@ class FTFAcquire:
             prepared = self._prepare(snapshot, index)
             owner.preparation_cache.put(key, prepared)
         else:
+            facts.source.record_gate_usage(dict(prepared.gate_inventory))
             owner.evaluations = (
                 FTFNumericUse(self.request.sequence, index, prepared.paths),
             )
@@ -200,6 +202,7 @@ class FTFAcquire:
             )
             for template in acquire.templates
         )
+        before = facts.source.gate_usage
         evolved = owner.engine.evolve(
             plans[0].source, tuple(plan.batch for plan in plans), cancel=Event()
         )
@@ -263,7 +266,14 @@ class FTFAcquire:
             if acquire.mode == "integrated"
             else None
         )
-        return _Prepared(probabilities, tuple(channels), evolved.paths, sampler)
+        inventory = tuple(
+            (key, count - before.get(key, 0))
+            for key, count in facts.source.gate_usage.items()
+            if count > before.get(key, 0)
+        )
+        return _Prepared(
+            probabilities, tuple(channels), evolved.paths, sampler, inventory
+        )
 
 
 class FTFSource:
@@ -353,6 +363,8 @@ class FTFSource:
         if self._facts is None or not self._facts.matches(self.settings, snapshot):
             self.readout_cache.clear()
             self.preparation_cache.clear()
+            if self._facts is not None:
+                self._facts.source.close()
             self._facts = None
             self._facts = FTFModelFacts(self.settings, snapshot)
         return self._facts
@@ -403,10 +415,12 @@ class FTFSource:
         return session.sample_round(request.snapshot, request.index)
 
     def close(self) -> None:
-        """Release current deterministic preparations and the engine; safe to repeat."""
+        """Release preparations, model/source usage and Engine; safe to repeat."""
         if self._session is not None:
             self._session.invalidate()
             self._session = None
+        if self._facts is not None:
+            self._facts.source.close()
         self._facts = None
         self.readout_cache.clear()
         self.preparation_cache.clear()

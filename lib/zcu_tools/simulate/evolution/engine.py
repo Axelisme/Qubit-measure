@@ -309,6 +309,10 @@ class Engine:
     idempotent and waits for active work before clearing the cache. No worker
     resource survives an evolve call. The prepare cache persists across evolve
     calls; multi-timeline work opens and closes its own joblib threading pool.
+    Exact-input memo hits skip geometry only for inventories without cumulative
+    single-tone shaped gate candidates: their routes do not depend on history.
+    Other inventories count source usage and select gate keys before memo lookup.
+    Acquires sharing a source must serialize, including across Engine instances.
     Empty work, a single timeline, and workers=1 run inline without a pool.
     Native BLAS uses one thread throughout evolve, coordinated across engines.
     The last overlapping evolve restores the original process-wide BLAS limits.
@@ -381,7 +385,7 @@ class Engine:
         from ._planning import plan
         from ._prefix import PrefixResolver
         from ._resident import ResidentAdmission
-        from ._result_memo import input_key
+        from ._result_memo import input_key, single_gate_key
         from ._schedule import Schedule
         from .kernel import KernelContext
 
@@ -401,11 +405,10 @@ class Engine:
                 )
             key = input_key(source, batches, budget) if self._memo_enabled else None
             if key is not None:
-                cached = self._memo.find(key)
+                # Only inventories without cumulative gate candidates use the
+                # raw input key. Their routes are independent of source history.
+                cached = self._cached_result(key, cancel)
                 if cached is not None:
-                    if cancel.is_set():
-                        raise Cancelled()
-                    _warn_exceeded(cached)
                     return cached
             geometry = plan(source, batches)
             workers = (
@@ -416,6 +419,11 @@ class Engine:
             # Drain workers before releasing evolve-local ownership.
             with closing(create_work_plan(geometry.table, source, budget)) as work_plan:
                 context = KernelContext(source, budget, work_plan)
+                if key is not None:
+                    key = single_gate_key(key, geometry.table, context)
+                    cached = self._cached_result(key, cancel)
+                    if cached is not None:
+                        return cached
                 kernels = self._kernels
                 inventory = resident_inventory(geometry, kernels, context, self._cache)
                 with (
@@ -446,6 +454,15 @@ class Engine:
             if key is not None:
                 self._memo.add(key, result)
             return result
+
+    def _cached_result(self, key: bytes, cancel: Event) -> EvolutionResult | None:
+        """Look up an exact result and preserve cancellation/warning semantics."""
+        cached = self._memo.find(key)
+        if cached is not None:
+            if cancel.is_set():
+                raise Cancelled()
+            _warn_exceeded(cached)
+        return cached
 
     def close(self) -> None:
         """Wait for active work, clear the cache and reject later evolve calls; idempotent."""

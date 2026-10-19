@@ -35,7 +35,8 @@ def test_preparation_hits_preserve_source_usage_for_later_acquires():
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(
-        tuple(times), tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex))
+        tuple(times),
+        tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex)),
     )
     drive = replace(
         drive,
