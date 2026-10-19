@@ -33,6 +33,7 @@ class _Block:
     b: NDArray[np.int64]
     kind: NDArray[np.int64]
     components: tuple[NDArray[np.int64], ...]
+    labels: NDArray[np.int64]
     charges: NDArray[np.int64]
 
     @property
@@ -46,6 +47,7 @@ class _Block:
                 self.a,
                 self.b,
                 self.kind,
+                self.labels,
                 self.charges,
                 *self.components,
             )
@@ -127,9 +129,65 @@ def _build(table: SegmentTable, row: int, context: KernelContext) -> _Block:
     population, decay = secular_operators(model)
     generator = _generator(h, population, decay, a, b, kind)
     charges = graph.charges[:, 0].copy()
-    for array in (h, decay, generator, a, b, kind, charges, *components):
+    labels = labels.astype(np.int64)
+    for array in (h, decay, generator, a, b, kind, labels, charges, *components):
         array.setflags(write=False)
-    return _Block(h, decay, generator, a, b, kind, components, charges)
+    return _Block(h, decay, generator, a, b, kind, components, labels, charges)
+
+
+@njit(nogil=True, cache=True)
+def _initial_coordinates(operators, coordinates, topology, rho, theta, duration):
+    h, decay = operators
+    a, b, kind = coordinates
+    charges, labels = topology
+    size = len(charges)
+    phase = np.exp(1j * charges * theta)
+    rotated = np.empty_like(rho)
+    result = np.empty_like(rho)
+    active = np.zeros((size, size), dtype=np.bool_)
+    for i in range(size):
+        for j in range(size):
+            value = rho[i, j] * phase[i].conjugate() * phase[j]
+            rotated[i, j] = value
+            result[i, j] = value * np.exp(
+                (-2j * np.pi * (h[i, i] - h[j, j]) - decay[i, j]) * duration
+            )
+            if labels[i] != labels[j] and value != 0:
+                # Either direction activates the pair, including non-Hermitian
+                # residuals. Only an exact-zero RHS may skip its exponential.
+                active[min(labels[i], labels[j]), max(labels[i], labels[j])] = True
+    state = np.empty(len(a), dtype=np.complex128)
+    for k in range(len(a)):
+        i, j = a[k], b[k]
+        if kind[k] == 0:
+            state[k] = rotated[i, j]
+        elif kind[k] == 1:
+            state[k] = (rotated[i, j] + rotated[j, i]) / 2
+        else:
+            state[k] = (rotated[i, j] - rotated[j, i]) / (2j)
+    return rotated, result, state, active
+
+
+@njit(nogil=True, cache=True)
+def _finish_coordinates(result, out, a, b, kind):
+    # Preparation emits each real/imaginary coordinate pair adjacently.
+    # Both coordinates can be complex: this is not Hermitian projection.
+    for k in range(len(a)):
+        i, j = a[k], b[k]
+        if kind[k] == 0:
+            result[i, j] = out[k]
+        elif kind[k] == 1:
+            result[i, j] = out[k] + 1j * out[k + 1]
+            result[j, i] = out[k] - 1j * out[k + 1]
+
+
+@njit(nogil=True, cache=True)
+def _finish_frame(result, charges, theta, frequency, duration):
+    end = np.exp(1j * charges * (theta + 2 * np.pi * frequency * duration))
+    for i in range(len(charges)):
+        for j in range(len(charges)):
+            result[i, j] *= end[i] * end[j].conjugate()
+    return result
 
 
 def _play(
@@ -139,33 +197,22 @@ def _play(
     theta: float,
     duration: float,
 ) -> NDArray[np.complex128]:
-    start = np.exp(1j * entry.charges * theta)
-    rho = rho * start.conj()[:, None] * start[None, :]
-    diagonal_h = np.diag(entry.h)
-    result = rho * np.exp(
-        (-2j * np.pi * (diagonal_h[:, None] - diagonal_h[None, :]) - entry.decay)
-        * duration
-    )
-    a, b, kind = entry.a, entry.b, entry.kind
-    state = np.where(
-        kind == 0,
-        rho[a, b],
-        np.where(
-            kind == 1, (rho[a, b] + rho[b, a]) / 2, (rho[a, b] - rho[b, a]) / (2j)
-        ),
+    rho, result, state, active = _initial_coordinates(
+        (entry.h, entry.decay),
+        (entry.a, entry.b, entry.kind),
+        (entry.charges, entry.labels),
+        rho,
+        theta,
+        duration,
     )
     out = expm(entry.generator * duration) @ state
-    diagonal, real, imag = kind == 0, kind == 1, kind == 2
-    result[a[diagonal], b[diagonal]] = out[diagonal]
-    result[a[real], b[real]] = out[real] + 1j * out[imag]
-    result[b[real], a[real]] = out[real] - 1j * out[imag]
+    _finish_coordinates(result, out, entry.a, entry.b, entry.kind)
     for index, ca in enumerate(entry.components):
-        for cb in entry.components[index + 1 :]:
-            if len(ca) == len(cb) == 1:
-                continue  # Scalar closed form already computed above.
+        for other in range(index + 1, len(entry.components)):
+            cb = entry.components[other]
+            if len(ca) == len(cb) == 1 or not active[index, other]:
+                continue  # Scalar closed form, or an exact-zero RHS.
             forward, reverse = np.ix_(ca, cb), np.ix_(cb, ca)
-            if not np.any(rho[forward] != 0) and not np.any(rho[reverse] != 0):
-                continue  # Exact zero RHS remains zero; no tolerance truncation.
             ha, hb = entry.h[np.ix_(ca, ca)], entry.h[np.ix_(cb, cb)]
             generator = (
                 -2j
@@ -184,8 +231,7 @@ def _play(
                 .conj()
                 .T
             )
-    end = np.exp(1j * entry.charges * (theta + 2 * np.pi * frequency * duration))
-    return result * end[:, None] * end.conj()[None, :]
+    return _finish_frame(result, entry.charges, theta, frequency, duration)
 
 
 class SingleToneRWAKernel:
