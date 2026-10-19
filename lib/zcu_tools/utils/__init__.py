@@ -4,6 +4,7 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any, Literal
 
 from . import math, process, tomography
+from .atomic import atomic_replace
 from .cache import user_cache_root
 
 
@@ -83,6 +84,7 @@ __all__ = [
     "process",
     "tomography",
     # utils
+    "atomic_replace",
     "deepupdate",
     "format_obj",
     "user_cache_root",

@@ -7,6 +7,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from zcu_tools.utils import atomic_replace
+
 
 @dataclass(frozen=True)
 class TransferSettings:
@@ -73,7 +75,7 @@ def save_settings(config_dir: Path, selection: TransferSettings) -> None:
             encoding="utf-8",
         )
         temporary.chmod(0o600)
-        temporary.replace(config_dir / "transfer.json")
+        atomic_replace(temporary, config_dir / "transfer.json")
 
 
 def validate_entry_name(value: str) -> str:
