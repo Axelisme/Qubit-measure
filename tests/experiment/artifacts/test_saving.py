@@ -63,7 +63,7 @@ def storage(tmp_path: Path) -> tuple[RunMetadata, SaveLayout, RecordsLedger]:
         result_path=entry.result_path,
         database_path=entry.database_path,
         run_id=metadata.run_id,
-        experiment="synthetic",
+        experiment="Synthetic/Experiment",
         point="sweet",
         saved_at=datetime.now(UTC),
     )
@@ -128,6 +128,19 @@ def test_all_outputs_share_content_context_and_one_saved_event(
     labber = next(
         item.output.path for item in report.outputs if item.output.format == "labber"
     )
+    run = tmp_path / "Database/entry/runs" / f"Synthetic_Experiment_{metadata.run_id}"
+    assert native == run / "data.h5"
+    assert png_paths == [
+        run / "figures/analysis_results_fit.png",
+        tmp_path
+        / "results/entry/points/sweet/figures"
+        / f"Synthetic_Experiment_{metadata.run_id}_analysis_results_fit.png",
+    ]
+    analysis = next(
+        item.output.path for item in report.outputs if item.output.format == "json"
+    )
+    assert analysis == run / "analysis/analysis.json"
+    assert analysis.is_file()
     loaded = load_run_data(native)
     assert loaded.metadata.snapshot == metadata.snapshot
     assert loaded.metadata.started_at == metadata.started_at

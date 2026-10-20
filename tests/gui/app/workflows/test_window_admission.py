@@ -90,8 +90,12 @@ def test_admission_notification_can_cancel_current_start(
     harness.background.deliver()
     assert controller.operation_id is None and harness.handles.live_count() == 0
     assert not harness.gate.snapshot()
-    assert not (entry.result_path / "workflows/notification").exists()
-    assert not (entry.database_path / "workflows/notification").exists()
+    assert not (
+        entry.result_path / "workflows/admission-observer_notification"
+    ).exists()
+    assert not (
+        entry.database_path / "workflows/admission-observer_notification"
+    ).exists()
     assert window.close()
 
 

@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-20，entry dispersive、T1 curve 與 predictor JSON 格式 owner
+**Last updated:** 2026-10-20，Result-only entry 與獨立 Database 輸出位置
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
@@ -55,7 +55,7 @@ Caller 從 `zcu_tools.resources.parameters` import `open_parameters`，提供既
 
 各 owner 的 scope、schema、commit 與失敗政策分開，不共用 ResourceManager：
 
-- `ResultEntry` 綁定條目與兩個 roots。Setup 是範本，point 是獨立的完整參數文件；ModuleLibrary 與 point 同目錄。
+- `ResultEntry` 只以 Result 構成條目，Database root 只設定輸出位置。Create／open 不檢查或建立 Database，首次 Save 才建立所需目錄。Rename 只移動 Result，舊 Database 輸出不動。Setup 是範本，point 是獨立的完整參數文件；ModuleLibrary 與 point 同目錄。
 - `ModuleLibrary` 綁定一個 point 的 module 與 waveform 文件。參數與 point 身分由 `entry/` 管理。
 - `QubitParams` 擁有 result scope 層級的 `params.json`，跨多個 point 共用。
 - `ResultEntry.samples(component)` 綁定元件 JSONL 樣本歷史。v2 座標協定保持 opt-in。

@@ -28,9 +28,9 @@ class SavedRunInfo:
     historical UTC ISO strings, or None when unknown. completion is historical
     progress, including unknown, not a save status. metadata_error is None on a
     successful metadata read. Otherwise it contains the decoding/I/O diagnostic,
-    run_id is the parent directory name, experiment is empty, and unavailable
-    point/times/completion are None. No values are inferred from file timestamps
-    or ledger events. A successful metadata read does not validate data arrays.
+    run_id and experiment are empty, and unavailable point/times/completion are
+    None. No values are inferred from directory names, file timestamps or ledger
+    events. A successful metadata read does not validate data arrays.
     """
 
     run_id: str
@@ -103,9 +103,7 @@ def _saved_run_info(path: Path) -> SavedRunInfo:
         metadata = read_run_metadata(path)
     except (OSError, ValueError) as error:
         # Isolate a single unreadable file so selection still reaches Load errors.
-        return SavedRunInfo(
-            path.parent.name, None, "", None, path, metadata_error=str(error)
-        )
+        return SavedRunInfo("", None, "", None, path, metadata_error=str(error))
     return SavedRunInfo(
         run_id=metadata.run_id,
         point=metadata.snapshot.point,

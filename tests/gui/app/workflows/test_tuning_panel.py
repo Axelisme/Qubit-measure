@@ -121,7 +121,7 @@ def test_journal_failure_propagates_without_accepting_input_or_clearing_local_te
     assert isinstance(control, QLineEdit)
     commit_text(control, "-")
     _window, _harness, entry = attachment
-    journal = entry.result_path / "workflows/tuning/journal.jsonl"
+    journal = entry.result_path / "workflows/tuning-paused_tuning/journal.jsonl"
     original = journal.read_bytes()
     journal.unlink()
     journal.mkdir()

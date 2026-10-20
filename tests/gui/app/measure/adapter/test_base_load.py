@@ -87,9 +87,7 @@ def test_base_adapter_load_reads_native_record_and_full_history(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         session.save()
-        path = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-        )
+        path = session.native_data_path
 
         restored = AnalysisSavingAdapter().restore(load_run_data(path))
         record = restored.record
