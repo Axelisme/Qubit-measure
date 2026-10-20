@@ -45,10 +45,15 @@ components:
     wiring:
       ch: 0
       ro_ch: 0
+  MG12:
+    kind: group/mux
+    resonators: [R1, R2]
+    qubits: [Q1, Q2]
 aliases:
   format: zcu.aliases
   format_version: "1.0"
   aliases:
+    mux: MG12
     qubit: Q1
     resonator: $qubit.resonator
     flux_dev: $qubit.flux_source
