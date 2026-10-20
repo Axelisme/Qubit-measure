@@ -9,7 +9,7 @@ from typing import Annotated, get_args, get_origin
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
-from pydantic_core import PydanticUndefined
+from pydantic_core import PydanticUndefined, PydanticUndefinedType
 
 from zcu_tools.cfg_model import (
     AliasName,
@@ -285,7 +285,7 @@ class Section:
             info = core.model_fields[name]
             node = tree.get(name)
             if isinstance(node, Hidden):
-                if info.is_required():
+                if info.is_required() and node.value is PydanticUndefined:
                     raise ValueError(
                         f"{'.'.join((*path, name))}: Hidden requires a core default"
                     )
@@ -619,6 +619,14 @@ class Section:
         """
         prefix = self.path if path is None else path
         raw: dict[str, CfgInputValue] = value.model_dump(mode="python")
+        raw.update(
+            {
+                name: node.value
+                for name, node in self.tree.items()
+                if isinstance(node, Hidden)
+                and not isinstance(node.value, PydanticUndefinedType)
+            }
+        )
         raw.update(self._list_raw(value, env, errors, prefix))
         for name, child in self.children.items():
             item: object = getattr(value, name)

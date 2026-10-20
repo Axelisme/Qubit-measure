@@ -6,7 +6,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from .template_nodes import Expr, Template, TemplateSeed
+from pydantic_core import PydanticUndefined, PydanticUndefinedType
+
+from .template_nodes import Expr, Template, TemplateLiteral, TemplateSeed
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +86,16 @@ class AliasName:
 
 @dataclass(frozen=True, slots=True)
 class Hidden:
-    """Omit a core field from input; cfg validation restores its declared default.
+    """Omit a field from input and supply a literal during cfg conversion.
 
-    The field must have a core default. A required hidden field fails during
-    form construction because no value could be restored during conversion.
+    value is the literal in the core field\'s units, still subject to core
+    validation. With no argument, conversion restores the core default;
+    a required field then fails at Form construction. Explicit None supplies
+    None rather than restoring a default. Hidden does not infer a value source.
     """
+
+    # Undefined distinguishes Hidden() from an explicit nullable Hidden(None).
+    value: TemplateLiteral | PydanticUndefinedType = PydanticUndefined
 
 
 type FormNode = (
