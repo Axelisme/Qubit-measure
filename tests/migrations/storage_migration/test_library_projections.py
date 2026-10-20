@@ -236,13 +236,17 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
             assert library.snapshot().value(leaf) == _SCALARS[key]
     view = entry.setup if point is None else entry.use_point(point)
     assert document_value(snapshot(view), "Q1.ext") == {"readout_cal": {}}
+    # The exact owner sidecar protects reads too; only its empty bytes are stable.
+    sidecar = library.source_path.with_suffix(".yaml.lock")
+    assert sidecar.read_bytes() == b""
     files = {
         path: (path.read_bytes(), path.stat().st_mtime_ns)
         for path in entry.result_path.rglob("*")
-        if path.is_file()
+        if path.is_file() and path != sidecar
     }
     rerun = _convert(request, default_mapping)
     assert rerun.skipped
+    assert sidecar.read_bytes() == b""
     assert files == {
         path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files
     }
