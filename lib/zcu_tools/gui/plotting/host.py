@@ -99,30 +99,13 @@ def get_figure_container(fig: Figure) -> FigureContainer | None:
 
 
 def _purge_stale_registry_entries() -> None:
-    from qtpy import sip
-
     # GC-driven weakref eviction can mutate the registry mid-iteration, so snapshot
     # to a plain list first (a live WeakKeyDictionary iterator would raise
     # RuntimeError if a key is collected during the loop).
     stale_figs: list[Figure] = []
     for fig, container in list(_fig_container_registry.items()):
-        try:
-            container._stack.count()
-        except RuntimeError:
-            # The container's QStackedWidget itself was deleted.
-            stale_figs.append(fig)
-            continue
-        # Also evict entries whose canvas wrapper is dead: the registry maps a
-        # figure to its container, but if the canvas was deleted the mapping is
-        # stale and would resurrect a dead wrapper on the next attachment.
-        fig_canvas: QWidget | None = None
-        for index in range(container._stack.count()):
-            widget = container._stack.widget(index)
-            figure = getattr(widget, "figure", None)
-            if figure is fig:
-                fig_canvas = widget
-                break
-        if fig_canvas is None or sip.isdeleted(fig_canvas):
+        # Deleted stacks and missing/dead canvases make the mapping stale.
+        if not container.contains_figure(fig):
             stale_figs.append(fig)
     for fig in stale_figs:
         _fig_container_registry.pop(fig, None)
@@ -146,15 +129,7 @@ def assert_plot_invariants() -> None:
     # Snapshot before iterating: a key GC'd mid-loop would raise on a live
     # WeakKeyDictionary iterator.
     for fig, container in list(_fig_container_registry.items()):
-        stack = container._stack
-        found_canvas = False
-        for index in range(stack.count()):
-            widget = stack.widget(index)
-            figure = getattr(widget, "figure", None)
-            if figure is fig:
-                found_canvas = True
-                break
-        if not found_canvas:
+        if not container.contains_figure(fig):
             raise RuntimeError(
                 f"Figure registry invariant broken for figure id {id(fig)}"
             )
@@ -184,7 +159,7 @@ def _attach_figure_canvas(
         # entry (e.g. the canvas already moved, or the container was torn down)
         # must NOT trigger detach_canvas, which would flip an unrelated
         # container back to its placeholder. If stale, just drop the entry.
-        if _container_hosts_canvas(previous_container, canvas):
+        if previous_container.contains_canvas(canvas):
             previous_container.detach_canvas(canvas)
         else:
             _fig_container_registry.pop(fig, None)
@@ -192,20 +167,6 @@ def _attach_figure_canvas(
     container.attach_canvas(canvas)
     _fig_container_registry[fig] = container
     return canvas
-
-
-def _container_hosts_canvas(container: FigureContainer, canvas: QWidget) -> bool:
-    """True if ``container``'s stack is live and currently holds ``canvas``.
-
-    Guards the detach path against stale/aliased registry entries: a dead
-    QStackedWidget raises on ``indexOf`` (treated as not-hosting), and a live
-    stack that does not contain the canvas means the mapping is stale.
-    """
-    try:
-        return container._stack.indexOf(canvas) >= 0
-    except RuntimeError:
-        # The container's QStackedWidget itself was deleted.
-        return False
 
 
 def _remove_canvas_impl(canvas: QWidget) -> None:

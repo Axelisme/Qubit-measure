@@ -31,6 +31,43 @@ class FigureContainer:
         # correctly instead of taking the worker's affinity.
         _host.ensure_host()
 
+    def contains_figure(self, fig: Figure) -> bool:
+        """Inspect membership of ``fig`` by Figure identity on the GUI thread.
+
+        This read-only query does not change selection, registry or ownership.
+        Inspect canvases in stack order and return whether the first identity
+        match is a live Qt widget; do not skip a deleted first match. Return
+        False when there is no match or the stack or matching canvas is deleted.
+        Only RuntimeError from accessing a deleted stack is isolated; other
+        failures propagate. The caller must run synchronously on the GUI thread.
+        """
+        from qtpy import sip
+
+        try:
+            count = self._stack.count()
+        except RuntimeError:
+            return False
+        for index in range(count):
+            widget = self._stack.widget(index)
+            figure = getattr(widget, "figure", None)
+            if figure is fig:
+                return widget is not None and not sip.isdeleted(widget)
+        return False
+
+    def contains_canvas(self, canvas: QWidget) -> bool:
+        """Inspect whether ``canvas`` belongs to this stack on the GUI thread.
+
+        Accept a QWidget canvas and use Qt indexOf membership, independently of
+        current selection. This read-only query changes neither selection nor
+        ownership. Return False for a nonmember or when a deleted stack/canvas
+        wrapper makes indexOf raise RuntimeError. Other failures propagate.
+        The caller must run synchronously on the GUI thread.
+        """
+        try:
+            return self._stack.indexOf(canvas) >= 0
+        except RuntimeError:
+            return False
+
     def attach_canvas(self, canvas: QWidget) -> None:
         if self._stack.indexOf(canvas) < 0:
             self._stack.addWidget(canvas)
