@@ -27,28 +27,29 @@ from tests.gui._user_input import ComponentDriver
 
 
 @pytest.mark.parametrize(
-    "trial",
+    "trial, name",
     [
-        FluxoniumParams(5.0, None, 0.5, 0.0, 1.0, 0.0),
-        TransmonParams(20.0, None, 0.0, 0.0, 1.0, 0.0),
+        (FluxoniumParams(5.0, 1.0, None, 0.0, 1.0, 0.0), "EL"),
+        (TransmonParams(20.0, 1.0, None, 0.0, 1.0, 0.0), "d"),
     ],
     ids=["fluxonium", "transmon"],
 )
 def test_blank_parameters_can_be_completed_cleared_and_corrected(
-    qapp, tmp_path: Path, trial
+    qapp, tmp_path: Path, trial, name
 ) -> None:
     dialog = PredictorDialog(PredictorControlFacet(PredictorService()), params=trial)
     evidence = Path(os.environ.get("PREDICTOR_BLANK_EVIDENCE", str(tmp_path))) / trial.model
+    field_name = f"predictor_input_{name}"
     try:
         dialog.show()
         qapp.processEvents()
         ui = ComponentDriver(dialog)
         ui.screenshot(evidence / "01-missing.png")
-        field = ui.observe(object_name="predictor_input_EC")
+        field = ui.observe(object_name=field_name)
         assert field.visible and field.enabled and field.text == ""
-        assert "Missing parameters: EC" in ui.observe(object_name="predictor_status").text
+        assert f"Missing parameters: {name}" in ui.observe(object_name="predictor_status").text
 
-        ui.enter_text(object_name="predictor_input_EC", value="1.0", commit=False)
+        ui.enter_text(object_name=field_name, value="0.1", commit=False)
         qt_until(
             lambda: any(axis.visible_curves > 0 for axis in ui.plots().axes),
             label="completed predictor curves",
@@ -56,30 +57,30 @@ def test_blank_parameters_can_be_completed_cleared_and_corrected(
         ui.screenshot(evidence / "02-complete.png")
         assert "Missing parameters" not in ui.observe(object_name="predictor_status").text
 
-        ui.enter_text(object_name="predictor_input_EC", value="", commit=False)
+        ui.enter_text(object_name=field_name, value="", commit=False)
         ui.click(object_name="predictor_input_half")
         ui.screenshot(evidence / "03-cleared.png")
-        assert ui.observe(object_name="predictor_input_EC").text == ""
-        assert "Missing parameters: EC" in ui.observe(object_name="predictor_status").text
+        assert ui.observe(object_name=field_name).text == ""
+        assert f"Missing parameters: {name}" in ui.observe(object_name="predictor_status").text
         assert all(axis.visible_curves == 0 for axis in ui.plots().axes)
 
         for index, invalid in enumerate(("oops", "1e", "nan", "inf"), start=4):
-            ui.enter_text(object_name="predictor_input_EC", value=invalid, commit=False)
+            ui.enter_text(object_name=field_name, value=invalid, commit=False)
             ui.screenshot(evidence / f"{index:02}-invalid-{invalid}.png")
-            field = ui.observe(object_name="predictor_input_EC")
+            field = ui.observe(object_name=field_name)
             assert field.text == invalid
-            assert "EC" in field.tooltip and "finite number" in field.tooltip
-            assert "EC" in ui.observe(object_name="predictor_status").text
+            assert name in field.tooltip and "finite number" in field.tooltip
+            assert name in ui.observe(object_name="predictor_status").text
             assert not ui.observe("Calibrate").enabled
             assert all(axis.visible_curves == 0 for axis in ui.plots().axes)
 
-        ui.enter_text(object_name="predictor_input_EC", value="1.0", commit=False)
+        ui.enter_text(object_name=field_name, value="0.1", commit=False)
         qt_until(
             lambda: any(axis.visible_curves > 0 for axis in ui.plots().axes),
             label="corrected predictor curves",
         )
         ui.screenshot(evidence / "08-corrected.png")
-        assert "finite number" not in ui.observe(object_name="predictor_input_EC").tooltip
+        assert "finite number" not in ui.observe(object_name=field_name).tooltip
         ui.click("Close")
     finally:
         dialog.close()
