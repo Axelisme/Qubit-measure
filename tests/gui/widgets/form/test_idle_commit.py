@@ -11,7 +11,8 @@ from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field, JsonValue
-from qtpy.QtCore import QObject, Qt, Signal
+from PyQt6.QtCore import pyqtSignal
+from qtpy.QtCore import QObject, Qt
 from qtpy.QtWidgets import QApplication, QLineEdit, QVBoxLayout, QWidget
 from zcu_tools.gui.form import Display, FormEnv, FormModel, FormState, FormWritePath
 from zcu_tools.gui.widgets.form import FormEditor, value_widgets
@@ -22,7 +23,7 @@ from tests.gui._user_input import ComponentDriver, key_click, type_text
 class ManualTimer(QObject):
     """Qt timer replacement driven only by explicit virtual clock advances."""
 
-    timeout = Signal()
+    timeout = pyqtSignal()
 
     def __init__(self, parent: QObject | None, clock: "Clock") -> None:
         super().__init__(parent)
@@ -155,6 +156,7 @@ def test_idle_validation_and_repair_are_visible(
 ) -> None:
     driver = ComponentDriver(form[0])
     name = f"form.input.{path}"
+    baseline_help = driver.observe(object_name=f"form.row.{path}").tooltip
     # An incomplete integer, malformed scalar or invalid float is retained.
     invalid = "-1" if path == "amount" else "1." if path == "count" else ""
     if path == "name":
@@ -168,7 +170,7 @@ def test_idle_validation_and_repair_are_visible(
     failed = driver.observe(object_name=name)
     evidence(driver, "02-idle-error")
     assert failed.text == invalid
-    assert failed.tooltip
+    assert driver.observe(object_name=f"form.row.{path}").tooltip != baseline_help
     if path == "name":
         value = "'hello'"
     driver.enter_text(value=value, object_name=name, commit=False)
@@ -176,7 +178,7 @@ def test_idle_validation_and_repair_are_visible(
     clock.advance(500)
     repaired = driver.observe(object_name=name)
     evidence(driver, "04-idle-valid")
-    assert not repaired.tooltip
+    assert driver.observe(object_name=f"form.row.{path}").tooltip == baseline_help
     if path == "name":
         assert driver.observe(object_name="form.value.name").text == '= "hello"'
     else:
