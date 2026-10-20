@@ -85,6 +85,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         program.config_all(soc, load_envelopes=False, load_mem=False)
         if options.get("load_envelopes", True):
             self._validate_simulation_uploads()
+        self._prepare_statistics_averaging()
         self.rounds_pbar = make_pbar(
             total=rounds, disable=not options.get("progress", True), leave=False
         )
@@ -98,6 +99,28 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             return result
         finally:
             self._close_rounds_pbar()
+
+    def _prepare_statistics_averaging(self) -> None:
+        assert self.acquire_params is not None
+        assert self.loop_dims is not None
+        params = self.acquire_params
+        self._simulation_needs_raw = any(
+            params.get(key) is not None
+            for key in ("threshold", "ge_radius", "trackers")
+        )
+        self._simulation_normalization: list[tuple[int | None, float | None]] = []
+        for ch, ro in self._program().ro_chs.items():
+            length = None if ro["edge_counting"] else ro["length"]
+            offset = (
+                self._ro_offset(ch, ro.get("ro_config"))
+                if length is not None and params["remove_offset"]
+                else None
+            )
+            self._simulation_normalization.append((length, offset))
+        # Compact sums omit reps and end in (read, IQ). Moving reads first is
+        # a fixed transpose, independent of the values returned in each round.
+        point_ndim = len(self.loop_dims) - 1
+        self._simulation_average_axes = (point_ndim, *range(point_ndim), point_ndim + 1)
 
     def _validate_simulation_uploads(self) -> None:
         program = self._program()
@@ -167,18 +190,13 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         assert self.acquire_params is not None
         assert self.rounds_buf is not None
         assert self.avg_level is not None
-        params = self.acquire_params
         prog = self._program()
         assert self.loop_dims is not None
         request = soc.binding.last_request
         if request is None:
             raise RuntimeError("simulation round requires installed request")
         self._simulation_raw = (result.raw, request)
-        needs_raw = any(
-            params.get(key) is not None
-            for key in ("threshold", "ge_radius", "trackers")
-        )
-        if not needs_raw:
+        if not self._simulation_needs_raw:
             self.acc_buf = None
             self.rounds_buf.append(
                 self._average_statistics(result.statistics, request.reps)
@@ -191,16 +209,18 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     def _average_statistics(
         self, result: RoundStatistics, reps: int
     ) -> list[NDArray[np.float64]]:
-        assert self.acquire_params is not None
-        by_channel = {ch.channel: ch for ch in result.channels}
         averaged = []
-        for ch, ro in self._program().ro_chs.items():
-            avg = by_channel[ch].sums / reps
-            if not ro["edge_counting"]:
-                avg /= ro["length"]
-                if self.acquire_params["remove_offset"]:
-                    avg -= self._ro_offset(ch, ro.get("ro_config"))
-            averaged.append(np.moveaxis(avg, -2, 0))
+        # SimulationSoc has validated and detached channels in request order.
+        for ch, (length, offset) in zip(
+            result.channels, self._simulation_normalization, strict=True
+        ):
+            avg = ch.sums / reps
+            # Keep the two divisions and subtraction in their original order.
+            if length is not None:
+                avg /= length
+                if offset is not None:
+                    avg -= offset
+            averaged.append(avg.transpose(self._simulation_average_axes))
         return averaged
 
     def get_raw(self) -> list[NDArray[np.int64]] | None:

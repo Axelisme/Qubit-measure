@@ -6,7 +6,7 @@ Bind `f1` and `f2` to two different fluxonium components. Bind `coupler` to thei
 
 The MuxGroup needs ordered `qubits` and `resonators` for every tone. Each qubit must point to its matching resonator. F1 and F2 must be distinct members. Their tone positions come from `qubits`; neither tone labels nor ADC channel numbers identify a qubit. The form does not offer editable tone indices. It shows the captured roles and positions. The complete readout stays in its original tone order, including tones outside F1/F2.
 
-Provide calibrated `$f1.module.x180` and `$f2.module.x180` pulses on different charge generators. Readout starts from `$mux.module.readout`. If that slot is absent, fill the blank mux readout, including every bound tone. Confirm generator, mixer, ADC channels, integration window and trigger timing before running. These values are not hardware-safe defaults.
+Provide calibrated `$f1.module.x180` and `$f2.module.x180` pulses on different charge generators. Readout references `$mux.module.readout`, preserving the library's complete tones and scalar settings. If that slot is absent, fill the blank mux readout, including every bound tone. Confirm generator, mixer, ADC channels, integration window and trigger timing before running. These values are not hardware-safe defaults.
 
 The two GE center pairs start from `$f1.ext.readout_cal.g_center` / `e_center` and the equivalent F2 leaves. Missing centers remain required fields. Nonfinite or coincident centers are invalid. There is no simulator-truth fallback. GE centers must use the same readout route, gain, normalization and timing as this run.
 

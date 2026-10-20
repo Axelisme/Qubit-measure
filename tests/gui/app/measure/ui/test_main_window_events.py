@@ -563,10 +563,12 @@ def test_run_started_refreshes_invalidated_content_once(
 def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     from qtpy.QtWidgets import QTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.control_identity import ControlIdentity
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = BaseEventBus()
     ctrl.get_running_tab_id.return_value = "tab-a"
+    ctrl.control_identity = ControlIdentity()
     ctrl.get_active_tab_id.return_value = None
     ctrl.active_operation_count.return_value = 0
     ctrl.has_tab.return_value = True

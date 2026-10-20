@@ -31,8 +31,10 @@ def analyze_frequency(
 ) -> tuple[MuxFreqFit | MuxFitFailure, ...]:
     """Estimate each measured qubit's transition frequency and linewidth in MHz.
 
-    result contains actual MHz axes and complex IQ. options selects a Lorentzian
-    or sinc line shape and a fit overlay. plots receives one fit_i spectrum per
+    result contains actual MHz axes and complex IQ, both shaped (K,P). options
+    selects a line shape and fit overlay: ``lor`` uses background-subtracted
+    magnitude; ``sinc`` uses a signed IQ principal-axis projection that preserves
+    sidelobes. plots receives one fit_i spectrum per
     original tone position. Return estimates and one-sigma errors, or a per-tone
     failure reason. Partial spectra use only finite IQ points. Invalid shapes or
     options raise before fitting; plotting errors propagate.
@@ -57,7 +59,7 @@ def analyze_frequency(
         try:
             if len(xs) < 6:
                 raise ValueError("Frequency fit requires at least six acquired points")
-            real = qubfreq_signal2real(signal)
+            real = qubfreq_signal2real(signal, model_type=options.model_type)
             freq, ferr, width, werr, fitted, (params, covariance) = fit_qubit_freq(
                 xs, real, options.model_type
             )

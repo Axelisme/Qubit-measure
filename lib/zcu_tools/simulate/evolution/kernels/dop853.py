@@ -98,24 +98,36 @@ def _run(data, row_models, states, controls):
     run_chain(_rhs, _lab_context, data, row_models, states, controls)
 
 
+@njit(nogil=True, cache=True, inline="always")
+def _tone_hamiltonian(time, context, tone):
+    models, segments, row, model = context
+    envelope = segments.envelope[row, tone]
+    begin, end = segments.sample_offsets[envelope : envelope + 2]
+    amplitude = sample_value(
+        time + segments.offset[row, tone],
+        segments.sample_time[begin:end],
+        segments.samples[begin:end],
+    )
+    phase = segments.theta[row, tone] + 2 * np.pi * segments.frequency[row, tone] * time
+    z = segments.gain[row, tone] * amplitude * np.exp(1j * phase)
+    port = segments.port[row, tone]
+    return z.real * models.x[model, port] + z.imag * models.y[model, port]
+
+
 @njit(nogil=True, cache=True)
 def _interaction_rhs(time, state, context):
     models, segments, row, model = context
     size = models.energies.shape[1]
     rho = state.reshape(size, size)
-    envelope = segments.envelope[row, 0]
-    begin, end = segments.sample_offsets[envelope : envelope + 2]
-    amplitude = sample_value(
-        time + segments.offset[row, 0],
-        segments.sample_time[begin:end],
-        segments.samples[begin:end],
-    )
-    phase = segments.theta[row, 0] + 2 * np.pi * segments.frequency[row, 0] * time
-    z = segments.gain[row, 0] * amplitude * np.exp(1j * phase)
-    port = segments.port[row, 0]
-    # Build the drive directly: subtracting H0 from a full Hamiltonian would
-    # lose small diagonal drive terms to cancellation at weak gains.
-    h = z.real * models.x[model, port] + z.imag * models.y[model, port]
+    # Build only the drives: subtracting H0 from a full Hamiltonian would
+    # lose small diagonal drive terms to cancellation at weak gains. The first
+    # tone keeps the original single-tone arithmetic without an extra M² buffer.
+    if segments.tones[row]:
+        h = _tone_hamiltonian(time, context, 0)
+        for tone in range(1, segments.tones[row]):
+            h += _tone_hamiltonian(time, context, tone)
+    else:
+        h = np.zeros((size, size), dtype=np.complex128)
     phases = np.exp(2j * np.pi * models.energies[model] * time)
     for i in range(size):
         for j in range(size):
@@ -275,7 +287,7 @@ class DOP853Kernel:
         the smallest spacing between envelope knots inside the row's local
         envelope window. Samples outside that window and all flux waveform
         samples are ignored. Constant envelopes have no sampling ceiling.
-        Independent single-tone rows use sigma(t)=exp(+i*2*pi*H0*t) rho(t)
+        Independent rows use sigma(t)=exp(+i*2*pi*H0*t) rho(t)
         exp(-i*2*pi*H0*t), integrating the full transformed drive and unchanged
         secular dissipator, then return to model eigenbasis. Each row keeps its
         own adaptive step controller and original normalized RMS error norm,
@@ -284,8 +296,10 @@ class DOP853Kernel:
         is local control, not a new end-to-end error bound. No adaptive history
         carries between rows or calls, so row order and worker/apply partition
         do not change an independent row's numerical path, including mixed
-        IP/lab calls. Zero-gain and non-single-tone rows, and every row in a
-        touching chain, retain the unchanged lab-frame runner. Dispatch fixes
+        IP/lab calls. Every row in a touching chain retains the lab-frame
+        runner, with local tolerances capped by budget divided by accumulated
+        bare spectral phase. This prevents local GHz integration error from
+        becoming a biased waiting frequency. Dispatch fixes
         frames and chain membership from the complete timeline. Apply executes
         those decisions even when a prepared-payload boundary splits a chain.
         No RWA, drive truncation, splitting or envelope changes are made.
@@ -357,10 +371,14 @@ def advance_endpoints(
         0, np.flatnonzero(interaction[1:] != interaction[:-1]) + 1, len(rows)
     ]
     for begin, end in zip(boundaries[:-1], boundaries[1:], strict=True):
-        runner = _run_interaction if interaction[begin] else _run
-        runner(
-            _Data(models, segments),
-            (rows[begin:end], key_index[begin:end], plan.chain),
-            states[begin:end],
-            controls,
-        )
+        data = _Data(models, segments)
+        chain_rows = (rows[begin:end], key_index[begin:end], plan.chain)
+        if interaction[begin]:
+            _run_interaction(data, chain_rows, states[begin:end], controls)
+        else:
+            _run(
+                data,
+                chain_rows,
+                states[begin:end],
+                controls._replace(phase_budget=budget),
+            )

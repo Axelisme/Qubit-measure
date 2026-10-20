@@ -37,7 +37,6 @@ from zcu_lab.v2.onetone.freq.form import make_form
 
 OneToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 SamplingMode: TypeAlias = Literal["linear", "homophasal"]
-EDelayMode: TypeAlias = Literal["auto", "calibrated", "manual"]
 EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
 
 _EDELAY_PARAMETER_PATH = "resonator.ext.edelay"
@@ -46,24 +45,47 @@ _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
 
 @dataclass
 class OneToneFreqAnalyzeParams:
+    """Shared resonance fit controls for single-tone and mux analysis."""
+
     model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
         "hm"
     )
+    """Resonance model: "hm" for hanger, "t" for transmission, or "auto".
+
+    "auto" selects the model from the measured magnitude response.
+    The default is "hm".
+    """
+
     fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
         True
     )
+    """Fit the background's log-amplitude slope when True, the default.
+
+    True fits a frequency-dependent exponential amplitude envelope.
+    False keeps the log-amplitude slope at zero, giving a constant envelope.
+    """
+
     fit_bg_phase_curvature: Annotated[bool, ParamMeta(label="Fit phase curvature")] = (
         False
     )
-    edelay_mode: Annotated[EDelayMode, ParamMeta(label="Electrical-delay mode")] = (
-        "auto"
-    )
-    manual_edelay: Annotated[
-        float | None, ParamMeta(label="Manual electrical delay")
+    """Fit quadratic background phase curvature when True.
+
+    True fits a quadratic phase term alongside the electrical-delay phase.
+    False, the default, keeps the quadratic coefficient at zero.
+    """
+
+    edelay: Annotated[
+        float | None, ParamMeta(label="Electrical delay seed (us; blank = auto)")
     ] = None
-    max_edelay_search_radius: Annotated[
-        float, ParamMeta(label="Maximum electrical-delay search radius")
-    ] = _DEFAULT_MAX_EDELAY_SEARCH_RADIUS
+    """Electrical-delay branch seed in us, default None, shown as blank.
+
+    A finite number, including zero or a negative value, seeds the delay branch.
+    Blank first uses a finite route-matched calibration as the seed.
+    Otherwise automatic branch selection uses an internal 100 us search cap.
+    Fitting starts from the selected branch and stores the fitted delay in the
+    analysis result. The input field retains the supplied seed or blank state.
+    Invalid seeds raise ValueError at analyze entry.
+    """
 
 
 @dataclass
@@ -126,27 +148,16 @@ class OneToneFreqAdapter(
         parameters: ParameterContext | None,
         route: tuple[int, int] | None,
     ) -> tuple[float | None, EDelaySource]:
-        if params.edelay_mode == "manual":
-            if params.manual_edelay is None:
-                raise ValueError("manual edelay mode requires manual_edelay")
-            seed = finite_real(params.manual_edelay)
+        if params.edelay is not None:
+            seed = finite_real(params.edelay)
             if seed is None:
-                raise ValueError("manual_edelay must be finite")
+                raise ValueError("edelay must be a finite real scalar or None")
             return seed, "manual"
 
         prior = cls._route_matched_prior(parameters, route)
-        if params.edelay_mode == "calibrated":
-            if prior is None:
-                raise ValueError(
-                    "calibrated edelay mode requires a finite route-matched "
-                    "resonator.ext.edelay prior"
-                )
+        if prior is not None:
             return prior, "calibrated"
-        if params.edelay_mode == "auto":
-            if prior is not None:
-                return prior, "calibrated"
-            return None, "global"
-        raise ValueError(f"Invalid electrical-delay mode: {params.edelay_mode!r}")
+        return None, "global"
 
     @staticmethod
     def _has_nonuniform_fitting_grid(result: OneToneFreqRunResult) -> bool:
@@ -178,14 +189,9 @@ class OneToneFreqAdapter(
         edelay_seed, edelay_source = self._resolve_edelay_seed(
             params, req.parameters, route
         )
-        max_search_radius: float | None = None
-        if edelay_seed is None:
-            max_search_radius = finite_real(params.max_edelay_search_radius)
-            if max_search_radius is None or max_search_radius <= 0.0:
-                raise ValueError(
-                    "max_edelay_search_radius must be positive and finite, got "
-                    f"{params.max_edelay_search_radius!r}"
-                )
+        max_search_radius = (
+            _DEFAULT_MAX_EDELAY_SEARCH_RADIUS if edelay_seed is None else None
+        )
         answer = FreqExp().analyze(
             req.run_result,
             FreqAnalyzeOptions(
@@ -218,6 +224,14 @@ class OneToneFreqAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[OneToneFreqRunResult, OneToneFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose scalars and a readout from the saved pulse-readout cfg.
+
+        A captured parameter context adds a following readout slot row pointing
+        to the resolved module root. Missing cfg skips the module and slot;
+        persistable delay requires a finite fitted delay and its saved route.
+        Missing capture retains scalars and any module. Alias and source
+        failures propagate.
+        """
         result = req.analyze_result
         theta0 = result.params.get("theta0")
         if isinstance(theta0, bool) or not isinstance(theta0, Real):
@@ -262,13 +276,22 @@ class OneToneFreqAdapter(
                     },
                 )
             )
-        items.extend(
-            pulse_readout_module_writeback_items(
-                req.run_result.cfg,
-                target="$resonator.readout.readout_rf",
-                desc="Readout at fitted resonator frequency",
-                field_updates=(("freq", float(result.freq)),),
-                role_id="readout",
-            )
+        module_items = pulse_readout_module_writeback_items(
+            req.run_result.cfg,
+            target="$resonator.readout.readout_rf",
+            desc="Readout at fitted resonator frequency",
+            field_updates=(("freq", float(result.freq)),),
+            role_id="readout",
         )
+        items.extend(module_items)
+        if module_items and req.ctx.parameters is not None:
+            items.append(
+                ParameterWriteback(
+                    target_name="$qubit.module.readout",
+                    description="Select fitted readout for downstream experiments",
+                    proposed_value=req.ctx.parameters.resolve_path(
+                        "$resonator.readout.readout_rf"
+                    ),
+                )
+            )
         return items
