@@ -191,7 +191,7 @@ def test_historical_top_level_fit_projects_exact_source_leaves(
         "timestamp": "unproven local time",
     }
     source = write_params(request, values)
-    before = {p: p.read_bytes() for p in request.repo_root.rglob("*") if p.is_file()}
+    before = {p: p.read_bytes() for p in request.result_root.parent.rglob("*") if p.is_file()}
     report = migrate(request, analysis_mapping)
     converted = {
         row.source_keys: row.new_path
@@ -214,7 +214,7 @@ def test_historical_top_level_fit_projects_exact_source_leaves(
         "Qlegacy", "ext", "legacy_params", "params", "custom.energy"
     )
     if dry_run:
-        assert {p: p.read_bytes() for p in request.repo_root.rglob("*") if p.is_file()} == before
+        assert {p: p.read_bytes() for p in request.result_root.parent.rglob("*") if p.is_file()} == before
         assert not backup_path(request).exists()
         return
     predictor = load_migrated_predictor(request)
@@ -314,7 +314,7 @@ def test_newer_transition_annotations_preserve_only_different_historical_leaves(
     analysis_mapping: MigrationMapping,
 ) -> None:
     source = write_params(request_data, {
-        "allows": {"r_f": 5.2, "sample_f": 9.7, "transitions": [[0, 1]], "mirror": [[1, 2]], "nested": {"equal": [], "different": "old"}},
+        "allows": {"r_f": 5.2, "sample_f": 9.7, "transitions": [[0, 1]], "mirror": [[1, 2]], "nested": {"equal": [], "different": "old"}, "old.only": "preserve"},
         "fluxdep_fit": {"plot_transitions": {"r_f": 5.2, "sample_f": 8.1, "transitions": [[0, 1]], "mirror": [[2, 3]], "nested": {"equal": [], "different": "new"}}},
     })
     report = migrate(request_data, analysis_mapping)
@@ -323,9 +323,12 @@ def test_newer_transition_annotations_preserve_only_different_historical_leaves(
         "r_f": 5.2, "sample_f": 8.1, "transitions": [[0, 1]], "mirror": [[2, 3]], "nested": {"equal": [], "different": "new"}
     }
     assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
-        "allows": {"sample_f": 9.7, "mirror": [[1, 2]], "nested": {"different": "old"}}
+        "allows": {"sample_f": 9.7, "mirror": [[1, 2]], "nested": {"different": "old"}, "old.only": "preserve"}
     }
     comparisons = {row.source_keys: row for row in report.key_mappings if row.old_file == source and row.compared_source_keys is not None}
+    assert comparisons.get(("allows", "old.only")) is not None
+    assert comparisons[("allows", "old.only")].action == "preserved"
+    assert comparisons[("allows", "old.only")].compared_source_keys == ("fluxdep_fit", "plot_transitions", "old.only")
     assert comparisons[("allows", "r_f")].action == "remove"
     assert comparisons[("allows", "nested", "equal")].action == "remove"
     different = comparisons[("allows", "nested", "different")]
@@ -1678,7 +1681,7 @@ def test_undefined_explicit_model_contract_remains_located_pending(
     assert dispersive.params.plot_transitions.model_extra == {"0.1": [1, 2]}
 
 
-def test_undefined_transmon_parameter_shape_stays_pending(
+def test_undefined_transmon_parameter_shape_is_preserved_as_unsupported(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
 ) -> None:
