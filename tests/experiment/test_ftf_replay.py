@@ -5,7 +5,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.ftf import ftf
+from zcu_tools.core.simulation import RoundRequest, RoundSignals
+from zcu_tools.device import DeviceManager
+from zcu_tools.experiment.ftf import FTFSource, ftf, replay_round
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.resources.simulation_replay import replay_paths
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -14,6 +18,61 @@ from zcu_tools.resources.ftf import parse_ftf
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim
+
+
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
+    from tests.experiment._ftf_templates import request, settings, snapshot
+
+    source = FTFSource(
+        settings().with_telemetry(enabled=False),
+        DeviceManager(),
+        private_replay=tmp_path / "archive",
+    )
+    acquire = request(mode)
+    try:
+        result = source.execute(
+            RoundRequest(
+                acquire, replace(snapshot(), model_identity=source.identity), 2
+            )
+        )
+        if isinstance(result, IntegratedRound):
+            expected = result.raw.materialize(acquire.reps, acquire.avg_level)
+        else:
+            expected = {channel.channel: channel.iq.copy() for channel in result.channels}
+        # Eviction and a later round must not change this delivery's identity.
+        source.preparation_cache.max_bytes = 0
+        source.readout_cache.clear()
+        source.execute(
+            RoundRequest(
+                replace(acquire, sequence=8),
+                replace(snapshot(), model_identity=source.identity),
+                3,
+            )
+        )
+    finally:
+        source.close()
+    if isinstance(result, IntegratedRound):
+        retained = result.raw.materialize(acquire.reps, acquire.avg_level)
+        for channel, values in expected.items():
+            np.testing.assert_array_equal(retained[channel], values)
+            retained[channel][...] = 0
+        # Each source call owns fresh buffers, even after close.
+        for channel, values in result.raw.materialize(
+            acquire.reps, acquire.avg_level
+        ).items():
+            np.testing.assert_array_equal(values, expected[channel])
+    replayed = replay_round(replay_paths(tmp_path / "archive")[0])
+    if isinstance(replayed, IntegratedRound):
+        actual = replayed.raw.materialize(acquire.reps, acquire.avg_level)
+    elif isinstance(replayed, RoundSignals):
+        actual = {channel.channel: channel.iq for channel in replayed.channels}
+    for channel, values in actual.items():
+        np.testing.assert_array_equal(values, expected[channel])
+    if isinstance(result, IntegratedRound) and isinstance(replayed, IntegratedRound):
+        np.testing.assert_array_equal(
+            result.statistics.channels[0].sums, replayed.statistics.channels[0].sums
+        )
 
 
 @pytest.mark.parametrize(
