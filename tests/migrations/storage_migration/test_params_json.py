@@ -57,6 +57,7 @@ class AnalysisQubit(ComponentSchema):
 
     model_config = ConfigDict(extra="forbid")
     EJ: float | None = None
+    freq: float | None = None
     ext: YamlMap = Field(default_factory=dict)
     wiring: dict[str, int] = Field(default_factory=dict)
     module: dict[str, str] = Field(default_factory=dict)
@@ -181,10 +182,185 @@ def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
         concrete,
         components={
             "Q1": {"kind": "qubit/migration_analysis"},
+            "R1": {"kind": "qubit/migration_analysis"},
             "J1": {"kind": "amplifier/migration_analysis"},
         },
         roles={"qubit": "Q1"},
     )
+
+
+@pytest.mark.parametrize("context", ["", "exps/bias"])
+def test_unknown_meta_has_literal_preservation_rows_and_survives_resume(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    context: str,
+) -> None:
+    values: JsonObject = {
+        "scalar": 42,
+        "nested.with.dot": {"child": [1, None, {"x": True}]},
+        "list": ["raw", 3],
+        "null": None,
+        "legacy_meta_info": {"source": "meta"},
+        "legacy_module_cfg": ["source", "module"],
+    }
+    source = write_meta(request_data, context, values)
+    before = {p: p.read_bytes() for p in request_data.repo_root.rglob("*") if p.is_file()}
+    dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
+    assert {p: p.read_bytes() for p in request_data.repo_root.rglob("*") if p.is_file()} == before
+    report = migrate(request_data, metadata_mapping)
+    entry = open_entry(request_data)
+    view = entry.use_point("bias") if context else entry.setup
+    target = entry.result_path / ("points/bias/point.yaml" if context else "setup.yaml")
+    assert not [item for item in report.pending if item.source == source]
+    ext = document_value(snapshot(view), "general.ext")
+    assert ext == {
+        "scalar": 42,
+        "nested.with.dot": {"child": [1, None, {"x": True}]},
+        "list": ["raw", 3],
+        "null": None,
+        "legacy_meta_info": {
+            "legacy_meta_info": {"source": "meta"},
+            "legacy_module_cfg": ["source", "module"],
+        },
+    }
+    rows = [row for row in report.key_mappings if row.old_file == source]
+    assert len(rows) == len(values)
+    for row in rows:
+        assert row.action == "preserved"
+        assert row.source_keys == (row.old_key,)
+        assert row.new_file == target
+        assert row.new_path is None
+        assert row.destination_keys == (
+            ("general", "ext", "legacy_meta_info", row.old_key)
+            if row.old_key in ("legacy_meta_info", "legacy_module_cfg")
+            else ("general", "ext", row.old_key)
+        )
+    assert dry.key_mappings == report.key_mappings
+    with view.edit() as draft:
+        draft.set("general.description", "edited after migration")
+    edited = target.read_bytes()
+    resumed = migrate(replace(request_data, resume=True), metadata_mapping)
+    assert resumed.key_mappings == report.key_mappings
+    assert target.read_bytes() == edited
+
+
+@pytest.mark.parametrize(
+    ("values", "params"),
+    [
+        ({"flx_half": 0.2, "best_jpa_flux": 0.3}, {}),
+        ({"flux_unit": "V", "flx_half": 0.2}, {"flux_unit": "A"}),
+        ({"flux_unit": "unknown", "flx_half": 0.2}, {}),
+        ({"flux_unit": "A", "flx_half": "wrong type"}, {}),
+        ({"jpa_flux_unit": "mA", "best_jpa_flux": 0.3}, {}),
+        ({"jpa_flux_unit": None, "best_jpa_flux": 0.3}, {}),
+    ],
+)
+def test_blocked_flux_preserves_actual_source_without_activating_units(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    values: JsonObject,
+    params: JsonObject,
+) -> None:
+    if params:
+        write_params(request_data, params)
+    source = write_meta(request_data, "", {**values, "qub_ch": 4})
+    dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
+    report = migrate(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
+    assert document_value(setup, "general.ext") == {"legacy_meta_info": values}
+    assert document_value(setup, "Q1.wiring.ch") == 4
+    assert document_value(setup, "Q1.flux_half") is None
+    assert document_value(setup, "J1.flux_unit") is None
+    assert document_value(setup, "J1.flux") is None
+    pending = [item for item in report.pending if item.source == source]
+    assert set(values) <= {item.location for item in pending}
+    assert all("legacy_meta_info" in item.reason for item in pending)
+    for key in values:
+        row = next(row for row in report.key_mappings if row.old_file == source and row.old_key == key)
+        assert row.action == "preserved"
+        assert row.new_path is None
+        assert row.source_keys == (key,)
+        assert row.destination_keys == ("general", "ext", "legacy_meta_info", key)
+    assert dry.key_mappings == report.key_mappings
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_qubit_channel_alias_is_deduplicated_only_against_selected_wiring(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping, same: bool
+) -> None:
+    source = write_meta(request_data, "", {"qub_ch": 2 if same else 4, "qub_0_1_ch": 2})
+    report = migrate(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
+    assert document_value(setup, "Q1.wiring.ch") == 2
+    assert document_value(setup, "general.ext") == (
+        {} if same else {"legacy_meta_info": {"qub_ch": 4}}
+    )
+    row = next(row for row in report.key_mappings if row.old_file == source and row.old_key == "qub_ch")
+    assert row.source_keys == ("qub_ch",)
+    assert row.action == ("remove" if same else "preserved")
+    if same:
+        assert row.new_file == open_entry(request_data).result_path / "setup.yaml"
+        assert row.new_path == "Q1.wiring.ch"
+        assert "same" in row.reason.lower()
+    else:
+        assert row.destination_keys == ("general", "ext", "legacy_meta_info", "qub_ch")
+
+
+@pytest.mark.parametrize("canonical", [None, 1.0, 2.0])
+def test_removed_meta_keys_preserve_unmatched_values_and_report_proven_duplicates(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    canonical: float | None,
+) -> None:
+    removed: JsonObject = {
+        "readout_f": 1.0,
+        "flx_bias": 1.0,
+        "mA_c": 1.0,
+        "mA_e": 1.0,
+        "resetf1_w": 1.0,
+        "cur_jpa_A": 1.0,
+        "fake_peak": {"value": 1.0},
+        "log_scale": True,
+    }
+    values: JsonObject = {**removed, "flx_half": 1.0, "flux_unit": "V"}
+    if canonical is not None:
+        values.update({"r_f": canonical, "flux_bias": canonical})
+    source = write_meta(request_data, "", values)
+    report = migrate(request_data, metadata_mapping)
+    expected = dict(removed)
+    if canonical == 1.0:
+        expected.pop("readout_f")
+        expected.pop("flx_bias")
+    assert document_value(snapshot(open_entry(request_data).setup), "general.ext") == {
+        "flux_unit": "V",
+        "legacy_meta_info": expected,
+    }
+    rows = {row.old_key: row for row in report.key_mappings if row.old_file == source}
+    for key in removed:
+        row = rows[key]
+        assert row.source_keys == (key,)
+        if canonical == 1.0 and key in ("readout_f", "flx_bias"):
+            assert row.action == "remove"
+            assert row.new_path == {"readout_f": "R1.freq", "flx_bias": "Q1.ext.flux_bias"}[key]
+            assert row.new_file == open_entry(request_data).result_path / "setup.yaml"
+            assert "same" in row.reason.lower()
+        else:
+            assert row.action == "preserved"
+            assert row.destination_keys == ("general", "ext", "legacy_meta_info", key)
+    assert not [item for item in report.pending if item.source == source]
+
+
+def test_removed_alias_does_not_deduplicate_against_inherited_formal_value(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    write_meta(request_data, "", {"r_f": 1.0, "flux_unit": "V", "flux_bias": 1.0})
+    write_meta(request_data, "exps/bias", {"readout_f": 1.0, "flx_bias": 1.0})
+    migrate(request_data, metadata_mapping)
+    point = snapshot(open_entry(request_data).use_point("bias"))
+    assert document_value(point, "general.ext") == {
+        "flux_unit": "V",
+        "legacy_meta_info": {"readout_f": 1.0, "flx_bias": 1.0},
+    }
 
 
 def test_missing_units_drive_alias_and_module_scalars_remain_observable(
