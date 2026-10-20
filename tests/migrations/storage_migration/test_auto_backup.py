@@ -511,7 +511,7 @@ def test_backup_conflict_is_located_and_preflight_prevents_partial_writes(
             target.unlink()
             target.mkdir()
     before = {item: item.read_bytes() for item in path.rglob("*") if item.is_file()}
-    with pytest.raises((MigrationInputError, FileExistsError)) as caught:
+    with pytest.raises((MigrationInputError, FileExistsError, IsADirectoryError)) as caught:
         create_backup(path, backup_source, dry_run=False)
     assert isinstance(caught.value, MigrationInputError), "must report a data conflict"
     assert caught.value.differences, "conflicts expose typed located comparisons"
