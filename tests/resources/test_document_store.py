@@ -140,6 +140,32 @@ def test_edit_validates_complete_projection_without_revalidating_each_leaf(
     assert scalar_validations == []
 
 
+def test_edit_reuses_unchanged_yaml_bytes_but_revalidates_each_read(
+    document_path: Path,
+) -> None:
+    validations: list[float] = []
+
+    def validate(document: SyntheticDocument) -> None:
+        validations.append(document.values["left"])
+
+    store = DocumentStore(
+        document_path, SyntheticDocument, format="synthetic", validate=validate
+    )
+    with patch.object(YAML, "load", autospec=True, side_effect=YAML.load) as load:
+        with store.edit() as draft:
+            draft.values["left"] = 10.0
+    assert store.snapshot().values == {"left": 10.0, "right": 2.0}
+    assert validations == [1.0, 1.0, 1.0, 10.0]
+    assert load.call_count == 0
+
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\nvalues: {left: 30.0, right: 2.0}\n",
+        encoding="utf-8",
+    )
+    assert store.refresh()
+    assert store.snapshot().values == {"left": 30.0, "right": 2.0}
+
+
 def test_snapshot_is_an_independent_memory_only_typed_copy(document_path: Path) -> None:
     store = make_store(document_path)
     document_path.unlink()

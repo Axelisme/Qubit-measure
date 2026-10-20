@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from ruamel.yaml import YAML
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     PulseCfg,
@@ -475,6 +476,29 @@ def test_open_validates_nonmanual_source_and_attachment(
     (files[1].parent / f"{EVENT_ID}.json").unlink()
     with pytest.raises(FileNotFoundError):
         open_library(files)
+
+
+@pytest.mark.parametrize("action", ["refresh", "edit"])
+def test_unchanged_library_bytes_recheck_attachments_without_reparsing_yaml(
+    files: tuple[Path, Path], action: str
+) -> None:
+    local_source(files)
+    value = document()
+    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData(
+        source=EVENT_ID, kind="rabi", run_id=None, at=AT, stderr=0.01
+    )
+    write_document(files, value)
+    library = open_library(files)
+    (files[1].parent / f"{EVENT_ID}.json").unlink()
+    with patch.object(YAML, "load", autospec=True, side_effect=YAML.load) as load:
+        with pytest.raises(FileNotFoundError):
+            if action == "refresh":
+                library.refresh()
+            else:
+                with library.edit():
+                    pass
+    assert load.call_count == 0
+    assert library.snapshot().meta("Q1.pulses.pi.gain") is not None
 
 
 def test_rename_preserves_complete_metadata_and_segment_boundaries() -> None:
