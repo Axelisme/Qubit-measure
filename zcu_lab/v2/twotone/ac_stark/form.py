@@ -16,9 +16,15 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
                 "stark_pulse1": Template(
                     "res_probe",
                     bindings={"resonator": "$resonator"},
-                    set={"waveform.length": 1.0},
+                    # Run supplies the Stark gain scan.
+                    set={"gain": Hidden(0.0), "waveform.length": 1.0},
                 ),
-                "stark_pulse2": Template("qub_probe", bindings={"qubit": "$qubit"}),
+                # Run supplies the spectroscopy frequency scan.
+                "stark_pulse2": Template(
+                    "qub_probe",
+                    bindings={"qubit": "$qubit"},
+                    set={"freq": Hidden(0.0)},
+                ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
@@ -45,7 +51,8 @@ def make_ramsey_form(ctx: FormContext) -> Form[AcStarkRamseyCfg]:
                 "stark_pulse": Template(
                     "res_probe",
                     bindings={"resonator": "$resonator"},
-                    set={"waveform.length": 10.0},
+                    # Run supplies the Stark gain scan; duration remains fixed.
+                    set={"gain": Hidden(0.0), "waveform.length": 10.0},
                 ),
                 "pi2_pulse": Slot("$qubit.module.x90")
                 if ctx.has("$qubit.module.x90")

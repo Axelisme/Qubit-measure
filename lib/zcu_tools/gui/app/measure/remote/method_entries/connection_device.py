@@ -21,8 +21,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             # A margin above make_soc_proxy's 1s COMMTIMEOUT lets its error return.
             3.0,
             "Connect a real SoC SYNCHRONOUSLY with kind='remote', ip and port. "
-            "Mock connections are rejected; use --simulate at GUI startup for an offline "
-            "environment. Returns {soc: {description, is_mock}} once connected; "
+            "Mock connections are rejected; use a trusted startup script (--script) to "
+            "install simulation resources. Returns {soc: {description, is_mock}} once connected; "
             "read soc.info for structured cfg. Unreachable boards fail fast (~1s).",
             (
                 required_string("kind", "Must be 'remote'"),

@@ -1,6 +1,6 @@
 """Fixed-capture duration scan with explicit two-line drive and GE calibration inputs."""
 
-from zcu_tools.cfg_model import Expr, Range, Slot, Template
+from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from .._measure import captured_roles
@@ -19,14 +19,15 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
     for role in ("f1", "f2"):
         slot = f"$coupler.module.cz_{role}"
         drive[role] = (
-            Slot(slot, copy=True)
+            # Run replaces both line frequencies with the common scan coordinate.
+            Slot(slot, copy=True, set={"freq": Hidden(0.0)})
             if ctx.has(slot)
             else Template(
                 "pulse:blank",
                 set={
                     "ch": Expr(f"${role}.wiring.ch"),
                     "nqz": None,
-                    "freq": None,
+                    "freq": Hidden(0.0),
                     "gain": None,
                     "waveform.style": "cosine",
                     "waveform.length": None,

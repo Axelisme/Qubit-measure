@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-19，Core 強制唯讀與存檔值還原
+**Last updated:** 2026-10-20，model-list indexed editing
 
 `FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
@@ -46,7 +46,7 @@ Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_a
 
 Editor 與 MCP 讀同一份 description options，照 label 列選項，透過明確 selection 操作選擇 option.value，首次展開才 describe 選中項目的 children。它們不推論 union、ref 或 library 的呈現。普通 nullable model 仍用 Enabled，bool 仍用 checkbox。明確複製只經 `to_inline` 指令，使用 host 的 guarded command callback；一般選 Inline 由 `form_adapter` 的集中 converter 決定繼承或新建 input。
 
-`list[Model]` 直接提供 indexed editing，不需要政策標記。`describe(("tones",), env)` 回 `kind="elements"`、目前各位置的 index、label 與 typed path，children 是元素 model。`Display(element_label="label")` 指定 picker 使用哪個字串欄位，未指定或非字串時顯示 index。各位置可有不同的唯讀初值，寫入仍遵守 Core 的唯讀限制。數字字串、bool、負數與越界 index 都不是合法 path。字串 list 與其他 sequence、typed mapping 仍是整個 leaf。
+`list[Model]` 提供 indexed editing，不需要政策標記。`describe(("tones",), env)` 回 `kind="elements"`、目前各位置的 index、label 與 typed path，children 是元素 model。`Display(element_label="label")` 指定 picker 使用哪個字串欄位，未指定或非字串時顯示 index。各位置可有不同的唯讀初值，寫入仍遵守 Core 的唯讀限制。數字字串、bool、負數與越界 index 都不是合法 path。字串 list 與其他 sequence、typed mapping 仍是整個 leaf。
 
 `FormModel.check_input_change(before, after)` 由 root 宣告提供。Core 在普通 write、command 與選項切換的完整候選準備後呼叫它。兩棵 JSON tree 都是深複本，改動不會寫回 draft 或 base。宣告以 `FormInputRejected(path, message)` 拒絕時，整批 input、base、selections 與通知不變，原始請求 path 保留。`install_input` 會對 current input 重新檢查，保護直接傳入的候選。檢查不讀新來源、不執行 options 或 converter；一般值驗證仍由 Pydantic 處理。還原與 reset 不執行這個檢查。
 

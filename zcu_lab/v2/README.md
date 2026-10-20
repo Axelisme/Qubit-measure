@@ -17,18 +17,22 @@ population 或 repeated-gate 誤差；支援 TwoPulse/Bath reset，需獨立驗�
 `mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
-`mux/onetone` adapter 從 group 的 readout slot 建立初值。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
+`mux/onetone` adapter 從 group 的 resonators 產生 readout tones，保留既有 readout slot 的 scalar 初值。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。FIT 共用 onetone/freq 的模型與 delay 選項，逐 tone 隔離數值失敗。沒有歷史 cfg 時拒絕 FIT。
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時只提 module，summary 顯示原因。
-MuxGroup 可不填 qubits 做 resonator bring-up，保留手填 readout，不增加完整綁定門檻。
+MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯，不增加完整 qubit 綁定門檻。
 填了則由 model 檢查等長與重複 qubit。Form 在 Open／Reset 呼叫
 `_support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
 檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。
 其他 mux／FTF Forms 共用此入口，精確 import 與呼叫例見
 [Measure support](_support/measure/README.md#mux-綁定驗證)。
-Module 可整組引用或 inline 編輯，tones 使用單行 JSON。
-Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 tones 並確認接線；範本不是硬體安全預設。
+Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
+八個 mux Forms 的 readout 都從 group 產生每 resonator 一槽位的固定清單。
+Freq 使用 resonator 校準值，gain 初值為 0.1，ro_ch 按 group 順序從 0 起算。
+Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
+Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。實驗透過 typed model-list seeds 加入 tones。
+操作員必須確認通道與功率；範本不是硬體安全預設。
 
 ## Mux qubit numeric cores
 

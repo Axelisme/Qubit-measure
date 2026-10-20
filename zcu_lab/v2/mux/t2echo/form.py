@@ -3,7 +3,12 @@
 from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import captured_mux_names, mux_relax_delay
+from zcu_lab.v2._support.measure.mux_forms import (
+    READOUT_ELEMENTS,
+    captured_mux_names,
+    mux_readout_initial,
+    mux_relax_delay,
+)
 
 from .core import MuxT2EchoCfg
 
@@ -35,9 +40,7 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
         tree={
             "modules": {
                 "reset": Slot("$mux.module.reset"),
-                "readout": Slot("$mux.module.readout")
-                if ctx.has("$mux.module.readout")
-                else Template("readout/mux:blank"),
+                "readout": mux_readout_initial(ctx),
             },
             "tones": tones,
             "participants": list(names),
@@ -47,5 +50,17 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
             "reps": 1000,
             "rounds": 100,
         },
-        fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        fixed_elements=(
+            FixedElements(("tones",), "name", ("participants",)),
+            READOUT_ELEMENTS,
+        ),
+        field_order=(
+            "participants",
+            "tones",
+            "delay",
+            "modules",
+            "relax_delay",
+            "reps",
+            "rounds",
+        ),
     )

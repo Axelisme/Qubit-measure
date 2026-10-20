@@ -326,13 +326,15 @@ def convert_module_cfg(
     source: Path,
     mapping: MigrationMapping,
     dry_view: EditView | None = None,
-) -> None:
+) -> LibrarySnapshot | None:
     """Prepare/report one legacy library and commit its complete typed Spec file.
 
     session owns report, source baselines and manifest checkpoints. source is
-    the absolute legacy module_cfg.yaml under its result root; an absent file is
-    a no-op. label is the validated point label, or None for root metadata with
-    setup destination. entry is the matching handle, or None only in dry-run.
+    the absolute legacy module_cfg.yaml under its result root; an absent file
+    returns None. Return the owner-validated same-context snapshot for scalar
+    comparison: the isolated plan in dry-run, or the published library otherwise.
+    label is the validated point label, or None for root metadata with setup
+    destination. entry is the matching handle, or None only in dry-run.
     mapping supplies explicit module/waveform source keys and canonical targets.
     The legacy envelope requires modules and waveforms mappings; malformed
     envelopes raise MigrationInputError and retain a module-step failure diagnostic.
@@ -356,11 +358,13 @@ def convert_module_cfg(
     no ledger events are invented, and no unrecorded-write recovery is provided.
     """
     if not source.is_file():
-        return
+        return None
     source = contained_path(source, session.manifest.report.source.result_path)
-    if any(item.source == source for item in session.manifest.module_files):
-        # The manifest recovery owner already verified completed source/destination hashes.
-        return
+    if entry is not None and any(
+        item.source == source for item in session.manifest.module_files
+    ):
+        # The recovery owner already verified the fixed document baseline.
+        return entry.module_library(label).snapshot()
     try:
         source_hash = session.baseline(source)
         with source.open("r", encoding="utf-8") as stream:
@@ -378,14 +382,16 @@ def convert_module_cfg(
             "setup.yaml" if label is None else f"points/{label}/point.yaml"
         )
         if session.dry_run:
-            _, retained = _prepare_library(session, source, values, mapping, None)
+            candidate, retained = _prepare_library(
+                session, source, values, mapping, None
+            )
             if dry_view is None:
                 raise ValueError(
                     "A dry-run library requires its isolated context draft"
                 )
             _preserve_in_context(dry_view, retained)
             _record_preserved(session, source, values, retained, context_target)
-            return
+            return candidate
         if entry is None:
             raise ValueError("A library commit requires its ResultEntry handle")
         library = entry.module_library(label)
@@ -446,6 +452,7 @@ def convert_module_cfg(
             )
         )
         session.failure(source, "module_cfg", None)
+        return candidate
     except Exception as exc:
         # This boundary persists module-step diagnostics, then propagates the failure.
         session.failure(source, "module_cfg", exc)

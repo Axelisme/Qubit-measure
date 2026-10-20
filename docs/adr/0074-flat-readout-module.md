@@ -45,11 +45,19 @@ Mux readout 不接受 sweep 或逐 tone library key，`set_param` 一律拒絕�
 Tone 的選填 `label` 預設空字串，隨 Spec、cfg 與 library 保存。
 Label 只作顯示，可以重複，不代表 component；program 不解讀它。
 Tone 序號定義資料軸順序，label 與 ADC channel 都不改變這個順序。
-Form 沿用整個 module 的 ref／inline 與 Convert to inline，tones 以單行 JSON 編輯。
+Form 沿用整個 module 的 ref／inline 與 Convert to inline，tones 使用 model-list picker 逐項編輯。
+每筆 tone 的 freq、gain、phase、ro_ch 與 label 都可編輯。Label 不當固定 identity。
 
 Library 新建入口識別 MuxReadoutSpec，`readout/mux:blank` 只提供 scalar 編輯初值。
-Tones 必須由作者填寫，範本不擴充 TemplateLiteral，也不提供硬體安全保證。
-使用者於 2026-10-16 對新增 blank 範本、新建 kind，以及 scalar 初值加必填 tones JSON 的方案回覆：「A同意」。
+Mux 實驗的 lab Form 從固定 capture 的 mux group 產生清單，每個 resonator 一個槽位。
+Freq 取該 resonator 校準值，gain 使用 lab 初值，ro_ch 依 group 順序。生成器不猜硬體或校準值。
+Lab 以 Template.set／Slot.set 提供依原 Spec schema 驗證的 typed model-list 初值。
+Form adapter 集中生成與 nested ref／inline 路徑處理，Core 只處理普通 list input。
+FixedElements 的無 participants 模式只固定目前 inline 清單的槽位數，見 [[0079]]。
+
+使用者於 2026-10-16 曾同意 scalar 初值加必填 tones JSON 的方案。
+使用者於 2026-10-20 對從 group 產生可逐欄編輯的固定清單回覆：「可以」。
+本次取代 JSON leaf 候選，不擴充 InputPolicy，不新增持久 identity，也不提供硬體安全保證。
 
 ### Owner 不變，caller 不重建舊配置
 

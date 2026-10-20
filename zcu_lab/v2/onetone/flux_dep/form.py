@@ -19,6 +19,8 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                     "readout",
                     bindings={"resonator": "$resonator"},
                     set={
+                        # Run supplies the frequency sweep at every flux point.
+                        "freq": Hidden(0.0),
                         "gain": 0.05,
                         "ro_length": initial_ro_length(),
                     },
