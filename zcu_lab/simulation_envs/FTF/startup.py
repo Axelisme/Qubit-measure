@@ -3,12 +3,11 @@
 from pathlib import Path
 
 from pydantic import TypeAdapter
+from zcu_tools.experiment.ftf import ftf
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.app.measure.startup_context import StartupContext
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.resources.entry import load_entry_template
-
-from zcu_lab.simulation_envs.FTF.environment import build_environment
 
 
 def startup(ctx: StartupContext) -> None:
@@ -40,9 +39,7 @@ def startup(ctx: StartupContext) -> None:
     )
 
     ctx.progress("Building offline FTF resources")
-    environment = build_environment(
-        settings_path=Path(__file__).with_name("ftf.yaml"), workers=1, warmup=False
-    )
+    environment = ftf(Path(__file__).with_name("ftf.yaml"), workers=1, warmup=False)
     transferred: set[str] = set()
 
     def close_environment() -> None:
