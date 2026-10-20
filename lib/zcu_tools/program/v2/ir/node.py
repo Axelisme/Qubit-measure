@@ -31,12 +31,17 @@ class IRNode(ABC):
         """
         ...
 
-    def _into_str(self, indent: int = 0) -> str:
-        """Helper for __str__ that takes an indent level."""
+    def format_tree(self, indent: int = 0) -> str:
+        """Return this node's tree representation as a string without mutation.
+
+        indent is the initial indentation level, with four spaces per level.
+        Child nodes use the next level; node-specific spacing and newlines
+        are preserved. The default level is zero, as used by str(node).
+        """
         return f"{'    ' * indent}{self.__class__.__name__}()"
 
     def __str__(self) -> str:
-        return self._into_str()
+        return self.format_tree()
 
 
 @dataclass
@@ -92,7 +97,8 @@ class BasicBlockNode(IRNode):
             size += self.branch.addr_inc
         return size
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return block text without mutation, using four spaces per indent level."""
         prefix = "    " * indent
         lines = []
         if self.disable_opt:
@@ -122,10 +128,11 @@ class BlockNode(IRNode):
         idx = self.insts.index(old)
         self.insts[idx] = new
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return container text with children one four-space indent level deeper."""
         prefix = "    " * indent
         return f"{prefix} {self.__class__.__name__}()\n" + "\n".join(
-            i._into_str(indent + 1) for i in self.insts
+            i.format_tree(indent + 1) for i in self.insts
         )
 
 
@@ -145,7 +152,8 @@ class IRLoop(IRNode):
     range_hint: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.body, BlockNode):
+        # tolerated: Untyped callers must still get TypeError for non-BlockNode bodies.
+        if not isinstance(self.body, BlockNode):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(
                 f"IRLoop.body must be BlockNode, got {type(self.body).__name__}"
             )
@@ -165,11 +173,12 @@ class IRLoop(IRNode):
                 f"IRLoop.replace_child: {old!r} is not a child of this node"
             )
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return loop text with its body one four-space indent level deeper."""
         prefix = "    " * indent
         return (
             f"{prefix} IRLoop(name={self.name}, n={self.n}, counter={str(self.counter_reg)}, range_hint={self.range_hint})\n"
-            + self.body._into_str(indent + 1)
+            + self.body.format_tree(indent + 1)
         )
 
 
@@ -194,11 +203,12 @@ class IRBranch(IRNode):
         idx = self.cases.index(old)
         self.cases[idx] = new
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return branch text with cases one four-space indent level deeper."""
         prefix = "    " * indent
         return (
             f"{prefix} IRBranch(name={self.name}, compare_reg={str(self.compare_reg)})\n"
-            + "\n".join(i._into_str(indent + 1) for i in self.cases)
+            + "\n".join(i.format_tree(indent + 1) for i in self.cases)
         )
 
 
@@ -239,7 +249,8 @@ class IRDispatch(IRNode):
     def replace_child(self, old: IRNode, new: IRNode) -> None:
         raise TypeError("IRDispatch is a leaf node and has no children")
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return dispatch text without mutation, using four spaces per indent level."""
         prefix = "    " * indent
         targets = ", ".join(str(lbl) for lbl in self.target_labels)
         return f"{prefix} IRDispatch(name={self.name}, value_reg={self.value_reg}, targets=[{targets}])\n"

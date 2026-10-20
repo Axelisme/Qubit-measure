@@ -115,7 +115,7 @@ class IRCompileMixin(QickProgramV2):
         cursor = dmem_base
         for idx, table_labels in enumerate(ctx.dmem_tables):
             entry_addrs = [
-                IRLinker._parse_label_addr(lbl.name, opt_labels[lbl.name])
+                IRLinker.parse_label_addr(lbl.name, opt_labels[lbl.name])
                 for lbl in table_labels
             ]
             offset = self.add_dmem(entry_addrs)
