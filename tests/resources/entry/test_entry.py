@@ -20,7 +20,9 @@ from tests._filesystem import symlink_or_skip
 def test_create_accepts_a_fixed_identity_without_changing_default_creation(
     entry_roots: tuple[Path, Path],
 ) -> None:
-    assert hasattr(entry_api, "EntryIdentity"), "owner must accept stable creation values"
+    assert hasattr(entry_api, "EntryIdentity"), (
+        "owner must accept stable creation values"
+    )
     result, database = entry_roots
     identity = entry_api.EntryIdentity(
         entry_id=UUID("00000000-0000-0000-0000-000000000042"),
@@ -31,10 +33,17 @@ def test_create_accepts_a_fixed_identity_without_changing_default_creation(
     )
     reopened = ResultEntry.open("fixed", result_root=result, database_root=database)
     assert fixed.entry_id == reopened.entry_id == str(identity.entry_id)
-    assert entry_api.snapshot(reopened.setup).general.created_at == "2026-10-20T01:02:03Z"
+    assert (
+        entry_api.snapshot(reopened.setup).general.created_at == "2026-10-20T01:02:03Z"
+    )
     fresh = ResultEntry.create("fresh", result_root=result, database_root=database)
     assert fresh.entry_id != fixed.entry_id
-    assert datetime.fromisoformat(entry_api.snapshot(fresh.setup).general.created_at).tzinfo is not None
+    assert (
+        datetime.fromisoformat(
+            entry_api.snapshot(fresh.setup).general.created_at
+        ).tzinfo
+        is not None
+    )
 
 
 def test_fixed_identity_rejects_naive_creation_time_before_creating_directories(
@@ -42,13 +51,14 @@ def test_fixed_identity_rejects_naive_creation_time_before_creating_directories(
 ) -> None:
     assert hasattr(entry_api, "EntryIdentity"), "fixed identity must validate UTC time"
     with pytest.raises(ValueError, match="UTC"):
-        identity = entry_api.EntryIdentity(
-            entry_id=UUID("00000000-0000-0000-0000-000000000042"),
-            created_at=datetime(2026, 10, 20),
-        )
         ResultEntry.create(
-            "fixed", result_root=entry_roots[0], database_root=entry_roots[1],
-            identity=identity,
+            "fixed",
+            result_root=entry_roots[0],
+            database_root=entry_roots[1],
+            identity=entry_api.EntryIdentity(
+                entry_id=UUID("00000000-0000-0000-0000-000000000042"),
+                created_at=datetime(2026, 10, 20),
+            ),
         )
     assert all(not root.exists() for root in entry_roots)
 

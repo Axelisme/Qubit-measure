@@ -471,7 +471,17 @@ def test_partial_backup_fills_only_missing_files_and_directories(
     assert backup_source.result_path.exists()
 
 
-@pytest.mark.parametrize("conflict", ["bytes", "extra", "directory", "inventory"])
+@pytest.mark.parametrize(
+    "conflict",
+    [
+        "bytes",
+        "extra",
+        "directory",
+        "inventory",
+        "invalid-inventory",
+        "inventory-directory",
+    ],
+)
 def test_backup_conflict_is_located_and_preflight_prevents_partial_writes(
     request_data: MigrationRequest,
     backup_source: MigrationSource,
@@ -495,10 +505,13 @@ def test_backup_conflict_is_located_and_preflight_prevents_partial_writes(
         raw = json.loads(target.read_text())
         raw["hashes"]["result/chip/qubit/original.bin"] = "0" * 64
         target.write_text(json.dumps(raw))
-    before = {
-        item: item.read_bytes() for item in path.rglob("*") if item.is_file()
-    }
-    with pytest.raises(Exception) as caught:
+        if conflict == "invalid-inventory":
+            target.write_bytes(b"incomplete JSON {")
+        elif conflict == "inventory-directory":
+            target.unlink()
+            target.mkdir()
+    before = {item: item.read_bytes() for item in path.rglob("*") if item.is_file()}
+    with pytest.raises((MigrationInputError, FileExistsError)) as caught:
         create_backup(path, backup_source, dry_run=False)
     assert isinstance(caught.value, MigrationInputError), "must report a data conflict"
     assert caught.value.differences, "conflicts expose typed located comparisons"
@@ -507,7 +520,9 @@ def test_backup_conflict_is_located_and_preflight_prevents_partial_writes(
     assert difference.expected != difference.actual
     assert str(target) in str(caught.value)
     assert not missing.exists(), "all existing items are checked before filling gaps"
-    assert {item: item.read_bytes() for item in path.rglob("*") if item.is_file()} == before
+    assert {
+        item: item.read_bytes() for item in path.rglob("*") if item.is_file()
+    } == before
 
 
 def test_partial_backup_dry_run_validates_without_filling_gaps(
@@ -536,7 +551,9 @@ def interrupted_initialization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
     """Interrupt external manifest I/O after publishing the initial entry."""
-    target = request_data.results_root / request_data.name / "records/migration-state.json"
+    target = (
+        request_data.results_root / request_data.name / "records/migration-state.json"
+    )
     replace_file = os.replace
 
     def fail_manifest(source: str | Path, destination: str | Path) -> None:
@@ -548,7 +565,10 @@ def interrupted_initialization(
         patch.setattr(os, "replace", fail_manifest)
         with pytest.raises(OSError, match="initial manifest interrupted"):
             migrate(request_data, mapping)
-    return backup_path(request_data) / "migration-records/chip/qubit/migration-initialization.json"
+    return (
+        backup_path(request_data)
+        / "migration-records/chip/qubit/migration-initialization.json"
+    )
 
 
 def test_initial_manifest_interruption_reruns_with_fixed_identity_and_future_fields(
@@ -571,7 +591,9 @@ def test_initial_manifest_interruption_reruns_with_fixed_identity_and_future_fie
     )
     assert entry.entry_id == identity
     assert snapshot(entry.setup).general.created_at == created_at
-    manifest = json.loads((entry.result_path / "records/migration-state.json").read_text())
+    manifest = json.loads(
+        (entry.result_path / "records/migration-state.json").read_text()
+    )
     assert manifest["report_path"] == report_path
     assert json.loads(interrupted_initialization.read_text())["future"] == raw["future"]
 
@@ -588,7 +610,9 @@ def test_initialization_windows_resume_without_an_explicit_resume_flag(
     result_target = request_data.results_root / request_data.name
     database_target = request_data.database_root / request_data.name
 
-    def fail_mkdir(path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
+    def fail_mkdir(
+        path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False
+    ) -> None:
         if window == "before-entry" and path.name.startswith(".migration-init-"):
             raise OSError("initialization interrupted")
         mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
@@ -605,13 +629,20 @@ def test_initialization_windows_resume_without_an_explicit_resume_flag(
         patch.setattr(Path, "rename", fail_rename)
         with pytest.raises(OSError, match="initialization interrupted"):
             migrate(request_data, mapping)
-    ownership = backup_path(request_data) / "migration-records/chip/qubit/migration-initialization.json"
+    ownership = (
+        backup_path(request_data)
+        / "migration-records/chip/qubit/migration-initialization.json"
+    )
     assert ownership.is_file()
     raw = json.loads(ownership.read_text())
     assert not result_target.exists() or window == "database-rename"
     assert not database_target.exists()
     migrate(request_data, mapping)
-    entry = ResultEntry.open(request_data.name, result_root=request_data.results_root, database_root=request_data.database_root)
+    entry = ResultEntry.open(
+        request_data.name,
+        result_root=request_data.results_root,
+        database_root=request_data.database_root,
+    )
     assert entry.entry_id == raw["manifest"]["identity"]["entry_id"]
     assert snapshot(entry.setup).general.created_at == raw["created_at"]
     assert not (request_data.results_root / raw["temporary_name"]).exists()
@@ -633,10 +664,14 @@ def test_initial_window_yaml_formatting_is_skipped_without_rewriting(
     before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
     # Data-only leaves the initial setup/library unchanged after bootstrap.
     migrate(replace(request_data, part="data"), mapping)
-    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths} == before
+    assert {
+        path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths
+    } == before
 
 
-@pytest.mark.parametrize("change", ["declaration", "mapping", "identity", "source", "value", "unknown"])
+@pytest.mark.parametrize(
+    "change", ["declaration", "mapping", "identity", "source", "value", "unknown"]
+)
 def test_initialization_conflicts_leave_all_owned_content_untouched(
     request_data: MigrationRequest,
     mapping: MigrationMapping,
@@ -663,11 +698,25 @@ def test_initialization_conflicts_leave_all_owned_content_untouched(
             raw["future"] = {"unknown": "must not disappear"}
         with path.open("w") as stream:
             YAML(typ="safe").dump(raw, stream)
-    roots = [request_data.results_root, request_data.database_root, backup_path(request_data)]
-    before = {path: path.read_bytes() for root in roots for path in root.rglob("*") if path.is_file()}
+    roots = [
+        request_data.results_root,
+        request_data.database_root,
+        backup_path(request_data),
+    ]
+    before = {
+        path: path.read_bytes()
+        for root in roots
+        for path in root.rglob("*")
+        if path.is_file()
+    }
     with pytest.raises(MigrationInputError) as caught:
         migrate(request, mapping)
     assert caught.value.differences, "immutable ownership conflicts must be located"
-    after = {path: path.read_bytes() for root in roots for path in root.rglob("*") if path.is_file()}
+    after = {
+        path: path.read_bytes()
+        for root in roots
+        for path in root.rglob("*")
+        if path.is_file()
+    }
     assert after == before
     assert (request_data.result_root / "chip/qubit").exists()
