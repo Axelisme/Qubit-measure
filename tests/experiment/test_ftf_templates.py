@@ -24,6 +24,27 @@ from tests.experiment._ftf_templates import (
 pytestmark = pytest.mark.sim
 
 
+def test_cavity_rates_cover_final_evolution_spans_including_ringdown() -> None:
+    import zcu_tools.experiment.ftf as ftf
+    from zcu_tools.simulate.evolution import segment_spans
+
+    base = template(tones=1)
+    terminal = base.events[-1]
+    earlier = replace(
+        terminal, start_us=np.zeros(2), duration_us=np.full(2, 0.002),
+        gain=np.array([0.3, 0.5]),
+    )
+    driven = replace(base, events=(earlier, *base.events))
+    plan = ftf.plan_template(settings(), snapshot(), driven)
+    spans = segment_spans(plan.batch)
+    assert tuple(tuple((s.start_ns, s.end_ns) for s in point) for point in plan.batch.segment_shifts) == spans
+    # The last segment starts after switch-off but retains the emitted field.
+    for point, pulses in enumerate(plan.cavity_drives):
+        assert pulses[0].end_ns == 2
+        assert plan.batch.segment_shifts[point][-1].start_ns >= 2
+        assert np.any(plan.batch.segment_shifts[point][-1].energy_shift_ghz != 0)
+
+
 def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
     import zcu_tools.experiment.ftf as ftf
 
