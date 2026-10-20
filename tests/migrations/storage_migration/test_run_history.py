@@ -230,7 +230,38 @@ def test_unknown_history_resume_reuses_assigned_id_and_published_bytes(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     request, source = write_run(request_data)
-    request = history_request(request, {"started_at": None, "completion": "unknown"})
+    request = history_request(
+        request,
+        {
+            "started_at": None,
+            "completion": "unknown",
+            "run_id": "20251001T000000Z-abc123",
+        },
+    )
+    source_bytes = source.read_bytes()
+    expected = (
+        request.database_root
+        / request.name
+        / "runs"
+        / "synthetic_scan_20251001T000000Z-abc123"
+        / "data.h5"
+    )
+    planned = migrate_storage(
+        replace(request, dry_run=True),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=lambda path, tag, cfg_type: pytest.fail(
+            "Dry-run must not call native validation"
+        ),
+    )
+    assert [
+        item.new_file for item in planned.key_mappings if item.old_key == "run_id"
+    ] == [expected]
+    assert source.read_bytes() == source_bytes
+    assert not expected.parent.exists()
+    assert not manifest_path(request).exists()
+    assert planned.backup_path is not None
+    assert not planned.backup_path.exists()
     paths: list[Path] = []
 
     def interrupt(path: Path, tag: str, cfg_type: str) -> None:
@@ -246,8 +277,9 @@ def test_unknown_history_resume_reuses_assigned_id_and_published_bytes(
             validate_native=interrupt,
         )
     before = json.loads(manifest_path(request).read_text())
+    assert paths == [expected]
     native_bytes = paths[0].read_bytes()
-    assert source.is_file()
+    assert source.read_bytes() == source_bytes
 
     def validate(path: Path, tag: str, cfg_type: str) -> None:
         assert path == paths[0]
