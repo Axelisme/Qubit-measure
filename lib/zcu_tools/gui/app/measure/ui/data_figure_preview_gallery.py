@@ -316,12 +316,14 @@ class DataFigurePreviewGallery(QWidget):
         renderer: Callable[[Figure], bytes] | None = None,
     ) -> None:
         super().__init__(parent)
-        if capabilities is None:
+        # tolerated: Untyped callers must receive the distinct missing-capabilities TypeError.
+        if capabilities is None:  # pyright: ignore[reportUnnecessaryComparison]
             raise TypeError("DataFigurePreviewGallery requires AdapterCapabilities")
         # Import here to avoid circular import at module load.
         from zcu_tools.gui.app.measure.adapter import AdapterCapabilities as _Caps
 
-        if not isinstance(capabilities, _Caps):
+        # tolerated: Untyped callers must supply nominal capabilities, not a lookalike.
+        if not isinstance(capabilities, _Caps):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(
                 f"DataFigurePreviewGallery requires AdapterCapabilities, got {type(capabilities).__name__!r}"
             )
@@ -644,7 +646,8 @@ class DataFigurePreviewGallery(QWidget):
         # Convert PNG bytes to pixmap
         try:
             pixmap = QPixmap()
-            if not isinstance(png_bytes, (bytes, bytearray)):
+            # tolerated: Reject non-byte renderer results with a per-card TypeError before Qt decoding.
+            if not isinstance(png_bytes, (bytes, bytearray)):  # pyright: ignore[reportUnnecessaryIsInstance]
                 raise TypeError(
                     f"renderer returned {type(png_bytes).__name__!r}, expected bytes"
                 )
