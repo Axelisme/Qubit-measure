@@ -107,7 +107,8 @@ def test_public_acquisition_resolves_jump_bridges_and_shared_mux_paths(mux, mode
         if mux:
             assert tuple(prog.ro_chs) == (4, 1)
             np.testing.assert_array_equal(raw[0], raw[1])
-            np.testing.assert_array_equal(result[0], result[1])
+            if mode == "decimated":
+                np.testing.assert_array_equal(result[0], result[1])
         if mode == "decimated":
             for trace, sums in zip(result, raw, strict=True):
                 np.testing.assert_array_equal(

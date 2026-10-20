@@ -40,6 +40,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
             expected = result.raw.materialize(acquire.reps, acquire.avg_level)
         else:
             expected = {channel.channel: channel.iq.copy() for channel in result.channels}
+        archived_round = replay_paths(tmp_path / "archive")[0]
         # Eviction and a later round must not change this delivery's identity.
         source.preparation_cache.max_bytes = 0
         source.readout_cache.clear()
@@ -62,7 +63,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
             acquire.reps, acquire.avg_level
         ).items():
             np.testing.assert_array_equal(values, expected[channel])
-    replayed = replay_round(replay_paths(tmp_path / "archive")[0])
+    replayed = replay_round(archived_round)
     if isinstance(replayed, IntegratedRound):
         actual = replayed.raw.materialize(acquire.reps, acquire.avg_level)
     elif isinstance(replayed, RoundSignals):
