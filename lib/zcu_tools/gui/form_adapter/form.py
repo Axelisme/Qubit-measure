@@ -80,8 +80,9 @@ class Form[C: ConfigBase]:
     Nonempty order on a persistent Spec raises ValueError: Spec forms retain
     their inherited field order and validators. Extras, if supplied, remains last.
     fixed_elements is a tuple of root-relative FixedElements declarations for
-    core cfg Forms. It supplies owner identity admission and participants value
-    validation; default_input rejects duplicate capture names with indices.
+    core cfg Forms. Named mode supplies identity admission and participants
+    validation, rejecting duplicate default names with indices. Slot mode fixes
+    only an active list's length and leaves all element values editable.
     """
 
     def __init__[E: BaseModel](
@@ -192,8 +193,9 @@ class Form[C: ConfigBase]:
         state mutation, publication or materialization occurs. Wrong input model
         raises TypeError; template projections preserve initial values and
         requiredness.
-        Declared fixed-list descendants include the deepest matching
-        FixedElements identity from this same input, never from participants.
+        Named fixed-list descendants include the deepest matching FixedElements
+        identity from this same input, never from participants. Fixed slots do
+        not declare element identity.
         """
         self._check_logical_input(input)
         observation = _logical.read(input, path, env)

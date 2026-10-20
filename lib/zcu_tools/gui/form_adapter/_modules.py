@@ -291,8 +291,12 @@ def _editable(annotation: object, seeds: Mapping[str, JsonValue]) -> object:
             _editable(member, seeds) for member in args if member is not QickParam
         )
         return union_type(items)
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return editable_spec(annotation, seeds)
+    if origin is list:
+        (element,) = args
+        if isinstance(element, type) and issubclass(element, BaseModel):
+            annotation = list[editable_spec(element, seeds)]
+    elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        annotation = editable_spec(annotation, seeds)
     return annotation
 
 
@@ -358,6 +362,21 @@ def _spec_display(name: str, info: FieldInfo) -> Display | None:
     return display
 
 
+def _list_seed_fields(rows: list[JsonValue]) -> dict[str, JsonValue]:
+    """Share expression requirements without borrowing a position's defaults."""
+    fields: dict[str, JsonValue] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for name, value in row.items():
+            previous = fields.get(name)
+            if isinstance(previous, list) and isinstance(value, list):
+                fields[name] = [*previous, *value]
+            elif not (isinstance(previous, dict) and "expr" in previous):
+                fields[name] = value
+    return fields
+
+
 def editable_spec(
     model: type[BaseModel],
     seeds: Mapping[str, JsonValue],
@@ -383,9 +402,14 @@ def editable_spec(
             annotations[name] = ClassVar[None]
             continue
         seed = seeds.get(name)
-        annotations[name] = _editable(
-            info.annotation, seed if isinstance(seed, dict) else {}
+        fields = (
+            seed
+            if isinstance(seed, dict)
+            else _list_seed_fields(seed)
+            if isinstance(seed, list)
+            else {}
         )
+        annotations[name] = _editable(info.annotation, fields)
         derived = deepcopy(info)
         if inline_wrapper(annotations[name]) is not None:
             derived.discriminator = (
@@ -742,7 +766,9 @@ class ModuleField:
         )
         return {
             "kind": "inline",
-            "module": supported_input(selected, complete_input(selected, module)),
+            "module": supported_input(
+                selected, complete_input(selected, complete_input(type(spec), module))
+            ),
         }
 
     def native_input(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:

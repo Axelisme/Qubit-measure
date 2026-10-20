@@ -35,6 +35,8 @@
 
 Core-cfg 表單可用 `field_order=("participants", "tones", ...)` 把指定頂層欄位放在前面。未列欄位維持原相對順序，nested model 不變。空 tuple 沿用原序，tree 的寫入順序不控制畫面。未知或重複欄位在建構時以 ValueError 拒絕。持久 Spec 的非空 field_order 也以 ValueError 拒絕，保留繼承的欄位順序與 validators。Extras 若有宣告，仍在最後。
 
+`Template.set`／`Slot.set` 的 model-list seed 使用原 Spec 欄位名，例如 `set={"tones": [{"freq": Expr("6000 + 2"), "gain": 0.1, "ro_ch": 0}]}`。生成器先按原 Spec 補各位置的結構預設，再以共享元素宣告保留 expression 的 requiredness 與原 schema 驗證。某位置的 expression 算不出時留空，不使用該欄位的靜態預設；其他位置仍有自己的初值。未知元素欄位在建立 input 時以含 list index 的路徑報錯。實驗自行提供清單，生成器不推導來源關係或通道。
+
 `Slot(copy=True).set` 的 dotted Spec 路徑若穿過 captured child key，生成器只把路徑上的 child Spec 複製成 inline，再套用覆寫。未涉及的 child key 與來源保持不變，既有 input 不隨後續來源更新重填。查詢不 materialize 或讀 asset；缺 child、錯 family 與來源故障直接回報，None 覆寫沿用必填空白語意。
 
 Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Measure 在 Open／Reset 捕捉來源，呼叫 adapter 的 `make_form(ctx)`，再綁定 Registry 的範本目錄。註冊與 reload 不呼叫 factory，也不預檢範本。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
@@ -76,6 +78,8 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 ## 固定元素宣告
 
 `FixedElements(list_path, name_field, participants_path)` 指定 root-relative typed paths 與元素的 str 名稱欄位。手寫表單繼承 `FixedElementsForm`，以 `fixed_elements` tuple 列出宣告；生成器接受 `Form(..., fixed_elements=(... ,))`。Fresh `default_input` 先呼叫 Core，再檢查宣告與捕捉名稱唯一性。重名錯誤列出名稱及原始 indices。這個共用能力集中名稱與 participants 政策，Core、widgets 和各 host 不再各自維護。
+
+`FixedElements(list_path)` 省略 name 與 participants，使用固定槽位模式。它只固定目前 active inline 清單的長度，label 與其他欄位都可編輯。相同長度的值交換不被拒絕，因此它不保證 component 身份，也不提供 ElementIdentity。宣告可穿過 nested ref／inline 的 canonical typed path，例如 `("modules", "readout", "module", "tones")`。合法 ref／inline 切換仍可進行，新 active 清單建立新的長度邊界。增刪或把 active 清單改成非 list 以 FormInputRejected 原子拒絕，還原與 Reset 不受這項 mutation 檢查。
 
 `FixedElements.identify(data, path)` 依同份 input 的完整原始 index 回傳 `ElementIdentity`，不讀 participants。Logical field observation 同時攜帶該 identity，供 Run capture 保留當次名稱；巢狀固定 list 使用最深的宣告。
 

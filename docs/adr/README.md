@@ -25,7 +25,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
-- [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用、待實作的中立 converter／scoped command、原子安裝、草稿還原、具名固定 list／participants，以及 indexed remote、逐元素 recipe 與 native tunables 的完整 model 提交邊界。
+- [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用、待實作的中立 converter／scoped command、原子安裝、草稿還原、具名固定 list／participants、無 participants 的固定槽位，以及 indexed remote、逐元素 recipe 與 native tunables 的完整 model 提交邊界。
 
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建與表單路徑。
 

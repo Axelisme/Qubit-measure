@@ -386,7 +386,13 @@ def template_input(
     for path, seed in seeds.items():
         if not isinstance(seed, Slot):
             set_path(data, path, scalar_seed(seed))
-    data = _complete_template_input(model, data, template.id)
+    # Fill each row from the original Spec before a shared input declaration
+    # removes static defaults for any expression-authored position.
+    data = _complete_template_input(
+        model,
+        _complete_template_input(definition.module, data, template.id),
+        template.id,
+    )
     for path, seed in seeds.items():
         if isinstance(seed, Slot):
             annotation = _path_annotation(model, data, path)
