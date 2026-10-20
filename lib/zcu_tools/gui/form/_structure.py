@@ -1,8 +1,7 @@
 """Pydantic field traversal and transactional candidate construction.
 
 Reflection stays here: model fields, union tags and mapping annotations define
-which paths can be edited. Model lists expose indexed paths unless restricted
-by the declaring field's InputPolicy.
+which paths can be edited. Lists of models expose indexed paths without policy metadata.
 """
 
 from collections.abc import Mapping
@@ -110,11 +109,7 @@ def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
 
 
 def list_model(info: FieldInfo) -> type[BaseModel] | None:
-    """Return an indexable model-list element, or None for whole leaves."""
-    if any(
-        isinstance(item, InputPolicy) and not item.indexed for item in info.metadata
-    ):
-        return None
+    """Return a list's sole model element declaration, or None for other leaves."""
     annotation = unwrap(info.annotation)
     if get_origin(annotation) is not list:
         return None

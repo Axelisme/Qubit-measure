@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-20，局部欄位排序與 mux tones JSON leaf
+**Last updated:** 2026-10-20，局部欄位排序
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -31,7 +31,7 @@
 
 `readout/pulse` 直接編輯平鋪的 generator 與 ADC 欄位。`gen_ch` 與 `ro_ch` 必填且可編輯；一般 Pulse 沒有 `ro_ch`。單一 `freq` 同時供兩者使用，不從其他欄位推導通道或補值。Waveform 仍可保留 child library key。
 
-`readout/mux` 沿用 module 的 ref／inline 與 Convert to inline。Scalar 欄位分別編輯，tones 是整個 list 的 JSON leaf，包含每筆 tone 的 label。生成器只在 `MuxReadoutSpec.tones` 加上 `InputPolicy(indexed=False)`，保留原 typed annotation 與驗證。空 tones 可直接輸入 JSON，不靠 picker 新增元素。其他 model list 與 FixedElements 保留 indexed editing。它沒有 waveform 或逐 tone 引用。
+`readout/mux` 沿用 module 的 ref／inline 與 Convert to inline。Scalar 欄位分別編輯，tones 使用一般 model-list 的 indexed editing，每筆 tone 的 freq、gain、phase、ro_ch 與 label 都是獨立欄位。它沒有 waveform 或逐 tone 引用。生成器不推導 mux group 或 resonator 校準初值。
 
 Core-cfg 表單可用 `field_order=("participants", "tones", ...)` 把指定頂層欄位放在前面。未列欄位維持原相對順序，nested model 不變。空 tuple 沿用原序，tree 的寫入順序不控制畫面。未知或重複欄位在建構時以 ValueError 拒絕。持久 Spec 的非空 field_order 也以 ValueError 拒絕，保留繼承的欄位順序與 validators。Extras 若有宣告，仍在最後。
 
