@@ -19,6 +19,9 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                     "two_pulse_reset",
                     bindings={"qubit": "$qubit"},
                     set={
+                        # Run replaces these scan coordinates; other reset inputs remain.
+                        "pulse1_cfg.freq": Hidden(0.0),
+                        "pulse2_cfg.freq": Hidden(0.0),
                         "pulse1_cfg.gain": Expr("$qubit.ext.reset_gain1"),
                         "pulse2_cfg.gain": Expr("$qubit.ext.reset_gain2"),
                     },

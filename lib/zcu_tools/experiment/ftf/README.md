@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-20, physical acquisition, retained raw and replay v11
+**Last updated:** 2026-10-20
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -8,8 +8,10 @@ and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 applies initial values at environment construction and binds the derived channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
-The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
-`ftf.yaml`, a working copy of the tracked `default.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
+The GUI example is `zcu_lab/simulation_envs/FTF/startup.py`, which calls `ftf(...)`
+with adjacent `ftf.yaml`, a working copy of the tracked `default.yaml`.
+The Notebook walkthrough is `notebook_md/single_qubit.md`; it calls the same public
+builder with an explicit YAML path. Neither caller uses an environment wrapper.
 欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
 ## Round pacing
@@ -84,9 +86,10 @@ One source owns one `Engine`, whose 2 GiB resident/pending prepare budget surviv
 acquires. This shared byte budget counts retained model-only payload arrays, not total
 process memory; workspaces, active references and ADC allocations remain separate.
 The keyword `workers` selects the engine's sole parallel width; direct callers
-use one worker by default. GUI and Notebook use the shared FTF environment entry,
-which selects `max(1, (os.cpu_count() or 1) - 2)` workers. Unknown CPU counts
-therefore use one worker. An eight-core host uses six workers. Evolution limits
+use one worker by default. GUI startup explicitly uses `workers=1`.
+The Notebook example selects `max(1, (os.cpu_count() or 1) - 2)` workers,
+reserving two host CPUs. Unknown CPU counts use one worker.
+An eight-core host uses six Notebook workers. Evolution limits
 native BLAS to one thread for the entire call. Overlapping evolves share a
 process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.
@@ -111,11 +114,12 @@ operators, rates or readout response cross flux points.
 
 ## Startup preparation
 
-The shared production GUI/Notebook environment entry opts into `warmup=True`.
-Building that environment immediately starts one process-wide background numeric
-worker. All opted-in environments share its future and terminal result. Direct
-`ftf()` callers keep `warmup=False`, just as they keep `workers=1`, to avoid
-unexpected CPU work. Authors can disable startup work with `ftf(..., warmup=False)`.
+The Notebook example opts into `warmup=True`. Building that environment
+immediately starts one process-wide background numeric worker. All opted-in
+environments in the same process share its future and terminal result.
+GUI startup explicitly uses `warmup=False`, so it starts no numeric preparation.
+Direct `ftf()` callers also default to `warmup=False` and `workers=1` to avoid
+unexpected CPU work. Authors choose the policy at each call.
 Preparation uses small disposable numeric models, one evolution worker and no
 sampling. It never reads or changes the live environment's devices, binding seed,
 acquire sequence or resident engine cache. Compilation still consumes CPU and

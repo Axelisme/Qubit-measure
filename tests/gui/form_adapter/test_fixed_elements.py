@@ -139,6 +139,96 @@ def test_native_position_seeds_reject_declaration_changes_at_typed_position(node
     assert "('tones', 1, 'drive')" in str(caught.value)
 
 
+def test_hidden_module_list_keeps_values_and_sources_per_position():
+    from zcu_tools.cfg_model import PulseSpec, Range, Slot, Template, TemplateDef
+
+    from tests.gui.form_adapter._indexed_models import NativeGroup, indexed_env
+
+    env = indexed_env()
+    definition = adapter.Form(
+        NativeGroup,
+        {
+            "tones": [
+                {
+                    "name": "A",
+                    "drive": Template(
+                        "pulse",
+                        set={"freq": Hidden(11.0), "waveform.length": Hidden(0.2)},
+                    ),
+                    "sweep": Range.between(1, 2, 3),
+                },
+                {
+                    "name": "B",
+                    "drive": Slot(
+                        "Q.pulses.drive",
+                        copy=True,
+                        set={"freq": Hidden(22.0), "waveform.length": Hidden(0.4)},
+                    ),
+                    "sweep": Range.between(3, 4, 3),
+                },
+            ],
+            "participants": ["B", "A"],
+        },
+        fixed_elements=(adapter.FixedElements(("tones",), "name", ("participants",)),),
+    )
+    definition.bind_templates(
+        {
+            "pulse": TemplateDef(
+                PulseSpec,
+                "Pulse",
+                {"ch": 1, "nqz": 1, "gain": 0.3, "waveform.style": "const"},
+            )
+        },
+        adapter="synthetic",
+    )
+    state = core.FormState(definition.default_input(env))
+    for index in (0, 1):
+        for suffix in (("freq",), ("waveform", "module", "length")):
+            target = state.describe(
+                ("tones", index, "drive", "module", *suffix), env
+            ).target
+            assert target is not None and target.hidden
+    result = state.result(env)
+    assert not isinstance(result, core.FormErrors), result
+    cfg = definition.to_cfg(result, env)
+    assert not isinstance(cfg, core.FormErrors), cfg
+    assert [(tone.drive.freq, tone.drive.waveform.length) for tone in cfg.tones] == [
+        (11.0, 0.2),
+        (22.0, 0.4),
+    ]
+    assert [(tone.drive.ch, tone.drive.gain) for tone in cfg.tones] == [
+        (1, 0.3),
+        (0, 0.2),
+    ]
+    assert env.library is not None
+    assert env.library.module_spec("Q.pulses.drive").model_dump()["freq"] == 100
+
+
+@pytest.mark.parametrize("second_path", ["gain", None])
+def test_hidden_module_list_rejects_mismatched_paths(second_path):
+    from zcu_tools.cfg_model import Slot
+
+    from tests.gui.form_adapter._indexed_models import NativeGroup
+
+    definition = adapter.Form(
+        NativeGroup,
+        {
+            "tones": [
+                {"drive": Slot("Q.pulses.drive", set={"freq": Hidden(0.0)})},
+                {
+                    "drive": Slot(
+                        "Q.pulses.drive",
+                        set={} if second_path is None else {second_path: Hidden(0.0)},
+                    )
+                },
+            ]
+        },
+    )
+    with pytest.raises(ValueError, match="Hidden.*paths|hidden.*paths") as caught:
+        definition.bind_templates({}, adapter="synthetic")
+    assert "tones" in str(caught.value)
+
+
 def test_indexed_module_read_rejects_inactive_ancestry_with_original_path():
     from zcu_tools.cfg_model import PulseCfg
 

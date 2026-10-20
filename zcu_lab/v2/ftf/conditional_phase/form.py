@@ -1,6 +1,6 @@
 """Fixed-capture inputs for conditional phase calibration."""
 
-from zcu_tools.cfg_model import Expr, Range, Slot, Template
+from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from .._measure import captured_roles
@@ -29,8 +29,13 @@ def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
                 else Template("readout/mux:blank"),
             },
             "drive": {
-                "f1": Slot("$coupler.module.cz_f1", copy=True),
-                "f2": Slot("$coupler.module.cz_f2", copy=True),
+                # dual_line_drive replaces both frequencies, including repeated gates.
+                "f1": Slot(
+                    "$coupler.module.cz_f1", copy=True, set={"freq": Hidden(0.0)}
+                ),
+                "f2": Slot(
+                    "$coupler.module.cz_f2", copy=True, set={"freq": Hidden(0.0)}
+                ),
             },
             "frequency": Range.between(None, None, expts=101),
             **{

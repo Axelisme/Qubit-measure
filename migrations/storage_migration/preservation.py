@@ -1,107 +1,307 @@
-"""Offline migration preservation ownership."""
+"""Route byte-identical legacy files and preflight their owned publication."""
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .paths import contained_path, source_removed, validate_segment
-from .state import (
-    MigrationSession,
-    clear_pending,
-    record_pending,
+from migrations.sample_csv import plan_sample_csv
+
+from .errors import MigrationInputError
+from .models import (
+    MigrationDeclarations,
+    MigrationDestination,
+    MigrationDifference,
+    MigrationManifest,
+    MigrationSource,
 )
+from .paths import contained_path, source_removed, validate_segment
+from .processed_spectrums import LEGACY_PATH, SPECTRUM_PATH
+from .state import MigrationSession, clear_pending, file_hash, record_pending
+
+_RESULT_RESERVED = frozenset(
+    {
+        "setup.yaml",
+        "module_cfg.yaml",
+        "aliases.yaml",
+        "points",
+        "records",
+        "figures",
+        "samples",
+        "predictors",
+        "dispersive",
+        "t1_curve",
+        "runs",
+    }
+)
+_POINT_RESERVED = frozenset({"point.yaml", "module_cfg.yaml", "figures"})
+_DATABASE_RESERVED = frozenset({"runs", "Labber"})
 
 
-def _publish_point_figure(session: MigrationSession, path: Path) -> bool:
-    source = session.manifest.report.source.result_path
-    relative = path.relative_to(source)
+@dataclass(frozen=True)
+class _CopyTarget:
+    """One raw source/destination, optional required point and reserved conflict."""
+
+    source: Path
+    destination: Path
+    point: str | None = None
+    reserved: bool = False
+    operation: str = "copy"
+
+
+def _result_target(
+    path: Path,
+    source: MigrationSource,
+    destination: MigrationDestination,
+    declarations: MigrationDeclarations,
+) -> _CopyTarget | None:
+    relative = path.relative_to(source.result_path)
     parts = relative.parts
-    if (
-        len(parts) != 4
-        or parts[0] != "exps"
-        or parts[2] != "image"
-        or path.suffix.lower() != ".png"
-    ):
-        return False
-    label = parts[1]
-    validate_segment(label, "point label")
-    destination = session.manifest.report.destination.result_path
-    point = contained_path(destination / "points" / label, destination)
-    point_exists = (point / "point.yaml").is_file() and (
-        point / "module_cfg.yaml"
-    ).is_file()
-    if not point_exists and not (
-        session.dry_run and session.manifest.parameters_complete
-    ):
-        record_pending(
-            session,
-            contained_path(path, source),
-            "point figures",
-            f"Point {label!r} is not created; run parameters then resume data",
+    top = parts[0]
+    if relative in (Path("params.json"), SPECTRUM_PATH):
+        return None
+    if relative == Path("samples.csv"):
+        plan = plan_sample_csv(
+            [path],
+            dev_value_column=declarations.sample_value_column,
+            source_unit=declarations.sample_source_unit,
         )
-        return True
-    state = session.publish(
-        contained_path(path, source),
-        contained_path(point / "figures" / path.name, destination),
-        operation="copy",
+        return (
+            _CopyTarget(path, destination.result_path / relative)
+            if plan.pending
+            else None
+        )
+    if path.name in ("meta_info.json", "module_cfg.yaml") and (
+        len(parts) == 1
+        or (len(parts) == 2 and (path.parent / "meta_info.json").is_file())
+        or (len(parts) == 3 and parts[0] == "exps")
+    ):
+        return None
+    if len(parts) >= 3 and parts[0] == "exps":
+        label = parts[1]
+        validate_segment(label, "point label")
+        point_relative = Path(*parts[2:])
+        figure = (
+            len(parts) == 4 and parts[2] == "image" and path.suffix.lower() == ".png"
+        )
+        target = Path("figures") / path.name if figure else point_relative
+        return _CopyTarget(
+            path,
+            destination.result_path / "points" / label / target,
+            label,
+            not figure and point_relative.parts[0] in _POINT_RESERVED,
+        )
+    if (
+        "image" in parts[:-1]
+        and "exps" not in parts[:-1]
+        and "autofluxdep_runs" not in parts[:-1]
+    ):
+        return _CopyTarget(path, destination.result_path / "figures" / relative)
+    return _CopyTarget(
+        path, destination.result_path / relative, reserved=top in _RESULT_RESERVED
     )
+
+
+def _copy_targets(
+    source: MigrationSource,
+    destination: MigrationDestination,
+    declarations: MigrationDeclarations,
+) -> list[_CopyTarget]:
+    targets = []
+    for path in sorted(source.result_path.rglob("*")):
+        if path.is_file():
+            path = contained_path(path, source.result_path)
+            target = _result_target(path, source, destination, declarations)
+            if target is not None:
+                targets.append(target)
+    processed = source.result_path / SPECTRUM_PATH
+    if processed.is_file():
+        targets.extend(
+            (
+                _CopyTarget(
+                    processed,
+                    destination.result_path / SPECTRUM_PATH,
+                    operation="spectrums",
+                ),
+                _CopyTarget(
+                    processed,
+                    destination.result_path / LEGACY_PATH,
+                    operation="spectrums_legacy",
+                ),
+            )
+        )
+    for path in sorted(source.database_path.rglob("*")):
+        if not path.is_file():
+            continue
+        path = contained_path(path, source.database_path)
+        relative = path.relative_to(source.database_path)
+        labber = path.suffix.lower() in (".h5", ".hdf5")
+        target = Path("Labber") / relative if labber else relative
+        targets.append(
+            _CopyTarget(
+                path,
+                destination.database_path / target,
+                reserved=not labber and relative.parts[0] in _DATABASE_RESERVED,
+            )
+        )
+    return targets
+
+
+def _check_existing(
+    target: _CopyTarget,
+    destination: MigrationDestination,
+    manifest: MigrationManifest | None,
+) -> None:
+    path = target.destination
+    for ancestor in path.parents:
+        if ancestor.is_symlink() or (ancestor.exists() and not ancestor.is_dir()):
+            raise FileExistsError(
+                f"{target.source} -> {path}: occupied ancestor {ancestor}"
+            )
+    if target.point is not None:
+        point = destination.result_path / "points" / target.point
+        if point.exists() and not (
+            (point / "point.yaml").is_file() and (point / "module_cfg.yaml").is_file()
+        ):
+            raise FileExistsError(
+                f"{target.source} -> {path}: occupied incomplete point directory {point}"
+            )
+    if not (path.exists() or path.is_symlink()):
+        return
+    owned = next(
+        (
+            state
+            for state in (() if manifest is None else manifest.files)
+            if state.source == target.source
+            and state.destination == path
+            and (
+                state.operation == target.operation
+                or (target.operation == "copy" and state.operation == "move_labber")
+            )
+            and state.phase in ("prepared", "published", "source_removed")
+        ),
+        None,
+    )
+    if owned is None or path.is_symlink() or not path.is_file():
+        raise FileExistsError(
+            f"{target.source} -> {path}: unowned destination collision"
+        )
+    actual = file_hash(path)
+    if owned.destination_hash != actual:
+        raise MigrationInputError(
+            f"{target.source} -> {path}: destination hash changed",
+            differences=(
+                MigrationDifference(
+                    source=target.source,
+                    destination=path,
+                    comparison="sha256",
+                    expected=owned.destination_hash or "prepared hash",
+                    actual=actual,
+                ),
+            ),
+        )
+
+
+def preflight_preservation(
+    source: MigrationSource,
+    destination: MigrationDestination,
+    declarations: MigrationDeclarations,
+    *,
+    manifest: MigrationManifest | None = None,
+) -> None:
+    """Refuse conflicting raw-copy routes before backup, entry or report writes.
+
+    source/destination are resolved entry roots. declarations go unchanged to the
+    CSV owner's pure plan. Reject reserved native files/directories, overlapping
+    source routes and occupied destinations/ancestors with both source and target
+    locations. Only matching manifest-owned, hash-verified publications can reuse
+    existing destinations, including recovery of an already prepared publication.
+    No writes occur; invalid paths, owner planning and I/O errors propagate.
+    """
+    targets = _copy_targets(source, destination, declarations)
+    claimed: dict[Path, _CopyTarget] = {}
+    for target in sorted(targets, key=lambda item: item.destination):
+        previous = claimed.get(target.destination)
+        if previous is None:
+            previous = next(
+                (
+                    claimed[parent]
+                    for parent in target.destination.parents
+                    if parent in claimed
+                ),
+                None,
+            )
+        if previous is not None:
+            raise MigrationInputError(
+                f"{previous.source} -> {previous.destination} conflicts with "
+                f"{target.source} -> {target.destination}"
+            )
+        claimed[target.destination] = target
+    for target in targets:
+        if target.reserved:
+            raise MigrationInputError(
+                f"{target.source} -> {target.destination}: reserved native destination"
+            )
+        _check_existing(target, destination, manifest)
+
+
+def _publish_target(session: MigrationSession, target: _CopyTarget) -> None:
+    if target.point is not None:
+        root = session.manifest.report.destination.result_path
+        point = root / "points" / target.point
+        ready = (point / "point.yaml").is_file() and (
+            point / "module_cfg.yaml"
+        ).is_file()
+        if not ready and not (session.dry_run and session.manifest.parameters_complete):
+            record_pending(
+                session,
+                target.source,
+                "point files",
+                f"Point {target.point!r} is not created; run parameters then resume data",
+            )
+            return
+    state = session.publish(target.source, target.destination, operation="copy")
     session.completed(state)
-    clear_pending(session, path.resolve(), "point figures")
-    return True
+    clear_pending(session, target.source, "point files")
 
 
 def preserve_result_files(session: MigrationSession) -> None:
-    """Copy authorized waveform/sample/image/workflow source bytes through owned publication.
+    """Publish result raw copies at entry/point-relative paths, keeping bytes/hash.
 
-    session identifies the old result and new Database entry. Preserve relative
-    paths and hashes, leave originals intact and report unproven associations.
-    exps/<point>/image/*.png publishes to that point's result figures instead of
-    an archive. Missing points stay pending until parameters then data resume.
-    dry_run plans only; collision/hash/I/O failures propagate with recovery state."""
-    source = session.manifest.report.source.result_path
-    destination = session.manifest.report.destination.database_path
-    for path in sorted(source.rglob("*")):
-        if not path.is_file():
-            continue
-        if _publish_point_figure(session, path):
-            continue
-        relative = path.relative_to(source)
-        archive = next(
-            (
-                part
-                for part in relative.parts[:-1]
-                if part in ("arb_waveforms", "autofluxdep_runs", "image")
-            ),
-            None,
-        )
-        if archive is None and relative != Path("samples.csv"):
-            continue
-        target = (
-            destination / relative
-            if archive == "arb_waveforms"
-            else destination / "migration-preserved" / "result" / relative
-        )
-        state = session.publish(
-            contained_path(path, source),
-            contained_path(target, destination),
-            operation="copy",
-        )
-        session.completed(state)
-        if archive != "arb_waveforms":
-            reason = (
-                "Archive preserved; point/run association is unproven"
-                if archive is not None
-                else (
-                    "No proven component/sample/point association; not a runtime v2 SampleTable"
-                )
-            )
-            record_pending(session, path.resolve(), "association", reason)
+    session owns the verified sources, manifest and fixed declarations. Supported
+    parameter files stay with their converter; partial CSVs also retain their raw
+    source through the CSV owner's pending plan. Existing figure routing remains.
+    Missing points stay located pending without creating their directory. Dry-run
+    only plans. Hash/collision/I/O errors propagate with owned recovery state.
+    """
+    report = session.manifest.report
+    for target in _copy_targets(report.source, report.destination, report.declarations):
+        if target.operation == "copy" and target.source.is_relative_to(
+            report.source.result_path
+        ):
+            _publish_target(session, target)
+
+
+def preserve_database_files(session: MigrationSession) -> None:
+    """Copy Database sources not already moved by validated native conversion.
+
+    All .h5/.hdf5 originals use Labber/<source-relative-path> regardless of native
+    success. Other unknown files keep entry-relative paths. Raw copying records
+    preservation, never conversion, and leaves run-evidence pending unchanged.
+    Dry-run plans only; publication conflicts and I/O failures propagate.
+    """
+    report = session.manifest.report
+    for target in _copy_targets(report.source, report.destination, report.declarations):
+        if target.source.is_relative_to(
+            report.source.database_path
+        ) and not source_removed(target.source, session.manifest):
+            _publish_target(session, target)
 
 
 def report_unrecognized_files(session: MigrationSession) -> None:
-    """Refresh pending locations for untouched source files in the session's report.
+    """Refresh pending locations for source files untouched by any owned action.
 
-    Previously unrecognized files that are now identified cease to be pending.
-    No source is changed. Checkpoint the cumulative report; I/O failures propagate."""
+    Remove obsolete unconverted-file locations, keep explicit converter pending,
+    and checkpoint the cumulative report. Sources are unchanged; I/O propagates.
+    """
     source = session.manifest.report.source
     report = session.manifest.report
     session.report(
@@ -125,5 +325,5 @@ def report_unrecognized_files(session: MigrationSession) -> None:
                         session,
                         path,
                         "unconverted file",
-                        "File remains at its original source; no authorized conversion",
+                        "No authorized conversion; original bytes remain in verified backup",
                     )

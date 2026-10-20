@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
@@ -17,6 +18,7 @@ from zcu_tools.cfg_model import (
     module_spec_from_raw,
     waveform_spec_from_raw,
 )
+from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 from zcu_tools.format_version import YamlMap
 
 from .ledger import RecordsLedger
@@ -88,13 +90,17 @@ class SampleWriteback:
     """One component's producer-defined JSON fields for an accepted sample.
 
     component is a concrete safe single path segment, not a role alias. value
-    contains measurement fields, including optional device values and units;
-    none are inferred or converted. run_id, point, at and source are supplied
-    by the executor and override those keys if present in value.
+    is a dict of measurement fields, including optional device values and units.
+    The executor recursively converts numpy floating/integer scalars in dicts
+    and lists to Python float/int before strict JSON validation. Float rounding
+    follows Python float; integers retain their exact value. Non-finite results
+    and other non-JSON inputs are rejected before any write. Units are not
+    converted and the producer tree is not mutated. run_id, point, at and source
+    are supplied by the executor and override those keys if present in value.
     """
 
     component: str
-    value: JsonObject
+    value: Mapping[str, object]
 
 
 type WritebackItem = (
@@ -123,6 +129,15 @@ def _require_named_spec(value: object) -> None:
         raise TypeError("library writeback requires a named Spec, not a raw mapping")
 
 
+def _normalize_sample_value(value: object) -> object:
+    """Copy JSON containers, projecting numpy numbers without coercing other values."""
+    if isinstance(value, dict):
+        return {key: _normalize_sample_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_sample_value(item) for item in value]
+    return normalize_numpy_scalar(value)
+
+
 def _accepted_write(item: WritebackItem) -> AcceptedWrite:
     if isinstance(item, ParameterWriteback) and item.metadata is not None:
         TypeAdapter(YamlMap).validate_python(item.metadata, strict=True)
@@ -136,7 +151,10 @@ def _accepted_write(item: WritebackItem) -> AcceptedWrite:
     if isinstance(item, ParameterWriteback):
         return AcceptedWrite.model_validate({"path": item.path, "value": item.value})
     if isinstance(item, SampleWriteback):
-        return AcceptedWrite(path=item.component, value=item.value)
+        fields = TypeAdapter(JsonObject).validate_python(
+            _normalize_sample_value(item.value)
+        )
+        return AcceptedWrite(path=item.component, value=fields)
     _require_named_spec(item.value)
     if isinstance(item, ModuleWriteback):
         value = module_spec_from_raw(item.value).to_dict()
@@ -273,8 +291,10 @@ def apply_writeback(
     target binds the destination and its entry ledger; callers resolve roles
     before this entry. Nonempty items, strict JSON/Spec values, parameter
     metadata representation, finite nonnegative library stderr, kind and sample
-    run_id are validated before append. Target owners validate paths, schema,
-    sources and transactions when each item is reached. Parameters commit the
+    run_id are validated before append. Sample dict/list values first normalize
+    numpy floating/integer scalars to Python numbers without mutating producers;
+    non-finite results and other non-JSON values remain invalid. Target owners
+    validate paths, schema, sources and transactions when each item is reached. Parameters commit the
     caller's metadata unchanged, or keep existing metadata when it is None; no
     event, source or time is added to it. Library items receive the accepted
     Provenance. Samples receive run_id, saved point, UTC at and accepted source;
@@ -311,9 +331,11 @@ def apply_writeback(
             if isinstance(item, SampleWriteback):
                 if evidence.run_id is None:
                     raise ValueError("sample writeback requires a run_id")
+                if not isinstance(write.value, dict):
+                    raise TypeError("accepted sample fields must be a JSON object")
                 fields = {
                     key: value
-                    for key, value in item.value.items()
+                    for key, value in write.value.items()
                     if key not in {"run_id", "point", "at", "source"}
                 }
                 target.append_sample(

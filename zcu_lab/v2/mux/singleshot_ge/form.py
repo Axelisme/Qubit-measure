@@ -3,7 +3,12 @@
 from zcu_tools.cfg_model import FormNode, Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import captured_mux_names, mux_relax_delay
+from zcu_lab.v2._support.measure.mux_forms import (
+    READOUT_ELEMENTS,
+    captured_mux_names,
+    mux_readout_initial,
+    mux_relax_delay,
+)
 
 from .core import MuxGECfg
 
@@ -31,9 +36,7 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
         tree={
             "modules": {
                 "reset": Slot("$mux.module.reset"),
-                "readout": Slot("$mux.module.readout")
-                if ctx.has("$mux.module.readout")
-                else Template("readout/mux:blank"),
+                "readout": mux_readout_initial(ctx),
             },
             "tones": tones,
             "participants": list(names),
@@ -41,5 +44,15 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
         },
-        fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        fixed_elements=(
+            FixedElements(("tones",), "name", ("participants",)),
+            READOUT_ELEMENTS,
+        ),
+        field_order=(
+            "participants",
+            "tones",
+            "shots",
+            "modules",
+            "relax_delay",
+        ),
     )

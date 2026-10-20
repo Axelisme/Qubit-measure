@@ -251,7 +251,9 @@ def restore_run(
     model returns record.cfg=None and a readable cfg_issue, also emitted as one
     CfgUnavailableWarning after successful reconstruction. Same-major minor and
     unknown cfg keys use typed known projection; validators see isolated raw
-    values. This result is not a lossless rewrite envelope.
+    values. record.labber_metadata retains a detached copy of the payload's
+    comment, tags, project, user and creation time. This result is not a lossless
+    rewrite envelope.
     """
     if stored.metadata.experiment != spec.tag:
         raise ValueError(
@@ -305,7 +307,10 @@ def restore_run(
     cfg, cfg_issue = _restore_cfg(stored.cfg, spec=spec)
     if cfg_issue is not None:
         warnings.warn(cfg_issue, CfgUnavailableWarning, stacklevel=2)
-    return RestoredRun(record=RunRecord(cfg=cfg, result=result), cfg_issue=cfg_issue)
+    return RestoredRun(
+        record=RunRecord(cfg=cfg, result=result, labber_metadata=payload.metadata),
+        cfg_issue=cfg_issue,
+    )
 
 
 def _restore_cfg(

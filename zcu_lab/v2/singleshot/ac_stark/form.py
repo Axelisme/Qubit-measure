@@ -19,7 +19,8 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
                     "res_probe",
                     bindings={"resonator": "$resonator"},
                     set={
-                        "gain": 0.0,
+                        # Run supplies the cavity gain scan.
+                        "gain": Hidden(0.0),
                         "waveform.length": Expr(
                             "$qubit.module.x180.waveform.length + 1.0 / $resonator.kappa"
                         ),
@@ -29,6 +30,8 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
                     "pi_pulse",
                     bindings={"qubit": "$qubit"},
                     set={
+                        # Run supplies the qubit frequency scan.
+                        "freq": Hidden(0.0),
                         "waveform.length": Expr("$qubit.module.x180.waveform.length"),
                         "mixer_freq": Expr("$qubit.module.x180.mixer_freq"),
                         "pre_delay": Expr("1.0 / $resonator.kappa"),

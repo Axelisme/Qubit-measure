@@ -14,9 +14,12 @@ def make_form(ctx: FormContext) -> Form[ResetCheckCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "rabi_pulse": Slot("$qubit.module.x180")
+                # Run supplies the diagnostic gain scan in either source mode.
+                "rabi_pulse": Slot("$qubit.module.x180", set={"gain": Hidden(0.0)})
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                else Template(
+                    "pi_pulse", bindings={"qubit": "$qubit"}, set={"gain": Hidden(0.0)}
+                ),
                 "tested_reset": Slot("$qubit.module.reset")
                 if ctx.has("$qubit.module.reset")
                 else Template("reset", bindings={"qubit": "$qubit"}),

@@ -20,7 +20,10 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
                 if ctx.has("$qubit.module.x180")
                 else Template("pi_pulse", bindings={"qubit": "$qubit"}),
                 "probe_pulse": Template(
-                    "res_probe", bindings={"resonator": "$resonator"}
+                    "res_probe",
+                    bindings={"resonator": "$resonator"},
+                    # Run supplies the outer gain scan; keep waveform baseline.
+                    set={"gain": Hidden(0.0)},
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
@@ -56,7 +59,10 @@ def make_form_freq(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
                 if ctx.has("$qubit.module.x180")
                 else Template("pi_pulse", bindings={"qubit": "$qubit"}),
                 "probe_pulse": Template(
-                    "res_probe", bindings={"resonator": "$resonator"}
+                    "res_probe",
+                    bindings={"resonator": "$resonator"},
+                    # Run supplies the outer freq scan; keep waveform baseline.
+                    set={"freq": Hidden(0.0)},
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")

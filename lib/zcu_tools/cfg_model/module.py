@@ -186,7 +186,11 @@ class _MuxReadoutFields(_ModuleFields):
     gen_ch: Annotated[int, Field(ge=0)]
     nqz: Literal[1, 2]
     mixer_freq: float
-    tones: Annotated[list[MuxReadoutTone], Field(min_length=1, max_length=8)]
+    tones: Annotated[
+        list[MuxReadoutTone],
+        Field(min_length=1, max_length=8),
+        FieldMeta(element_label="label"),
+    ]
     length: Annotated[float, Field(gt=0)]
     ro_length: Annotated[float, Field(gt=0)]
     pre_delay: Annotated[float, Field(ge=0)] = 0.0

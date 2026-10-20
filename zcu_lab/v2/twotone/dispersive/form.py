@@ -18,9 +18,14 @@ def make_form(ctx: FormContext) -> Form[DispersiveCfg]:
                 "qub_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
                 else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-                "readout": Slot("$qubit.module.readout")
+                # Run supplies the readout frequency scan in either source mode.
+                "readout": Slot("$qubit.module.readout", set={"freq": Hidden(0.0)})
                 if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
+                else Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    set={"freq": Hidden(0.0)},
+                ),
             },
             "sweep": {
                 "freq": Range.around(

@@ -127,7 +127,7 @@ loop_flux_phi0 = offset_phi0 + sum(live_source_value * flux_per_unit)
 
 例如樣板的 `f1_bias` 是 A 單位。若把它設成 0.001 A，F1 增加 0.1282 Phi0，coupler 增加 0.002 Phi0，F2 減少 0.001 Phi0。其他 source 的貢獻再加上去。`f1_bias` 不是「只作用於 F1」的保證。
 
-樣板三個電源的 limits 都是 `[-0.01, 0.01]` A，等於 ±10 mA。`ramp_step: 0.000001` A 等於 0.001 mA。一般靜態掃描改的是 live source 值，不必為每個點重寫 `initial`。同一 round 內的快速磁通波形不在這個介面內。
+樣板三個電源的 limits 都是 `[-0.02, 0.02]` A，等於 ±20 mA。`ramp_step: 0.000001` A 等於 0.001 mA。一般靜態掃描改的是 live source 值，不必為每個點重寫 `initial`。同一 round 內的快速磁通波形不在這個介面內。
 
 ## Drive lines：charge 與小訊號 flux 校準
 

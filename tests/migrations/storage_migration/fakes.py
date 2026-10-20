@@ -2,10 +2,12 @@
 
 import hashlib
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from zcu_tools.datafile import (
     CfgSnapshot,
@@ -22,9 +24,42 @@ from zcu_tools.resources.entry import ComponentSchema
 from migrations.storage_migration import (
     LegacyRunEvidence,
     LegacySnapshotEvidence,
+    MigrationInputError,
     MigrationRequest,
     load_run_evidence,
 )
+
+
+def assert_difference(
+    action: Callable[[], object],
+    request: MigrationRequest,
+    destinations: Sequence[Path],
+) -> None:
+    """Require a located public conflict and no changes to outputs or reports."""
+    roots = (
+        request.results_root / request.name,
+        request.database_root / request.name,
+        request.result_root.parent.parent / "repo-backup",
+    )
+
+    def snapshot_files() -> dict[Path, tuple[bytes, int]]:
+        return {
+            path: (path.read_bytes(), path.stat().st_mtime_ns)
+            for root in roots
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    before = snapshot_files()
+    with pytest.raises(MigrationInputError) as caught:
+        action()
+    assert any(
+        row.destination in destinations and row.expected != row.actual
+        for row in caught.value.differences
+    ), "Conflict must carry a located typed difference"
+    assert snapshot_files() == before, (
+        "Diagnostics must not modify outputs, manifest, or reports"
+    )
 
 
 class SyntheticChannel(BaseModel):

@@ -31,9 +31,18 @@ def migrate_storage(
     optional acquisition evidence. mapping supplies complete registered seeds,
     explicit key rules, disk schemas and native-tag renames; register kinds in entry's shared registry
     before calling. Values/stderr keep working units; expressions are not evaluated.
-    Point-local module_cfg uses typed Spec owners and explicit module/waveform
-    rules. Unmapped/unsupported entries and root libraries without a point remain
+    Root/point module_cfg uses typed Spec owners and explicit module/waveform
+    rules. Root libraries belong to setup. Unsupported Specs/references remain
     located pending; no child references or asset values are inferred/evaluated.
+    Component flux groups use located explicit evidence before the declared
+    assumption. Point unit overrides clear unreplaced inherited group values and
+    metadata in one context edit. Owner-incompatible groups stay pending without
+    conversion. CSV samples use independent declarations and the sample_csv owner,
+    then publish prepared JSONL through the manifest; partial CSVs also retain
+    exact originals at entry/samples.csv. Unsupported result/Database files keep
+    entry-relative paths; exps attachments keep point-relative paths. Every Labber
+    original uses Database/<entry>/Labber/<source-relative-path>, including pending
+    conversions. Raw copies are preservation, never native conversion.
     validate_cfg receives the known historical source tag and CfgSnapshot.
     It must check cfg_type, schema_version and values with the concrete cfg owner,
     return None without mutation, and raise ValueError for unconvertible cfg.
@@ -42,27 +51,48 @@ def migrate_storage(
     validate_native receives the published native path, historical source tag and cfg_type;
     it must load against its declared experiment spec without modifying the file.
     It runs synchronously before the corresponding Labber source can be deleted.
+    Native readers must accept unknown lifecycle metadata, not require a complete
+    analysis result. Missing start writes native 2.1 None/unknown/None, preserving
+    original evidence in the manifest. Trusted run_id/time evidence is retained;
+    absent run_id uses new_run_id and is reported as 遷移賦值, never historical time.
 
     First execution verifies a complete external SHA256 backup before entry writes.
     Backup location comes from request.repo_root/backup_parent. Shared old/new
     result roots are allowed for independent entries; source overlaps and existing
-    destinations are refused. Once both parts and all publications complete with
-    no deferred point figures, verify backup/current sources again, remove only
+    destinations without tool ownership are refused. Raw-copy routes are preflighted before backup and
+    entry writes, rejecting reserved native paths and overlapping/occupied targets
+    with source/destination diagnostics. Once both parts and all publications complete with
+    no deferred point files, verify backup/current sources again, remove only
     the two old source trees, and locate permanent pending in the backup.
     Cleanup interruption resumes without rerunning conversions.
 
-    First execution refuses either existing destination and independent report.
-    resume only accepts this tool's matching manifest, immutable entry identity,
+    First execution fixes identity, declarations, source baseline, creation time
+    and report date/path in external initialization ownership before backup/entry
+    writes. Matching backups are reused unchanged, missing backup items filled,
+    differing content rejected with typed located differences. Initial entries
+    are created under recorded sibling temporary names then renamed to final
+    paths. An interruption before the first manifest automatically recovers from
+    that ownership, preserving fixed values; arbitrary entries are never adopted.
+    Initial YAML comparisons use owner types and retain unknown raw fields.
+    resume accepts this tool's matching manifest or initialization ownership,
+    immutable entry identity,
     exact mapping revision and owned file hashes. It reuses run assignments and
     completes planned/prepared/published moves without deleting unverified sources.
-    Completed setup/point documents remain editable and are validated, not restored.
-    Completed module_cfg files must match their recorded hash and are not rewritten.
-    Library commit and manifest checkpoint are not cross-file atomic. The caller
-    must keep this migration uninterrupted; a library write not yet recorded has
-    no recovery procedure here. Delete its destination and rerun if that occurs.
+    Both implicit reruns and explicit resume compare all fixed documents with
+    public owner types, retaining unknown raw fields; binary/JSONL publications
+    use verified hashes. Equal content is skipped without rewrites. Legal edits
+    also produce located typed differences, never restoration. Document writes
+    prepare owner artifacts and fixed expected/previous values before replacing
+    the destination. Points prepare under a manifest-owned temporary label before
+    rename and are reopened with the final binding. Creation times and run IDs
+    do not regenerate after preparation. Missing document baseline evidence in
+    an old manifest is a typed conflict, not permission to adopt current files.
+    Completed cleanup permits absent sources; matching replayed sources are
+    verified against backup and retained, never deleted for a second time.
     dry_run reads/validates sources and returns a report without any writes, moves
-    or native validation callback. Missing cfg identity/acquisition evidence or an undeclared
-    (tag, cfg_type) schema is pending; never fall back to a tag-only declaration.
+    or native validation callback. Missing cfg identity or other required evidence,
+    or an undeclared (tag, cfg_type) schema is pending; never fall back to a
+    tag-only declaration. Missing historical time/ID alone does not block native.
 
     Return the cumulative report of attempted parts. Normal runs persist manifest
     checkpoints and the fixed report location. Input/manifest/hash conflicts raise
@@ -72,6 +102,8 @@ def migrate_storage(
     """
     validate_mapping(mapping)
     session, entry = prepare_session(request, mapping)
+    if session.manifest.cleanup_phase == "complete":
+        return session.manifest.report
     if session.manifest.cleanup_phase != "pending":
         validate_run_evidence(request, session)
         finish_cleanup(session)

@@ -14,7 +14,10 @@ def make_form(ctx: FormContext) -> Form[PreFreqCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "init_pulse": Template("qub_probe", bindings={"qubit": "$qubit"}),
+                # Run supplies the preparation frequency scan, not the MIST probe.
+                "init_pulse": Template(
+                    "qub_probe", bindings={"qubit": "$qubit"}, set={"freq": Hidden(0.0)}
+                ),
                 "pi_pulse": Slot("$qubit.module.x180"),
                 "probe_pulse": Template(
                     "res_probe", bindings={"resonator": "$resonator"}

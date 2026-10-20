@@ -17,13 +17,16 @@ This notebook uses the F1-SQUID-F2 environment with a finite charge-drive pulse,
 
 ## Load the environment
 
-Run from the repository root, or supply an absolute environment path. The GUI uses the same Python builder when launched with `--simulate zcu_lab/simulation_envs/FTF/environment.py`. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
+Copy `zcu_lab/simulation_envs/FTF/default.yaml` to `ftf.yaml` in the same directory before running. Run from the repository root, or supply an absolute YAML path below. This Notebook calls the public `ftf(...)` builder directly. It reserves two host CPUs and enables background numeric warmup.
+
+For the GUI, use `scripts/run_measure_gui.py --script zcu_lab/simulation_envs/FTF/startup.py`. That trusted startup script uses one worker without warmup and installs resources through the GUI facets. See the [FTF startup instructions](../zcu_lab/simulation_envs/FTF/README.md) for project setup. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
 
 ```python
+import os
 from pathlib import Path
 
 from zcu_tools.device.fake import FakeDevice
-from zcu_tools.experiment.simulation import load_environment
+from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.notebook import NotebookAdapter
@@ -32,8 +35,12 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-environment_path = Path("zcu_lab/simulation_envs/FTF/environment.py").resolve()
-env = load_environment(environment_path)
+settings_path = Path("zcu_lab/simulation_envs/FTF/ftf.yaml").resolve()
+env = ftf(
+    settings_path,
+    workers=max(1, (os.cpu_count() or 1) - 2),
+    warmup=True,
+)
 nb_adapter = NotebookAdapter(
     soc=env.soc, soccfg=env.soccfg, device_manager=env.devices,
 )
@@ -91,7 +98,7 @@ The YAML example supplies native/local/global dimensions and solver tolerances e
 
 ## Close the shared manager
 
-After synchronous work has finished, close the exact returned manager. In a longer notebook, put acquisition in a `try/finally` block so failures also release resources. The GUI owns this cleanup after a successful builder return.
+After synchronous work has finished, close the exact returned manager. In a longer notebook, put acquisition in a `try/finally` block so failures also release resources. The Notebook owns this manager throughout. The GUI startup instead transfers successfully registered drivers to the GUI and arranges cleanup with `on_close`.
 
 ```python
 env.devices.close_all_devices()

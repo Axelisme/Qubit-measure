@@ -224,8 +224,8 @@ def test_cfg_boolean_number_conflict_retains_source(
     assert any("comment.cfg" in item.reason for item in report.pending)
     retained = (
         request.result_root.parent.parent
-        / f"{request.name}-backup"
-        / "Database"
+        / "repo-backup"
+        / "Database/chip/qubit"
         / source.relative_to(request.database_root / "chip/qubit")
     )
     assert retained.read_bytes() == before
