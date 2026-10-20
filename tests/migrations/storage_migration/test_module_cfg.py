@@ -371,8 +371,8 @@ def test_supported_module_missing_required_evidence_is_pending_and_preserved(
     )
     report = _convert(request, library_mapping)
     entry = _entry(request)
-    assert document_value(snapshot(entry.setup), "general.ext.legacy_module_cfg") == {
-        "modules": {"same": pulse}
+    assert document_value(snapshot(entry.setup), "general.ext") == {
+        "legacy_module_cfg": {"modules": {"same": pulse}}
     }
     assert entry.module_library().snapshot().module_keys() == ()
     assert document_value(snapshot(entry.setup), "C1.module") == {}
