@@ -1,12 +1,13 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-20，SoC named dialog 與 Run 唯讀
+**Last updated:** 2026-10-21，獨立 Run 與 Local authority 投影
 
 Views project controller snapshots and submit commands through control facets.
 They do not own result data or Save policy. `MainDialogRegistry` retains truly
 non-modal named windows. `MainWindow` synchronizes Setup, SoC, Devices,
-Inspect and ARB editing on control transfer and Run changes, including windows
-already open. Setup… and SoC… have separate toolbar entries; the named `soc`
+Inspect and ARB editing on control transfer, including windows already open.
+Run separately locks Setup and SoC submissions; Inspect, Devices and ARB keep
+their existing Run policy. Setup… and SoC… have separate toolbar entries; the named `soc`
 window participates in remote screenshots.
 Error notifications are non-modal; confirmations, choosers and writeback editing
 keep their modal protection. See the [Measure README](../README.md)

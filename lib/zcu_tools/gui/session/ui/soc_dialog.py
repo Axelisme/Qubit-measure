@@ -62,7 +62,8 @@ class SocDialog(QDialog):
     """Connect a remote SoC and browse its configuration through SocControlPort.
 
     Construct and use on the Qt owner thread. Showing the dialog prefills cached
-    connection preferences without connecting hardware. Connect remembers the
+    connection preferences and synchronizes connection state/configuration from
+    the session cache without accessing hardware. Connect remembers the
     submitted address and starts the asynchronous operation; admission and
     terminal failures remain visible for retry. The host controls write access
     with set_read_only. Close hides the dialog without cancelling the operation.
@@ -150,7 +151,7 @@ class SocDialog(QDialog):
             self._bus_subs_active = False
 
     def showEvent(self, a0: QShowEvent | None) -> None:
-        """Prefill remembered inputs on explicit show, preserving minimise drafts."""
+        """Sync cached inputs and connection on explicit show, preserving minimise drafts."""
         if a0 is not None:
             super().showEvent(a0)
             if a0.spontaneous():
@@ -159,6 +160,7 @@ class SocDialog(QDialog):
             self._ctrl.get_bus().subscribe(SocChangedPayload, self._on_bus_soc_changed)
             self._bus_subs_active = True
         self._prefill_from_preferences()
+        self._maybe_show_current_cfg()
 
     def _prefill_from_preferences(self) -> None:
         data = self._ctrl.get_setup_preferences()
@@ -176,6 +178,7 @@ class SocDialog(QDialog):
             self._maybe_show_current_cfg()
         else:
             self._set_conn_status("Disconnected", error=False)
+            self._cfg_text.clear()
             self._cfg_text.setVisible(False)
 
     @staticmethod
@@ -189,6 +192,10 @@ class SocDialog(QDialog):
         if isinstance(soccfg, SocConfigProtocol):
             self._show_cfg(describe_soc(soccfg))
             self._set_conn_status("Currently connected", error=False)
+        else:
+            self._cfg_text.clear()
+            self._cfg_text.setVisible(False)
+            self._set_conn_status("Disconnected", error=False)
 
     def _on_connect_clicked(self) -> None:
         if self._read_only or self._connecting:

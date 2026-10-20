@@ -88,6 +88,11 @@ class AppServices:
     exclusion) so operation_id / await / cancel are uniform (ADR-0066).
     A single OperationRunner (the kind-agnostic lifecycle mechanism, ADR-0066)
     is shared by run / analyze / post-analyze / device-setup operations.
+
+    soc_control is the non-null session control facet for the shared SoC dialog.
+    Use it on the GUI owner thread for connection commands, cached preferences,
+    configuration reads and outcome subscriptions. Unlike soc_connection, the
+    owning connection service, this facet exposes only the dialog's narrow port.
     """
 
     startup: StartupService

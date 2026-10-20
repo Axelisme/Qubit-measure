@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
 
 _PERSISTENT_DIALOGS: frozenset[DialogName] = frozenset({DialogName.PREDICTOR})
+_RUN_LOCKED_DIALOGS: frozenset[DialogName] = frozenset(
+    {DialogName.SETUP, DialogName.SOC}
+)
 
 
 def _visible_dialog_names(
@@ -41,8 +44,9 @@ def _visible_dialog_names(
 class MainDialogRegistry:
     """Retain the named dialogs exposed through ``MainWindow``.
 
-    Named windows are non-modal. The host pushes writability to new and retained
-    Setup, SoC, Inspect, Device and ARB windows; dialogs never observe authority.
+    Use on the Qt owner thread. Named windows are non-modal. The host pushes
+    Local writability to new and retained Setup, SoC, Inspect, Device and ARB
+    windows; dialogs never observe authority. Run separately locks Setup/SoC.
     """
 
     def __init__(
@@ -66,6 +70,7 @@ class MainDialogRegistry:
         """
         self._ctrl = ctrl
         self._writable = True
+        self._running = False
         self._parent = parent
         self._dialog_refs = dialog_refs
         self._templates = templates
@@ -160,7 +165,7 @@ class MainDialogRegistry:
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
     def set_writable(self, *, writable: bool) -> None:
-        """Push host edit availability to all retained session editors."""
+        """Push Local authority to all editors, preserving their Run policy."""
         from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
         from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
         from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
@@ -180,7 +185,13 @@ class MainDialogRegistry:
                     ArbWaveformDialog,
                 ),
             ):
-                dialog.set_read_only(read_only=not writable)
+                run_locked = self._running and name in _RUN_LOCKED_DIALOGS
+                dialog.set_read_only(read_only=not writable or run_locked)
+
+    def set_running(self, *, running: bool) -> None:
+        """Lock only Setup/SoC submissions during Run, retaining Local authority."""
+        self._running = running
+        self.set_writable(writable=self._writable)
 
     def open(self, name: DialogName, *, writable: bool = True) -> None:
         """Show a non-modal named window, or focus its retained instance."""
@@ -196,7 +207,8 @@ class MainDialogRegistry:
             except RuntimeError:
                 self._forget(name)
 
-        dialog = self._build_dialog(name, writable=writable)
+        run_locked = self._running and name in _RUN_LOCKED_DIALOGS
+        dialog = self._build_dialog(name, writable=writable and not run_locked)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         self._dialog_names[name] = None
         if name in _PERSISTENT_DIALOGS:

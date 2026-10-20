@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-20，獨立 SoC 入口與 session dialog 唯讀
+**Last updated:** 2026-10-21，Setup／SoC Run lock 與共用視窗控制權
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -57,7 +57,9 @@ The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manag
 result entries and working points; SoC connects the board and displays soccfg
 through `Controller.soc_control`. The named `soc` window supports remote screenshots.
 Session dialogs remain available for inspection during Run or remote control.
-The host disables their submissions until Run finishes and Local control returns.
+Run disables Setup and SoC submissions. Inspect, Devices and ARB retain their
+existing Run policy. Remote control makes all five shared dialogs read-only;
+Local restores editing subject to each dialog's Run and validation gates.
 
 `Controller.install_soc` / `uninstall_soc` publish a caller-built board on the
 owner thread. `register_device` adopts a built driver through DeviceService.
