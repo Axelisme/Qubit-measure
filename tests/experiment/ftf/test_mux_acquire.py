@@ -26,7 +26,7 @@ def jumping_settings(mux):
             "f2": chip.f2.model_copy(update={"q_cap": 10.0}),
         }
     )
-    receiver = numeric.readout.receivers()[0].model_copy(update={"gain": 1e12})
+    receiver = numeric.readout.receivers[0].model_copy(update={"gain": 1e12})
     readout = numeric.readout.model_copy(
         update={
             "drive": numeric.readout.drive.model_copy(
