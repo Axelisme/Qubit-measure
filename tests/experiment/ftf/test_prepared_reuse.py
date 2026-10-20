@@ -30,11 +30,29 @@ def draw(source, acquire=None, snap=None):
     )
 
 
-def test_preparation_hits_preserve_source_usage_for_later_acquires():
+@pytest.fixture
+def delayed_readout_template():
+    """Leave room for shaped controls and retain each ADC's readout offset."""
+    base = template(tones=1)
+    readout = base.events[-1]
+    shift = 0.140 - readout.start_us
+    return replace(
+        base,
+        events=(*base.events[:-1], replace(readout, start_us=readout.start_us + shift)),
+        readouts=tuple(
+            replace(window, trigger_us=window.trigger_us + shift[:, None])
+            for window in base.readouts
+        ),
+    )
+
+
+def test_preparation_hits_preserve_source_usage_for_later_acquires(
+    delayed_readout_template,
+):
     import numpy as np
     from zcu_tools.core.simulation import PulseEnvelope
 
-    base = template(tones=1)
+    base = delayed_readout_template
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(
@@ -80,11 +98,13 @@ def test_preparation_hits_preserve_source_usage_for_later_acquires():
 
 
 @pytest.mark.parametrize("rebuild", [False, True])
-def test_cached_small_acquire_reselects_route_after_source_usage_grows(rebuild):
+def test_cached_small_acquire_reselects_route_after_source_usage_grows(
+    rebuild, delayed_readout_template
+):
     import numpy as np
     from zcu_tools.core.simulation import PulseEnvelope
 
-    base = template(tones=1)
+    base = delayed_readout_template
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(
@@ -136,7 +156,9 @@ def test_cached_small_acquire_reselects_route_after_source_usage_grows(rebuild):
     assert routes[0].get("single_tone_gate") == 2
 
 
-def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put():
+def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put(
+    delayed_readout_template,
+):
     import numpy as np
     from zcu_tools.core.simulation import PulseEnvelope
     from zcu_tools.experiment.ftf.preparation import PreparationCache
@@ -153,7 +175,7 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put():
     source = FTFSource(settings(), DeviceManager())
     cache = CountingPreparations()
     source.preparation_cache = cache
-    base = template(tones=1)
+    base = delayed_readout_template
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(
@@ -195,11 +217,13 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put():
 
 
 @pytest.mark.parametrize("clear", [False, True])
-def test_repeated_content_does_not_inflate_source_amortization(clear):
+def test_repeated_content_does_not_inflate_source_amortization(
+    clear, delayed_readout_template
+):
     import numpy as np
     from zcu_tools.core.simulation import PulseEnvelope
 
-    base = template(tones=1)
+    base = delayed_readout_template
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(

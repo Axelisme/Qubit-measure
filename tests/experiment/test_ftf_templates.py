@@ -119,7 +119,9 @@ def test_template_engine_paths_match_strict_secular_reference(
         )
 
 
-def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_pulses() -> None:
+def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_pulses() -> (
+    None
+):
     import zcu_tools.experiment.ftf as ftf
 
     base = template()
@@ -151,8 +153,10 @@ def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> N
     base = template()
     terminal = base.events[-1]
     earlier = replace(
-        terminal, start_us=np.array([0.0, 0.002]),
-        duration_us=np.full(2, 0.004), frequency_mhz=np.full(2, 5900.),
+        terminal,
+        start_us=np.array([0.0, 0.002]),
+        duration_us=np.full(2, 0.004),
+        frequency_mhz=np.full(2, 5900.0),
         gain=np.array([0.3, -0.4]),
     )
     # Mutually exclusive slots must classify by active point, not slot order.
@@ -195,7 +199,9 @@ def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
     terminal = base.events[-1]
     earlier = replace(terminal, start_us=np.zeros(2), duration_us=terminal.start_us)
     try:
-        plan = ftf.plan_template(settings(), snapshot(), replace(base, events=(earlier, terminal)))
+        plan = ftf.plan_template(
+            settings(), snapshot(), replace(base, events=(earlier, terminal))
+        )
     except ValueError as error:
         pytest.fail(f"cavity drives may end exactly at terminal start: {error}")
     drives = getattr(plan, "cavity_drives", None)
@@ -203,7 +209,9 @@ def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
     assert tuple(len(p) for p in drives) == (1, 1)
     crossing = replace(earlier, duration_us=earlier.duration_us + 1e-12)
     with pytest.raises(ValueError, match="cross|overlap"):
-        ftf.plan_template(settings(), snapshot(), replace(base, events=(crossing, terminal)))
+        ftf.plan_template(
+            settings(), snapshot(), replace(base, events=(crossing, terminal))
+        )
 
 
 class CountingEngine(Engine):

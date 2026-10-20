@@ -92,7 +92,14 @@ class FTFTemplatePlan:
 
     source: round-DC secular model source, including the Gibbs initial density.
     batch: ns/GHz/rad charge/flux drives at fixed DC, ending at readout start.
-    readouts: per-ADC distinct pulse/grid contents at DC, in declaration order.
+    readouts: per-ADC distinct terminal pulse/grid contents at DC, in declaration order.
+    cavity_drives: tuple in batch.points order, each containing the earlier active
+        readout-generator ReadoutPulse inputs in template slot order. Supports are
+        absolute ns, carriers GHz, phases pulse-local radians in the neutral DC
+        readout model's zero-GHz reference. Amplitudes include input_per_gain and
+        constant envelope values; nonconstant envelopes retain their local shape.
+        Empty point tuples mean no cavity drive. Earlier pulses must end no later
+        than terminal start; crossing pulses raise ValueError during planning.
     No propagation, conditional field solve or random draws happen in planning.
     These inputs are author diagnostics, not public measurement metadata.
     """
@@ -100,6 +107,7 @@ class FTFTemplatePlan:
     source: ModelSource
     batch: TimelineBatch
     readouts: tuple[FTFReadoutPlan, ...]
+    cavity_drives: tuple[tuple[ReadoutPulse, ...], ...]
 
 
 def _envelopes(
@@ -168,6 +176,51 @@ def _timeline_batch(
     return TimelineBatch(template.points, tuple(drives), fixed_dc, end_ns)
 
 
+def _classify_readout(
+    settings: FTFSettings,
+    template: TimelineTemplate,
+    config: FTFReadoutConfig,
+    memo: dict[int, EnvelopeSpec],
+) -> tuple[tuple[EventSlot, ...], tuple[tuple[ReadoutPulse, ...], ...]]:
+    """Partition active readout-generator slots at each point's latest start."""
+    slots = tuple(
+        event
+        for event in template.events
+        if event.gen_ch == settings.readout.drive.gen_ch
+    )
+    if not slots:
+        raise ValueError("FTF requires one terminal readout pulse per point")
+    latest = np.max([np.where(e.active, e.start_us, -np.inf) for e in slots], axis=0)
+    if not np.isfinite(latest).all():
+        raise ValueError("FTF requires one terminal readout pulse per point")
+    terminals = []
+    drives: list[list[ReadoutPulse]] = [[] for _ in template.points]
+    for event in slots:
+        terminal = event.active & (event.start_us == latest)
+        earlier = event.active & ~terminal
+        if np.any(earlier & (event.start_us + event.duration_us > latest)):
+            if config.kind == "mux":
+                raise ValueError(
+                    "FTF mux tones require a common pulse start; blocks overlap"
+                )
+            raise ValueError("FTF cavity drive crosses terminal readout start")
+        terminals.append(replace(event, active=terminal))
+        envelopes = list(_envelopes(event, memo))
+        rows = np.column_stack(
+            (
+                event.start_us,
+                event.duration_us,
+                event.frequency_mhz,
+                event.phase_deg - 360 * event.frequency_mhz * event.phase_reference_us,
+                event.gain,
+                event.envelope_index,
+            )
+        )
+        for index in np.flatnonzero(earlier):
+            drives[index].append(_readout_pulse(settings, rows[index], envelopes))
+    return tuple(terminals), _local_readout_pulses(tuple(tuple(p) for p in drives), 0.0)
+
+
 def _readout_contents(
     settings: FTFSettings,
     template: TimelineTemplate,
@@ -215,6 +268,10 @@ def _readout_contents(
         envelopes.extend(_envelopes(event, memo))
     if np.any(values[:, :, 0] != values[:, :1, 0]):
         raise ValueError("FTF mux tones require a common pulse start per point")
+    if np.any(window.trigger_us[:, 0] < values[:, 0, 0]):
+        raise ValueError(
+            "FTF first ADC trigger must not precede terminal readout start"
+        )
     features = np.column_stack(
         (
             values.reshape(len(template.points), -1),
@@ -316,9 +373,11 @@ def plan_template(
     settings is the immutable FTF resource, snapshot supplies live fixed-unit DC
     values, and template has point arrays in us/MHz/degrees. Support rounds to
     nearest 2 ns, ties even, without changing the common carrier origin. The
-    first common-start readout block per point ends evolution; overlapping/later
-    drive-line controls do not affect the DC readout model. Constant complex
-    readout envelopes fold into amplitude, enabling the exact field solution.
+    latest active readout-generator block per point ends evolution. Earlier
+    readout pulses are cavity drives and must end no later than that start.
+    The first ADC trigger must not precede it; triggers after pulse end are valid.
+    Overlapping/later drive-line controls do not affect the DC readout model.
+    Constant complex readout envelopes fold into amplitude, enabling the exact field solution.
     readout supplies detached author capabilities; None adapts current settings.
     facts optionally shares physical inputs across templates/acquires. It must
     match the complete settings, snapshot and numeric revision or raises ValueError.
@@ -328,8 +387,8 @@ def plan_template(
     common-origin carrier phases convert to pulse-local phases in the first
     carrier's model reference frame; ADC demodulation remains absolute-time.
     Missing routes, invalid DC values or invalid readout pulse blocks raise
-    ValueError. Loops scale with slots, candidates and unique readout contents,
-    not with points or reps. No old per-point planner is called.
+    ValueError. Terminal contents deduplicate point rows; earlier cavity pulses
+    detach once per active point/slot. No per-point evolution planner is called.
     """
     config = readout_configuration(settings) if readout is None else readout
     receivers = {receiver.ro_ch: receiver for receiver in config.receivers}
@@ -340,11 +399,15 @@ def plan_template(
     # Identity lookup is safe: template keeps every input envelope alive for
     # this call. No memo survives a plan or retains compiled program buffers.
     memo: dict[int, EnvelopeSpec] = {}
+    terminal_slots, cavity_drives = _classify_readout(settings, template, config, memo)
+    terminal_template = replace(template, events=terminal_slots)
     contents = []
     for window in template.readouts:
         if window.channel not in receivers:
             raise ValueError(f"unbound FTF receiver {window.channel}")
-        contents.append(_readout_contents(settings, template, config, window, memo))
+        contents.append(
+            _readout_contents(settings, terminal_template, config, window, memo)
+        )
     end_ns = contents[0][0]
     if facts is None:
         facts = FTFModelFacts(settings, snapshot)
@@ -394,4 +457,5 @@ def plan_template(
         source,
         _timeline_batch(settings, joint, template, end_ns, memo),
         tuple(readouts),
+        cavity_drives,
     )
