@@ -85,6 +85,7 @@ def test_yaml_zero_disables_round_wait(monkeypatch: pytest.MonkeyPatch):
             ],
         )
         result = program.acquire(env.soc, progress=False)
+        assert result is not None
         assert waits == []
         assert np.isfinite(result).all()
     finally:
