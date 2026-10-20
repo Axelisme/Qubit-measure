@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-20，entry 範本讀取與建立分離、predictors 唯讀路徑與 point 來源 YAML 複製
+**Last updated:** 2026-10-20，Sample writeback 入口統一正規化 numpy 數值
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -78,7 +78,7 @@ Acquired 只保存 run 身分、tab、experiment、point、roles 與事件時間
 
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與 metadata。Point commit 失敗時 accepted 可以保留，值與 metadata 仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
 
-`writeback` 提供共用 parameter／module／waveform／sample 項目與 `apply_writeback`。SampleWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、point、accepted 時間與事件 source；dev 欄位選填，原值與 caller 單位不轉換。Caller 傳入固定 SavedPoint 的 write target、已解析的具體路徑，以及具名 evidence，包含實驗名稱、run_id、origin 與可選 source。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆 point commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目照舊帶 accepted Provenance 交給 library owner。流程追加一筆 accepted 後沿項目順序各自提交，首錯停止。項目失敗拋 `WritebackApplyError(event_id, applied)`，原始錯誤為 cause，前項與事件保留。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨項交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開 setters 並發布成功前綴；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
+`writeback` 提供共用 parameter／module／waveform／sample 項目與 `apply_writeback`。SampleWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、point、accepted 時間與事件 source。Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值仍在追加 accepted 前拒絕。Ledger 與 sample sink 使用同一份正規化 JSON；dev 欄位選填，caller 單位不轉換。Caller 傳入固定 SavedPoint 的 write target、已解析的具體路徑，以及具名 evidence，包含實驗名稱、run_id、origin 與可選 source。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆 point commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目照舊帶 accepted Provenance 交給 library owner。流程追加一筆 accepted 後沿項目順序各自提交，首錯停止。項目失敗拋 `WritebackApplyError(event_id, applied)`，原始錯誤為 cause，前項與事件保留。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨項交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開 setters 並發布成功前綴；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
 
 ## 輸出位置
 
