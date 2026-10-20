@@ -1252,7 +1252,10 @@ class ExpTabWidget(QWidget):
 
         if self._has_analysis:
             self.analyze_btn.setEnabled(
-                idle and state.has_context and state.has_run_result
+                idle
+                and state.has_context
+                and state.has_run_result
+                and (not self.analyze_form.has_params() or self.analyze_form.is_valid())
             )
             self.analyze_form.setEnabled(idle)
             self.writeback_widget.setEnabled(
@@ -1265,7 +1268,13 @@ class ExpTabWidget(QWidget):
         if self._has_post:
             post_enabled = idle and state.has_analyze_result
             self.post_analyze_form.setEnabled(post_enabled)
-            self.post_analyze_btn.setEnabled(post_enabled)
+            self.post_analyze_btn.setEnabled(
+                post_enabled
+                and (
+                    not self.post_analyze_form.has_params()
+                    or self.post_analyze_form.is_valid()
+                )
+            )
             self._post_gate_label.setVisible(not state.has_analyze_result)
             self.post_writeback_widget.setEnabled(
                 idle and state.has_context and state.has_post_analyze_result
@@ -1322,12 +1331,18 @@ class ExpTabWidget(QWidget):
         self._actions = actions
 
         if self._has_analysis:
+            self.analyze_form.validity_changed.connect(
+                lambda _valid: actions.refresh_interaction(tab_id)
+            )
             self.analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_analyze_param_instance(
                     tab_id, instance
                 )
             )
         if self._has_post:
+            self.post_analyze_form.validity_changed.connect(
+                lambda _valid: actions.refresh_interaction(tab_id)
+            )
             self.post_analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
                     tab_id, instance
