@@ -134,6 +134,51 @@ def test_cavity_field_average_preserves_coherent_carriers_and_ringdown(shaped):
     np.testing.assert_allclose(cancelled.field_products, 0, atol=1e-13)
 
 
+@pytest.mark.parametrize("shaped", [False, True], ids=["flat", "mixed-shaped"])
+@pytest.mark.parametrize(
+    "interval", [(5.0, 45.0), (30.7, 45.0)], ids=["overlap-and-ringdown", "ringdown"]
+)
+def test_cavity_field_average_preserves_different_start_phases(shaped, interval):
+    model = adc.ReadoutModel(
+        "different-start-phases",
+        ("g", "e"),
+        np.array([[6.0, 6.11], [6.002, 6.105]]),
+        0.17,
+        np.array([0.02, 0.03]),
+        np.array([0.06, 0.04]),
+        np.zeros((2, 2)),
+    )
+    envelope = (
+        adc.PiecewiseLinearEnvelope(
+            np.array([0.0, 6.0, 14.0, 20.0]), np.array([0.0, 1.0, 0.4j, 0.0])
+        )
+        if shaped
+        else None
+    )
+    # Neither carrier*start nor the common-frame shift*start is an integer.
+    pulses = (
+        adc.ReadoutPulse(1.3, 21.3, 0.3j, 6.03, 0.2, envelope=envelope),
+        adc.ReadoutPulse(8.4, 30.7, 0.2, 6.07, -0.4),
+    )
+    start, end = interval
+    times = np.linspace(start, end, 8001)
+    fields = adc.cavity_fields(model, pulses, times)
+    average = adc.cavity_field_average(model, pulses, start, end)
+    np.testing.assert_allclose(
+        average.photons,
+        trapezoid(np.abs(fields) ** 2, times, axis=0) / (end - start),
+        rtol=2e-6,
+        atol=1e-10,
+    )
+    products = np.einsum("tsr,tuq->tsruq", fields, fields.conj())
+    np.testing.assert_allclose(
+        average.field_products,
+        trapezoid(products, times, axis=0) / (end - start),
+        rtol=2e-6,
+        atol=1e-10,
+    )
+
+
 def test_cavity_field_average_matches_isolated_resonant_integral():
     model = adc.ReadoutModel(
         "isolated-integral",
