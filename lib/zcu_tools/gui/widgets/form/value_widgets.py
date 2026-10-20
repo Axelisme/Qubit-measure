@@ -251,13 +251,14 @@ class _TextCommit(QObject):
         elif isinstance(event, QFocusEvent) and event.type() == QEvent.Type.FocusOut:
             if event.reason() != Qt.FocusReason.PopupFocusReason:
                 self._finish()
-        elif (
-            isinstance(event, QKeyEvent)
-            and event.type() == QEvent.Type.KeyPress
-            and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
-        ):
-            # Validators may suppress editingFinished for partial input.
-            self._finish()
+        elif isinstance(event, QKeyEvent) and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Tab:
+                # Traversal commits through FocusOut. Inline completion keeps
+                # focus and must not inherit a pending idle commit from typing.
+                self._cancel()
+            elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                # Validators may suppress editingFinished for partial input.
+                self._finish()
         return False
 
 

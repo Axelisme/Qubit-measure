@@ -9,6 +9,11 @@ from qtpy.QtWidgets import QLineEdit, QStyle, QStyleOptionFrame, QWidget
 from zcu_tools.gui.widgets import mixed_colour
 
 
+def _utf16_length(text: str) -> int:
+    """Count Qt string offsets, which use UTF-16 code units, not code points."""
+    return len(text.encode("utf-16-le")) // 2
+
+
 class TextInput(QLineEdit):
     """Native line edit with local inline completion and one commit on focus loss.
 
@@ -51,20 +56,25 @@ class TextInput(QLineEdit):
         self._expression_mode = expression
         self._reset_completion()
 
+    def _cursor_index(self) -> int:
+        """Translate the Qt caret offset to a Python string index for slicing."""
+        before = self.text().encode("utf-16-le")[: 2 * self.cursorPosition()]
+        return len(before.decode("utf-16-le"))
+
     def _matches(self) -> tuple[int, str, tuple[str, ...]]:
         """Match a one-level $token prefix before whitespace or end of text.
 
         Any immediate non-whitespace character, including an identifier tail,
         closing parenthesis or operator, blocks hints. Each dotted level matches
-        only its own captured names. Selected text is excluded by _can_complete.
+        only its own captured names. Captured candidates define the allowed
+        characters, including Unicode combining marks; do not revalidate alias
+        identifiers here. Selected text is excluded by _can_complete.
         """
-        cursor = self.cursorPosition()
+        cursor = self._cursor_index()
         text = self.text()
         if cursor < len(text) and not text[cursor].isspace():
             return 0, "", ()
-        match = re.search(
-            r"(?<![\w$.])\$[A-Za-z0-9_]*(?:\.[A-Za-z0-9_]*)?$", text[:cursor]
-        )
+        match = re.search(r"(?<![\w$.])\$[^$]*$", text[:cursor])
         if match is None:
             return 0, "", ()
         prefix = match.group()
@@ -121,8 +131,9 @@ class TextInput(QLineEdit):
             start, prefix, matches = self._matches()
             if not matches:
                 return False
-            self._start = start
-            self._end = start + len(prefix)
+            # Replacement offsets stay in Qt units; matching uses Python indices.
+            self._start = _utf16_length(self.text()[:start])
+            self._end = self._start + _utf16_length(prefix)
             self._cycle = matches
             self._cycle_index = 0
         replacement = self._cycle[self._cycle_index]
@@ -131,7 +142,7 @@ class TextInput(QLineEdit):
         with QSignalBlocker(self):
             self.setSelection(self._start, self._end - self._start)
             self.insert(replacement)
-        self._end = self._start + len(replacement)
+        self._end = self._start + _utf16_length(replacement)
         self._update_hint()
         return True
 
@@ -206,6 +217,6 @@ class TextInput(QLineEdit):
         painter.setPen(self.palette().color(QPalette.ColorRole.Text))
         painter.drawText(
             QPointF(x + metrics.horizontalAdvance(self._ghost), baseline),
-            self.text()[self.cursorPosition() :],
+            self.text()[self._cursor_index() :],
         )
         painter.end()
