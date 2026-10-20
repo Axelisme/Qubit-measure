@@ -31,6 +31,7 @@ from migrations.storage_migration import (
 )
 from tests._native_support import hdf_group
 from tests.migrations.storage_migration.fakes import (
+    assert_difference,
     manifest_path,
     noop_validation,
     validate_cfg,
@@ -190,7 +191,7 @@ def test_parts_accumulate_with_same_identity(
     assert len(result.key_mappings) == 1
 
 
-def test_data_resume_keeps_valid_user_edit(
+def test_data_resume_reports_valid_user_edit_without_overwriting(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     write_meta(request_data, "context", {"old_frequency": 8.0})
@@ -206,12 +207,12 @@ def test_data_resume_keeps_valid_user_edit(
         database_root=request_data.database_root,
     )
     entry.use_point("context").C1.frequency = 19.0
-    migrate_storage(
+    assert_difference(lambda: migrate_storage(
         replace(request_data, part="data", resume=True),
         mapping=mapping,
         validate_cfg=validate_cfg,
         validate_native=noop_validation,
-    )
+    ), request_data, [entry.result_path / "points/context/point.yaml"])
     assert entry.use_point("context").C1.frequency == 19.0
 
 
