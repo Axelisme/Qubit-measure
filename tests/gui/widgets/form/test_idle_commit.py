@@ -92,7 +92,8 @@ class Child(FormModel):
 class IdleForm(FormModel):
     count: int = 2
     amount: float = Field(default=2.0, gt=0)
-    name: str = "a"
+    name: str = Field(default="aa", min_length=2)
+    expression: float = 2.0
     amplitude: complex = 1 + 0j
     child: Annotated[Child, Display(collapsed=False)] = Field(default_factory=Child)
     optional: Child | None = Field(default_factory=Child)
@@ -149,7 +150,13 @@ def evidence(tmp_path: Path, request: pytest.FixtureRequest):
 
 @pytest.mark.parametrize(
     "path,value",
-    [("count", "12"), ("amount", "3.5"), ("name", "hello"), ("amplitude", "2+3j")],
+    [
+        ("count", "12"),
+        ("amount", "3.5"),
+        ("name", "hello"),
+        ("expression", "1 / 4"),
+        ("amplitude", "2+3j"),
+    ],
 )
 def test_idle_validation_and_repair_are_visible(
     form, clock: Clock, evidence, path: str, value: str
@@ -158,8 +165,8 @@ def test_idle_validation_and_repair_are_visible(
     name = f"form.input.{path}"
     baseline_help = driver.observe(object_name=f"form.row.{path}").tooltip
     # An incomplete integer, malformed scalar or invalid float is retained.
-    invalid = "-1" if path == "amount" else "1." if path == "count" else ""
-    if path == "name":
+    invalid = "-1.0" if path == "amount" else "1." if path == "count" else "x"
+    if path == "expression":
         driver.invoke_context_action(action="Expression", object_name=name)
         invalid = "1 /"
     elif path == "amplitude":
@@ -171,16 +178,14 @@ def test_idle_validation_and_repair_are_visible(
     evidence(driver, "02-idle-error")
     assert failed.text == invalid
     assert driver.observe(object_name=f"form.row.{path}").tooltip != baseline_help
-    if path == "name":
-        value = "'hello'"
     driver.enter_text(value=value, object_name=name, commit=False)
     evidence(driver, "03-repair-typing")
     clock.advance(500)
     repaired = driver.observe(object_name=name)
     evidence(driver, "04-idle-valid")
     assert driver.observe(object_name=f"form.row.{path}").tooltip == baseline_help
-    if path == "name":
-        assert driver.observe(object_name="form.value.name").text == '= "hello"'
+    if path == "expression":
+        assert driver.observe(object_name="form.value.expression").text == "= 0.25"
     else:
         assert repaired.text == value or (
             path == "amplitude" and repaired.text == "(2+3j)"
