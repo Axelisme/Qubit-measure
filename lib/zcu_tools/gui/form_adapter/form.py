@@ -45,7 +45,8 @@ class Form[C: ConfigBase]:
 
     core_cfg is the validated result type; tree keys follow its nested field
     names. Unspecified fields derive shape and defaults from core declarations.
-    Hidden requires a core default; unknown keys fail with ValueError at creation.
+    Hidden(value) omits input and supplies a core-validated literal at conversion.
+    Hidden() requires a core default; unknown keys fail with ValueError at creation.
     model is a generated FormModel class, used only through the public form API.
     default_input resolves names once against the supplied captured FormEnv;
     hosts use the same env until Reset. The host calls bind_templates with its
@@ -73,9 +74,15 @@ class Form[C: ConfigBase]:
     Template/type defaults, never copy the key or retain another kind's draft.
     A core_cfg that is a concrete persistent module or waveform Spec builds the
     same Spec form as module_form and requires an empty tree.
+    field_order optionally puts named core-cfg fields first at the top level;
+    unlisted fields retain their relative order, and nested fields are unchanged.
+    Empty order preserves the default. Unknown or duplicate names raise ValueError.
+    Nonempty order on a persistent Spec raises ValueError: Spec forms retain
+    their inherited field order and validators. Extras, if supplied, remains last.
     fixed_elements is a tuple of root-relative FixedElements declarations for
-    core cfg Forms. It supplies owner identity admission and participants value
-    validation; default_input rejects duplicate capture names with indices.
+    core cfg Forms. Named mode supplies identity admission and participants
+    validation, rejecting duplicate default names with indices. Slot mode fixes
+    only an active list's length and leaves all element values editable.
     """
 
     def __init__[E: BaseModel](
@@ -86,14 +93,21 @@ class Form[C: ConfigBase]:
         extras: type[E] | None = None,
         lower: Callable[[E, C], C] | None = None,
         fixed_elements: tuple[FixedElements, ...] = (),
+        field_order: tuple[str, ...] = (),
     ) -> None:
         if (extras is None) != (lower is None):
             raise ValueError("extras and lower must be provided together")
+        if len(set(field_order)) != len(field_order):
+            raise ValueError("field_order contains duplicate fields")
+        if unknown := set(field_order) - core_cfg.model_fields.keys():
+            raise ValueError(f"field_order contains unknown fields: {sorted(unknown)}")
+        if field_order and core_cfg in PERSISTENT_SPECS:
+            raise ValueError("field_order is supported only for core-cfg Forms")
         self._core_cfg = core_cfg
         self._section: Section | SpecSection = (
             SpecSection(core_cfg, tree)
             if core_cfg in PERSISTENT_SPECS
-            else Section(core_cfg, tree, ())
+            else Section(core_cfg, tree, (), field_order=field_order)
         )
         self.model: type[FormModel] = self._section.model
         self._lower: Callable[[BaseModel, ConfigBase], C] | None = None
@@ -179,8 +193,9 @@ class Form[C: ConfigBase]:
         state mutation, publication or materialization occurs. Wrong input model
         raises TypeError; template projections preserve initial values and
         requiredness.
-        Declared fixed-list descendants include the deepest matching
-        FixedElements identity from this same input, never from participants.
+        Named fixed-list descendants include the deepest matching FixedElements
+        identity from this same input, never from participants. Fixed slots do
+        not declare element identity.
         """
         self._check_logical_input(input)
         observation = _logical.read(input, path, env)

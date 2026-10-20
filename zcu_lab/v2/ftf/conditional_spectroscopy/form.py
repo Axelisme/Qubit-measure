@@ -1,6 +1,6 @@
 """Fixed-capture thermal spectroscopy Form with explicit two-line probe inputs."""
 
-from zcu_tools.cfg_model import Expr, Range, Slot, Template
+from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from .._measure import captured_roles
@@ -12,23 +12,25 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
 
     Existing coupler CZ slots are editable starting points, not assumed weak
     probes. Without a slot, offer an explicit cosine envelope on the role's
-    captured wiring channel; frequency, gain, duration and Nyquist zone remain
-    required operator inputs. No model truth or safe-drive defaults are supplied.
-    Common frequency scan must also be entered. Optional DC starts disabled.
+    captured wiring channel; gain, duration and Nyquist zone remain required
+    operator inputs. Run supplies both drive frequencies from the common scan.
+    No model truth or safe-drive defaults are supplied. The frequency scan must
+    be entered. Optional DC starts disabled.
     """
     roles = captured_roles(ctx)
     drive = {}
     for role in ("f1", "f2"):
         slot = f"$coupler.module.cz_{role}"
         drive[role] = (
-            Slot(slot, copy=True)
+            # dual_line_drive replaces both frequencies with the common scan.
+            Slot(slot, copy=True, set={"freq": Hidden(0.0)})
             if ctx.has(slot)
             else Template(
                 "pulse:blank",
                 set={
                     "ch": Expr(f"${role}.wiring.ch"),
                     "nqz": None,
-                    "freq": None,
+                    "freq": Hidden(0.0),
                     "gain": None,
                     "waveform.style": "cosine",
                     "waveform.length": None,

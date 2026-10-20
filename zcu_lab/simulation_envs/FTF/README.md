@@ -1,8 +1,8 @@
 # 模擬環境
 
-**Last updated:** 2026-10-20，point-local alias 初始化與 FTF startup 資源交接
+**Last updated:** 2026-10-20，直接呼叫公開 FTF builder 與 GUI／Notebook 成本政策
 
-這裡放 GUI 與 Notebook 共用的可信 Python 環境。`environment.py` 的 `build_environment()` 預設讀取相鄰 `ftf.yaml`，也接受明確的 `settings_path=Path(...)`。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
+這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。Startup 與 Notebook 直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
 
 `default.yaml` 是納入 Git 的樣板；`ftf.yaml` 是各自的工作副本，不納入 Git。第一次使用時複製一份：
 
@@ -10,7 +10,7 @@
 cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
 ```
 
-缺少 `ftf.yaml` 時，`build_environment()` 直接報錯。完整欄位、單位、合法範圍、三迴路映射與 entry 接線對照見 [FTF YAML v2 欄位指南](field-guide.md)。
+缺少 `ftf.yaml` 時，`ftf(...)` 直接報錯。完整欄位、單位、合法範圍、三迴路映射與 entry 接線對照見 [FTF YAML v2 欄位指南](field-guide.md)。
 
 ## 建立 entry 與啟動
 
@@ -25,7 +25,8 @@ uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
 
 `--project-root` 須指向既存的絕對目錄。省略時使用 repo root。
 Script 透過公開 ctx 在該專案建立 `ftf-demo`，從相鄰 `entry-template.yaml`
-加入 Q1、Q2、coupler、R1、R2，再建立並選取第一個 point `initial`。
+加入 Q1、Q2、coupler、R1、R2 與 mux group MG12，再建立並選取第一個 point `initial`。
+MG12 使用 `MuxGroupSchema`（`group/mux`），依序綁定 Q1／R1 與 Q2／R2。
 Script 用 `ctx.context.apply_alias_rows` 初始化該 point 的 alias，框架保存到 `points/initial/aliases.yaml`。
 新 point 從 setup 複製這些元件。任一 entry 目錄已存在就報錯，不覆寫。
 後續失敗可能留下部分 entry，沒有跨檔交易或自動 rollback。
@@ -46,6 +47,7 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 
 `entry-template.yaml` 使用 `default.yaml` 的 EJ/EC/EL 與 resonator 頻率。Energies 用 GHz，R1/R2 頻率為 7190/7080 MHz。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。範本提供接線與引用，不提供 module library 或校準完成的量測參數。若修改工作副本的模型或接線，也要調整 entry 範本或已建立的 entry。
 
+初始 alias `mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。Inspect > Aliases > Load preset 可選 FTF，再按 Apply 保存。載入 preset 只替換 draft，不會建立元件或 device。
 
 ## 工作副本與調參
@@ -56,17 +58,17 @@ FTF 的 flux drive 只在 DC 附近線性化，不建構大振幅 fast-flux cont
 
 啟動腳本會執行 Python，只載入可信來源。修改腳本或 YAML 後須重啟 GUI。腳本失敗時，GUI 保留已完成操作並顯示腳本位置與錯誤，不自動改跑預設腳本。
 
-`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量由最大索引加一推導，不是綁定條數；樣板保留 readout gen0、f1_charge gen2 與 f2_charge gen3，推導出 4 個 generator，gen1 是未綁定空洞。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製環境檔與 YAML，並調整 builder 指向的檔案。
+`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量由最大索引加一推導，不是綁定條數；樣板保留 readout gen0、f1_charge gen2 與 f2_charge gen3，推導出 4 個 generator，gen1 是未綁定空洞。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
 
-[Notebook 範例](../../../notebook_md/single_qubit.md) 使用同一個環境。Builder 成功回傳後，caller 負責資源關閉。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
+[Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
 ## 演化與重播
 
-FTF 預設使用分段引擎的快速算法。共用入口使用 Python 3.12 支援的 `os.cpu_count()`，保留兩核，以 `max(1, (os.cpu_count() or 1) - 2)` 選擇 workers。核心數未知時使用 1 個。八核主機使用 6 個 workers；直接呼叫 `ftf(..., workers=1)` 預設只用 1 個。
+FTF 預設使用分段引擎的快速算法。GUI startup 明確傳 `workers=1, warmup=False`，不啟動數值預編譯。Notebook 明確傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留兩核並在建立環境後啟動單一背景 worker 預編譯常用數值路徑。核心數未知時使用 1 個 worker，八核主機使用 6 個 Notebook workers。公開 `ftf()` 的預設是 `workers=1, warmup=False`；`workers` 必須為正整數。
 
-`build_environment()` 無參數時保留 Notebook 的預設，傳 `warmup=True`，環境建立後立即用單一背景 worker 預編譯常用數值路徑。本頁的 GUI startup 明確傳 `workers=1, warmup=False`，不啟動預編譯。這會占用 CPU 與記憶體，不會縮短總編譯成本。GUI 與 Notebook 共用同一個 process 內的 future。直接呼叫 `ftf()` 預設不開啟；`build_environment(workers=1, warmup=False)` 也可明確限制平行度並關閉預編譯。`workers` 必須為正整數，省略時保留兩核，至少使用一個 worker。
+預編譯會占用 CPU 與記憶體，只把編譯時間與其他工作重疊，不縮短總編譯成本。同一個 process 內啟用 warmup 的環境共用同一個 future。
 
-`env.warmup.status` 提供進度與錯誤。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不占用正式引擎的 prepare 快取。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md#startup-preparation)。
+啟用預編譯時，`env.warmup.status` 提供進度與錯誤。停用時 `env.warmup` 為 `None`。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不占用正式引擎的 prepare 快取。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md#startup-preparation)。
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 prepare 快取只保留在記憶體，不需要離線建庫或 GPU，也不保存 exact density records。
 

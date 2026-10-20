@@ -1,12 +1,12 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-20，Log／List 的正值政策、logical observation readonly 與明填模板 bindings
+**Last updated:** 2026-10-20，局部欄位排序
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
 主要生成入口如下：
 
-- `Form(core_cfg, tree, *, extras=None, lower=None, fixed_elements=())`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。Form 的 cfg 結果型別具協變性，具體 `Form[SampleCfg]` 可交給 generic-free host，`to_cfg` 仍回傳 SampleCfg 或 FormErrors。Core annotations 決定形狀與驗證；樹決定起始值、唯讀屬性、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的 Expr start／stop 也沿用這個規則，不回落 LinRange 的 0／1。Range 端點為 None 時顯示空白且必填，對應 input key 缺席也不使用 0／1。Literal 端點與未宣告的掃描仍保留原有預設。
+- `Form(core_cfg, tree, *, extras=None, lower=None, fixed_elements=(), field_order=())`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。Form 的 cfg 結果型別具協變性，具體 `Form[SampleCfg]` 可交給 generic-free host，`to_cfg` 仍回傳 SampleCfg 或 FormErrors。Core annotations 決定形狀與驗證；樹決定起始值、唯讀屬性、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的 Expr start／stop 也沿用這個規則，不回落 LinRange 的 0／1。Range 端點為 None 時顯示空白且必填，對應 input key 缺席也不使用 0／1。Literal 端點與未宣告的掃描仍保留原有預設。
 - `module_form(spec_type)`：為一個具體持久 module 或 waveform Spec class 建 Form。生成的 model 可當 FormState root，也可當 `ModuleInline` 的 module 欄位；host 的選項沿用自己的 `choices(env)`。`to_cfg` 回傳同一個 Spec，child library key 保持字串，不讀 library、asset，也不轉 native cfg。`Form.input_from_spec(spec, env)` 把既有 Spec（library entry 或 writeback proposal）投影成 input；它只接受這類 Form 的同型 Spec。
 - `FormContext(parameters)`：實驗 `make_form(ctx)` 使用的固定來源查詢。parameters 是捕捉的 ParameterContext，缺來源時為 None。`has(ref)` 接受 library root 或 point module slot，含 `$alias` 前綴。缺 key、未設定或懸空的 slot、缺或未綁 alias 回 False；語法錯誤、其他 alias 解析錯誤與來源故障仍 raise。它不 materialize module、不讀 asset、不 refresh。
 - `ModuleValues`：`Form.read_module` 回傳的單一 module 欄位實際值、模式與來源。
@@ -31,7 +31,11 @@
 
 `readout/pulse` 直接編輯平鋪的 generator 與 ADC 欄位。`gen_ch` 與 `ro_ch` 必填且可編輯；一般 Pulse 沒有 `ro_ch`。單一 `freq` 同時供兩者使用，不從其他欄位推導通道或補值。Waveform 仍可保留 child library key。
 
-`readout/mux` 沿用 module 的 ref／inline 與 Convert to inline。Scalar 欄位分別編輯，tones 是整個 list 的 JSON leaf，包含每筆 tone 的 label。它沒有 waveform 或逐 tone 引用。
+`readout/mux` 沿用 module 的 ref／inline 與 Convert to inline。Scalar 欄位分別編輯，tones 使用一般 model-list 的 indexed editing，每筆 tone 的 freq、gain、phase、ro_ch 與 label 都是獨立欄位。它沒有 waveform 或逐 tone 引用。生成器不推導 mux group 或 resonator 校準初值。
+
+Core-cfg 表單可用 `field_order=("participants", "tones", ...)` 把指定頂層欄位放在前面。未列欄位維持原相對順序，nested model 不變。空 tuple 沿用原序，tree 的寫入順序不控制畫面。未知或重複欄位在建構時以 ValueError 拒絕。持久 Spec 的非空 field_order 也以 ValueError 拒絕，保留繼承的欄位順序與 validators。Extras 若有宣告，仍在最後。
+
+`Template.set`／`Slot.set` 的 model-list seed 使用原 Spec 欄位名，例如 `set={"tones": [{"freq": Expr("6000 + 2"), "gain": 0.1, "ro_ch": 0}]}`。生成器先按原 Spec 補各位置的結構預設，再以共享元素宣告保留 expression 的 requiredness 與原 schema 驗證。某位置的 expression 算不出時留空，不使用該欄位的靜態預設；其他位置仍有自己的初值。未知元素欄位在建立 input 時以含 list index 的路徑報錯。實驗自行提供清單，生成器不推導來源關係或通道。
 
 `Slot(copy=True).set` 的 dotted Spec 路徑若穿過 captured child key，生成器只把路徑上的 child Spec 複製成 inline，再套用覆寫。未涉及的 child key 與來源保持不變，既有 input 不隨後續來源更新重填。查詢不 materialize 或讀 asset；缺 child、錯 family 與來源故障直接回報，None 覆寫沿用必填空白語意。
 
@@ -52,9 +56,30 @@ Module 子欄位唯讀不移除 library key 選項。Module 節點本身標唯�
 
 只為組實驗 cfg 存在的固定值不進 Form 或實驗 cfg 型別，由實驗的 `run()` 補齊。供驗證、analysis 或 writeback 使用的固定輸入仍可保留為唯讀欄位。具體分類由 [ADR-0073](../../../../docs/adr/0073-measure-form-derivation.md#form-的形狀與初值) 定義。
 
+## Hidden 填入值
+
+`Hidden(value)` 隱藏欄位並提供明確的 literal。沒有 core default 的必填欄位也可使用，
+但填入值仍受 core／Spec 的型別、範圍與交叉欄位驗證。普通 core tree 在 `to_cfg` 供值；
+module 的 generated input 使用該 literal 作為隱藏欄位的初值與 default，不新增 readonly。
+`Hidden()` 不帶值時保留普通 core 欄位的省略語意，由 core default 還原；必填且無 default 時
+在 Form 建構報錯。Module seed 必須明填值，`Hidden(None)` 表示 literal None，不是省略。
+
+實驗 form 在自己的 `Template.set`／`Slot.set` 以 dotted Spec 路徑標出 Run 會覆寫的欄位，
+例如 `Template("readout", bindings={"resonator": "$resonator"}, set={"freq": Hidden(0.0)})`。
+巢狀 waveform 路徑寫
+`"waveform.length"`，不含 generated input 的 `module` wrapper。Slot 的 `set` 仍只作用於
+`copy=True` 的 inline 初值；未複製的 ref 仍使用固定 library 的完整有效值，不改 library。
+Inline 選項共用該欄位的隱藏政策。真正 user-owned 欄位照常顯示與驗證。
+
+生成器不推導來源，不新增 sweep→module 關係或另一份 hidden_paths 表。Run 照原樣覆寫，
+core input 型別不變。只有經 Run 確認會覆寫的欄位才能這樣宣告，不能以隱藏規避無效設定。
+Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/0073-measure-form-derivation.md#form-的形狀與初值)。
+
 ## 固定元素宣告
 
 `FixedElements(list_path, name_field, participants_path)` 指定 root-relative typed paths 與元素的 str 名稱欄位。手寫表單繼承 `FixedElementsForm`，以 `fixed_elements` tuple 列出宣告；生成器接受 `Form(..., fixed_elements=(... ,))`。Fresh `default_input` 先呼叫 Core，再檢查宣告與捕捉名稱唯一性。重名錯誤列出名稱及原始 indices。這個共用能力集中名稱與 participants 政策，Core、widgets 和各 host 不再各自維護。
+
+`FixedElements(list_path)` 省略 name 與 participants，使用固定槽位模式。它只固定目前 active inline 清單的長度，label 與其他欄位都可編輯。相同長度的值交換不被拒絕，因此它不保證 component 身份，也不提供 ElementIdentity。宣告可穿過 nested ref／inline 的 canonical typed path，例如 `("modules", "readout", "module", "tones")`。合法 ref／inline 切換仍可進行，新 active 清單建立新的長度邊界。增刪或把 active 清單改成非 list 以 FormInputRejected 原子拒絕，還原與 Reset 不受這項 mutation 檢查。
 
 `FixedElements.identify(data, path)` 依同份 input 的完整原始 index 回傳 `ElementIdentity`，不讀 participants。Logical field observation 同時攜帶該 identity，供 Run capture 保留當次名稱；巢狀固定 list 使用最深的宣告。
 
@@ -68,7 +93,11 @@ Module 子欄位唯讀不移除 library key 選項。Module 節點本身標唯�
 
 `Form` 遞迴生成 `list[ConfigBase]` 的元素 model。起始樹的 list 按位置提供初值，scalar list 也可直接提供初值。省略 list tree 時，生成器把 native defaults 中的 module 與 sweep 投影成可編輯輸入。`to_cfg` 遞迴還原 native model list，不改 participants 順序。
 
-所有位置共用元素宣告，各位置可提供不同的唯讀初值。位置 tree 的 `Hidden` 仍在建立 Form 時拒絕，隱藏政策放在元素型別的宣告。Native 欄位用 `FieldMeta(readonly=True)` 宣告 Form core 的唯讀限制，用 `FieldMeta(element_label="name")` 提供 picker label，不需 import GUI metadata。
+所有位置共用元素宣告，各位置可提供不同的唯讀初值。位置 tree 直接放 `Hidden` 仍在建立 Form 時拒絕。
+位置的 `Template.set`／`Slot.set` 可用 `Hidden(value)`。所有位置必須宣告相同的 Hidden Spec 路徑，
+`bind_templates` 才把隱藏政策套到共享元素 model；路徑不同時，錯誤列出 list 路徑與不一致的 indices。
+共享 model 只取得隱藏路徑，不取得第一個位置的值、來源、bindings 或其他 defaults。
+各位置仍從自己的 Template／Slot 建 input，Hidden literal 也各自保留。Native 欄位用 `FieldMeta(readonly=True)` 宣告 Form core 的唯讀限制，用 `FieldMeta(element_label="name")` 提供 picker label，不需 import GUI metadata。
 
 ```python
 from typing import Annotated

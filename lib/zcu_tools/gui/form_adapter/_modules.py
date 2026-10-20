@@ -52,6 +52,7 @@ from ._converters import module_converter
 from ._display import field_display
 from ._seeds import (
     complete_input,
+    declaration_seed,
     inline_wrapper,
     persistent_input,
     scalar_seed,
@@ -290,8 +291,12 @@ def _editable(annotation: object, seeds: Mapping[str, JsonValue]) -> object:
             _editable(member, seeds) for member in args if member is not QickParam
         )
         return union_type(items)
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return editable_spec(annotation, seeds)
+    if origin is list:
+        (element,) = args
+        if isinstance(element, type) and issubclass(element, BaseModel):
+            annotation = list[editable_spec(element, seeds)]
+    elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        annotation = editable_spec(annotation, seeds)
     return annotation
 
 
@@ -357,6 +362,21 @@ def _spec_display(name: str, info: FieldInfo) -> Display | None:
     return display
 
 
+def _list_seed_fields(rows: list[JsonValue]) -> dict[str, JsonValue]:
+    """Share expression requirements without borrowing a position's defaults."""
+    fields: dict[str, JsonValue] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for name, value in row.items():
+            previous = fields.get(name)
+            if isinstance(previous, list) and isinstance(value, list):
+                fields[name] = [*previous, *value]
+            elif not (isinstance(previous, dict) and "expr" in previous):
+                fields[name] = value
+    return fields
+
+
 def editable_spec(
     model: type[BaseModel],
     seeds: Mapping[str, JsonValue],
@@ -382,9 +402,14 @@ def editable_spec(
             annotations[name] = ClassVar[None]
             continue
         seed = seeds.get(name)
-        annotations[name] = _editable(
-            info.annotation, seed if isinstance(seed, dict) else {}
+        fields = (
+            seed
+            if isinstance(seed, dict)
+            else _list_seed_fields(seed)
+            if isinstance(seed, list)
+            else {}
         )
+        annotations[name] = _editable(info.annotation, fields)
         derived = deepcopy(info)
         if inline_wrapper(annotations[name]) is not None:
             derived.discriminator = (
@@ -399,6 +424,12 @@ def editable_spec(
             derived.default = PydanticUndefined
             derived.default_factory = None
         display = _spec_display(name, info)
+        if isinstance(seed, dict) and seed.get("hidden") is True:
+            if "value" in seed:
+                derived.default = seed["value"]
+                derived.default_factory = None
+                derived.validate_default = True
+            display = replace(display or Display(), hidden=True)
         if display is not None:
             derived.metadata.append(display)
         namespace[name] = derived
@@ -544,6 +575,8 @@ class ModuleField:
         self.ref_specs = self.specs if ref_specs is None else ref_specs
         self.path = path
         self.node = node
+        # List positions share visibility, never another position's literal/source.
+        self.shared_hidden_paths: frozenset[str] = frozenset()
         self.nullable = type(None) in members(annotation)
         self.catalog: Mapping[str, TemplateDef] = {}
         self.editable = tuple(editable_spec(spec, {}) for spec in self.specs)
@@ -677,7 +710,9 @@ class ModuleField:
             seeds = template_seed_tree(template, catalog)
         if isinstance(self.node, Slot):
             for path, value in self.node.set.items():
-                set_path(seeds, path, scalar_seed(value))
+                set_path(seeds, path, declaration_seed(value))
+        for path in self.shared_hidden_paths:
+            set_path(seeds, path, {"hidden": True})
         if seeds:
             self.editable = tuple(editable_spec(spec, seeds) for spec in self.specs)
             module = union_type(self.editable)
@@ -731,7 +766,9 @@ class ModuleField:
         )
         return {
             "kind": "inline",
-            "module": supported_input(selected, complete_input(selected, module)),
+            "module": supported_input(
+                selected, complete_input(selected, complete_input(type(spec), module))
+            ),
         }
 
     def native_input(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:

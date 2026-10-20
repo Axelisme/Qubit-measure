@@ -1,5 +1,7 @@
 """Starting values for singleshot/len_rabi; sources are captured at Open/Reset."""
 
+from dataclasses import replace
+
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -11,6 +13,10 @@ from zcu_lab.v2.singleshot.len_rabi.core import LenRabiCfg
 def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
     """Build starting values and shape from the captured source availability."""
     qub_pulse, length_stop = len_rabi_initial_values(ctx.parameters)
+    # This Run accepts only const/flat_top and replaces total pulse duration.
+    qub_pulse = replace(
+        qub_pulse, set={**qub_pulse.set, "waveform.length": Hidden(0.0)}
+    )
     return Form(
         LenRabiCfg,
         tree={

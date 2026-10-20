@@ -3,7 +3,12 @@
 from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import captured_mux_names, mux_relax_delay
+from zcu_lab.v2._support.measure.mux_forms import (
+    READOUT_ELEMENTS,
+    captured_mux_names,
+    mux_readout_initial,
+    mux_relax_delay,
+)
 
 from .core import MuxFreqCfg
 
@@ -24,7 +29,8 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
             "drive": Template(
                 "qub_probe",
                 bindings={"qubit": name},
-                set={"gain": 0.1, "waveform.length": 1.0},
+                # Run supplies this independent frequency scan.
+                set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
             ),
             "sweep": Range.around(f"{name}.freq", f"1.5 * {name}.kappa", expts=301),
         }
@@ -37,9 +43,7 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
         tree={
             "modules": {
                 "reset": Slot("$mux.module.reset"),
-                "readout": Slot("$mux.module.readout")
-                if ctx.has("$mux.module.readout")
-                else Template("readout/mux:blank"),
+                "readout": mux_readout_initial(ctx),
             },
             "tones": tones,
             "participants": list(names),
@@ -48,5 +52,16 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
             "reps": 1000,
             "rounds": 100,
         },
-        fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        fixed_elements=(
+            FixedElements(("tones",), "name", ("participants",)),
+            READOUT_ELEMENTS,
+        ),
+        field_order=(
+            "participants",
+            "tones",
+            "modules",
+            "relax_delay",
+            "reps",
+            "rounds",
+        ),
     )

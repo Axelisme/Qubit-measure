@@ -9,6 +9,7 @@ from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     Expr,
     FlatTopWaveformSpec,
+    Hidden,
     PulseReadoutSpec,
     PulseSpec,
     Slot,
@@ -669,6 +670,48 @@ def nested_copy_env(*, inline: bool = False) -> FormEnv:
             )
         )
     )
+
+
+@pytest.mark.parametrize("placement", ["template", "slot-copy"])
+def test_hidden_module_seeds_supply_literals_at_dotted_spec_paths(
+    placement: str,
+) -> None:
+    env = nested_copy_env()
+    overrides = {"freq": Hidden(0.0), "waveform.length": Hidden(0.5)}
+    node = (
+        Template("pulse", set=overrides)
+        if placement == "template"
+        else Slot("Q.pulses.probe", copy=True, set=overrides)
+    )
+    form = bound_form(node)
+    state = FormState(form.default_input(env))
+    for path in (
+        ("probe", "module", "freq"),
+        ("probe", "module", "waveform", "module", "length"),
+    ):
+        description = state.describe(path, env).target
+        assert description is not None and description.hidden
+    gain = state.describe(("probe", "module", "gain"), env).target
+    assert gain is not None and not gain.hidden and not gain.readonly
+    cfg = configured(form, state, env)
+    assert cfg.probe.freq == 0.0
+    assert cfg.probe.waveform.length == 0.5
+    state.write({("probe", "module", "gain"): 0.2}, env)
+    assert configured(form, state, env).probe.gain == 0.2
+
+
+@pytest.mark.parametrize("placement", ["template", "slot-copy"])
+def test_hidden_module_fill_does_not_bypass_spec_validation(placement: str) -> None:
+    env = environment()
+    node = (
+        Template("pulse", set={"freq": Hidden("not numeric")})
+        if placement == "template"
+        else Slot("Q.pulses.probe", copy=True, set={"freq": Hidden("not numeric")})
+    )
+    form = bound_form(node)
+    result = FormState(form.default_input(env)).result(env)
+    assert isinstance(result, FormErrors)
+    assert ("probe", "module", "freq") in result.messages
 
 
 def input_object(value: JsonValue) -> dict[str, JsonValue]:
