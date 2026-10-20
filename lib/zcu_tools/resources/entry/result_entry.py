@@ -6,11 +6,13 @@ import errno
 import os
 import shutil
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+from pydantic import TypeAdapter
 from ruamel.yaml import YAML
 
 from zcu_tools.cfg_model import WaveformAssetInfo
@@ -101,6 +103,24 @@ def rename_entry(
                 recovery_cause=recovery_cause,
             ) from cause
         raise
+
+
+@dataclass(frozen=True, kw_only=True)
+class EntryIdentity:
+    """Fixed values for creating a new entry, not ownership of existing paths.
+
+    entry_id is the UUID to write to setup. created_at is a timezone-aware UTC
+    datetime; non-UTC or naive times raise ValueError, invalid IDs ValidationError.
+    These values do not authorize opening, replacing or repairing any entry.
+    """
+
+    entry_id: UUID
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        TypeAdapter(UUID).validate_python(self.entry_id, strict=True)
+        if self.created_at.utcoffset() != timedelta(0):
+            raise ValueError("created_at must be a timezone-aware UTC datetime")
 
 
 class ResultEntry:
@@ -563,8 +583,25 @@ class ResultEntry:
 
     @classmethod
     def create(
-        cls, name: str, *, result_root: str | Path, database_root: str | Path
+        cls,
+        name: str,
+        *,
+        result_root: str | Path,
+        database_root: str | Path,
+        identity: EntryIdentity | None = None,
     ) -> ResultEntry:
+        """Create a complete new entry under two explicit roots.
+
+        name is a safe single path segment. identity fixes the setup UUID and UTC
+        creation time, or None generates both now. Neither mode adopts existing
+        destinations: collisions raise DestinationExistsError before writes.
+        Schema/I/O failures propagate and remove only directories created by this
+        call, retaining caller roots. No cross-file/power-loss guarantee is made.
+        """
+        if identity is None:
+            identity = EntryIdentity(
+                entry_id=uuid4(), created_at=datetime.now(timezone.utc)
+            )
         result_path = _entry_path(result_root, name, new_destination=True)
         database_path = _entry_path(database_root, name, new_destination=True)
         created: list[Path] = []
@@ -578,10 +615,10 @@ class ResultEntry:
                 "format": PARAMETER_FORMAT,
                 "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
                 "general": {
-                    "entry_id": str(uuid4()),
-                    "created_at": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
+                    "entry_id": str(identity.entry_id),
+                    "created_at": identity.created_at.isoformat().replace(
+                        "+00:00", "Z"
+                    ),
                 },
                 "components": {},
                 "metadata": {},

@@ -200,8 +200,9 @@ class MigrationRequest:
     results_root contains the new name entry; database_root also holds its heavy
     data entry. source_chip, source_qubit and name are safe single path segments,
     not physical identifiers to parse. part selects parameters, data or both.
-    dry_run reads only and publishes nothing. resume requires this tool's prior
-    manifest, never an arbitrary existing entry. report_path is an optional
+    dry_run reads only and publishes nothing. resume accepts this tool's prior
+    manifest or initialization ownership, never an arbitrary existing entry.
+    Initialization interruptions also recover without resume. report_path is an optional
     independent report file; None selects the shared backup's dated report.
     Completion also publishes a dated report in the entry records directory.
     run_evidence is the complete caller-loaded document or None. The converter
@@ -209,7 +210,8 @@ class MigrationRequest:
     repo_root is the checkout to exclude from backup, or None for this tool's
     checkout. backup_parent is an external directory, or None for repo_root.parent;
     the tool accumulates chip/qubit mirrors in its <repo-name>-backup child.
-    Either existing source mirror is refused before migration writes.
+    Matching source mirrors are verified/reused; partial mirrors are completed.
+    Different backup content is never overwritten.
     assume_flux_unit supplies A/mA/V/mV only when flux unit keys are absent;
     explicit invalid/conflicting evidence stays pending. assume_jpa_flux_unit
     independently supplies A/V only for absent JPA unit evidence; it never uses
@@ -361,6 +363,37 @@ class PreservedSampleField:
 
 
 @dataclass(frozen=True, kw_only=True)
+class ExistingItem:
+    """Verified existing content that was not rewritten.
+
+    source is the baseline input; destination is the reused absolute path.
+    comparison names the contract used (for example sha256 or backup-inventory).
+    summary describes the verified value, such as a lowercase SHA256 digest.
+    """
+
+    source: Path
+    destination: Path
+    comparison: str
+    summary: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class MigrationDifference:
+    """Located conflict, not authorization to overwrite either side.
+
+    source identifies the expected input and destination the conflicting path.
+    comparison names the comparison contract. expected and actual are readable
+    summaries (hashes, types, identities or typed values), not executable patches.
+    """
+
+    source: Path
+    destination: Path
+    comparison: str
+    expected: str
+    actual: str
+
+
+@dataclass(frozen=True, kw_only=True)
 class MigrationReport:
     """Cumulative report of attempted parts, not a claim that pending is empty.
 
@@ -373,6 +406,7 @@ class MigrationReport:
     backup_path is the external verified backup, or its planned path in dry_run;
     None is reserved for reports loaded without the backup extension.
     declarations records the operator inputs shared with the typed manifest.
+    skipped records verified existing items reused without rewriting content.
     preserved_sample_fields locates unsupported CSV cells retained verbatim in
     planned/published JSONL rows, separately from converted file actions.
     """
@@ -388,6 +422,7 @@ class MigrationReport:
     preserved_sample_fields: tuple[PreservedSampleField, ...] = ()
     pending: tuple[PendingItem, ...] = ()
     failures: tuple[FailureItem, ...] = ()
+    skipped: tuple[ExistingItem, ...] = ()
     backup_path: Path | None = None
     declarations: MigrationDeclarations = field(default_factory=MigrationDeclarations)
     format: str = "zcu.migration-report"
@@ -474,11 +509,13 @@ class MigrationBackup:
     binding complete relative file hashes and directory lists for this chip/qubit.
     source_hashes maps absolute original files to their backed-up SHA256, so
     publications reject changed/new sources before any individual move deletes.
+    skipped records existing files/inventories verified against these sources.
     """
 
     path: Path
     inventory_hashes: Mapping[str, str]
     source_hashes: Mapping[str, str]
+    skipped: tuple[ExistingItem, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)

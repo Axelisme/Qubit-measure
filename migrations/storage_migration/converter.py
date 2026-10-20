@@ -59,15 +59,23 @@ def migrate_storage(
     First execution verifies a complete external SHA256 backup before entry writes.
     Backup location comes from request.repo_root/backup_parent. Shared old/new
     result roots are allowed for independent entries; source overlaps and existing
-    destinations are refused. Raw-copy routes are preflighted before backup and
+    destinations without tool ownership are refused. Raw-copy routes are preflighted before backup and
     entry writes, rejecting reserved native paths and overlapping/occupied targets
     with source/destination diagnostics. Once both parts and all publications complete with
     no deferred point files, verify backup/current sources again, remove only
     the two old source trees, and locate permanent pending in the backup.
     Cleanup interruption resumes without rerunning conversions.
 
-    First execution refuses either existing destination and independent report.
-    resume only accepts this tool's matching manifest, immutable entry identity,
+    First execution fixes identity, declarations, source baseline, creation time
+    and report date/path in external initialization ownership before backup/entry
+    writes. Matching backups are reused unchanged, missing backup items filled,
+    differing content rejected with typed located differences. Initial entries
+    are created under recorded sibling temporary names then renamed to final
+    paths. An interruption before the first manifest automatically recovers from
+    that ownership, preserving fixed values; arbitrary entries are never adopted.
+    Initial YAML comparisons use owner types and retain unknown raw fields.
+    resume accepts this tool's matching manifest or initialization ownership,
+    immutable entry identity,
     exact mapping revision and owned file hashes. It reuses run assignments and
     completes planned/prepared/published moves without deleting unverified sources.
     Completed setup/point documents remain editable and are validated, not restored.

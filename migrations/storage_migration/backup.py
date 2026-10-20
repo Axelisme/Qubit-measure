@@ -1,5 +1,6 @@
 """Complete external source backups and hash-guarded, resumable source cleanup."""
 
+import hashlib
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -8,7 +9,14 @@ from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
 
 from .errors import MigrationInputError
-from .models import MigrationBackup, MigrationRequest, MigrationSource, PendingItem
+from .models import (
+    ExistingItem,
+    MigrationBackup,
+    MigrationDifference,
+    MigrationRequest,
+    MigrationSource,
+    PendingItem,
+)
 from .state import MigrationSession, file_hash
 
 
@@ -24,6 +32,17 @@ class BackupInventory:
 
     hashes: Mapping[str, str]
     directories: tuple[str, ...]
+
+    @property
+    def summary(self) -> str:
+        """Return file/directory counts and a typed-inventory SHA256 for diagnostics.
+
+        This hashes the complete listing in memory, not files on disk. It does
+        not verify the backup or change it. The digest distinguishes differing
+        listings without printing every source path in a conflict message.
+        """
+        digest = hashlib.sha256(_INVENTORY.dump_json(self)).hexdigest()
+        return f"{len(self.hashes)} files, {len(self.directories)} directories, sha256={digest}"
 
 
 _INVENTORY = TypeAdapter(BackupInventory)
@@ -144,28 +163,73 @@ def _source_roots(source: MigrationSource) -> dict[str, Path]:
     return {"result": source.result_path, "Database": source.database_path}
 
 
+def inventory_paths(roots: Mapping[str, Path]) -> BackupInventory:
+    """Snapshot complete regular directory trees under caller-supplied labels.
+
+    roots maps nonoverlapping labels to exact directory paths. Return SHA256
+    hashes and every directory under label/relative-path, including empty roots.
+    No writes occur. Reject missing roots, symlinks and non-regular files with
+    MigrationInputError; read errors propagate. This listing does not authorize
+    overwrites, adoption or cleanup and does not coordinate concurrent writers.
+    """
+    return _inventory(roots)
+
+
+def snapshot_sources(source: MigrationSource) -> BackupInventory:
+    """Read complete live source hashes and directories without writing anything.
+
+    source supplies the selected result/Database trees. Return result/Database
+    relative labels, including empty roots. Reject missing roots, symlinks and
+    non-regular files with MigrationInputError; read errors propagate. A snapshot
+    is a baseline, not backup verification or cleanup authorization.
+    """
+    return _inventory(_source_roots(source))
+
+
 def create_backup(
     path: Path, source: MigrationSource, *, dry_run: bool
 ) -> MigrationBackup | None:
     """Copy complete sources into a shared root and publish two verified hash lists.
 
-    Refuse either existing chip/qubit mirror or records directory, symlinks and
-    non-regular files. Unrelated backups remain untouched. dry_run validates but
-    writes nothing and returns None. Failures retain partial backups for operator
-    review, never grant migration permission or remove the shared root.
+    path is a validated external backup root; source supplies complete live trees.
+    Verify every existing file/directory and inventory against those trees before
+    any write. Matching files/lists are reused unchanged, missing items copied.
+    Return verified inventories/source hashes and typed skipped items. Differences
+    raise MigrationInputError with located comparisons, without overwriting or
+    filling gaps. Symlinks and non-regular files are always refused. Unrelated
+    chip/qubit backups remain untouched. dry_run performs the same preflight,
+    writes nothing and returns None. I/O failures propagate; incomplete backups
+    never authorize conversion/cleanup. No concurrent-writer guarantee is made.
     """
     mirrors = _mirror_roots(path, source)
     records = backup_records_path(path, source)
     for target in (*mirrors.values(), records):
         _reject_symlinks(target)
-        if target.exists():
-            raise FileExistsError(target)
-    inventory = _inventory(_source_roots(source))
+    if records.exists() and not records.is_dir():
+        raise MigrationInputError(
+            "backup records conflict",
+            differences=(
+                MigrationDifference(
+                    source=source.result_path,
+                    destination=records,
+                    comparison="file-type",
+                    expected="directory",
+                    actual="non-directory",
+                ),
+            ),
+        )
+    inventory = snapshot_sources(source)
+    skipped = _preflight_backup(path, source, inventory)
     if dry_run:
         return None
-    for label, root in _source_roots(source).items():
-        mirrors[label].parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(root, mirrors[label], copy_function=shutil.copy2)
+    for relative in inventory.directories:
+        label, _, name = relative.partition("/")
+        (mirrors[label] / name).mkdir(parents=True, exist_ok=True)
+    for relative in inventory.hashes:
+        label, name = relative.split("/", 1)
+        target = mirrors[label] / name
+        if not target.exists():
+            shutil.copy2(_source_roots(source)[label] / name, target)
     if (
         _inventory(mirrors) != inventory
         or _inventory(_source_roots(source)) != inventory
@@ -173,23 +237,129 @@ def create_backup(
         raise MigrationInputError(
             f"{path}: backup verification failed or sources changed"
         )
-    records.mkdir(parents=True, exist_ok=False)
+    records.mkdir(parents=True, exist_ok=True)
     inventory_hashes: dict[str, str] = {}
     for label, mirror in mirrors.items():
         inventory_path = records / f"{label}.sha256"
         mirror_label = mirror.relative_to(path).as_posix()
-        with inventory_path.open("xb") as stream:
-            stream.write(
-                _INVENTORY.dump_json(_inventory({mirror_label: mirror}), indent=2)
-            )
+        if not inventory_path.exists():
+            with inventory_path.open("xb") as stream:
+                stream.write(
+                    _INVENTORY.dump_json(_inventory({mirror_label: mirror}), indent=2)
+                )
         inventory_hashes[label] = file_hash(inventory_path)
     backup = MigrationBackup(
         path=path,
         inventory_hashes=inventory_hashes,
         source_hashes=_absolute_hashes(inventory, source),
+        skipped=skipped,
     )
     verify_backup(backup, source)
     return backup
+
+
+def _compare_inventory(
+    path: Path, source: Path, expected: BackupInventory
+) -> ExistingItem | MigrationDifference:
+    actual = "non-regular inventory file"
+    if path.is_file():
+        try:
+            inventory = _INVENTORY.validate_json(path.read_bytes(), strict=True)
+        except ValidationError:
+            actual = "invalid JSON or backup-inventory shape"
+        else:
+            if inventory == expected:
+                return ExistingItem(
+                    source=source,
+                    destination=path,
+                    comparison="backup-inventory",
+                    summary=file_hash(path),
+                )
+            actual = inventory.summary
+    return MigrationDifference(
+        source=source,
+        destination=path,
+        comparison="backup-inventory",
+        expected=expected.summary,
+        actual=actual,
+    )
+
+
+def _preflight_backup(
+    path: Path, source: MigrationSource, expected: BackupInventory
+) -> tuple[ExistingItem, ...]:
+    mirrors = _mirror_roots(path, source)
+    sources = _source_roots(source)
+    differences: list[MigrationDifference] = []
+    skipped: list[ExistingItem] = []
+    for label, mirror in mirrors.items():
+        if mirror.exists() and not mirror.is_dir():
+            differences.append(
+                MigrationDifference(
+                    source=sources[label],
+                    destination=mirror,
+                    comparison="file-type",
+                    expected="directory",
+                    actual="non-directory",
+                )
+            )
+            continue
+        current = _inventory({label: mirror}, missing_ok=True)
+        for relative in sorted(set(current.hashes) | set(current.directories)):
+            _, _, name = relative.partition("/")
+            actual = current.hashes.get(relative, "directory")
+            wanted = expected.hashes.get(relative)
+            if wanted is None:
+                wanted = "directory" if relative in expected.directories else "absent"
+            if actual != wanted:
+                differences.append(
+                    MigrationDifference(
+                        source=sources[label] / name,
+                        destination=mirror / name,
+                        comparison="sha256"
+                        if relative in current.hashes and relative in expected.hashes
+                        else "file-type",
+                        expected=wanted,
+                        actual=actual,
+                    )
+                )
+            elif relative in current.hashes:
+                skipped.append(
+                    ExistingItem(
+                        source=sources[label] / name,
+                        destination=mirror / name,
+                        comparison="sha256",
+                        summary=actual,
+                    )
+                )
+        inventory_path = backup_records_path(path, source) / f"{label}.sha256"
+        _reject_symlinks(inventory_path)
+        if inventory_path.exists():
+            mirror_label = mirror.relative_to(path).as_posix()
+            wanted_inventory = BackupInventory(
+                hashes={
+                    f"{mirror_label}{key.removeprefix(label)}": value
+                    for key, value in expected.hashes.items()
+                    if key.startswith(f"{label}/")
+                },
+                directories=tuple(
+                    f"{mirror_label}{key.removeprefix(label)}"
+                    for key in expected.directories
+                    if key == label or key.startswith(f"{label}/")
+                ),
+            )
+            comparison = _compare_inventory(
+                inventory_path, sources[label], wanted_inventory
+            )
+            if isinstance(comparison, MigrationDifference):
+                differences.append(comparison)
+            else:
+                skipped.append(comparison)
+    if differences:
+        raise MigrationInputError(
+            "backup differs from source", differences=tuple(differences)
+        )
+    return tuple(skipped)
 
 
 def verify_backup(backup: MigrationBackup, source: MigrationSource) -> BackupInventory:

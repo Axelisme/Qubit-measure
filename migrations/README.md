@@ -24,7 +24,7 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
   --backup-parent <external-backup-parent> --dry-run
 ```
 
-正式執行前，依遷移說明書核對報告與備份位置。預設備份累積在 checkout 平行的 `<checkout-name>-backup/`，保留 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`。共用根可以已存在，本次任一鏡像已存在就停止。逐檔 hash 清單與自動日期報告在 `migration-records/<chip>/<qubit>/`，不寫入來源鏡像。兩部分與安全清理完成後，entry 的 `records/` 另存日期報告。`--qubit-kind` 須符合來源元件，不由工具推論。
+正式執行前，依遷移說明書核對報告與備份位置。預設備份累積在 checkout 平行的 `<checkout-name>-backup/`，保留 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`。共用根可以已存在。本次鏡像先核對完整來源，相同檔案略過，缺項補完，不同內容或額外項目停止且不覆寫。初始化 ownership 固定 identity 與生成值，備份／entry 初始化中斷可直接用原指令重跑，不認領無工具紀錄的 entry。逐檔 hash 清單與自動日期報告在 `migration-records/<chip>/<qubit>/`，不寫入來源鏡像。兩部分與安全清理完成後，entry 的 `records/` 另存日期報告。`--qubit-kind` 須符合來源元件，不由工具推論。
 
 需要操作者宣告單位或 CSV 欄位時，在首次 dry-run 與正式執行明填：
 

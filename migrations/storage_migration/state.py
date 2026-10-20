@@ -68,6 +68,18 @@ def _merge_raw(raw: JsonValue, known: JsonValue) -> JsonValue:
     return known
 
 
+def overlay_known_fields(raw: JsonObject, known: JsonObject) -> JsonObject:
+    """Overlay typed fields on a loaded JSON tree while retaining unknown fields.
+
+    raw is an original wire mapping and known its validated/normalized projection.
+    Nested mappings retain unknown keys; lists follow known order and match
+    identity-bearing rows by source/destination/operation keys when available.
+    Return an isolated JSON mapping; neither input is changed and no I/O occurs.
+    Known values win conflicts. This does not validate an artifact's schema.
+    """
+    return _JSON.validate_python(_merge_raw(raw, known), strict=True)
+
+
 def report_json(report: MigrationReport) -> JsonObject:
     """Encode known report fields over its raw future fields without writing files."""
     known = _JSON.validate_json(_REPORT.dump_json(report, exclude={"raw"}))

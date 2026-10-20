@@ -8,7 +8,9 @@ entry definition registration and native experiment validation.
 from .converter import migrate_storage
 from .errors import MigrationInputError
 from .evidence import load_run_evidence
+from .initialization import InitializationDocument, InitializationOwnership
 from .models import (
+    ExistingItem,
     FailureItem,
     FileMigrationItem,
     KeyMappingItem,
@@ -22,6 +24,7 @@ from .models import (
     MigrationBackup,
     MigrationDeclarations,
     MigrationDestination,
+    MigrationDifference,
     MigrationFileState,
     MigrationIdentity,
     MigrationManifest,
@@ -40,8 +43,11 @@ from .models import (
 from .state import report_json
 
 __all__ = [
+    "ExistingItem",
     "FailureItem",
     "FileMigrationItem",
+    "InitializationDocument",
+    "InitializationOwnership",
     "KeyMappingItem",
     "KeyRule",
     "LegacyCloneOrigin",
@@ -53,6 +59,7 @@ __all__ = [
     "MigrationBackup",
     "MigrationDeclarations",
     "MigrationDestination",
+    "MigrationDifference",
     "MigrationFileState",
     "MigrationIdentity",
     "MigrationInputError",

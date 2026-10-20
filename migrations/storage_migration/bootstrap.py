@@ -16,12 +16,12 @@ from zcu_tools.resources.entry import (
 from .backup import (
     backup_location,
     backup_records_path,
-    create_backup,
     validate_backup_report_path,
     validate_backup_sources,
 )
 from .errors import MigrationInputError
 from .evidence import validate_run_evidence
+from .initialization import initialize_entry
 from .models import (
     MigrationDeclarations,
     MigrationDestination,
@@ -248,9 +248,6 @@ def _new_session(
     source: MigrationSource,
     destination: MigrationDestination,
 ) -> tuple[MigrationManifest, ResultEntry | None]:
-    for target in (destination.result_path, destination.database_path):
-        if target.exists() or target.is_symlink():
-            raise FileExistsError(target)
     backup_path = backup_location(request, source)
     report_date = datetime.now(timezone.utc).date()
     report_path = (
@@ -259,8 +256,6 @@ def _new_session(
         else backup_records_path(backup_path, source)
         / f"migration-report-{report_date}.json"
     )
-    if report_path.exists() or report_path.is_symlink():
-        raise FileExistsError(report_path)
     if request.report_path is not None:
         if any(
             report_path.is_relative_to(root)
@@ -276,17 +271,7 @@ def _new_session(
             )
         if not report_path.parent.is_dir():
             raise MigrationInputError(f"{report_path}: report parent must exist")
-    preflight_preservation(source, destination, _declarations(request))
-    backup = create_backup(backup_path, source, dry_run=request.dry_run)
-    entry = None
     entry_id = uuid4()
-    if not request.dry_run:
-        entry = ResultEntry.create(
-            request.name,
-            result_root=request.results_root,
-            database_root=request.database_root,
-        )
-        entry_id = UUID(entry.entry_id)
     report = MigrationReport(
         source=source,
         destination=destination,
@@ -307,9 +292,8 @@ def _new_session(
         parameters_complete=False,
         data_complete=False,
         report=report,
-        backup=backup,
     )
-    return manifest, entry
+    return initialize_entry(request, manifest)
 
 
 def publish_report(session: MigrationSession) -> None:
@@ -399,18 +383,27 @@ def prepare_session(
     """Resolve and validate request paths, then create or resume this tool's entry.
 
     mapping supplies the exact revision required on resume. Return a session and
-    entry handle, or None for a new dry-run entry. Refuse collisions, overlapping
+    entry handle, or None for a dry-run initial entry. Refuse collisions, overlapping
     trees, invalid current containers or conflicting manifest/hash/identity with
     MigrationInputError/FileExistsError. Checkpoint initial ownership before source
-    operations. Complete and verify the external backup before creating any entry;
-    resume verifies that backup independently of removed old sources. Bootstrap
-    does not delete sources; I/O/schema failures propagate."""
+    operations. An external initialization record fixes values before backup or
+    staging writes and permits direct reruns before the first manifest. Complete
+    and verify the external backup before creating any entry. Matching backups
+    are reused; missing items are filled without replacing differing content.
+    Manifest resume verifies the backup independently of removed old sources.
+    Bootstrap does not delete sources; I/O/schema failures propagate."""
     _declarations(request)
     source, destination = _locations(request)
     path = destination.result_path / "records" / "migration-state.json"
-    if request.resume:
+    if request.resume and path.is_file():
         manifest, entry = _resume_session(request, mapping, path, source, destination)
     else:
+        ownership_path = (
+            backup_records_path(backup_location(request, source), source)
+            / "migration-initialization.json"
+        )
+        if request.resume and not ownership_path.is_file():
+            raise MigrationInputError(f"{path}: resume requires this tool's manifest")
         manifest, entry = _new_session(request, mapping, source, destination)
     session = MigrationSession(path, manifest, dry_run=request.dry_run)
     validate_owned_state(session, entry=entry)
