@@ -805,7 +805,7 @@ def constant_retentions(
             ):
                 results.append(None)
                 continue
-            model = context.source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(context.source, row)
             results.append(
                 _resolve_retention(
                     model,
@@ -831,7 +831,7 @@ def multitone_retention(
     the final mask. Phase and dimension limits are part of its policy identity.
     """
     count = int(table.tones[row])
-    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    model = table.model(context.source, row)
     ports = tuple(int(v) for v in table.tone_port[row, :count])
     frequencies = tuple(float(v) for v in table.tone_frequency_ghz[row, :count])
     bounds = envelope_bounds(table, context.work_plan)
@@ -952,7 +952,7 @@ def _admit_rows(
             and np.any(np.diff(np.sort(frequencies)) < 2 * _EDGE_GHZ)
         ):
             continue
-        model = context.source.model(tuple(int(v) for v in table.level[row]))
+        model = table.model(context.source, row)
         if adaptive_multitone or (single_tone and not constant_single):
             resolved = multitone_retention(table, int(row), context)
             # Shaped single gates and ordinary multitone request both limits.
@@ -1224,12 +1224,7 @@ class MultitoneRWAKernel:
         tolerances(context.budget)
         if len(keys) != len(rows):
             raise ValueError("RWA keys and representative rows must align")
-        models = pack_models(
-            [
-                context.source.model(tuple(int(v) for v in table.level[row]))
-                for row in rows
-            ]
-        )
+        models = pack_models([table.model(context.source, row) for row in rows])
         positive = np.zeros(
             (
                 len(rows),
@@ -1245,7 +1240,7 @@ class MultitoneRWAKernel:
         )
         for index, row in enumerate(rows):
             count = int(table.tones[row])
-            model = context.source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(context.source, row)
             coefficients = rwa_coefficients(
                 model,
                 tuple(int(v) for v in table.tone_port[row, :count]),

@@ -90,7 +90,7 @@ def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> byte
     Guard admission is required before using this equivalence for playback.
     """
     count = table.tones[row]
-    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    model = table.model(context.source, row)
     retention = _row_retention(table, row, context)
     policy = SINGLE_GATE_POLICY if retention is not None else GATE_POLICY
     digest = sha256(repr((policy, model.identity, model.level)).encode())
@@ -139,6 +139,7 @@ def canonical_keys(table: SegmentTable, context: KernelContext) -> tuple[bytes, 
                 np.ascontiguousarray(array[rows]).reshape(len(rows), -1).view(np.uint8)
                 for array in (
                     table.level,
+                    table.shift_content,
                     table.tones,
                     table.duration_ns,
                     table.tone_port,
@@ -177,7 +178,7 @@ def _row_retention(
 def _row_graph(table: SegmentTable, row: int, context: KernelContext) -> PhaseGraph:
     count = table.tones[row]
     return phase_graph(
-        context.source.model(tuple(int(v) for v in table.level[row])),
+        table.model(context.source, row),
         tuple(int(v) for v in table.tone_port[row, :count]),
         tuple(float(v) for v in table.tone_frequency_ghz[row, :count]),
         context.work_plan,
@@ -265,7 +266,7 @@ def gate_segments(table: SegmentTable, row: int, context: KernelContext) -> int:
 
     def build() -> int:
         graph = _row_graph(table, row, context)
-        model = context.source.model(tuple(int(v) for v in table.level[row]))
+        model = table.model(context.source, row)
         peaks = envelope_bounds(table, context.work_plan).peaks
         amplitudes = (
             np.abs(table.tone_amplitude[row, : table.tones[row]])
@@ -456,7 +457,7 @@ def _build_unitaries(
     graph: PhaseGraph,
     segments: int,
 ) -> NDArray[np.complex128]:
-    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    model = table.model(context.source, row)
     count = table.tones[row]
     energy = model.energies_ghz + graph.charges @ table.tone_frequency_ghz[row, :count]
     energy -= energy[0]
@@ -643,7 +644,7 @@ class CovariantGateKernel:
         width = int(np.max(table.tones[rows], initial=0))
         for row, count in zip(rows, segments, strict=True):
             graph = _row_graph(table, int(row), context)
-            model = context.source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(context.source, row)
             u = _build_unitaries(table, int(row), context, graph, int(count))
             padding = int(segments.max() - count)
             unitaries.append(

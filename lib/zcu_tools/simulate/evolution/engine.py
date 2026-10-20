@@ -21,11 +21,11 @@ from numpy.typing import NDArray
 from ._envelope import sample_values
 from ._parallel import execution_pool, native_limit
 from ._validation import integers, owned, shape
-from .secular import FluxSchedule, FluxWaveform, ModelSource
+from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v4"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v5"
 
 
 @dataclass(frozen=True)
@@ -162,7 +162,13 @@ class TimelineBatch:
     flux_waveform: optional continuous absolute flux samples in batch point
         order, with the same loop count as flux. Required by flux_dop853.
         None means no continuous samples were supplied.
-    Arrays own read-only copies.
+    segment_boundaries: optional point-aligned tuples of strictly increasing,
+        finite absolute ns in [0, end_ns]. Empty outer tuple means none.
+    segment_shifts: optional point-aligned tuples of SegmentShift in increasing
+        span order. Each span must exactly match a segment_spans result; shifts
+        never introduce boundaries. Unlisted spans have zero shift. Empty outer
+        tuple means no shifts. State order is the physical flux model basis.
+    Arrays own read-only copies. Invalid boundaries/spans fail at construction.
 
     Raises:
         ValueError: message names shape for misaligned per-point arrays,
@@ -174,6 +180,8 @@ class TimelineBatch:
     flux: FluxSchedule
     end_ns: NDArray[np.float64]
     flux_waveform: FluxWaveform | None = None
+    segment_boundaries: tuple[tuple[float, ...], ...] = ()
+    segment_shifts: tuple[tuple[SegmentShift, ...], ...] = ()
 
     def __post_init__(self) -> None:
         points = integers(self.points, "point indices")
@@ -197,6 +205,67 @@ class TimelineBatch:
             shape(track.start_ns, points.shape, "drive track")
         object.__setattr__(self, "points", points)
         object.__setattr__(self, "end_ns", end)
+        self._validate_segments()
+
+    def _validate_segments(self) -> None:
+        boundaries = tuple(
+            tuple(float(t) for t in times) for times in self.segment_boundaries
+        )
+        if boundaries and len(boundaries) != len(self.points):
+            raise ValueError("segment boundaries must match points")
+        for point, times in enumerate(boundaries):
+            values = np.asarray(times)
+            if (
+                not np.isfinite(values).all()
+                or np.any(values < 0)
+                or np.any(values > self.end_ns[point])
+                or np.any(np.diff(values) <= 0)
+            ):
+                raise ValueError(
+                    "segment boundaries must increase within readout times"
+                )
+        shifts = tuple(tuple(point) for point in self.segment_shifts)
+        if shifts and len(shifts) != len(self.points):
+            raise ValueError("segment shifts must match points")
+        object.__setattr__(self, "segment_boundaries", boundaries)
+        object.__setattr__(self, "segment_shifts", shifts)
+        if shifts:
+            for supplied, spans in zip(shifts, segment_spans(self), strict=True):
+                previous_end = -1.0
+                for shift in supplied:
+                    if (
+                        shift.start_ns,
+                        shift.end_ns,
+                    ) not in spans or shift.start_ns < previous_end:
+                        raise ValueError(
+                            "shift span must match a final segment without overlap"
+                        )
+                    previous_end = shift.end_ns
+
+
+def segment_spans(batch: TimelineBatch) -> tuple[tuple[tuple[float, float], ...], ...]:
+    """Query final half-open ns spans, in batch point order, without model/cache work.
+
+    Spans touch without overlap and cover [0, end_ns]; zero duration gives ().
+    Uses exactly evolve's flux, active microwave/plateau and neutral boundaries.
+    SegmentShift values do not change this partition. No kernel is prepared and
+    neither a ModelSource nor an Engine is needed. Invalid batch input raises
+    ValueError at TimelineBatch construction.
+    """
+    from ._planning import batch_boundaries
+
+    events, ends, _ = batch_boundaries(batch, {})
+    return tuple(
+        tuple(
+            (float(a), float(b))
+            for a, b in zip(
+                events["time"][events["timeline"] == point],
+                ends[events["timeline"] == point],
+                strict=True,
+            )
+        )
+        for point in range(len(batch.points))
+    )
 
 
 @dataclass(frozen=True)

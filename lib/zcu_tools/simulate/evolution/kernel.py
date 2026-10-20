@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, SupportsIndex
 
 import numpy as np
 from numpy.typing import NDArray
@@ -82,6 +82,9 @@ class SegmentTable:
     prefix_group: tuple[int | None, ...] | None = None
     prefix_no_drive: tuple[bool, ...] = ()
     prefix_inputs: Mapping[int, NDArray[np.complex128]] = field(default_factory=dict)
+    shift_content: NDArray[np.bytes_] = field(
+        default_factory=lambda: np.empty(0, dtype="S64")
+    )
 
     def __post_init__(self) -> None:
         timeline = integers(self.timeline, "segment timelines")
@@ -112,8 +115,26 @@ class SegmentTable:
             )
             shape(mask, (len(self.flux_waveform.offsets) - 1,), "waveform availability")
             object.__setattr__(self, "flux_waveform_available", mask)
+        shifts = (
+            np.zeros(rows, dtype="S64")
+            if not len(self.shift_content)
+            else np.array(self.shift_content, dtype="S64", copy=True)
+        )
+        shape(shifts, (rows,), "segment shift content")
+        shifts.setflags(write=False)
+        object.__setattr__(self, "shift_content", shifts)
         self._validate_prefixes(rows)
         self._validate_tones(rows)
+
+    def model(self, source: ModelSource, row: SupportsIndex):
+        """Resolve a row by physical flux and its independent shift identity."""
+        return source.shifted_model(
+            tuple(int(v) for v in self.level[int(row)]), self.shift(row)
+        )
+
+    def shift(self, row: SupportsIndex) -> bytes:
+        """Return the normalized model-only shift fingerprint."""
+        return bytes(self.shift_content[int(row)])
 
     def constant_envelopes(self, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
         """Return row-aligned bools: every active envelope has kind constant.

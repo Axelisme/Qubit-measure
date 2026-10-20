@@ -156,7 +156,9 @@ class PeriodTableKernel:
         tail_budget = min(budget, 1e-8)
         entries = []
         for key in keys:
-            model = source.model(tuple(int(v) for v in key["level"]))
+            model = source.shifted_model(
+                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+            )
             frequency = float(key["frequency"])
             bound = float(2.0 ** int(key["band"]))
             size = len(model.energies_ghz)

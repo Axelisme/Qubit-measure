@@ -10,7 +10,7 @@ from .kernel import KernelContext, SegmentTable
 from .kernels._cf4_grid import coarse_count, finer_count, spectral_width
 from .kernels._cf4_spectral import CF4Grids, CF4Nodes, carrier_grids
 from .kernels.floquet_period import PeriodAnchor, PeriodBuilder
-from .secular import ModelSource, SecularModel
+from .secular import ModelIdentity, ModelSource, SecularModel
 from .workplan import (
     CF4CarrierGroupPlan,
     FactKey,
@@ -44,13 +44,13 @@ def period_builder(
 
 def period_gain_coordinates(
     table: SegmentTable,
-) -> dict[tuple[tuple[int, ...], int, float], tuple[float, ...]]:
+) -> dict[tuple[ModelIdentity, int, float], tuple[float, ...]]:
     """Collect complete-table low-carrier gain groups, before model selection.
 
     Only constant single tones with .03 <= |f| < 1 GHz participate; groups
     need at least two distinct gains before removing spectral candidates.
     """
-    groups: dict[tuple[tuple[int, ...], int, float], set[float]] = {}
+    groups: dict[tuple[ModelIdentity, int, float], set[float]] = {}
     rows = np.flatnonzero(table.tones == 1)
     rows = rows[table.constant_envelopes(rows)]
     for row in rows:
@@ -58,7 +58,7 @@ def period_gain_coordinates(
         if not 0.03 <= abs(frequency) < 1.0:
             continue
         key = (
-            tuple(int(v) for v in table.level[row]),
+            ModelIdentity(tuple(int(v) for v in table.level[row]), table.shift(row)),
             int(table.tone_port[row, 0]),
             frequency,
         )
@@ -110,8 +110,9 @@ def plan_gain_groups(table: SegmentTable, source: ModelSource, plan: WorkPlan) -
     """
     plan.fact(_FULL_TABLE_ROWS, lambda: len(table.timeline))
     groups = []
-    for (level, port, frequency), gains in period_gain_coordinates(table).items():
-        model = source.model(level)
+    for (identity, port, frequency), gains in period_gain_coordinates(table).items():
+        level = identity.physical_flux
+        model = source.shifted_model(level, identity.shift_content)
         builders = period_builders(model, port, frequency, gains)
         groups.append(
             GainGroupPlan(
@@ -124,6 +125,7 @@ def plan_gain_groups(table: SegmentTable, source: ModelSource, plan: WorkPlan) -
                     GainBuildPlan(gain, b.kind, b.work_limit, b.anchors)
                     for gain, b in builders.items()
                 ),
+                identity.shift_content,
             )
         )
     plan.publish_gain_groups(tuple(groups))
@@ -133,21 +135,30 @@ def plan_gain_groups(table: SegmentTable, source: ModelSource, plan: WorkPlan) -
 def _plan_cf4_carriers(
     table: SegmentTable, source: ModelSource, plan: WorkPlan
 ) -> None:
-    inventories: dict[tuple[tuple[int, ...], int, float], set[float]] = {}
+    inventories: dict[tuple[ModelIdentity, int, float], set[float]] = {}
     rows = np.flatnonzero(table.tones == 1)
     rows = rows[table.constant_envelopes(rows)]
-    gain_groups = {(g.level, g.port, g.frequency_ghz) for g in plan.gain_groups}
+    gain_groups = {
+        (ModelIdentity(g.level, g.shift_content), g.port, g.frequency_ghz)
+        for g in plan.gain_groups
+    }
     for row in rows:
-        level = tuple(int(v) for v in table.level[row])
+        identity = ModelIdentity(
+            tuple(int(v) for v in table.level[row]), table.shift(row)
+        )
         port = int(table.tone_port[row, 0])
         frequency = float(table.tone_frequency_ghz[row, 0])
         # Keep gain sharing authoritative for every overlapping physical key.
-        if not 0.03 <= abs(frequency) < 1.0 or (level, port, frequency) in gain_groups:
+        if (
+            not 0.03 <= abs(frequency) < 1.0
+            or (identity, port, frequency) in gain_groups
+        ):
             continue
         gain = float(table.tone_amplitude[row, 0])
-        inventories.setdefault((level, port, gain), set()).add(frequency)
+        inventories.setdefault((identity, port, gain), set()).add(frequency)
     groups = []
-    for (level, port, gain), frequencies in inventories.items():
+    for (identity, port, gain), frequencies in inventories.items():
+        level = identity.physical_flux
         carriers = tuple(sorted(frequencies))
         magnitudes = np.abs(carriers)
         if (
@@ -156,7 +167,7 @@ def _plan_cf4_carriers(
             or max(magnitudes) > 1.01 * min(magnitudes)
         ):
             continue
-        model = source.model(level)
+        model = source.shifted_model(level, identity.shift_content)
         # Do not recruit spectral or high-carrier keys into CF4 dependencies.
         if any(period_builder(model, port, f, gain).kind != "cf4" for f in carriers):
             continue
@@ -165,7 +176,15 @@ def _plan_cf4_carriers(
             for i in np.linspace(0, len(carriers) - 1, 4).round().astype(int)
         )
         groups.append(
-            CF4CarrierGroupPlan(model.identity, level, port, gain, carriers, anchors)
+            CF4CarrierGroupPlan(
+                model.identity,
+                level,
+                port,
+                gain,
+                carriers,
+                anchors,
+                identity.shift_content,
+            )
         )
     plan.publish_cf4_carrier_groups(tuple(groups))
 
@@ -232,7 +251,7 @@ def carrier_node_resources(
     """
 
     def inventory() -> CF4Grids:
-        model = context.source.model(group.level)
+        model = context.source.shifted_model(group.level, group.shift_content)
         drive = model.drives[group.port]
         return carrier_grids(
             model.energies_ghz,
@@ -425,6 +444,7 @@ def _carriers_at(
         & table.constant_envelopes(rows)
         & np.all(table.level[rows] == group.level, axis=1)
         & (table.tone_port[rows, 0] == group.port)
+        & (table.shift_content[rows] == group.shift_content)
         & (table.tone_amplitude[rows, 0] == group.gain)
     ]
     return set(table.tone_frequency_ghz[selected, 0].tolist()).intersection(
@@ -440,6 +460,7 @@ def _gains_at(
         & table.constant_envelopes(rows)
         & np.all(table.level[rows] == group.level, axis=1)
         & (table.tone_port[rows, 0] == group.port)
+        & (table.shift_content[rows] == group.shift_content)
         & (table.tone_frequency_ghz[rows, 0] == group.frequency_ghz)
     ]
     return set(table.tone_amplitude[selected, 0].tolist()).intersection(group.gains)

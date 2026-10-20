@@ -20,14 +20,14 @@ def drive_bounds(
     Reuse model/level/port scalars across this evolve's guard and build calls.
     Resolve row mapping once per level/port in this call. No density is read.
     """
-    bounds: dict[tuple[tuple[int, ...], int], tuple[float, float]] = {}
+    bounds: dict[tuple[tuple[int, ...], bytes, int], tuple[float, float]] = {}
     strengths, rates = np.empty(len(rows)), np.empty(len(rows))
     for index, row in enumerate(rows):
         level = tuple(int(v) for v in table.level[row])
         port = int(table.tone_port[row, 0])
-        key = level, port
+        key = level, table.shift(row), port
         if key not in bounds:
-            model = source.model(level)
+            model = table.model(source, row)
             bound = drive_bound(model, port, work_plan)
             bounds[key] = bound.strength, bound.rate
         strengths[index], rates[index] = bounds[key]

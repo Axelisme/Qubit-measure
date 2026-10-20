@@ -1,7 +1,8 @@
 """Secular models and quantized flux in ns/GHz, independent of model builders."""
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from hashlib import sha256
 from threading import Lock
 from typing import Literal
 
@@ -16,6 +17,70 @@ FluxLevel = tuple[int, ...]
 The all-zero tuple denotes the DC model. Tuple order is supplied by the model
 builder (F1, C, F2 for FTF).
 """
+
+
+@dataclass(frozen=True, eq=False)
+class SegmentShift:
+    """Constant segment correction in the physical flux model's state order.
+
+    start_ns, end_ns: finite absolute ns, 0 <= start < end. TimelineBatch
+        requires an exact final segment span; adjacent spans may touch, not
+        overlap. Missing spans are zero, not a hold of the previous shift.
+    energy_shift_ghz: finite float64 (M,), additive energy/h in cycles/ns.
+    dephasing_per_ns: nonnegative symmetric float64 (M,M), zero diagonal,
+        additive coherence-pair decay in ns^-1, without another 2*pi.
+    Arrays own immutable copies. No basis rotation or state reordering occurs.
+    Shifted energies must stay nondecreasing (equal adjacent energies are valid).
+    Engine.evolve rejects inversions with ValueError naming the point/segment:
+    cavity-drive Stark shifts then exceed the dispersive model's validity.
+    Shape must match the source model there. Invalid inputs raise
+    ValueError before numerical work. Complete positivity is caller-owned.
+    """
+
+    start_ns: float
+    end_ns: float
+    energy_shift_ghz: NDArray[np.float64]
+    dephasing_per_ns: NDArray[np.float64]
+
+    def __post_init__(self) -> None:
+        if not (
+            np.isfinite(self.start_ns)
+            and np.isfinite(self.end_ns)
+            and 0 <= self.start_ns < self.end_ns
+        ):
+            raise ValueError("shift span must be finite with 0 <= start < end")
+        energy = owned(self.energy_shift_ghz, np.float64, "energy shift")
+        if energy.ndim != 1 or not len(energy):
+            raise ValueError("energy shift must have shape (states,)")
+        gamma = owned(self.dephasing_per_ns, np.float64, "shift dephasing")
+        shape(gamma, (len(energy), len(energy)), "shift dephasing")
+        if np.any(gamma < 0) or np.any(np.diag(gamma) != 0):
+            raise ValueError("shift dephasing must be nonnegative with zero diagonal")
+        if not np.allclose(gamma, gamma.T, rtol=0, atol=1e-10):
+            raise ValueError("shift dephasing must be symmetric")
+        object.__setattr__(self, "energy_shift_ghz", energy)
+        object.__setattr__(self, "dephasing_per_ns", gamma)
+
+    @property
+    def content(self) -> bytes:
+        """Stable rate/energy content fingerprint; span is not model identity."""
+        digest = sha256()
+        digest.update(str(self.energy_shift_ghz.shape).encode())
+        digest.update(self.energy_shift_ghz.tobytes())
+        digest.update(self.dephasing_per_ns.tobytes())
+        return digest.hexdigest().encode()
+
+
+@dataclass(frozen=True)
+class ModelIdentity:
+    """Internal model identity: physical flux and independent shift content."""
+
+    physical_flux: FluxLevel
+    shift_content: bytes = b""
+
+
+class ShiftOrderingError(ValueError):
+    """A segment shift inverts the physical model state order."""
 
 
 @dataclass(frozen=True)
@@ -241,6 +306,8 @@ class ModelSource:
         self._build = build
         self._expansion = expansion
         self._models: dict[FluxLevel, SecularModel] = {}
+        self._shift_models: dict[ModelIdentity, SecularModel] = {}
+        self._shifts: dict[bytes, SegmentShift] = {}
         self._gate_usage: dict[bytes, int] = {}
         self._gate_contents: dict[bytes, set[bytes]] = {}
         self._lock = Lock()
@@ -260,6 +327,73 @@ class ModelSource:
             if level not in self._models:
                 self._models[level] = self._build(level)
             return self._models[level]
+
+    def register_shift(self, shift: SegmentShift) -> bytes:
+        """Register a correction and return its span-independent content bytes.
+
+        shift: validated SegmentShift with additive energy/h in GHz, shape (M,),
+            and coherence-pair dephasing in ns^-1, shape (M,M), in the physical
+            model's state order. Compatibility with a model is checked only
+            when shifted_model resolves it; registration does not build models.
+
+        Returns shift.content, fingerprinting the correction arrays, not their
+        start/end span. Equal content keeps the first registration and any
+        cached shifted models. Even zero correction arrays have nonempty
+        content; b'' is reserved by shifted_model for the unshifted model.
+        Registration and model caches persist until close(), which clears them.
+        Register again before resolving nonempty content after close().
+        """
+        content = shift.content
+        with self._lock:
+            self._shifts.setdefault(content, shift)
+        return content
+
+    def shifted_model(self, level: FluxLevel, content: bytes = b"") -> SecularModel:
+        """Return the physical model with a registered energy/dephasing correction.
+
+        level: physical FluxLevel in the builder's loop order, with one integer
+            per loop; flux = round DC + level * 1e-3 Phi0. The all-zero tuple
+            selects the DC model.
+        content: bytes returned by register_shift on this source since its last
+            close(). The default b'' returns model(level) unchanged and needs no
+            registration. Nonempty content must be registered, even if all
+            correction values are zero. The registered span is ignored here.
+
+        Adds the registered GHz energies and ns^-1 coherence-pair dephasing to
+        model(level) and includes content in the returned model's identity.
+        Physical level, eigenvectors, drive quadratures, transition rates and
+        initial_density stay unchanged; no state reordering or basis rotation
+        occurs. Successful shifted models are cached per (level, content), with
+        serialized cache access. close() clears this cache and registrations.
+
+        Builder errors propagate unchanged, before content lookup. Unregistered
+        nonempty content raises KeyError. Incompatible correction/model shapes
+        or invalid resulting SecularModel data raise ValueError. Energy-order
+        inversion raises ValueError indicating that the cavity-drive Stark
+        shift exceeds dispersive validity; equal adjacent energies are valid.
+        Failed shifted models are not cached; the physical model may be cached.
+        """
+        model = self.model(level)
+        if not content:
+            return model
+        identity = ModelIdentity(level, content)
+        with self._lock:
+            if identity not in self._shift_models:
+                shift = self._shifts[content]
+                shape(shift.energy_shift_ghz, model.energies_ghz.shape, "energy shift")
+                energies = model.energies_ghz + shift.energy_shift_ghz
+                if np.any(np.diff(energies) < 0):
+                    raise ShiftOrderingError(
+                        "cavity-drive Stark shift reverses energy ordering; "
+                        "outside dispersive model validity"
+                    )
+                self._shift_models[identity] = replace(
+                    model,
+                    identity=model.identity + ":shift:" + content.decode(),
+                    energies_ghz=energies,
+                    dephasing_per_ns=model.dephasing_per_ns + shift.dephasing_per_ns,
+                )
+            return self._shift_models[identity]
 
     @property
     def gate_usage(self) -> dict[bytes, int]:
@@ -321,6 +455,8 @@ class ModelSource:
         """
         with self._lock:
             self._models.clear()
+            self._shift_models.clear()
+            self._shifts.clear()
             self._gate_usage.clear()
             self._gate_contents.clear()
 
