@@ -5,7 +5,7 @@
 ## 準備輸入
 
 1. 在 Inspect 的 Parameters 建立 `kind: group/mux` 元件，例如 `MG12`。設定有序 `resonators: [R1, R2, R3]`，並把 `module.readout` 指到已有的 `readout/mux` library key。完整 tones[i] 對應 resonators[i]，label 不決定綁定。
-2. 在 Aliases 設定 scalar alias `mux = MG12`。開啟 `mux/onetone` 時，Readout 引用 `$mux.module.readout` 的條目。
+2. 在 Aliases 設定 scalar alias `mux = MG12`。Open／Reset 時，Readout 複製 `$mux.module.readout` 的 scalar 設定，tones 由 group resonators 校準值產生。缺 slot 時沿 blank mux 範本加 group tones。共同 trigger 增加最小 kappa 對應的五倍 ringup 等待，pulse 至少涵蓋 ADC window。
 3. 核對 generator、mixer、每個 tone 的 ADC channel、frequency、gain，以及共用播放長度、ADC window 和 trigger timing。範本的 scalar 初值只供編輯，不代表硬體安全設定。
 4. 可選已有的 readout/mux key，或用 Convert to inline 複製內容再修改。Tones 是單行 JSON，例如 `[{"freq":5980,"gain":0.1,"ro_ch":4,"label":"R1"},{"freq":6020,"gain":0.1,"ro_ch":5,"label":"R2"},{"freq":6040,"gain":0.1,"ro_ch":6}]`。這是格式例子，不是建議的硬體輸入。
 5. Active tones 選 None 量全部，或輸入原始序號 JSON list，例如 `[0,2]` 只量第一及第三個 tone。`[2,0]` 也有效，program、曲線與資料 columns 都保持此順序。不接受空 list、重複、越界、bool 或非整數 index。宿主的 result／Run 診斷會指出 `active_tones` 的錯誤並拒絕 Run，不保證欄位本身變紅。
