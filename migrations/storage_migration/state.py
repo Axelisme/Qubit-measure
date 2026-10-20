@@ -15,8 +15,11 @@ from zcu_tools.datafile import JsonObject
 
 from .errors import MigrationInputError
 from .models import (
+    ExistingItem,
     FailureItem,
     FileMigrationItem,
+    KeyMappingItem,
+    MigrationDifference,
     MigrationFileState,
     MigrationManifest,
     MigrationReport,
@@ -67,6 +70,18 @@ def _merge_raw(raw: JsonValue, known: JsonValue) -> JsonValue:
     return known
 
 
+def overlay_known_fields(raw: JsonObject, known: JsonObject) -> JsonObject:
+    """Overlay typed fields on a loaded JSON tree while retaining unknown fields.
+
+    raw is an original wire mapping and known its validated/normalized projection.
+    Nested mappings retain unknown keys; lists follow known order and match
+    identity-bearing rows by source/destination/operation keys when available.
+    Return an isolated JSON mapping; neither input is changed and no I/O occurs.
+    Known values win conflicts. This does not validate an artifact's schema.
+    """
+    return _JSON.validate_python(_merge_raw(raw, known), strict=True)
+
+
 def report_json(report: MigrationReport) -> JsonObject:
     """Encode known report fields over its raw future fields without writing files."""
     known = _JSON.validate_json(_REPORT.dump_json(report, exclude={"raw"}))
@@ -78,7 +93,18 @@ def _manifest_json(manifest: MigrationManifest) -> JsonObject:
         _MANIFEST.dump_json(manifest, exclude={"raw", "report"})
     )
     known["report"] = report_json(manifest.report)
-    return _JSON.validate_python(_merge_raw(manifest.raw, known), strict=True)
+    encoded = _JSON.validate_python(_merge_raw(manifest.raw, known), strict=True)
+    # Baseline values are opaque complete data, not forward-minor schema fields:
+    # merging their old keys back would resurrect fields removed by a real edit.
+    documents = known.get("documents")
+    merged_documents = encoded.get("documents")
+    if isinstance(documents, dict) and isinstance(merged_documents, dict):
+        for key, baseline in documents.items():
+            merged = merged_documents.get(key)
+            if isinstance(baseline, dict) and isinstance(merged, dict):
+                merged["value"] = baseline["value"]
+                merged["previous"] = baseline["previous"]
+    return encoded
 
 
 def _check_header(raw: JsonObject, expected: str, path: Path) -> None:
@@ -100,6 +126,8 @@ def read_manifest(path: Path) -> MigrationManifest:
     Invalid headers/types raise located MigrationInputError; I/O errors propagate.
     Identity, path ownership and hash checks belong to the converter before writes.
     """
+    if path.is_symlink() or path.parent.is_symlink():
+        raise MigrationInputError(f"{path}: manifest symlink conflict")
     try:
         text = path.read_text(encoding="utf-8")
         raw = _JSON.validate_json(text, strict=True)
@@ -199,7 +227,7 @@ class MigrationSession:
         return current
 
     def state(self, source: Path, operation: str) -> MigrationFileState | None:
-        """Find absolute source plus copy/move_labber/native operation, or return None."""
+        """Find source plus copy/move_labber/native/samples operation, or return None."""
         return next(
             (
                 item
@@ -219,16 +247,46 @@ class MigrationSession:
         self.manifest = replace(self.manifest, files=(*files, state))
         self.checkpoint()
 
-    def verify_destination(self, state: MigrationFileState) -> None:
+    def verify_destination(
+        self, state: MigrationFileState, *, record_existing: bool = True
+    ) -> None:
         """Require prepared hash to match actual destination bytes or raise conflict.
 
         Missing or unreadable destination propagates filesystem errors.
         """
-        if (
-            state.destination_hash is None
-            or file_hash(state.destination) != state.destination_hash
-        ):
-            raise MigrationInputError(f"{state.destination}: destination hash changed")
+        actual = (
+            file_hash(state.destination)
+            if state.destination.is_file() and not state.destination.is_symlink()
+            else "absent or non-regular destination"
+        )
+        if state.destination_hash is None or actual != state.destination_hash:
+            raise MigrationInputError(
+                f"{state.destination}: destination hash changed",
+                differences=(
+                    MigrationDifference(
+                        source=state.source,
+                        destination=state.destination,
+                        comparison="sha256",
+                        expected=state.destination_hash or "prepared hash",
+                        actual=actual,
+                    ),
+                ),
+            )
+        if not record_existing:
+            return
+        report = self.manifest.report
+        item = ExistingItem(
+            source=state.source,
+            destination=state.destination,
+            comparison="sha256",
+            summary=actual,
+        )
+        skipped = tuple(
+            old for old in report.skipped if old.destination != state.destination
+        )
+        self.manifest = replace(
+            self.manifest, report=replace(report, skipped=(*skipped, item))
+        )
 
     def failure(self, source: Path, operation: str, error: Exception | None) -> None:
         """Replace this absolute source/action diagnostic, or remove it with None.
@@ -258,6 +316,12 @@ class MigrationSession:
             if operation == "native"
             else "move_labber"
             if operation == "move_labber"
+            else "samples"
+            if operation == "samples"
+            else "spectrums"
+            if operation == "spectrums"
+            else "spectrums_legacy"
+            if operation == "spectrums_legacy"
             else "copy",
             source=source,
             destination=destination,
@@ -287,7 +351,8 @@ class MigrationSession:
             build(state.temp_path)
         destination_hash = file_hash(state.temp_path)
         if self.baseline(state.source) != state.source_hash or (
-            state.operation != "native" and destination_hash != state.source_hash
+            state.operation in ("copy", "move_labber")
+            and destination_hash != state.source_hash
         ):
             raise MigrationInputError(
                 f"{state.source}: source/copy hash changed during publication"
@@ -318,13 +383,21 @@ class MigrationSession:
     ) -> MigrationFileState:
         """Recover or publish one owned exact destination and return durable state.
 
-        operation is copy/move_labber/native. build writes native temp bytes;
+        operation is copy/move_labber/native/samples/spectrums/spectrums_legacy.
+        build writes converted or residual temp bytes;
         None copies source bytes. Verify hashes at every publication/removal
         window. A move only removes source after published destination verification.
         Conflicts raise MigrationInputError/FileExistsError; execution failures
         persist diagnostic/recovery state and propagate. dry_run only plans.
         """
-        if operation not in ("copy", "move_labber", "native"):
+        if operation not in (
+            "copy",
+            "move_labber",
+            "native",
+            "samples",
+            "spectrums",
+            "spectrums_legacy",
+        ):
             raise ValueError(f"Invalid publication operation {operation!r}")
         state = self.state(source, operation)
         if state is None:
@@ -333,12 +406,13 @@ class MigrationSession:
             raise MigrationInputError(f"{source}: publication destination changed")
         if self.dry_run:
             return state
+        existing = state.phase in ("published", "source_removed")
         try:
             if state.phase == "planned":
                 state = self._prepare(state, build)
             if state.phase == "prepared":
                 state = self._publish_prepared(state)
-            self.verify_destination(state)
+            self.verify_destination(state, record_existing=existing)
             if operation == "move_labber" and state.phase == "published":
                 if source.exists():
                     if self.baseline(source) != state.source_hash:
@@ -354,7 +428,7 @@ class MigrationSession:
             raise
 
     def completed(self, state: MigrationFileState) -> None:
-        """Record completed copy, validated native or removed Labber and checkpoint.
+        """Record a completed copy/sample conversion, validated native or removed Labber.
 
         dry_run and incomplete/unvalidated states add no success report item.
         """
@@ -365,7 +439,7 @@ class MigrationSession:
         report = self.manifest.report
         status = (
             "converted"
-            if state.operation == "native"
+            if state.operation in ("native", "samples", "spectrums")
             else "moved"
             if state.operation == "move_labber"
             else "preserved"
@@ -395,6 +469,22 @@ class MigrationSession:
             )
             report = replace(report, preserved_files=(*items, item))
         self.report(report)
+
+
+def record_key_mapping(session: MigrationSession, item: KeyMappingItem) -> None:
+    """Upsert one typed source-key decision and checkpoint the cumulative report.
+
+    Library kind distinguishes same-name module/waveform keys. No source or
+    destination file is changed; dry-run only changes in-memory report state.
+    """
+    report = session.manifest.report
+    retained = tuple(
+        old
+        for old in report.key_mappings
+        if (old.old_file, old.old_key, old.library_kind)
+        != (item.old_file, item.old_key, item.library_kind)
+    )
+    session.report(replace(report, key_mappings=(*retained, item)))
 
 
 def record_pending(

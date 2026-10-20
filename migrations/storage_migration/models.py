@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -15,6 +15,10 @@ from zcu_tools.datafile import (
     VariableSchema,
 )
 
+from migrations.comparison import ExistingItem
+from migrations.comparison import MigrationDifference as MigrationDifference
+from migrations.sample_csv import PreservedCsvField
+
 type MigrationPart = Literal["parameters", "data", "all"]
 type MappingAction = Literal["value", "stderr", "module", "remove", "pending"]
 
@@ -26,10 +30,17 @@ class KeyRule:
     old_key is the literal legacy key. target_path is its dotted component,
     provenance or module destination, required for value/stderr/module actions.
     action selects value, stderr, deferred module conversion, removal or pending.
+    A remove rule's optional target_path names its documented formal alias target;
+    removal requires an equal value successfully converted in the same context.
+    Otherwise preserve the original source key/value in legacy_meta_info.
     reason explains the decision for the human-facing report. wrap_key, when
     non-None, wraps a value in one named field for a complete container write;
     only value actions support it. requires_keys lists explicit, non-expression
     keys required in the same source JSON; absent evidence leaves this pending.
+    candidate_path optionally names a concrete library leaf for module scalar
+    deduplication, never a role or active slot. Only an equal owner-resolved value
+    in the successfully converted same-context library may replace the scalar.
+    Missing, invalid or different candidates preserve the scalar in component.ext.
     """
 
     old_key: str
@@ -38,6 +49,7 @@ class KeyRule:
     reason: str
     wrap_key: str | None = None
     requires_keys: tuple[str, ...] = ()
+    candidate_path: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -47,7 +59,8 @@ class ModuleRule:
     old_name is the literal source library key. target_path is the proposed concrete
     key (component.partition.name). Publication requires successful Spec conversion.
     reference_path is a component module-slot path or None. Rule order chooses the
-    first present candidate per slot; other candidates retain their own destinations. reason
+    first successfully published candidate per slot; other candidates retain their
+    own destinations, and unsuccessful candidates remain located pending. reason
     explains this declaration. kind selects the source modules or waveforms
     partition; waveform rules must not supply a module-slot reference_path.
     """
@@ -148,8 +161,12 @@ class LegacyRunEvidence:
     declared tag, not a filename inference. cfg is the complete historical cfg,
     or None when cfg/cfg_type evidence is missing; the converter keeps it pending
     and the document retains the complete unresolved JSON in raw.
-    started_at is a UTC ISO acquisition time; finished_at is UTC ISO or None.
-    completion is the historical complete/partial/stopped state.
+    started_at is a UTC ISO acquisition time, or None when unproven. Missing
+    time fields default to None; completion defaults to unknown. With no start,
+    native metadata uses None/unknown/None, retaining all original evidence here.
+    Otherwise completion preserves complete/partial/stopped/unknown evidence.
+    run_id is an explicit trusted historical native-format identity, or None when
+    missing. Only missing IDs receive a new migration-assigned identity.
     snapshot holds historical entry/point/parameter evidence. provenance holds
     historical software evidence; its None values mean missing evidence.
     Source containment, hash and existing metadata agreement are checked by the
@@ -160,11 +177,12 @@ class LegacyRunEvidence:
     source_hash: str
     experiment: str
     cfg: CfgSnapshot | None
-    started_at: str
-    finished_at: str | None
-    completion: Literal["complete", "partial", "stopped"]
+    started_at: str | None = None
+    finished_at: str | None = None
+    completion: Literal["complete", "partial", "stopped", "unknown"] = "unknown"
     snapshot: LegacySnapshotEvidence
     provenance: SoftwareProvenance
+    run_id: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -192,14 +210,24 @@ class MigrationRequest:
     results_root contains the new name entry; database_root also holds its heavy
     data entry. source_chip, source_qubit and name are safe single path segments,
     not physical identifiers to parse. part selects parameters, data or both.
-    dry_run reads only and publishes nothing. resume requires this tool's prior
-    manifest, never an arbitrary existing entry. report_path is an optional
-    independent report file; None selects records/migration-report.json.
+    dry_run reads only and publishes nothing. resume accepts this tool's prior
+    manifest or initialization ownership, never an arbitrary existing entry.
+    Initialization interruptions also recover without resume. report_path is an optional
+    independent report file; None selects the shared backup's dated report.
+    Completion also publishes a dated report in the entry records directory.
     run_evidence is the complete caller-loaded document or None. The converter
     resolves paths and rejects source/destination overlaps and identity changes.
     repo_root is the checkout to exclude from backup, or None for this tool's
     checkout. backup_parent is an external directory, or None for repo_root.parent;
-    the tool exclusively creates its <name>-backup child before migration writes.
+    the tool accumulates chip/qubit mirrors in its <repo-name>-backup child.
+    Matching source mirrors are verified/reused; partial mirrors are completed.
+    Different backup content is never overwritten.
+    assume_flux_unit supplies A/mA/V/mV only when flux unit keys are absent;
+    explicit invalid/conflicting evidence stays pending. assume_jpa_flux_unit
+    independently supplies A/V only for absent JPA unit evidence; it never uses
+    assume_flux_unit. sample_value_column and
+    sample_source_unit declare the legacy CSV coordinate column and A/mA/V/mV
+    unit independently of flux assumptions. All four are fixed on resume.
     """
 
     result_root: Path
@@ -215,6 +243,10 @@ class MigrationRequest:
     run_evidence: MigrationRunEvidenceDocument | None = None
     repo_root: Path | None = None
     backup_parent: Path | None = None
+    assume_flux_unit: Literal["A", "mA", "V", "mV"] | None = None
+    assume_jpa_flux_unit: Literal["A", "V"] | None = None
+    sample_value_column: str | None = None
+    sample_source_unit: Literal["A", "mA", "V", "mV"] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -237,14 +269,39 @@ class MigrationDestination:
 class KeyMappingItem:
     """Report location of one key decision.
 
-    old_file is an absolute source file; old_key is its literal legacy key.
-    new_file is the absolute target file, or None when no destination handle is
-    acquired (including library dry-run/root rows) or the key is removed/pending.
+    old_file is an absolute source file; old_key is the legacy key or a dotted
+    display label for nested analysis data. source_keys is the exact sequence of
+    literal JSON keys (or HDF5 object path segments) when recorded, authoritative
+    over that display label. HDF5 attribute rows use an attribute: display prefix
+    and append the literal attribute name to the owning object path; None
+    means no exact source-key sequence was recorded. A value row with source_keys
+    identifies content transferred to a formal destination, not a whole section
+    implied by a summary row. Pending display labels can retain their historical
+    location, such as fluxdep_fit.flux_unit even when source_keys is ("flux_unit",).
+    Preserved rows always record source_keys.
+    new_file is the absolute target file, or None when no destination is available
+    or acquired (including library dry-run rows). A deduplicated alias records the
+    formal target file and new_path whose successfully converted value matches it.
     new_path is the proposed dotted target path, or None without a declared target.
     A library dry-run may have new_path with new_file=None; this alone is not pending.
-    action selects the explicit rule operation. reason explains conversion, deferral
-    or removal without evaluating values.
-    library_kind is module/waveform for a library entry, or None for meta keys.
+    action selects the explicit rule operation, or preserved when raw content is
+    retained without claiming semantic conversion. reason explains the decision
+    without evaluating values. destination_keys is the complete sequence of literal
+    target keys for preserved content, including a source key containing dots as
+    one segment. It is None when no literal-key destination is recorded (including
+    failed preservation). Preserved rows use new_path=None, not a dotted path.
+    In dry-run, preserved means the validated destination plan, without writes;
+    an unavailable ext capability stays pending with no destination. A completed
+    report records the original action, not later user edits. Encoding/decoding
+    rejects unknown actions or wrongly typed keys; it does not resolve the target.
+    compared_source_keys optionally identifies the corresponding newer source
+    path in old_file whose formal projection takes precedence. That path can be
+    absent within a successfully transferred subtree; reason then says <absent>.
+    For comparison rows, remove means equal values deduplicated against that
+    projection; preserved means different or unmatched values retained at
+    destination_keys. reason records both source values for comparison.
+    library_kind is module/waveform for a library entry or a scalar deduplicated
+    against that library family; other meta keys use None.
     Same-name library keys in different source partitions remain distinct.
     """
 
@@ -252,17 +309,23 @@ class KeyMappingItem:
     old_key: str
     new_file: Path | None
     new_path: str | None
-    action: MappingAction
+    action: MappingAction | Literal["preserved"]
     reason: str
+    source_keys: tuple[str, ...] | None = None
+    destination_keys: tuple[str, ...] | None = None
     library_kind: Literal["module", "waveform"] | None = None
+    compared_source_keys: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
 class FileMigrationItem:
     """Completed file action with absolute source/destination and SHA256 hashes.
 
-    status is converted for native or typed module cfg, moved after Labber source removal, or
-    preserved for a byte-identical copy. Pending and failed actions are separate.
+    status is converted for native, samples, typed module cfg or processed spectra,
+    moved after Labber source removal, or
+    preserved for a byte-identical copy or residual processed HDF5 content.
+    Residual preservation retains values/dtypes, not whole-file byte identity.
+    Pending and failed actions are separate.
     """
 
     source: Path
@@ -292,6 +355,38 @@ class FailureItem:
 
 
 @dataclass(frozen=True, kw_only=True)
+class MigrationDeclarations:
+    """Operator declarations, immutable across parts/resume of one migration.
+
+    assume_flux_unit is A/mA/V/mV or None; it fills absent flux unit evidence,
+    never explicit null/invalid/conflicting values. assume_jpa_flux_unit is A/V
+    or None and fills only absent JPA evidence, independently of global flux.
+    sample_value_column is the
+    literal legacy CSV coordinate header or None. sample_source_unit is its
+    explicit A/mA/V/mV unit or None, never inherited from assume_flux_unit.
+    """
+
+    assume_flux_unit: Literal["A", "mA", "V", "mV"] | None = None
+    assume_jpa_flux_unit: Literal["A", "V"] | None = None
+    sample_value_column: str | None = None
+    sample_source_unit: Literal["A", "mA", "V", "mV"] | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class PreservedSampleField:
+    """Raw CSV cell retained in a planned or published JSONL sample row.
+
+    field locates the original CSV cell, unchanged string value, synthetic row
+    identity and literal destination JSON keys. output_path is the absolute
+    JSONL destination; dry-run plans it without creating a file. This records
+    preservation only, not semantic conversion or a later user's edited value.
+    """
+
+    field: PreservedCsvField
+    output_path: Path
+
+
+@dataclass(frozen=True, kw_only=True)
 class MigrationReport:
     """Cumulative report of attempted parts, not a claim that pending is empty.
 
@@ -303,6 +398,10 @@ class MigrationReport:
     document's unknown fields; an empty raw denotes a newly constructed report.
     backup_path is the external verified backup, or its planned path in dry_run;
     None is reserved for reports loaded without the backup extension.
+    declarations records the operator inputs shared with the typed manifest.
+    skipped records verified existing items reused without rewriting content.
+    preserved_sample_fields locates unsupported CSV cells retained verbatim in
+    planned/published JSONL rows, separately from converted file actions.
     """
 
     source: MigrationSource
@@ -313,9 +412,12 @@ class MigrationReport:
     converted_files: tuple[FileMigrationItem, ...] = ()
     moved_labber_files: tuple[FileMigrationItem, ...] = ()
     preserved_files: tuple[FileMigrationItem, ...] = ()
+    preserved_sample_fields: tuple[PreservedSampleField, ...] = ()
     pending: tuple[PendingItem, ...] = ()
     failures: tuple[FailureItem, ...] = ()
+    skipped: tuple[ExistingItem, ...] = ()
     backup_path: Path | None = None
+    declarations: MigrationDeclarations = field(default_factory=MigrationDeclarations)
     format: str = "zcu.migration-report"
     format_version: str = "1.0"
     raw: JsonObject = field(default_factory=dict)
@@ -325,7 +427,9 @@ class MigrationReport:
 class MigrationFileState:
     """Manifest-owned file publication state; paths are absolute and resolved.
 
-    operation is copy, move_labber or native. source_hash is baseline SHA256.
+    operation is copy, move_labber, native, samples (CSV to JSONL), spectrums
+    (formal collection) or spectrums_legacy (residual HDF5 preservation).
+    source_hash is baseline SHA256; converted/residual output need not equal it.
     destination_hash is None while planned, then SHA256 of prepared temp bytes.
     temp_path names only this action's owned same-directory temporary file.
     phase is planned/prepared/published, or source_removed for move_labber only.
@@ -333,7 +437,9 @@ class MigrationFileState:
     A published native is not removable-source evidence until validation passes.
     """
 
-    operation: Literal["copy", "move_labber", "native"]
+    operation: Literal[
+        "copy", "move_labber", "native", "samples", "spectrums", "spectrums_legacy"
+    ]
     source: Path
     destination: Path
     temp_path: Path
@@ -345,10 +451,11 @@ class MigrationFileState:
 
 @dataclass(frozen=True, kw_only=True)
 class RunAssignment:
-    """Persisted new run identity, assigned before any native publication.
+    """Persisted run identity, fixed before any native publication.
 
-    source is absolute; source_hash is baseline SHA256; run_id is opaque.
-    assigned_at is timezone-aware assignment time, never acquisition evidence.
+    source is absolute; source_hash is baseline SHA256; run_id is the trusted
+    historical ID or a migration-assigned opaque ID. assigned_at is the
+    timezone-aware migration assignment time, never acquisition evidence.
     """
 
     source: Path
@@ -393,15 +500,62 @@ class ModuleFilePublication:
 class MigrationBackup:
     """Verified external backup identity fixed before any migration writes.
 
-    path is the resolved <name>-backup directory. inventory_hash is SHA256 of
-    sha256.json, binding its complete relative file hashes and directory list.
+    path is the resolved shared <repo-name>-backup directory. inventory_hashes
+    maps result and Database to SHA256 of their respective records/*.sha256 lists,
+    binding complete relative file hashes and directory lists for this chip/qubit.
     source_hashes maps absolute original files to their backed-up SHA256, so
     publications reject changed/new sources before any individual move deletes.
+    skipped records existing files/inventories verified against these sources.
     """
 
     path: Path
-    inventory_hash: str
+    inventory_hashes: Mapping[str, str]
     source_hashes: Mapping[str, str]
+    skipped: tuple[ExistingItem, ...] = ()
+
+
+type DocumentKind = Literal[
+    "setup", "point", "library", "predictor", "dispersive", "t1_curve"
+]
+
+
+@dataclass(frozen=True, kw_only=True)
+class DocumentBaseline:
+    """Owner-normalized publication intent, fixed before replacing a document.
+
+    source locates the original input. destination/temp_path are contained absolute
+    final/staging paths. kind selects the public owner codec. value includes typed
+    defaults and unknown raw fields. previous is the last verified value, or None
+    for a new document. prepared allows only previous, value, or absent-new-file;
+    published requires value. The same-directory temp contains owner-written bytes.
+    """
+
+    source: Path
+    destination: Path
+    temp_path: Path
+    kind: DocumentKind
+    value: JsonObject
+    previous: JsonObject | None
+    phase: Literal["prepared", "published"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class PointPublication:
+    """One tool-owned point staging directory and its fixed first contents.
+
+    label is the final safe point label; temporary_label is the manifest-owned
+    safe sibling label. documents maps relative point.yaml/module_cfg.yaml paths
+    to typed baselines after preparation; None means creation is not prepared.
+    hashes/directories fix all other owner-created content and directories.
+    published records the final rename; existing formal points are never adopted.
+    """
+
+    label: str
+    temporary_label: str
+    documents: Mapping[str, DocumentBaseline] | None = None
+    hashes: Mapping[str, str] = field(default_factory=dict)
+    directories: tuple[str, ...] = ()
+    published: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -409,7 +563,10 @@ class MigrationManifest:
     """Durable state for this tool's entry, not a multi-file transaction.
 
     identity is immutable; mapping_version must match exactly on resume.
-    report_path is the immutable resolved report location. source_hashes maps
+    report_path is the immutable resolved report location. report_date is the
+    first execution's UTC ISO date, also naming the completion report in entry
+    records. completion_report_published records ownership of that entry copy.
+    source_hashes maps
     absolute source path strings to baseline SHA256. evidence stores the full
     original JSON document or None, including unknown fields. files records
     owned publications; runs records fixed run assignments. parameters_complete
@@ -419,7 +576,7 @@ class MigrationManifest:
     means an existing path must match that exact initial report before recovery.
     format/format_version identify zcu.storage-migration 1.x. raw retains loaded
     unknown fields; an empty raw denotes a new manifest. module_files records
-    completed point-local library commits; pending entries may remain in report.
+    completed setup/point library commits; pending entries may remain in report.
     Module files and manifest are not a cross-file atomic transaction.
     backup binds the verified external inventory; None is invalid for execution.
     cleanup_phase is pending before full completion, cleaning after verified
@@ -430,6 +587,7 @@ class MigrationManifest:
     identity: MigrationIdentity
     mapping_version: str
     report_path: Path
+    report_date: date
     source_hashes: Mapping[str, str]
     evidence: JsonObject | None
     files: tuple[MigrationFileState, ...]
@@ -438,9 +596,13 @@ class MigrationManifest:
     data_complete: bool
     report: MigrationReport
     report_published: bool = False
+    completion_report_published: bool = False
     format: str = "zcu.storage-migration"
     format_version: str = "1.0"
     raw: JsonObject = field(default_factory=dict)
     module_files: tuple[ModuleFilePublication, ...] = ()
     backup: MigrationBackup | None = None
     cleanup_phase: Literal["pending", "cleaning", "complete"] = "pending"
+    # None identifies old manifests without comparison evidence; never adopt them.
+    documents: Mapping[str, DocumentBaseline] | None = None
+    points: tuple[PointPublication, ...] = ()

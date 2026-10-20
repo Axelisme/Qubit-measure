@@ -32,7 +32,11 @@ def paused_with_canvas(session: WindowSession) -> tuple[int, Path, QStackedWidge
     assert isinstance(figures, QStackedWidget) and figures.count() == 2
     assert window.tuning_panel is not None
     assert harness.progress.bars_for_owner("workflow")
-    return token, entry.result_path / f"workflows/{RUN_ID}/journal.jsonl", figures
+    return (
+        token,
+        entry.result_path / f"workflows/synthetic_wide_{RUN_ID}/journal.jsonl",
+        figures,
+    )
 
 
 @contextmanager

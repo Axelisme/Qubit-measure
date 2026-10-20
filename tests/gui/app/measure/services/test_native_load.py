@@ -175,7 +175,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     control = ContextControlFacet(context=session.context)
     tab = session.state.get_tab("tab")
     target = control.read_context().target
-    path = session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+    path = session.native_data_path
     session.entry.new_point("other")
     other = control.use_point(PointUseRequest("other"))
     control.add_component("Q1", "run-source/qubit", {"rate": 40.0})
@@ -281,12 +281,7 @@ def test_native_load_historical_source_failure_preserves_previous_result(
     with pytest.raises(FileNotFoundError):
         service.load_result(
             "tab",
-            str(
-                session.entry.database_path
-                / "runs"
-                / session.metadata.run_id
-                / "data.h5"
-            ),
+            str(session.native_data_path),
         )
 
     assert tab.run is previous
@@ -317,7 +312,7 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
 
     service.load_result(
         "tab",
-        str(session.entry.database_path / "runs" / metadata.run_id / "data.h5"),
+        str(session.native_data_path),
     )
 
     loaded = tab.run.parameters
@@ -355,7 +350,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
 ) -> None:
     session = role_load_session
     tab = session.state.get_tab("tab")
-    path = session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+    path = session.native_data_path
     if source == "foreign":
         other = ResultEntry.create(
             "foreign",
@@ -487,9 +482,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
         assert all(output.status == "saved" for output in initial_report.outputs), (
             "Historical unknown evidence must be saveable"
         )
-        path = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-        )
+        path = session.native_data_path
         stored = load_run_data(path)
         events = session.entry.ledger.events()
         service = LoadService(
@@ -541,9 +534,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         session.save()
-        source = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-        )
+        source = session.native_data_path
         stored = load_run_data(source).metadata
         assert stored.snapshot.point == "p"
         session.entry.new_point("destination-point")
@@ -650,9 +641,7 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         session.save()
-        source = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-        )
+        source = session.native_data_path
         destination = ResultEntry.create(
             "destination",
             result_root=tmp_path / "Destination",
@@ -712,9 +701,7 @@ def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
     with native_save_session(tmp_path, qapp) as session:
         session.save()
         declare_panes(session)
-        path = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-        )
+        path = session.native_data_path
         stored = load_run_data(path)
         session.context.install_entry(session.entry)
         control = ContextControlFacet(context=session.context)
@@ -773,9 +760,7 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
             parameters=tab.run.parameters,
         )
         session.save()
-        path = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-        )
+        path = session.native_data_path
         old_run = tab.run
         service = LoadService(
             session.state,

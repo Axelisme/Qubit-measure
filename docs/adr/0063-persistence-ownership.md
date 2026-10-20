@@ -44,11 +44,23 @@ MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不
 新格式根目錄統一為 `result/`，與 GUI runtime 一致，不另設 `results/`。`.gitignore` 保留 `result/`，移除 `/results/`。
 使用者於 2026-10-20 裁決：「好，統一result，那gitignore也做處理」。
 
-`resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `result/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、前端啟動實驗的名稱、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
+Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條目的不可變身分、exact Result path、Database 輸出位置與 scoped ledger。`create`／`open` 只檢查 Result，不檢查或建立 `Database/<name>/`。第一次 Save 才由 writer 建立所需的 Database 目錄，已有的同名 Database 照用，不另加混雜偵測。
 
-新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<run_id>/`。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域副本，對等 paths 使用同一份 bytes。Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取 `<experiment>_<id6>_<序號>.hdf5` 新檔名。實驗名中的 `/` 轉 `_`，id6 是 run_id 的後六碼。序號從 1 起避讓既有檔案，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
+`rename_entry` 只移動 Result，不改內容或 UUID，也不移動 Database 舊輸出。改名後重新 open，新 Save 使用 `Database/<新名>/`，舊輸出留在原處。Database 不是 entry 的存在或 clone 身分邊界，因此沒有雙目錄改名與復原協定。
+
+使用者於 2026-10-20 裁決：「甲，簡單的機制加一致的規則比非預期的兼容邏輯好維護與使用，同樣名字的Database會混雜屬於有意不處理的設計。」對改名裁決：「改名時Database不動，Database是輸出位置，不是什麼要綁定的目錄」。
+
+`SaveLayout` 根據這些 paths、前端啟動實驗的名稱、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
+
+新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<experiment>_<run_id>/`，名稱保留完整 run_id。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域 figures 副本，檔名為 `<experiment>_<run_id>_<圖名>.png`。對等 paths 使用同一份 bytes。
+
+Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取 `<experiment>_<id6>_<序號>.hdf5` 新檔名。實驗名中的 `/` 轉 `_`，id6 是 run_id 的後六碼。序號從 1 起避讓既有檔案，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
 
 使用者於 2026-10-19 表示：「Labber的檔名是run_id對人太不友善了，應該要有實驗名比較好，id可能取後6位用於grep」，並裁決「採用建議」。實驗名使用各前端啟動名稱，GUI 用 adapter 名稱，workflow 用 manifest.workflow，Notebook 用 spec.tag。Migration 傳入 legacy.experiment 計算 native 位置，不重命名舊 Labber 檔。
+
+Workflow 的兩側目錄都使用 `workflows/<workflow名>_<run_id>/`，保留完整 run_id。Workflow 名中的 `/` 同樣轉 `_`。Result 保存 manifest／journal，Database 保存 acquisition 與圖，iteration 位於其 `iter/` 下。可讀前綴不取代 metadata 中的 run 身分，也不引入額外的身分側檔或新的序號避讓規則。
+
+使用者於 2026-10-20 提出：「不然名字包含完整run_id，但前綴也有實驗名讓用戶看？」並以「2可以 4可以」確認完整 run_id 前綴命名與後續遷移範圍。對 Result 圖片與 workflow 套用相同規則回覆：「3」。Labber 維持原有 id6 加序號的檔名，遷移工具與消費端改用新版面，不新增舊路徑相容邏輯。
 
 `experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。`experiment.artifacts` 的共用保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
 
@@ -84,7 +96,9 @@ GUI Native Load 由 LoadService 呼叫 datafile.load_run_data 讀成 StoredRun �
 
 相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
 
-Load Data 同時提供 File 選檔與 opened entry ledger 清單。清單按 run_id 合併 acquired／saved，只有成功 native 輸出能作為 data_path，取最近成功路徑。Recorded at 是首 acquired 或首 saved 的事件時間，不冒充量測開始時間。查詢不讀 data.h5、不 stat 或寫事件，損壞 ledger 明確失敗。
+Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。Datafile 的 `read_run_metadata` 共用 native 解碼，只驗 metadata／cfg envelope，不讀量測 arrays，也不保證整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
+
+使用者於 2026-10-20 確認檔案清單與成功 Load 分開：「我以為只要是data.h5就可以看到，能不能Load另說」。對清單完全不讀 ledger、顯示欄位只從檔案 metadata 讀取的方案回覆：「可以」。
 
 ### Setup 與 point alias 表
 

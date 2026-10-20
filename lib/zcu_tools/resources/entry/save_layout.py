@@ -84,22 +84,26 @@ class WorkflowRoots:
 
 
 def workflow_roots(
-    *, result_path: Path, database_path: Path, run_id: str
+    *, result_path: Path, database_path: Path, workflow: str, run_id: str
 ) -> WorkflowRoots:
     """Calculate two exact workflow directories without publishing anything.
 
     result_path and database_path are exact entry directories, not parent roots;
-    relative paths become absolute and directories need not exist. run_id is an
-    opaque nonempty single segment, using the same POSIX/Windows-safe rules as
-    SaveLayout. Return each entry's workflows/run_id directory. Invalid run_id
-    or a destination resolving outside its entry root raises ValueError.
+    relative paths become absolute and directories need not exist. workflow is
+    the selected workflow name; slash becomes underscore. That normalized name
+    and opaque run_id must be nonempty POSIX/Windows-safe single segments, using
+    the same rules as SaveLayout. Return each entry's
+    workflows/<workflow>_<run_id> directory, keeping the complete run_id.
+    Invalid names or a destination resolving outside its entry root raise ValueError.
     Filesystem resolution errors propagate; do not create directories or files,
     reserve names, or require point identity or a save timestamp.
     """
+    workflow = workflow.replace("/", "_")
+    validate_path_segment(workflow, field="workflow")
     validate_path_segment(run_id, field="run_id")
     result_root = result_path.resolve()
     database_root = database_path.resolve()
-    destination = Path("workflows") / run_id
+    destination = Path("workflows") / f"{workflow}_{run_id}"
     return WorkflowRoots(
         result=_checked_path(result_root, destination),
         database=_checked_path(database_root, destination),
@@ -109,8 +113,9 @@ def workflow_roots(
 class SaveLayout:
     """Calculate run and member destinations without publishing files or directories.
 
-    Experiment names label Labber exports only. Fixed run/figure/JSON destinations
-    may already exist; callers own replacement. Labber names are selected by checking
+    Experiment names prefix run directories, Result figure copies and Labber exports.
+    Fixed run/figure/JSON destinations may already exist; callers own replacement.
+    Labber names are selected by checking
     existing files, not atomically reserved. Writers and save orchestration own
     serialization, locking and failure isolation.
     """
@@ -129,7 +134,7 @@ class SaveLayout:
 
         result_path and database_path resolve to absolute entry directories, not
         parent roots; they need not exist. experiment is the frontend's launch
-        name, with slash replaced by underscore for Labber filenames. The result,
+        name, with slash replaced by underscore for all destinations. The result,
         run_id and non-None point must be nonempty single components without dot
         traversal, slash/backslash, NUL or POSIX/Windows anchors. saved_at must be
         timezone-aware; its local date selects the Labber date tree. Invalid
@@ -154,14 +159,17 @@ class SaveLayout:
         Data returns canonical data_h5 then <experiment>_<run_id last six>_N.hdf5
         in the Labber date tree, starting at N=1 and skipping existing files.
         Run IDs shorter than six characters are kept whole. Multiple data
-        artifacts share the run's data.h5. Figure returns run PNG then point/global
-        PNG copy. Analysis returns analysis/<member_name>.json; section/name do
-        not affect that destination. Producers supply their pane as member_name.
+        artifacts share runs/<experiment>_<complete run_id>/data.h5. Figure returns
+        run PNG then point/global <experiment>_<complete run_id>_<figure>.png copy.
+        Analysis returns analysis/<member_name>.json in the same run directory;
+        section/name do not affect that destination. Producers supply their pane
+        as member_name.
         Figure filename tokens escape percent then underscore, preserving
         member identity. A symlink escaping either
         entry root raises ValueError; filesystem lookup errors propagate.
         """
-        run = Path("runs") / self._run_id
+        run_name = f"{self._experiment}_{self._run_id}"
+        run = Path("runs") / run_name
         if key.member == "data":
             data_path = _checked_path(self._database_path, run / "data.h5")
             local = self._saved_at
@@ -201,7 +209,7 @@ class SaveLayout:
             else Path("points") / self._point / "figures"
         )
         copy = _checked_path(
-            self._result_path, copy_folder / f"{_encode(self._run_id)}_{filename}.png"
+            self._result_path, copy_folder / f"{run_name}_{filename}.png"
         )
         return Output("png", figure), Output("png", copy)
 

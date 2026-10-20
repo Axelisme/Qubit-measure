@@ -84,7 +84,7 @@ Device 設定使用完整 cfg。同步 `env.get_device_cfg(name)` 在 worker liv
 
 Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自同一 Window 的 Plots，PNG 在 owner thread 由 shared renderer 讀原生 Figure。QtPlotHost 只收合 presentation，每次 owner 同步更新 artists，final refresh 立即 flush。MCP 驗證 PNG 並附 image content，不保存 preview 檔或序列化 Figure。Status-only 不渲染，terminal 圖保留到新 Start 或成功 close。Timeout／斷線不取消 run，也不證明命令沒有副作用。
 
-Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<run_id>/`，native acquisition 與圖在條目 Database 的 `workflows/<run_id>/iter/`。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
+Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<workflow名>_<run_id>/`，native acquisition 與圖在 Database 輸出位置的 `workflows/<workflow名>_<run_id>/iter/`。兩側都保留完整 run_id，workflow 名中的 `/` 轉 `_`，命名規則見 [[0063]]。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
 
 使用者在 2026-10-12 裁定：「flux device我傾向用direct mode，而不是eval mode」。此裁定只用於 workflow 的 fixed-capture／direct defaults：新 Coherence flux_dev defaults 在建立時解析 alias，讓預設值指向當次 capture 的具體裝置，不隨後續 alias 修改變動。它不是所有表單的通則，也不取消 eval mode。
 

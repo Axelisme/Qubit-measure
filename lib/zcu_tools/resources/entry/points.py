@@ -52,9 +52,10 @@ class PointView:
         ResultEntry supplies these dependencies; construction does not reload or
         revalidate field values. Binding rejects components shadowing any public
         SetupView/PointView/EditView member with ValueError naming the member.
-        entry_id is the owning entry's immutable UUID. result_root and database_root are the caller's owning
-        roots; they are resolved once. Complete clone identity is bound here,
-        including for directly constructed views. Cloning requires matching roots
+        entry_id is the owning entry's immutable UUID. result_root and database_root
+        are resolved once. Clone identity binds source, entry_id and result_root,
+        including for directly constructed views. database_root only configures
+        Save output, not clone identity. Cloning requires a matching Result root
         and reloads the published source, not this cached snapshot. No later
         identity registration is required. There are no multi-file callbacks.
         ResultEntry's store callback rejects shadowing on refresh/mutation before

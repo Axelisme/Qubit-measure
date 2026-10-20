@@ -105,7 +105,9 @@ def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_captur
     assert [r.encoded_record.value for r in records] == [20.0, 30.0]
     events = [
         json.loads(line)
-        for line in (entry.result_path / "workflows/running/journal.jsonl")
+        for line in (
+            entry.result_path / "workflows/tuning-running_running/journal.jsonl"
+        )
         .read_text(encoding="utf-8")
         .splitlines()
     ]
@@ -326,7 +328,7 @@ def test_rpc_tunables_absent_and_pending_target_cannot_edit_start_draft(
     assert (
         window.tunables_panel.state.input.data == before and window.tuning_panel is None
     )
-    assert not (entry.result_path / "workflows/pending").exists()
+    assert not (entry.result_path / "workflows/sample_pending").exists()
     assert harness.gate.snapshot()
     window.stop("pending")
     harness.complete_segment()
@@ -401,7 +403,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     control = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(control, QLineEdit)
     commit_text(control, "-")
-    journal = entry.result_path / "workflows/tuning/journal.jsonl"
+    journal = entry.result_path / "workflows/tuning-paused_tuning/journal.jsonl"
     original_journal = journal.read_bytes()
     if failure == "terminal":
         window.stop("tuning")
@@ -474,7 +476,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert isinstance(message, QLabel)
     commit_text(control, "8.00")
     before_click_text = control.text()
-    journal = entry.result_path / "workflows/tuning/journal.jsonl"
+    journal = entry.result_path / "workflows/tuning-paused_tuning/journal.jsonl"
     original = journal.read_bytes()
     journal.unlink()
     journal.mkdir()
@@ -517,7 +519,7 @@ def test_window_tunables_journal_failure_reports_the_original_path(
 ) -> None:
     del paused_tuning
     window, harness, entry = attachment
-    journal = entry.result_path / "workflows/tuning/journal.jsonl"
+    journal = entry.result_path / "workflows/tuning-paused_tuning/journal.jsonl"
     original = journal.read_bytes()
     journal.unlink()
     journal.mkdir()

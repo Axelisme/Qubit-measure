@@ -2,8 +2,8 @@
 
 Readout uses the DC model at readout start. Flux tails and overlapping controls
 are not inputs. Conditional means contain receiver calibration but no noise;
-round sampling adds only initial-state mixture, receiver noise and rounding
-variance, not jump-time trajectory variance.
+direct-mean sampling adds initial-state mixture, receiver noise and rounding
+variance. Physical shot sampling lives in sampling and raw.
 """
 
 from dataclasses import dataclass
@@ -12,13 +12,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
-    ChannelSignals,
     ChannelStatistics,
-    RoundSignals,
     RoundStatistics,
     SamplingIdentity,
 )
 
+from ._noise import noise_root
 from .model import ReadoutModel, RealArray, Receiver, readonly_array
 from .populations import validate_populations
 from .request import ReadoutPulse, SampleGrid
@@ -85,7 +84,7 @@ class ConditionalSums:
         no sample-period factor or receiver noise.
     sample_counts: owned/read-only positive int64 (reads,) sample counts, shared
         by every content. Counts may differ between reads in this record;
-        round_statistics and sample_traces require equal counts per channel
+        round_statistics requires equal counts per channel
         because ChannelStatistics has one shot covariance per ADC.
     traces: optional owned/read-only finite float64
         (contents, reads, states, samples, 2) in ADC sample units, using the same
@@ -247,7 +246,7 @@ class PreparedStatistics:
                 int(channel.conditional.sample_counts[0])
                 * channel.receiver.noise_covariance
             )
-            root = _noise_root(reps * (covariance + np.eye(2) / 12))
+            root = noise_root(reps * (covariance + np.eye(2) / 12))
             prepared.append(
                 _StatisticsChannel(
                     channel.channel,
@@ -290,54 +289,6 @@ class PreparedStatistics:
         )
 
 
-def sample_traces(
-    populations: NDArray[np.float64],
-    channels: tuple[ChannelReadout, ...],
-    *,
-    reps: int,
-    seed: int,
-    acquire_sequence: int,
-    round_index: int,
-) -> RoundSignals:
-    """Draw vectorized decimated shots for every ADC, with shared initial states.
-
-    Parameters, population/state ordering, identity rules and failures match
-    round_statistics. Each conditional.traces must be present and reads of one
-    ADC must have equal sample_counts. Each shot shares its initial state across
-    ADCs/reads, but receiver noise is independent across ADCs/reads/samples/shots.
-    Use one SamplingIdentity(seed, (acquire_sequence, round_index, 0)) stream.
-
-    Return one ChannelSignals per ADC, with float64 iq shape
-    (prod(point_dims) * reps, reads, samples, 2), flattening points in C order
-    then shots. Traces already contain gain/phase/offset; only per-sample noise
-    is added, with no integrated rounding term or normalization. No trajectory
-    jump-time variance is modeled. Inputs and global RNG state remain unchanged.
-    Missing traces also raise ValueError.
-    """
-    probabilities = _validate_round_inputs(populations, channels, reps)
-    if any(channel.conditional.traces is None for channel in channels):
-        raise ValueError("decimated sampling requires conditional traces")
-    identity = SamplingIdentity(seed, (acquire_sequence, round_index, 0))
-    rng = np.random.Generator(
-        np.random.PCG64(np.random.SeedSequence((identity.seed, *identity.stream)))
-    )
-    uniforms = rng.random((*probabilities.shape[:-1], reps))
-    states = np.zeros(uniforms.shape, dtype=np.int64)
-    # Loop over states, never over points or shots; memory stays O(points * reps).
-    for boundary in np.moveaxis(probabilities.cumsum(axis=-1)[..., :-1], -1, 0):
-        states += uniforms >= boundary[..., None]
-    output = []
-    for channel in channels:
-        traces = channel.conditional.traces
-        if traces is None:
-            raise ValueError("decimated sampling requires conditional traces")
-        selected = traces[channel.content_index[..., None], :, states, :, :]
-        noise = _gaussian_noise(rng, channel.receiver.noise_covariance, selected.shape)
-        iq = (selected + noise).reshape((-1, *traces.shape[1:2], *traces.shape[-2:]))
-        output.append(ChannelSignals(channel.channel, iq))
-    return RoundSignals(tuple(output))
-
-
 def _validate_round_inputs(
     populations: RealArray, channels: tuple[ChannelReadout, ...], reps: int
 ) -> RealArray:
@@ -356,17 +307,3 @@ def _validate_round_inputs(
         if np.any(conditional.sample_counts != conditional.sample_counts[0]):
             raise ValueError("reads of one channel must have equal sample counts")
     return probabilities
-
-
-def _gaussian_noise(
-    rng: np.random.Generator, covariance: RealArray, shape: tuple[int, ...]
-) -> RealArray:
-    """Independent I/Q draws, including degenerate receiver covariances."""
-    root = _noise_root(covariance)
-    return rng.standard_normal(shape) @ root.T
-
-
-def _noise_root(covariance: RealArray) -> RealArray:
-    eigenvalues, vectors = np.linalg.eigh(covariance)
-    # Receiver already validates PSD. Only factorization roundoff may be negative.
-    return vectors @ np.diag(np.sqrt(np.maximum(eigenvalues, 0)))

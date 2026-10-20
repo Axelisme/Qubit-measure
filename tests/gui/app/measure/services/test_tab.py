@@ -336,9 +336,7 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record(
         "labber",
     ]
     assert all(output.status == "reserved" for output in data.members[0].outputs)
-    assert data.members[0].outputs[0].path == (
-        session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-    )
+    assert data.members[0].outputs[0].path == (session.native_data_path)
 
 
 def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(

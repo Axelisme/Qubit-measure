@@ -9,8 +9,9 @@ from zcu_tools.datafile import (
     VariableSchema,
     cast_labber_values,
     load_grouped_labber_data,
-    load_labber_data,
+    load_labber_logs,
     validate_experiment_payload,
+    validate_labber_payload,
 )
 from zcu_tools.datafile.grouped import GROUPED_VERSION_ATTR
 
@@ -23,8 +24,9 @@ def load_legacy_labber_payload(
     source is an exact existing Labber file; schema names its experiment's
     variables, axes, signal labels, SI/discrete units and numeric dtypes.
     Marked grouped files use the canonical/streaming grouped reader; unmarked
-    files must declare one variable and use the single-log reader. No filename
-    or channel guesses, unit conversion or runtime fallback is performed.
+    files map schema order explicitly to root, Log_2, Log_3 and so on. Log count,
+    signal/axis labels, units and shapes must match, including independent grids.
+    No filename or channel guesses, unit conversion or runtime fallback occurs.
     Return a schema-validated generic payload with source metadata preserved.
     Numeric reader containers are cast through the Labber dtype contract.
     Unsupported layout/schema raises ValueError; filesystem errors propagate.
@@ -41,13 +43,21 @@ def load_legacy_labber_payload(
         variables = loaded.variables
         metadata = loaded.metadata
     else:
-        if len(schema) != 1:
+        logs = load_labber_logs(str(source))
+        if len(logs) != len(schema):
             raise ValueError(
-                f"{source}: unmarked file cannot identify multiple variables"
+                f"{source}: log count {len(logs)} cannot identify multiple "
+                f"variables in schema of length {len(schema)}"
             )
-        single = load_labber_data(str(source))
-        variables = {schema[0].variable: single.payload}
-        metadata = single.metadata
+        variables = {
+            item.variable: log.payload for item, log in zip(schema, logs, strict=True)
+        }
+        metadata = logs[0].metadata
+        grouped = len(logs) > 1
+    for item in schema:
+        validate_labber_payload(
+            variables[item.variable], schema=item, context=f"{source}/{item.variable}"
+        )
     converted = {
         item.variable: LabberPayload(
             (

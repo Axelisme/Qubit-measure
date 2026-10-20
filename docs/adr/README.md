@@ -50,7 +50,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Persistence
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。Native 2.1 保存未知歷史時間與完成狀態，保真寫回不降 minor。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；SaveLayout 計算位置，Labber 檔名含實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。Native 2.1 保存未知歷史時間與完成狀態，保真寫回不降 minor。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；Entry 只由 Result 構成，Database 首次 Save 才建立且改名不搬舊輸出。Run／圖片與雙側 workflow 路徑保留名稱前綴及完整 run_id，Labber 檔名維持實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
 
 ## Experiment runtime／Workflows
 
@@ -60,7 +60,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Analysis / Simulation / Waveform
 
-- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。依賴方向沿用 C8、C9、C12。
+- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。Program 擁有 RawShots 介面，環境生成完整 raw，core 保持純資料。依賴方向沿用 C8、C9、C12、C19。
 - [0077 — Numerical candidates、plan ownership 與 checked replay](0077-numerical-plans-and-replay.md)：superseded。實驗 planner 與 checked plan replay 已移除，現行分工由 [[0078]] 接替；正文保留歷史設計。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。

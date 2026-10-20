@@ -1,6 +1,6 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-20，Hidden literal 填入值、明填模板 bindings 與持久 Spec family 型別判定
+**Last updated:** 2026-10-20，strict Spec partition、Hidden literal、明填模板 bindings 與持久 Spec family 型別判定
 
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
@@ -16,6 +16,7 @@ Caller 從 package root import 公開名稱。
 - `Range.start`／`stop` 與 `Range.between` 的端點接受 `None`。它表示 Form 中可見空白且必填的端點，不是 0／1 或可執行預設。即使對應 input key 缺席，生成 model 仍要求操作員填入數字才能提交。另一端點與 `expts` 不受影響。Literal 與 `Expr` 端點沿用既有語意。
 - `WaveformSamples` 由 core.waveform_format 擁有。它攜帶一次 asset 讀取的 reference time axis 與 normalized I/Q samples，不從 cfg_model re-export。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。
+- `partition_module_spec(raw)` 與 `partition_waveform_spec(raw)` 接受現行欄名與 discriminator 的 JSON mapping，回傳 `SpecPartition(spec, unrecognized)`。它們把巢狀未知欄位分出來，保留原名原值，已支援的 leaf 不另存。List 中的未知欄位保持原 index，沒有未知欄位的元素以空 object 佔位。缺少或非法的已知欄位、未知 family 仍 raise ValueError。輸出 Spec 再經普通 strict reader 驗證，runtime 不接受 extra。這兩個介面不處理舊 type、欄名或單位，也不解析引用。
 - `spec_types` 集中持久 Spec union 的展開。`concrete_spec_types` 供 TemplateDef 檢查宣告中的具體型別；`is_module_spec_type`／`is_waveform_spec_type` 供 library consumer 判定 family，接受已宣告型別及其 subclass。
 - `ModuleCfg`／`WaveformCfg` 表示已展開的執行參數。它們只提供欄位驗證與 `set_param`，不建立 program runtime 物件。
 - `readout/pulse` 獨立持有平鋪的 generator／ADC 欄位與 waveform。唯一 `freq` 同時供 generator／ADC 使用，waveform 仍可引用 key。Readout 不引用 Pulse，也沒有 DirectReadout；Reset 的 Pulse 引用保持不變。Pulse cfg 不保存 `ro_ch`，ADC matching 由 program runtime 提供。

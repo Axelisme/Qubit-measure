@@ -1,13 +1,19 @@
 """Public converter source-root protection and durable removed-source identity."""
 
+import hashlib
 import json
+import os
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
+from zcu_tools.datafile import load_run_data
+from zcu_tools.resources.entry import ResultEntry
 
 from migrations.storage_migration import (
     MigrationInputError,
     MigrationMapping,
+    MigrationReport,
     MigrationRequest,
     migrate_storage,
 )
@@ -245,3 +251,288 @@ def test_removed_source_reuse_blocks_resume_without_deleting_new_data(
     )
     assert source.read_bytes() == external.read_bytes() == b"new unrelated acquisition"
     assert source.is_symlink() == (reuse == "symlink")
+
+
+def _convert(request: MigrationRequest, mapping: MigrationMapping) -> MigrationReport:
+    return migrate_storage(
+        request,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+
+
+def _entry(request: MigrationRequest) -> ResultEntry:
+    return ResultEntry.open(
+        request.name,
+        result_root=request.results_root,
+        database_root=request.database_root,
+    )
+
+
+def _write(path: Path, content: bytes = b"unconverted\x00\xff\r\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
+
+
+def _snapshot(root: Path) -> dict[Path, bytes | None]:
+    return {
+        path.relative_to(root): path.read_bytes() if path.is_file() else None
+        for path in root.rglob("*")
+    }
+
+
+def test_unsupported_sources_publish_at_entry_and_point_locations_with_exact_hashes(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    old_result = request_data.result_root / "chip/qubit"
+    old_database = request_data.database_root / "chip/qubit"
+    write_meta(request_data, "exps/context", {})
+    paths = {
+        _write(old_result / "notes/readme.bin"): "notes/readme.bin",
+        _write(
+            old_result / "autofluxdep_runs/run/image/fit.png"
+        ): "autofluxdep_runs/run/image/fit.png",
+        _write(
+            old_result / "exps/context/notes/readme.bin"
+        ): "points/context/notes/readme.bin",
+        _write(
+            old_result / "exps/context/image/raw.svg"
+        ): "points/context/image/raw.svg",
+        _write(old_database / "notes/readme.bin"): "notes/readme.bin",
+    }
+    before = _snapshot(request_data.repo_root or old_result)
+    dry = _convert(replace(request_data, dry_run=True), mapping)
+    assert _snapshot(request_data.repo_root or old_result) == before
+    assert not (request_data.result_root.parent.parent / "repo-backup").exists()
+    assert dry.converted_files == dry.preserved_files == ()
+    report = _convert(request_data, mapping)
+    entry = _entry(request_data)
+    for source, relative in paths.items():
+        target = (
+            entry.database_path
+            if source.is_relative_to(old_database)
+            else entry.result_path
+        ) / relative
+        assert target.is_file(), f"Preserve {source} at {target}"
+        assert target.read_bytes() == b"unconverted\x00\xff\r\n"
+        item = next(item for item in report.preserved_files if item.source == source)
+        assert item.destination == target
+        assert (
+            item.source_hash
+            == item.destination_hash
+            == hashlib.sha256(target.read_bytes()).hexdigest()
+        )
+        assert item.status == "preserved"
+    assert report.converted_files == ()
+    assert not old_result.exists()
+    assert not old_database.exists()
+    assert (
+        _convert(replace(request_data, resume=True), mapping).preserved_files
+        == report.preserved_files
+    )
+
+
+@pytest.mark.parametrize("native_success", [True, False])
+def test_all_labber_originals_share_one_layout_independent_of_native_success(
+    request_data: MigrationRequest, mapping: MigrationMapping, native_success: bool
+) -> None:
+    request, source = write_run(
+        request_data, cfg_values=None if native_success else {"missing_frequency": 1}
+    )
+    original = source.read_bytes()
+    report = _convert(request, mapping)
+    target = _entry(request).database_path / "Labber/2025/10/scan.hdf5"
+    assert target.is_file(), "Native failure must not change the original Labber layout"
+    assert target.read_bytes() == original
+    copies = (*report.preserved_files, *report.moved_labber_files)
+    item = next(item for item in copies if item.source == source)
+    assert item.destination == target
+    assert (
+        item.source_hash
+        == item.destination_hash
+        == hashlib.sha256(original).hexdigest()
+    )
+    if native_success:
+        stored = load_run_data(report.converted_files[0].destination)
+        assert stored.metadata.labber_path == "Labber/2025/10/scan.hdf5"
+    else:
+        assert report.converted_files == ()
+        assert any(item.location == "run evidence" for item in report.pending)
+    _convert(replace(request, resume=True), mapping)
+    assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "root,relative",
+    [
+        ("result", "setup.yaml"),
+        ("result", "setup.yaml/child.bin"),
+        ("result", "points"),
+        ("result", "points/context/blob.bin"),
+        ("result", "records/unknown.bin"),
+        ("result", "runs/unknown.bin"),
+        ("result", "samples/unknown.bin"),
+        ("result", "predictors/unknown.bin"),
+        ("result", "exps/context/point.yaml"),
+        ("result", "exps/context/figures/unknown.bin"),
+        ("Database", "runs/unknown.bin"),
+        ("Database", "Labber/unknown.bin"),
+    ],
+)
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reserved_destinations_are_refused_with_source_and_target_before_writes(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    root: str,
+    relative: str,
+    dry_run: bool,
+) -> None:
+    old_root = (
+        request_data.result_root if root == "result" else request_data.database_root
+    )
+    source = _write(old_root / "chip/qubit" / relative)
+    base = request_data.results_root if root == "result" else request_data.database_root
+    destination = base / request_data.name / relative
+    if relative.startswith("exps/"):
+        destination = (
+            base / request_data.name / "points" / relative.removeprefix("exps/")
+        )
+    before = _snapshot(request_data.repo_root or old_root)
+    with pytest.raises((MigrationInputError, FileExistsError)) as caught:
+        _convert(replace(request_data, dry_run=dry_run), mapping)
+    assert str(source) in str(caught.value)
+    assert str(destination) in str(caught.value)
+    assert _snapshot(request_data.repo_root or old_root) == before
+    assert not (request_data.result_root.parent.parent / "repo-backup").exists()
+
+
+@pytest.mark.parametrize("kind", ["same", "ancestor", "descendant"])
+def test_source_routes_cannot_claim_the_same_or_nested_destination(
+    request_data: MigrationRequest, mapping: MigrationMapping, kind: str
+) -> None:
+    root = request_data.result_root / "chip/qubit/exps/context"
+    first = _write(root / "image/fit.png")
+    if kind == "same":
+        second = _write(root / "figures/fit.png")
+    elif kind == "ancestor":
+        second = _write(root / "figures")
+    else:
+        second = _write(root / "figures/fit.png/child.bin")
+    before = _snapshot(request_data.repo_root or root)
+    with pytest.raises((MigrationInputError, FileExistsError)) as caught:
+        _convert(request_data, mapping)
+    assert str(first) in str(caught.value)
+    assert str(second) in str(caught.value)
+    assert str(request_data.name) in str(caught.value)
+    assert _snapshot(request_data.repo_root or root) == before
+
+
+def test_missing_point_defers_unknown_files_and_blocks_cleanup_until_data_resume(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    source = _write(request_data.result_root / "chip/qubit/exps/context/notes/blob.bin")
+    report = _convert(replace(request_data, part="data"), mapping)
+    entry = _entry(request_data)
+    target = entry.result_path / "points/context/notes/blob.bin"
+    assert not target.parent.parent.exists()
+    assert any(
+        item.source == source and "point" in item.reason.lower()
+        for item in report.pending
+    )
+    _convert(replace(request_data, part="parameters", resume=True), mapping)
+    assert _entry(request_data).list_points() == ["context"]
+    assert source.is_file(), (
+        "Deferred data publication must block cleanup after parameters"
+    )
+    assert not target.exists()
+    completed = _convert(replace(request_data, part="data", resume=True), mapping)
+    assert target.read_bytes() == b"unconverted\x00\xff\r\n"
+    assert not any(item.source == source for item in completed.pending)
+    assert not (request_data.result_root / "chip/qubit").exists()
+
+
+@pytest.mark.parametrize("occupation", ["file", "directory", "ancestor"])
+def test_resume_never_adopts_unowned_existing_destinations_even_with_equal_bytes(
+    request_data: MigrationRequest, mapping: MigrationMapping, occupation: str
+) -> None:
+    source = _write(request_data.database_root / "chip/qubit/notes/blob.bin")
+    _convert(replace(request_data, part="parameters"), mapping)
+    target = _entry(request_data).database_path / "notes/blob.bin"
+    if occupation == "file":
+        _write(target, source.read_bytes())
+    elif occupation == "directory":
+        target.mkdir(parents=True)
+        _write(target / "child.bin")
+    else:
+        _write(target.parent)
+    before = _snapshot(request_data.repo_root or source.parent)
+    with pytest.raises((MigrationInputError, FileExistsError)) as caught:
+        _convert(replace(request_data, part="data", resume=True), mapping)
+    assert str(source) in str(caught.value)
+    assert str(target) in str(caught.value)
+    assert _snapshot(request_data.repo_root or source.parent) == before
+
+
+def test_preservation_hash_mismatch_is_refused_without_overwriting(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    _write(request_data.database_root / "chip/qubit/notes/blob.bin")
+    _convert(replace(request_data, part="data"), mapping)
+    target = _entry(request_data).database_path / "notes/blob.bin"
+    assert target.is_file()
+    target.write_bytes(b"caller edit")
+    before = _snapshot(request_data.repo_root or target.parent)
+    with pytest.raises(MigrationInputError, match="hash"):
+        _convert(replace(request_data, part="data", resume=True), mapping)
+    assert _snapshot(request_data.repo_root or target.parent) == before
+
+
+def test_interrupted_unknown_file_publication_prevents_cleanup_and_resumes(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _write(request_data.database_root / "chip/qubit/notes/blob.bin")
+    target = request_data.database_root / request_data.name / "notes/blob.bin"
+    link = os.link
+
+    def interrupt(src: Path, dst: Path) -> None:
+        if dst == target:
+            raise OSError("copy publication interrupted")
+        link(src, dst)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", interrupt)
+        with pytest.raises(OSError, match="copy publication interrupted"):
+            _convert(request_data, mapping)
+    assert source.is_file()
+    _convert(replace(request_data, resume=True), mapping)
+    assert target.read_bytes() == b"unconverted\x00\xff\r\n"
+    assert not source.exists()
+
+
+@pytest.mark.parametrize(
+    "occupation", ["incomplete_point", "point_file", "target_file"]
+)
+def test_resume_point_occupancy_reports_source_and_target_before_any_writes(
+    request_data: MigrationRequest, mapping: MigrationMapping, occupation: str
+) -> None:
+    source = _write(request_data.result_root / "chip/qubit/exps/context/notes/blob.bin")
+    request = replace(request_data, part="data")
+    _convert(request, mapping)
+    target = _entry(request).result_path / "points/context/notes/blob.bin"
+    point = target.parent.parent
+    if occupation == "incomplete_point":
+        point.mkdir()
+    elif occupation == "point_file":
+        _write(point)
+    else:
+        _write(target)
+    before = _snapshot(request_data.result_root.parent)
+    with pytest.raises((ValueError, OSError)) as caught:
+        _convert(replace(request, resume=True), mapping)
+    assert str(source) in str(caught.value)
+    assert str(target) in str(caught.value)
+    assert _snapshot(request_data.result_root.parent) == before

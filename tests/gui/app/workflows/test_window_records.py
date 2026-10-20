@@ -56,7 +56,7 @@ def test_rpc_read_targets_preserve_pending_and_absent(
     assert isinstance(error, dict) and error["code"] == "controller_error"
     assert window.controller.operation_id == token
     assert window.controller.status() is None and harness.gate.snapshot()
-    assert not (entry.result_path / "workflows/reader").exists()
+    assert not (entry.result_path / "workflows/sample_reader").exists()
     window.stop("reader")
     harness.complete_segment()
 

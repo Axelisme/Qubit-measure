@@ -7,6 +7,7 @@ import pytest
 from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, replay
+from zcu_tools.program.v2.simulation import IntegratedRound
 
 from tests.experiment._ftf_templates import (
     expect_statistics,
@@ -247,19 +248,25 @@ def test_equal_content_acquires_skip_adc_preparation_and_keep_streams_exact():
     try:
         first = expect_statistics(draw(source))
         later = replace(request(), sequence=8)
-        second = expect_statistics(draw(source, later))
+        second_delivery = draw(source, later)
+        assert isinstance(second_delivery, IntegratedRound)
+        second = expect_statistics(second_delivery)
         assert source.readout_cache.hits == 0, "equal content must skip ADC preparation"
         assert source.preparation_cache.builds == 1
         assert source.preparation_cache.hits == 1
-        expected = expect_statistics(draw(reference, later))
+        expected_delivery = draw(reference, later)
+        assert isinstance(expected_delivery, IntegratedRound)
+        expected = expect_statistics(expected_delivery)
         assert first.channels[0].sums.tobytes() != second.channels[0].sums.tobytes()
         assert second.channels[0].sums.tobytes() == expected.channels[0].sums.tobytes()
         assert second.state_counts.tobytes() == expected.state_counts.tobytes()
         assert source.evaluations[0].acquire_sequence == 8
         assert source.evaluations[0].round_index == 0
         assert (
-            second.materialize_raw(later.reps, later.avg_level)[0].tobytes()
-            == expected.materialize_raw(later.reps, later.avg_level)[0].tobytes()
+            second_delivery.raw.materialize(later.reps, later.avg_level)[0].tobytes()
+            == expected_delivery.raw.materialize(later.reps, later.avg_level)[
+                0
+            ].tobytes()
         )
     finally:
         source.close()

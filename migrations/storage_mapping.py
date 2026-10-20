@@ -16,7 +16,7 @@ from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
 # Explicit legacy mappings preserve working units and fixed roots. Changes to rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.12", "qubit/transmon": "1.13"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.20", "qubit/transmon": "1.21"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),
@@ -24,6 +24,7 @@ _VALUE_PATHS = (
     ("res_ch", "R1.wiring.ch"),
     ("ro_ch", "R1.wiring.ro_ch"),
     ("qub_0_1_ch", "Q1.wiring.ch"),
+    ("qub_ch", "Q1.wiring.ch"),
     ("lo_flux_ch", "Q1.wiring.lo_flux_ch"),
     ("timeFly", "R1.ext.time_of_fly"),
     ("res_edelay_calibration", "R1.ext.edelay"),
@@ -75,23 +76,26 @@ _FLUX_PATHS = (
 )
 
 _MODULE_KEY_PATHS = (
-    ("pi_gain", "qubit.module.x180.gain", "Pulse gain belongs to the x180 module"),
+    ("pi_gain", "qubit.module.x180.gain", "Q1.pulses.pi_amp.gain"),
     (
         "pi_len",
         "qubit.module.x180.waveform.length",
-        "Pulse length belongs to the x180 waveform",
+        "Q1.pulses.pi_len.waveform.length",
     ),
-    ("pi2_gain", "qubit.module.x90.gain", "Pulse gain belongs to the x90 module"),
+    ("pi2_gain", "qubit.module.x90.gain", "Q1.pulses.pi2_amp.gain"),
     (
         "pi2_len",
         "qubit.module.x90.waveform.length",
-        "Pulse length belongs to the x90 waveform",
+        "Q1.pulses.pi2_len.waveform.length",
     ),
 )
 
+# Only these aliases have a documented corresponding formal destination.
+# Removal still requires a successful same-context source write with equal value.
+_ALIAS_TARGETS = {"readout_f": "R1.freq", "flx_bias": "Q1.ext.flux_bias"}
+
 _REMOVED = (
     ("readout_f", "Use resonator.freq instead of the removed readout frequency alias"),
-    ("qub_ch", "Explicit drive wiring replaces the ambiguous channel"),
     ("flx_bias", "Obsolete alias; flux_bias holds the predictor's flux offset"),
     ("mA_c", "Obsolete flux value"),
     ("mA_e", "Obsolete flux value"),
@@ -177,11 +181,22 @@ def build_mapping(
             )
         )
         + tuple(
-            KeyRule(old_key=key, target_path=path, action="module", reason=reason)
-            for key, path, reason in _MODULE_KEY_PATHS
+            KeyRule(
+                old_key=key,
+                target_path=path,
+                action="module",
+                candidate_path=candidate,
+                reason="Compare only the declared same-context library candidate",
+            )
+            for key, path, candidate in _MODULE_KEY_PATHS
         )
         + tuple(
-            KeyRule(old_key=key, target_path=None, action="remove", reason=reason)
+            KeyRule(
+                old_key=key,
+                target_path=_ALIAS_TARGETS.get(key),
+                action="remove",
+                reason=reason,
+            )
             for key, reason in _REMOVED
         )
     )
@@ -206,5 +221,20 @@ def build_mapping(
                 else "Preserve the named legacy module as an explicit library candidate",
             )
             for name, target, reference in _MODULE_NAMES
+        )
+        + tuple(
+            ModuleRule(
+                old_name=name,
+                target_path=f"{component}.waveforms.{name}",
+                reference_path=None,
+                kind="waveform",
+                reason="Preserve the named legacy waveform as a formal library entry",
+            )
+            for name, component in (
+                ("mist_waveform", "Q1"),
+                ("qub_cos", "Q1"),
+                ("qub_flat", "Q1"),
+                ("ro_waveform", "R1"),
+            )
         ),
     )

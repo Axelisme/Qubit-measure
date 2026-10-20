@@ -255,7 +255,10 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
             png_outputs = analysis.members["figure:pick"]
             assert len(png_outputs) == 2
             assert {Path(output.path).parent for output in png_outputs} == {
-                storage.database_path / "runs" / source.run_id / "figures",
+                storage.database_path
+                / "runs"
+                / f"synthetic_magnitude_{source.run_id}"
+                / "figures",
                 storage.result_path / "points" / source.snapshot.point / "figures",
             }
             for output in png_outputs:
@@ -446,7 +449,10 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
         png_outputs = analysis.members["figure:pick"]
         assert len(png_outputs) == 2
         assert {Path(output.path).parent for output in png_outputs} == {
-            storage.database_path / "runs" / source.run_id / "figures",
+            storage.database_path
+            / "runs"
+            / f"synthetic_magnitude_{source.run_id}"
+            / "figures",
             storage.result_path / "points" / source.snapshot.point / "figures",
         }
         for output in png_outputs:

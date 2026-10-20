@@ -615,6 +615,7 @@ class WorkflowWindow[C](QWidget):
         roots = workflow_roots(
             result_path=storage.result_path,
             database_path=storage.database_path,
+            workflow=attachment.name,
             run_id=run_id,
         )
         plots = Plots(self._figure_area)
