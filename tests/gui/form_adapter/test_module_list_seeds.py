@@ -1,6 +1,7 @@
 """Typed model-list seeds enter modules through the public authoring boundary."""
 
 import pytest
+from pydantic import JsonValue
 from zcu_tools.cfg_model import (
     ConfigBase,
     Expr,
@@ -165,7 +166,12 @@ def test_nested_fixed_slots_allow_value_edits_and_module_branch_switches():
         "Edited",
     ]
     saved = state.input
-    for replacement in ([], [{"freq": 6000.0, "gain": 0.1, "ro_ch": 0}], None):
+    replacements: tuple[JsonValue, ...] = (
+        [],
+        [{"freq": 6000.0, "gain": 0.1, "ro_ch": 0}],
+        None,
+    )
+    for replacement in replacements:
         with pytest.raises(FormInputRejected):
             state.write({path: replacement, ("readout", "module", "length"): 5.0}, env)
         assert state.input.same_as(saved)
@@ -192,3 +198,31 @@ def test_nested_fixed_slots_allow_value_edits_and_module_branch_switches():
     if isinstance(cfg, FormErrors):
         pytest.fail(str(cfg.messages))
     assert [tone.label for tone in cfg.readout.tones] == ["Copied and editable"]
+
+
+def test_model_list_expression_seed_does_not_fall_back_to_element_static_default():
+    form = module_form(
+        Template(
+            "blank",
+            set={
+                "tones": [
+                    {
+                        "freq": 6000.0,
+                        "gain": 0.1,
+                        "ro_ch": 0,
+                        "phase": Expr("unknown_phase"),
+                    },
+                    {"freq": 6010.0, "gain": 0.2, "ro_ch": 1},
+                ]
+            },
+        )
+    )
+    env = module_env()
+    state = FormState(form.default_input(env))
+    preview = state.preview(env)
+    path = ("readout", "module", "tones")
+    assert preview.errors is not None, (
+        "An invalid authored expression must leave phase required"
+    )
+    assert (*path, 0, "phase") in preview.errors.messages
+    assert preview.values[(*path, 1, "phase")] == 0.0
