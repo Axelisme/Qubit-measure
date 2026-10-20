@@ -45,28 +45,47 @@ _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
 
 @dataclass
 class OneToneFreqAnalyzeParams:
-    """Shared single-tone and mux resonance fit controls.
-
-    model_type selects hanger (hm), transmission (t), or automatic selection.
-    The background switches independently fit amplitude slope and phase curvature.
-    edelay is a finite branch seed in us, including zero or negative values,
-    never a fixed delay. None uses a finite route-matched prior, or an internal
-    100 us search cap when no matching prior exists. Invalid seeds raise ValueError
-    at analyze entry.
-    """
+    """Shared resonance fit controls for single-tone and mux analysis."""
 
     model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
         "hm"
     )
+    """Resonance model: "hm" for hanger, "t" for transmission, or "auto".
+
+    "auto" selects the model from the measured magnitude response.
+    The default is "hm".
+    """
+
     fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
         True
     )
+    """Fit the background's log-amplitude slope when True, the default.
+
+    True fits a frequency-dependent exponential amplitude envelope.
+    False keeps the log-amplitude slope at zero, giving a constant envelope.
+    """
+
     fit_bg_phase_curvature: Annotated[bool, ParamMeta(label="Fit phase curvature")] = (
         False
     )
+    """Fit quadratic background phase curvature when True.
+
+    True fits a quadratic phase term alongside the electrical-delay phase.
+    False, the default, keeps the quadratic coefficient at zero.
+    """
+
     edelay: Annotated[
         float | None, ParamMeta(label="Electrical delay seed (us; blank = auto)")
     ] = None
+    """Electrical-delay branch seed in us, default None, shown as blank.
+
+    A finite number, including zero or a negative value, seeds the delay branch.
+    Blank first uses a finite route-matched calibration as the seed.
+    Otherwise automatic branch selection uses an internal 100 us search cap.
+    Fitting starts from the selected branch and stores the fitted delay in the
+    analysis result. The input field retains the supplied seed or blank state.
+    Invalid seeds raise ValueError at analyze entry.
+    """
 
 
 @dataclass
