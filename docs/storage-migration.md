@@ -358,9 +358,12 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 
 舊 `module_cfg.yaml` 的 `modules`、`waveforms` mapping 不是新 library，只換 header 不算轉換。逐筆建立「舊 family、舊 key、新 canonical key、引用位置」的對照，轉成 `components.<Q>.{pulses,readout,reset,waveforms}.<name>`，再把 point 的 module slot 指到新 key，例如 `components.Q0.module.x180: Q0.pulses.pi_amp`。
 
-1. 用 [cfg_model](../lib/zcu_tools/cfg_model/README.md) 的 `module_spec_from_raw(raw)`、`waveform_spec_from_raw(raw)` 驗證每筆候選；child key 用 `remap_module_references`、`remap_waveform_references` 改。expression 不求值，缺的必要欄位不猜。
-2. readout 要轉成平鋪的 `readout/pulse` Spec：generator 是 `gen_ch`，ADC 是 `ro_ch`，只有一個 `freq`。不能確定舊 `pulse_cfg`、`ro_cfg` 怎麼組合時，該筆列 pending。
-3. 用 owner 提交並讀回：
+1. 先重建已證實的歷史 shape。完整的舊 Pulse 至少有 ch、nqz、freq、gain、waveform；沒有其他 type 證據且缺 type 時才補 `type: pulse`，不按名稱猜。歷史 `Pulse.auto_fill` 的 phase、pre_delay、post_delay 預設都是 0.0，已有值保持不動。desc 與 mixer_freq 是正式欄位，不能丟掉。
+2. 舊 `type: base` 轉成平鋪的 `readout/pulse`。pulse_cfg.ch 改名 gen_ch，pulse_cfg 的頻率、gain、phase、延遲、mixer_freq、waveform 保持原值；ro_cfg 的 ro_ch、ro_length、trig_offset 移到外層。外層 desc 是正式描述，內層 pulse_cfg.desc 沒有獨立對應，要留原文。沒有 ro_freq 時，ADC 使用 pulse_cfg.freq。明示 ro_freq 等於 pulse_cfg.freq 時共用正式 freq，不另存同值；不同時現行單一 freq 無法同時表達，整條原文保全，不建該條 Spec，pending 記兩個頻率。
+3. 舊 `type: bath` 改為 `reset/bath`。cavity_tone_cfg、qubit_tone_cfg、pi2_cfg 是三個已知 Pulse 位置，分別補 type、套用上述 defaults，保留其 desc、mixer_freq、phase 等正式值。name、block_mode 等未表達欄位留原位置，不把整條成功 Spec 再存一份。
+4. 用 [cfg_model](../lib/zcu_tools/cfg_model/README.md) 的 `partition_module_spec(raw)`、`partition_waveform_spec(raw)` 分離未知欄位，取得 typed spec 與 unrecognized 樹。輸入此時必須已是現行欄名與 discriminator。輸出仍經 `module_spec_from_raw`／`waveform_spec_from_raw` strict 驗證。Child key 用 `remap_module_references`、`remap_waveform_references` 改；expression 不求值，缺的必要欄位不猜。只在未知欄位中的 expression 原樣保全，不阻斷其餘正式輸出。
+5. 把未表達欄位樹寫進該 context 的 `general.ext.legacy_module_cfg[原section][原name]`。未知 section 保持原 section 名。完整不支援或沒有 mapping 的條目才存整條原文，不列 pending。支援項缺欄位或 child mapping 仍 pending，原文也要在此可讀。只留未轉 leaf，移除空分支，不把成功值存兩份。透過 view.edit() 設定整個 general.ext mapping，可保留含點號的 literal key。例如未知 `modules.drive.old.key` 若原本 old.key 是單一 key，就寫 `legacy_module_cfg: {modules: {drive: {old.key: 原值}}}`，不要拆開它。報告的 preserved row 用 literal source_keys／destination_keys、new_file 與 new_path=None 定位。
+6. 用 owner 提交並讀回：
 
 ```python
 from zcu_tools.cfg_model import waveform_spec_from_raw
@@ -373,9 +376,9 @@ print(entry.module_library(label).snapshot().waveform_spec("Q0.waveforms.drive")
 `entry` 依第 9 步的方式註冊 component models 後開啟。provenance 由 owner 產生，不手寫事件或 run_id。
 一般讀取 library 時會自動備份並移除壞掉的條目，所以先在工作副本試轉候選，不拿真檔試錯。
 
-**根層 `module_cfg.yaml`** 用同樣規則轉成 entry 的 setup library，新 point 從 setup library 繼承。目前 main 的 `module_library` 只接受 point label；setup library 的支援 land 前，根層 module_cfg 列 temporary-pending，land 後再補。
+**根層 `module_cfg.yaml`** 用同樣規則經 `entry.module_library()` 寫入 setup library。Point 自己的庫用 `entry.module_library(label)`，新 point 不自動複製 setup library。Slots 只指向成功發布的 Spec，按 mapping 次序選第一個成功候選；不能用 pending 或只保全原文的名稱建立引用。
 
-完成條件：每筆舊 module 和 waveform 都已轉換並讀回，或逐筆列 pending。空 library 本身合法，但不能說成「舊 library 已全部轉換」。
+完成條件：每筆舊 module 和 waveform 都已經 owner 提交並讀回，或在新 context 的 legacy_module_cfg 可讀且報告標 preserved。真正缺轉換證據的支援項另列 pending。空 library 本身合法，但不能說成「舊 library 已全部轉換」。
 
 ## 7. 複製圖、樣本與保全檔
 
