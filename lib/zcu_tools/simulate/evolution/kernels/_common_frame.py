@@ -240,14 +240,44 @@ def amplitudes(time, args):
 
 
 @njit(cache=True, nogil=True)
-def hamiltonian(time, channels, args):
+def pack_entries(channels):
+    """Pack exact nonzero entries in channel order for one propagation only.
+
+    Pointers delimit each channel's flattened indices and complex values.
+    Scratch capacity is the dense entry count; compact copies leave no dense
+    allocation attached to the returned apply-local payload.
+    """
+    size = len(channels.energies)
+    pointer = np.empty(len(channels.operators) + 1, np.int64)
+    indices = np.empty(channels.operators.size, np.int64)
+    values = np.empty(channels.operators.size, np.complex128)
+    count = 0
+    for k in range(len(channels.operators)):
+        pointer[k] = count
+        for i in range(size):
+            for j in range(size):
+                entry = channels.operators[k, i, j]
+                if entry != 0:
+                    indices[count] = i * size + j
+                    values[count] = entry
+                    count += 1
+    pointer[-1] = count
+    return pointer, indices[:count].copy(), values[:count].copy()
+
+
+@njit(cache=True, nogil=True)
+def hamiltonian(time, channels, args, packed):
+    pointer, indices, values = packed
     z = amplitudes(time, args)
     h = np.diag(channels.energies.astype(np.complex128))
+    flat = h.reshape(h.size)
     for k in range(len(channels.operators)):
         value = z[channels.first[k]] * np.exp(1j * channels.omega[k] * time)
         if channels.second[k] >= 0:
             value *= z[channels.second[k]]
-        h += channels.operators[k] * value
+        # Keep signed channels separate and preserve each entry's sum order.
+        for n in range(pointer[k], pointer[k + 1]):
+            flat[indices[n]] += values[n] * value
     return h
 
 
@@ -271,9 +301,10 @@ def propagate(channels, args, control, rho, bath):
     dt = duration / steps
     a, b = (3 - 2 * np.sqrt(3)) / 12, (3 + 2 * np.sqrt(3)) / 12
     c1, c2 = 0.5 - np.sqrt(3) / 6, 0.5 + np.sqrt(3) / 6
+    packed = pack_entries(channels)
     for k in range(steps):
-        h1 = hamiltonian((k + c1) * dt, channels, args)
-        h2 = hamiltonian((k + c2) * dt, channels, args)
+        h1 = hamiltonian((k + c1) * dt, channels, args, packed)
+        h2 = hamiltonian((k + c2) * dt, channels, args, packed)
         u = unitary(a * h1 + b * h2, dt) @ unitary(b * h1 + a * h2, dt)
         rho = split_step(rho, u, populations, coherences)
     return rho
