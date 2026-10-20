@@ -137,6 +137,48 @@ def test_coupled_state_independent_cavities_allow_unobserved_jumps() -> None:
     )
 
 
+def test_mux_traces_have_a_bridge_and_share_windows_through_ringdown() -> None:
+    base = model(np.array([[0, 0.08, 0.02], [0.04, 0, 0.06], [0.02, 0.03, 0]]))
+    base = replace(
+        base,
+        receiver=Receiver(
+            gain=1.7, phase_rad=0.3, offset=np.array([0.2, -0.4]), time_of_flight_ns=2.5
+        ),
+        mismatch_phase_rad=np.array([0.6, 0.2]),
+    )
+    envelope = PiecewiseLinearEnvelope(
+        np.array([0.0, 15.0, 40.0]), np.array([0, 1 + 0.2j, 0.4], complex)
+    )
+    pulses = (
+        ReadoutPulse(5, 65, 0.8 + 0.2j, 6.007, 0.2, envelope),
+        ReadoutPulse(15, 75, 0.4 - 0.1j, 6.021),
+    )
+    grid = SampleGrid(np.array([-5.0, 5, 10, 25, 45, 65, 85, 105]), 6.003, 0.1)
+    population = PopulationInput(base.state_labels, np.array([0.0, 0.0, 1.0]))
+    sampler = ADC(base)
+    whole, early, late = sampler.sample_windows(
+        population,
+        pulses,
+        (
+            grid,
+            replace(grid, times_ns=grid.times_ns[:4]),
+            replace(grid, times_ns=grid.times_ns[4:]),
+        ),
+        SamplingIdentity(83),
+        shots=600,
+    )
+    assert whole.traces[:, 4].var(axis=0).sum() > 0.01
+    assert_array_equal(
+        whole.traces, np.concatenate((early.traces, late.traces), axis=1)
+    )
+    expected = sampler.response(pulses, grid).traces[2]
+    assert np.all(
+        np.abs(whole.traces.mean(axis=0) - expected)
+        < 6 * whole.traces.std(axis=0) / np.sqrt(600) + 3e-8
+    )
+    assert_array_equal(whole.sums, whole.traces.sum(axis=1))
+
+
 def test_shaped_paths_share_windows_delay_mismatch_and_seed() -> None:
     base = model(np.array([[0, 0.025, 0], [0, 0, 0.04], [0, 0, 0]]))
     receiver = Receiver(gain=1.7, phase_rad=0.3, offset=np.array([0.2, -0.4]))

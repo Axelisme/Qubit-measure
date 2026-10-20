@@ -109,6 +109,72 @@ def test_integrated_shots_form_bridge_and_match_conditional_expectation(rates, s
     assert_array_equal(source.materialize(1600, 0)[0], raw)
 
 
+@pytest.mark.parametrize("mux", [False, True])
+def test_receivers_share_full_paths_and_windows_with_independent_noise(mux):
+    rates = np.array([[0, 0.12, 0.04], [0.06, 0, 0.1], [0.09, 0.03, 0]])
+    content = batch(model(rates), shaped=mux)
+    pulse = content.pulses[0][0]
+    if mux:
+        content = replace(
+            content,
+            pulses=((pulse, replace(pulse, start_ns=15, frequency_ghz=6.021)),),
+        )
+    grid = content.grids[0][0]
+    content = replace(content, grids=((grid, grid),))
+    shifted = replace(
+        content,
+        model=replace(
+            content.model, receiver=adc.Receiver(gain=100, offset=np.array([3.0, -2.0]))
+        ),
+    )
+    noisy = replace(
+        content,
+        model=replace(
+            content.model,
+            receiver=adc.Receiver(gain=100, noise_covariance=np.eye(2) * 4),
+        ),
+    )
+    source = prepare(
+        np.array([0.0, 0.0, 1.0]),
+        {7: content, 2: shifted, 5: noisy, 9: noisy},
+        reps=500,
+    ).bind(SamplingIdentity(61))
+    raw = source.materialize(500, 0)
+    assert list(raw) == [7, 2, 5, 9]
+    assert raw[7][:, 0].var(axis=0).sum() > 10000
+    assert_array_equal(raw[7][:, 0], raw[7][:, 1])
+    assert_array_equal(
+        raw[2] - raw[7],
+        np.broadcast_to(len(grid.times_ns) * np.array([3, -2]), raw[7].shape),
+    )
+    residual_a = (raw[5] - raw[7]).reshape(500, -1)
+    residual_b = (raw[9] - raw[7]).reshape(500, -1)
+    assert_allclose(residual_a.var(axis=0), len(grid.times_ns) * 4, rtol=0.22)
+    assert np.max(np.abs(np.corrcoef(residual_a.T, residual_b.T)[:4, 4:])) < 0.16
+    expected = adc.ADC(content.model).responses(content).sums[0, :, 2]
+    assert np.all(
+        np.abs(raw[7].mean(axis=0) - expected)
+        < 6 * raw[7].std(axis=0) / np.sqrt(500) + 0.51
+    )
+    assert_array_equal(source.materialize(500, 0)[7], raw[7])
+
+
+def test_mux_carriers_superpose_on_the_same_jumping_cavity():
+    content = batch(model(np.array([[0, 0.1, 0.03], [0.05, 0, 0.08], [0.02, 0.04, 0]])))
+    first = content.pulses[0][0]
+    second = replace(first, start_ns=15, frequency_ghz=6.023, amplitude=0.3 - 0.4j)
+    mux = replace(content, pulses=((first, second),))
+    # The silent first pulse preserves the population origin for the later tone.
+    later = replace(content, pulses=((replace(first, amplitude=0), second),))
+    raw = (
+        prepare(np.array([0.0, 0.0, 1.0]), {0: mux, 1: content, 2: later}, reps=120)
+        .bind(SamplingIdentity(4))
+        .materialize(120, 0)
+    )
+    assert np.unique(raw[0][:, 0], axis=0).shape[0] > 100
+    assert_allclose(raw[0], raw[1] + raw[2], atol=1)
+
+
 def test_deferred_raw_does_not_change_statistics_stream_or_retain_noisy_results():
     content = batch(model(np.array([[0, 0.025, 0], [0, 0, 0.04], [0, 0, 0]])))
     content = replace(content, grids=((content.grids[0][0], content.grids[0][0]),))
