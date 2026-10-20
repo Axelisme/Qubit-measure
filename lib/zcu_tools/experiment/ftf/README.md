@@ -164,14 +164,17 @@ including absolute phase origins. Physical settings/snapshot/numeric changes,
 engine replacement, failed preparation and close clear the preparations. It never
 retains request seeds, acquire sequences, noisy IQ or round results. Hits update
 numeric-use identity and repeat report-only accuracy warnings through evolution's
-`PathDiagnostics.warn_exceeded()`. Entries record whether their solve increments
-source-cumulative routing usage. Such hits call `Engine.evolve` again so its
-route-aware memo counts the current inventory and resolves the current route.
-They reuse ADC channels, refresh populations and paths, and reuse the integrated
-sampler only when populations are unchanged. Content keys exclude cumulative
-counts, so growing usage does not force a cache miss. History-sensitive hits
-still pay for template conversion and route planning. Other hits return the
-saved preparation without evolving. Equal consecutive
+`PathDiagnostics.warn_exceeded()`. Hits ask `Engine.reuse` to resolve the current
+selection from immutable inventory and pricing facts. FTF neither inspects
+cumulative source counters nor infers history sensitivity from count increments. An unchanged
+selection returns the saved preparation without template conversion, geometry,
+WorkPlan construction, numerical preparation, population conversion or cache put.
+A changed selection or evicted routing facts calls `Engine.evolve` and refreshes
+populations and paths while retaining ADC channels. Content keys exclude
+cumulative counts, so growing usage does not force a preparation-cache miss.
+Evolution counts each distinct acquire content's complete row inventory once;
+identical repeats do not invent additional numerical playback to amortize a gate.
+Other hits return the saved preparation without evolving. Equal consecutive
 software rounds remain one preparation. The public
 `source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
 Its `max_bytes` can be adjusted between calls; zero disables residency. The budget

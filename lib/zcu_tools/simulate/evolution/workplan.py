@@ -298,7 +298,9 @@ class WorkPlan:
     RuntimeError. Model-only resident cache ownership is separate.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, content_key: bytes = b"") -> None:
+        # Engine supplies the whole numerical input digest, independent of caches.
+        self.content_key = content_key
         self.routing = RoutingCollector()
         self._facts: dict[Hashable, _Resource] = {}
         self._resources: dict[Hashable, _Resource] = {}

@@ -47,6 +47,7 @@ def create_work_plan(
     budget: float = 1e-3,
     *,
     telemetry: bool = False,
+    content_key: bytes = b"",
 ) -> WorkPlan:
     """Create ownership for the complete evolve before prefix/worker planning.
 
@@ -55,7 +56,7 @@ def create_work_plan(
     budget is the numerical admission budget for cold mixed gate plans.
     telemetry enables calling-thread CPU accounting before those plans build.
     """
-    plan = WorkPlan()
+    plan = WorkPlan(content_key=content_key)
     plan.routing.enabled = telemetry
     plan.publish_common_frame_table(table)
     populate_carrier_plan(table, source, plan)

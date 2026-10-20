@@ -16,13 +16,16 @@ class MultitoneInventory:
     """Complete admitted rows and expanded-row source usage, fixed before workers.
 
     admitted lists row indices of the complete Engine geometry, not a prefix
-    slice. cheap lists admitted unexpanded small graphs. uses pairs an expanded row with its source-cumulative key use count.
+    slice. cheap lists admitted unexpanded small graphs. uses pairs an expanded
+    row with its source-cumulative distinct-content row count. keys aligns with
+    uses and names each row's source-history physics digest.
     Prices are evaluated lazily only when dispatch needs the legacy fallback.
     """
 
     admitted: tuple[int, ...]
     cheap: tuple[int, ...]
     uses: tuple[tuple[int, int], ...]
+    keys: tuple[bytes, ...] = ()
 
 
 def populate_multitone_inventory(
@@ -62,11 +65,16 @@ def populate_multitone_inventory(
             ).digest()
             keys.append(identity)
             inventory[identity] = inventory.get(identity, 0) + 1
-        usage = source.record_gate_usage(inventory) if inventory else {}
+        usage = (
+            source.record_gate_usage(inventory, content=plan.content_key)
+            if inventory
+            else {}
+        )
         return MultitoneInventory(
             tuple(int(row) for row in admitted),
             tuple(cheap),
             tuple((int(row), usage[key]) for row, key in zip(rows, keys, strict=True)),
+            tuple(keys),
         )
 
     return plan.fact(
@@ -107,15 +115,36 @@ def populate_multitone_plan(
         return frozenset(
             row
             for row, uses in inventory.uses
-            if _direct_cheaper(geometry, row, context, uses)
+            if multitone_cost(geometry, row, context).direct_cheaper(uses)
         )
 
     return plan.fact(FactKey(("multitone-cold-plan", budget), frozenset), build)
 
 
-def _direct_cheaper(
-    table: SegmentTable, row: int, context: KernelContext, uses: int
-) -> bool:
+@dataclass(frozen=True)
+class MultitoneCost:
+    """Usage-independent direct/RWA prices for one expanded row."""
+
+    direct: float
+    prepare: float
+    guard: float
+    apply: float
+
+    def direct_cheaper(self, uses: int) -> bool:
+        return self.direct < self.guard + self.prepare / uses + self.apply
+
+
+def multitone_cost(
+    table: SegmentTable, row: int, context: KernelContext
+) -> MultitoneCost:
+    """Borrow one row's immutable pricing, retaining no numerical payloads."""
+    return context.work_plan.fact(
+        FactKey(("multitone-row-cost", id(table), row, context.budget), MultitoneCost),
+        lambda: _price_row(table, row, context),
+    )
+
+
+def _price_row(table: SegmentTable, row: int, context: KernelContext) -> MultitoneCost:
     model = context.source.model(tuple(int(v) for v in table.level[row]))
     retained = multitone_retention(table, row, context)
     assert retained.dimension is not None
@@ -155,7 +184,7 @@ def _direct_cheaper(
     occupancy = retained.dimension / size**2
     # Expanded graphs incur fast interaction-picture oscillations and additional
     # coefficient/guard work even when their omission certificate is excellent.
-    prepare = 0.002 * scale * (1 + occupancy) / uses
+    prepare = 0.002 * scale * (1 + occupancy)
     guard = 0.003 * scale * (1 + occupancy)
     apply = (
         6e-5
@@ -166,4 +195,4 @@ def _direct_cheaper(
         * scale
         * tolerance
     )
-    return bool(direct < guard + prepare + apply)
+    return MultitoneCost(float(direct), float(prepare), float(guard), float(apply))

@@ -355,8 +355,10 @@ class Engine:
     Exact-input memo hits skip geometry only for inventories without cumulative
     single-tone shaped gate or multitone candidates: their routes do not depend
     on history.
-    Other inventories count source usage and select gate keys and multitone routes
-    before memo lookup.
+    Other inventories count distinct acquire content's complete row inventories
+    and select gate keys/multitone routes before memo lookup. Caller-owned
+    preparations can use reuse() to reprice retained immutable facts without
+    entering geometry, WorkPlan construction or numerical preparation.
     Acquires sharing a source must serialize, including across Engine instances.
     Empty work, a single timeline, and workers=1 run inline without a pool.
     Native BLAS uses one thread throughout evolve, coordinated across engines.
@@ -378,6 +380,7 @@ class Engine:
     ) -> None:
         """Create the prepare cache; reject invalid sizes or duplicate kernel names."""
         from ._result_memo import RESULT_MEMO_BYTES, ResultMemo
+        from ._routing_reuse import RoutingReuse
         from .cache import PrepareCache
         from .kernels import REGISTRY
 
@@ -396,11 +399,39 @@ class Engine:
         self._cache: PrepareCache = PrepareCache(cache_bytes)
         self._memo = ResultMemo(min(RESULT_MEMO_BYTES, cache_bytes))
         self._memo_enabled = cache_bytes > 0
+        self._routing_reuse = RoutingReuse(min(4 * 1024**2, cache_bytes))
         self._chunks = workers * (6 if chunks_per_worker is None else chunks_per_worker)
         self._inventory_chunks = chunks_per_worker is None
         self._lock = Lock()
         self._closed = False
         self._workers = workers
+
+    def reuse(
+        self,
+        source: ModelSource,
+        key: bytes,
+        *,
+        cancel: Event | None = None,
+        budget: float = 1e-3,
+    ) -> bool:
+        """Validate a caller's exact-content result against current source usage.
+
+        key is the same caller-owned content digest passed as reuse_key to the
+        successful evolve that produced the result. The caller must invalidate
+        its result on any content, source, budget or Engine change. True records
+        this acquire's complete inventory and permits reuse with no numerical
+        work. False records nothing: evolve the full acquire instead. Eviction,
+        a different source, disabled residency and a changed route return False.
+        Calls sharing a source must serialize the check and subsequent evolve.
+        Optional cancel raises Cancelled when set; None has no cancellation
+        token. A closed engine raises RuntimeError.
+        """
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("engine is closed")
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            return self._routing_reuse.reuse(key, source, budget)
 
     def evolve(
         self,
@@ -410,11 +441,17 @@ class Engine:
         budget: float = 1e-3,
         cancel: Event,
         telemetry: bool = False,
+        reuse_key: bytes | None = None,
     ) -> EvolutionResult:
         """Evolve all batches to readout, forwarding per-segment budget to kernels.
 
         source: this round's model cache and initial DC density. batches: all
-        template batches for the acquire. budget: positive absolute population
+        template batches for the acquire. reuse_key optionally registers a
+        caller-owned exact-content digest for reuse(); it must cover every input
+        the caller retains, and is scoped to this Engine and source instance.
+        Only immutable inventory/pricing facts are retained, in a separate LRU
+        capped at min(4 MiB, cache_bytes); eviction causes a normal fresh evolve.
+        budget: positive absolute population
         and low-four error allowance. cancel: event checked between chunks;
         when set, raises Cancelled, without returning partial results.
         telemetry enables per-family calling-thread CPU and routing accounting
@@ -451,12 +488,16 @@ class Engine:
                     np.empty((0, size, size), dtype=np.complex128),
                     PathDiagnostics(),
                 )
-            key = input_key(source, batches, budget) if self._memo_enabled else None
+            content_key = input_key(source, batches, budget)
+            key = content_key if self._memo_enabled else None
             if key is not None:
                 # Only inventories without cumulative gate candidates use the
                 # raw input key. Their routes are independent of source history.
                 cached = self._cached_result(key, cancel, telemetry=telemetry)
                 if cached is not None:
+                    self._routing_reuse.remember_independent(
+                        reuse_key, source, budget, content_key
+                    )
                     return cached
             frontend_started = time.thread_time() if telemetry else 0.0
             geometry = plan(source, batches)
@@ -467,16 +508,26 @@ class Engine:
             )
             # Drain workers before releasing evolve-local ownership.
             with closing(
-                create_work_plan(geometry.table, source, budget, telemetry=telemetry)
+                create_work_plan(
+                    geometry.table,
+                    source,
+                    budget,
+                    telemetry=telemetry,
+                    content_key=content_key,
+                )
             ) as work_plan:
                 frontend_cpu_s = (
                     time.thread_time() - frontend_started if telemetry else 0.0
                 )
                 context = KernelContext(source, budget, work_plan)
+                reuse_snapshot = self._routing_reuse.snapshot(
+                    reuse_key, geometry.table, context
+                )
                 if key is not None:
                     key = route_key(key, geometry.table, context)
                     cached = self._cached_result(key, cancel, telemetry=telemetry)
                     if cached is not None:
+                        self._routing_reuse.add(reuse_key, reuse_snapshot)
                         return cached
                 kernels = self._kernels
                 inventory = resident_inventory(geometry, kernels, context, self._cache)
@@ -511,6 +562,7 @@ class Engine:
             result.paths.warn_exceeded(stacklevel=3)
             if key is not None:
                 self._memo.add(key, result)
+            self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
 
     def _cached_result(
@@ -531,3 +583,4 @@ class Engine:
                 self._closed = True
                 self._cache.clear()
                 self._memo.clear()
+                self._routing_reuse.clear()

@@ -91,7 +91,7 @@ tries the next candidate in the following graph.
 | Two constant tones | First try cold-priced `common_frame`. For remaining distinct ports, compare omission-expanded `multitone_rwa` with DOP853 using cold prepare, guard and apply estimates including retained dimension and restored oscillation frequencies. Unexpanded RWA stays first. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order. |
 | Shaped two-tone or three-or-more-tone row | Two-tone rows first try cold-priced `common_frame`. Remaining rows try `multitone_gate`, then the cheaper cold-cost choice between omission-expanded `multitone_rwa` and `dop853`. Unexpanded RWA stays first. Ordinary RWA admits fixed-flux rows with acceptable omitted-channel estimates, smooth real envelopes and at least one sampled envelope, including close or equal carriers. Other rows retain the full-drive fallback. |
 
-Expanded-RWA preparation is amortized over the complete acquire and source-cumulative exact prepare-key usage, not resident cache warmth. Prefix and worker subsets borrow the same plan. Exact-result memoization includes the selected route and still counts cumulative usage on memo hits.
+Expanded-RWA preparation is amortized over the complete acquire and source-cumulative exact prepare-key usage, not resident cache warmth. Prefix and worker subsets borrow the same plan. Exact-result memoization includes the selected route. Source usage counts distinct acquire content's complete row inventories, not repeated identical playback.
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
 no-tone or single constant-tone row respectively. They have no DOP853 fallback.
@@ -514,8 +514,8 @@ releases cache ownership, not references already held by active work.
 
 Exact-input repeats without single-tone shaped gate candidates bypass geometry,
 planning and every kernel call because their routes do not depend on usage.
-Inventories with those candidates always count the complete acquire and choose
-cold costs first. Their memo key also includes selected gate keys, so a prior
+Inventories with history-sensitive candidates choose cold costs from the
+source's distinct-content row inventories before exact-result memo lookup. Their memo key also includes selected gate keys, so a prior
 Sambe result cannot hide a later source-amortized gate decision. The
 Engine-local result LRU retains owned densities, points and diagnostics, not
 ADC or random samples. Its key covers the whole-source DC model identity,
@@ -526,11 +526,29 @@ production kernels must be deterministic and pure for identical inputs, as with
 prepare reuse. Returned copies cannot mutate memo entries. Cancellation still
 raises without a partial result, and cached exceedances still warn per call.
 
+Callers retaining exact-content preparations can pass `reuse_key=content_digest`
+to `evolve`, then call `Engine.reuse(source, content_digest, cancel=event)` before
+reusing that preparation. The caller invalidates on input/source/Engine/budget
+changes. Evolution retains only immutable inventory and usage-independent pricing
+facts derived from geometry. It reprices the current source usage without
+constructing geometry or a WorkPlan. The policy answer is memoized by the
+current inventory's relevant key totals; unchanged inputs reuse that answer,
+while changed totals still select actual keys and rows. True authorizes reuse;
+False records no
+usage and requires fresh evolve. Selections, not raw monotonic counters, decide
+reuse. A different source, eviction or disabled residency also returns False.
+FTF therefore never assembles Engine geometry or knows algorithm cost rules.
+
 The result LRU charges arrays and metadata up to `min(64 MiB, cache_bytes)` in
-addition to the prepare budget; zero disables both caches. `close()` clears both.
+addition to the prepare budget. A separate routing-facts LRU charges immutable
+Python records and scalars up to `min(4 MiB, cache_bytes)`; weak source references
+do not retain models. Oversize facts stream without evicting resident entries.
+A working set exceeding capacity falls back to normal evolve, never stale routes.
+Zero disables residency in all caches. `close()` clears them.
 All Engines include the same per-allocation metadata estimate in retention
 charges. FTF production uses a 2 GiB unified resident/pending budget for arrays
-and estimated metadata, plus at most 64 MiB for results. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
+and estimated metadata, plus at most 64 MiB for results and 4 MiB for routing
+facts. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
 active payload references and ADC preparations are separate allocations. The
 process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
 4 GB ceiling. Numba's compilation cache is independent of the prepare LRU.
@@ -592,13 +610,24 @@ process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
 `close()` waits for active work, clears the prepare cache and is idempotent.
 
-`ModelSource` owns cumulative canonical single-tone gate-key row counts, separate
-from resident preparations and numerical guards. Each complete acquire increments
-counts before prefix planning or memo lookup; cache eviction and Engine replacement
-do not reset them. Source callers serialize acquires, even across Engines.
-`gate_usage` returns a detached snapshot. `record_gate_usage` adds a complete
-inventory and returns its new totals. Callers with history-sensitive cached
-results still use `Engine.evolve` to count usage and resolve the current route.
+`ModelSource` owns distinct acquire content's complete row inventories, separate
+from resident preparations and numerical guards. Each numerical input digest
+contributes its canonical gate/multitone key row multiplicities once. Identical
+repeats need no numerical playback, so counting them again would overstate gate
+amortization and select unnecessary builds. Distinct contents still accumulate
+all their rows, including rejected or nonresident keys, before prefix work.
+The digest covers model, initial density, budget and full batch content, not
+sampling sequence or cache state. Cache hits, clearing, eviction, disabled
+residency and Engine replacement do not reset this history. Thus clearing a
+preparation cache and rerunning selects the same current route. Source callers
+serialize acquires, even across Engines. `gate_usage` returns a detached snapshot;
+`record_gate_usage(inventory, content=digest)` returns the keys' current totals.
+`projected_gate_usage` predicts that operation without mutation for route checks.
+Content membership and cumulative counters are source-lifetime history, not an
+LRU: storage grows with distinct content/key pairs and is released at source
+close. Only the current inventory is visited on a hit, not the historical set.
+Callers with history-sensitive preparations use `Engine.reuse` or `Engine.evolve`
+to resolve the current route.
 `ModelSource.close()` clears models and counts after active work drains. It is
 idempotent and leaves immutable builder inputs reusable with a fresh history.
 

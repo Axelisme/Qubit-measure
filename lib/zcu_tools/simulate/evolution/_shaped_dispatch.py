@@ -87,9 +87,55 @@ class SingleGateChoice:
     preferred: bool
 
 
+@dataclass(frozen=True)
+class GateCost:
+    """Immutable geometry/guard pricing for one key, independent of usage."""
+
+    key: bytes
+    scale: float
+    build: float
+    play: float
+    sambe: float
+
+    def price(self, count: int) -> tuple[float, float]:
+        return self.scale * (
+            self.build + count * self.play
+        ), self.scale * count * self.sambe
+
+
+@dataclass(frozen=True)
+class GateFamilyCost:
+    """Complete spectral family's key costs and shared Sambe construction."""
+
+    shared: float
+    costs: tuple[GateCost, ...]
+
+    def choose(self, usage: Mapping[bytes, int]) -> SingleGateChoice:
+        costs = [(cost.key, *cost.price(usage[cost.key])) for cost in self.costs]
+        all_sambe = self.shared + sum(sambe for _, _, sambe in costs)
+        selected = {key for key, gate, sambe in costs if gate < sambe}
+        mixed = sum(min(gate, sambe) for _, gate, sambe in costs)
+        if any(gate >= sambe for _, gate, sambe in costs):
+            mixed += self.shared
+        all_gate = sum(gate for _, gate, _ in costs)
+        if all_gate < mixed:
+            mixed = all_gate
+            selected = {key for key, _, _ in costs}
+        if mixed >= all_sambe:
+            mixed = all_sambe
+            selected = set()
+        return SingleGateChoice(
+            tuple(sorted(selected)),
+            sum(usage[cost.key] for cost in self.costs),
+            float(mixed),
+            float(all_sambe),
+            bool(selected),
+        )
+
+
 def _cold_key_cost(
-    table: SegmentTable, row: int, count: int, context: KernelContext, subdivisions: int
-) -> tuple[float, float]:
+    table: SegmentTable, row: int, key: bytes, context: KernelContext, subdivisions: int
+) -> GateCost:
     """Estimate cold gate build/play and Sambe variable playback for one key."""
     model = context.source.model(tuple(int(v) for v in table.level[row]))
     scale = (len(model.energies_ghz) / 16) ** 3
@@ -112,13 +158,13 @@ def _cold_key_cost(
     kernel = SingleToneGateKernel()
     with context.work_plan.routing.measure(kernel.name, "prepare"):
         admitted = kernel.guard(table, np.array([row], dtype=np.int64), context)[0]
-    gate = np.inf
+    build, play = np.inf, 0.0
     if admitted:
         segments = gate_segments(table, row, context)
         build = 0.10 * duration / 256 * (
             1 + 4 * motion + 0.1 * 2 * np.pi * duration * strength
         ) + 0.001 * (segments - 4)
-        gate = scale * (build + count * (0.0000075 * segments + 0.00008))
+        play = 0.0000075 * segments + 0.00008
     steps = duration * frequency * subdivisions
     whole_steps = np.floor(steps + 1e-10)
     tail = (
@@ -130,8 +176,8 @@ def _cold_key_cost(
     phase = 0.0000002 * 4 * 7 * subdivisions
     subperiod = 0.0000005 * 4 + 0.000004 * 2 + 0.00001
     fractional = 0.0009 * tail if frequency >= 1 else (0.00010 if tail > 1e-10 else 0)
-    sambe = scale * count * (phase + whole_steps * subperiod + fractional + 0.00002)
-    return float(gate), float(sambe)
+    sambe = phase + whole_steps * subperiod + fractional + 0.00002
+    return GateCost(key, scale, float(build), float(play), float(sambe))
 
 
 def populate_single_gate_plan(
@@ -157,64 +203,54 @@ def populate_single_gate_plan(
     Fractional tails cost 0.9 ms/ns above 1 GHz or 0.1 ms for a spectral tail.
     Cubic dimension scaling applies to both alternatives. These are conservative
     relative CPU estimates, not numerical certificates or resident-cache prices.
-    Source usage includes this complete inventory once, before any guards or
-    prefix work. Counts survive eviction; no future acquire or cache warmth is
-    consulted. Prefix/worker subsets borrow the fixed decision without recounting.
+    Source usage includes each distinct acquire content's complete row inventory
+    once. Identical content repeats have zero numerical playback and contribute
+    no extra amortization. Counts survive eviction; no future acquire or cache
+    warmth is consulted. Prefix/worker subsets borrow the fixed decision.
     """
 
     def build() -> tuple[SingleGateChoice, ...]:
+        inventory, families = single_gate_costs(table, source, plan, budget)
+        if not inventory:
+            return ()
+        usage = source.record_gate_usage(dict(inventory), content=plan.content_key)
+        return tuple(family.choose(usage) for family in families)
+
+    return plan.fact(FactKey(("single-tone-gate-mixed-cold-v3", budget), tuple), build)
+
+
+def single_gate_costs(
+    table: SegmentTable, source: ModelSource, plan: WorkPlan, budget: float
+) -> tuple[tuple[tuple[bytes, int], ...], tuple[GateFamilyCost, ...]]:
+    """Publish immutable pricing and inventory once, without counting usage."""
+
+    def build() -> tuple[tuple[tuple[bytes, int], ...], tuple[GateFamilyCost, ...]]:
         context = KernelContext(source, budget, plan)
         families = plan.ramp_families or plan_ramp_families(table, source, plan)
         if not families:
-            return ()
+            return (), ()
         canonical = canonical_keys(table, context)
         inventory: dict[bytes, int] = {}
-        for family in families:
-            for row in family.rows:
-                key = canonical[row]
-                inventory[key] = inventory.get(key, 0) + 1
-        usage = source.record_gate_usage(inventory)
-        choices = []
+        costs = []
         for family in families:
             group: dict[tuple[bytes, bool], int] = {}
             for row in family.rows:
                 key = canonical[row]
+                inventory[key] = inventory.get(key, 0) + 1
                 group.setdefault((key, fixed_flux(table, row)), row)
             scale = (len(source.model(family.level).energies_ghz) / 16) ** 3
-            shared = scale * 0.008
-            costs = [
-                (
-                    key,
-                    *_cold_key_cost(
-                        table, row, usage[key], context, family.subdivisions
+            costs.append(
+                GateFamilyCost(
+                    scale * 0.008,
+                    tuple(
+                        _cold_key_cost(table, row, key, context, family.subdivisions)
+                        for (key, _fixed), row in group.items()
                     ),
                 )
-                for (key, _fixed), row in group.items()
-            ]
-            all_sambe = shared + sum(sambe for _, _, sambe in costs)
-            selected = {key for key, gate, sambe in costs if gate < sambe}
-            mixed = sum(min(gate, sambe) for _, gate, sambe in costs)
-            if any(gate >= sambe for _, gate, sambe in costs):
-                mixed += shared
-            all_gate = sum(gate for _, gate, _ in costs)
-            if all_gate < mixed:
-                mixed = all_gate
-                selected = {key for key, _, _ in costs}
-            if mixed >= all_sambe:
-                mixed = all_sambe
-                selected = set()
-            choices.append(
-                SingleGateChoice(
-                    tuple(sorted(selected)),
-                    sum(usage[key] for key, _fixed in group),
-                    float(mixed),
-                    float(all_sambe),
-                    bool(selected),
-                )
             )
-        return tuple(choices)
+        return tuple(inventory.items()), tuple(costs)
 
-    return plan.fact(FactKey(("single-tone-gate-mixed-cold-v3", budget), tuple), build)
+    return plan.fact(FactKey(("single-tone-gate-costs", budget), tuple), build)
 
 
 def single_gate_preferred(

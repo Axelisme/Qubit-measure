@@ -74,7 +74,6 @@ class _Prepared:
     channels: tuple[ChannelReadout, ...]
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
-    history_sensitive: bool
 
 
 class FTFAcquire:
@@ -174,15 +173,15 @@ class FTFAcquire:
     def _reuse_or_prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
         owner = self._source
         # This check must precede every lookup, including equal-content requests.
-        owner.model_facts(snapshot)
+        facts = owner.model_facts(snapshot)
         key = preparation_key(
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
         prepared = owner.preparation_cache.get(key)
-        if prepared is None or prepared.history_sensitive:
-            # Cumulative routing belongs to Engine, including its route-aware memo.
-            # Equal readout content can still reuse channels and sampling plans.
-            prepared = self._prepare(snapshot, index, previous=prepared)
+        if prepared is None or not owner.engine.reuse(facts.source, key):
+            # Evolution replays inventory and reprices immutable policy facts.
+            # Only a changed selection or evicted facts requires a fresh solve.
+            prepared = self._prepare(snapshot, index, key=key, previous=prepared)
             owner.preparation_cache.put(key, prepared)
         else:
             if owner.telemetry is not None:
@@ -198,6 +197,7 @@ class FTFAcquire:
         snapshot: EnvironmentSnapshot,
         index: int,
         *,
+        key: bytes,
         previous: _Prepared | None = None,
     ) -> _Prepared:
         acquire = self.request
@@ -209,12 +209,12 @@ class FTFAcquire:
             )
             for template in acquire.templates
         )
-        before = facts.source.gate_usage
         evolved = owner.engine.evolve(
             plans[0].source,
             tuple(plan.batch for plan in plans),
             cancel=Event(),
             telemetry=owner.telemetry is not None,
+            reuse_key=key,
         )
         if owner.telemetry is not None:
             self.routing.append(evolved.paths)
@@ -287,7 +287,6 @@ class FTFAcquire:
             tuple(channels),
             evolved.paths.for_reuse(telemetry=False),
             sampler,
-            facts.source.gate_usage != before,
         )
 
 
@@ -309,8 +308,9 @@ class FTFSource:
     preparation_cache owns at most 4 MiB of read-only probabilities, conditionals,
     content mappings, path diagnostics and deterministic integrated samplers.
     Exact current C1 content, layout, mode, reps and readout values select entries.
-    History-sensitive hits still evolve through Engine's route-aware memo and
-    refresh populations/paths; channels and unchanged sampling plans are reused.
+    History-sensitive hits ask Engine to reprice cached immutable routing facts.
+    Only a changed selection or evicted facts evolves and refreshes populations;
+    stable hits retain populations, channels, samplers and the preparation entry.
     Physical/numeric generation and engine replacement clear them before lookup.
     Its public max_bytes may be adjusted between calls; zero disables residency.
     Cumulative builds/hits and resident_bytes report reuse, never noisy results
