@@ -45,7 +45,9 @@ class Template:
     """Request a fresh inline module from an injected template catalog.
 
     ``id`` names a TemplateDef in that catalog. ``set`` maps dotted paths relative
-    to the module root to initial literal, Expr, Slot or Hidden(value) seeds. ``bindings`` maps
+    to the module root to initial literal, Expr, Slot, Hidden(value), or typed model-list seeds.
+    List elements map original Spec field names to seeds; consumers validate
+    their shape and fields against that Spec. ``bindings`` maps
     plain placeholder names to authored replacement text. Explicit bindings
     override captured registry defaults and may use unregistered names; omitted
     bindings are empty.
@@ -70,7 +72,8 @@ class Slot:
     ``path`` is an authored slot or library root, optionally containing component
     placeholders. Forms resolve it at Reset to a direct key. ``copy=False`` keeps
     a reference; ``copy=True`` copies the module inline. ``set`` maps relative
-    dotted paths to initial literal, Expr, Slot or Hidden(value) seeds. Hidden
+    dotted paths to initial literal, Expr, Slot, Hidden(value), or typed
+    model-list seeds validated against the original Spec. Hidden
     supplies a validated literal and hides that inline field. When the slot
     is unset, dangling or its alias is unbound, forms leave input absent: required
     core fields are Invalid; nullable core fields with a None default remain
@@ -95,4 +98,6 @@ class Slot:
         object.__setattr__(self, "set", MappingProxyType(dict(self.set)))
 
 
-type TemplateSeed = TemplateLiteral | Expr | Slot | Hidden
+type TemplateSeed = (
+    TemplateLiteral | Expr | Slot | Hidden | list[dict[str, TemplateSeed]]
+)

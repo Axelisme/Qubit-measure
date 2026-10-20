@@ -49,6 +49,10 @@ def scalar_seed(seed: TemplateSeed) -> JsonValue:
         return {"__complex__": [seed.real, seed.imag]}
     if isinstance(seed, Slot):
         raise TypeError("Slot seeds require captured source resolution")
+    if isinstance(seed, list):
+        return [
+            {name: scalar_seed(value) for name, value in item.items()} for item in seed
+        ]
     return seed
 
 
@@ -226,6 +230,20 @@ def complete_input(
     data.update(authored)
     for name, value in tuple(data.items()):
         info = model.model_fields[name]
+        annotation = spec_annotation(info.annotation)
+        if get_origin(annotation) is list:
+            element = get_args(annotation)[0]
+            if (
+                isinstance(element, type)
+                and issubclass(element, BaseModel)
+                and isinstance(value, list)
+            ):
+                data[name] = [
+                    complete_input(element, item, path=(*path, name, str(index)))
+                    if isinstance(item, dict)
+                    else item
+                    for index, item in enumerate(value)
+                ]
         if (
             name in {"type", "style"}
             and get_origin(info.annotation) is Literal
