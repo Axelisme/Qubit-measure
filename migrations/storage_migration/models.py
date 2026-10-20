@@ -47,7 +47,8 @@ class ModuleRule:
     old_name is the literal source library key. target_path is the proposed concrete
     key (component.partition.name). Publication requires successful Spec conversion.
     reference_path is a component module-slot path or None. Rule order chooses the
-    first present candidate per slot; other candidates retain their own destinations. reason
+    first successfully published candidate per slot; other candidates retain their
+    own destinations, and unsuccessful candidates remain located pending. reason
     explains this declaration. kind selects the source modules or waveforms
     partition; waveform rules must not supply a module-slot reference_path.
     """

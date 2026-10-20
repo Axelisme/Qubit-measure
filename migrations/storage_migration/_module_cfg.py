@@ -157,22 +157,22 @@ def _pending_reason(raw: JsonValue, rule: ModuleRule | None) -> str | None:
 
 
 def _set_slots(
-    entry: ResultEntry, label: str | None, values: JsonObject, mapping: MigrationMapping
+    entry: ResultEntry,
+    label: str | None,
+    published: LibrarySnapshot,
+    mapping: MigrationMapping,
 ) -> None:
-    modules = values.get("modules")
-    if not isinstance(modules, dict):
-        return
+    modules = published.module_keys()
     slots: set[str] = set()
     view = entry.setup if label is None else entry.use_point(label)
     with view.edit() as draft:
         for rule in mapping.module_rules:
             if (
                 rule.kind == "module"
-                and rule.old_name in modules
+                and rule.target_path in modules
                 and rule.reference_path is not None
                 and rule.reference_path not in slots
             ):
-                # Slot priority is presence-based, even for unsupported Specs.
                 draft.set(rule.reference_path, rule.target_path)
                 slots.add(rule.reference_path)
 
@@ -195,7 +195,8 @@ def convert_module_cfg(
     The legacy envelope requires modules and waveforms mappings; malformed
     envelopes raise MigrationInputError and retain a module-step failure diagnostic.
     Root entries use the setup library and set setup slots through the entry owner.
-    Child slots retain first-present module-rule priority. Unsupported expressions,
+    Slots choose the first successfully published module rule per reference path.
+    Unsupported expressions,
     Specs and unmapped child references remain located pending without evaluation.
     Document/schema or I/O commit failures are recorded then propagate.
 
@@ -236,12 +237,12 @@ def convert_module_cfg(
         candidate = _prepare_library(
             session, source, values, mapping, library.source_path
         )
-        _set_slots(entry, label, values, mapping)
         with library.edit() as draft:
             for path in candidate.module_keys():
                 draft.set_module(path, candidate.module_spec(path))
             for path in candidate.waveform_keys():
                 draft.set_waveform(path, candidate.waveform_spec(path))
+        _set_slots(entry, label, candidate, mapping)
         destination_hash = file_hash(library.source_path)
         publication = ModuleFilePublication(
             source=source,

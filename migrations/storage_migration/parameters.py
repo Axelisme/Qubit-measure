@@ -241,6 +241,28 @@ def _module_scalar_destination(
     return f"{name}.ext.{rule.old_key}"
 
 
+def _retain_point_slots(
+    entry: ResultEntry, label: str, mapping: MigrationMapping
+) -> None:
+    # New points copy setup YAML but deliberately start with an empty library.
+    # Keep only references that this point's own published library can resolve.
+    published = entry.module_library(label).snapshot().module_keys()
+    with entry.use_point(label).edit() as draft:
+        document = snapshot(draft)
+        for name in mapping.components:
+            path = f"{name}.module"
+            try:
+                slots = document_value(document, path)
+            except AttributeError:
+                continue  # Components need not declare a module-slot container.
+            if isinstance(slots, dict):
+                retained: YamlMap = {
+                    slot: key for slot, key in slots.items() if key in published
+                }
+                if retained != slots:
+                    draft.set(path, retained)
+
+
 def _convert_context(
     session: MigrationSession,
     entry: ResultEntry | None,
@@ -269,6 +291,8 @@ def _convert_context(
             if label in entry.list_points()
             else entry.new_point(label)
         )
+        if not is_setup:
+            _retain_point_slots(entry, label, mapping)
     convert_module_cfg(
         session,
         entry=entry,
