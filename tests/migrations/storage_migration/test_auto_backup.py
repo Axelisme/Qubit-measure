@@ -2,12 +2,15 @@
 
 import hashlib
 import json
+import os
 import shutil
 from dataclasses import replace
 from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 
 import pytest
+from ruamel.yaml import YAML
+from zcu_tools.resources.entry import ResultEntry, snapshot
 
 from migrations.storage_migration import (
     MigrationInputError,
@@ -524,3 +527,147 @@ def test_partial_backup_dry_run_validates_without_filling_gaps(
     assert sorted(path.rglob("*.bin")) == [kept]
     assert not (path / "Database").exists()
     assert not (path / "migration-records").exists()
+
+
+@pytest.fixture
+def interrupted_initialization(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    """Interrupt external manifest I/O after publishing the initial entry."""
+    target = request_data.results_root / request_data.name / "records/migration-state.json"
+    replace_file = os.replace
+
+    def fail_manifest(source: str | Path, destination: str | Path) -> None:
+        if Path(destination) == target:
+            raise OSError("initial manifest interrupted")
+        replace_file(source, destination)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", fail_manifest)
+        with pytest.raises(OSError, match="initial manifest interrupted"):
+            migrate(request_data, mapping)
+    return backup_path(request_data) / "migration-records/chip/qubit/migration-initialization.json"
+
+
+def test_initial_manifest_interruption_reruns_with_fixed_identity_and_future_fields(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    interrupted_initialization: Path,
+) -> None:
+    assert interrupted_initialization.is_file(), "ownership must precede entry writes"
+    raw = json.loads(interrupted_initialization.read_text())
+    identity = raw["manifest"]["identity"]["entry_id"]
+    created_at = raw["created_at"]
+    report_path = raw["manifest"]["report_path"]
+    raw["future"] = {"opaque": [1, "retained"]}
+    interrupted_initialization.write_text(json.dumps(raw))
+    migrate(request_data, mapping)
+    entry = ResultEntry.open(
+        request_data.name,
+        result_root=request_data.results_root,
+        database_root=request_data.database_root,
+    )
+    assert entry.entry_id == identity
+    assert snapshot(entry.setup).general.created_at == created_at
+    manifest = json.loads((entry.result_path / "records/migration-state.json").read_text())
+    assert manifest["report_path"] == report_path
+    assert json.loads(interrupted_initialization.read_text())["future"] == raw["future"]
+
+
+@pytest.mark.parametrize("window", ["before-entry", "result-rename", "database-rename"])
+def test_initialization_windows_resume_without_an_explicit_resume_flag(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
+    window: str,
+) -> None:
+    mkdir = Path.mkdir
+    rename = Path.rename
+    result_target = request_data.results_root / request_data.name
+    database_target = request_data.database_root / request_data.name
+
+    def fail_mkdir(path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
+        if window == "before-entry" and path.name.startswith(".migration-init-"):
+            raise OSError("initialization interrupted")
+        mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    def fail_rename(path: Path, target: str | Path) -> Path:
+        if (window == "result-rename" and Path(target) == result_target) or (
+            window == "database-rename" and Path(target) == database_target
+        ):
+            raise OSError("initialization interrupted")
+        return rename(path, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "mkdir", fail_mkdir)
+        patch.setattr(Path, "rename", fail_rename)
+        with pytest.raises(OSError, match="initialization interrupted"):
+            migrate(request_data, mapping)
+    ownership = backup_path(request_data) / "migration-records/chip/qubit/migration-initialization.json"
+    assert ownership.is_file()
+    raw = json.loads(ownership.read_text())
+    assert not result_target.exists() or window == "database-rename"
+    assert not database_target.exists()
+    migrate(request_data, mapping)
+    entry = ResultEntry.open(request_data.name, result_root=request_data.results_root, database_root=request_data.database_root)
+    assert entry.entry_id == raw["manifest"]["identity"]["entry_id"]
+    assert snapshot(entry.setup).general.created_at == raw["created_at"]
+    assert not (request_data.results_root / raw["temporary_name"]).exists()
+    assert not (request_data.database_root / raw["temporary_name"]).exists()
+
+
+def test_initial_window_yaml_formatting_is_skipped_without_rewriting(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    interrupted_initialization: Path,
+) -> None:
+    assert interrupted_initialization.is_file(), "initialization must be owned"
+    entry_path = request_data.results_root / request_data.name
+    paths = [entry_path / "setup.yaml", entry_path / "module_cfg.yaml"]
+    for path in paths:
+        raw = YAML(typ="safe").load(path.read_text())
+        with path.open("w") as stream:
+            YAML(typ="safe").dump(raw, stream)
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
+    # Data-only leaves the initial setup/library unchanged after bootstrap.
+    migrate(replace(request_data, part="data"), mapping)
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths} == before
+
+
+@pytest.mark.parametrize("change", ["declaration", "mapping", "identity", "source", "value", "unknown"])
+def test_initialization_conflicts_leave_all_owned_content_untouched(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    interrupted_initialization: Path,
+    change: str,
+) -> None:
+    assert interrupted_initialization.is_file(), "initialization must be owned"
+    request = request_data
+    if change == "declaration":
+        request = replace(request, assume_flux_unit="mA")
+    elif change == "mapping":
+        mapping = replace(mapping, mapping_version="1.1")
+    elif change == "identity":
+        request = replace(request, name="another-entry")
+    elif change == "source":
+        (request.result_root / "chip/qubit/new.bin").write_bytes(b"new source")
+    else:
+        path = request.results_root / request.name / "setup.yaml"
+        raw = YAML(typ="safe").load(path.read_text())
+        if change == "value":
+            raw["general"]["description"] = "edited"
+        else:
+            raw["format_version"] = "2.1"
+            raw["future"] = {"unknown": "must not disappear"}
+        with path.open("w") as stream:
+            YAML(typ="safe").dump(raw, stream)
+    roots = [request_data.results_root, request_data.database_root, backup_path(request_data)]
+    before = {path: path.read_bytes() for root in roots for path in root.rglob("*") if path.is_file()}
+    with pytest.raises(MigrationInputError) as caught:
+        migrate(request, mapping)
+    assert caught.value.differences, "immutable ownership conflicts must be located"
+    after = {path: path.read_bytes() for root in roots for path in root.rglob("*") if path.is_file()}
+    assert after == before
+    assert (request_data.result_root / "chip/qubit").exists()
