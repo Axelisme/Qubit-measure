@@ -7,12 +7,14 @@ from typing import Literal
 import numpy as np
 import pytest
 import zcu_tools.simulate.evolution as evolution
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
     KernelContract,
     assert_budget,
+    kernel_context,
     reference,
     synthetic_model,
 )
@@ -134,17 +136,26 @@ class TestFluxDOP853(KernelContract):
 def prepare(case: KernelCase):
     rows = np.arange(len(case.states))
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
     return case.kernel.prepare(
-        keys, case.table, rows[first], case.source, case.budget
+        keys,
+        case.table,
+        rows[first],
+        KernelContext(case.source, case.budget, WorkPlan()),
     ), inverse
 
 
 def test_source_keys_share_across_baths_and_apply_parameters(kernel_case: KernelCase):
-    keys = kernel_case.kernel.prepare_keys(kernel_case.table, np.arange(3))
+    keys = kernel_case.kernel.prepare_keys(
+        kernel_case.table,
+        np.arange(3),
+        KernelContext(kernel_case.source, kernel_case.budget, WorkPlan()),
+    )
     assert len(np.unique(keys)) == 1
 
 
@@ -161,7 +172,14 @@ def test_chained_bath_changes_and_split_restart(kernel_case: KernelCase):
     prepared, inverse = prepare(case)
     actual = case.states.copy()
     actual[1:] = 0
-    case.kernel.apply(prepared, inverse, case.table, np.arange(3), actual, case.budget)
+    case.kernel.apply(
+        prepared,
+        inverse,
+        case.table,
+        np.arange(3),
+        actual,
+        kernel_context(case.kernel.name, case.table, case.budget),
+    )
     expected = []
     previous = case.source.model(tuple(case.table.level[0]))
     state = case.states[0]
@@ -174,13 +192,23 @@ def test_chained_bath_changes_and_split_restart(kernel_case: KernelCase):
     assert_budget(actual, np.stack(expected), case.budget)
     split = case.states.copy()
     case.kernel.apply(
-        prepared, inverse[:1], case.table, np.array([0]), split[:1], case.budget
+        prepared,
+        inverse[:1],
+        case.table,
+        np.array([0]),
+        split[:1],
+        kernel_context(case.kernel.name, case.table, case.budget),
     )
     left, right = (case.source.model(tuple(case.table.level[i])) for i in (0, 1))
     overlap = right.eigenvectors.conj().T @ left.eigenvectors
     split[1] = overlap @ split[0] @ overlap.conj().T
     case.kernel.apply(
-        prepared, inverse[1:], case.table, np.array([1, 2]), split[1:], case.budget
+        prepared,
+        inverse[1:],
+        case.table,
+        np.array([1, 2]),
+        split[1:],
+        kernel_context(case.kernel.name, case.table, case.budget),
     )
     assert_budget(actual, split, 1e-8)
 
@@ -189,11 +217,22 @@ def test_missing_waveform_and_expansion_fail_explicitly():
     case = flux_case()
     with pytest.raises(ValueError, match="expansion"):
         case.kernel.prepare(
-            case.kernel.prepare_keys(case.table, np.array([0])),
+            case.kernel.prepare_keys(
+                case.table,
+                np.array([0]),
+                KernelContext(
+                    evolution.ModelSource(case.states[0], case.source.model),
+                    case.budget,
+                    WorkPlan(),
+                ),
+            ),
             case.table,
             np.array([0]),
-            evolution.ModelSource(case.states[0], case.source.model),
-            case.budget,
+            KernelContext(
+                evolution.ModelSource(case.states[0], case.source.model),
+                case.budget,
+                WorkPlan(),
+            ),
         )
     prepared, inverse = prepare(case)
     with pytest.raises(ValueError, match="waveform"):
@@ -203,7 +242,7 @@ def test_missing_waveform_and_expansion_fail_explicitly():
             replace(case.table, flux_waveform=None),
             np.arange(3),
             case.states.copy(),
-            case.budget,
+            kernel_context(case.kernel.name, case.table, case.budget),
         )
 
 

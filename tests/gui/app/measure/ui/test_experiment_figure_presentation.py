@@ -19,11 +19,6 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
 )
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.persistence_types import (
-    AppPersistedState,
-    PersistedSession,
-    PersistedTab,
-)
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.session.context_types import (
@@ -136,14 +131,7 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Offline presentation", CommandOrigin("gui"))
         )
-        app.controller.restore_persisted_state(
-            AppPersistedState(
-                session=PersistedSession(
-                    tabs=(PersistedTab(adapter_name="presentation", form_input={}),),
-                    active_tab_index=0,
-                )
-            )
-        )
+        app.controller.new_tab("presentation")
         app.window.resize(1280, 800)
         yield app.window
 

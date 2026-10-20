@@ -64,7 +64,9 @@ class DummyYokoResourceManager:
     def __init__(self, session: DummyYokoSession) -> None:
         self.session = session
 
-    def open_resource(self, address: str) -> DummyYokoSession:
+    def open_resource(
+        self, address: str, *, open_timeout: int, timeout: int
+    ) -> DummyYokoSession:
         return self.session
 
 

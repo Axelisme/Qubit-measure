@@ -45,6 +45,8 @@ from zcu_tools.program.v2 import (
 
 @dataclass(frozen=True)
 class AutoOptResult:
+    """Candidate rows (MHz frequency, normalized gain, RF length in us) and SNR."""
+
     params: NDArray[np.float64]
     signals: NDArray[np.float64]
 
@@ -288,6 +290,19 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
         context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> AutoOptResult:
+        """Search readout frequency, gain and RF pulse duration for high SNR.
+
+        At each candidate, apply optional reset, omit or apply qub_pulse, then
+        read out; configure qub_pulse for the intended excitation. The ADC
+        integration window stays configured while RF waveform length varies.
+        Feed moment-based SNR, optionally reduced by skew_penalty for distorted
+        IQ distributions, back to the optimizer. Sweep min/max values define
+        continuous bounds, not a Cartesian grid; num_points is the budget.
+        Return params shaped (Npoint, 3) in MHz, normalized gain and us, plus
+        SNR shaped (Npoint,). Unvisited rows remain NaN. SNR is not assignment
+        fidelity. acquire_kwargs is forwarded to acquisition.
+        """
+        # Prepare the bounded search and preserve one parameter row per candidate.
         run_cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         num_points = run_cfg.num_points
@@ -304,6 +319,7 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
             ax.lines[0].set_linestyle("None")
             ax.lines[0].set_marker("o")
 
+        # Show search progress and the sampled score along each readout coordinate.
         figure, initial_ax = context.plots.subplots("measurement", figsize=(8, 5))
         initial_ax.remove()
         figure.suptitle("Readout Auto Optimization")
@@ -347,6 +363,8 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
             dtype=np.float64,
             on_update=plot_fn,
         )
+
+        # Feed back the previous score before asking for the next candidate.
         with Schedule(run_cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for idx, (_, step) in enumerate(sched.scan("Iteration", range(num_points))):
                 current_index = idx
@@ -366,6 +384,8 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
                 modules.readout.set_param("gain", cur_params[1])
                 modules.readout.set_param("length", cur_params[2])
                 tracker = MomentTracker()
+
+                # Compare pulse-off/on preparations at this candidate's readout settings.
                 _ = (
                     step.prog_builder(soc, soccfg)
                     .add(
@@ -384,6 +404,8 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
                         **(acquire_kwargs or {}),
                     )
                 )
+
+        # Keep the sampled path and scores, including unvisited NaN rows.
         signals = signals_buffer.array
 
         return AutoOptResult(params, signals)
@@ -395,6 +417,13 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
         *,
         plots: Plots,
     ) -> AutoOptAnalysis:
+        """Return the measured candidate with the largest non-NaN SNR.
+
+        Report best_freq in MHz, normalized best_gain and RF best_length in
+        us, and publish fit. This is the best sampled point, not a fitted
+        global optimum. An all-NaN score array raises ValueError.
+        source.cfg may be None.
+        """
         del options
         result = source.result
 

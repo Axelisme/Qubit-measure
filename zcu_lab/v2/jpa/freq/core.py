@@ -20,7 +20,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import set_rf_frequency
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -38,9 +37,13 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 
+from zcu_lab.v2._support.device import set_rf_frequency
+
 
 @dataclass(frozen=True)
 class FreqResult:
+    """Pump frequencies in MHz and moment-based GE SNR in acquisition order."""
+
     freqs: NDArray[np.float64]
     signals: NDArray[np.float64]
 
@@ -92,6 +95,18 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     )
 
     def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        """Measure qubit readout SNR versus JPA pump frequency.
+
+        At each pump setting, reset, select no pulse or a pi pulse, then
+        read out both preparation branches. Their IQ moments give the SNR,
+        with the configured skew penalty; this is not assignment fidelity.
+        Return pump frequencies in MHz and one real SNR per point.
+
+        Interior frequencies are randomized; endpoints stay in place.
+        ``jpa_rf_dev`` names a device in ``context.devices``; None skips
+        pump tuning without changing the requested frequency coordinates.
+        """
+        # 1. Prepare pump settings and preserve randomized acquisition order.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         jpa_freqs = sweep2array(cfg.sweep.jpa_freq, allow_array=True)
@@ -101,6 +116,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             ax.lines[0].set_linestyle("None")
             ax.lines[0].set_marker("o")
 
+        # Show independent points because neighboring samples need not be nearby.
         viewer = context.plots.liveplot_1d(
             "measurement",
             "JPA Frequency (MHz)",
@@ -112,12 +128,16 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(jpa_freqs, np.abs(data)),
         )
+
+        # 2. Tune the external pump once per host-side scan point.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_freq, step in sched.scan("JPA Frequency", jpa_freqs.tolist()):
                 if step.cfg.jpa_rf_dev is not None:
                     set_rf_frequency(
                         context.devices[step.cfg.jpa_rf_dev], jpa_freq * 1e6
                     )
+
+                # 3. Compare reset-only and pi-prepared readout in one GE sweep.
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (
@@ -139,6 +159,8 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                         trackers=[tracker],
                     )
                 )
+
+        # 4. Keep SNR paired with the actual acquisition-order coordinates.
         signals = signals_buffer.array
 
         return FreqResult(freqs=jpa_freqs, signals=signals)
@@ -146,6 +168,11 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     def analyze(
         self, source: RunRecord[FreqCfg, FreqResult], options: None, *, plots: Plots
     ) -> FreqAnalysis:
+        """Plot measured SNR and return the sampled pump frequency with peak SNR.
+
+        ``source`` supplies this run's frequencies and signals; no fit or
+        interpolation is applied. ``options`` is None. All-NaN SNR fails.
+        """
         del options
         result = source.result
 

@@ -1,442 +1,307 @@
-"""Validated model updates through the Engine's package-internal tunables seam."""
+"""Whole native model updates through the public Engine and journal seams."""
 
-from __future__ import annotations
-
+from datetime import timedelta
+from pathlib import Path
 from threading import RLock
 
 import pytest
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    JsonValue,
-    ValidationError,
-    model_validator,
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment.workflows import (
+    Actor,
+    Done,
+    Next,
+    RevisionConflict,
+    RunIdentity,
+    Step,
+    WorkflowEnv,
+    workflow,
 )
 from zcu_tools.experiment.workflows.journal import TunablesChanged
-from zcu_tools.experiment.workflows.models import (
-    Actor,
-    RevisionConflict,
-    TunableChange,
-    TunablesSnapshot,
-)
 from zcu_tools.experiment.workflows.tunables import TunableValues
+
+from tests._filesystem import DIRECTORY_OPEN_ERROR
+
+from ._engine_fakes import Plan, Rig, State
 
 
 class Gate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     lower: float = 2
     upper: float = 5
 
     @model_validator(mode="after")
-    def ordered(self) -> Gate:
+    def ordered(self) -> "Gate":
         if self.lower > self.upper:
             raise ValueError("lower must not exceed upper")
         return self
 
 
 class Tunables(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     reps: int = Field(default=2, ge=1)
-    gate: Gate = Field(default_factory=Gate)
-    points: tuple[float, ...] = (1, 2)
+    gate: Gate | None = Field(default_factory=Gate)
+    points: tuple[float, ...] = (1.0, 2.0)
+    gates: list[Gate] = Field(default_factory=lambda: [Gate()])
     note: str | None = None
 
 
-class StrictTunables(Tunables):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-
 @pytest.fixture
-def journal() -> list[TunablesChanged]:
-    return []
+def rig(tmp_path: Path) -> Rig:
+    rig = Rig(tmp_path)
 
+    @workflow("whole-model", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index == plan.count:
+            return Done()
+        yield from env.wait_until(env.started_at + timedelta(seconds=1))
+        state.index += 1
+        return Next(tun.reps, state)
 
-@pytest.fixture
-def values(journal: list[TunablesChanged]) -> TunableValues[Tunables]:
-    return TunableValues(Tunables, Tunables(), RLock(), journal.append)
-
-
-def test_start_revalidates_constructed_instances(
-    journal: list[TunablesChanged],
-) -> None:
-    invalid = Tunables.model_construct(reps=0)
-    with pytest.raises(ValidationError) as caught:
-        TunableValues(Tunables, invalid, RLock(), journal.append)
-    assert caught.value.errors()[0]["loc"] == ("reps",)
-    assert journal == []
-
-
-def test_batch_validates_complete_candidate_and_increments_once(
-    values: TunableValues[Tunables], journal: list[TunablesChanged]
-) -> None:
-    snapshot = values.update(
-        (TunableChange("gate.lower", 6), TunableChange("gate.upper", 7)),
-        expected_revision=0,
-        actor=Actor("agent", "calibrator"),
+    rig.engine.start(
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=RunIdentity(
+            "run",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
-    assert snapshot.revision == 1
-    assert snapshot.values == {
-        "reps": 2,
-        "gate": {"lower": 6.0, "upper": 7.0},
-        "points": [1.0, 2.0],
-        "note": None,
+    return rig
+
+
+def test_complete_nested_model_list_replacement_and_detached_journal(rig: Rig) -> None:
+    candidate = Tunables(
+        reps=3, gate=None, points=(3.0,), gates=[Gate(lower=6, upper=7)], note="new"
+    )
+    result = rig.engine.update_tunables(
+        "run", tunables=candidate, expected_revision=0, actor=Actor("agent", "planner")
+    )
+    expected = {
+        "reps": 3,
+        "gate": None,
+        "points": [3.0],
+        "gates": [{"lower": 6.0, "upper": 7.0}],
+        "note": "new",
     }
-    assert len(journal) == 1
-    event = journal[0]
-    assert event.actor == Actor("agent", "calibrator")
-    assert (event.revision_before, event.revision_after) == (0, 1)
-    assert [(change.path, change.old, change.new) for change in event.changes] == [
-        ("gate.lower", 2.0, 6.0),
-        ("gate.upper", 5.0, 7.0),
+    assert result.revision == 1 and result.values == expected
+    event = rig.events()[-1]
+    assert event["actor"] == {"kind": "agent", "name": "planner"}
+    assert (event["revision_before"], event["revision_after"]) == (0, 1)
+    assert event["tunables"] == expected
+    assert rig.kinds() == ("run_started", "tunables_changed")
+    candidate.gates[0].lower = -100
+    assert isinstance(result.values, dict)
+    result.values["gates"] = []
+    assert rig.engine.tunables("run").values == expected
+    assert rig.events()[-1]["tunables"] == expected
+
+
+def test_same_complete_values_still_append_and_increment(rig: Rig) -> None:
+    for revision in range(2):
+        result = rig.engine.update_tunables(
+            "run", Tunables(), expected_revision=revision, actor=Actor("user", "gui")
+        )
+        assert result.revision == revision + 1
+    assert rig.kinds() == ("run_started", "tunables_changed", "tunables_changed")
+    assert [event["tunables"] for event in rig.events()[1:]] == [
+        Tunables().model_dump(mode="json"),
+        Tunables().model_dump(mode="json"),
     ]
-    assert values.capture().model.gate == Gate(lower=6, upper=7)
-
-
-def test_current_invocation_capture_is_not_changed_by_later_update(
-    values: TunableValues[Tunables],
-) -> None:
-    old = values.capture()
-    values.update(
-        (TunableChange("reps", 7),), expected_revision=0, actor=Actor("user", "owner")
-    )
-    assert old.revision == 0
-    assert old.model.reps == 2
-    assert values.capture().revision == 1
-    assert values.capture().model.reps == 7
-    old.model.gate.lower = -20
-    assert values.capture().model.gate.lower == 2
-
-
-def test_revision_is_published_only_after_append_returns() -> None:
-    seen: list[TunablesSnapshot] = []
-    events: list[TunablesChanged] = []
-    values: TunableValues[Tunables]
-
-    def append(event: TunablesChanged) -> None:
-        seen.append(values.snapshot())
-        events.append(event)
-
-    values = TunableValues(Tunables, Tunables(), RLock(), append)
-    after = values.update(
-        (TunableChange("reps", 4),), expected_revision=0, actor=Actor("user", "owner")
-    )
-    assert len(events) == 1
-    assert seen[0].revision == 0
-    assert isinstance(seen[0].values, dict)
-    assert seen[0].values["reps"] == 2
-    assert after.revision == 1
-    assert isinstance(after.values, dict)
-    assert after.values["reps"] == 4
-
-
-def test_append_failure_retains_previous_model_revision_and_cause() -> None:
-    cause = OSError("journal flush failed")
-    events: list[TunablesChanged] = []
-
-    def append(event: TunablesChanged) -> None:
-        events.append(event)
-        raise cause
-
-    values = TunableValues(Tunables, Tunables(), RLock(), append)
-    before = values.snapshot()
-    with pytest.raises(OSError, match="journal flush failed") as caught:
-        values.update(
-            (TunableChange("reps", 4),),
-            expected_revision=0,
-            actor=Actor("user", "owner"),
-        )
-    assert caught.value is cause
-    assert values.snapshot() == before
-    assert len(events) == 1
-
-
-def test_stale_revision_exposes_expected_and_actual_without_append(
-    values: TunableValues[Tunables], journal: list[TunablesChanged]
-) -> None:
-    values.update(
-        (TunableChange("reps", 3),), expected_revision=0, actor=Actor("user", "owner")
-    )
-    before = values.snapshot()
-    with pytest.raises(RevisionConflict) as caught:
-        values.update(
-            (TunableChange("reps", 4),),
-            expected_revision=0,
-            actor=Actor("user", "owner"),
-        )
-    assert caught.value.expected == 0
-    assert caught.value.actual == 1
-    assert values.snapshot() == before
-    assert len(journal) == 1
 
 
 @pytest.mark.parametrize(
-    ("changes", "message"),
+    ("candidate", "location"),
     [
-        ((), "nonempty batch"),
-        ((TunableChange("reps", 3), TunableChange("reps", 4)), "Duplicate"),
-        ((TunableChange("gate", None), TunableChange("gate.lower", 1)), "Overlapping"),
-        ((TunableChange("gate", None),), "entire model"),
-        ((TunableChange("unknown", 4),), "Unknown"),
-        ((TunableChange("points.0", 4),), "Unknown"),
-        ((TunableChange("reps.unknown", 4),), "Unknown"),
-        ((TunableChange("", 4),), "nonempty model field"),
-        ((TunableChange("gate..lower", 4),), "nonempty model field"),
-        ((TunableChange("gate.unknown", 4),), "Unknown"),
+        (Tunables.model_construct(reps=0), ("reps",)),
+        (Tunables.model_construct(reps="3"), ("reps",)),
+        (
+            Tunables.model_construct(gates=[Gate.model_construct(lower=7, upper=2)]),
+            ("gates", 0),
+        ),
+        (Tunables(points=(float("inf"),)), ("points", 0)),
+        (Tunables(gates=[Gate(lower=float("nan"))]), ("gates", 0, "lower")),
     ],
 )
-def test_illegal_paths_do_not_publish_partial_changes(
-    values: TunableValues[Tunables],
-    journal: list[TunablesChanged],
-    changes: tuple[TunableChange, ...],
-    message: str,
+def test_revalidate_complete_native_model_without_publication(
+    rig: Rig, candidate: Tunables, location: tuple[str | int, ...]
 ) -> None:
-    before = values.snapshot()
-    with pytest.raises(ValueError, match=message):
-        values.update(changes, expected_revision=0, actor=Actor("user", "owner"))
-    assert values.snapshot() == before
-    assert journal == []
-
-
-def test_schema_failure_rolls_back_every_field_and_keeps_location(
-    values: TunableValues[Tunables], journal: list[TunablesChanged]
-) -> None:
-    before = values.snapshot()
+    before = rig.engine.tunables("run")
     with pytest.raises(ValidationError) as caught:
-        values.update(
-            (TunableChange("note", "new"), TunableChange("reps", 0)),
-            expected_revision=0,
-            actor=Actor("user", "owner"),
+        rig.engine.update_tunables(
+            "run", candidate, expected_revision=0, actor=Actor("user", "gui")
         )
+    assert caught.value.errors()[0]["loc"] == location
+    assert rig.engine.tunables("run") == before
+    assert rig.kinds() == ("run_started",)
+
+
+def test_wrong_declared_model_is_rejected_without_publication(rig: Rig) -> None:
+    with pytest.raises(TypeError, match="declared tunables"):
+        rig.engine.update_tunables(
+            "run", Plan(), expected_revision=0, actor=Actor("user", "gui")
+        )
+    assert rig.engine.tunables("run").revision == 0
+    assert rig.kinds() == ("run_started",)
+
+
+def test_stale_complete_model_keeps_previous_revision_and_journal(rig: Rig) -> None:
+    rig.engine.update_tunables(
+        "run", Tunables(reps=3), expected_revision=0, actor=Actor("user", "gui")
+    )
+    before = rig.engine.tunables("run")
+    with pytest.raises(RevisionConflict) as caught:
+        rig.engine.update_tunables(
+            "run", Tunables(reps=4), expected_revision=0, actor=Actor("agent", "rpc")
+        )
+    assert (caught.value.expected, caught.value.actual) == (0, 1)
+    assert rig.engine.tunables("run") == before
+    assert len(rig.events()) == 2
+
+
+def test_append_failure_keeps_complete_model_revision_and_original_cause(
+    rig: Rig,
+) -> None:
+    journal = rig.paths.metadata_root / "journal.jsonl"
+    original = journal.read_bytes()
+    before = rig.engine.tunables("run")
+    journal.unlink()
+    journal.mkdir()
+    try:
+        with pytest.raises(DIRECTORY_OPEN_ERROR) as caught:
+            rig.engine.update_tunables(
+                "run", Tunables(reps=4), expected_revision=0, actor=Actor("user", "gui")
+            )
+        assert caught.value.filename == str(journal)
+        assert rig.engine.tunables("run") == before
+        status = rig.engine.status()
+        assert status is not None and status.lifecycle == "failed"
+        assert status.reason is not None and str(journal) in status.reason
+    finally:
+        journal.rmdir()
+        journal.write_bytes(original)
+
+
+def test_current_step_keeps_capture_and_next_step_uses_whole_replacement(
+    rig: Rig,
+) -> None:
+    def update(_signal: object) -> None:
+        # The wait port is reached only after this invocation captured revision zero.
+        rig.clock.on_wait = None
+        result = rig.engine.update_tunables(
+            "run",
+            Tunables(reps=8, gates=[]),
+            expected_revision=0,
+            actor=Actor("agent", "rpc"),
+        )
+        assert result.revision == 1
+
+    rig.clock.on_wait = update
+    assert rig.engine.execute("run").lifecycle == "done"
+    assert [
+        (r.revision, r.encoded_record.value) for r in rig.engine.records("run")
+    ] == [(0, 2), (1, 8)]
+    first = (rig.paths.data_root / "iter/000001/record.json").read_text()
+    assert '"reps":2' in first.replace(" ", "")
+
+
+def start_native[T: BaseModel](rig: Rig, model_type: type[T], values: T) -> None:
+    """Start a native declaration without converting or trusting its model."""
+
+    @workflow("startup", plan=Plan, tunables=model_type, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: T, state: State
+    ) -> Step[State, int]:
+        del env, plan, tun, state
+        yield from ()
+        return Done()
+
+    rig.engine.start(
+        step,
+        plan=Plan(),
+        tunables=values,
+        paths=rig.paths,
+        identity=RunIdentity(
+            "run",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
+    )
+
+
+def test_start_revalidates_constructed_tunables_before_creating_paths(
+    tmp_path: Path,
+) -> None:
+    rig = Rig(tmp_path)
+    with pytest.raises(ValidationError) as caught:
+        start_native(rig, Tunables, Tunables.model_construct(reps=0))
     assert caught.value.errors()[0]["loc"] == ("reps",)
-    assert values.snapshot() == before
-    assert journal == []
+    assert rig.engine.status() is None
+    assert not rig.paths.metadata_root.exists()
+    assert not rig.paths.data_root.exists()
 
 
-def test_cross_field_validation_failure_does_not_append(
-    values: TunableValues[Tunables], journal: list[TunablesChanged]
-) -> None:
-    with pytest.raises(ValidationError, match="lower must not exceed upper") as caught:
-        values.update(
-            (TunableChange("gate.lower", 6),),
-            expected_revision=0,
-            actor=Actor("user", "owner"),
-        )
-    assert caught.value.errors()[0]["loc"] == ("gate",)
-    assert values.capture().model.gate.lower == 2
-    assert journal == []
-
-
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
-def test_nonfinite_array_leaf_is_rejected_with_model_location(
-    values: TunableValues[Tunables], journal: list[TunablesChanged], bad: float
-) -> None:
+def test_start_nonfinite_tunables_are_not_coerced_to_missing(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
     with pytest.raises(ValidationError) as caught:
-        values.update(
-            (TunableChange("points", [1.0, bad]),),
-            expected_revision=0,
-            actor=Actor("user", "owner"),
-        )
-    assert caught.value.errors()[0]["loc"] == ("points", 1)
-    assert caught.value.errors()[0]["type"] == "finite_number"
-    assert values.capture().revision == 0
-    assert journal == []
-
-
-def test_start_nonfinite_values_are_not_coerced_to_missing(
-    journal: list[TunablesChanged],
-) -> None:
-    invalid = Tunables(points=(float("inf"),))
-    with pytest.raises(ValidationError) as caught:
-        TunableValues(Tunables, invalid, RLock(), journal.append)
+        start_native(rig, Tunables, Tunables(points=(float("inf"),)))
     assert caught.value.errors()[0]["loc"] == ("points", 0)
-    assert journal == []
+    assert rig.engine.status() is None
+    assert not rig.paths.metadata_root.exists()
+    assert not rig.paths.data_root.exists()
 
 
-def test_strict_tuple_model_allows_other_scalar_update(
-    journal: list[TunablesChanged],
-) -> None:
-    values = TunableValues(StrictTunables, StrictTunables(), RLock(), journal.append)
-    snapshot = values.update(
-        (TunableChange("reps", 3),),
-        expected_revision=0,
-        actor=Actor("user", "owner"),
-    )
-    assert snapshot.revision == 1
-    assert values.capture().model == StrictTunables(reps=3)
-    assert values.capture().model.points == (1.0, 2.0)
-    assert len(journal) == 1
-    event = journal[0]
-    assert (event.revision_before, event.revision_after) == (0, 1)
-    assert [(change.path, change.old, change.new) for change in event.changes] == [
-        ("reps", 2, 3),
-    ]
-
-
-def test_strict_tuple_model_accepts_detached_json_array_replacement(
-    journal: list[TunablesChanged],
-) -> None:
-    values = TunableValues(StrictTunables, StrictTunables(), RLock(), journal.append)
-    requested: list[JsonValue] = [3.0, 4.0]
-    snapshot = values.update(
-        (TunableChange("points", requested),),
-        expected_revision=0,
-        actor=Actor("user", "owner"),
-    )
-    captured = values.capture()
-    requested.append(99.0)
-    captured.model.points = (100.0,)
-    assert values.capture().model == StrictTunables(points=(3.0, 4.0))
-    assert snapshot.revision == 1
-    assert snapshot.values == {
-        "reps": 2,
-        "gate": {"lower": 2.0, "upper": 5.0},
-        "points": [3.0, 4.0],
-        "note": None,
-    }
-    assert len(journal) == 1
-    event = journal[0]
-    assert (event.revision_before, event.revision_after) == (0, 1)
-    assert [(change.path, change.old, change.new) for change in event.changes] == [
-        ("points", [1.0, 2.0], [3.0, 4.0]),
-    ]
-
-
-def test_strict_tuple_model_rejects_scalar_coercion_without_publication(
-    journal: list[TunablesChanged],
-) -> None:
-    values = TunableValues(StrictTunables, StrictTunables(), RLock(), journal.append)
-    with pytest.raises(ValidationError) as caught:
-        values.update(
-            (TunableChange("reps", "3"),),
-            expected_revision=0,
-            actor=Actor("user", "owner"),
-        )
-    assert [(error["loc"], error["type"]) for error in caught.value.errors()] == [
-        (("reps",), "int_type"),
-    ]
-    assert values.capture().revision == 0
-    assert values.capture().model == StrictTunables()
-    assert journal == []
-
-
-def test_tuple_replacement_and_snapshots_do_not_alias_request_or_model(
-    values: TunableValues[Tunables], journal: list[TunablesChanged]
-) -> None:
-    requested: list[JsonValue] = [3.0, 4.0]
-    result = values.update(
-        (TunableChange("points", requested),),
-        expected_revision=0,
-        actor=Actor("agent", "planner"),
-    )
-    requested.append(99)
-    assert values.capture().model.points == (3.0, 4.0)
-    assert isinstance(result.values, dict)
-    result.values["points"] = []
-    assert values.capture().model.points == (3.0, 4.0)
-    assert journal[0].changes[0].new == [3.0, 4.0]
-    snapshot = values.snapshot()
-    assert isinstance(snapshot.values, dict)
-    snapshot.values["gate"] = None
-    assert values.capture().model.gate == Gate()
-
-
-def test_none_is_a_schema_checked_value_not_deletion(
-    values: TunableValues[Tunables], journal: list[TunablesChanged]
-) -> None:
-    values.update(
-        (TunableChange("note", "label"),),
-        expected_revision=0,
-        actor=Actor("user", "owner"),
-    )
-    values.update(
-        (TunableChange("note", None),),
-        expected_revision=1,
-        actor=Actor("user", "owner"),
-    )
-    assert values.capture().model.note is None
-    assert journal[-1].changes[0].old == "label"
-    assert journal[-1].changes[0].new is None
-    with pytest.raises(ValidationError) as caught:
-        values.update(
-            (TunableChange("reps", None),),
-            expected_revision=2,
-            actor=Actor("user", "owner"),
-        )
-    assert caught.value.errors()[0]["loc"] == ("reps",)
-    assert values.capture().revision == 2
-
-
-def test_same_value_batch_still_records_actor_and_new_revision(
-    values: TunableValues[Tunables], journal: list[TunablesChanged]
-) -> None:
-    values.update(
-        (TunableChange("reps", 2),), expected_revision=0, actor=Actor("user", "owner")
-    )
-    assert values.capture().revision == 1
-    assert journal[0].changes[0].old == journal[0].changes[0].new == 2
-
-
-def test_paths_use_model_field_names_not_aliases(
-    journal: list[TunablesChanged],
-) -> None:
+def test_alias_model_snapshot_uses_complete_native_field_names(tmp_path: Path) -> None:
     class Aliased(BaseModel):
         model_config = ConfigDict(extra="forbid")
         repetitions: int = Field(default=2, alias="reps")
 
-    values = TunableValues(Aliased, Aliased(reps=2), RLock(), journal.append)
-    values.update(
-        (TunableChange("repetitions", 4),),
-        expected_revision=0,
-        actor=Actor("user", "owner"),
+    rig = Rig(tmp_path)
+    start_native(rig, Aliased, Aliased(reps=2))
+    snapshot = rig.engine.update_tunables(
+        "run", Aliased(reps=4), expected_revision=0, actor=Actor("user", "owner")
     )
-    assert values.capture().model.repetitions == 4
-    assert values.snapshot().values == {"repetitions": 4}
-    with pytest.raises(ValueError, match="Unknown"):
-        values.update(
-            (TunableChange("reps", 5),),
-            expected_revision=1,
-            actor=Actor("user", "owner"),
-        )
+    assert snapshot.values == {"repetitions": 4}
+    assert rig.events()[-1]["tunables"] == {"repetitions": 4}
+    assert snapshot.revision == 1
 
 
-def test_optional_model_cannot_be_replaced_even_when_absent(
-    journal: list[TunablesChanged],
-) -> None:
-    class OptionalModel(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        gate: Gate | None = None
+def test_revision_and_values_are_published_only_after_append_returns() -> None:
+    seen: list[tuple[int, int]] = []
+    events: list[TunablesChanged] = []
+    values: TunableValues[Tunables]
 
-    values = TunableValues(OptionalModel, OptionalModel(), RLock(), journal.append)
-    with pytest.raises(ValueError, match="entire model"):
-        values.update(
-            (TunableChange("gate", None),),
-            expected_revision=0,
-            actor=Actor("user", "owner"),
-        )
-    with pytest.raises(ValueError, match="absent model"):
-        values.update(
-            (TunableChange("gate.lower", 1),),
-            expected_revision=0,
-            actor=Actor("user", "owner"),
-        )
-    assert journal == []
+    def append(event: TunablesChanged) -> None:
+        captured = values.capture()
+        seen.append((captured.revision, captured.model.reps))
+        assert values.snapshot().values == Tunables().model_dump(mode="json")
+        events.append(event)
 
-
-def test_recursive_model_paths_are_bounded_by_request_not_schema_enumeration(
-    journal: list[TunablesChanged],
-) -> None:
-    class Recursive(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        reps: int = 2
-        child: Recursive | None = None
-
-    values = TunableValues(
-        Recursive, Recursive(child=Recursive()), RLock(), journal.append
+    values = TunableValues(Tunables, Tunables(), RLock(), append)
+    after = values.update(
+        Tunables(reps=4), expected_revision=0, actor=Actor("agent", "planner")
     )
-    values.update(
-        (TunableChange("child.reps", 6),),
-        expected_revision=0,
-        actor=Actor("user", "owner"),
-    )
-    assert values.snapshot().values == {"reps": 2, "child": {"reps": 6, "child": None}}
+    assert seen == [(0, 2)]
+    assert after.revision == 1
+    assert after.values == Tunables(reps=4).model_dump(mode="json")
+    assert values.capture().model.reps == 4
+    assert len(events) == 1
+    assert events[0].actor == Actor("agent", "planner")
+    assert (events[0].revision_before, events[0].revision_after) == (0, 1)
+    assert events[0].tunables == Tunables(reps=4).model_dump(mode="json")

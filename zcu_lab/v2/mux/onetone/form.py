@@ -3,15 +3,22 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
 from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
 
 
 def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
-    """Use the captured mux slot, or a blank editable readout without tones.
+    """Prepare a common-offset scan from the mux group's readout in ctx.
 
-    Missing group bindings do not gate Run: valid manual readout inputs suffice.
-    Active tones defaults to None (all), as declared by the core cfg.
+    Use the captured readout slot when present, otherwise an editable blank
+    readout without tones. Start with all tones selected and 101 offsets from
+    -1 to 1 MHz. If the group names qubits, invalid qubit/resonator pairings
+    raise at Open/Reset. Groups without qubits allow manually entered readout.
     """
+    # Check declared qubit/resonator pairs before choosing readout defaults.
+    validate_mux_bindings(ctx.parameters)
+
+    # Retain a group slot reference when available; otherwise leave tones to fill.
     return Form(
         MuxOnetoneCfg,
         tree={

@@ -43,14 +43,49 @@ class GuiRpcError(GuiInvocationError):
         self.request_rejected = request_rejected
 
 
-def _reject_environment_attach(
-    simulate: str | None, launch: str, *, existing: bool
+@dataclass(frozen=True)
+class GuiStartupPaths:
+    """Launch-only paths, forwarded verbatim for the GUI launcher to validate.
+
+    script selects trusted startup(ctx) code; None uses the launcher default.
+    clean=True in connect_to_gui skips all scripts and rejects an explicit script.
+    project_root selects the data root; None uses the repo-root default.
+    Neither field changes code/catalog lookup or an existing GUI process.
+    """
+
+    script: str | None = None
+    project_root: str | None = None
+
+    def cli_args(self) -> list[str]:
+        """Encode explicit paths as GUI launch arguments, preserving their strings."""
+        args: list[str] = []
+        if self.script is not None:
+            args.extend(["--script", self.script])
+        if self.project_root is not None:
+            args.extend(["--project-root", self.project_root])
+        return args
+
+
+_DEFAULT_STARTUP_PATHS = GuiStartupPaths()
+
+
+def _reject_launch_options_attach(
+    paths: GuiStartupPaths, launch: str, *, existing: bool
 ) -> None:
-    """An explicit environment path may only select a newly born GUI process."""
-    if simulate is not None and launch != "new" and (launch == "never" or existing):
+    """Script and data-root options may only select a new GUI process."""
+    if paths.script is not None and launch != "new" and (launch == "never" or existing):
         raise GuiRpcError(
-            'Existing GUI unchanged; close it first, then use launch="new" with simulate.',
-            reason="environment_requires_new_gui",
+            'Existing GUI unchanged; close it first, then use launch="new" with script.',
+            reason="script_requires_new_gui",
+        )
+    if (
+        paths.project_root is not None
+        and launch != "new"
+        and (launch == "never" or existing)
+    ):
+        raise GuiRpcError(
+            'Existing GUI unchanged; close it first, then use launch="new" with project_root.',
+            reason="project_root_requires_new_gui",
         )
 
 
@@ -418,14 +453,22 @@ class MeasureMcpSession:
         clean: bool,
         token: str | None = None,
         identity: ConnectIdentity = _DEFAULT_CONNECT_IDENTITY,
-        simulate: str | None = None,
+        startup_paths: GuiStartupPaths = _DEFAULT_STARTUP_PATHS,
     ) -> dict[str, Any]:
         """Attach and initialize identity before catalog; report native control.
 
         Omitted label/mode retain the prior identity (initially agent/owner).
         Changing them explicitly reconnects, since socket identity is immutable.
         Auth/wire failures discard the socket. A GUI lock does not fail connect.
+        startup_paths configures a new process only; attach rejects explicit paths
+        without changing the GUI. Paths are forwarded for launcher validation.
+        clean skips every script; combining it with startup_paths.script raises
+        ValueError before network work. Trusted scripts may connect hardware.
+        Call synchronously from the MCP caller thread; this session owns the
+        connection, not the script or its resources.
         """
+        if clean and startup_paths.script is not None:
+            raise ValueError("clean and script are mutually exclusive")
         with self._rpc_lock:
             self._require_open()
             connection_identity = identity.resolve(self._control_connection)
@@ -435,7 +478,7 @@ class MeasureMcpSession:
                 clean=clean,
                 token=token,
                 identity=connection_identity,
-                simulate=simulate,
+                startup_paths=startup_paths,
             )
 
     def _attach_existing_gui(self, selected: int, token: str | None) -> None:
@@ -464,14 +507,16 @@ class MeasureMcpSession:
         clean: bool,
         token: str | None = None,
         identity: ControlConnection,
-        simulate: str | None = None,
+        startup_paths: GuiStartupPaths = _DEFAULT_STARTUP_PATHS,
     ) -> dict[str, Any]:
         """Attach or launch once; incompatible GUI contracts fail before mutations.
 
         A repeated attach returns the connected GUI. GUI code revision is shown
         but never compared. No failed or stale mutation is resent automatically.
         """
-        _reject_environment_attach(simulate, launch, existing=self.bridge.is_connected)
+        _reject_launch_options_attach(
+            startup_paths, launch, existing=self.bridge.is_connected
+        )
         if (
             launch != "new"
             and self.bridge.is_connected
@@ -488,7 +533,7 @@ class MeasureMcpSession:
             }
         selected = self._resolve_connect_port(self._config, port)
         existing = self._port_is_open(selected)
-        _reject_environment_attach(simulate, launch, existing=existing)
+        _reject_launch_options_attach(startup_paths, launch, existing=existing)
         if launch == "new" and existing:
             raise GuiRpcError(f"GUI port {selected} is in use", reason="port_in_use")
         if launch == "never" and not existing:
@@ -508,8 +553,7 @@ class MeasureMcpSession:
                 selected,
                 token=token,
                 auto_connect=True,
-                extra_args=(["--clean"] if clean else [])
-                + (["--simulate", simulate] if simulate is not None else []),
+                extra_args=(["--clean"] if clean else []) + startup_paths.cli_args(),
             )
             if not self.bridge.is_connected:
                 raise GuiRpcError(

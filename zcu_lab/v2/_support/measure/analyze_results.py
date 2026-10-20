@@ -24,15 +24,23 @@ _FigureOnlyT = TypeVar("_FigureOnlyT", bound="FigureOnlyAnalyzeResult")
 
 def fit_quality_summary(
     qualities: Mapping[str, FitQuality] | None,
+    *,
+    summary_path: str = "summary.fit_quality",
 ) -> dict[str, dict[str, object]] | None:
-    """Project committed numeric quality, qualifying native summary issue paths."""
+    """Project committed quality and qualify diagnostic paths under summary_path.
+
+    qualities is the core-owned mapping, or None when unavailable. summary_path
+    locates that mapping in the returned GUI summary; indexed consumers supply
+    e.g. ``summary.tones[0].fit_quality``. The default preserves single-qubit
+    summaries. Values/acceptance are unchanged; no fit or validation is rerun.
+    """
     if qualities is None:
         return None
     result = {}
     for name, quality in qualities.items():
         summary = quality.to_summary_dict()
         summary["invalid"] = [
-            {"path": f"summary.fit_quality.{name}.{issue.path}", "reason": issue.reason}
+            {"path": f"{summary_path}.{name}.{issue.path}", "reason": issue.reason}
             for issue in quality.invalid
         ]
         result[name] = summary

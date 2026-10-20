@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
@@ -48,7 +47,22 @@ class CheckModuleCfg(ConfigBase):
     readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
-class CheckCfg(ProgramV2Cfg, ExpCfgModel):
+class CheckCfg(ExpCfgModel):
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay", unit="us", description="Delay before the first shot."
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Delay after each shot.",
+        ),
+    ] = 1.0
     modules: CheckModuleCfg
     shots: Annotated[int, FieldMeta(label="Shots")]
 
@@ -69,32 +83,39 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=CheckResult,
         cfg_type=CheckCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/check",
     )
 
     def run(self, cfg: CheckCfg, *, context: RunContext) -> CheckResult:
+        """Collect an IQ cloud after a fixed qubit preparation and probe.
+
+        Repeat optional reset, optional init pulse, probe pulse, then readout
+        for cfg.shots shots. Return shot indices and one complex IQ per shot,
+        not an averaged response. Analyze classifies this cloud with supplied
+        G/E centers and radius to inspect preparation and readout separation.
+
+        Acquisition uses one round and cfg.shots reps on a copied cfg, and
+        raw-shot conversion requires exactly one readout channel.
+        """
+
+        # Keep individual shots with a separate raw-shot program configuration.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        # Validate and setup configuration
-        if cfg.rounds != 1:
-            warnings.warn(
-                "rounds will be overwritten to 1 for singleshot measurement",
-                stacklevel=2,
-            )
-            cfg.rounds = 1
-
-        if cfg.reps != 1:
-            warnings.warn(
-                "reps will be overwritten by singleshot measurement shots", stacklevel=2
-            )
-        cfg.reps = cfg.shots
+        program_cfg = ProgramV2Cfg(
+            reps=cfg.shots,
+            rounds=1,
+            initial_delay=cfg.initial_delay,
+            relax_delay=cfg.relax_delay,
+        )
 
         signals_buffer = SignalBuffer((cfg.shots,))
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
+
+            # Prepare the same state for every shot before probing and readout.
             program = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(soc, soccfg, cfg=program_cfg)
                 .add(
                     Reset("reset", modules.reset),
                     Pulse("init_pulse", modules.init_pulse),
@@ -103,6 +124,8 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                 )
                 .build()
             )
+
+            # Retain raw IQ; an interrupted acquisition leaves missing data.
             try:
                 program.acquire(soc, progress=True, cancel_flag=sched.stop)
             except StoppedPartialAcquireError:

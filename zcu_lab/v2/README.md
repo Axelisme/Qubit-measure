@@ -1,8 +1,9 @@
 # v2 experiments
 
-**Last updated:** 2026-10-16，mux active FIT 與 capture writeback
+**Last updated:** 2026-10-20，儀器角色 helpers
 
-ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
+ZigZag 的 `run()` 直接列出 pulse 序列，使用 register loop。
+公開 `build_zigzag_modules` 保留給離線編譯，另行列出相同序列。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
 相位，不新增 RF pulse 或 programmed wait。它平均初始化的橫向相干分量，不修正
 population 或 repeated-gate 誤差；支援 TwoPulse/Bath reset，需獨立驗證相位及初態投影。
@@ -19,9 +20,76 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 `mux/onetone` adapter 從 group 的 readout slot 建立初值。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。FIT 共用 onetone/freq 的模型與 delay 選項，逐 tone 隔離數值失敗。沒有歷史 cfg 時拒絕 FIT。
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
-單一參數從 Run／Load capture 的 `$mux.members` 依完整原始序號對應。Members 數不等於完整 tone 數時只提 module，summary 顯示原因。
+單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時只提 module，summary 顯示原因。
+MuxGroup 可不填 qubits 做 resonator bring-up，保留手填 readout，不增加完整綁定門檻。
+填了則由 model 檢查等長與重複 qubit。Form 在 Open／Reset 呼叫
+`_support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
+檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。
+其他 mux／FTF Forms 共用此入口，精確 import 與呼叫例見
+[Measure support](_support/measure/README.md#mux-綁定驗證)。
 Module 可整組引用或 inline 編輯，tones 使用單行 JSON。
 Library 的 `readout/mux:blank` 只給 scalar 編輯初值，作者必須填 tones 並確認接線；範本不是硬體安全預設。
+
+## Mux qubit numeric cores
+
+`mux/freq` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。
+兩個 `run()` 各自在 core 直接寫出掃描與 pulse 序列，每點 compile 一次。
+共同 reset 後，既有 Join 讓 drives 同時起跑，短 branch 完成後等待當點最長 branch，
+再做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。
+七個 mux qubit adapters 已註冊在 catalog，透過各 leaf 的 native `form.py` 生成完整
+固定具名 tones 及獨立 Participants 輸入。元素 picker 只選編輯對象；名稱 readonly。
+普通改名、增刪及重排由公開 FixedElements owner 原子拒絕。
+未參與及未顯示元素錯誤照常顯示並擋 Run。七個同名 mux recipes 已明列於
+`zcu_lab.recipes.RECIPES`，typed overrides、逐元素來源與操作見
+[mux recipe guide](../recipes/mux-guide.md)。
+各 leaf guide 說明 GUI、保存來源及 explicit Apply 操作，core 本身仍不依賴 GUI。
+
+`_support.mux_liveplot.draw_mux_magnitudes` 為七個實驗提供 combined `measurement` 圖，
+保留原有 `measurement_i`。Legend 取自 source cfg 原始 index/name，順序跟 participants。
+每線保留自己的 actual x；delay 類共用 requested-delay 軸，GE 另標 probe off/on。
+Helper 先複製本次座標、magnitude 及標籤，再經公開 `Plots.draw` 在 host owner 繪圖。
+Worker 不持有 active artists。它不讀 Form、改 acquisition 或將 partial NaN 補成零。
+
+七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[str]`。
+每個元素有固定 qubit `name` 與必填 drive；pulse sweep 類另有自己的 sweep，
+T1／Ramsey／Echo 使用共用 requested-delay 軸。所有元素都驗證，未參與者也必須有
+有效 drive、獨立 generator；pulse sweep 點數全部相同。Len Rabi 全部元素只接受
+const／flat_top，不伸縮或裁切 arb asset。
+Participants 非空、不重複，名稱必須存在。Runtime 按名稱順序查完整原始位置，
+例如 Q3／Q1 對應 `[2, 0]`。GE raw、analysis 與 native persistence 同樣保留該順序。
+RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 group snapshot。
+
+`prepare_frequency_scan(cfg, soccfg=...)` 與 `prepare_amplitude_scan(cfg, soccfg=...)`
+各自按 participants 查出原始 indices，回傳 `_support.mux.MuxPulseScan`。
+其 `indices` 保留原始序號，`coordinates` 是各自硬體 grid 的 `(K,P)` 浮點陣列，
+`point_pulses` 是 `(P,K)` 固定 numeric pulse cfg，不展開 Cartesian product。
+這些入口只準備資料，不 acquire；各 public `run()` 直接寫出 common-start zip 排程。
+Frequency／gain conversion 分別沿既有 `round_zcu_freq`／`round_zcu_gain`。
+
+`MuxSweepResult` 保存原始 `tone_indices`、各自量化的 `coordinates` 及平均 complex IQ `signals`。
+兩個矩陣都是 `(K,P)`。NaN IQ 表示未取得的 partial data，不表示成功。
+各 core 的 `analyze(source, options, plots=...)` 使用 explicit RunRecord，允許 cfg=None。
+每個原始序號各有 `fit_i` 圖、校準值／誤差／quality，或保留原因的 `MuxFitFailure`。
+Freq 沿用單 qubit 的 magnitude/background transform 與 linewidth fitter；Amp 沿用零 gain phase、無衰減 fit。
+
+Native mapping 使用 `coordinates`／`signals` 兩個 variables，共享 Point／Tone axes。
+Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
+Analyze／Save 使用 explicit RunRecord；Load 還原同次完整 tones cfg、原始 indices、獨立數值座標與 IQ。
+它們不讀目前 Form 或 library。取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
+Caller 先呼叫 RunContext.cancel_signal.raise_if_error()，不把 failure 的 partial data 報為成功。
+Numeric core 不保存 writeback destination，也不發 proposal。
+
+## 實驗角色與 device 操作
+
+`_support/device.py` 擁有儀器角色 helpers，供實驗 core 與 workflow 使用。DeviceInfo 是資訊，不再提供 set_flux／set_freq／set_power／set_output 控制命令。Device 層只提供儀器本身的操作，不知道 flux 或 RF 角色；實驗層選 driver、明示單位與操作用途。
+
+- `check_flux_unit(cfg: BaseDeviceInfo, unit: str) -> None` 是純檢查，只比 YOKO／Fake Info 儲存的 value_unit。YOKO Info 驗 current／A 與 voltage／V，Fake 為建立時固定的 native、V 或 A。Mismatch 或契約外 unit 報 ValueError，其他 Info 報 TypeError 並指名不支援 flux 設定的類別。不換算、不改 cfg，不讀寫硬體或 cache。
+- `set_flux(device, value, *, unit, stop, progress=False)` 委派同一 checker，保既有 mode 查詢、stop、progress 與 driver safety，不新增 get_info 或其他硬體查詢。接受 A、V 或 native。YOKO 的 A 要求 current 模式並呼叫 set_current，V 要求 voltage 模式並呼叫 set_voltage。Fake 比對 driver 實際 get_info() 回報的固定單位，再呼叫 set_value，不新造 native Info。單位或模式不符在寫入前拒絕。Helper 不換算、不切模式、不改 rampstep、不自動開 output，YOKO ramp 使用同一 stop 並沿既有安全限制。
+- `set_rf_frequency(device, freq_hz)` 呼叫 SGS100A 的 set_frequency 或 Fake 的 set_value。單位為 Hz，MHz 等換算由 caller 在呼叫處完成。
+- `set_rf_power(device, power_dbm)` 呼叫 SGS100A 的 set_power 或 Fake 的 set_value，單位為 dBm。
+- `set_output(device, "on" | "off")` 呼叫支援 driver 的 set_output。
+
+Helpers 對其他 device 種類報 TypeError，driver 錯誤原樣傳播。FakeDevice 維持單一 value，不新增 RF 欄位、protocol 或 registry；模擬頻率與功率仍寫同一值。
 
 ## Layout
 
@@ -42,6 +110,11 @@ zcu_lab/
 
 ## Reading routes
 
+- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈 smoke 已完成，不代表物理校準或 fidelity 已驗收。
+  - 四分支 [conditional spectroscopy](ftf/conditional_spectroscopy/guide.md)、[relative-phase × duration constructive phase](ftf/constructive_phase/guide.md) 與 [common-frequency × duration Rabi chevron](ftf/chevron/guide.md) 提供雙線校準圖與分析。
+  - [CZ common-amplitude](ftf/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
+  - [Conditional phase](ftf/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
+  - [Local-Z](ftf/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。

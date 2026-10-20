@@ -2,7 +2,7 @@
 
 import importlib.util
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import prod
 from pathlib import Path
 from uuid import uuid4
@@ -19,9 +19,11 @@ from zcu_tools.core.simulation import (
     RoundStatistics,
     SamplingIdentity,
 )
-from zcu_tools.device import DeviceManager
+from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
+
+from .warmup import EnvironmentWarmup, WarmupStatus
 
 
 @dataclass(frozen=True)
@@ -32,16 +34,64 @@ class SimulationEnvironment:
     Notebook owners close it themselves. description is public, not model truth.
     Builder failures must close their resources before raising; host installation
     failures close these devices, preserving both startup and cleanup exceptions.
+    warmup optionally exposes process-shared numeric preparation; None disables
+    startup work. It owns no live resources. Poll warmup.status for progress or
+    call wait_ready before starting acquisition timing. Explicitly addressed
+    startup FakeDevices define the modeled addresses for create_device. Their
+    identities live only in FakeDevice's process-wide class container; this
+    environment retains only address metadata, not a second instance registry.
     """
 
     soc: SimulationSoc
     soccfg: QickConfig
     devices: DeviceManager
     description: str
+    warmup: EnvironmentWarmup | None = None
+    _fake_addresses: frozenset[str] = field(init=False, repr=False)
+
+    def create_device(self, type_name: str, address: str) -> FakeDevice:
+        """Retrieve a modeled FakeDevice by its explicit address, without reset.
+
+        Only type FakeDevice and an addressed startup source are supported.
+        Unsupported type/address combinations raise ValueError, never open real
+        hardware and never create an inert source. Returned identities retain
+        settings and model bindings across disconnects and name changes. The
+        caller owns registry admission; an already connected identity cannot be
+        registered under a second name (ADR-0076).
+        """
+        if type_name != "FakeDevice" or address not in self._fake_addresses:
+            raise ValueError(
+                f"Simulation cannot bind device type {type_name!r} at {address!r}: "
+                "use an explicitly addressed startup FakeDevice"
+            )
+        return FakeDevice(address=address)
+
+    def wait_ready(self, timeout: float | None = None) -> WarmupStatus | None:
+        """Wait before starting caller-owned acquisition timing.
+
+        Return None when startup preparation is disabled, otherwise its terminal
+        status. Failure is reported in the status and allows on-demand compiling.
+        timeout is seconds or None; TimeoutError does not cancel preparation.
+        warmup is the optional shared preparation controller; polling its status
+        never blocks. The environment does not own a second worker or future.
+        """
+        return None if self.warmup is None else self.warmup.wait_ready(timeout)
 
     def __post_init__(self) -> None:
         if self.soc.get_cfg() != self.soccfg.get_cfg():
             raise ValueError("environment soc and soccfg must use matching profiles")
+        retained = FakeDevice.instance_addresses()
+        object.__setattr__(
+            self,
+            "_fake_addresses",
+            frozenset(
+                device.address
+                for device in self.devices.get_all_devices().values()
+                if isinstance(device, FakeDevice)
+                and device.address in retained
+                and FakeDevice(address=device.address) is device
+            ),
+        )
 
 
 @dataclass(frozen=True)

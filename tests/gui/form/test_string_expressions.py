@@ -79,7 +79,10 @@ def test_string_envelopes_share_preview_result_and_restore(
     assert preview.values[path] == ("yoko1" if field == "section" else expected)
     saved = FormInput.from_json(NamesForm, FormInput(NamesForm, authored).to_json())
     restored = FormState(NamesForm.default_input(name_env))
-    assert restored.write_compatible(saved.data, name_env) == ()
+    assert (
+        restored.restore_input(FormInput(restored.input.model, saved.data), name_env)
+        == ()
+    )
     assert restored.input.data[field] == value
     assert restored.result(name_env) == result
     # A literal beginning with $ never opts in to evaluation.
@@ -206,40 +209,6 @@ def test_single_model_selector_rejects_expression_without_evaluating_tag(
     assert "kind" in invalid.messages[("branch",)]
 
 
-def test_single_model_selector_restore_drops_expression_and_retains_ordinary_tag(
-    name_env: FormEnv,
-) -> None:
-    assert name_env.parameters is not None
-    env = FormEnv(
-        parameters=name_env.parameters.bind_aliases((AliasRow("device", "first"),), {})
-    )
-    state = FormState(SingleSelectorForm.default_input(env))
-    saved = FormInput.from_json(
-        SingleSelectorForm,
-        FormInput(
-            SingleSelectorForm,
-            {"branch": {"kind": {"expr": "$device"}, "name": {"expr": "$device"}}},
-        ).to_json(),
-    )
-
-    assert state.write_compatible(saved.data, env) == (("branch", "kind"),)
-    assert state.input.data["branch"] == {
-        "kind": "first",
-        "name": {"expr": "$device"},
-    }
-    result = state.result(env)
-    assert isinstance(result, SingleSelectorForm), result
-    assert result.branch.kind == "first" and result.branch.name == "first"
-
-    ordinary = FormInput(
-        SingleSelectorForm, {"branch": {"kind": "first", "name": "saved"}}
-    )
-    assert state.write_compatible(ordinary.data, env) == ()
-    result = state.result(env)
-    assert isinstance(result, SingleSelectorForm), result
-    assert result.branch.kind == "first" and result.branch.name == "saved"
-
-
 class ContainerSelectorForm(FormModel):
     """Containers keep tagged models as whole leaves during restore."""
 
@@ -247,48 +216,6 @@ class ContainerSelectorForm(FormModel):
     pair: tuple[Annotated[FirstSelector, Field(discriminator="kind")], ...]
     by_name: Mapping[str, Annotated[FirstSelector, Field(discriminator="kind")]]
     note: str = "unchanged"
-
-
-@pytest.mark.parametrize(
-    ("field", "saved", "ordinary"),
-    [
-        (
-            "items",
-            [{"kind": {"expr": "$device"}, "name": "saved"}],
-            [{"kind": "first", "name": {"expr": "$device"}}],
-        ),
-        (
-            "pair",
-            [{"kind": {"expr": "$device"}, "name": "saved"}],
-            [{"kind": "first", "name": {"expr": "$device"}}],
-        ),
-        (
-            "by_name",
-            {"rack.left": {"kind": {"expr": "$device"}, "name": "saved"}},
-            {"rack.left": {"kind": "first", "name": {"expr": "$device"}}},
-        ),
-    ],
-    ids=["list", "tuple", "typed-mapping"],
-)
-def test_container_selector_restore_drops_expression_whole_leaf(
-    name_env: FormEnv, field: str, saved: JsonValue, ordinary: JsonValue
-) -> None:
-    before: dict[str, JsonValue] = {
-        "items": [{"kind": "first", "name": "initial"}],
-        "pair": [{"kind": "first", "name": "initial"}],
-        "by_name": {"rack.left": {"kind": "first", "name": "initial"}},
-        "note": "unchanged",
-    }
-    state = FormState(FormInput(ContainerSelectorForm, before))
-    assert state.write_compatible({field: saved}, name_env) == ((field,),)
-    assert state.input.data == before
-    assert state.base.data == before
-
-    # Ordinary selectors and value expressions still restore as a whole leaf.
-    assert state.write_compatible({field: ordinary}, name_env) == ()
-    assert state.input.data == {**before, field: ordinary}
-    assert state.base.data == before
-    assert isinstance(state.result(name_env), ContainerSelectorForm)
 
 
 class ScalarEnvelopeForm(FormModel):

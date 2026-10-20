@@ -94,14 +94,14 @@ class FigureReply(FigureParams):
 
 
 class FormWrite(TypedDict):
-    """One JSON batch edit: nonempty string field path and JSON value.
+    """One JSON batch edit: typed field/index path and JSON value.
 
-    path uses model-field segments, not dotted keys, mapping keys or indexes.
+    path uses field names and FixedList indexes, not dotted or mapping keys.
     value may be an ordinary value, expression or complex tag. Native FormState
     owns branch ordering, whole-leaf replacement and field/model validation.
     """
 
-    path: list[str]
+    path: list[str | int]
     value: JsonValue
 
 
@@ -171,9 +171,9 @@ class FormInspectionReply(TypedDict):
 
 
 class FormDescriptionParams(FormInspectionParams):
-    """path selects model-field names; [] describes root and its direct fields."""
+    """path selects field names/FixedList indexes; [] describes root fields."""
 
-    path: list[str]
+    path: list[str | int]
 
 
 class FormDescriptionInspectionReply(FormInspectionReply):
@@ -293,8 +293,7 @@ class WorkflowRemoteControlAdapter[C](RemoteControlServiceBase):
             app=RemoteAppSpec(
                 wire_version=WIRE_VERSION,
                 gui_version=GUI_VERSION,
-                # Preserve the published server identity across the host relocation.
-                server_name="T1WorkflowRemoteServer",
+                server_name="WorkflowRemoteServer",
                 method_registry={
                     "workflow.start": BoundMethod(
                         self._start, METHOD_SPECS["workflow.start"]
@@ -569,11 +568,12 @@ def _parse_form_path(value: object) -> FormWritePath:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, "path must be an array of field names"
         )
-    path: list[str] = []
+    path: list[str | int] = []
     for part in value:
-        if not isinstance(part, str) or not part:
+        if not isinstance(part, (str, int)) or (isinstance(part, str) and not part):
             raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "path must contain nonempty field names"
+                ErrorCode.INVALID_PARAMS,
+                "path must contain field names or integer indexes",
             )
         path.append(part)
     return tuple(path)
@@ -596,12 +596,14 @@ def _parse_form_batch(
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS, "Start paths must be nonempty arrays"
             )
-        segments: list[str] = []
+        segments: list[str | int] = []
         for segment in path:
-            if not isinstance(segment, str) or not segment:
+            if not isinstance(segment, (str, int)) or (
+                isinstance(segment, str) and not segment
+            ):
                 raise RemoteError(
                     ErrorCode.INVALID_PARAMS,
-                    "Start path segments must be nonempty strings",
+                    "Start path segments must be field names or integer indexes",
                 )
             segments.append(segment)
         field_path = tuple(segments)

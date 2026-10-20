@@ -18,7 +18,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
     AnalysisExecution,
     ExecutionSnapshot,
 )
-from zcu_tools.mcp.measure.execution_reply import SummaryParameter
+from zcu_tools.mcp.measure.execution_reply import SummaryElements, SummaryParameter
 from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.raw_save import RawSaveRequest, SaveReport, save_raw_data
@@ -34,6 +34,7 @@ from zcu_tools.mcp.measure.recipe_contracts import (
     WritebackReceipt,
     recipe_gui_object,
 )
+from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath
 from zcu_tools.mcp.measure.recipe_inputs import copy_recipe_parameters
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
@@ -270,8 +271,8 @@ class RecipeTabBinding:
     observe_run: Callable[[RunOperation], None]
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
-    origins: dict[str, str | SweepSources] = field(default_factory=dict)
-    summary_parameters: tuple[SummaryParameter, ...] = ()
+    origins: dict[RecipeFieldPath, str | SweepSources] = field(default_factory=dict)
+    summary_parameters: tuple[SummaryParameter | SummaryElements, ...] = ()
     closed: Event = field(default_factory=Event)
     condition: Condition = field(default_factory=Condition)
     consume_cancel: Callable[[], bool] | None = None

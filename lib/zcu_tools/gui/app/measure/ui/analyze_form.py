@@ -120,6 +120,9 @@ class AnalyzeFormWidget(QWidget):
             self._widgets[binding.name] = widget
             self._connect_widget(widget)
 
+        # Refresh the parent's cached form size even while its pane is hidden.
+        self.updateGeometry()
+
     def clear(self) -> None:
         """Remove every field and reset the form's dataclass contract."""
         while self._form.rowCount():

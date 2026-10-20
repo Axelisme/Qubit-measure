@@ -148,7 +148,7 @@ def test_waveform_options_keep_all_inline_kinds_with_branch_fields() -> None:
         (options[1], {"length"}),
         (options[-1], {"length", "raise_waveform"}),
     ):
-        state.write({("waveform",): option.value}, env)
+        state.select(("waveform",), option.value, env)
         children = state.describe(("waveform",), env).children
         assert {field.path[-1] for field in children} == names
 
@@ -183,7 +183,7 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
     }
     cfg = result_spec(form, state, waveform_env(0.9))
     assert isinstance(cfg.waveform, ConstWaveformCfg) and cfg.waveform.length == 0.1
-    with pytest.raises(ValueError, match="Unavailable option command"):
+    with pytest.raises(ValueError, match="Unavailable field command"):
         state.run_command(("waveform",), "to_inline", env)
     assert notifications == ["changed"]
 
@@ -213,7 +213,7 @@ def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None
     before = state.input.data
 
     with pytest.raises(OSError, match="Cannot read captured waveform"):
-        key.commands[0].run(broken)
+        state.run_command(("waveform",), "to_inline", broken)
     with pytest.raises(OSError, match="Cannot read captured waveform"):
         state.run_command(("waveform",), "to_inline", broken)
 
@@ -361,14 +361,18 @@ def test_tagged_waveform_name_is_key_only_in_description_result_defaults_and_res
     state = FormState(form.input_from_spec(spec, env))
     assert state.input.data["waveform"] == {"kind": "ref", "name": "$missing.value"}
     assert result_spec(form, state, env).waveform == "$missing.value"
-    state.write({("waveform", "name"): {"expr": "1 / 0"}}, env)
+    state.write({("waveform",): {"kind": "ref", "name": {"expr": "1 / 0"}}}, env)
     assert expect_object(state.input.data["waveform"])["name"] == {"expr": "1 / 0"}
     errors = state.result(env)
     assert isinstance(errors, FormErrors)
     assert errors.messages == {("waveform", "name"): "Input should be a valid string"}
     restored = FormState(form.input_from_spec(spec, env))
-    assert restored.write_compatible(state.input.data, env) == (("waveform", "name"),)
-    assert result_spec(form, restored, env).waveform == "$missing.value"
+    assert (
+        restored.restore_input(FormInput(restored.input.model, state.input.data), env)
+        == ()
+    )
+    assert restored.input.data == state.input.data
+    assert isinstance(restored.result(env), FormErrors)
 
 
 @pytest.mark.parametrize("missing", ["gen_ch", "ro_ch"])
@@ -446,7 +450,7 @@ def test_unsupported_pulse_fields_cannot_be_written_and_use_spec_defaults(
     env = FormEnv()
     state = FormState(form.default_input(env))
 
-    with pytest.raises(ValueError, match="Unknown field path"):
+    with pytest.raises(ValueError, match="Unknown.*field path"):
         state.write({(name,): 1}, env)
     batch: dict[FormWritePath, JsonValue] = {
         **PULSE_LEAVES,
@@ -765,7 +769,7 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
 
     def choose(kind: str) -> None:
         value = next(item.value for item in options if item.label == f"Inline: {kind}")
-        state.write({(child,): value}, env)
+        state.select((child,), value, env)
 
     assert (
         expect_object(expect_object(state.input.data[child])["module"])["length"]
@@ -775,23 +779,23 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
     choose(other_kind)
     assert expect_object(state.input.data[child]) == {
         "kind": "inline",
-        "module": {"style": other_kind},
+        "module": {"style": other_kind, "length": 1.7},
     }
     choose(authored_kind)
     assert (
         expect_object(expect_object(state.input.data[child])["module"]).get("length")
-        == length
+        == 1.7
     )
 
 
-def test_template_input_models_isolate_locks_defaults_and_recomputation(
+def test_template_input_models_isolate_defaults_and_recomputation(
     creation_templates: dict[str, TemplateDef],
 ) -> None:
     form = form_adapter.module_form(PulseSpec)
     original_model = form.model
     env = creation_env()
-    first_template = Template("pulse", lock={"gain": 0.6})
-    second_template = Template("pulse", set={"phase": 7.0}, lock={"ch": 3})
+    first_template = Template("pulse", set={"gain": 0.6})
+    second_template = Template("pulse", set={"phase": 7.0, "ch": 3})
     first = form.template_input(first_template, creation_templates, env)
     second = form.template_input(second_template, creation_templates, env)
     first_state = FormState(first)
@@ -800,24 +804,17 @@ def test_template_input_models_isolate_locks_defaults_and_recomputation(
     assert issubclass(first.model, original_model)
     assert issubclass(second.model, original_model)
     assert form.model is original_model
-    first_state.write({("gain",): 0.7}, env)
-    errors = first_state.result(env)
-    assert isinstance(errors, FormErrors) and set(errors.messages) == {("gain",)}
-    first_state.write({("gain",): 0.6}, env)
     first_cfg = result_spec(form, first_state, env)
     second_cfg = result_spec(form, second_state, env)
     assert type(first_cfg) is PulseSpec and first_cfg.gain == 0.6
     assert type(second_cfg) is PulseSpec and second_cfg.gain == 0.25
     assert second_cfg.phase == 7.0 and second_cfg.ch == 3
-    second_state.write({("gain",): 0.4, ("ch",): 2}, env)
-    errors = second_state.result(env)
-    assert isinstance(errors, FormErrors) and set(errors.messages) == {("ch",)}
     refreshed = first.model.default_input(creation_env(125.0))
     assert refreshed.data["freq"] == 125.0 and refreshed.data["gain"] == 0.6
     assert first.data["freq"] == 120.0
     assert form.default_input(env).data == original_model.default_input(env).data
-    assert dict(first_template.lock) == {"gain": 0.6}
-    assert dict(second_template.set) == {"phase": 7.0}
+    assert dict(first_template.set) == {"gain": 0.6}
+    assert dict(second_template.set) == {"phase": 7.0, "ch": 3}
 
 
 def test_template_input_slot_keeps_bound_key(

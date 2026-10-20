@@ -128,6 +128,63 @@ def test_new_point_copies_complete_components_and_keeps_independent_values(
     assert point.Q1.rate == 5200.0
 
 
+def test_new_point_inherits_setup_general_with_fresh_creation_time(
+    entry: ResultEntry,
+) -> None:
+    with entry.setup.edit() as draft:
+        draft.set("general.created_at", "2000-01-01T00:00:00Z")
+        draft.set("general.ext", {"flux_value": 0.5, "flux_unit": "mA"})
+    source = entry.result_path / "setup.yaml"
+    before = source.read_bytes()
+
+    point = entry.new_point("inherited")
+
+    assert snapshot(point).general.ext == {"flux_value": 0.5, "flux_unit": "mA"}
+    stored = YAML(typ="safe").load(
+        (entry.result_path / "points/inherited/point.yaml").read_text()
+    )
+    assert stored["general"]["entry_id"] == entry.entry_id
+    assert stored["general"]["created_at"] > "2000-01-01T00:00:00Z"
+    assert source.read_bytes() == before
+    point.general.ext["flux_unit"] = "A"
+    assert entry.setup.general.ext.flux_unit == "mA"
+
+
+@pytest.mark.parametrize("clone_from", [None, "source"])
+def test_new_point_copies_forward_minor_source_yaml(
+    entry: ResultEntry, clone_from: str | None
+) -> None:
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    with entry.setup.edit() as draft:
+        draft.set_meta("Q1.rate", {"comment": "source value", "stderr": 1.0})
+    if clone_from is not None:
+        entry.new_point(clone_from)
+    source = entry.result_path / (
+        "setup.yaml" if clone_from is None else "points/source/point.yaml"
+    )
+    document = YAML(typ="rt").load(source.read_text())
+    document["format_version"] = "2.1"
+    document["general"]["created_at"] = "2000-01-01T00:00:00Z"
+    document["general"]["description"] = "published source"
+    document["general"]["ext"] = {"flux_unit": "mA"}
+    document["general"]["future_general"] = {"calibration": [1, None, "opaque"]}
+    document["future_container"] = {"owner": "future caller", "enabled": True}
+    write_yaml(source, document)
+    before = source.read_bytes()
+
+    point = entry.new_point("copy", clone_from=clone_from)
+
+    stored = YAML(typ="safe").load(
+        (entry.result_path / "points/copy/point.yaml").read_text()
+    )
+    assert stored["general"]["created_at"] > "2000-01-01T00:00:00Z"
+    stored["general"]["created_at"] = document["general"]["created_at"]
+    assert stored == document
+    assert point.Q1.rate == 5000.0
+    assert point.meta("Q1.rate") == {"comment": "source value", "stderr": 1.0}
+    assert source.read_bytes() == before
+
+
 def test_seed_accepts_omitted_components_without_rewriting_setup(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
@@ -595,6 +652,7 @@ def test_point_description_is_set_within_create_and_preserves_source(
     clone_from: str | None,
     description: str | None,
 ) -> None:
+    entry.setup.description = "setup description"
     source = entry.new_point("source")
     source.description = "source description"
     created = entry.new_point(
@@ -603,7 +661,7 @@ def test_point_description_is_set_within_create_and_preserves_source(
     expected = (
         description
         if description is not None
-        else ("source description" if clone_from is not None else None)
+        else ("source description" if clone_from is not None else "setup description")
     )
     assert snapshot(created).general.description == expected
     assert snapshot(entry.use_point("destination")).general.description == expected

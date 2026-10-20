@@ -19,9 +19,10 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "pi_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse"),
+                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
                 "res_pulse": Template(
                     "res_probe",
+                    bindings={"resonator": "$resonator"},
                     set={
                         "gain": 0.015,
                         "waveform.length": Expr(
@@ -31,6 +32,7 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
                 ),
                 "qub_pulse": Template(
                     "qub_probe",
+                    bindings={"qubit": "$qubit"},
                     set={
                         "gain": 0.01,
                         "waveform.length": 1.5,
@@ -40,7 +42,7 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "res_freq": Range.around(

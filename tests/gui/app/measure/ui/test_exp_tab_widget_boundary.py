@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -664,6 +665,25 @@ def test_result_focus_and_panel_width_are_owned_by_tab(
     assert window.current_left_panel_width() == tab.left_panel_width()
 
 
+def test_window_dimensions_roundtrip_through_layout_caretaker(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str], tmp_path: Path
+) -> None:
+    _session, ctrl, window, _original_tab = live_ui
+    ctrl.add_view(window)
+    ctrl.attach_caretaker(create_persistence_caretaker(ctrl, cache_dir=tmp_path))
+    original_ids = set(ctrl.list_tab_ids())
+    window.resize(1100, 820)
+    ctrl.persist_all()
+    window.resize(900, 650)
+    try:
+        ctrl.restore_all()
+        assert (window.width(), window.height()) == (1100, 820)
+    finally:
+        for tab_id in tuple(ctrl.list_tab_ids()):
+            if tab_id not in original_ids:
+                ctrl.close_tab(tab_id)
+
+
 def test_prepare_run_container_clears_run_and_downstream_figures(
     live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
 ) -> None:
@@ -789,19 +809,34 @@ def test_retired_view_stops_authority_projection(
 @pytest.mark.slow
 def test_application_quit_stops_authority_projection(tmp_path: Path) -> None:
     """Exercise real Qt process exit without mutating the suite's QApplication."""
-    completed = subprocess.run(
+    with subprocess.Popen(
         [
             sys.executable,
             "-m",
             "tests.gui.app.measure.ui._quit_authority",
             str(tmp_path),
         ],
-        capture_output=True,
+        env={
+            **os.environ,
+            "QT_QPA_PLATFORM": "offscreen",
+            "QT_QPA_PLATFORMTHEME": "generic",
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    assert "application quit retired authority projection" in completed.stdout
+    ) as child:
+        try:
+            stdout, stderr = child.communicate(timeout=30)
+            assert child.returncode == 0, stderr
+            assert "application quit retired authority projection" in stdout
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=5)
 
 
 def test_interactive_widget_lifecycle_is_owned_by_tab(

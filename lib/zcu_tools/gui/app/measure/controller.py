@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from pydantic import JsonValue
 
 from zcu_tools.cfg_model import Template, TemplateDef
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
+from zcu_tools.gui.app.measure.events.startup import STARTUP_ORIGIN
 from zcu_tools.gui.app.measure.services.experiment_reload import (
     ReloadPreview,
     ReloadReport,
 )
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.plotting import FigureContainer
@@ -39,7 +40,6 @@ from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
 )
-from zcu_tools.gui.session.services.predictor import ParamsFor
 from zcu_tools.gui.session.types import ParameterContext
 
 from .adapter import AdapterGuide, SessionEnv
@@ -61,7 +61,6 @@ from .services import (
     AppPersistedState,
     LoadTabResultOutcome,
     PersistenceError,
-    RestoreReport,
     TabSnapshot,
     build_app_services,
 )
@@ -71,6 +70,7 @@ from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
     from zcu_tools.experiment.artifacts import SaveReport
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.alias_presets import AliasPresets
@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.persistence import SingleFileCaretaker
     from zcu_tools.gui.session.ports import (
         DeviceRegistryPort,
+        DriverFactoryPort,
         OwnerScheduler,
         ProgressTransport,
     )
@@ -180,9 +181,16 @@ class RenderHost(Protocol):
     def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None: ...
     def discard_interactive_preview(self, tab_id: str) -> None: ...
 
-    # The View's current left-panel width — the only persistence value sourced
-    # from the View (the splitter widget); captured at flush time.
+    # Pure Qt appearance is captured from the View at layout flush time.
     def current_left_panel_width(self) -> int: ...
+
+    def current_window_size(self) -> tuple[int, int]:
+        """Return current width and height in Qt logical pixels on the owner thread."""
+        ...
+
+    def resize_window(self, width: int, height: int) -> None:
+        """Resize the caller-owned window to positive logical-pixel dimensions."""
+        ...
 
 
 class ViewSnapshot(TypedDict):
@@ -278,12 +286,16 @@ class Controller(SessionControllerMixin):
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
-        params_for: ParamsFor | None = None,
         *,
         alias_presets: AliasPresets | None = None,
         device_registry: DeviceRegistryPort | None = None,
+        driver_factory: DriverFactoryPort | None = None,
     ) -> None:
         """Compose services for state/registry with an optional view and adapters.
+
+        driver_factory creates device drivers; None selects the real hardware
+        factory. Tests may inject a hardware-free constructor. device_registry
+        supplies registered drivers, which close_hardware eventually closes.
 
         ``alias_presets`` maps names to ordered caller-owned alias rows. None
         or omission means no catalog and an empty initial table. A supplied
@@ -346,21 +358,20 @@ class Controller(SessionControllerMixin):
             owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
-            params_for=params_for,
             alias_presets=alias_presets,
             device_registry=device_registry,
+            driver_factory=driver_factory,
         )
         self._bind_services(services)
         # App-level PersistenceCaretaker, injected by runtime behavior via
         # attach_caretaker (None in bare-Controller tests that don't exercise
         # persistence).
-        self._caretaker: (
-            SingleFileCaretaker[AppPersistedState, RestoreReport] | None
-        ) = None
+        self._caretaker: SingleFileCaretaker[AppPersistedState, None] | None = None
         # Lazily built on first begin_shutdown so the Controller stays importable
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
+        self._hardware_close_attempted = False
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
@@ -370,10 +381,6 @@ class Controller(SessionControllerMixin):
         bus.subscribe(
             DeviceOperationFinishedPayload, self._on_device_operation_finished
         )
-        # FLUX-AWARE-MOCK: the mock flux source provisioning (SOC_CHANGED hook +
-        # fake_flux register/reconnect/ramp) is owned by the shared session-layer
-        # MockFluxProvisioner (built in build_session_services), so this controller
-        # carries no provisioning code of its own.
 
     def _bind_services(self, services: AppServices) -> None:
         """Retain the bundle and name the service instances used by the facade."""
@@ -543,6 +550,14 @@ class Controller(SessionControllerMixin):
         if payload.success:
             self._info(f"Device {payload.action}ed: {payload.name}")
             return
+        origin = self._bus.current_origin
+        if (origin.kind, origin.client_id) == (
+            STARTUP_ORIGIN.kind,
+            STARTUP_ORIGIN.client_id,
+        ):
+            # The script owns per-item logs and its final status summary. Keep
+            # the terminal fact/failed handle; do not duplicate it as a dialog.
+            return
         self._notify(
             "error",
             f"Device operation failed: {payload.name}",
@@ -601,7 +616,7 @@ class Controller(SessionControllerMixin):
         return self._writeback_control
 
     def attach_caretaker(
-        self, caretaker: SingleFileCaretaker[AppPersistedState, RestoreReport]
+        self, caretaker: SingleFileCaretaker[AppPersistedState, None]
     ) -> None:
         """Wire the app-level PersistenceCaretaker.
 
@@ -609,31 +624,45 @@ class Controller(SessionControllerMixin):
         """
         self._caretaker = caretaker
 
-    # -- Memento Originator (PersistOriginatorPort) --------------------------
+    # -- Layout SnapshotOriginator -----------------------------------------
 
     def capture_persisted_state(self) -> AppPersistedState:
-        """Snapshot the whole app state into a memento (no disk). Composes the
-        remembered settings + device projection + view's left-panel width and the
-        live tabs into one immutable ``AppPersistedState``."""
-        settings = self._settings_svc.capture_settings(
-            left_panel_width=self._capture_left_panel_width()
+        """Capture only Qt appearance on the owner thread, without disk I/O.
+
+        The returned dimensions and panel width are detached values. Without a
+        view use default window dimensions. Session resources and drafts have
+        their own live owners and are not part of this layout snapshot.
+        """
+        width, height = (
+            (1280, 750)
+            if self._render_host is None
+            else self._render_host.current_window_size()
         )
-        session = self._workspace_svc.capture_session()
-        return AppPersistedState(startup=settings, session=session)
+        return AppPersistedState(
+            window_width=width,
+            window_height=height,
+            left_panel_width=self._capture_left_panel_width(),
+        )
 
-    def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
-        """Dispatch a memento back to the sub-owners: seed remembered settings +
-        register remembered devices, then rebuild tabs. Returns the session's
-        per-tab restore report (presented to the user by ``restore_all``)."""
-        with self._bus.origin(EventOrigin(kind="system")):
-            self._settings_svc.restore_settings(state.startup)
-            report = self._workspace_svc.apply_session(state.session)
-            self._present_restore_report(report)
-            return report
+    def restore_persisted_state(self, state: AppPersistedState) -> None:
+        """Apply a layout-only snapshot on the owner thread, without disk I/O.
 
-    # -- lifecycle façade (runtime startup / MainWindow close) ---------------
+        state supplies positive Qt logical-pixel dimensions. Panel width seeds
+        subsequently created tabs; an attached render host resizes immediately.
+        This method does not create tabs, connect drivers or change sources.
+        The caller retains ownership of the snapshot. Host failures propagate.
+        """
+        self._settings_svc.restore_left_panel_width(state.left_panel_width)
+        if self._render_host is not None:
+            self._render_host.resize_window(state.window_width, state.window_height)
 
     def restore_all(self, *, load: bool = True) -> None:
+        """Load pure Qt appearance on the owner thread using the attached caretaker.
+
+        load=False uses fresh default dimensions without reading disk. Present
+        load/codec errors through diagnostic sinks; unexpected failures propagate.
+        No domain session state is restored. Attach a caretaker before calling.
+        """
         assert self._caretaker is not None, "caretaker not attached"
         outcome = self._caretaker.restore_all(load=load)
         if outcome.load_error is not None:
@@ -655,17 +684,6 @@ class Controller(SessionControllerMixin):
         if host is None:
             return DEFAULT_LEFT_PANEL_WIDTH
         return host.current_left_panel_width()
-
-    def _present_restore_report(self, report: RestoreReport) -> None:
-        if report.rejected_tabs:
-            self._notify(
-                "error",
-                "Some session tabs were not restored",
-                "\n".join(
-                    f"{issue.subject}: {issue.message}"
-                    for issue in report.rejected_tabs
-                ),
-            )
 
     # ------------------------------------------------------------------
     # ExpTab operations (TabService)
@@ -702,9 +720,21 @@ class Controller(SessionControllerMixin):
     def get_running_tab_id(self) -> str | None:
         return self._tab_control.get_running_tab_id()
 
-    def install_startup_soc(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
-        """Publish a bound startup SoC; later connection mutations are rejected."""
-        self._soc_svc.install_startup_soc(soc, soccfg)
+    def install_soc(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
+        """Install or replace a caller-owned board/config on the Qt owner thread.
+
+        Clear the remote endpoint and publish the new pair. Run/connect conflicts
+        raise OperationConflictError. The caller retains board cleanup ownership.
+        """
+        self._soc_svc.install_soc(soc, soccfg)
+
+    def uninstall_soc(self) -> None:
+        """Clear the board/config on the Qt owner thread without closing it.
+
+        Publish the empty connection. Run/connect conflicts raise
+        OperationConflictError; external resource cleanup stays with the caller.
+        """
+        self._soc_svc.uninstall_soc()
 
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()
@@ -786,6 +816,70 @@ class Controller(SessionControllerMixin):
         self._background_svc.stop_accepting()
         if not self._background_svc.quiesce(timeout_ms):
             raise TimeoutError("Controller background work did not drain in time")
+
+    def register_device[Info: BaseDeviceInfo](
+        self, name: str, driver: BaseDevice[Info]
+    ) -> None:
+        """Adopt a constructed driver through DeviceService on the owner thread.
+
+        ``name`` is a nonblank session name and ``driver`` supplies its own info.
+        Replaces an idle remembered row or adds a nonremembered connected row.
+        Run/mutation conflicts, duplicate live names and driver/registry failures
+        propagate without publishing a candidate. Ownership transfers only on
+        success; GUI teardown closes registered drivers after drain and callbacks.
+        """
+        if self._hardware_close_attempted:
+            raise FailedPreconditionError("GUI hardware has already closed")
+        self._dev_svc.register_device(name, driver)
+
+    def placeholder_defaults(self) -> dict[str, str]:
+        """Capture detached template defaults from this session on the owner thread.
+
+        Empty until a startup script registers defaults. Later registration does
+        not change the returned mapping. This query does not load or save files.
+        """
+        return self._services.startup_context.placeholders.current()
+
+    def start_startup(self, path: Path) -> int:
+        """Run trusted path's startup(ctx) off-owner after the Qt loop starts.
+
+        Owner-only; returns an operation token. Script failures publish a
+        path/line diagnostic and retain earlier commands. Repeated start raises
+        RuntimeError. The shared background drain includes this work.
+        """
+        return self._services.startup.start(path, self._services.startup_context)
+
+    def finish_close(self, timeout_ms: int = 5000) -> None:
+        """Drain, run script callbacks in reverse order, then close managed hardware.
+
+        Owner-only. timeout_ms bounds the normal drain; TimeoutError propagates
+        without callbacks or hardware cleanup, allowing a later retry. Each
+        callback/driver failure is logged and isolated. Successful repeated calls
+        do not repeat callbacks or driver close attempts. SoC remains caller-owned.
+        """
+        self.close(timeout_ms)
+        self._services.startup.close_callbacks()
+        self.close_hardware()
+
+    def close_hardware(self) -> None:
+        """Close managed drivers once, then unpublish the caller-owned SoC.
+
+        Call on the Qt owner thread only after successful close() drain and any
+        caller on-close callbacks. Every driver gets one attempt; successful rows
+        become MEMORY_ONLY and failed rows stay CONNECTED with error. Aggregate
+        close errors are logged, not raised, so they cannot block GUI teardown.
+        The SoC has no close contract. Its creator still owns external cleanup.
+        Repeated calls do not retry failed driver closes or emit duplicate facts.
+        """
+        if self._hardware_close_attempted:
+            return
+        self._hardware_close_attempted = True
+        try:
+            self._dev_svc.close_all_devices()
+        except ExceptionGroup:
+            logger.exception("Failed to close GUI-managed devices")
+        finally:
+            self._soc_svc.uninstall_soc()
 
     def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation, wait (with a timeout) for them to stop,
@@ -1018,6 +1112,7 @@ class Controller(SessionControllerMixin):
             Template(template_id),
             self._registry.templates,
             arb_names=self._arb_waveform_svc.list_data_keys(),
+            placeholders=self.placeholder_defaults(),
         )
         self.apply_library_change(parameters, entry.put(name))
 

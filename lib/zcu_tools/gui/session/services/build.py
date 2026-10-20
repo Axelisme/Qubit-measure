@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from zcu_tools.cfg_model import PlaceholderRegistry
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.operation_runner import OperationInfrastructure
@@ -26,7 +27,7 @@ from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
-from zcu_tools.gui.session.services.predictor import ParamsFor, PredictorService
+from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.setup_control import SetupControlFacet
@@ -70,6 +71,8 @@ class SessionServices:
         device_control: Narrow device command/query/progress/event facade.
         setup_control: Entry/point setup and independent SoC command facade.
         settings: Entry opening/creation and remembered setup preferences.
+        placeholders: Initially empty, session-owned template default bindings.
+            Commands and snapshots run on the session owner thread; no I/O.
         values: Read-only lookup of the session value-source registry.
         value_sources: Binder publishing cached owner-specific value sources.
         arb_waveform: Qubit-scoped arbitrary waveform assets of the session
@@ -92,6 +95,7 @@ class SessionServices:
     setup_control: SetupControlPort
     settings: ProjectSettingsService
     values: ValueLookup
+    placeholders: PlaceholderRegistry
     value_sources: ValueSourceBinder
     arb_waveform: ArbWaveformService
 
@@ -108,7 +112,6 @@ def build_session_services(  # noqa: PLR0913
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
     alias_rows: tuple[AliasRow, ...] = (),
-    params_for: ParamsFor | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
@@ -131,8 +134,6 @@ def build_session_services(  # noqa: PLR0913
     are authoritative, including empty rows. Explicit Apply saves to the entry;
     ordinary set_alias_rows remains memory-only. Empty defaults enable no aliases.
     Syntax/order errors propagate at construction.
-    params_for is the user-owned read-only component-to-simulator parameter
-    conversion; None disables component prefill, not explicit-parameter queries.
     """
     value_registry = ValueRegistry()
     device = DeviceService(
@@ -154,15 +155,13 @@ def build_session_services(  # noqa: PLR0913
         alias_rows=alias_rows,
     )
     context_control = ContextControlFacet(context=context)
-    predictor = PredictorService(context_control, params_for)
+    predictor = PredictorService(context_control)
     predictor_control = PredictorControlFacet(predictor)
     device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
-    # ProjectSettingsService bridges the two session services it commands through
-    # their ports (project context + remembered-device registration) + State prefs.
+    # Entry composition uses the context owner and live dialog preferences.
     settings = ProjectSettingsService(
         context,
-        device,
         state,
         result_root=Path(project_root) / "result",
         database_root=Path(project_root) / "Database",
@@ -188,6 +187,7 @@ def build_session_services(  # noqa: PLR0913
         setup_control=setup_control,
         settings=settings,
         values=value_registry,
+        placeholders=PlaceholderRegistry(),
         value_sources=value_sources,
         arb_waveform=ArbWaveformService(state),
     )

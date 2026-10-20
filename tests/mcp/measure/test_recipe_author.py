@@ -3,6 +3,9 @@
 from copy import deepcopy
 
 import pytest
+from zcu_tools.cfg_model import ConfigBase, LogPoints
+from zcu_tools.gui.form import FormErrors
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
@@ -31,15 +34,60 @@ def test_missing_parameter_rejects_empty_name_or_reason(parameter, reason):
         MissingParameter(parameter, reason)
 
 
+class IntegerControls(ConfigBase):
+    depths: list[int]
+
+
+class IntegerGui(LookbackGui):
+    cfg_cls = IntegerControls
+
+    def make_form(self):
+        return Form(
+            IntegerControls,
+            {"depths": LogPoints(max=16, points=5, include_zero=False)},
+        )
+
+
+def test_author_integer_points_replaces_the_complete_log_branch_with_a_list(tmp_path):
+    gui = IntegerGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.set_integer_points(("depths",), [7])
+        assert tab.read_field(("depths",)).input == {"kind": "list", "values": [7]}
+        cfg = gui.owner.result()
+        assert not isinstance(cfg, FormErrors), cfg
+        assert cfg.model_dump()["depths"] == [7]
+
+
+def test_author_omitted_integer_points_preserves_unfinished_gui_draft(tmp_path):
+    gui = IntegerGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        gui.owner.write({("depths", "points"): 0})
+        before = deepcopy(tab.read_field(("depths",)).input)
+        tab.set_integer_points(("depths",), None)
+        assert tab.read_field(("depths",)).input == before
+
+
+def test_author_integer_points_reports_owner_errors_and_retains_invalid_list(tmp_path):
+    gui = IntegerGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        with pytest.raises(GuiRpcError, match="Invalid") as raised:
+            tab.set_integer_points(("depths",), [0])
+        assert raised.value.reason == "invalid_cfg"
+        assert tab.read_field(("depths",)).input == {"kind": "list", "values": [0]}
+
+
 def test_author_edits_preserve_defaults(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        tab.set("rounds", None)
-        assert tab.use_library("modules.readout", None) is None
-        tab.set("rounds", 7)
-        assert tab.use_library("modules.readout", "R1.readout.main") is None
-        tab.disable_library("modules.reset")
+        tab.set(("rounds",), None)
+        assert tab.use_library(("modules", "readout"), None) is None
+        tab.set(("rounds",), 7)
+        assert tab.use_library(("modules", "readout"), "R1.readout.main") is None
+        tab.disable_library(("modules", "reset"))
 
     assert gui.publication["input"]["rounds"] == 7
     assert gui.publication["input"]["modules"]["readout"] == {
@@ -83,7 +131,7 @@ def test_author_reuse_resets_the_observed_cfg_before_editing(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback", reuse="t")
-        tab.set("rounds", 9)
+        tab.set(("rounds",), 9)
         cfg_calls = [
             (method, params)
             for method, params in client.transport.sent
@@ -107,21 +155,23 @@ def test_author_reuse_resets_the_observed_cfg_before_editing(tmp_path):
     assert gui.publication["input"]["rounds"] == 9
 
 
-@pytest.mark.parametrize("field", ["", "missing", "modules..readout", "rounds.child"])
+@pytest.mark.parametrize(
+    "field", [(), ("missing",), ("modules", "", "readout"), ("rounds", "child")]
+)
 def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = gui.owner.input.data
         sent_before = len(client.transport.sent)
-        if field in ("missing", "rounds.child"):
+        if field in (("missing",), ("rounds", "child")):
             with pytest.raises(GuiRpcError) as error:
                 tab.set(field, 5)
             assert error.value.code == "invalid_params"
             assert error.value.reason == "form_path"
             assert error.value.data == {
-                "form_path": field.split("."),
-                "path": field.split("."),
+                "form_path": list(field),
+                "path": list(field),
                 "edit_index": 0,
             }
         else:
@@ -134,11 +184,11 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
                     "tab.edit_recipe_fields",
                     {
                         "tab_id": "t",
-                        "edits": [{"path": field.split("."), "value": 5}],
+                        "edits": [{"path": list(field), "value": 5}],
                     },
                 )
             ]
-            if field in ("missing", "rounds.child")
+            if field in (("missing",), ("rounds", "child"))
             else []
         )
 
@@ -150,7 +200,7 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
             None,
             None,
             MissingParameter(
-                "readout_ref", "Provide a valid modules.readout library key"
+                "readout_ref", "Provide a valid ('modules', 'readout') library key"
             ),
         ),
         (None, "R1.readout.main", None),
@@ -164,10 +214,11 @@ def test_author_required_library_returns_parameter_gap_or_none(
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         if current_reference is not None:
-            tab.use_library("modules.readout", current_reference)
+            tab.use_library(("modules", "readout"), current_reference)
         before = len(client.transport.sent)
         assert (
-            tab.use_library("modules.readout", name, required="readout_ref") == expected
+            tab.use_library(("modules", "readout"), name, required="readout_ref")
+            == expected
         )
         assert client.transport.sent[before:] == (
             [
@@ -195,11 +246,11 @@ def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        initial = tab.read_field("modules.readout")
+        initial = tab.read_field(("modules", "readout"))
         before = list(client.transport.sent)
         with pytest.raises(GuiRpcError) as error:
             tab.use_library(
-                "modules.readout", "unknown.readout.main", required="readout_ref"
+                ("modules", "readout"), "unknown.readout.main", required="readout_ref"
             )
         assert error.value.code == "invalid_params"
         assert error.value.reason == "library_key"
@@ -208,7 +259,7 @@ def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
             "selector_path": ["modules", "readout"],
             "available_keys": ["R1.readout.main", "R2.readout.main"],
         }
-        assert tab.read_field("modules.readout") == initial
+        assert tab.read_field(("modules", "readout")) == initial
         assert client.transport.sent[len(before) :] == [
             (
                 "tab.select_recipe_module",
@@ -234,7 +285,7 @@ def test_author_sweep_rejects_invalid_counts_before_edit(tmp_path, expts):
         pytest.raises(ValueError, match="expts"),
     ):
         RecipeSession(client.context).open_tab("lookback").set_sweep(
-            "sweep.freq", expts=expts
+            ("sweep", "freq"), expts=expts
         )
 
 
@@ -242,10 +293,10 @@ def test_author_sweep_only_edits_supplied_fields(tmp_path):
     gui = _SweepGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        before = deepcopy(tab.read_field("sweep.freq").input)
-        tab.set_sweep("sweep.freq")
-        tab.set_sweep("sweep.freq", start=6000.0, expts=2)
-        inputs = tab.read_field("sweep.freq").input
+        before = deepcopy(tab.read_field(("sweep", "freq")).input)
+        tab.set_sweep(("sweep", "freq"))
+        tab.set_sweep(("sweep", "freq"), start=6000.0, expts=2)
+        inputs = tab.read_field(("sweep", "freq")).input
         if not isinstance(inputs, dict) or not isinstance(before, dict):
             raise TypeError("Expected Form range input")
         assert inputs["start"] == 6000.0
@@ -265,16 +316,16 @@ def test_author_sweep_captures_individual_labels_and_omitted_gui_sources(tmp_pat
         tab = RecipeSession(
             client.context,
             summary_parameters=tuple(
-                SummaryParameter(name, name)
-                for name in (
-                    "sweep.freq",
-                    "sweep.freq.start",
-                    "sweep.freq.stop",
-                    "sweep.freq.n",
+                SummaryParameter(name, path)
+                for name, path in (
+                    ("sweep.freq", ("sweep", "freq")),
+                    ("sweep.freq.start", ("sweep", "freq", "start")),
+                    ("sweep.freq.stop", ("sweep", "freq", "stop")),
+                    ("sweep.freq.n", ("sweep", "freq", "n")),
                 )
             ),
         ).open_tab("lookback")
-        tab.set_sweep("sweep.freq", start=6000.0, expts=2, sources=sources)
+        tab.set_sweep(("sweep", "freq"), start=6000.0, expts=2, sources=sources)
         sources["start"] = "changed after preparation"
         capture = tab.run().snapshot()
         assert capture is not None
@@ -303,7 +354,7 @@ def test_author_sweep_rejects_empty_sources_before_any_edit(tmp_path, key, label
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
         with pytest.raises(ValueError, match="sources"):
-            tab.set_sweep("sweep.freq", start=6000.0, sources=sources)
+            tab.set_sweep(("sweep", "freq"), start=6000.0, sources=sources)
         assert client.transport.sent[before:] == []
 
 
@@ -314,7 +365,7 @@ def test_author_disconnected_binding_does_not_reconnect_or_replay_an_edit(tmp_pa
         before = len(client.transport.sent)
         client.transport.close()
         with pytest.raises(GuiRpcError) as error:
-            tab.set("rounds", 5)
+            tab.set(("rounds",), 5)
         assert error.value.reason == "connection_lost"
         assert len(client.transport.sent) == before
 

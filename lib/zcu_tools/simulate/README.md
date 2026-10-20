@@ -54,7 +54,10 @@ to microwave I+iQ before applying receiver gain, phase, offset and noise. See th
 For batched constant pulses, population and homogeneous moment exponentials are
 shared across carrier frequencies. A Sylvester solve supplies the driven block
 without assuming diagonalizable rate matrices. Near-singular driven blocks use
-the full matrix exponential. Shaped envelopes retain the DOP853 solver.
+the full matrix exponential. Content-defined `PiecewiseLinearEnvelope` inputs use
+bounded affine-input convolution propagation; opaque callbacks retain DOP853.
+Flat integrated contents with identical timing/grid coordinates share small
+carrier tiles, retaining per-carrier numerical guards.
 
 `ADC.sample_windows` shares one initial-state draw across several per-execution
 windows, while receiver noise remains independent across windows.

@@ -3,6 +3,8 @@
 Only Expr seeds evaluate; ordinary strings, numbers and bools remain literal.
 Slot seeds retain library links. The composition root injects TEMPLATES once
 into its measure Registry. This module does not register anything at import time.
+Placeholder names are lab declarations, not framework defaults. Callers must
+supply Template.bindings or register defaults through the startup context.
 """
 
 from __future__ import annotations
@@ -188,6 +190,19 @@ TEMPLATES: dict[str, TemplateDef] = {
         "Res-probe waveform",
         {"length": 1.0},
         default_name="ro_waveform",
+    ),
+    "flux_pulse": TemplateDef(
+        PulseSpec,
+        "Flux pulse",
+        {
+            "ch": Expr("{qubit}.wiring.lo_flux_ch"),
+            "freq": 0.0,
+            "gain": 1.0,
+            "nqz": 2,
+            "waveform.style": "const",
+            "waveform.length": 1.0,
+        },
+        default_name="flux_pulse",
     ),
     "pulse:blank": TemplateDef(
         PulseSpec,

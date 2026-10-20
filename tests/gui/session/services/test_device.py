@@ -49,6 +49,31 @@ from tests.gui.session.services._device_service_support import (
 from tests.gui.session.services._device_waits import DeviceWorkers
 
 
+@pytest.mark.parametrize("simulated", [False, True])
+@pytest.mark.parametrize("remembered", [False, True])
+def test_manual_fake_device_is_rejected_before_operation_admission(
+    qapp, device_workers: DeviceWorkers, remembered, simulated
+):
+    from zcu_tools.gui.session.ports import DeviceMemoryInfo
+
+    registry = FakeDeviceRegistry()
+    svc, driver = make_device_service(device_workers, registry=registry)
+    if simulated:
+        registry.register_device("published", driver)
+        svc.publish_initial_devices()
+        driver.get_info.reset_mock()
+    if remembered:
+        svc.register_remembered_devices(
+            [DeviceMemoryInfo(type_name="FakeDevice", name="manual", address="addr")]
+        )
+    before = svc.list_device_snapshots()
+    with pytest.raises(FailedPreconditionError, match="cannot be added manually"):
+        svc.start_connect_device(ConnectDeviceRequest("FakeDevice", "manual", "addr"))
+    assert svc.list_device_snapshots() == before
+    assert svc.get_active_device_operations() == ()
+    driver.get_info.assert_not_called()
+
+
 def test_device_connect_returns_operation_handle(qapp, device_workers: DeviceWorkers):
     svc, _device = make_device_service(device_workers)
     connected: list[object] = []
@@ -178,7 +203,8 @@ def test_cancel_missing_device_operation_is_failed_precondition(
 def test_device_connect_failure_is_reported_without_live_registration(
     qapp, device_workers: DeviceWorkers
 ):
-    svc, device = make_device_service(device_workers)
+    handles = OperationHandles()
+    svc, device = make_device_service(device_workers, handles=handles)
     device.get_info.side_effect = RuntimeError("cannot query")
     errors: list[str] = []
     loop = device_workers.completion(allow_failure=True)
@@ -186,14 +212,30 @@ def test_device_connect_failure_is_reported_without_live_registration(
         svc, lambda _name, error: errors.append(error) or loop.quit()
     )
 
-    svc.start_connect_device(device_connect_request())
+    token = svc.start_connect_device(device_connect_request())
     loop.exec()
 
     assert errors
     assert "cannot query" in errors[0]
     assert "dev1" not in svc.get_connected_devices()
     device.close.assert_called_once_with()
-    assert svc.get_device_snapshot("dev1") is None
+    failed = svc.get_device_snapshot("dev1")
+    assert failed is not None, "failed connection must retain a queryable device row"
+    assert failed.status is DeviceStatus.MEMORY_ONLY
+    assert failed.address == "addr"
+    assert failed.error is not None and "cannot query" in failed.error
+    outcome = handles.await_outcome(token, timeout=0)
+    assert outcome is not None and outcome.outcome is not None
+    assert outcome.outcome.status == "failed"
+
+    device.get_info.side_effect = None
+    device.get_info.return_value = FakeDeviceInfo(address="corrected", value=0.0)
+    connect_device(svc, ConnectDeviceRequest("YOKOGS200", "dev1", "corrected"))
+    retried = svc.get_device_snapshot("dev1")
+    assert retried is not None
+    assert retried.status is DeviceStatus.CONNECTED
+    assert retried.address == "corrected"
+    assert retried.error is None
 
 
 def test_setup_uses_gate_and_returns_to_connected_snapshot(
@@ -390,7 +432,7 @@ def test_connect_writes_device_state_to_state_with_remember(
     state = State(MagicMock())
     svc, _device = make_device_service(device_workers, state=state)
     connect_device(
-        svc, ConnectDeviceRequest("FakeDevice", "dev1", "addr", remember=False)
+        svc, ConnectDeviceRequest("YOKOGS200", "dev1", "addr", remember=False)
     )
     dev = state.get_device("dev1")
     assert dev is not None
@@ -454,7 +496,7 @@ def _connect_named(svc: DeviceService, name: str) -> None:
     on_device_operation_failed(svc, lambda _n, error: errors.append(error))
     # address == name so _make_multi_svc keys the driver by name.
     svc.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name=name, address=name)
+        ConnectDeviceRequest(type_name="YOKOGS200", name=name, address=name)
     )
     qt_until(lambda: bool(connected or errors), label=f"connect {name}")
     assert not errors

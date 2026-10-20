@@ -1,4 +1,4 @@
-"""Low-reuse real-envelope periods from finite Hilbert Fourier matrices."""
+"""Smooth-envelope periods from shared finite Hilbert Fourier matrices."""
 
 from dataclasses import dataclass
 
@@ -7,27 +7,37 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
+from .._carrier_plan import ramp_families_for_rows
+from .._carrier_plan import subdivisions as ramp_subdivisions
+from ..kernel import (
+    ApplyContext,
+    GuardPreparation,
+    GuardResult,
+    KernelContext,
+    Prepared,
+    SegmentTable,
+    prepared_key_indices,
 )
-from ..kernel import GuardPreparation, GuardResult, Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..secular import SecularModel
+from ..workplan import FactKey, RampFamilyPlan, WorkPlan
+from ._carrier_reuse import CarrierWorkspace
 from ._period_table import (
+    CompactPolynomial,
     PeriodEntry,
     PeriodPlayback,
     PeriodPrepared,
     SecularMaps,
     UnitaryTable,
+    advance_tail,
+    band_keys,
     envelopes,
     periods,
 )
-from ._shaped import drive_bounds, envelope_bounds
-from .dop853 import DOP853Kernel
-from .period_table import PeriodTableKernel, advance_tail
+from ._sambe import eigensystem
+from ._secular import coherence_decay, population_generator
+from ._shaped import drive_bounds
+from ._workload_facts import drive_bound, envelope_bounds
+from .dop853 import prepare_models
 
 
 def _spectral(
@@ -49,16 +59,7 @@ def _spectral_blocks(energies, coupling, frequency, modes, duration):
     """Run matrix assembly, eigensolve and reconstruction without the GIL."""
     size = len(energies)
     count = 2 * modes + 1
-    matrix = np.zeros((count * size, count * size), dtype=np.complex128)
-    for k in range(count):
-        block = slice(k * size, (k + 1) * size)
-        matrix[block, block] = np.diag(energies + (k - modes) * frequency)
-        if k:
-            previous = slice((k - 1) * size, k * size)
-            matrix[block, previous] = coupling
-            matrix[previous, block] = coupling.conj().T
-    values, vectors = np.linalg.eigh(matrix)
-    central = np.ascontiguousarray(vectors[modes * size : (modes + 1) * size])
+    values, vectors, central = eigensystem(energies, coupling, frequency, modes)
     evolved = (vectors * np.exp(-2j * np.pi * values * duration)) @ central.conj().T
     result = np.zeros((16, size, size), dtype=np.complex128)
     for index in range(count):
@@ -106,7 +107,9 @@ class _SpectralFamily:
         frequency: float,
         bound: float,
         step: float,
+        workspace: CarrierWorkspace | None,
     ) -> None:
+        self.workspace = workspace
         self.model = model
         self.port = port
         self.frequency = frequency
@@ -117,14 +120,41 @@ class _SpectralFamily:
             tuple[int, int], tuple[NDArray[np.complex128], float, float]
         ] = {}
 
+    def _physical(self, kind: str, orders: tuple[int, int]) -> NDArray[np.complex128]:
+        """Build or interpolate physical arrays with all noncarrier inputs fixed."""
+        subdivisions = int(round(1 / (abs(self.frequency) * self.step)))
+
+        def build(frequency: float) -> NDArray[np.complex128]:
+            step = 1 / (abs(frequency) * subdivisions)
+            if kind == "peak":
+                modes = orders[1]
+                return np.array(
+                    [
+                        _spectral(self.model, self.port, frequency, self.bound, k, step)
+                        for k in (modes, modes + 1)
+                    ]
+                )
+            return _coefficients(
+                self.model, self.port, frequency, self.bound, step, orders
+            )
+
+        workspace = self.workspace
+        if workspace is None:
+            return build(self.frequency)
+        identity = (
+            self.model.identity,
+            self.model.level,
+            self.port,
+            self.bound,
+            subdivisions,
+            kind,
+            orders,
+        )
+        return workspace.evaluate(identity, self.frequency, build, group=identity[:5])
+
     def error(self, modes: int) -> float:
         if modes not in self.errors:
-            fine = _spectral(
-                self.model, self.port, self.frequency, self.bound, modes + 1, self.step
-            )
-            coarse = _spectral(
-                self.model, self.port, self.frequency, self.bound, modes, self.step
-            )
+            coarse, fine = self._physical("peak", (0, modes))
             self.errors[modes] = float(
                 np.sum(np.linalg.norm(fine - coarse, axis=(-2, -1)))
             )
@@ -136,9 +166,7 @@ class _SpectralFamily:
     ) -> tuple[NDArray[np.complex128], float, float]:
         if orders not in self.polynomials:
             nodes, _ = orders
-            coefficients = _coefficients(
-                self.model, self.port, self.frequency, self.bound, self.step, orders
-            )
+            coefficients = self._physical("polynomial", orders)
             last = float(
                 np.sum(np.linalg.norm(coefficients[:, nodes - 1], axis=(-2, -1)))
             )
@@ -158,35 +186,84 @@ class _Data:
     periods: PeriodPrepared
     models: tuple[SecularModel, ...]
     ports: tuple[int, ...]
+    keys: NDArray[np.void]
+    errors: NDArray[np.float64]
 
     @property
     def nbytes(self) -> int:
         # Models belong to ModelSource; only newly owned arrays are charged.
-        return self.periods.nbytes
+        return self.periods.nbytes + self.keys.nbytes + self.errors.nbytes
+
+
+@dataclass(frozen=True)
+class _TailMaps:
+    # Half-tail secular maps; population casting preserves the original playback.
+    populations: NDArray[np.complex128]
+    coherences: NDArray[np.float64]
+
+
+def _tail_maps(
+    model: SecularModel, entry: PeriodEntry, tail: float, work_plan: WorkPlan
+) -> _TailMaps:
+    """Share exact half-tail maps, retaining the original subperiod power."""
+    step = 1 / (abs(entry.frequency) * entry.subdivisions)
+    key = FactKey(
+        ("shaped-tail-maps", model.identity, model.level, tail, step), _TailMaps
+    )
+
+    def build() -> _TailMaps:
+        population = np.asarray(
+            expm(tail / 2 * population_generator(model.rates_per_ns)), dtype=complex
+        )
+        # The power, rather than exp(-tail/2 * decay), preserves rounding.
+        coherence = entry.coherences ** (tail / step)
+        return _TailMaps(population, coherence)
+
+    return work_plan.fact(key, build)
+
+
+def _tail_blocks(
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    tail: float,
+    work_plan: WorkPlan,
+) -> NDArray[np.complex128]:
+    """Share all-phase Fourier blocks by their exact physical build inputs."""
+    key = FactKey[NDArray[np.complex128]](
+        (
+            "shaped-tail-blocks",
+            model.identity,
+            model.level,
+            port,
+            frequency,
+            amplitude,
+            tail,
+        ),
+        np.ndarray,
+    )
+    return work_plan.fact(
+        key, lambda: _spectral(model, port, frequency, amplitude, 3, tail)
+    )
 
 
 class ShapedSambeKernel:
-    """Finite-Fourier real-envelope propagation for low-reuse shaped keys.
+    """Finite-Fourier smooth-envelope propagation for shaped keys at any reuse.
 
     Keys contain level, port, signed GHz carrier, peak absolute gain,
-    duration in ns and gain-weighted envelope slope. They fix subperiod resolution.
+    duration in ns, gain-weighted slope and a complex-envelope flag.
+    They fix subperiod resolution, including the tighter complex motion limit.
     Comparing
     adjacent harmonic cutoffs (2/3, then 3/4) estimates Fourier truncation.
     Four/eight amplitude nodes control interpolation. Guard preparation is
     call-local and never reads density. Rejections retain the old shaped
     decision order. Apply uses frozen-envelope secular Strang steps, never
-    retries, clips or normalizes density. Complex envelopes and DC are rejected.
+    retries, clips or normalizes density. Complex amplitudes use their magnitude
+    polynomial and add their angle to carrier phase. DC is rejected.
     """
 
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("shaped_sambe", "spectral-reuse-v2"),
-        eligibility=Eligibility(1, 1, "shaped"),
-        guard=GuardDeclaration(("model-build",), builds_model=True),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("shaped_sambe/spectral-reuse-v2/serial"),
-        fallback="legacy-order",
-    )
-
+    revision = "carrier-physical-v3"
     name = "shaped_sambe"
     guard_builds = True
 
@@ -194,17 +271,19 @@ class ShapedSambeKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
+        context: KernelContext,
     ) -> NDArray[np.void]:
-        """Key peak gain, weighted slope and duration to fix subperiod resolution."""
-        base = PeriodTableKernel().prepare_keys(table, rows)
+        """Key peak, slope, duration and complex motion class to fix resolution."""
+        base = band_keys(table, rows, context.work_plan)
         keys = np.empty(
             len(rows),
             dtype=base.dtype.descr
-            + [("duration", "f8"), ("bound", "f8"), ("slope", "f8")],
+            + [("duration", "f8"), ("bound", "f8"), ("slope", "f8"), ("complex", "?")],
         )
         for name in base.dtype.names or ():
             keys[name] = base[name]
-        peaks, slopes = envelope_bounds(table)
+        bounds = envelope_bounds(table, context.work_plan)
+        peaks, slopes = bounds.peaks, bounds.slopes
         keys["slope"] = (
             np.abs(table.tone_amplitude[rows, 0]) * slopes[table.tone_envelope[rows, 0]]
         )
@@ -212,86 +291,63 @@ class ShapedSambeKernel:
             np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
         )
         keys["duration"] = table.duration_ns[rows]
+        keys["complex"] = ~bounds.real[table.tone_envelope[rows, 0]]
         return keys
-
-    def _subdivisions(
-        self,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        source: ModelSource,
-    ) -> NDArray[np.int64]:
-        strength, gamma = drive_bounds(table, rows, source)
-        peaks, slopes = envelope_bounds(table)
-        envelope = table.tone_envelope[rows, 0]
-        gain = np.abs(table.tone_amplitude[rows, 0])
-        frequency = np.maximum(np.abs(table.tone_frequency_ghz[rows, 0]), 1e-20)
-        motion = 2 * np.pi * gain * strength * slopes[envelope] / frequency**2
-        split = (
-            table.duration_ns[rows]
-            * gamma
-            * (gain * peaks[envelope] * strength / frequency) ** 2
-        )
-        return np.maximum(
-            1, np.ceil(np.sqrt(np.maximum(motion / 0.01, split / 0.01)))
-        ).astype(np.int64)
 
     def _eligible(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Check density-free bandwidth, motion and split bounds before building."""
-        del budget
-        strength, _ = drive_bounds(table, rows, source)
-        keys = self.prepare_keys(table, rows)
+        source = context.source
+        subdivisions = ramp_subdivisions(table, rows, source, context.work_plan)
+        bounded = subdivisions <= 32
+        # Strong, unresolved ramps need no keys or remaining eligibility work.
+        if not np.any(bounded):
+            return bounded
+        strength, _ = drive_bounds(table, rows, source, context.work_plan)
+        keys = self.prepare_keys(table, rows, context)
         frequency = np.abs(keys["frequency"])
-        real = np.array([np.all(e.samples.imag == 0) for e in table.envelopes])
-        peaks, slopes = envelope_bounds(table)
+        bounds = envelope_bounds(table, context.work_plan)
+        peaks, slopes = bounds.peaks, bounds.slopes
         envelope = table.tone_envelope[rows, 0]
-        resolved = slopes[envelope] <= 2 * np.maximum(
-            peaks[envelope], 1e-30
-        ) * frequency * self._subdivisions(table, rows, source)
+        resolved = (
+            slopes[envelope]
+            <= 2 * np.maximum(peaks[envelope], 1e-30) * frequency * subdivisions
+        )
         return (
             (frequency >= 0.03)
             & (keys["bound"] > 0)
             & resolved
-            & real[table.tone_envelope[rows, 0]]
-            & (
-                keys["bound"] * strength
-                <= 0.5 * frequency * self._subdivisions(table, rows, source)
-            )
-            & (self._subdivisions(table, rows, source) <= 32)
+            & (keys["bound"] * strength <= 0.5 * frequency * subdivisions)
+            & bounded
         )
 
     def guard(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Return the same model-only convergence mask as guard_prepared."""
-        return self.guard_prepared(table, rows, source, budget).accepted
+        return self.guard_prepared(table, rows, context).accepted
 
     def _build(
         self,
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> tuple[_Data, NDArray[np.float64]]:
+        source, budget = context.source, context.budget
         entries, models, ports, errors = [], [], [], []
-        subdivisions = self._subdivisions(table, rows, source)
-        fallback = DOP853Kernel()
-        # A timeline's rise/fall ramps arrive together. Only this call owns the
-        # workspace; accepted payloads retain their immutable coefficients.
-        families: dict[
-            tuple[str, tuple[int, ...], int, float, float, int, float, str],
-            _SpectralFamily,
-        ] = {}
+        planned = ramp_families_for_rows(table, rows, context)
+        # Spectral products remain call-local; only the family inventory moved
+        # to the planner. Accepted payloads retain immutable coefficient arrays.
+        families: dict[RampFamilyPlan, _SpectralFamily] = {}
+        compact: dict[int, CompactPolynomial] = {}
         for index, key in enumerate(keys):
             model = source.model(tuple(int(v) for v in key["level"]))
             port, f, bound = (
@@ -299,7 +355,8 @@ class ShapedSambeKernel:
                 float(key["frequency"]),
                 float(key["bound"]),
             )
-            m = int(subdivisions[index])
+            family_plan = planned[index]
+            m = family_plan.subdivisions
             step = 1 / (abs(f) * m)
             # Start with a cubic amplitude polynomial; refine its estimated
             # omitted tail before accepting a key.
@@ -309,20 +366,12 @@ class ShapedSambeKernel:
             # Compare the limiting amplitude, not 128 carrier-phase ODEs.
             # The bandwidth guard and the retained polynomial's last degree
             # accompany this calibrated (not rigorous) convergence estimate.
-            family_key = (
-                model.identity,
-                model.level,
-                port,
-                f,
-                bound,
-                m,
-                budget,
-                self.declaration.identity.revision,
-            )
-            family = families.get(family_key)
+            family = families.get(family_plan)
             if family is None:
-                family = _SpectralFamily(model, port, f, bound, step)
-                families[family_key] = family
+                family = _SpectralFamily(
+                    model, port, f, bound, step, context.work_plan.carrier_workspace()
+                )
+                families[family_plan] = family
             error = family.error(modes)
             if error * cycles > budget / 4:
                 modes = 3
@@ -331,33 +380,19 @@ class ShapedSambeKernel:
             if ratio > 0.25 or interpolation * cycles > budget / 8:
                 nodes = 8
                 coefficients, interpolation, _ = family.polynomial((nodes, modes))
+            if id(coefficients) not in compact:
+                compact[id(coefficients)] = CompactPolynomial.from_dense(coefficients)
             errors.append((error + interpolation) * cycles)
-            outgoing = model.rates_per_ns.sum(axis=0)
             populations = np.asarray(
-                expm(step / 2 * (model.rates_per_ns - np.diag(outgoing))), dtype=float
+                expm(step / 2 * population_generator(model.rates_per_ns)), dtype=float
             )
-            coherences = np.exp(
-                -step
-                / 2
-                * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
-            )
+            coherences = np.exp(-step / 2 * coherence_decay(model))
             for array in (coefficients, populations, coherences):
                 array.setflags(write=False)
-            representative = rows[index : index + 1]
-            direct = fallback.prepare(
-                fallback.prepare_keys(table, representative),
-                table,
-                representative,
-                source,
-                min(budget, 1e-8),
-            )
+            direct = prepare_models([model])
             # Integer-period blocks avoid thousands of tiny matrix products on
             # long high-carrier ramps. Subperiod playback retains every phase.
-            drive = model.drives[port]
-            strength = max(
-                np.linalg.norm(drive.in_phase_ghz, 2),
-                np.linalg.norm(drive.quadrature_ghz, 2),
-            )
+            strength = drive_bound(model, port, context.work_plan).strength
             frozen_ns = min(
                 20.0,
                 np.sqrt(0.05 / max(2 * np.pi * strength * float(key["slope"]), 1e-30)),
@@ -369,40 +404,73 @@ class ShapedSambeKernel:
                     min(budget, 1e-8),
                     f,
                     bound,
-                    coefficients,
+                    compact[id(coefficients)],
                     populations,
                     coherences,
                     m,
                     block,
                     True,
                     modes,
+                    nodes,
                 )
             )
             models.append(model)
             ports.append(port)
+        owned_keys = keys.copy()
+        convergence = np.asarray(errors)
+        owned_keys.setflags(write=False)
+        convergence.setflags(write=False)
         return _Data(
-            PeriodPrepared(tuple(entries)), tuple(models), tuple(ports)
-        ), np.asarray(errors)
+            PeriodPrepared(tuple(entries)),
+            tuple(models),
+            tuple(ports),
+            owned_keys,
+            convergence,
+        ), convergence
+
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> GuardResult | None:
+        """Reuse key-covered convergence data and recheck current row eligibility.
+
+        Keys include duration, bound, slope and complex motion class; stored errors
+        cover the complete spectral domain. Missing keys return None; eligibility
+        rejection returns a decision without rebuilding periods.
+        """
+        if not isinstance(prepared, _Data):
+            raise TypeError("shaped_sambe requires its own prepared payload")
+        keys = self.prepare_keys(table, rows, context)
+        indices = prepared_key_indices(prepared.keys, keys)
+        if indices is None:
+            return None
+        inverse = np.array([indices[key.tobytes()] for key in keys], dtype=np.int64)
+        accepted = self._eligible(table, rows, context)
+        accepted &= prepared.errors[inverse] <= context.budget / 2
+        return GuardResult(accepted, (GuardPreparation(prepared.keys, prepared),))
 
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> GuardResult:
         """Build eligible keys once, hand accepted model-only periods to Engine."""
-        accepted = self._eligible(table, rows, source, budget)
+        budget = context.budget
+        accepted = self._eligible(table, rows, context)
         selected = rows[accepted]
         preparations = []
         if len(selected):
             keys, representatives, inverse = np.unique(
-                self.prepare_keys(table, selected),
+                self.prepare_keys(table, selected, context),
                 return_index=True,
                 return_inverse=True,
             )
             prepared, errors = self._build(
-                keys, table, selected[representatives], source, budget
+                keys, table, selected[representatives], context
             )
             passed = errors[inverse] <= budget / 2
             accepted[np.flatnonzero(accepted)] = passed
@@ -414,11 +482,10 @@ class ShapedSambeKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable spectral periods from aligned representative rows."""
-        return self._build(keys, table, rows, source, budget)[0]
+        return self._build(keys, table, rows, context)[0]
 
     def cost(
         self,
@@ -435,9 +502,10 @@ class ShapedSambeKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; every prepared array is model-only."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(
@@ -447,13 +515,15 @@ class ShapedSambeKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
-        """Advance real envelopes; fractional steps use frozen spectral tails.
+        """Advance smooth envelopes; fractional steps use frozen spectral tails.
 
         Incompatible payloads raise ValueError; nonfinite output raises
         RuntimeError. Return an all-False accuracy-exceedance mask.
         """
+        context.require_no_plan()
+        budget = context.budget
         del budget
         if not isinstance(prepared, _Data):
             raise ValueError("shaped_sambe requires its own prepared payload")
@@ -479,7 +549,7 @@ class ShapedSambeKernel:
                 ),
                 UnitaryTable(
                     entry.bound,
-                    entry.coefficients,
+                    entry.expanded_coefficients()[:, : entry.degrees],
                     entry.subdivisions,
                     entry.block_cycles,
                     entry.project_unitary,
@@ -506,30 +576,28 @@ class ShapedSambeKernel:
                 tail = table.duration_ns[row] - start
                 if tail <= 1e-10:
                     continue
-                amp = float(
-                    envelopes(table, np.array([row]), np.array([[start + tail / 2]]))[
-                        0, 0
-                    ].real
-                )
-                blocks = _spectral(model, port, entry.frequency, amp, 3, tail)
+                amplitude = envelopes(
+                    table, np.array([row]), np.array([[start + tail / 2]])
+                )[0, 0]
                 theta = (
                     table.tone_theta_rad[row, 0] + 2 * np.pi * entry.frequency * start
+                )
+                if amplitude.imag == 0:
+                    # Keep the signed-real spectral path numerically unchanged.
+                    amp = float(amplitude.real)
+                else:
+                    amp = float(abs(amplitude))
+                    theta += float(np.angle(amplitude))
+                blocks = _tail_blocks(
+                    model, port, entry.frequency, amp, tail, context.work_plan
                 )
                 harmonics = np.fft.fftfreq(16) * 16
                 u = np.einsum("k,kij->ij", np.exp(1j * harmonics * theta), blocks)
                 # Polar projection changes U, not density or populations.
                 left, _, right = np.linalg.svd(u)
                 u = left @ right
-                ratio = tail / step
-                population = np.asarray(
-                    expm(
-                        tail
-                        / 2
-                        * (model.rates_per_ns - np.diag(model.rates_per_ns.sum(axis=0)))
-                    ),
-                    dtype=complex,
-                )
-                coherence = entry.coherences**ratio
+                maps = _tail_maps(model, entry, tail, context.work_plan)
+                population, coherence = maps.populations, maps.coherences
                 rho = chunk[j]
                 for half in range(2):
                     diagonal = population @ np.diag(rho)

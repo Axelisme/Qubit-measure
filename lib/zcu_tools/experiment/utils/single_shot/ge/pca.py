@@ -25,5 +25,8 @@ def fit_ge_by_pca(
     *,
     plots: Plots,
     options: GEFitOptions | None = None,
+    figure_name: str = "fit",
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
-    return fitting_ge_and_plot(signals, get_rotate_angle, plots=plots, options=options)
+    return fitting_ge_and_plot(
+        signals, get_rotate_angle, plots=plots, options=options, figure_name=figure_name
+    )

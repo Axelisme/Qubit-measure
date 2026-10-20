@@ -37,6 +37,7 @@ from pydantic import BaseModel, TypeAdapter
 from ruamel.yaml import YAML
 
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
+from zcu_tools.utils import atomic_replace
 
 type FieldPath = tuple[str, ...]
 
@@ -584,7 +585,7 @@ class DocumentStore[T: BaseModel]:
             ) as stream:
                 temporary = Path(stream.name)
                 stream.write(content.getvalue().encode("utf-8"))
-            temporary.replace(self._path)
+            atomic_replace(temporary, self._path)
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)

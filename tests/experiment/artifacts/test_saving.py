@@ -12,6 +12,7 @@ from matplotlib.figure import Figure
 from zcu_tools.datafile import (
     AnalysisDocument,
     RunMetadata,
+    load_grouped_labber_data,
     load_run_data,
 )
 from zcu_tools.experiment import (
@@ -34,6 +35,11 @@ from zcu_tools.resources.entry import (
 )
 
 from tests._native_support import native_metadata
+from tests.experiment._grouped_layout_support import (
+    assert_mixed_disk_values,
+    mixed_record,
+    mixed_spec,
+)
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
 
 
@@ -57,6 +63,7 @@ def storage(tmp_path: Path) -> tuple[RunMetadata, SaveLayout, RecordsLedger]:
         result_path=entry.result_path,
         database_path=entry.database_path,
         run_id=metadata.run_id,
+        experiment="synthetic",
         point="sweet",
         saved_at=datetime.now(UTC),
     )
@@ -131,6 +138,79 @@ def test_all_outputs_share_content_context_and_one_saved_event(
     assert isinstance(events[0].payload, SavedPayload)
     assert len(events[0].payload.outputs) == len(report.outputs)
     assert ledger.get(events[0].id).record is not None
+
+
+@pytest.mark.parametrize(
+    "independent", [True, False], ids=["independent", "default-common"]
+)
+def test_grouped_artifacts_obey_declared_layout_and_preserve_native_ledger_semantics(
+    tmp_path: Path, independent: bool
+) -> None:
+    spec = mixed_spec(independent=independent)
+    source = mixed_record()
+    metadata, layout, ledger = storage(tmp_path)
+    metadata = replace(
+        metadata, experiment=spec.tag, labber_path="previous-success.hdf5"
+    )
+    selected = (
+        SaveArtifact(
+            ArtifactRef("run", "measurement_data"),
+            (
+                DataItem.from_run(
+                    ArtifactKey("run", "measurement_data", "data"),
+                    source,
+                    spec=spec,
+                    comment="mixed rank export",
+                ),
+            ),
+        ),
+    )
+    labber_paths: list[Path] = []
+    native_paths: list[Path] = []
+    for _ in range(2):
+        report = save_artifacts(
+            selected, layout=layout, metadata=metadata, ledger=ledger, origin="notebook"
+        )
+        (native,) = (item for item in report.outputs if item.output.format == "data_h5")
+        (labber,) = (item for item in report.outputs if item.output.format == "labber")
+        assert native.status == "saved" and native.error is None
+        assert labber.status == ("saved" if independent else "failed")
+        if independent:
+            assert labber.error is None
+            loaded = load_grouped_labber_data(
+                str(labber.output.path), required_variables=spec.required_variables
+            )
+            assert_mixed_disk_values(loaded.variables)
+        else:
+            assert labber.error and "common grid" in labber.error
+            assert not labber.output.path.exists()
+        stored = load_run_data(native.output.path)
+        assert stored.payload.representation == "grouped"
+        assert_mixed_disk_values(stored.payload.variables)
+        assert stored.metadata == replace(
+            metadata,
+            labber_path=str(labber.output.path)
+            if independent
+            else metadata.labber_path,
+        )
+        assert stored.cfg.values == {"name": "mixed grids"}
+        event = ledger.events()[-1]
+        assert isinstance(event.payload, SavedPayload)
+        assert event.payload.labber_path == (
+            str(labber.output.path) if independent else None
+        )
+        assert [
+            (item.format, item.status, item.path) for item in event.payload.outputs
+        ] == [
+            (item.output.format, item.status, str(item.output.path))
+            for item in report.outputs
+        ]
+        labber_paths.append(labber.output.path)
+        native_paths.append(native.output.path)
+    assert native_paths[0] == native_paths[1]
+    if independent:
+        assert labber_paths[0] != labber_paths[1]
+    assert len(ledger.events()) == 2
 
 
 def test_one_failed_destination_does_not_block_other_outputs(tmp_path: Path) -> None:

@@ -9,7 +9,9 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     kernel,
 )
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 
 @pytest.mark.parametrize("duration", [512.0, 2000.0])
@@ -45,13 +47,21 @@ def test_long_periodic_frame_preserves_analytic_coherence(duration: float) -> No
     )
     floquet = FloquetKernel()
     rows = np.array([0])
-    assert floquet.guard(table, rows, source, 1e-3).all()
+    guarded = floquet.guard_prepared(
+        table, rows, KernelContext(source, 0.001, WorkPlan())
+    )
+    assert guarded.accepted.all()
     prepared = floquet.prepare(
-        floquet.prepare_keys(table, rows), table, rows, source, 1e-3
+        floquet.prepare_keys(table, rows, KernelContext(source, 0.001, WorkPlan())),
+        table,
+        rows,
+        KernelContext(source, 0.001, WorkPlan()),
     )
     actual = initial[None].copy()
     try:
-        floquet.apply(prepared, rows, table, rows, actual, 1e-3)
+        floquet.apply(
+            prepared, rows, table, rows, actual, ApplyContext(1e-3, guarded.plan)
+        )
     except RuntimeError as error:
         raise AssertionError(
             "Accepted long frame must integrate above roundoff"

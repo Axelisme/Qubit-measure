@@ -72,7 +72,8 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 from .catalog import WorkflowCatalog
 from .composition import WorkflowComposition
 from .figures import WorkflowFigureViews
-from .forms import WorkflowForms
+from .forms import WorkflowDraft, WorkflowForms
+from .input_restore_message import WorkflowInputRestoreMessage
 from .run_view import WorkflowRunView
 
 if TYPE_CHECKING:
@@ -121,7 +122,7 @@ class WorkflowWindow[C](QWidget):
         caller owns its bounded namespaces and fresh-registration builder.
         loader=None is unmonitored and disables Reload.
         Reload keeps session/Controller and the retained run binding. Prepare
-        captures context/global qubit alias; source errors propagate without I/O.
+        captures context and its alias table; source errors propagate without I/O.
         Caller retains this Window/parent through shutdown. Close requests Stop,
         waits for delivery, then calls on_close on owner; None skips caller cleanup.
         Callback errors reject close, display diagnostics and retain retry resources.
@@ -159,6 +160,9 @@ class WorkflowWindow[C](QWidget):
             self.plan_panel,
             self.tunables_panel,
         )
+        self._input_restore_message = WorkflowInputRestoreMessage(
+            self._controls.message
+        )
         self._dialogs = DialogRefStore()
         self._controls.selector.addItems(list(current.names))
         self._controls.selector.currentTextChanged.connect(self._selection_changed)
@@ -188,8 +192,8 @@ class WorkflowWindow[C](QWidget):
         """Show the same retained shared Setup non-modally on the GUI owner.
 
         Reopening refreshes the dialog's cached inputs, not form captures. No
-        entry is opened or hardware connected by showing. Closing Setup updates
-        the global qubit alias availability without replacing form drafts.
+        entry is opened or hardware connected by showing. Closing Setup refreshes
+        the session chips without replacing form drafts.
         """
         self.setup_dialog.show()
         self.setup_dialog.raise_()
@@ -236,6 +240,7 @@ class WorkflowWindow[C](QWidget):
             self._services.context_control,
             self._services.setup_control.get_bus(),
             templates=self._templates,
+            placeholder_defaults=self._services.placeholders.current,
             arb_waveforms=self._services.arb_waveform,
             open_arb_waveforms=self._open_arb_waveforms,
             dialog_presenter=self._dialog_presenter,
@@ -288,13 +293,14 @@ class WorkflowWindow[C](QWidget):
     def prepare_forms(self) -> None:
         """Replace both Start drafts and bases with current captured defaults.
 
-        Call on the GUI owner with a readable global qubit alias.
+        Call on the GUI owner with a readable parameter context.
         Capture parameters/library and cached device values once, then replace
         this Window's form attachments. Previous edits and local parse text are
         discarded on success; subsequent source changes do not update the forms.
         No live device reads, submission, storage write or input reload occurs.
-        EMPTY raises FailedPreconditionError; missing/unbound qubit raises the
-        base RoleResolutionError naming that alias. No component kind is checked.
+        EMPTY raises FailedPreconditionError. Forms resolve their own alias
+        dependencies; missing/unbound aliases raise RoleResolutionError naming
+        the alias when consumed by form preparation. No component kind is checked.
         Source/editor failures propagate without replacing the existing panels.
         Pending, running or paused operations raise InvalidRunState before capture.
         Success also refreshes the session chips from current services.
@@ -303,7 +309,6 @@ class WorkflowWindow[C](QWidget):
         env = self._capture_env(self._services.device.capture_native_device_info())
         if env.parameters is None:
             raise FailedPreconditionError("No parameter context is installed")
-        env.parameters.resolve_path("$qubit.kind")
         old = self.plan_panel, self.tunables_panel
         self._forms.prepare(env, self)
         self._publish_panels(*old)
@@ -351,9 +356,10 @@ class WorkflowWindow[C](QWidget):
         if name == self.workflow_name:
             return
         old = self.plan_panel, self.tunables_panel
-        self._forms.select(name, self.capture_persisted_state(), self)
+        report = self._forms.select(name, self._capture_draft(), self)
         self._publish_panels(*old)
         self._sync_selector()
+        self.show_input_restore_message(report)
 
     def _sync_selector(self) -> None:
         with QSignalBlocker(self._controls.selector):
@@ -406,7 +412,7 @@ class WorkflowWindow[C](QWidget):
             raise CatalogReloadError("Source reload is not configured")
         if self._catalog_error is not None and self._catalog_error.restart_required:
             raise self._catalog_error
-        snapshot = self.capture_persisted_state()
+        snapshot = self._capture_draft()
         old_name = self.workflow_name
         old = self.plan_panel, self.tunables_panel
         try:
@@ -453,30 +459,34 @@ class WorkflowWindow[C](QWidget):
         Start knobs panel. Renderer-local incomplete text, native values and
         journal/hardware state are excluded.
         """
+        draft = self._capture_draft()
+        return WorkflowInputSnapshot.capture(draft.plan, draft.knobs)
+
+    def _capture_draft(self) -> WorkflowDraft:
         binding = self.controller.binding
         # start_locked, not knobs_from_run: save the knobs the user edits and
         # would Start next. After terminal delivery those are the Start knobs,
         # already reset to the run's accepted input, while remote reads of the
         # run_id still use the run's binding.
         knobs = (
-            binding.state.input.data
+            binding.state.input
             if binding is not None and self._run_view.start_locked
-            else self.tunables_panel.state.input.data
+            else self.tunables_panel.state.input
         )
-        return WorkflowInputSnapshot(plan=self.plan_panel.state.input.data, knobs=knobs)
+        return WorkflowDraft(self.plan_panel.state.input, knobs)
 
     def restore_persisted_state(
         self, state: WorkflowInputSnapshot
     ) -> WorkflowInputRestoreReport:
-        """Overlay saved state on fresh defaults, resetting both panel bases.
+        """Restore complete saved drafts, resetting both panel bases atomically.
 
         Call on the owner thread after construction, before starting a run.
         Pending/running/paused ownership raises InvalidRunState before edits.
-        FormState owns compatibility and returns discarded model-field paths,
-        including saved leaves whose captured source check fails; expressions
-        remain input even when their result is invalid. Defaults and other source
-        failures propagate without publishing either candidate. Successful
-        restoration refreshes both editors and clears renderer-local text.
+        Core restores both drafts recursively against current defaults without
+        reading sources or executing converters. Format/provider failures leave
+        both panels untouched. Missing refs and ordinary invalid values remain
+        draft input for general validation. Return dropped paths for display.
+        Success refreshes both editors and clears renderer-local text.
         """
         self._ensure_can_start()
         return self._forms.restore(state)
@@ -490,25 +500,20 @@ class WorkflowWindow[C](QWidget):
 
         report is the completed restore outcome. load_error is the caretaker's
         read/decode failure, if any, which already selected fresh defaults.
-        No dialog, retry, state mutation or I/O occurs. Empty successful outcomes
-        clear this label. Call only on the GUI owner thread.
+        No dialog, retry, form mutation or I/O occurs. Empty successful outcomes
+        clear only a previous restore message, never unrelated run diagnostics.
+        Call only on the GUI owner thread.
         """
-        messages = [str(load_error)] if load_error is not None else []
-        for form, paths in (
-            ("plan", report.plan_dropped),
-            ("knobs", report.knobs_dropped),
-        ):
-            messages.extend(
-                f"Discarded {form}: {'.'.join(str(part) for part in path)}"
-                for path in paths
-            )
-        self._controls.message.setText("; ".join(messages))
+        self._input_restore_message.show(report, load_error)
 
     def _capture_env(self, devices: Mapping[str, DeviceInfo]) -> FormEnv:
         context = self._services.context
         parameters = context.read_context()
         return FormEnv(
-            parameters=parameters, library=parameters.library, devices=devices
+            parameters=parameters,
+            library=parameters.library,
+            devices=devices,
+            placeholders=self._services.placeholders.current(),
         )
 
     def _ensure_can_start(self) -> None:

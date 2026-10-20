@@ -77,7 +77,7 @@ def forbidden_recipe(_session: RecipeSession) -> RecipeGenerator:
 
 T1_DEFINITION = replace(
     definition(forbidden_recipe),
-    summary_estimates=(SummaryEstimate("t1", "t1", "t1_err", "us"),),
+    summary_estimates=(SummaryEstimate("t1", ("t1",), ("t1_err",), "us"),),
 )
 
 
@@ -108,9 +108,6 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
         ],
         "destination_context": {
             "active_label": "original",
-            "chip_name": "chip",
-            "qub_name": "q1",
-            "res_name": "r1",
             "project_loaded": True,
         },
     }
@@ -159,7 +156,6 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
     )
     assert initial.data["writeback"]["destination"] == {
         "context": {"active_label": "original"},
-        "project": {"chip_name": "chip", "qub_name": "q1", "res_name": "r1"},
     }
     full = client.call("status", {"execution": execution, "detail": "full"})
     assert full["writeback"] == proposal
@@ -186,9 +182,9 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
 @pytest.mark.parametrize(
     "declaration",
     [
-        SummaryEstimate("other", "t1", "t1_err", "us"),
-        SummaryEstimate("t1", "t1", "other_err", "us"),
-        SummaryEstimate("t1", "t1", "t1_err", "ns"),
+        SummaryEstimate("other", ("t1",), ("t1_err",), "us"),
+        SummaryEstimate("t1", ("t1",), ("other_err",), "us"),
+        SummaryEstimate("t1", ("t1",), ("t1_err",), "ns"),
     ],
 )
 def test_analysis_only_rejects_conflicting_estimate_declarations(
@@ -222,7 +218,7 @@ def test_analysis_only_rejects_conflicting_estimate_declarations(
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond, recipes=(T1_DEFINITION, conflict))
-    with pytest.raises(ValueError, match="Ambiguous analysis estimate 't1'"):
+    with pytest.raises(ValueError, match="Ambiguous analysis estimate"):
         client.call("tab_analyze", {"tab": "t"})
 
 

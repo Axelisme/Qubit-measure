@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.plotting.plots import Plots
 
-from .base import GE_FitResult, GEFitOptions, fidelity_func
+from .base import GE_FitResult, GEFitOptions, GENumericalError, fidelity_func
 from .center import fit_ge_by_center
 from .manual import fit_ge_manual
 from .pca import fit_ge_by_pca
@@ -93,6 +93,7 @@ def singleshot_ge_analysis(
     *,
     plots: Plots,
     options: GEFitOptions | None = None,
+    figure_name: str = "fit",
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     """
     Analyze ground and excited state signals to determine classification parameters.
@@ -110,7 +111,10 @@ def singleshot_ge_analysis(
     backend : Literal["center", "pca"], default="pca"
         Method used for determining the rotation angle when angle is absent.
     plots : Plots
-        Operation that owns the named fit figure.
+        Caller-owned operation; caller finishes/releases it after analysis.
+    figure_name : str, default="fit"
+        Unique diagnostic figure name within plots. Empty or conflicting names
+        raise from Plots. Naming does not change fitting or quality results.
     options : GEFitOptions, optional
         Paired-histogram fit and display controls; omitted uses the owner defaults.
 
@@ -118,14 +122,29 @@ def singleshot_ge_analysis(
     -------
     tuple[float, NDArray, GE_FitResult]
         Assignment fidelity, refined preparation populations and calibration.
+
+    Raises
+    ------
+    GENumericalError
+        Rotation/classification, histogram fitting, population/center validation
+        or fidelity calculation failed with ValueError, RuntimeError,
+        ArithmeticError or numpy.linalg.LinAlgError; __cause__ retains it.
+        Plotting and unknown backend errors propagate unchanged. signals must
+        contain paired rows (2,N); kwargs follow the selected fitting backend.
     """
     if angle is not None:
-        return fit_ge_manual(signals, angle, plots=plots, options=options)
+        return fit_ge_manual(
+            signals, angle, plots=plots, figure_name=figure_name, options=options
+        )
 
     if backend == "center":
-        return fit_ge_by_center(signals, plots=plots, options=options)
+        return fit_ge_by_center(
+            signals, plots=plots, figure_name=figure_name, options=options
+        )
     if backend == "pca":
-        return fit_ge_by_pca(signals, plots=plots, options=options)
+        return fit_ge_by_pca(
+            signals, plots=plots, figure_name=figure_name, options=options
+        )
 
     raise ValueError(f"Unknown backend: {backend}")
 
@@ -134,6 +153,7 @@ __all__ = [
     # base
     "GE_FitResult",
     "GEFitOptions",
+    "GENumericalError",
     "fidelity_func",
     # center
     "fit_ge_by_center",

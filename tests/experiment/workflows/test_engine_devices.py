@@ -1,6 +1,7 @@
 """Each env.run captures fixed native device evidence under the RUN lease."""
 
 from pathlib import Path
+from typing import Self
 
 import pytest
 from zcu_tools.datafile import JsonObject
@@ -26,6 +27,10 @@ class SnapshotDriver(FakeDevice):
     """Connected in-memory driver with observable reads and I/O failure."""
 
     info_model = FakeDeviceInfo
+
+    def __new__(cls) -> Self:
+        """Keep this test driver's no-argument constructor anonymous."""
+        return super().__new__(cls)
 
     def __init__(self) -> None:
         super().__init__(fast_mode=True)

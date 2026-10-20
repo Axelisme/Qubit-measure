@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.predictor import PredictorService
     from zcu_tools.gui.session.services.project_settings import (
         ConnectionPreferences,
-        ProjectRequest,
         ProjectSettingsService,
     )
     from zcu_tools.gui.session.state import DeviceStatus
@@ -43,10 +42,6 @@ if TYPE_CHECKING:
         APP_STATE_VERSION,
         DEFAULT_LEFT_PANEL_WIDTH,
         AppPersistedState,
-        PersistedDeviceEntry,
-        PersistedSession,
-        PersistedStartup,
-        PersistedTab,
         PersistenceError,
     )
     from .ports import (
@@ -90,15 +85,10 @@ __all__ = [
     "create_persistence_caretaker",
     "RestoreOutcome",
     "AppPersistedState",
-    "PersistedSession",
-    "PersistedTab",
-    "PersistedDeviceEntry",
-    "PersistedStartup",
     "PersistenceError",
     "APP_STATE_VERSION",
     "DEFAULT_LEFT_PANEL_WIDTH",
     "ConnectionPreferences",
-    "ProjectRequest",
     "ProjectSettingsService",
     "TabService",
     "TabSnapshot",
@@ -139,15 +129,10 @@ _EXPORT_MODULES: dict[str, str] = {
     "create_persistence_caretaker": ".caretaker",
     "RestoreOutcome": ".caretaker",
     "AppPersistedState": ".persistence_types",
-    "PersistedSession": ".persistence_types",
-    "PersistedTab": ".persistence_types",
-    "PersistedDeviceEntry": ".persistence_types",
-    "PersistedStartup": ".persistence_types",
     "PersistenceError": ".persistence_types",
     "APP_STATE_VERSION": ".persistence_types",
     "DEFAULT_LEFT_PANEL_WIDTH": ".persistence_types",
     "ConnectionPreferences": "zcu_tools.gui.session.services.project_settings",
-    "ProjectRequest": "zcu_tools.gui.session.services.project_settings",
     "ProjectSettingsService": "zcu_tools.gui.session.services.project_settings",
     "TabService": ".tab",
     "TabSnapshot": ".tab",

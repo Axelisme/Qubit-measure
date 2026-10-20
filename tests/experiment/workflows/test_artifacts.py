@@ -22,13 +22,11 @@ from zcu_tools.experiment.workflows import (
     Next,
     Run,
     Step,
-    TunableChange,
     WorkflowEnv,
 )
 from zcu_tools.experiment.workflows.artifacts import RunArtifacts
 from zcu_tools.experiment.workflows.encoding import encode_record
 from zcu_tools.experiment.workflows.journal import (
-    ChangedValue,
     ExperimentFailed,
     IterationStarted,
     Paused,
@@ -49,6 +47,8 @@ from zcu_tools.experiment.workflows.models import (
     RunIdentity,
     RunPaths,
 )
+
+from tests._filesystem import DIRECTORY_OPEN_ERROR, symlink_or_skip
 
 from ._engine_fakes import (
     START,
@@ -253,7 +253,7 @@ def test_journal_round_trips_all_outcomes_in_append_order(
         StepFinished(1, 0, iteration.iteration_dir, "done", None),
         StepDiscarded(1, 0, iteration.iteration_dir, "pause"),
         StepFailed(1, 0, iteration.iteration_dir, error),
-        TunablesChanged(Actor("agent", "協作者"), 0, 1, (ChangedValue("reps", 2, 3),)),
+        TunablesChanged(Actor("agent", "協作者"), 0, 1, {"reps": 3}),
         PauseRequested(clock.now(), 1),
         Paused(1, 1),
         Resumed(1, 1),
@@ -343,7 +343,7 @@ def test_journal_io_failure_is_not_followed_by_invented_success(
 ) -> None:
     artifacts.journal_path.unlink()
     artifacts.journal_path.mkdir()
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(DIRECTORY_OPEN_ERROR):
         artifacts.append(Paused(None, 0))
     with pytest.raises(RuntimeError, match="unusable after an I/O failure"):
         artifacts.append(RunEnded("failed", "journal broken", None, 0))
@@ -353,9 +353,7 @@ def test_journal_io_failure_is_not_followed_by_invented_success(
 def test_nonfinite_mandatory_payload_fails_without_consuming_sequence(
     artifacts: RunArtifacts,
 ) -> None:
-    change = TunablesChanged(
-        Actor("user", "user"), 0, 1, (ChangedValue("reps", 2, float("inf")),)
-    )
+    change = TunablesChanged(Actor("user", "user"), 0, 1, {"reps": float("inf")})
     with pytest.raises(ValueError, match="Out of range float"):
         artifacts.append(change)
     artifacts.append(Paused(None, 0))
@@ -529,7 +527,7 @@ def test_iteration_record_pause_resume_retains_captured_tunables(
     def change_and_pause(_signal: StopSignal) -> None:
         rig.engine.update_tunables(
             "run",
-            (TunableChange("value", 8),),
+            Tunables.model_construct(value=8),
             expected_revision=0,
             actor=Actor("agent", "test"),
         )
@@ -718,7 +716,7 @@ def test_iteration_record_publication_replaces_instead_of_editing_destination(
     ) -> Step[State, int]:
         yield from env.wait_until(START)
         # A real destination symlink distinguishes replace from in-place writes.
-        (env.iteration_dir / "record.json").symlink_to(external)
+        symlink_or_skip(env.iteration_dir / "record.json", external)
         return Done()
 
     rig.start(step)

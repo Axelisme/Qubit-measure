@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-18，driver 活動狀態與 manager 快照
+**Last updated:** 2026-10-20，儀器角色 helpers 由使用者套件擁有
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -50,7 +50,7 @@ Driver 在 `device_operation` 內記錄自己的兩項活動資訊。`DeviceActi
 
 實驗 cfg 自行宣告 `dev`，只保存角色到 device 名稱的 mapping。`ExpCfgModel` 不宣告這個欄位。Core 在實際使用時從 `RunContext.devices[name]` 取得 driver，不預查名稱，也不對全部裝置自動 setup。
 
-`DeviceInfo` 描述設定與讀回結果，不提供實驗旋鈕 setters。`experiment.utils` 的 `set_flux`、`set_rf_frequency`、`set_rf_power`、`set_output` 直接操作已選取的 driver。Flux 明示 A、V 或 native，helper 不切模式、步長或 output。`experiment.utils.check_flux_unit(cfg, unit)` 只比對 Info 儲存的 `value_unit`，不換算、不讀硬體、不修改 cfg。YOKO 和 Fake 以外的 Info 不支援 flux 設定。
+`DeviceInfo` 描述設定與讀回結果，不提供實驗旋鈕 setters。使用者套件 `zcu_lab.v2._support.device` 的 `set_flux`、`set_rf_frequency`、`set_rf_power`、`set_output` 直接操作已選取的 driver。Flux 明示 A、V 或 native，helper 不切模式、步長或 output。同一使用者模組的 `check_flux_unit(cfg, unit)` 只比對 Info 儲存的 `value_unit`，不換算、不讀硬體、不修改 cfg。YOKO 和 Fake 以外的 Info 不支援 flux 設定。
 
 GUI 在既有操作 lease 後、core 前，Notebook 在建立 caller-owned `RunContext` 後、core 前，各讀所有 connected drivers 一次。固定 snapshot 進入 `RunMetadata.device_snapshot`，Save 不刷新硬體。`DeviceManager.setup_devices` 與 GUI 手動設定仍是獨立的明確操作。
 
@@ -238,7 +238,11 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 `FakeDevice` 用於本地流程測試，不需要真實儀器連線：
 
-- **`__init__(*, fast_mode=False, value_unit="native")` 不接受 `rm` 參數**；value_unit 可為 native、V 或 A，建立後固定，不做數值換算。它呼叫 `BaseDevice.__init__("none", rm=None)`，並由 `_open_session()` override 回傳 `None`。因此 Fake 不開 pyvisa session、不呼叫 `connect_message()`，但仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
+- **`FakeDevice(*, address=None, fast_mode=False, value_unit="native")` 不接受 `rm` 參數**。顯式 address 從 process 共享的 class 容器取得同一實例。首次建立固定單位與 fast_mode，重取保留 value、output、ramp 與模擬綁定。
+- 省略 address 每次建立獨立 anonymous instance，不進容器。它的 Info address 是 `"none"`，與顯式 address `"none"` 的身分不同。
+- Class 容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額拒絕新 address，不淘汰，既有 address 仍可取回。`close()` 不移除身分。真實 driver 不受影響，見 ADR-0076。
+- `isolated_instances()` 在無工作執行時建立空 scope，退出後還原原容器。測試使用它隔離 process 共享狀態。
+- Fake 不開 pyvisa session，但首次建立仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`。`value_unit` 為 native、V 或 A，不做數值換算。
 - `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`、`value_unit: Literal["native", "V", "A"] = "native"`。Value 與 rampstep 使用相同固定單位。Setup 單位不同時在任何寫入前拒絕；換單位須重建裝置。Dump 與 GUI snapshot 保留實際單位。RF 裝置的 Hz／dBm 量各有固定單位，不新增 `value_unit`。
 - 提供 `get_output/set_output/output_on/output_off` 與 `get_value/set_value` 方法（記憶體狀態操作）。
 - `_set_value_smart(value, stop_event=None, *, progress=False)`：以 `_rampstep` 為實際步長，透過同一個 private ramp helper 做 `np.linspace` stepping + make_pbar；Fake 保留跳過起始點的 mock 行為，每步前 check `stop_event.is_set()`，協作中止。

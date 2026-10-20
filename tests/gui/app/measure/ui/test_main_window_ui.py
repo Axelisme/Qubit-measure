@@ -2,18 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtWidgets import (
+    QApplication,
     QLabel,
     QPushButton,
     QTabWidget,
 )
+from zcu_tools.gui.app.measure.adapter import ParameterWriteback, WritebackRequest
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import (
@@ -21,7 +33,10 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._form_fakes import configure_form_lookup
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleAnalysis, SampleRun
 from tests.gui.app.measure.ui._main_window_fakes import (
     apply_window_defaults,
     editor_wiring_ctrl,
@@ -163,6 +178,115 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
         window.remove_tab_widget("tab-1")
 
 
+@pytest.fixture
+def blocked_writeback_window(
+    tmp_path: Path, qapp: QApplication
+) -> Iterator[tuple[MainWindow, str]]:
+    class BlockedWritebackAdapter(SampleAdapter):
+        def get_writeback_items(
+            self, req: WritebackRequest[SampleRun, SampleAnalysis]
+        ) -> list[ParameterWriteback]:
+            return [
+                ParameterWriteback(
+                    "general.ext.blocked.sigma", "Nested calibration", 1.0
+                )
+            ]
+
+    registry = Registry()
+    registry.register("blocked-writeback", BlockedWritebackAdapter)
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        registry,
+        None,
+        EventBus(),
+        project_root=str(tmp_path),
+    )
+    ctrl.setup_control.new_entry(EntryRequest("synthetic"))
+    target = ctrl.setup_control.new_point(
+        PointCreateRequest("working", "", CommandOrigin("gui"))
+    )
+    ctrl.context_control.set_parameter(target, "general.ext.blocked", 3)
+    tab_id = ctrl.new_tab("blocked-writeback")
+    window = MainWindow(ctrl, templates=lambda: {})
+    ctrl.add_view(window)
+    window.add_tab_widget(tab_id, "blocked-writeback")
+    window.refresh_context_panel()
+    window.show()
+    try:
+        yield window, tab_id
+    finally:
+        ctrl.close()
+        ctrl.close_tab(tab_id)
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+
+
+def test_apply_failure_preserves_edited_draft_and_selection_without_closing_window(
+    blocked_writeback_window: tuple[MainWindow, str], tmp_path: Path
+) -> None:
+    window, tab_id = blocked_writeback_window
+    driver = ComponentDriver(window)
+    images = tmp_path / "apply-failure"
+    driver.screenshot(images / "01-ready.png")
+    driver.click("Run")
+    driver.select_tab("Analysis")
+    qt_until(
+        lambda: driver.observe("Analyze").enabled,
+        label="run result ready for analysis",
+    )
+    driver.click("Analyze")
+    qt_until(
+        lambda: driver.observe(object_name="writebackApply").enabled,
+        label="analysis writeback ready",
+    )
+    driver.screenshot(images / "02-proposal.png")
+    driver.click("Edit")
+    driver.enter_text(object_name="writebackValue", value="7.25", commit=False)
+    driver.screenshot(images / "03-edited.png")
+    driver.click("Save")
+    proposed = driver.observe(object_name="writebackProposed")
+    selected = driver.observe("general.ext.blocked.sigma*")
+    assert proposed.text == "7.25"
+    assert selected.checked is True
+    driver.screenshot(images / "04-draft.png")
+
+    # Exercise the public Qt boundary directly first: a missing exception
+    # barrier fails here without allowing the later real signal to abort pytest.
+    window.apply_tab_writeback(tab_id)
+    qt_until(lambda: bool(driver.dialogs()), label="direct Apply error visible")
+    error = driver.dialogs()[0]
+    assert error.title == "Writeback failed"
+    assert any("not a field container" in text for text in error.texts)
+    driver.screenshot(images / "05-boundary-failure.png")
+    driver.click("OK")
+
+    # This second attempt uses the shipped Apply signal and real mouse input.
+    driver.click("Apply Selected")
+    qt_until(lambda: bool(driver.dialogs()), label="clicked Apply error visible")
+    error = driver.dialogs()[0]
+    assert error.title == "Writeback failed"
+    assert any("not a field container" in text for text in error.texts)
+    driver.screenshot(images / "06-click-failure.png")
+    driver.click("OK")
+    qt_until(
+        lambda: (
+            tuple(
+                widget
+                for widget in driver.visible().widgets
+                if widget.object_name == "writebackProposed"
+            )
+            == (proposed,)
+        ),
+        label="retained proposal row after owner-loop refresh",
+    )
+    assert driver.observe("general.ext.blocked.sigma*") == selected
+    assert driver.observe("Apply Selected").enabled
+    assert "Writeback applied" not in driver.status().text
+    assert driver.tabs("Analysis").current == "Analysis"
+    driver.screenshot(images / "07-retained.png")
+
+
 def _status_bar_labels(window: MainWindow, text: str) -> list[QLabel]:
     status_bar = window.statusBar()
     assert status_bar is not None
@@ -234,42 +358,46 @@ def test_main_window_named_dialog_facade_delegates_to_registry(
 
 
 def test_show_error_dialog_retains_until_close(main_window_control_factory, qapp):
-    from unittest.mock import patch
+    import gc
+    import weakref
 
     from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 
-    with patch.object(
-        DialogRefStore,
-        "open_transient",
-        autospec=True,
-        side_effect=DialogRefStore.open_transient,
-    ) as open_transient:
-        ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
-        ctrl.get_bus.return_value = EventBus()
-        window = MainWindow(ctrl, templates=lambda: {})
+    ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
+    ctrl.get_bus.return_value = EventBus()
+    window = MainWindow(ctrl, templates=lambda: {})
 
-        window.show_error_dialog("Broken", "Something failed")
-        qapp.processEvents()
+    window.show_error_dialog("Broken", "Something failed")
+    qapp.processEvents()
 
-        dialogs = [
-            dialog
-            for dialog in window.findChildren(QMessageBox)
-            if dialog.windowTitle() == "Broken"
-        ]
-        assert len(dialogs) == 1
-        assert open_transient.call_args is not None
-        receiver = open_transient.call_args.args[0]
-        assert isinstance(receiver, DialogRefStore)
-        open_transient.assert_called_once_with(receiver, dialogs[0])
-        assert len(receiver) == 1
-        assert window.list_open_dialogs() == []
+    dialogs = [
+        dialog
+        for dialog in window.findChildren(QMessageBox)
+        if dialog.windowTitle() == "Broken"
+    ]
+    assert len(dialogs) == 1
+    dialog_ref = weakref.ref(dialogs[0])
+    del dialogs
+    gc.collect()
 
-        dialogs[0].reject()
-        qapp.processEvents()
+    dialog = dialog_ref()
+    assert dialog is not None
+    assert dialog.text() == "Something failed"
+    assert dialog.icon() == QMessageBox.Icon.Critical
+    assert dialog.isVisible()
+    assert not dialog.isModal()
+    assert dialog.windowModality() == Qt.WindowModality.NonModal
+    assert window.list_open_dialogs() == []
 
-        assert len(receiver) == 0
+    destroyed: list[bool] = []
+    dialog.destroyed.connect(lambda: destroyed.append(True))
+    dialog.close()
+    del dialog
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+    assert destroyed
+    assert window.list_open_dialogs() == []
 
 
 def test_main_window_load_data_dialog_cancel_is_noop(

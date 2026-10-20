@@ -45,7 +45,7 @@ def run_chain(
     rhs,
     make_context,
     data,
-    row_models: tuple[NDArray[np.int64], NDArray[np.int64]],
+    row_models: tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.int64]],
     states: NDArray[np.complex128],
     controls: Tolerances,
 ):
@@ -53,27 +53,25 @@ def run_chain(
 
     rhs(time, flat_state, context) and make_context(data, row, model) are
     compiled kernel-owned callables. data supplies packed models and segments.
-    row_models is (rows, model_index), aligned with states (rows, M, M).
+    row_models is (rows, model_index, global_chain_ids). The first two vectors
+    align with states (rows, M, M); chain IDs are indexed by global table row.
     Each chain reads only its first input slot; subsequent rows use the previous
     endpoint, changing basis on model changes. Disjoint rows read their own
     input. Each row resets a deterministic 0.1 ns initial seed, then adapts up
     to the smallest spacing between knots inside that row's envelope-local
     windows and, when packed, absolute flux window. Constant envelopes and
-    ordinary DOP853's unpacked flux add no sampling ceiling. Contiguity uses 1e-9 ns.
+    ordinary DOP853's unpacked flux add no sampling ceiling. Chain membership
+    comes from dispatch, not apply-call adjacency.
     Integration failures propagate; earlier endpoints may already be stored.
     """
     models, segments = data.models, data.segments
-    rows, model_index = row_models
+    rows, model_index, chain = row_models
     for index in range(len(rows)):
         row, model = rows[index], model_index[index]
         state = states[index].copy()
         if index > 0:
             previous = rows[index - 1]
-            boundary = segments.start[previous] + segments.duration[previous]
-            if (
-                segments.timeline[row] == segments.timeline[previous]
-                and abs(segments.start[row] - boundary) <= 1e-9
-            ):
+            if chain[row] >= 0 and chain[previous] == chain[row]:
                 previous_model = model_index[index - 1]
                 state = states[index - 1].copy()
                 if previous_model != model:

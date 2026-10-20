@@ -8,15 +8,9 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm, solve
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
-from ..kernel import Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularModel
+from ._secular import coherence_decay
 
 
 @dataclass(frozen=True)
@@ -175,9 +169,11 @@ def _problem(
     frequency = float(table.tone_frequency_ghz[row, 0])
     duration = float(table.duration_ns[row])
     energies = model.energies_ghz
-    outgoing = model.rates_per_ns.sum(axis=0)
-    decay = (outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns
-    diagonal = (-2j * np.pi * (energies[:, None] - energies[None, :]) - decay).ravel()
+    decay = coherence_decay(model)
+    diagonal = np.asarray(
+        -2j * np.pi * (energies[:, None] - energies[None, :]) - decay,
+        dtype=np.complex128,
+    ).ravel()
     coupling = 2 * np.abs(amplitude * drive.in_phase_ghz)
     detuning = np.abs(energies[:, None] - energies[None, :] - frequency)
     driven = (coupling > 0) & ~np.eye(len(energies), dtype=bool)
@@ -259,15 +255,6 @@ class T6Kernel:
     raises RuntimeError rather than silently selecting another algorithm.
     """
 
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("t6", "legacy-v1"),
-        eligibility=Eligibility(1, 1, "constant"),
-        guard=GuardDeclaration(),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("t6/legacy-v1/serial"),
-        fallback="terminal-domain",
-    )
-
     name = "t6"
     guard_builds = False
 
@@ -275,10 +262,10 @@ class T6Kernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Accept exactly one unity envelope, irrespective of branch priority."""
+        source, budget = context.source, context.budget
         del source
         _check_budget(budget)
         accepted = table.tones[rows] == 1
@@ -291,9 +278,10 @@ class T6Kernel:
         return accepted
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Return fixed-width keys; equal rows share a phase-independent channel."""
+        del context
         keys = np.empty(
             len(rows),
             dtype=[
@@ -322,16 +310,16 @@ class T6Kernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build immutable Fourier channels from representatives aligned to keys."""
+        source, budget = context.source, context.budget
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
-            keys, self.prepare_keys(table, rows)
+            keys, self.prepare_keys(table, rows, context)
         ):
             raise ValueError("t6: keys and representative rows must align")
-        if not self.guard(table, rows, source, budget).all():
+        if not self.guard(table, rows, context).all():
             raise ValueError("t6: prepare requires one constant tone")
         entries = [
             _fourier(
@@ -347,14 +335,24 @@ class T6Kernel:
         ]
         return _pack(entries)
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -364,9 +362,10 @@ class T6Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; apply uses the model-only prepared payload."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(
@@ -376,12 +375,14 @@ class T6Kernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Evaluate phase Fourier series and advance the aligned densities in place.
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        context.require_no_plan()
+        budget = context.budget
         _check_budget(budget)
         if not isinstance(prepared, _T6Prepared):
             raise ValueError("t6: incompatible prepared payload")

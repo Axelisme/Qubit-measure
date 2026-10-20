@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import os
 
-from zcu_tools.gui.project import ProjectInfo, nearest_existing
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+from zcu_tools.gui.widgets.file_dialog import nearest_existing
 
 # The repo's bundled simulation databases — the home of the precomputed *search*
 # database (fluxonium*.h5), a shared resource unrelated to a chip/qubit, so it is

@@ -14,7 +14,12 @@ def fit_ge_manual(
     *,
     plots: Plots,
     options: GEFitOptions | None = None,
+    figure_name: str = "fit",
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     return fitting_ge_and_plot(
-        signals, lambda *_: {"theta": np.pi * angle / 180}, plots=plots, options=options
+        signals,
+        lambda *_: {"theta": np.pi * angle / 180},
+        plots=plots,
+        options=options,
+        figure_name=figure_name,
     )

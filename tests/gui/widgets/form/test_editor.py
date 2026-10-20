@@ -28,6 +28,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_context import captured_ext_env
+from tests.gui._form_converters import RebuildingForm
 from tests.gui.widgets.form._field_errors import field_error as row_error
 from tests.gui.widgets.form._text_input import commit_text
 
@@ -75,8 +76,10 @@ class Section(FormModel):
         return self
 
 
-class SampleForm(FormModel):
+class SampleForm(RebuildingForm):
     """Scalar, whole-container, branch and nullable input scenarios."""
+
+    branch_models = {("branch",): (StaticBranch, AlternateBranch)}
 
     amount: float = Field(default=2.0, gt=0)
     count: int = 2

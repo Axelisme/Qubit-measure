@@ -1,5 +1,6 @@
 """Shared immutable period tables and single-threaded envelope playback."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -7,7 +8,11 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..kernel import Prepared, SegmentTable
+from ..kernel import SegmentTable
+from ..workplan import WorkPlan
+from ._dop853_data import pack_segments
+from ._workload_facts import envelope_bounds
+from .dop853 import DOP853Plan, DOP853Prepared, advance_endpoints
 
 
 class PeriodPlayback(NamedTuple):
@@ -30,7 +35,7 @@ class UnitaryTable(NamedTuple):
     """Immutable interpolation and carrier lattice for period playback.
 
     bound: positive absolute gain ceiling for the Chebyshev interval [0,bound].
-    coefficients: (P,8,16,M,M) padded amplitude/Fourier coefficients.
+    coefficients: (P,D,16,M,M) amplitude/Fourier coefficients, 1 <= D <= 8.
     subdivisions: positive subperiod count per carrier period.
     block_cycles: positive maximum block length; one for subdivided periods.
     project_unitary: whether to apply two Newton polar iterations to U.
@@ -59,48 +64,124 @@ class SecularMaps(NamedTuple):
 
 
 @dataclass(frozen=True)
+class CompactPolynomial:
+    """Lossless storage of byte-nonzero planes of a complex polynomial.
+
+    shape is the original (P, degrees, modes, M, M) dense shape. indices holds
+    flattened leading-axis plane positions in ascending order. values owns the
+    corresponding (planes, M, M) complex128 bytes, read-only. Omitted planes
+    contain only zero bytes; signed zeros and arbitrarily small values remain.
+    """
+
+    shape: tuple[int, ...]
+    indices: tuple[int, ...]
+    values: NDArray[np.complex128]
+
+    @classmethod
+    def from_dense(cls, coefficients: NDArray[np.complex128]) -> "CompactPolynomial":
+        """Copy a (P,degrees,modes,M,M) complex128 array into owned storage.
+
+        Positive dimensions and square trailing matrices are required; invalid
+        shape or dtype raises ValueError. The input may be strided or writable.
+        """
+        if (
+            coefficients.dtype != np.complex128
+            or coefficients.ndim != 5
+            or min(coefficients.shape) <= 0
+            or coefficients.shape[-2] != coefficients.shape[-1]
+        ):
+            raise ValueError(
+                "polynomial requires nonempty (P,degrees,modes,M,M) complex128"
+            )
+        planes = np.ascontiguousarray(coefficients).reshape(
+            (-1, *coefficients.shape[-2:])
+        )
+        # Test every bit, in machine words rather than eight separate bytes.
+        nonzero = np.any(planes.view(np.uint64).reshape(len(planes), -1), axis=1)
+        indices = tuple(int(index) for index in np.flatnonzero(nonzero))
+        values = planes[nonzero].copy()
+        values.setflags(write=False)
+        return cls(coefficients.shape, indices, values)
+
+    def expand(self) -> NDArray[np.complex128]:
+        """Return a fresh read-only dense array with the original exact bytes."""
+        result = np.zeros(self.shape, dtype=np.complex128)
+        planes = result.reshape((-1, *self.shape[-2:]))
+        planes[list(self.indices)] = self.values
+        result.setflags(write=False)
+        return result
+
+
+@dataclass(frozen=True)
 class PeriodEntry:
     """One carrier/band channel shared by the two shaped period families.
 
     fallback/tail_budget: direct solver payload and allowance for ordinary tables.
     frequency: signed carrier in GHz. bound: maximum absolute gain.
-    coefficients: (1,8,16,M,M) amplitude/phase polynomial for one subperiod.
+    coefficients: dense (1,8,16,M,M) or losslessly compact subperiod polynomial.
     populations/coherences: half-subperiod secular maps, (M,M).
     subdivisions: positive subperiods per carrier period, at most 32.
     block_cycles: positive maximum integer-subperiod block, one when subdivided.
     project_unitary: retract interpolated U with two Newton polar iterations.
     harmonics: retained absolute Fourier cutoff, 8 for ordinary full tables.
+    degrees: number of coefficients used by Clenshaw, at least one and no
+        greater than coefficients.shape[1]; the highest degree is degrees - 1.
     All retained arrays are read-only. No field depends on input density.
     """
 
-    fallback: Prepared
+    fallback: DOP853Prepared
     tail_budget: float
     frequency: float
     bound: float
-    coefficients: NDArray[np.complex128]
+    coefficients: NDArray[np.complex128] | CompactPolynomial
     populations: NDArray[np.float64]
     coherences: NDArray[np.float64]
     subdivisions: int = 1
     block_cycles: int = 1
     project_unitary: bool = False
     harmonics: int = 8
+    degrees: int = 8
+
+    def expanded_coefficients(self) -> NDArray[np.complex128]:
+        """Borrow dense coefficients, or expand compact storage for this playback."""
+        if isinstance(self.coefficients, CompactPolynomial):
+            return self.coefficients.expand()
+        return self.coefficients
+
+
+def _allocation_bytes(arrays: Iterable[NDArray[np.generic]]) -> int:
+    """Charge each retained ndarray owner once, including bases behind views."""
+    owners: dict[int, NDArray[np.generic]] = {}
+    for array in arrays:
+        while isinstance(array.base, np.ndarray):
+            array = array.base
+        owners[id(array)] = array
+    return sum(array.nbytes for array in owners.values())
 
 
 @dataclass(frozen=True)
 class PeriodPrepared:
-    """Immutable entries aligned with unique preparation keys, with owned bytes."""
+    """Immutable entries aligned with unique preparation keys.
+
+    entries borrow only read-only arrays. nbytes charges each retained ndarray
+    base allocation once across the entire batch, including fallback packing.
+    """
 
     entries: tuple[PeriodEntry, ...]
 
     @property
     def nbytes(self) -> int:
-        return sum(
-            e.coefficients.nbytes
-            + e.populations.nbytes
-            + e.coherences.nbytes
-            + e.fallback.nbytes
-            for e in self.entries
-        )
+        """Unique retained array bytes, excluding logical compact padding and RSS."""
+        arrays = []
+        for entry in self.entries:
+            coefficients = entry.coefficients
+            arrays.append(
+                coefficients.values
+                if isinstance(coefficients, CompactPolynomial)
+                else coefficients
+            )
+            arrays.extend((entry.populations, entry.coherences, *entry.fallback.models))
+        return _allocation_bytes(arrays)
 
 
 @njit(nogil=True, cache=True)
@@ -110,7 +191,14 @@ def _phase_coefficients(coefficients, theta, harmonics):
         mode = mode_index if mode_index < 8 else mode_index - 16
         if abs(mode) > harmonics:
             continue
-        result += np.exp(1j * mode * theta) * coefficients[:, mode_index]
+        phase = np.exp(1j * mode * theta)
+        # Preserve harmonic accumulation order without a matrix-sized temporary.
+        for degree in range(coefficients.shape[0]):
+            for i in range(coefficients.shape[2]):
+                for j in range(coefficients.shape[3]):
+                    result[degree, i, j] += (
+                        phase * coefficients[degree, mode_index, i, j]
+                    )
     return result
 
 
@@ -118,7 +206,7 @@ def _phase_coefficients(coefficients, theta, harmonics):
 def _amplitude_unitary(coefficients, x):
     previous = np.zeros_like(coefficients[0])
     current = previous.copy()
-    for degree in range(7, 0, -1):
+    for degree in range(coefficients.shape[0] - 1, 0, -1):
         updated = 2 * x * current - previous + coefficients[degree]
         previous, current = current, updated
     return x * current - previous + coefficients[0]
@@ -199,7 +287,11 @@ def periods(
             else:
                 phase_coefficients = _phase_coefficients(
                     coefficients[ports[row]],
-                    phases[row] + np.angle(amplitude),
+                    phases[row]
+                    + 2 * np.pi * (cycle % subdivisions) * direction / subdivisions
+                    # Phase is arbitrary at zero magnitude. Do not unwrap or
+                    # differentiate its angle: signed zero must not add a drive.
+                    + (np.angle(amplitude) if amplitude != 0 else 0.0),
                     harmonics,
                 )
             u = _amplitude_unitary(phase_coefficients, x)
@@ -233,8 +325,99 @@ def envelopes(
 ) -> NDArray[np.complex128]:
     """Evaluate playback in a row batch using the common envelope interface."""
     values = np.empty(elapsed.shape, dtype=np.complex128)
-    for index, envelope in enumerate(table.envelopes):
-        mask = table.tone_envelope[rows, 0] == index
+    envelope_ids = table.tone_envelope[rows, 0]
+    for index in np.unique(envelope_ids):
+        envelope = table.envelopes[int(index)]
+        mask = envelope_ids == index
         local = elapsed[mask] + table.tone_envelope_offset_ns[rows[mask], 0, None]
         values[mask] = envelope.values(local)
     return values * table.tone_amplitude[rows, 0, None]
+
+
+def band_keys(
+    table: SegmentTable, rows: NDArray[np.int64], work_plan: WorkPlan
+) -> NDArray[np.void]:
+    """Encode level, port, signed carrier and power-of-two peak-gain band.
+
+    Shape, duration and phase do not enter this ordinary preparation identity.
+    Zero peak gain uses the DC key, independent of its requested carrier.
+    """
+    peaks = envelope_bounds(table, work_plan).peaks
+    maximum = (
+        np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
+    )
+    band = np.ceil(np.log2(np.where(maximum > 0, maximum, 1))).astype(np.int64)
+    keys = np.zeros(
+        len(rows),
+        dtype=[
+            ("level", "i8", (table.level.shape[1],)),
+            ("port", "i8"),
+            ("frequency", "f8"),
+            ("band", "i8"),
+        ],
+    )
+    keys["level"] = table.level[rows]
+    keys["port"] = table.tone_port[rows, 0]
+    keys["frequency"] = np.where(maximum > 0, table.tone_frequency_ghz[rows, 0], 0)
+    keys["band"] = band
+    return keys
+
+
+def advance_tail(
+    entry: PeriodEntry,
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    starts: NDArray[np.float64],
+    states: NDArray[np.complex128],
+) -> None:
+    """Advance residual intervals with the existing compiled strict DOP853.
+
+    Shift carrier phase and envelope-local time together. Tail rows are
+    independent even when the caller supplies touching same-timeline segments.
+    """
+    durations = table.duration_ns[rows] - starts
+    selected = np.flatnonzero(durations > 0)
+    if not len(selected):
+        return
+    active = rows[selected]
+    elapsed = starts[selected, None]
+    local_rows = np.arange(len(active), dtype=np.int64)
+    # Pack only these tails' samples, not the complete acquire inventory.
+    # Keep -1 padding and physical ports independent of envelope renumbering.
+    envelope_ids = table.tone_envelope[active]
+    playing = np.arange(envelope_ids.shape[1])[None, :] < table.tones[active, None]
+    used = np.unique(envelope_ids[playing])
+    tail_envelopes = tuple(table.envelopes[int(index)] for index in used)
+    tail_ids = np.full_like(envelope_ids, -1)
+    tail_ids[playing] = np.searchsorted(used, envelope_ids[playing])
+    tail_table = SegmentTable(
+        timeline=local_rows,
+        start_ns=np.zeros(len(active)),
+        duration_ns=durations[selected],
+        level=table.level[active],
+        tones=table.tones[active],
+        tone_port=table.tone_port[active],
+        tone_frequency_ghz=table.tone_frequency_ghz[active],
+        tone_amplitude=table.tone_amplitude[active],
+        tone_theta_rad=table.tone_theta_rad[active]
+        + 2 * np.pi * table.tone_frequency_ghz[active] * elapsed,
+        tone_envelope=tail_ids,
+        tone_envelope_offset_ns=table.tone_envelope_offset_ns[active] + elapsed,
+        envelopes=tail_envelopes,
+    )
+    chunk = states[selected].copy()
+    frame = np.where(
+        (tail_table.tones == 1) & (tail_table.tone_amplitude[:, 0] != 0),
+        "interaction",
+        "lab",
+    )
+    plan = DOP853Plan(frame, np.full(len(active), -1, dtype=np.int64))
+    advance_endpoints(
+        entry.fallback.models,
+        pack_segments(tail_table),
+        (local_rows, np.zeros(len(active), dtype=np.int64)),
+        chunk,
+        entry.tail_budget,
+        plan,
+    )
+    states[selected] = chunk

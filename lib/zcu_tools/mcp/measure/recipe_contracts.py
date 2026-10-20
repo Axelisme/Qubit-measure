@@ -18,10 +18,15 @@ from zcu_tools.mcp.measure.analysis_execution import (
 )
 from zcu_tools.mcp.measure.raw_save import SaveReport
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
+from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 RecipeScalar = str | int | float | bool | None
 RecipeParameter = RecipeScalar | list[RecipeScalar]
+# Declared containers are invocation inputs, not scalar edits or analysis updates.
+type RecipeInputValue = (
+    RecipeScalar | list[RecipeInputValue] | dict[str, RecipeInputValue]
+)
 StepStatus = Literal["completed", "finished_early", "cancelled"]
 WritebackDecision = Literal["accepted", "skipped"]
 AnalysisStage = Literal["primary", "post"]
@@ -41,12 +46,12 @@ class RecipeExpression(TypedDict):
 class RecipeFieldEdit:
     """One scalar field edit for RecipeTab.set_fields.
 
-    field is a dotted public scalar cfg path. value is a direct scalar/list or
+    field is a typed logical path of str names and int original list indexes. value is a direct scalar/list or
     RecipeExpression; None retains the current input, it does not write null.
     source is a non-blank provenance label; retained inputs use gui_default.
     """
 
-    field: str
+    field: RecipeFieldPath
     value: RecipeParameter | RecipeExpression
     source: str = "explicit"
 
@@ -63,12 +68,16 @@ class RecipeDeviceState:
 
 
 class RecipePropertySchema(TypedDict):
-    """Handwritten JSON Schema for an existing scalar or array recipe parameter.
+    """Handwritten schema for scalars, declared objects and arrays of either.
 
-    type lists the accepted JSON types, including null when optional. minLength
-    constrains strings; items describes array elements; minItems/maxItems bound
-    the array length. description is operator-facing parameter documentation.
-    No annotations-to-schema generation takes place.
+    type lists accepted JSON types, including null for nullable inputs. minLength
+    constrains strings; items describes scalar or declared object array elements
+    (not direct arrays of arrays); minItems/maxItems bound array length.
+    properties declares object fields; required lists mandatory
+    declared fields. additionalProperties rejects unknown fields when false, allows
+    scalar/array extras when true or omitted, or declares a schema for name-keyed
+    object entries. Objects need properties or a schema-valued additionalProperties.
+    description is operator-facing documentation. No schema generation takes place.
     """
 
     type: str | list[str]
@@ -77,6 +86,9 @@ class RecipePropertySchema(TypedDict):
     minItems: NotRequired[int]
     maxItems: NotRequired[int]
     description: NotRequired[str]
+    properties: NotRequired[dict[str, RecipePropertySchema]]
+    required: NotRequired[list[str]]
+    additionalProperties: NotRequired[bool | RecipePropertySchema]
 
 
 class RecipeInputSchema(TypedDict):

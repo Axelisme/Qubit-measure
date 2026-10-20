@@ -1,6 +1,6 @@
 """Independent fluxonium / SQUID transmon simulator dialog; edits and calibration remain local.
 
-The optional device control supplies values only. params.json loads are read-only
+The optional device control supplies values only. Entry predictor files are read-only
 prefill. No operation installs a model or writes a component or source file.
 """
 
@@ -79,7 +79,7 @@ _DEFAULT_TRANSITIONS: list[tuple[int, int]] = [
     (1, 3),
 ]
 
-_DEFAULT_CALIBRATION_EXPR: str = "qubit.freq"
+_DEFAULT_CALIBRATION_EXPR: str = ""
 
 # Column indices for the 4-column tracked-transitions table.
 # Both matrix operators (n and phi) are shown side by side — there is no selector.
@@ -95,7 +95,6 @@ class PredictorDialogState:
 
     tracked_transitions: tuple[tuple[int, int], ...]
     tab_index: int
-    params_path_text: str
 
 
 def _normalize_tracked_transitions(
@@ -123,9 +122,9 @@ class PredictorDialog(QDialog):
     """Own detached fluxonium or SQUID transmon inputs for prediction and calibration.
 
     device optionally supplies cached/live device values. parameter_provider
-    supplies fixed ParameterContext captures for component choices/alias default
-    and frequency expressions; omitted or None-returning providers allow only
-    explicit trials. params optionally prefills complete or partial local inputs.
+    supplies fixed ParameterContext captures for optional frequency expressions.
+    Predictor files come from the current entry through predictor control.
+    params optionally prefills complete or partial local inputs.
     Unresolved frequency paths disable calibration without substituting a value.
     persistent_on_close hides instead of finishing, retaining the plotted model.
     """
@@ -165,16 +164,15 @@ class PredictorDialog(QDialog):
 
         # ── Left: controls column ─────────────────────────────────────────
         left_widget = QWidget()
+        left_widget.setMinimumWidth(480)
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         self._parameter_editor = PredictorParameterEditor(
             predictor,
-            self._parameter_provider,
             on_edited=self._on_parameters_changed,
             on_replaced=self._on_parameters_replaced,
             on_status=lambda message, error: self._set_status(message, error=error),
-            on_path_changed=self._emit_state_changed,
         )
         left_layout.addWidget(self._parameter_editor)
 
@@ -365,7 +363,7 @@ class PredictorDialog(QDialog):
         self._parameter_timer.setSingleShot(True)
         self._parameter_timer.setInterval(_DEBOUNCE_MS)
         self._parameter_timer.timeout.connect(self._refresh_curves)
-        self._parameter_editor.refresh_components()
+        self._parameter_editor.refresh_files()
 
         if params is not None:
             self.set_parameters(params)
@@ -391,21 +389,17 @@ class PredictorDialog(QDialog):
         """
         self._parameter_editor.set_parameters(params)
 
-    def selected_component(self) -> str | None:
-        """Return the concrete prefill selection, or None with no choices.
+    def selected_file(self) -> str | None:
+        """Return the selected entry filename, or None; selection alone never loads."""
+        return self._parameter_editor.selected_file()
 
-        Selection alone never loads parameters or binds the trial to a component.
+    def load_file(self, filename: str | None = None) -> None:
+        """Prefill this local trial from a current-entry predictor filename.
+
+        Omit filename to load the current selection. Failures from predictor
+        control propagate without changing the trial. The source is never written.
         """
-        return self._parameter_editor.selected_component()
-
-    def load_component(self, qubit: str | None = None) -> None:
-        """Prefill current-point params via injected params_for; never write back.
-
-        Omit qubit to use the selector (initially alias qubit, when bound).
-        Unknown/unsupported component and unavailable context errors propagate.
-        Missing fields remain None. Loading is explicit, not live binding.
-        """
-        self._parameter_editor.load_component(qubit)
+        self._parameter_editor.load_file(filename)
 
     def enable_parameter_cache(self, *, cache_dir: Path | None = None) -> None:
         """Restore and enable versioned user-cache persistence for this trial.
@@ -493,20 +487,11 @@ class PredictorDialog(QDialog):
         self._display_calibration(result)
         return result.flux_bias
 
-    def load_parameters(self, path: str) -> None:
-        """Read an existing params.json into this local trial, never changing the file.
-
-        PredictorLoadError reports unreadable/missing fluxdep_fit; invalid inputs
-        raise ValueError without changing fields. See read_fluxdep_fit_params.
-        """
-        self._parameter_editor.load_parameters(path)
-
     def capture_state(self) -> PredictorDialogState:
         """Return the persistent UI state only; live marker/device/cache state is excluded."""
         return PredictorDialogState(
             tracked_transitions=tuple(self._tracked),
             tab_index=int(self._curve_tabs.currentIndex()),
-            params_path_text=self._parameter_editor.path_text(),
         )
 
     def restore_state(self, state: PredictorDialogState) -> None:
@@ -517,7 +502,6 @@ class PredictorDialog(QDialog):
         self._suppress_state_changed = True
         try:
             self._tracked = list(transitions)
-            self._parameter_editor.set_path_text(state.params_path_text)
             self._curve_tabs.setCurrentIndex(tab_index)
             self._rebuild_table()
         finally:
@@ -564,7 +548,7 @@ class PredictorDialog(QDialog):
             self._set_status("Live predictor view", error=False)
             return
         self._refresh_device_selector()
-        self._parameter_editor.refresh_components()
+        self._parameter_editor.refresh_files()
         selected = self._selected_device_name()
         if selected is not None:
             self._apply_cached_device_value(selected)
@@ -886,10 +870,7 @@ class PredictorDialog(QDialog):
             self._set_status(reason, error=is_error)
             self._sync_calibration_button()
             return
-        from zcu_tools.gui.session.services.predictor import (
-            CalibrateFluxBiasRequest,
-            PredictorLoadError,
-        )
+        from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
 
         frequency_mhz = self._resolve_calibration_frequency_mhz()
         if frequency_mhz is None:
@@ -903,7 +884,7 @@ class PredictorDialog(QDialog):
         )
         try:
             result = self._pred.calibrate_flux_bias(self.parameters(), req)
-        except (PredictorLoadError, PredictorInputError) as exc:
+        except PredictorInputError as exc:
             self._set_status(str(exc), error=True)
             return
         except Exception as exc:

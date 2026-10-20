@@ -12,6 +12,7 @@ from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.resources.entry import ResultEntry
 
 from ._reload_source import InjectedCatalog
+from ._sample_input import draft_data
 from ._start_fakes import StartHarness
 from ._synthetic import Context, build_registry
 
@@ -150,11 +151,13 @@ def test_switching_workflows_preserves_separate_parsed_drafts(
         {("value",): {"expr": "3 * 4"}}, window.tunables_panel.env
     )
     window.select_workflow("sample")
-    assert window.capture_persisted_state().plan["scale"] == {"expr": "1 / 3"}
+    assert draft_data(window.capture_persisted_state().plan)["scale"] == {
+        "expr": "1 / 3"
+    }
     window.select_workflow("alternate")
     saved = window.capture_persisted_state()
-    assert saved.plan["batches"] == 7
-    assert saved.knobs["value"] == {"expr": "3 * 4"}
+    assert draft_data(saved.plan)["batches"] == 7
+    assert draft_data(saved.knobs)["value"] == {"expr": "3 * 4"}
 
 
 def test_switching_after_terminal_keeps_the_edited_start_tunables(

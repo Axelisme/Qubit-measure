@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-20，DeviceManager 測試按 registry/setup 與 close 契約歸位
+**Last updated:** 2026-10-20，DeviceManager 測試按 registry/setup 與 close 契約歸位；跨平台 GUI cache 隔離與 experiment device 測試邊界
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -18,7 +18,7 @@
    文件、靜態內容、設定值及腳本旗標直接審閱；既有白箱或靜態檢查案例不因本頁宣稱已搬遷。
    不新增頂層 unit／integration／e2e 目錄，亦不測 Notebook／腳本的主要內容。
 
-框架測試用最小合成 workflow／adapter，不 import `zcu_lab`，包括其 fake 實驗。Adapter、workflow 與 recipes 的個別實驗流程與預設值不寫測試；只因實驗定義改動而失敗的測試應刪除，不修成固定 lab 行為。宿主最高接縫是 caller 的註冊清單，再從 Window、RPC 或 MCP 驗證結果。Review 檢查 tests 沒有 import `zcu_lab`，必要時以 grep 輔助。不暫移目錄跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook，見 [模組定位 ADR](../docs/adr/0072-module-boundaries.md#分層)。
+框架測試用最小合成 workflow／adapter，不 import `zcu_lab`。Adapter、workflow 與 recipes 的個別實驗流程與預設值不寫測試；只因實驗定義改動而失敗的測試應刪除，不修成固定 lab 行為。宿主最高接縫是 caller 的註冊清單，再從 Window、RPC 或 MCP 驗證結果。Review 檢查 tests 沒有 import `zcu_lab`，必要時以 grep 輔助。不暫移目錄跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook，見 [模組定位 ADR](../docs/adr/0072-module-boundaries.md#分層)。
 
 ## Fixture 與測試支援碼
 
@@ -101,11 +101,13 @@ Qt GUI 子套件可選 `tests/gui tests/gui/app/fluxdep tests/gui/app/dispersive
 
 ### GUI cache 隔離
 
-GUI cache 隔離只支援 Linux，其它平台在 root conftest 載入時直接報錯。
-`tests/conftest.py` 在子目錄 conftest 與產品模組 import 前設定 `XDG_CACHE_HOME`，
-指向 worktree 內獨立的暫存目錄。每個 xdist worker 各自建立目錄，不使用會被 pytest
-清掉的 basetemp。這些目錄保留到 process 結束，再由 `atexit` 清理。
-巢狀 `pytest.main()` session 的 teardown 不還原 `XDG_CACHE_HOME`，後續 cleanup 仍使用隔離目錄。
+`tests/conftest.py` 在第三方套件、子目錄 conftest 與產品模組 import 前設定
+`ZCU_TOOLS_CACHE_DIR`，指向 worktree 內獨立的暫存目錄。
+建立與退出清理由可在第三方 import 前載入的 `tests/_cache_environment.py` 負責。
+GUI persistence 與 session discovery 在 Linux、Windows 和 macOS 都使用這個根目錄。
+每個 xdist worker 各自建立目錄，不使用會被 pytest 清掉的 basetemp。
+這些目錄保留到 process 結束，再由 `atexit` 清理。
+巢狀 `pytest.main()` session 的 teardown 不還原 `ZCU_TOOLS_CACHE_DIR`，後續 cleanup 仍使用隔離目錄。
 
 ### Background work — 測試 teardown 必要模式
 
@@ -267,7 +269,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ### Experiment device contracts
 
-`tests/experiment/utils/test_device.py` 在選定 driver 的公開接縫驗證 flux 單位、模式、安全限制、取消與錯誤傳播。Cfg assembly tests 驗證角色到名稱的 mapping，且不讀硬體。用到 device 的合成 cfg 在自身宣告該欄位，不依賴 framework base 的 default。
+`tests/device/` 在 driver 與 Info 的公開接縫驗證單位、模式、安全限制、取消與錯誤傳播。實驗角色 helpers 由 zcu_lab 擁有，不由框架測試匯入。Cfg assembly tests 驗證角色到名稱的 mapping，且不讀硬體。用到 device 的合成 cfg 在自身宣告該欄位，不依賴 framework base 的 default。
 
 GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guard 沒有可觀測的 driver 接縫，不在這些案例加入硬體讀取計數。Run 與 Notebook owner tests 驗證 acquisition 前讀全部 connected drivers 一次、讀取失敗拒 Run，以及固定 metadata 經 Save 後的讀回。DeviceInfo label 逆向投影與實驗自動 setup 的專用案例已退休，手動設定與 manager 的有效 owner tests 保留。
 
@@ -385,7 +387,7 @@ interaction.
 
 `DeviceManager` 是 instance registry，入口只接受 `BaseDevice` instance。GUI service unit tests 若用
 `MagicMock` driver 驗證 call interaction，注入 `tests/gui/session/services/_device_fakes.py::FakeDeviceRegistry`。
-Registry CRUD 使用真 `FakeDevice`。`test_simulated_environment.py` 經真 session owners 驗證明確組裝、部分斷線失敗與來源綁定，不靠一般 SoC change 通知補建資源。
+Registry CRUD 使用真 `FakeDevice`。`services/test_device_registration.py` 經真 manager 與 session owner 驗證 runtime 註冊、失敗保留與逐台 close；`app/measure/test_device_lifecycle.py` 驗證 drain 保留資源，以及 app 關閉隔離 driver 錯誤並卸載 SoC。不靠 SoC change 通知補建資源。
 
 `DeviceService.poll_device_info(name)` 測試應視為 best-effort off-main live-read contract：memory-only、
 connect/disconnect 等非 setup mutation 會 skip；`SETTING_UP` 的 selected device 可 poll current driver

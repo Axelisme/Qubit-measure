@@ -5,10 +5,14 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 
-from ._engine import batch, run, track
+from ._engine import RecordingKernel, batch, run, track
 from .contract.kernel_suite import KernelCase, reference, synthetic_model
 
 
@@ -62,6 +66,46 @@ def test_low_carrier_strong_tones_match_reference(frequency: float, coherent: bo
     assert result.paths.max_trace_error < 1e-8
 
 
+@pytest.mark.parametrize("workers,chunks", [(1, 3), (2, 1), (2, 3)])
+def test_gain_scan_is_bitwise_invariant_to_workers_and_chunks(workers, chunks):
+    model = synthetic_model(3)
+    model = replace(
+        model,
+        energies_ghz=np.array([0.0, 0.8, 1.6]),
+        rates_per_ns=model.rates_per_ns * 1e-3,
+        dephasing_per_ns=model.dephasing_per_ns * 1e-3,
+    )
+    src = ModelSource(np.ones((3, 3), dtype=np.complex128) / 3, lambda level: model)
+    count = 40
+    pulse = replace(
+        track(count, EnvelopeSpec("constant"), duration=23.7),
+        frequency_ghz=np.full(count, 0.05),
+        amplitude=0.003 + np.arange(count) * 1e-5,
+        phase_rad=np.full(count, 1.73),
+    )
+    timeline = replace(batch(count, duration=23.7), tracks=(pulse,))
+
+    def evolve(worker_count, chunk_count):
+        return run(
+            Engine(
+                worker_count,
+                0,
+                chunks_per_worker=chunk_count,
+                kernels=(
+                    RecordingKernel("dyson", accepts=False),
+                    FloquetPeriodKernel(),
+                ),
+            ),
+            src,
+            (timeline,),
+        )
+
+    reference = evolve(1, 1)
+    actual = evolve(workers, chunks)
+    assert actual.paths.segments_by_kernel == {"floquet_period": count}
+    np.testing.assert_array_equal(actual.densities, reference.densities)
+
+
 def test_many_low_carrier_keys_do_not_all_stay_live():
     import weakref
     from dataclasses import dataclass
@@ -80,10 +124,10 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
         nbytes: int
 
     class ObservedPeriod(FloquetPeriodKernel):
-        def guard(self, table, rows, source, budget):
+        def guard(self, table, rows, context: KernelContext):
             return np.ones(len(rows), dtype=bool)
 
-        def prepare(self, keys, table, rows, source, budget):
+        def prepare(self, keys, table, rows, context: KernelContext):
             nonlocal live, peak
             live += len(keys)
             peak = max(peak, live)
@@ -91,7 +135,9 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
             weakref.finalize(payload, release, len(keys))
             return payload
 
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             return np.zeros(len(rows), dtype=bool)
 
     count = 17
@@ -148,9 +194,9 @@ def test_long_plateau_reuses_period_across_durations():
     prepared_keys = []
 
     class ObservedPeriod(FloquetPeriodKernel):
-        def prepare(self, keys, table, rows, source, budget):
+        def prepare(self, keys, table, rows, context: KernelContext):
             prepared_keys.extend(keys)
-            return super().prepare(keys, table, rows, source, budget)
+            return super().prepare(keys, table, rows, context)
 
     result = run(
         Engine(

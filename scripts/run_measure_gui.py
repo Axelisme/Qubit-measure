@@ -3,7 +3,8 @@
 Examples:
     uv run python run_measure_gui.py                          # default file logging; opens control socket on port 8765
     uv run python run_measure_gui.py --no-log                 # no file log
-    uv run python run_measure_gui.py --clean                  # don't restore the previous persisted session
+    uv run python run_measure_gui.py --clean                  # skip all startup scripts
+    uv run python run_measure_gui.py --script startup.py      # run only this trusted startup(ctx)
     uv run python run_measure_gui.py --no-control             # disable the remote-control socket entirely
     uv run python run_measure_gui.py --control-port 0         # start remote control on an ephemeral loopback port
     uv run python run_measure_gui.py --control-port 8765 --control-token <hex>
@@ -15,10 +16,27 @@ import argparse
 import sys
 from pathlib import Path
 
-from zcu_tools.gui.launcher import add_runtime_cli_options, runtime_options_from_args
+from zcu_tools.gui.launcher import (
+    add_runtime_cli_options,
+    runtime_options_from_args,
+    select_startup_script,
+)
 
-# Repo root: this script lives in scripts/, so its parent is the root.
-PROJECT_ROOT = Path(__file__).parent.parent
+# Code, catalogs and logs stay anchored at the repo, not the data project.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _existing_project_root(value: str) -> Path:
+    root = Path(value)
+    if not root.is_absolute():
+        raise argparse.ArgumentTypeError("project root must be an absolute path")
+    try:
+        is_directory = root.is_dir()
+    except (OSError, ValueError):
+        is_directory = False
+    if not is_directory:
+        raise argparse.ArgumentTypeError("project root must be an existing directory")
+    return root
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -46,21 +64,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
         allow_external=True,
     )
-    parser.add_argument(
+    startup = parser.add_mutually_exclusive_group()
+    startup.add_argument(
         "--clean",
         action="store_true",
-        help=(
-            "Start without restoring the previous persisted session "
-            "(gui_state_v1.json is left untouched at startup; a normal close "
-            "still flushes over it)."
-        ),
+        help="Skip all startup scripts, including the default script.",
+    )
+    startup.add_argument(
+        "--script",
+        type=Path,
+        help="Run only this trusted Python file defining startup(ctx).",
     )
     parser.add_argument(
-        "--simulate",
-        type=Path,
+        "--project-root",
+        type=_existing_project_root,
+        default=REPO_ROOT,
         help=(
-            "Trusted Python environment defining build_environment(); fixed for this "
-            "process. Example: --simulate zcu_lab/simulation_envs/FTF/environment.py"
+            "Data project root: an absolute path to an existing directory "
+            "(default: repo root). Entry owners manage result/ and Database/; "
+            "code, catalogs and startup-script paths keep their existing resolution."
         ),
     )
     return parser.parse_args(argv)
@@ -84,8 +106,8 @@ def _build_measure_catalogs():
     register_all(registry, components=component_registry)
     loader = SourceExperimentCatalogLoader(
         sources=(
-            SourcePackage("zcu_tools", PROJECT_ROOT / "lib" / "zcu_tools"),
-            SourcePackage("zcu_lab", PROJECT_ROOT / "zcu_lab"),
+            SourcePackage("zcu_tools", REPO_ROOT / "lib" / "zcu_tools"),
+            SourcePackage("zcu_lab", REPO_ROOT / "zcu_lab"),
         ),
         reload_modules=("zcu_lab.v2", "zcu_lab.definitions"),
         preserved_modules=(
@@ -100,30 +122,27 @@ def _build_measure_catalogs():
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Launch the GUI; invalid project roots exit before GUI or lab assembly."""
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-
-    # Anchor default result/database paths at the repo root (this script lives in
-    # scripts/, so its parent is the repo root) rather than cwd — a .bat launcher
-    # does `cd /d "%~dp0"` into scripts/, which would otherwise scope defaults
-    # under scripts/.
-    project_root = str(PROJECT_ROOT)
 
     from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
     from zcu_tools.gui.runtime import launch_gui_runtime
 
     from zcu_lab import load_alias_presets
-    from zcu_lab.components import params_for
 
     return launch_gui_runtime(
         MeasureGuiBehavior,
-        runtime_options_from_args(args, log_root=PROJECT_ROOT),
+        runtime_options_from_args(args, log_root=REPO_ROOT),
         extra_logging_namespaces=("zcu_lab",),
         registry_factory=_build_measure_catalogs,
-        params_for=params_for,
         alias_presets=load_alias_presets(),
         clean=args.clean,
-        simulate=args.simulate,
-        project_root=project_root,
+        startup_script=select_startup_script(
+            clean=args.clean,
+            script=args.script,
+            default_script=REPO_ROOT / "zcu_lab" / "startup.py",
+        ),
+        project_root=str(args.project_root),
     )
 
 

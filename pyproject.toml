@@ -44,12 +44,6 @@ client = [
   "pyvisa",
   "pyro4",
 ]
-gdrive = [
-  "google-api-python-client",
-  "google-auth-httplib2",
-  "google-auth-oauthlib",
-  "python-dotenv",
-]
 # quantum-metal currently pins numpy<2, so the design stack is available only in
 # the Python 3.12 profile. The Python 3.13 profile uses NumPy 2.x for GUI/runtime.
 design = [
@@ -66,7 +60,7 @@ gui = [
   "markdown-it-py",
   "mdit-py-plugins",
 ]
-all = ["zcu-tools[client,gdrive,design,gui]"]
+all = ["zcu-tools[client,design,gui]"]
 development = ["zcu-tools[all]"]
 
 [dependency-groups]

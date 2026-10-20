@@ -69,7 +69,7 @@ def predictor_ui(qapp, monkeypatch: pytest.MonkeyPatch, request):
         dialog.set_live_mode(enabled=True)
     dialog.show()
     driver = ComponentDriver(dialog)
-    qt_until(lambda: driver.observe("Browse").visible, label="predictor shown")
+    qt_until(lambda: driver.observe("Refresh files").visible, label="predictor shown")
     yield driver
     dialog.close()
     dialog.deleteLater()
@@ -136,8 +136,8 @@ def test_predictor_model_tabs_and_known_fields(predictor_ui, tmp_path: Path) -> 
 def test_predictor_live_controls_stay_locked(predictor_ui, tmp_path: Path) -> None:
     driver = predictor_ui
     assert not driver.observe("EJ").enabled
-    assert not driver.observe("Browse").enabled
-    assert not driver.observe("Load component").enabled
+    assert not driver.observe("Refresh files").enabled
+    assert not driver.observe("Load").enabled
     assert not driver.observe("Add").enabled
     driver.click("EJ")
     driver.choose_option("Model:", "SQUID transmon")

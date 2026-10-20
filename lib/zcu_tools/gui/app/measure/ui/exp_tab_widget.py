@@ -266,8 +266,7 @@ class ExpTabWidget(QWidget):
         self._follow_cfg()
         run_layout.addWidget(self._form_scroll, stretch=1)
 
-        # Run action row: idle Reset 20% / Run 80%; running hides Reset and
-        # lets Stop fill the row. Presentation changes do not alter commands.
+        # Explicit source actions share the idle row; running shows only Stop.
         self._run_action_bar = QFrame()
         self._run_action_bar.setObjectName("runActionBar")
         self._run_action_bar.setFrameShape(QFrame.Shape.StyledPanel)
@@ -275,14 +274,24 @@ class ExpTabWidget(QWidget):
         self._run_action_layout = bar_layout
         bar_layout.setContentsMargins(8, 6, 8, 6)
         bar_layout.setSpacing(6)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setObjectName("refreshSourcesButton")
+        self.refresh_btn.setToolTip(
+            "Recapture sources and revalidate, keeping all input"
+        )
+        self.refresh_btn.setFixedHeight(30)
+        self.refresh_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        bar_layout.addWidget(self.refresh_btn, stretch=15)
         self.reset_btn = QPushButton("Reset")
         self.reset_btn.setObjectName("resetButton")
-        self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
+        self.reset_btn.setToolTip("Recapture sources and restore adapter defaults")
         self.reset_btn.setFixedHeight(30)
         self.reset_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        bar_layout.addWidget(self.reset_btn, stretch=20)
+        bar_layout.addWidget(self.reset_btn, stretch=15)
         self.run_btn = QPushButton("Run")
         self.run_btn.setObjectName("primaryButton")
         self.run_btn.setFixedHeight(30)
@@ -290,7 +299,7 @@ class ExpTabWidget(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.run_btn.setStyleSheet(BLUE_PRIMARY_STYLESHEET)
-        bar_layout.addWidget(self.run_btn, stretch=80)
+        bar_layout.addWidget(self.run_btn, stretch=70)
         run_layout.addWidget(self._run_action_bar)
         self._run_panel = run_panel
         self._left_tabs.addTab(run_panel, "Run")
@@ -701,6 +710,18 @@ class ExpTabWidget(QWidget):
         """
         self._figure_area.show_post_analysis_figures(figures)
 
+    def _on_refresh_sources_clicked(self) -> None:
+        try:
+            self._cfg.refresh_sources()
+        except Exception as exc:
+            # The Qt callback is the presentation boundary; the resource keeps
+            # the previous form on capture/factory failure so users can retry.
+            logger.exception("Source refresh failed for %s", self.tab_id)
+            self._dialog_presenter.critical(self, "Refresh sources failed", str(exc))
+            return
+        assert self._actions is not None, "refresh clicked before bind"
+        self._actions.refresh_interaction(self.tab_id)
+
     def _on_reset_cfg_clicked(self) -> None:
         confirmed = self._dialog_presenter.confirm(
             self,
@@ -759,6 +780,7 @@ class ExpTabWidget(QWidget):
             state,
             self._cfg.env,
             write=self._cfg.write,
+            select=self._cfg.select,
             run_command=self._cfg.run_command,
         )
         editor.setContentsMargins(4, 4, 4, 4)
@@ -806,6 +828,47 @@ class ExpTabWidget(QWidget):
         if self._actions is not None:
             self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
 
+    def _update_run_action_row(
+        self,
+        state: TabInteractionState,
+        capabilities: AdapterCapabilities,
+        *,
+        writable: bool,
+        local_busy: bool,
+    ) -> None:
+        """Project idle source actions or running Stop without changing commands."""
+        # Status-free action row (A5): no readiness text, only button enablement + tooltip.
+        if state.is_running:
+            self.refresh_btn.setVisible(False)
+            self.reset_btn.setVisible(False)
+            self._run_action_layout.setStretch(0, 0)
+            self._run_action_layout.setStretch(1, 0)
+            self._run_action_layout.setStretch(2, 100)
+            self.run_btn.setText("Stop")
+            self.run_btn.setEnabled(True)
+            self.run_btn.setToolTip("Running")
+            self.run_btn.setStyleSheet(_RED_STOP_STYLESHEET)
+            self.run_btn.setObjectName("")
+        else:
+            self.refresh_btn.setVisible(True)
+            self.reset_btn.setVisible(True)
+            self._run_action_layout.setStretch(0, 15)
+            self._run_action_layout.setStretch(1, 15)
+            self._run_action_layout.setStretch(2, 70)
+            self.run_btn.setText("Run")
+            self.run_btn.setObjectName("primaryButton")
+            self._update_run_admission(
+                state, capabilities, writable=writable, local_busy=local_busy
+            )
+            # Apply explicit blue primary style (idle/disabled) — objectName alone has no global stylesheet
+            self.run_btn.setStyleSheet(BLUE_PRIMARY_STYLESHEET)
+            # Force style refresh for objectName/stylesheet change
+            # tolerated: The initialized button has a live widget/application style after setStyleSheet.
+            self.run_btn.style().unpolish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]
+            # tolerated: The initialized button has a live widget/application style after setStyleSheet.
+            self.run_btn.style().polish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]
+            self.run_btn.update()
+
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         """Refresh action, editing, and save gates on the Qt owner thread.
 
@@ -828,38 +891,15 @@ class ExpTabWidget(QWidget):
         capabilities = snapshot.capabilities
         writable = self._writable
         local_busy = state.is_running or state.is_analyzing
-        # Status-free action row (A5): no readiness text, only button enablement + tooltip.
-        if state.is_running:
-            self.reset_btn.setVisible(False)
-            self._run_action_layout.setStretch(0, 0)
-            self._run_action_layout.setStretch(1, 100)
-            self.run_btn.setText("Stop")
-            self.run_btn.setEnabled(True)
-            self.run_btn.setToolTip("Running")
-            self.run_btn.setStyleSheet(_RED_STOP_STYLESHEET)
-            self.run_btn.setObjectName("")
-        else:
-            self.reset_btn.setVisible(True)
-            self._run_action_layout.setStretch(0, 20)
-            self._run_action_layout.setStretch(1, 80)
-            self.run_btn.setText("Run")
-            self.run_btn.setObjectName("primaryButton")
-            self._update_run_admission(
-                state, capabilities, writable=writable, local_busy=local_busy
-            )
-            # Apply explicit blue primary style (idle/disabled) — objectName alone has no global stylesheet
-            self.run_btn.setStyleSheet(BLUE_PRIMARY_STYLESHEET)
-            # Force style refresh for objectName/stylesheet change
-            # tolerated: The initialized button has a live widget/application style after setStyleSheet.
-            self.run_btn.style().unpolish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]
-            # tolerated: The initialized button has a live widget/application style after setStyleSheet.
-            self.run_btn.style().polish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]
-            self.run_btn.update()
+        self._update_run_action_row(
+            state, capabilities, writable=writable, local_busy=local_busy
+        )
 
         idle = writable and not local_busy
         self._editing_enabled = idle
         self._require_editor().set_editing_enabled(enabled=idle)
         self.reset_btn.setEnabled(idle)
+        self.refresh_btn.setEnabled(idle)
 
         # Capability is already enforced by conditional construction; no tab visibility toggling.
         # Branch inner controls only for present panes.
@@ -910,6 +950,7 @@ class ExpTabWidget(QWidget):
             writable
             and not local_busy
             and not state.global_run_active
+            and not state.startup_active
             and state.has_active_context
             and (not capabilities.requires_soc or state.has_soc)
             and cfg_valid
@@ -919,6 +960,8 @@ class ExpTabWidget(QWidget):
             self.run_btn.setToolTip("")
         elif local_busy:
             self.run_btn.setToolTip("Tab is busy")
+        elif state.startup_active:
+            self.run_btn.setToolTip("Startup script is running")
         elif state.global_run_active:
             self.run_btn.setToolTip("Another tab is running")
         elif not state.has_active_context:
@@ -945,6 +988,7 @@ class ExpTabWidget(QWidget):
                 )
             )
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
+        self.refresh_btn.clicked.connect(self._on_refresh_sources_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
         if self._capabilities.load_data:
             self._save_center.bind_load(lambda: actions.load_data(tab_id))

@@ -19,16 +19,16 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment.simulation import SimulationEnvironment
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.experiment.simulation import EnvironmentWarmup, SimulationEnvironment
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
 from zcu_tools.simulate.adc import (
     ChannelReadout,
-    ConditionalReadout,
     ConditionalSums,
     PopulationValidationError,
+    ReadoutCache,
     normalize_populations,
     round_statistics,
     sample_traces,
@@ -40,8 +40,9 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 
+from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
-from .template import plan_template
+from .template import FTFModelFacts, plan_template
 
 
 @dataclass(frozen=True)
@@ -146,8 +147,11 @@ class FTFAcquire:
     def _prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
         acquire = self.request
         owner = self._source
+        facts = owner.model_facts(snapshot)
         plans = tuple(
-            plan_template(owner.settings, snapshot, template)
+            plan_template(
+                owner.settings, snapshot, template, readout=owner.readout, facts=facts
+            )
             for template in acquire.templates
         )
         evolved = owner.engine.evolve(
@@ -162,7 +166,7 @@ class FTFAcquire:
         # with the ADC model's explicit state order.
         readout_basis = Basis(
             dc_model.identity,
-            plans[0].readout.model.state_labels,
+            plans[0].readouts[0].batch.model.state_labels,
             dc_model.eigenvectors,
         )
         populations = batch_populations(evolved.densities, readout_basis, readout_basis)
@@ -175,53 +179,65 @@ class FTFAcquire:
                 ),
             )
             raise
-        response = ConditionalReadout(
-            plans[0].readout.model,
-            rtol=owner.settings.numerics.solver.rtol,
-            atol=owner.settings.numerics.solver.atol,
-        )
-        conditionals = []
-        traces = []
-        content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
-        offset = 0
-        for plan in plans:
-            conditional = response.responses(
-                replace(plan.readout, include_traces=acquire.mode == "decimated")
+        channels = []
+        for channel_index, first in enumerate(plans[0].readouts):
+            conditionals = []
+            traces = []
+            content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
+            offset = 0
+            for plan in plans:
+                readout = plan.readouts[channel_index].batch
+                conditional = owner.readout_cache.responses(
+                    replace(readout, include_traces=acquire.mode == "decimated"),
+                    rtol=owner.settings.numerics.solver.rtol,
+                    atol=owner.settings.numerics.solver.atol,
+                )
+                conditionals.append(conditional)
+                if conditional.traces is not None:
+                    traces.append(conditional.traces)
+                content_index[plan.batch.points] = offset + readout.content_index
+                offset += len(conditional.sums)
+            conditional = ConditionalSums(
+                np.concatenate([item.sums for item in conditionals]),
+                conditionals[0].sample_counts,
+                np.concatenate(traces) if traces else None,
             )
-            conditionals.append(conditional)
-            if conditional.traces is not None:
-                traces.append(conditional.traces)
-            content_index[plan.batch.points] = offset + plan.readout.content_index
-            offset += len(conditional.sums)
-        conditional = ConditionalSums(
-            np.concatenate([item.sums for item in conditionals]),
-            conditionals[0].sample_counts,
-            np.concatenate(traces) if traces else None,
-        )
-        channel = ChannelReadout(
-            owner.settings.readout.adc.ro_ch,
-            conditional,
-            content_index.reshape(acquire.point_dims),
-            plans[0].readout.model.receiver,
-        )
+            channels.append(
+                ChannelReadout(
+                    first.channel,
+                    conditional,
+                    content_index.reshape(acquire.point_dims),
+                    first.batch.model.receiver,
+                )
+            )
         return _Prepared(
-            probabilities.reshape((*acquire.point_dims, state_count)), (channel,)
+            probabilities.reshape((*acquire.point_dims, state_count)), tuple(channels)
         )
 
 
 class FTFSource:
     """Environment coordinator with one persistent Engine and one current acquire.
 
-    settings is a validated immutable FTF resource; devices supplies live DC
-    readbacks to snapshot. engine optionally supplies a configured numerical
+    settings is a validated immutable FTF resource; devices supplies startup DC
+    identities whose live values are read by snapshot, even after session
+    disconnects or registry renames. engine optionally supplies a configured numerical
     executor; this source takes ownership, including close(). Without it, use
-    workers=1 and a 256 MiB prepare cache. private_replay is an optional absolute
-    author-only input archive directory; None performs no replay I/O.
+    workers=1 and a 2 GiB prepare cache. private_replay is an optional absolute
+    author-only input archive directory; None performs no replay I/O. readout
+    optionally supplies detached author capabilities, otherwise adapts settings.
+    Replay rejects overrides that cannot be reconstructed from those settings.
 
     open_acquire drops the previous session's density/conditional arrays. execute
     opens a session only when its request object changes, preserving preparation
     across equal-snapshot rounds. The engine/cache survives across acquires.
-    close invalidates the current session and closes the engine idempotently.
+    At most one complete snapshot's physical model survives across acquires;
+    full settings and numeric revisions also participate in its exact key.
+    readout_cache owns at most 8 MiB of physical ADC solvers and exact conditional
+    contents across acquires, never noisy IQ. Its cumulative builds/hits and
+    resident_bytes are author diagnostics. Full model/receiver/tolerance content
+    selects solvers; physical-facts generation changes clear all readout residents.
+    close releases physical facts/readout residents, invalidates the session and
+    closes the engine.
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
@@ -232,23 +248,56 @@ class FTFSource:
         *,
         engine: Engine | None = None,
         private_replay: Path | None = None,
+        readout: FTFReadoutConfig | None = None,
     ) -> None:
         if private_replay is not None and not private_replay.is_absolute():
             raise ValueError("private replay requires an explicit absolute root")
+        self.readout = readout_configuration(settings) if readout is None else readout
+        if private_replay is not None and self.readout != readout_configuration(
+            settings
+        ):
+            raise ValueError(
+                "private replay requires readout settings to match author configuration"
+            )
         self.settings = settings
         self.devices = devices
+        # The physical source survives session disconnects and registry renames.
+        self._source_devices = devices.get_all_devices()
         self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
         self.private_replay = private_replay
-        self.engine = Engine(1, 256 * 1024**2) if engine is None else engine
+        self.engine = Engine(1, 2 * 1024**3) if engine is None else engine
         self.evaluations: tuple[FTFNumericUse, ...] = ()
         self._session: FTFAcquire | None = None
+        self._facts: FTFModelFacts | None = None
+        self.readout_cache = ReadoutCache(8 * 1024**2)
         self._closed = False
 
+    def model_facts(self, snapshot: EnvironmentSnapshot) -> FTFModelFacts:
+        """Return physical inputs for this full snapshot/settings/numeric key.
+
+        Retains only the latest key, dropping the previous model before building
+        a replacement. No pulse/content/receiver results or evolved densities are
+        cached here. Invalid numeric inputs propagate; a closed source raises.
+        """
+        if self._closed:
+            raise RuntimeError("FTF source is closed")
+        if self._facts is None or not self._facts.matches(self.settings, snapshot):
+            self.readout_cache.clear()
+            self._facts = None
+            self._facts = FTFModelFacts(self.settings, snapshot)
+        return self._facts
+
     def snapshot(self) -> EnvironmentSnapshot:
-        """Read fixed-unit live DC values once, rejecting missing/invalid devices."""
+        """Read bound startup DC values once, rejecting missing/invalid sources.
+
+        Source identities survive GUI registry disconnects/name changes; their
+        explicitly addressed FakeDevices retain the physical values and units.
+        """
         values = []
         for name, source in self.settings.dc_bias.sources.items():
-            info = self.devices.get_info(name)
+            if name not in self._source_devices:
+                raise ValueError(f"dc_bias.sources.{name}: missing startup device")
+            info = self._source_devices[name].get_info()
             if not isinstance(info, FakeDeviceInfo) or info.value_unit != source.unit:
                 raise ValueError(
                     f"dc_bias.sources.{name}.unit: fixed source unit mismatch"
@@ -294,6 +343,8 @@ class FTFSource:
         if self._session is not None:
             self._session.invalidate()
             self._session = None
+        self._facts = None
+        self.readout_cache.clear()
         self._closed = True
         self.engine.close()
 
@@ -303,6 +354,7 @@ def ftf(
     *,
     private_replay: Path | None = None,
     workers: int = 1,
+    warmup: bool | EnvironmentWarmup = False,
 ) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
 
@@ -316,6 +368,12 @@ def ftf(
     acquires, using workers (default 1) as its sole parallel width.
     Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory engine cache. FTFSource.close explicitly clears it.
+    warmup=False keeps direct callers/tests free of background CPU work. True
+    starts process-wide single-flight numeric preparation; the shared production
+    GUI/Notebook entry opts in while setting production workers. An explicit
+    EnvironmentWarmup supplies named preparation items instead. It must not
+    sample or mutate live devices. env.wait_ready() waits before caller timing;
+    acquire also waits automatically. Failure status permits on-demand compiling.
     """
     settings = (
         parse_ftf(configuration)
@@ -325,7 +383,7 @@ def ftf(
     devices = DeviceManager()
     try:
         for name, source in settings.dc_bias.sources.items():
-            device = FakeDevice(fast_mode=True, value_unit=source.unit)
+            device = FakeDevice(address=name, fast_mode=True, value_unit=source.unit)
             devices.register_device(name, device)
             device.setup(
                 FakeDeviceInfo(
@@ -340,31 +398,53 @@ def ftf(
         coordinator = FTFSource(
             settings,
             devices,
-            engine=Engine(workers, 256 * 1024**2),
+            engine=Engine(workers, 2 * 1024**3),
             private_replay=private_replay,
         )
         gens = (
             settings.readout.drive.gen_ch,
             *(s.gen_ch for s in settings.drive_lines.values()),
         )
-        soccfg = make_mock_soccfg(max(gens) + 1, settings.readout.adc.ro_ch + 1)
+        readout = coordinator.readout
+        receivers = tuple(r.ro_ch for r in readout.receivers)
+        if readout.kind == "mux":
+            soccfg = make_mux_mock_soccfg(
+                max(gens) + 1,
+                max(receivers) + 1,
+                gen_ch=settings.readout.drive.gen_ch,
+                ro_chs=receivers,
+            )
+        else:
+            soccfg = make_mock_soccfg(max(gens) + 1, max(receivers) + 1)
+        from .warmup import startup_warmup
+
+        preparation = (
+            startup_warmup()
+            if warmup is True
+            else (warmup if isinstance(warmup, EnvironmentWarmup) else None)
+        )
         binding = SimulationBinding(
             coordinator.snapshot,
             coordinator.execute,
             backend_version=BACKEND_VERSION,
             seed=settings.numerics.seed,
+            wait_ready=None if preparation is None else preparation.wait_ready,
         )
         soc = SimulationSoc(
             soccfg,
             binding,
-            routes=tuple((gen, settings.readout.adc.ro_ch) for gen in gens),
+            routes=tuple((gen, ch) for gen in gens for ch in receivers),
         )
-        return SimulationEnvironment(
+        environment = SimulationEnvironment(
             soc,
             soccfg,
             devices,
             "FTF: independent shots, terminal shared-line readout, synchronous acquire/decimated",
+            preparation,
         )
+        if preparation is not None:
+            preparation.start()
+        return environment
     except Exception as error:
         try:
             devices.close_all_devices()

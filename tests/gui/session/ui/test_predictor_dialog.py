@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QLabel,
-    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -68,14 +67,6 @@ def _button(dialog: PredictorDialog, text: str) -> QPushButton:
     return next(b for b in dialog.findChildren(QPushButton) if b.text() == text)
 
 
-def _path_edit(dialog: PredictorDialog) -> QLineEdit:
-    return next(
-        edit
-        for edit in dialog.findChildren(QLineEdit)
-        if "params.json" in edit.placeholderText()
-    )
-
-
 def _status(dialog: PredictorDialog) -> str:
     label = dialog.findChild(QLabel, "predictor_status")
     assert label is not None
@@ -110,8 +101,7 @@ def test_live_mode_locks_model_and_transition_controls(qapp):
         assert all(
             not widget.isEnabled() for widget in dialog.findChildren(widget_type)
         )
-    assert not _path_edit(dialog).isEnabled()
-    for text in ("Load", "Browse", "Add", "Remove", "Calibrate", "Use"):
+    for text in ("Load", "Refresh files", "Add", "Remove", "Calibrate", "Use"):
         assert not _button(dialog, text).isEnabled()
 
     dialog.set_live_mode(enabled=False)
@@ -130,44 +120,6 @@ def test_live_device_value_updates_read_only_control(qapp):
     assert _value_spin(dialog).value() == 0.25
     assert not _value_spin(dialog).isEnabled()
     assert "0.25" in _status(dialog)
-
-
-def test_predictor_dialog_browse_cancel_is_noop(qapp):
-    dialog = _make_dialog()
-    before_params = dialog.parameters()
-    before_state = dialog.capture_state()
-
-    with patch(
-        "qtpy.QtWidgets.QFileDialog.getOpenFileName",
-        return_value=("", ""),
-    ):
-        _button(dialog, "Browse").click()
-
-    assert dialog.parameters() == before_params
-    assert dialog.capture_state() == before_state
-
-
-def test_predictor_dialog_browse_error_shown_in_status(qapp, tmp_path):
-    dialog = _make_dialog()
-    before = dialog.parameters()
-    missing = tmp_path / "params.json"
-
-    with patch(
-        "qtpy.QtWidgets.QFileDialog.getOpenFileName",
-        return_value=(str(missing), ""),
-    ):
-        _button(dialog, "Browse").click()
-
-    assert str(missing) in _status(dialog)
-    assert dialog.parameters() == before
-
-
-def test_predictor_dialog_typed_path_load_requires_path(qapp):
-    dialog = _make_dialog()
-
-    _button(dialog, "Load").click()
-
-    assert "params.json path" in _status(dialog)
 
 
 def test_predictor_dialog_default_tracked_count(qapp):
@@ -291,7 +243,6 @@ def test_predictor_dialog_capture_restore_state_roundtrip(qapp):
     state = PredictorDialogState(
         tracked_transitions=((2, 3), (3, 5)),
         tab_index=2,
-        params_path_text="/saved/params.json",
     )
 
     source.restore_state(state)
@@ -306,9 +257,7 @@ def test_predictor_dialog_capture_restore_state_roundtrip(qapp):
 
 def test_predictor_dialog_restore_state_allows_empty_transitions(qapp):
     dialog = _make_dialog()
-    state = PredictorDialogState(
-        tracked_transitions=(), tab_index=1, params_path_text=""
-    )
+    state = PredictorDialogState(tracked_transitions=(), tab_index=1)
 
     dialog.restore_state(state)
 
@@ -323,12 +272,11 @@ def test_predictor_dialog_restore_state_skips_invalid_transitions(qapp):
         PredictorDialogState(
             tracked_transitions=((0, 1), (0, 1), (2, 2), (-1, 3), (3, 5)),
             tab_index=99,
-            params_path_text="/p.json",
         )
     )
 
     assert dialog.capture_state() == PredictorDialogState(
-        tracked_transitions=((0, 1), (3, 5)), tab_index=2, params_path_text="/p.json"
+        tracked_transitions=((0, 1), (3, 5)), tab_index=2
     )
     assert _table(dialog).rowCount() == 2
 
@@ -340,7 +288,6 @@ def test_predictor_dialog_state_changed_only_for_persisted_ui_state(qapp):
     tabs = dialog.findChild(QTabWidget)
     assert tabs is not None
 
-    _path_edit(dialog).setText("/typed/params.json")
     tabs.setCurrentIndex(1)
     frm, to = dialog.findChildren(QSpinBox)
     frm.setValue(2)
@@ -349,7 +296,7 @@ def test_predictor_dialog_state_changed_only_for_persisted_ui_state(qapp):
     _table(dialog).selectRow(0)
     _button(dialog, "Remove").click()
 
-    assert changed.call_count == 4
+    assert changed.call_count == 3
 
     changed.reset_mock()
     dialog.set_live_device_value(0.25)
@@ -483,9 +430,7 @@ def test_predictor_params_row_keeps_full_control_height(qapp):
     dialog.show()
     qapp.processEvents()
     try:
-        row = [_path_edit(dialog)] + [
-            _button(dialog, text) for text in ("Load", "Browse", "Load component")
-        ]
+        row = [_button(dialog, text) for text in ("Load", "Refresh files")]
         for widget in row:
             assert widget.height() >= widget.sizeHint().height()
     finally:

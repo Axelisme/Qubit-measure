@@ -88,6 +88,7 @@ class _Writeback:
         experiment_name: str,
         run_id: str | None = None,
         device_snapshot: Mapping[str, JsonObject] | None = None,
+        sample_device_alias: str | None = None,
     ) -> _Draft:
         if self.fail_create:
             raise RuntimeError("draft creation failed")

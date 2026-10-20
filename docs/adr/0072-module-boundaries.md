@@ -43,8 +43,14 @@
 4. 使用者套件：`zcu_lab`
 5. 組合根：使用者入口在 `scripts/`，agent MCP 入口在 `mcp_servers/`
 
+`scripts/` 的每個 Python 檔案都是可獨立執行的使用者入口，不放被其他入口依賴的實作套件。
+可重用實作放在 `lib/zcu_tools/`，依上表定位；rclone 外部資料夾傳輸不屬於量測資料檔格式或實驗容器，
+放在 `utils.result_transfer`，由 `scripts/transfer_results.py` 注入 checkout 的本地結果根目錄。
+`lib` 不反向依賴 `scripts`，由 import-linter C21 保護。
+使用者於 2026-10-19 裁定：「不要把依賴放在scripts, 後者的每個檔案都該被理解為獨立腳本入口，需要用到的內容可以放lib裡」。
+
 - `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
-- tests 不依賴 `zcu_lab`，不 import、不使用其 fake 實驗、不綁定實驗流程或預設值。
+- tests 不依賴 `zcu_lab`，不 import、不綁定實驗流程或預設值。
 
 框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。實驗定義錯誤由 GUI 啟動或載入時回報，不另維護個別實驗測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
 
@@ -69,26 +75,42 @@ Component 的 module slot 指向下游實驗要使用的模組，不用來為每
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
-它保存有序的 1 至 8 個 component 名稱及一般 module／ext。Members 不作去重或 resonator kind gate。
-Group 自己擁有 readout module，重排成員不改 owner。
+它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits` 和一般 module／ext。
+Group 自己擁有 readout module，重排 resonators 不改 owner。
 使用者於 2026-10-16 對專屬 group component 方案裁定：「我選B」。
 
-Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.members`，
-Readout 初值使用 `$mux.module.readout`。Framework 不認得 group/mux 或 members，
+`resonators` 取代原 members，不提供舊欄位相容讀取。Tone i 對應完整 `resonators[i]`。
+選填 qubits 讓沒有 qubit 的 resonator bring-up 繼續使用同一種 group，不從 resonators 反推 qubit。
+使用者於 2026-10-18 裁定：「或是改寫mux_group這個原件的欄位吧，qubits分resonators」。
+對 resonators 必填、qubits 選填並逐項檢查，以及改名不留相容層的細節，裁定：「12都同意」。
+
+Model 驗證名稱、qubits 與 resonators 等長及重複 qubit。
+提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在與 kind，
+並逐項要求 `qubits[i].resonator == resonators[i]`。缺失或 null 同樣拒絕。
+錯誤指名欄位、index 與實際值，在 Run 前拒絕來源。不排序、猜配對或自動修正，不額外拒絕重複 resonator。
+Framework resources、session 與 program 不擁有這些關係。既有表單不隨全域來源編輯刷新。
+
+Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.resonators`，
+Readout 初值使用 `$mux.module.readout`。Framework 不認得 group/mux 或 resonators，
 也不新增 list alias、group registry、RPC 或保存格式。
 使用者於 2026-10-16 對只用 scalar mux alias 的方案裁定：「B」。
 
-完整 readout 的 tones[i] 綁定 members[i]，cfg 不保存 writeback 目標或 group snapshot。
+完整 readout 的 tones[i] 綁定 resonators[i]，cfg 不保存 writeback 目標或 group snapshot。
 active_tones=None 量全部；指定非空、唯一且有效的原始 index list，則依輸入順序投影 subset
-給 program。Program 不知道 MG 或 members。RunRecord 保存完整 readout 與 selection，
+給 program。Program 不知道 MG 或 resonators。RunRecord 保存完整 readout 與 selection，
 資料軸保留原始序號，不重新編號。使用者於 2026-10-16 提議：「一個MG component類，內部屬性綁定到R1, R2，gui中預設指定MG，寫回目標也是從MG的綁定取」，並補充「為了能只讀特定幾個R，可以考慮MG外cfg另外提供mask之類的」。對 active_tones 方案裁定：「可以」。
 
-Core cfg 驗證錯誤沿既有宿主 result／Run 診斷定位 `active_tones` 並拒絕 Run，不保證欄位變紅。
+[[0079]] 採用但尚待實作的 lab 表單契約使用完整具名 tones list 與獨立 participants。元素位置是原始 tone index，name 不可編輯；participants 的順序是執行順序，未參與元素同樣驗證。Lab runtime 邊界一次解析名稱到原始 index，再交給既有 program／raw active_tones 接口。這不把 group snapshot 或 writeback 目的地塞進 cfg，也不讓 framework 解讀 group。具體實驗 cfg 與 recipe 接線由 lab 交付。
+
+Program cfg 驗證錯誤沿既有宿主 result／Run 診斷定位 `active_tones` 並拒絕 Run，不保證欄位變紅。
 FormState 的 preview／describe 不執行 lowering，也不新增 FormEditor 外部錯誤投影。
 此分界沿用 [[0065]]。使用者於 2026-10-16 裁定：「報錯我選B」。
 
-Writeback 由 adapter 經 Run／Load 既有 capture 讀取 `$mux.members`，以完整原始序號對應成功 active tones。
-Members 數不等於完整 N 時只提 module，並顯示原因。
+Writeback 由 adapter 經 Run／Load 既有 capture 讀取 `$mux.resonators`，以完整原始序號對應成功 active tones。
+Onetone 沒有 qubits 時保留手填 readout。缺 capture 或 resonators 數不等於完整 N 時只提 module，並顯示原因。
+有 qubits 時仍須通過上述逐項檢查。新 qubit 實驗另要求 resonators 數等於完整 tone 數，驗證後才投影 active_tones。
+新 qubit 實驗的成功 tone i 寫回 `qubits[i]`，onetone 則仍寫回 `resonators[i]`。
+目的地只從該次 Run／Load capture 解析，沒有 capture 時不得猜目的地或讀目前 alias。
 固定 module target 是 `$mux.readout.readout_rf`，與 group 當前 slot 所指的 key 無關。
 使用者於 2026-10-16 裁定：「應該參考其他使用alias是怎麼寫回的」。
 這些 lab 定義沿第 4 層依賴下層的方向，C15、C16 保護 core 與 framework 邊界。
@@ -127,6 +149,16 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 
 `program` 以 `type`／`style` 對應到執行用的 Module builder，取代 cfg 上的 `build()`。`resources` 的 module library 以核心 schema 作為 DocumentStore 的 model，並實作核心的 Protocol。驗證 context 注入固定 library 與 asset capability。Program 的 ModuleCfgFactory.from_core 集中轉換成 native cfg，透過 assets.path_for 取得絕對路徑。Native arb 只保留 data key 與必填 path，不保留 provider，不查 global DB。
 
+### 分析 app 的過渡 project owner
+
+2026-10-20 裁決：「新增 gui/app/analysis_project/ 共用過渡 owner」。
+
+`gui.app.analysis_project` 集中 fluxdep／dispersive 共用的 ProjectInfo、ProjectDialog、
+ResultScopeManager、project CLI 與 RPC 投影，保留既有 chip／qubit 資料流。
+共用 GUI、session、remote、measure 與 workflows 不依賴這個分析 owner。
+`.importlinter` 的 `shared-no-analysis-project` contract 保護此方向。
+中立的 `nearest_existing` 位於 `gui.widgets.file_dialog`，callers 直接匯入，不經分析 owner re-export。
+
 ### 模組之間的合作
 
 - 需要另一個模組負責的能力，而它沒有提供時，擴充那個模組或停下來問。不在呼叫端重做。
@@ -135,7 +167,7 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 
 ### 可執行投影
 
-`.importlinter` 的 C8–C13、C15、C16 與 C19 投影本篇規則：
+`.importlinter` 的 C8–C13、C15、C16、C19 與 C21 投影本篇規則：
 
 | contract | 類型 | 內容 |
 |---|---|---|
@@ -148,8 +180,9 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 | C15 | `forbidden` | 使用者實驗的 core 不依賴 GUI framework |
 | C16 | `forbidden` | `zcu_tools` 不 import `zcu_lab` |
 | C19 | `forbidden` | `core` 在 repo 內只依賴 `utils` |
+| C21 | `forbidden` | `zcu_tools` 不反向依賴使用者入口 `scripts` |
 
-`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
+`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers`、`scripts` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。舊 cfg_editing → gui.cfg 例外隨兩個模組退休而移除，不是可仿照的依賴。`ignore_imports` 只減不增。
 
@@ -158,12 +191,11 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 | 債務 | 移除方式 | 記帳位置 |
 |---|---|---|
 | `program → resources` | `program` 改依賴 `cfg_model` 的 Protocol | C10 `ignore_imports`：`program.v2.modules*` → `resources.context` |
-| `simulate → resources` | `predict` 改由呼叫端傳入數值 | C10、C12 `ignore_imports`：`simulate.fluxonium.predict` → `resources.qubit_params` |
 | `notebook/analysis` | 通用分析移到 `analysis`；實驗專屬 helpers 已由 `zcu_lab` 附件擁有 | 尚未搬移 |
 | `utils` 的 `shot_classification`、`tomography` | 移到 `analysis` | 尚未搬移 |
 | `analysis/fluxdep/io.py` 直接用 h5py | 檔案讀寫移到 `datafile` | 尚未搬移 |
 
-已清除的債務不再列出：`resources → program`、`experiment/base.py` 的 Labber 格式處理（已改用 `datafile`）、`utils/datasaver/`、`mcp → gui.logging_setup`。
+已清除的債務不再列出：`simulate → resources`、`resources → program`、`experiment/base.py` 的 Labber 格式處理（已改用 `datafile`）、`utils/datasaver/`、`mcp → gui.logging_setup`。
 
 ## 後果
 

@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Callable
 
+from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
@@ -110,6 +111,7 @@ class StartHarness:
             self.bus,
         )
         self.state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+        self.devices = DeviceManager()
         self.services = build_session_services(
             state=self.state,
             bus=self.bus,
@@ -121,7 +123,14 @@ class StartHarness:
             ),
             progress=self.progress,
             bind_assets=ArbWaveformDatabase.info_at,
+            device_registry=self.devices,
         )
+
+    def publish_devices(self, *names: str) -> None:
+        """Publish synthetic startup drivers through the session's public owner."""
+        for name in names:
+            self.devices.register_device(name, FakeDevice(address=name, fast_mode=True))
+        self.services.device.publish_initial_devices()
 
     def complete_segment(self) -> None:
         """Run the deferred worker, pump its progress, then deliver owner terminal."""

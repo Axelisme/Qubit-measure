@@ -45,7 +45,7 @@ def controller(qapp, tmp_path: Path):
             {
                 "ch": 2,
                 "nqz": 1,
-                "freq": Expr("{qubit}.ext.freq"),
+                "freq": Expr("$qubit.ext.freq"),
                 "gain": 0.25,
                 "waveform.style": "const",
                 "waveform.length": 0.4,
@@ -56,7 +56,7 @@ def controller(qapp, tmp_path: Path):
             PulseResetSpec,
             "Reset",
             {
-                "pulse_cfg": Slot("{qubit}.pulses.probe"),
+                "pulse_cfg": Slot("$qubit.pulses.probe"),
             },
             "{qubit}.reset.probe",
         ),

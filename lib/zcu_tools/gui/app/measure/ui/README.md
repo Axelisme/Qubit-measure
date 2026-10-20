@@ -1,9 +1,13 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-19，experiment figure area ownership boundaries
+**Last updated:** 2026-10-20，experiment figure area ownership 與具名非模態視窗
 
 Views project controller snapshots and submit commands through control facets.
-They do not own result data or Save policy. See the [Measure README](../README.md)
+They do not own result data or Save policy. `MainDialogRegistry` retains truly
+non-modal named windows. `MainWindow.set_writable` synchronizes Setup, Devices,
+Inspect and ARB editing on control transfer, including windows already open.
+Error notifications are non-modal; confirmations, choosers and writeback editing
+keep their modal protection. See the [Measure README](../README.md)
 for pane ownership and operation lifecycles.
 
 `ExpTabWidget` owns the left forms and ledgers, commands, subscriptions,

@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from .._envelope import sample_value
 from ..kernel import SegmentTable
 from ..secular import SecularModel
+from ._secular import coherence_decay
 
 
 class Models(NamedTuple):
@@ -84,10 +85,7 @@ def pack_models(models: list[SecularModel]) -> Models:
     for index, model in enumerate(models):
         energies[index] = model.energies_ghz
         rates[index] = model.rates_per_ns
-        outgoing = model.rates_per_ns.sum(axis=0)
-        decay[index] = (
-            outgoing[:, None] + outgoing[None, :]
-        ) / 2 + model.dephasing_per_ns
+        decay[index] = coherence_decay(model)
         basis[index] = model.eigenvectors
         ports[index] = len(model.drives)
         for port, drive in enumerate(model.drives):
@@ -136,9 +134,24 @@ def pack_segments(table: SegmentTable, *, include_flux: bool = False) -> Segment
 @njit(nogil=True, cache=True)
 def hamiltonian(time, context):
     """Return H0 plus drives in row eigenbasis at segment-local time in ns."""
+    size = context.models.energies.shape[1]
+    h = np.empty((size, size), dtype=np.complex128)
+    fill_hamiltonian(time, context, h)
+    return h
+
+
+@njit(nogil=True, cache=True)
+def fill_hamiltonian(time: float, context: Context, h: NDArray[np.complex128]) -> None:
+    """Overwrite row-owned H with H0 plus drives in the secular eigenbasis.
+
+    time is segment-local ns; context selects packed model/row operators.
+    h is a writable complex128 (M,M) workspace matching the model dimension.
+    Tone and scalar accumulation order matches the allocating Hamiltonian.
+    No workspace may be shared between concurrently integrating rows.
+    """
     models, segments, row, model = context
     size = models.energies.shape[1]
-    h = np.zeros((size, size), dtype=np.complex128)
+    h[:] = 0.0
     for index in range(size):
         h[index, index] = models.energies[model, index]
     for tone in range(segments.tones[row]):
@@ -154,5 +167,9 @@ def hamiltonian(time, context):
         )
         z = segments.gain[row, tone] * amplitude * np.exp(1j * phase)
         port = segments.port[row, tone]
-        h += z.real * models.x[model, port] + z.imag * models.y[model, port]
-    return h
+        for target in range(size):
+            for source in range(size):
+                h[target, source] += (
+                    z.real * models.x[model, port, target, source]
+                    + z.imag * models.y[model, port, target, source]
+                )

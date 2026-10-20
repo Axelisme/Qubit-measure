@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     PostAnalyzeRequest,
@@ -97,6 +98,27 @@ def saved_session(session: WritebackSession) -> WritebackSession:
     session.control.use_point(PointUseRequest("saved"))
     session.control.add_component("Q1", "fake/drive/a", {})
     return session
+
+
+def test_draft_detaches_author_element_identity(session: WritebackSession) -> None:
+    identity = ElementIdentity(index=2, name="Q3")
+    proposal = ParameterWriteback(
+        "Q1.ext.gain", "Gain", proposed_value=0.4, element=identity
+    )
+    draft = session.service.create_draft(
+        [proposal],
+        parameters=session.control.read_context(),
+        experiment_name="synthetic",
+    )
+    try:
+        identity["name"] = "later"
+        identity["index"] = 0
+        assert session.service.preview_draft(draft)[0].element == {
+            "index": 2,
+            "name": "Q3",
+        }
+    finally:
+        session.service.teardown_draft(draft)
 
 
 @pytest.mark.parametrize("save_before_accept", [False, True])
@@ -430,13 +452,13 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     draft = session.service.create_draft(
         [
             ParameterWriteback(
-                "driver.ext.readout_cal.g_center",
+                "$driver.ext.readout_cal.g_center",
                 "Ground center",
                 proposed_value=centers[0],
                 stderr=0.01,
             ),
             ParameterWriteback(
-                "driver.ext.readout_cal.e_center",
+                "$driver.ext.readout_cal.e_center",
                 "Excited center",
                 proposed_value=centers[1],
                 stderr=0.02,
@@ -468,7 +490,7 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     assert (
         evaluate_scalar_expr("$driver.ext.readout_cal.g_center", current) == centers[0]
     )
-    assert captured.value("driver.ext.readout_cal.g_center") == {
+    assert captured.value("$driver.ext.readout_cal.g_center") == {
         "__complex__": [0.2, -0.1]
     }
     assert session.control.read_context().target == second
@@ -501,7 +523,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
     draft = session.service.create_draft(
-        [ParameterWriteback("driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
+        [ParameterWriteback("$driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
         parameters=captured,
         run_id="original-run",
         experiment_name="test/writeback",
@@ -517,7 +539,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
         draft, (WritebackEdit("param-1"),), origin=CommandOrigin("mcp")
     )
     assert written == [WritebackWritten("param-1", "parameter", "Q1.rate", 0.6, 0.2)]
-    assert captured.value("driver.rate") == 0.1
+    assert captured.value("$driver.rate") == 0.1
     assert session.control.read_context().target == second
     assert session.control.read_context().document() == selected
     assert not draft.items[0].selected
@@ -608,7 +630,7 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
     )
     draft = session.service.create_draft(
         [
-            ParameterWriteback("driver.rate", "Role", proposed_value=0.2),
+            ParameterWriteback("$driver.rate", "Role", proposed_value=0.2),
             ParameterWriteback("Q1.rate", "Direct", proposed_value=0.3),
         ],
         parameters=captured,

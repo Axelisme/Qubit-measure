@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.io import load_spectrums
 from zcu_tools.analysis.fluxdep.search import ParamBounds
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.services.export import default_export_path
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.resources.qubit_params import (
     DispersiveFit,
     FluxDepFit,

@@ -5,30 +5,20 @@ from numpy.typing import NDArray
 
 from ..kernel import SegmentTable
 from ..secular import ModelSource
-
-
-def envelope_bounds(
-    table: SegmentTable,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return peak magnitude and maximum piecewise-linear slope per envelope."""
-    peaks = np.ones(len(table.envelopes))
-    slopes = np.zeros(len(table.envelopes))
-    for index, envelope in enumerate(table.envelopes):
-        if envelope.kind == "sampled":
-            peaks[index] = np.max(np.abs(envelope.samples))
-            if len(envelope.samples) > 1:
-                slopes[index] = np.max(
-                    np.abs(np.diff(envelope.samples)) / np.diff(envelope.sample_ns)
-                )
-    return peaks, slopes
+from ..workplan import WorkPlan
+from ._workload_facts import drive_bound
 
 
 def drive_bounds(
-    table: SegmentTable, rows: NDArray[np.int64], source: ModelSource
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    source: ModelSource,
+    work_plan: WorkPlan,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Return quadrature spectral norm and largest secular rate per selected row.
 
-    Resolve each level/port once per call. No source initial density is read.
+    Reuse model/level/port scalars across this evolve's guard and build calls.
+    Resolve row mapping once per level/port in this call. No density is read.
     """
     bounds: dict[tuple[tuple[int, ...], int], tuple[float, float]] = {}
     strengths, rates = np.empty(len(rows)), np.empty(len(rows))
@@ -38,20 +28,7 @@ def drive_bounds(
         key = level, port
         if key not in bounds:
             model = source.model(level)
-            drive = model.drives[port]
-            bounds[key] = (
-                float(
-                    max(
-                        np.linalg.norm(drive.in_phase_ghz, 2),
-                        np.linalg.norm(drive.quadrature_ghz, 2),
-                    )
-                ),
-                float(
-                    max(
-                        model.rates_per_ns.sum(axis=0).max(),
-                        model.dephasing_per_ns.max(),
-                    )
-                ),
-            )
+            bound = drive_bound(model, port, work_plan)
+            bounds[key] = bound.strength, bound.rate
         strengths[index], rates[index] = bounds[key]
     return strengths, rates

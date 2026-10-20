@@ -16,7 +16,6 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
@@ -27,6 +26,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
+
+from zcu_lab.v2._support.device import set_flux
 
 
 @dataclass(frozen=True)
@@ -100,7 +101,19 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FluxDepResult:
-        """Run one sweep using this operation's instruments and named plots."""
+        """Map the resonator response versus flux bias and readout frequency.
+
+        At each host-side flux value, apply optional reset and sweep the
+        readout tone frequency on the board. Return flux-device values in
+        cfg.flux_unit, frequencies in MHz, and mean complex IQ shaped
+        (Nflux, Nfreq). The map reveals resonance tracks; line selection and
+        flux calibration are separate analysis steps.
+
+        cfg.flux_dev must name a connected device supporting cfg.flux_unit.
+        acquire_kwargs forwards optional acquisition controls to the builder.
+        """
+
+        # Prepare the device coordinates and the matched generator/ADC grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
         modules = cfg.modules
@@ -118,6 +131,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             },
         )
 
+        # Move to the first bias with progress before collecting the map.
         set_flux(
             context.devices[cfg.flux_dev],
             dev_values[0],
@@ -126,6 +140,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             progress=True,
         )
 
+        # Display magnitude, but retain complex IQ for each flux/frequency point.
         viewer = context.plots.liveplot_2d_with_line(
             "measurement",
             "Flux device value",
@@ -157,6 +172,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                 freq_sweep = cfg.sweep.freq
                 modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
+                # Reset at each frequency, then excite and measure the resonator.
                 _ = (
                     step.prog_builder(soc, soccfg)
                     .add_reset("reset", modules.reset)
@@ -167,6 +183,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                     )
                 )
 
+        # Publish the final map without treating an acquisition error as success.
         signals_buffer.trigger_update(flush=True)
         sched.stop.raise_if_error()
         return FluxDepResult(

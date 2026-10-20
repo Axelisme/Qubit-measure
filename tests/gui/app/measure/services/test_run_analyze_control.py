@@ -407,8 +407,8 @@ def test_interactive_factory_receives_run_source_after_tab_rebinding(
     assert isinstance(request, AnalyzeRequest)
     assert request.parameters is captured
     if request.parameters is not None:
-        assert request.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
-        assert request.parameters.value("source_qubit.rate") == 1.0
+        assert request.parameters.resolve_path("$source_qubit.rate") == "Q1.rate"
+        assert request.parameters.value("$source_qubit.rate") == 1.0
 
 
 def test_interactive_analyze_mounts_render_host_session() -> None:

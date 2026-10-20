@@ -124,6 +124,12 @@ class BaseAdapter(
     # Concrete adapters set the tag from their experiment's persistence spec.
     # See ExpAdapterProtocol.run for the associated RunRecord envelope contract.
     experiment_tag: ClassVar[str | None] = None
+    # Device alias supplying Sample writeback coordinates, e.g. "$bias_source".
+    # Use the ParameterContext alias path syntax; its captured value must be a
+    # nonempty device name present in the Run snapshot with value/value_unit.
+    # None disables only Sample writeback. Alias resolution or missing evidence
+    # omits the sample with a public unavailable reason; no live fallback occurs.
+    sample_device_alias: ClassVar[str | None] = None
     # Most registered adapters use the canonical PersistableExperiment loader;
     # concrete no-load adapters declare ``load_data=False`` explicitly.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)

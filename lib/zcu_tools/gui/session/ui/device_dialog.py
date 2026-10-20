@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
@@ -25,20 +25,21 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.session.device_models import (
     ConnectDeviceRequest,
     DeviceSnapshot,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.devices import device_adapters, get_device_adapter
+from zcu_tools.gui.session.devices.base import DevicePanelProtocol
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
-from zcu_tools.gui.session.services.device import list_supported_device_types
 from zcu_tools.gui.session.state import DeviceStatus
-from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import (
     accent_colour,
@@ -59,204 +60,6 @@ logger = logging.getLogger(__name__)
 _ACTIVITY_MARKER_PREFIX = "● "
 _ACTIVITY_MARKER_ROLE = Qt.ItemDataRole.UserRole + 1
 _ACTIVITY_MARKER_TOOLTIP = "Operating or recently active"
-
-
-@runtime_checkable
-class DevicePanelProtocol(Protocol):
-    """Protocol for device detail panels."""
-
-    def load(self, info: Any) -> None: ...
-    def read(self) -> Any: ...
-    def reset_eval_fields(self) -> None: ...
-    def set_editing_enabled(self, *, enabled: bool) -> None: ...
-
-
-# ---------------------------------------------------------------------------
-# Per-device detail panels
-# ---------------------------------------------------------------------------
-
-
-class _FakeDevicePanel(QWidget):
-    """Info + control panel for FakeDevice."""
-
-    def __init__(
-        self,
-        parameter_provider: Callable[[], ParameterContext | None],
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        form = QFormLayout(self)
-
-        self._type_label = QLabel()
-        make_label_selectable(self._type_label)
-        form.addRow("Type:", self._type_label)
-
-        self._address_label = QLabel()
-        make_label_selectable(self._address_label)
-        form.addRow("Address:", self._address_label)
-
-        self._output_combo = QComboBox()
-        self._output_combo.addItems(["on", "off"])
-        form.addRow("Output:", self._output_combo)
-
-        self._value_field = EvalNumericField(
-            minimum=-1e9, maximum=1e9, decimals=6, parameter_provider=parameter_provider
-        )
-        form.addRow("Value:", self._value_field)
-
-        self._rampstep_field = EvalNumericField(
-            minimum=1e-9, maximum=1e9, decimals=9, parameter_provider=parameter_provider
-        )
-        form.addRow("Ramp step:", self._rampstep_field)
-
-    def load(self, info: Any) -> None:
-        from zcu_tools.device.fake import FakeDeviceInfo
-
-        assert isinstance(info, FakeDeviceInfo)
-        self._type_label.setText(info.type)
-        self._address_label.setText(info.address)
-        self._output_combo.setCurrentText(info.output)
-        self._value_field.load_direct(info.value)
-        self._rampstep_field.load_direct(info.rampstep)
-
-    def reset_eval_fields(self) -> None:
-        """Reset all eval-mode fields to direct mode.
-
-        Called when a different device is loaded into this panel to prevent an
-        expression from persisting into a different device's context (R3).
-        """
-        self._value_field.reset_to_direct()
-        self._rampstep_field.reset_to_direct()
-
-    def set_editing_enabled(self, *, enabled: bool) -> None:
-        self._output_combo.setEnabled(enabled)
-        self._value_field.setEnabled(enabled)
-        self._rampstep_field.setEnabled(enabled)
-
-    def read(self) -> Any:
-        return {
-            "output": self._output_combo.currentText(),
-            "value": self._value_field.read_raw(),
-            "rampstep": self._rampstep_field.read_raw(),
-        }
-
-
-class _YOKOGS200Panel(QWidget):
-    """Info + control panel for YOKOGS200."""
-
-    def __init__(
-        self,
-        parameter_provider: Callable[[], ParameterContext | None],
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        form = QFormLayout(self)
-
-        self._type_label = QLabel()
-        make_label_selectable(self._type_label)
-        form.addRow("Type:", self._type_label)
-
-        self._address_label = QLabel()
-        make_label_selectable(self._address_label)
-        form.addRow("Address:", self._address_label)
-
-        self._mode_label = QLabel()
-        make_label_selectable(self._mode_label)
-        form.addRow("Mode:", self._mode_label)
-
-        self._output_combo = QComboBox()
-        self._output_combo.addItems(["on", "off"])
-        form.addRow("Output:", self._output_combo)
-
-        self._value_field = EvalNumericField(
-            minimum=-1e9, maximum=1e9, decimals=6, parameter_provider=parameter_provider
-        )
-        form.addRow("Value:", self._value_field)
-
-    def load(self, info: Any) -> None:
-        from zcu_tools.device.yoko import YOKOGS200Info
-
-        assert isinstance(info, YOKOGS200Info)
-        self._type_label.setText(info.type)
-        self._address_label.setText(info.address)
-        self._mode_label.setText(info.mode)
-        self._output_combo.setCurrentText(info.output)
-        self._value_field.load_direct(info.value)
-
-    def reset_eval_fields(self) -> None:
-        """Reset all eval-mode fields to direct mode (R3 device-switch guard)."""
-        self._value_field.reset_to_direct()
-
-    def set_editing_enabled(self, *, enabled: bool) -> None:
-        self._output_combo.setEnabled(enabled)
-        self._value_field.setEnabled(enabled)
-
-    def read(self) -> Any:
-        return {
-            "output": self._output_combo.currentText(),
-            "value": self._value_field.read_raw(),
-        }
-
-
-class _SGS100APanel(QWidget):
-    """Info + control panel for SGS100A."""
-
-    def __init__(
-        self,
-        parameter_provider: Callable[[], ParameterContext | None],
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        form = QFormLayout(self)
-
-        self._type_label = QLabel()
-        make_label_selectable(self._type_label)
-        form.addRow("Type:", self._type_label)
-
-        self._address_label = QLabel()
-        make_label_selectable(self._address_label)
-        form.addRow("Address:", self._address_label)
-
-        self._output_combo = QComboBox()
-        self._output_combo.addItems(["on", "off"])
-        form.addRow("Output:", self._output_combo)
-
-        self._freq_field = EvalNumericField(
-            minimum=1e6, maximum=20e9, decimals=3, parameter_provider=parameter_provider
-        )
-        form.addRow("Freq (Hz):", self._freq_field)
-
-        self._power_field = EvalNumericField(
-            minimum=-120, maximum=30, decimals=2, parameter_provider=parameter_provider
-        )
-        form.addRow("Power (dBm):", self._power_field)
-
-    def load(self, info: Any) -> None:
-        from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
-
-        assert isinstance(info, RohdeSchwarzSGS100AInfo)
-        self._type_label.setText(info.type)
-        self._address_label.setText(info.address)
-        self._output_combo.setCurrentText(info.output)
-        self._freq_field.load_direct(info.freq_Hz)
-        self._power_field.load_direct(info.power_dBm)
-
-    def reset_eval_fields(self) -> None:
-        """Reset all eval-mode fields to direct mode (R3 device-switch guard)."""
-        self._freq_field.reset_to_direct()
-        self._power_field.reset_to_direct()
-
-    def set_editing_enabled(self, *, enabled: bool) -> None:
-        self._output_combo.setEnabled(enabled)
-        self._freq_field.setEnabled(enabled)
-        self._power_field.setEnabled(enabled)
-
-    def read(self) -> Any:
-        return {
-            "output": self._output_combo.currentText(),
-            "freq_Hz": self._freq_field.read_raw(),
-            "power_dBm": self._power_field.read_raw(),
-        }
 
 
 class _MemoryDevicePanel(QWidget):
@@ -400,12 +203,26 @@ class DeviceDialog(QDialog):
         drop_row.addStretch()
         left_layout.addLayout(drop_row)
 
+        self._rename_edit = QLineEdit()
+        self._rename_edit.setObjectName("device_rename_name")
+        self._rename_edit.setPlaceholderText("New name")
+        self._rename_btn = QPushButton("Rename")
+        self._rename_btn.clicked.connect(self._on_rename_clicked)
+        rename_row = QHBoxLayout()
+        rename_row.addWidget(self._rename_edit)
+        rename_row.addWidget(self._rename_btn)
+        left_layout.addLayout(rename_row)
+
         # Add device form
         self._add_box = QGroupBox("Register New Device")
         add_form = QFormLayout(self._add_box)
 
         self._type_combo = QComboBox()
-        self._type_combo.addItems(list_supported_device_types())
+        self._type_combo.addItems(
+            adapter.driver_cls.__name__
+            for adapter in device_adapters()
+            if adapter.capabilities.user_connectable
+        )
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         add_form.addRow("Type:", self._type_combo)
 
@@ -437,12 +254,10 @@ class DeviceDialog(QDialog):
         # Panels receive parameter_provider so their EvalNumericField widgets can show
         # a live ghost preview while the user composes an expression.
         self._stack = QStackedWidget()
+        self._device_panels: dict[str, QWidget] = {}
         self._stack.addWidget(QLabel("Select a device to configure."))  # Page 0: Idle
-        self._stack.addWidget(_FakeDevicePanel(self._parameter_provider))  # Page 1
-        self._stack.addWidget(_YOKOGS200Panel(self._parameter_provider))  # Page 2
-        self._stack.addWidget(_SGS100APanel(self._parameter_provider))  # Page 3
         self._memory_panel = _MemoryDevicePanel()
-        self._stack.addWidget(self._memory_panel)  # Page 4: memory-only
+        self._stack.addWidget(self._memory_panel)
         right_layout.addWidget(self._stack, stretch=1)
 
         # Bottom buttons for right side
@@ -562,10 +377,16 @@ class DeviceDialog(QDialog):
                     break
 
         self._on_selection_changed(self._list.currentRow())
-        # refresh default name so it stays unique after any list change
-        dtype = self._type_combo.currentText()
-        existing = {e.name for e in entries}
-        self._name_edit.setText(self._unique_name(dtype.lower(), existing))
+        # Keep the submitted name while connecting or failed so editing only
+        # the address retries that device. Suggest a new name after success.
+        name = self._name_edit.text()
+        if not name or any(
+            entry.name == name and entry.status == DeviceStatus.CONNECTED.value
+            for entry in entries
+        ):
+            dtype = self._type_combo.currentText()
+            existing = {e.name for e in entries}
+            self._name_edit.setText(self._unique_name(dtype.lower(), existing))
 
     def _refresh_activity_markers(self) -> None:
         activity = self._dev.activity_snapshot()
@@ -632,7 +453,7 @@ class DeviceDialog(QDialog):
             self._memory_panel.load_memory(
                 snapshot.type_name, snapshot.name, snapshot.address
             )
-            self._stack.setCurrentIndex(4)
+            self._stack.setCurrentWidget(self._memory_panel)
             self._apply_current_panel_editing_state(snapshot)
             return
 
@@ -640,13 +461,17 @@ class DeviceDialog(QDialog):
         if info is None:
             return
 
-        # Map info.type to stack page
-        page_map = {"FakeDevice": 1, "YOKOGS200": 2, "RohdeSchwarzSGS100A": 3}
-        page = page_map.get(getattr(info, "type", ""), 0)
-        self._stack.setCurrentIndex(page)
-
-        panel = self._stack.currentWidget()
-        if page > 0 and isinstance(panel, DevicePanelProtocol):
+        adapter = get_device_adapter(info.type)
+        if adapter is None:
+            self._stack.setCurrentIndex(0)
+            return
+        panel = self._device_panels.get(info.type)
+        if panel is None:
+            panel = adapter.panel_cls(self._parameter_provider)
+            self._device_panels[info.type] = panel
+            self._stack.addWidget(panel)
+        self._stack.setCurrentWidget(panel)
+        if isinstance(panel, DevicePanelProtocol):
             # R3: reset eval fields when a different device is loaded into this panel
             # so expressions from one device do not persist into another device's context.
             # Same-device repaints (poll tick, status update) preserve the expression.
@@ -695,6 +520,9 @@ class DeviceDialog(QDialog):
             # resource-aware in Phase C).
             self._drop_btn.setEnabled(False)
             self._drop_btn.setText("Drop")
+            self._rename_edit.setEnabled(False)
+            self._rename_btn.setEnabled(False)
+            self._rename_btn.setToolTip("Select a disconnected device to rename.")
             self._refresh_btn.setEnabled(False)
             self._apply_btn.setEnabled(False)
             self._apply_btn.setText("Apply Changes")
@@ -724,6 +552,15 @@ class DeviceDialog(QDialog):
         # different device's setup. So: enable iff the selected device is idle.
         self._drop_btn.setEnabled(not self._read_only and not is_busy)
         self._drop_btn.setText("Forget" if is_memory else "Drop")
+
+        can_rename = not self._read_only and is_memory
+        self._rename_edit.setEnabled(can_rename)
+        self._rename_btn.setEnabled(can_rename)
+        self._rename_btn.setToolTip(
+            "Rename the disconnected device. Aliases are not updated."
+            if is_memory
+            else "Disconnect the device before renaming."
+        )
 
         # --- Refresh button ---
         # refresh reads get_device_info; the read is gate-guarded against the
@@ -796,6 +633,23 @@ class DeviceDialog(QDialog):
         )
         set_foreground(self._add_status, secondary_colour(self))
         self._add_status.setText(f"Connecting {name}...")
+
+    def _on_rename_clicked(self) -> None:
+        if self._read_only:
+            return
+        name = self._selected_device_name()
+        if name is None:
+            return
+        new_name = self._rename_edit.text()
+        try:
+            self._dev.rename_device(name, new_name)
+        except ExpectedError as exc:
+            self._show_error(str(exc))
+            return
+        self._refresh_list(select_name=new_name)
+        self._rename_edit.clear()
+        set_foreground(self._add_status, success_colour(self))
+        self._add_status.setText(f"Device name: {new_name}. Aliases are unchanged.")
 
     def _on_forget_clicked(self) -> None:
         if self._read_only:
@@ -937,6 +791,9 @@ class DeviceDialog(QDialog):
         elif snapshot.status is DeviceStatus.CONNECTED:
             set_foreground(self._add_status, success_colour(self))
             self._add_status.setText(f"Connected {name}.")
+        elif snapshot.status is DeviceStatus.MEMORY_ONLY:
+            set_foreground(self._add_status, secondary_colour(self))
+            self._add_status.setText(f"Disconnected {name}.")
         elif snapshot.status in {
             DeviceStatus.CONNECTING,
             DeviceStatus.DISCONNECTING,

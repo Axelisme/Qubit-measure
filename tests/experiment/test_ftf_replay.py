@@ -14,7 +14,9 @@ from zcu_tools.resources.ftf import parse_ftf
 from tests.resources._ftf_data import ftf_document
 
 
-@pytest.mark.parametrize("backend", ["ftf-direct-v1", "ftf-direct-v2"])
+@pytest.mark.parametrize(
+    "backend", ["ftf-direct-v1", "ftf-direct-v2", "ftf-segment-v6", "ftf-segment-v7"]
+)
 def test_replay_rejects_archive_from_obsolete_numeric_backend(
     tmp_path: Path,
     backend: str,

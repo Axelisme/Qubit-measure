@@ -1,12 +1,18 @@
 """Registered handwritten workflow forms share sweep commands and restored input."""
 
+import json
 from pathlib import Path
 from typing import Annotated
 
 import pytest
 from pydantic import Field
 from zcu_tools.gui.app.workflows.persistence import WorkflowInputSnapshot
-from zcu_tools.gui.form import Display, FormModel, LinRange, SweepInput
+from zcu_tools.gui.form import (
+    Display,
+    FormInput,
+    FormModel,
+)
+from zcu_tools.gui.form_adapter import LinRange, SweepInput
 
 from tests.gui._user_input import ComponentDriver
 
@@ -25,9 +31,19 @@ def coordinate_window(sweep_window):
 @pytest.fixture
 def restored_coordinate_window(sweep_window):
     saved = WorkflowInputSnapshot(
-        plan={
-            "sweep": {"kind": "center", "center": {"expr": "3 + 4"}, "span": -6, "n": 4}
-        }
+        plan=json.loads(
+            FormInput(
+                SweepPlanForm,
+                {
+                    "sweep": {
+                        "kind": "center",
+                        "center": {"expr": "3 + 4"},
+                        "span": -6,
+                        "n": 4,
+                    }
+                },
+            ).to_json()
+        )
     )
     return ComponentDriver(sweep_window(SweepPlanForm, saved))
 
@@ -38,7 +54,7 @@ def test_registered_workflow_sweep_commands_and_prepare(
     driver = coordinate_window
     driver.screenshot(tmp_path / "01-workflow-range.png")
     driver.invoke_context_action(
-        object_name="form.input.sweep.stop", action="Switch to Center / Span"
+        object_name="form.fold.sweep", action="Switch to Center / Span"
     )
     driver.screenshot(tmp_path / "02-workflow-center.png")
     assert driver.observe(object_name="form.input.sweep.span").text == "-6.0"

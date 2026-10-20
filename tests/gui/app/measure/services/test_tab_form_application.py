@@ -15,7 +15,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
-from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
 from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -58,10 +57,14 @@ class FactoryCfg(ConfigBase):
     amount: float = 1.0
 
 
-@pytest.mark.parametrize("failure", ["template", "factory"])
+@pytest.mark.parametrize(
+    ("command", "failure"),
+    [("reset", "template"), ("reset", "factory"), ("refresh_sources", "factory")],
+)
 def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
     qapp: QApplication,
     failure: str,
+    command: str,
 ) -> None:
     assert hasattr(ExpAdapterProtocol, "make_form"), (
         "Missing adapter factory contract for Open/Reset"
@@ -100,25 +103,27 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
         resource.subscribe(
             lambda: notifications.append(resource.preview().values[("amount",)])
         )
+        recapture = resource.reset if command == "reset" else resource.refresh_sources
         broken = True
         with pytest.raises(error, match=match):
-            resource.reset()
+            recapture()
         assert resource.editor_state is state
         assert resource.env is env
         assert resource.input.data == authored
         assert resource.result() == FactoryCfg(amount=7.0)
         assert notifications == []
         broken = False
-        resource.reset()
-        assert resource.result() == FactoryCfg(amount=3.0)
-        assert notifications == [3.0]
+        recapture()
+        expected = 3.0 if command == "reset" else 7.0
+        assert resource.result() == FactoryCfg(amount=expected)
+        assert notifications == [expected]
     finally:
         application.stop()
         for tab_id in tuple(application.ctrl.list_tab_ids()):
             application.ctrl.close_tab(tab_id)
 
 
-def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
+def test_open_edit_run_and_reset_use_public_form_authority(
     qapp: QApplication,
 ) -> None:
     application = Fixture(headless=True)
@@ -155,43 +160,6 @@ def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
         resource.reset()
         assert resource.result() == TraceCfg(amount=5.0)
         resource.write({("amount",): {"expr": "unfinished +"}})
-        saved = application.ctrl.capture_persisted_state()
-        assert saved.session.tabs[0].form_input == {"amount": {"expr": "unfinished +"}}
-        application.ctrl.close_tab(tab_id)
-        with pytest.raises(CfgPreconditionError):
-            resource.result()
-        report = application.ctrl.restore_persisted_state(saved)
-        assert report.restored_tabs == 1
-        restored_id = application.ctrl.list_tab_ids()[0]
-        assert restored_id != tab_id
-        restored = application.ctrl.cfg_resources.lookup(restored_id)
-        assert restored.input.data == {"amount": {"expr": "unfinished +"}}
-    finally:
-        application.stop()
-        for tab_id in tuple(application.ctrl.list_tab_ids()):
-            application.ctrl.close_tab(tab_id)
-
-
-def test_public_restore_reports_dropped_inputs_and_keeps_compatible_values(
-    qapp: QApplication,
-) -> None:
-    application = Fixture(headless=True)
-    application.registry.register("trace", TraceAdapter)
-    try:
-        tab_id = application.ctrl.new_tab("trace")
-        resource = application.ctrl.cfg_resources.lookup(tab_id)
-        resource.write({("amount",): 7.0})
-        saved = application.ctrl.capture_persisted_state()
-        saved.session.tabs[0].form_input["retired"] = 9.0
-        application.ctrl.close_tab(tab_id)
-        report = application.ctrl.restore_persisted_state(saved)
-        assert report.restored_tabs == 1
-        assert report.dropped_inputs[0].adapter_name == "trace"
-        assert report.dropped_inputs[0].paths == (("retired",),)
-        restored = application.ctrl.cfg_resources.lookup(
-            application.ctrl.list_tab_ids()[0]
-        )
-        assert restored.result() == TraceCfg(amount=7.0)
     finally:
         application.stop()
         for tab_id in tuple(application.ctrl.list_tab_ids()):

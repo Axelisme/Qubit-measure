@@ -50,7 +50,9 @@ def test_coordinate_context_menu_preserves_local_drafts(
     driver.enter_text(object_name="form.input.sweep.n", value="unfinished")
     driver.screenshot(tmp_path / "02-sampling-draft.png")
     driver.invoke_context_action(
-        object_name="form.input.sweep.start", action="Switch to Center / Span"
+        object_name="form.fold.sweep",
+        action="Switch to Center / Span",
+        evidence=tmp_path / "03-row-menu.png",
     )
     driver.screenshot(tmp_path / "03-center.png")
     assert driver.observe(object_name="form.input.sweep.center").text == "7.0"
@@ -63,14 +65,14 @@ def test_coordinate_context_menu_preserves_local_drafts(
     driver.screenshot(tmp_path / "04-expression.png")
     driver.enter_text(object_name="form.input.sweep.span", value="broken")
     driver.invoke_context_action(
-        object_name="form.input.sweep.center", action="Switch to Range"
+        object_name="form.fold.sweep", action="Switch to Range"
     )
     driver.screenshot(tmp_path / "05-rejected.png")
     assert driver.observe(object_name="form.input.sweep.span").text == "broken"
     assert driver.observe(object_name="form.input.sweep.center").text == "3 + 4"
     driver.enter_text(object_name="form.input.sweep.span", value="-6")
     driver.invoke_context_action(
-        object_name="form.input.sweep.span", action="Switch to Range"
+        object_name="form.fold.sweep", action="Switch to Range"
     )
     driver.screenshot(tmp_path / "06-range.png")
     assert driver.observe(object_name="form.input.sweep.start").text == "10.0"
@@ -83,7 +85,7 @@ def test_readonly_coordinate_command_cannot_replace_draft(
     driver = readonly_coordinate_editor
     driver.screenshot(tmp_path / "01-readonly-range.png")
     driver.invoke_context_action(
-        object_name="form.input.sweep.start", action="Switch to Center / Span"
+        object_name="form.fold.sweep", action="Switch to Center / Span"
     )
     driver.screenshot(tmp_path / "02-readonly-command.png")
     assert float(driver.observe(object_name="form.input.sweep.start").text) == 10.0

@@ -23,6 +23,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -60,7 +61,6 @@ from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.controller_base import BaseController
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
-from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.ports import OwnerScheduler
 

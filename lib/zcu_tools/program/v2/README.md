@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-19，readout configuration for frequency word decoding
+**Last updated:** 2026-10-20，readout configuration for frequency word decoding；fixed mux profile 與 frontend lowering
 
 ## Testing & Type Checking Conventions
 
@@ -22,7 +22,11 @@ revision. Generators are `axis_signal_gen_v6`, with 32-bit DDS/phase,
 12288 MHz DDS, 384 MHz fabric, 16 envelope samples/clock, max gain word 32766
 and 65536 envelope samples. ADCs are `axis_readout_v2`, with 32-bit DDS,
 2457.6 MHz DDS, 307.2 MHz output and 8192-sample accumulated/decimated buffers.
-Mixers, mux channels and weighted readouts are not offered. These are virtual
+The ordinary profile does not offer mixers, mux channels or weighted readouts.
+`make_mux_mock_soccfg(n_gens, n_readouts, gen_ch=..., ro_chs=...)` separately
+selects one fixed mixmux8 generator and 1..8 unique static PFBv4 output routes.
+Its generator DDS is 1536 MHz and ADC output is 76.8 MHz. Other channels keep
+the ordinary profile. Neither helper permits arbitrary clock/firmware overrides. These are virtual
 compile capabilities, not a claim about an attached board. Clocks, DDS, memory
 limits and channel types are not override parameters. Explicit `(gen_ch, ro_ch)`
 wiring belongs to `SimulationSoc`; actually using an unwired channel fails.

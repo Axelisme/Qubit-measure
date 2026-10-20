@@ -5,7 +5,12 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import (
     KernelCase,
@@ -101,15 +106,21 @@ def test_channels_for_arbitrary_coherent_inputs(
     case = KernelCase(T6Kernel(), source, table, states, budget=1e-6)
     rows = np.arange(count, dtype=np.int64)
     prepared = case.kernel.prepare(
-        case.kernel.prepare_keys(table, rows[:1]),
+        case.kernel.prepare_keys(
+            table, rows[:1], KernelContext(source, case.budget, WorkPlan())
+        ),
         table,
         rows[:1],
-        source,
-        case.budget,
+        KernelContext(source, case.budget, WorkPlan()),
     )
     actual = states.copy()
     case.kernel.apply(
-        prepared, np.zeros(count, dtype=np.int64), table, rows, actual, case.budget
+        prepared,
+        np.zeros(count, dtype=np.int64),
+        table,
+        rows,
+        actual,
+        ApplyContext(case.budget),
     )
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(states)]
@@ -122,14 +133,18 @@ def test_guard_only_accepts_one_constant_tone(kernel_case: KernelCase) -> None:
     rows = np.arange(len(case.states), dtype=np.int64)
     sampled = EnvelopeSpec("sampled", np.ones(2, dtype=complex), np.array([0.0, 20.0]))
     table = replace(case.table, envelopes=(sampled,))
-    assert not case.kernel.guard(table, rows, case.source, case.budget).any()
+    assert not case.kernel.guard(
+        table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).any()
     table = replace(
         case.table,
         tones=np.zeros(len(rows), dtype=np.int64),
         tone_port=np.full((len(rows), 1), -1, dtype=np.int64),
         tone_envelope=np.full((len(rows), 1), -1, dtype=np.int64),
     )
-    assert not case.kernel.guard(table, rows, case.source, case.budget).any()
+    assert not case.kernel.guard(
+        table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).any()
     table = replace(
         case.table,
         tones=np.full(len(rows), 2, dtype=np.int64),
@@ -145,7 +160,9 @@ def test_guard_only_accepts_one_constant_tone(kernel_case: KernelCase) -> None:
             )
         },
     )
-    assert not case.kernel.guard(table, rows, case.source, case.budget).any()
+    assert not case.kernel.guard(
+        table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    ).any()
 
 
 def test_keys_share_phase_but_distinguish_model_and_drive(
@@ -153,7 +170,9 @@ def test_keys_share_phase_but_distinguish_model_and_drive(
 ) -> None:
     case = kernel_case
     rows = np.array([1, 2], dtype=np.int64)
-    keys = case.kernel.prepare_keys(case.table, rows)
+    keys = case.kernel.prepare_keys(
+        case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+    )
     assert keys.dtype.itemsize > 0
     assert keys[0] == keys[1]
     for field in (
@@ -166,7 +185,9 @@ def test_keys_share_phase_but_distinguish_model_and_drive(
         values = getattr(case.table, field).copy()
         values[2] += 1
         changed = replace(case.table, **{field: values})
-        other = case.kernel.prepare_keys(changed, rows)
+        other = case.kernel.prepare_keys(
+            changed, rows, KernelContext(case.source, case.budget, WorkPlan())
+        )
         assert other[0] != other[1], field
     costs = case.kernel.cost(case.table, np.arange(len(case.states), dtype=np.int64))
     assert costs.shape == (len(case.states),)
@@ -184,11 +205,21 @@ def test_periods_and_tail_at_tight_budget(kernel_case: KernelCase) -> None:
     table = replace(case.table, duration_ns=duration)
     budget = 1e-7
     prepared = case.kernel.prepare(
-        case.kernel.prepare_keys(table, row), table, row, case.source, budget
+        case.kernel.prepare_keys(
+            table, row, KernelContext(case.source, budget, WorkPlan())
+        ),
+        table,
+        row,
+        KernelContext(case.source, budget, WorkPlan()),
     )
     actual = case.states[row].copy()
     case.kernel.apply(
-        prepared, np.array([0], dtype=np.int64), table, row, actual, budget
+        prepared,
+        np.array([0], dtype=np.int64),
+        table,
+        row,
+        actual,
+        ApplyContext(budget),
     )
     expected = reference(replace(case, table=table), 1, case.states[1])
     assert_budget(actual[0], expected, budget)

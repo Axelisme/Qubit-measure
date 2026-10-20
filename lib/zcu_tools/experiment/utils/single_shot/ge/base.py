@@ -22,6 +22,14 @@ from zcu_tools.analysis.fitting.singleshot import (
 from zcu_tools.plotting.plots import Plots
 
 
+class GENumericalError(RuntimeError):
+    """GE fitting or classification failed numerically; __cause__ is the original error.
+
+    Callers may isolate this failure per dataset. Plotting errors are not
+    represented by this type.
+    """
+
+
 def rotate(
     I_orig: NDArray[np.float64], Q_orig: NDArray[np.float64], theta: float
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -207,106 +215,127 @@ def fitting_ge_and_plot(
     *,
     options: GEFitOptions | None = None,
     plots: Plots,
+    figure_name: str = "fit",
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
+    """Fit paired raw IQ (2,N) and publish diagnostics under figure_name.
+
+    IQ uses ADC units per sample. Existing histogram/population and quality
+    policy is unchanged by the name, which defaults to fit. plots owns the
+    figure; caller finishes/releases the operation. Empty or conflicting names
+    raise from Plots. Rotation/classification, histogram fitting, population /
+    center validation and fidelity calculations translate ValueError,
+    RuntimeError, ArithmeticError and numpy.linalg.LinAlgError into
+    GENumericalError with the original cause. Plotting is outside that boundary;
+    its errors propagate unchanged. The input must have paired rows (2,N).
+    """
     options = GEFitOptions() if options is None else options
-    Ig, Ie = signals.real
-    Qg, Qe = signals.imag
+    (Ig, Ie), (Qg, Qe) = signals.real, signals.imag
 
-    # Calculate the angle of rotation
-    out_dict = classify_func(Ig, Qg, Ie, Qe)
-    theta = out_dict["theta"]
-    theta = (theta + np.pi / 2) % np.pi - np.pi / 2
+    try:
+        # Calculate the angle of rotation
+        theta = classify_func(Ig, Qg, Ie, Qe)["theta"]
+        theta = (theta + np.pi / 2) % np.pi - np.pi / 2
 
-    # Rotate the IQ data
-    Ig, Qg = rotate(Ig, Qg, theta)
-    Ie, Qe = rotate(Ie, Qe, theta)
+        # Rotate the IQ data
+        (Ig, Qg), (Ie, Qe) = rotate(Ig, Qg, theta), rotate(Ie, Qe, theta)
 
-    g_pdfs, e_pdfs, bins = hist(Ig, Ie, options.numbins)
+        g_pdfs, e_pdfs, bins = hist(Ig, Ie, options.numbins)
 
-    xs = 0.5 * (bins[:-1] + bins[1:])
+        xs = 0.5 * (bins[:-1] + bins[1:])
 
-    ge_params, joint_covariance = fit_singleshot(
-        xs,
-        g_pdfs,
-        e_pdfs,
-        fixedparams=[
-            None,
-            None,
-            None,
-            options.init_p0_g,
-            options.init_p0_e,
-            options.avg_p,
-            options.length_ratio,
-        ],
-    )
-    sg, se, s, joint_p0_gg, joint_p0_ge, p_avg, length_ratio = ge_params
-    (p0_gg, p0_ge, l_ratio_g), ground_covariance = fit_singleshot_p0(
-        xs,
-        g_pdfs,
-        joint_p0_gg,
-        joint_p0_ge,
-        ge_params=ge_params,
-        fit_length_ratio=not options.align_t1,
-    )
-    (p0_eg, p0_ee, l_ratio_e), excited_covariance = fit_singleshot_p0(
-        xs,
-        e_pdfs,
-        joint_p0_ge,
-        joint_p0_gg,
-        ge_params=ge_params,
-        fit_length_ratio=not options.align_t1,
-    )
-    populations = np.array([[p0_gg, p0_ge], [p0_eg, p0_ee]])
-    if (
-        not np.isfinite(populations).all()
-        or np.any(populations < 0)
-        or np.any(populations.sum(axis=1) > 1.0 + 1e-12)
-    ):
-        raise ValueError(
-            "GE fit returned invalid populations; calibration is unavailable"
-        )
-
-    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_gg, p0_ge, p_avg, l_ratio_g)
-    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_eg, p0_ee, p_avg, l_ratio_e)
-    # Joint parameters describe the original paired histogram model, not the
-    # independently refined populations used for the final plotted PDFs.
-    joint_g_pdfs = calc_population_pdf(xs, *ge_params)
-    joint_e_pdfs = calc_population_pdf(
-        xs, sg, se, s, joint_p0_ge, joint_p0_gg, p_avg, length_ratio
-    )
-    joint_names = ("sg", "se", "s", "p0_g", "p0_e", "p_avg", "length_ratio")
-    fit_quality = {
-        "joint": compute_fit_quality(
-            np.concatenate([g_pdfs, e_pdfs]),
-            np.concatenate([joint_g_pdfs, joint_e_pdfs]),
-            dict(zip(joint_names, ge_params, strict=True)),
-            joint_covariance,
-        ),
-        "ground": compute_fit_quality(
+        ge_params, joint_covariance = fit_singleshot(
+            xs,
             g_pdfs,
-            fit_g_pdfs,
-            {"p0_g": p0_gg, "p0_e": p0_ge, "length_ratio": l_ratio_g},
-            ground_covariance,
-        ),
-        "excited": compute_fit_quality(
             e_pdfs,
-            fit_e_pdfs,
-            {"p0_g": p0_eg, "p0_e": p0_ee, "length_ratio": l_ratio_e},
-            excited_covariance,
-        ),
-    }
-    rotated_g_center = _estimate_rotated_center(Ig, Qg, sg, s)
-    rotated_e_center = _estimate_rotated_center(Ie, Qe, se, s)
-
-    if (
-        not np.isfinite([rotated_g_center, rotated_e_center, s]).all()
-        or s <= 0
-        or np.isclose(rotated_g_center, rotated_e_center)
-    ):
-        raise ValueError(
-            "GE fit returned invalid centers or width; calibration is unavailable"
+            fixedparams=[
+                None,
+                None,
+                None,
+                options.init_p0_g,
+                options.init_p0_e,
+                options.avg_p,
+                options.length_ratio,
+            ],
         )
-    fig, raw_axes = plots.subplots("fit", nrows=2, ncols=2, figsize=(8, 8))
+        sg, se, s, joint_p0_gg, joint_p0_ge, p_avg, length_ratio = ge_params
+        (p0_gg, p0_ge, l_ratio_g), ground_covariance = fit_singleshot_p0(
+            xs,
+            g_pdfs,
+            joint_p0_gg,
+            joint_p0_ge,
+            ge_params=ge_params,
+            fit_length_ratio=not options.align_t1,
+        )
+        (p0_eg, p0_ee, l_ratio_e), excited_covariance = fit_singleshot_p0(
+            xs,
+            e_pdfs,
+            joint_p0_ge,
+            joint_p0_gg,
+            ge_params=ge_params,
+            fit_length_ratio=not options.align_t1,
+        )
+        populations = np.array([[p0_gg, p0_ge], [p0_eg, p0_ee]])
+        if (
+            not np.isfinite(populations).all()
+            or np.any(populations < 0)
+            or np.any(populations.sum(axis=1) > 1.0 + 1e-12)
+        ):
+            raise ValueError(
+                "GE fit returned invalid populations; calibration is unavailable"
+            )
+
+        fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_gg, p0_ge, p_avg, l_ratio_g)
+        fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_eg, p0_ee, p_avg, l_ratio_e)
+        # Joint parameters describe the original paired histogram model, not the
+        # independently refined populations used for the final plotted PDFs.
+        joint_g_pdfs = calc_population_pdf(xs, *ge_params)
+        joint_e_pdfs = calc_population_pdf(
+            xs, sg, se, s, joint_p0_ge, joint_p0_gg, p_avg, length_ratio
+        )
+        fit_quality = {
+            "joint": compute_fit_quality(
+                np.concatenate([g_pdfs, e_pdfs]),
+                np.concatenate([joint_g_pdfs, joint_e_pdfs]),
+                dict(
+                    zip(
+                        ("sg", "se", "s", "p0_g", "p0_e", "p_avg", "length_ratio"),
+                        ge_params,
+                        strict=True,
+                    )
+                ),
+                joint_covariance,
+            ),
+            "ground": compute_fit_quality(
+                g_pdfs,
+                fit_g_pdfs,
+                {"p0_g": p0_gg, "p0_e": p0_ge, "length_ratio": l_ratio_g},
+                ground_covariance,
+            ),
+            "excited": compute_fit_quality(
+                e_pdfs,
+                fit_e_pdfs,
+                {"p0_g": p0_eg, "p0_e": p0_ee, "length_ratio": l_ratio_e},
+                excited_covariance,
+            ),
+        }
+        rotated_g_center = _estimate_rotated_center(Ig, Qg, sg, s)
+        rotated_e_center = _estimate_rotated_center(Ie, Qe, se, s)
+
+        if (
+            not np.isfinite([rotated_g_center, rotated_e_center, s]).all()
+            or s <= 0
+            or np.isclose(rotated_g_center, rotated_e_center)
+        ):
+            raise ValueError(
+                "GE fit returned invalid centers or width; calibration is unavailable"
+            )
+        fid, threshold = calc_fidelity(g_pdfs, e_pdfs, bins)
+        ideal_fid = calc_ideal_fidelity(sg, se, s)
+
+    except (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError) as exc:
+        raise GENumericalError(str(exc)) from exc
+
+    fig, raw_axes = plots.subplots(figure_name, nrows=2, ncols=2, figsize=(8, 8))
     # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
     axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
     scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
@@ -352,9 +381,6 @@ def fitting_ge_and_plot(
     axs[1][0].plot(xs, fit_g_pdfs, "b-", label="g")
     axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
 
-    fid, threshold = calc_fidelity(g_pdfs, e_pdfs, bins)
-    ideal_fid = calc_ideal_fidelity(sg, se, s)
-
     axs[1][0].set_title(
         r"${F}_{ge}: $" + f"{fid:.1%} / {1e2 * ideal_fid:.3g}%", fontsize=14
     )
@@ -370,12 +396,7 @@ def fitting_ge_and_plot(
 
     return (
         fid,
-        np.array(
-            [
-                [p0_gg, p0_ge],
-                [p0_eg, p0_ee],
-            ]
-        ),
+        populations,
         GE_FitResult(
             ge_params=ge_params,
             p0_gg=p0_gg,

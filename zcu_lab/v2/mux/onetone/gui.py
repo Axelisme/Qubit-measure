@@ -74,14 +74,14 @@ class ToneFitFailure:
 class MuxOnetoneAnalyzeResult(AnalyzeResultBase):
     """Active outcomes in column order plus bindings from the analysis capture.
 
-    members contains the complete N bindings, or None when absent/mismatched.
-    members_diagnostic explains why parameter proposals are unavailable. It does
+    resonators contains the complete N bindings, or None when absent/mismatched.
+    resonators_diagnostic explains why parameter proposals are unavailable. It does
     not suppress successful module proposals. No live context is retained.
     """
 
     outcomes: tuple[ToneFitSuccess | ToneFitFailure, ...]
-    members: tuple[str, ...] | None
-    members_diagnostic: str | None
+    resonators: tuple[str, ...] | None
+    resonators_diagnostic: str | None
 
     def to_summary_dict(self) -> dict[str, object]:
         """Expose each original tone's scalars/quality or failure, plus bindings."""
@@ -102,7 +102,7 @@ class MuxOnetoneAnalyzeResult(AnalyzeResultBase):
                     edelay_persistable=outcome.edelay_persistable,
                 )
             tones.append(row)
-        return {"tones": tones, "members_diagnostic": self.members_diagnostic}
+        return {"tones": tones, "resonators_diagnostic": self.resonators_diagnostic}
 
 
 def _validate_source(source: MuxOnetoneRunResult) -> MuxOnetoneCfg:
@@ -160,30 +160,32 @@ def _validate_options(params: OneToneFreqAnalyzeParams) -> None:
             raise ValueError("max_edelay_search_radius must be positive and finite")
 
 
-def _members(
+def _resonators(
     parameters: ParameterContext | None, count: int
 ) -> tuple[tuple[str, ...] | None, str | None]:
     if parameters is None:
-        return None, "No Run/Load parameter capture; member parameters unavailable"
-    lookup = parameters.lookup("$mux.members")
+        return None, "No Run/Load parameter capture; resonator parameters unavailable"
+    lookup = parameters.lookup("$mux.resonators")
     raw = lookup.value
     if not lookup.present or raw is None:
         raise ValueError(
-            "$mux.members is missing; expected an ordered list of component names"
+            "$mux.resonators is missing; expected an ordered list of component names"
         )
     if not isinstance(raw, list):
-        raise ValueError("$mux.members must be an ordered list of component names")
-    members: list[str] = []
-    for member in raw:
-        if not isinstance(member, str):
-            raise ValueError("$mux.members must be an ordered list of component names")
-        members.append(member)
+        raise ValueError("$mux.resonators must be an ordered list of component names")
+    resonators: list[str] = []
+    for resonator in raw:
+        if not isinstance(resonator, str):
+            raise ValueError(
+                "$mux.resonators must be an ordered list of component names"
+            )
+        resonators.append(resonator)
     if len(raw) != count:
         return (
             None,
-            f"$mux.members length {len(raw)} does not match complete readout tone count N={count}; parameter proposals omitted",
+            f"$mux.resonators length {len(raw)} does not match complete readout tone count N={count}; parameter proposals omitted",
         )
-    return tuple(members), None
+    return tuple(resonators), None
 
 
 def _fit_tone(
@@ -210,7 +212,7 @@ def _fit_tone(
             seed, delay_source = finite_real(params.manual_edelay), "manual"
         elif params.edelay_mode == "calibrated" and prior is None:
             raise ValueError(
-                "calibrated edelay mode requires a finite route-matched member.ext.edelay prior"
+                "calibrated edelay mode requires a finite route-matched resonator.ext.edelay prior"
             )
         fit = fit_resonance(
             freqs,
@@ -255,7 +257,7 @@ class MuxOnetoneAdapter(
         OneToneFreqAnalyzeParams,
     ]
 ):
-    """Run, fit and propose updates for active columns of a complete mux readout."""
+    """Scan selected resonators, fit their spectra, and propose frequency updates."""
 
     experiment_tag: ClassVar[str | None] = MuxOnetoneExp.persistence_tag()
     exp_cls = MuxOnetoneExp
@@ -266,16 +268,17 @@ class MuxOnetoneAdapter(
 
     @staticmethod
     def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
-        """Build the mux draft from the fixed Open/Reset capture."""
+        """Start from the mux group's readout, or an editable blank readout."""
         return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: MuxOnetoneCfg, *, context: RunContext
     ) -> MuxOnetoneRunResult:
-        """Acquire active columns; retain complete cfg and partial data.
+        """Measure selected tones and keep the full base readout with their spectra.
 
-        req is unused. Context owns hardware/plots/cancellation; caller checks its
-        cancel signal for acquisition failure. Configuration errors propagate.
+        cfg supplies the tones and offset sweep; context supplies hardware, plots
+        and cancellation. req is unused. Unmeasured points remain NaN; check the
+        context cancel signal for acquisition errors. Invalid settings raise.
         """
         del req
         return RunRecord(cfg=cfg, result=MuxOnetoneExp().run(cfg, context=context))
@@ -286,43 +289,52 @@ class MuxOnetoneAdapter(
         *,
         plots: Plots,
     ) -> MuxOnetoneAnalyzeResult:
-        """Fit active (Ndf,K) IQ at saved base frequencies + nominal MHz dfs.
+        """Fit each selected resonator at its saved base frequency plus MHz offset.
 
-        Reject absent cfg, inconsistent coordinates/shapes and shared options.
-        Numerical/prior failures produce per-tone diagnostics and fit_i figures;
-        source/alias errors propagate. Only the supplied Run/Load capture supplies
-        full members and route-qualified delay priors. No form or global reads.
+        req supplies measured IQ, the saved cfg, common fit options and captured
+        resonator calibrations. plots receives a fit_i figure per original tone i.
+        Return frequency, linewidth, phase and electrical delay, or a failure
+        reason for each tone. Missing cfg, inconsistent data, invalid options or
+        source errors raise; one tone's numerical or delay-prior failure does not
+        prevent fitting the others.
         """
+        # 1. Match measured columns to the saved tones and captured resonators.
         cfg = _validate_source(req.run_result)
         params = req.analyze_params
         _validate_options(params)
-        members, diagnostic = _members(req.parameters, len(cfg.modules.readout.tones))
+        resonators, diagnostic = _resonators(
+            req.parameters, len(cfg.modules.readout.tones)
+        )
+
+        # 2. Fit independently, using only a delay prior for the same generator/ADC.
         outcomes: list[ToneFitSuccess | ToneFitFailure] = []
         for column, index in enumerate(req.run_result.result.tone_indices):
             prior = None
             if (
-                members is not None
+                resonators is not None
                 and req.parameters is not None
                 and params.edelay_mode != "manual"
             ):
                 tone = cfg.modules.readout.tones[index]
-                raw = req.parameters.lookup(f"{members[index]}.ext.edelay")
+                raw = req.parameters.lookup(f"{resonators[index]}.ext.edelay")
                 if raw.present:
                     prior = route_matched_delay(
                         raw.value, (cfg.modules.readout.gen_ch, tone.ro_ch)
                     )
             outcomes.append(_fit_tone(req.run_result, params, column, prior, plots))
-        return MuxOnetoneAnalyzeResult(tuple(outcomes), members, diagnostic)
+        return MuxOnetoneAnalyzeResult(tuple(outcomes), resonators, diagnostic)
 
     def get_writeback_items(
         self, req: WritebackRequest[MuxOnetoneRunResult, MuxOnetoneAnalyzeResult]
     ) -> Sequence[WritebackItem]:
-        """Propose full module and independent successful member scalar rows.
+        """Propose fitted frequencies without changing inactive or failed tones.
 
-        Preserve inactive/failed tones; omit module when every fit failed. Fixed
-        $mux module target is resolved by the existing draft capture, not by this
-        adapter. Member destinations come only from analyze's captured full list.
+        req supplies the saved run and its analysis. Return a full readout module
+        for $mux.readout.readout_rf and separate resonator calibration rows when
+        bindings are available. All-failed fits return no proposals; missing or
+        inconsistent saved cfg raises. Proposals do not write until Apply.
         """
+        # 1. Only successful fits can propose changes.
         cfg = _validate_source(req.run_result)
         answer = req.analyze_result
         successes = [
@@ -332,6 +344,8 @@ class MuxOnetoneAdapter(
         ]
         if not successes:
             return []
+
+        # 2. Replace successful frequencies in the complete readout, not a subset.
         readout = cfg.modules.readout
         tones = list(readout.tones)
         changes: list[str] = []
@@ -357,9 +371,11 @@ class MuxOnetoneAdapter(
                 role_id="readout",
             )
         ]
-        if answer.members is not None:
+
+        # 3. Map scalar calibrations by original tone index to captured resonators.
+        if answer.resonators is not None:
             for outcome in successes:
-                member, fit = answer.members[outcome.index], outcome.fit
+                resonator, fit = answer.resonators[outcome.index], outcome.fit
                 for suffix, description, value in (
                     ("freq", "Resonator frequency (MHz)", fit.freq),
                     ("kappa", "Resonator linewidth FWHM (MHz)", fit.fwhm),
@@ -367,7 +383,7 @@ class MuxOnetoneAdapter(
                 ):
                     items.append(
                         ParameterWriteback(
-                            target_name=f"{member}.{suffix}",
+                            target_name=f"{resonator}.{suffix}",
                             description=description,
                             proposed_value=value,
                         )
@@ -375,7 +391,7 @@ class MuxOnetoneAdapter(
                 if outcome.edelay_persistable:
                     items.append(
                         ParameterWriteback(
-                            target_name=f"{member}.ext.edelay",
+                            target_name=f"{resonator}.ext.edelay",
                             description="Route-qualified resonator electrical-delay calibration",
                             proposed_value={
                                 "edelay": fit.edelay,

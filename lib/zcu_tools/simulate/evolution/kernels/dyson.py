@@ -7,18 +7,10 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
-from ..kernel import Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularModel
 from ._dyson_bound import accepts_population_bound
-from ._dyson_paths import build_shared_paths, contractible_modes
-from ._weak import (
+from ._dyson_model import (
     commutator,
     constant_mask,
     drive_ratios,
@@ -28,6 +20,7 @@ from ._weak import (
     model_keys,
     parameters,
 )
+from ._dyson_paths import build_shared_paths, contractible_modes
 
 
 @njit(nogil=True, cache=True)
@@ -568,11 +561,19 @@ class _Entry:
     vectors: NDArray[np.complex128]
     inverse: NDArray[np.complex128]
     couplings: tuple[NDArray[np.complex128], ...]
+    conjugates: NDArray[np.int64]
 
     @property
     def nbytes(self) -> int:
         return sum(
-            v.nbytes for v in (self.values, self.vectors, self.inverse, *self.couplings)
+            v.nbytes
+            for v in (
+                self.values,
+                self.vectors,
+                self.inverse,
+                *self.couplings,
+                self.conjugates,
+            )
         )
 
 
@@ -614,13 +615,19 @@ class _BoundInput:
 
 
 @njit(nogil=True, cache=True)
-def _restore_bound_modes(
-    modes: NDArray[np.complex128], vectors: NDArray[np.complex128]
+def _transform_modes(
+    modes: NDArray[np.complex128],
+    transform: NDArray[np.complex128],
+    size: int,
 ) -> NDArray[np.complex128]:
-    """Use fixed-size matrix-vector products independent of worker batch size."""
-    result = np.empty_like(modes)
+    """Transform populations rowwise; secular coherence coordinates are unchanged."""
+    stride = size + 1
+    population_block = np.ascontiguousarray(transform[::stride, ::stride])
+    result = modes.copy()
     for row in range(len(modes)):
-        result[row] = vectors @ modes[row]
+        populations = np.ascontiguousarray(modes[row, ::stride])
+        # Fixed-size products keep rounding independent of worker batch size.
+        result[row, ::stride] = population_block @ populations
     return result
 
 
@@ -643,7 +650,7 @@ def _advance_bound(
             shared=True,
         ),
     )
-    return _restore_bound_modes(modes, entry.vectors).reshape(shape)
+    return _transform_modes(modes, entry.vectors, shape[-1]).reshape(shape)
 
 
 def _prepare_model(model: SecularModel) -> _Entry:
@@ -658,9 +665,14 @@ def _prepare_model(model: SecularModel) -> _Entry:
         q, rotation = np.linalg.eig(free[np.ix_(populations, populations)])
         values[populations] = q
         vectors[np.ix_(populations, populations)] = rotation
-        if np.linalg.cond(vectors) > 1e10:
+        # Normalized eigenvector columns imply sigma_min <= 1 <= sigma_max,
+        # so the coherence identity blocks cannot change this condition number.
+        if np.linalg.cond(rotation) > 1e10:
             raise RuntimeError("Dyson population modes are ill-conditioned")
-        inverse = np.linalg.inv(vectors).astype(np.complex128)
+        inverse = np.eye(size**2, dtype=np.complex128)
+        inverse[np.ix_(populations, populations)] = np.linalg.inv(
+            rotation.astype(np.complex128)
+        )
     except np.linalg.LinAlgError as error:
         raise RuntimeError("Dyson modal decomposition failed") from error
     couplings = []
@@ -676,7 +688,15 @@ def _prepare_model(model: SecularModel) -> _Entry:
             ]
         )
         couplings.append(freeze(pair))
-    return _Entry(freeze(values), freeze(vectors), freeze(inverse), tuple(couplings))
+    # Adjoint each column of W, then express it in modal coordinates. Unlike
+    # nearest-eigenvalue matching, this handles repeated coherence roots and
+    # complex-conjugate population eigenmodes of a real rate generator.
+    adjoints = vectors.reshape(size, size, -1).conj().swapaxes(0, 1)
+    conjugates = np.argmax(abs(inverse @ adjoints.reshape(size**2, -1)), axis=0)
+    conjugates.setflags(write=False)
+    return _Entry(
+        freeze(values), freeze(vectors), freeze(inverse), tuple(couplings), conjugates
+    )
 
 
 def _advance(
@@ -686,12 +706,16 @@ def _advance(
     states: NDArray[np.complex128],
     budget: float,
 ) -> NDArray[np.complex128]:
-    modes = states.reshape(len(states), -1) @ entry.inverse.T
+    modes = _transform_modes(
+        states.reshape(len(states), -1), entry.inverse, states.shape[-1]
+    )
     pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
     evolved = evaluate_dyson(
         params, entry.values, modes, entry.couplings[port], pruning
     )
-    return (evolved @ entry.vectors.T).reshape(states.shape)
+    return _transform_modes(evolved, entry.vectors, states.shape[-1]).reshape(
+        states.shape
+    )
 
 
 def _free_populations(
@@ -733,15 +757,6 @@ class DysonKernel:
     keeps its existing per-batch pruning policy.
     """
 
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("dyson", "legacy-v1"),
-        eligibility=Eligibility(1, 1, "constant"),
-        guard=GuardDeclaration(("no-build", "certified-input")),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("dyson/legacy-v1/serial"),
-        fallback="legacy-order",
-    )
-
     name = "dyson"
     guard_builds = False
 
@@ -749,8 +764,7 @@ class DysonKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Classify rows using r, r2 and B2+budget/8, without path evaluation.
 
@@ -763,6 +777,7 @@ class DysonKernel:
         not rigorous multilevel error guarantees. Returns a row-aligned mask;
         invalid budgets raise ValueError.
         """
+        source, budget = context.source, context.budget
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
         accepted = constant_mask(table, rows)
@@ -789,9 +804,10 @@ class DysonKernel:
         return accepted
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Model-level lookup keys, namespaced by the engine's DC model identity."""
+        del context
         return model_keys(table, rows)
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
@@ -803,10 +819,10 @@ class DysonKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> _Prepared:
         """Factor one secular free generator per representative model row."""
+        source, budget = context.source, context.budget
         if len(keys) != len(rows) or not np.isfinite(budget) or budget <= 0:
             raise ValueError(
                 "Dyson requires aligned representative rows and positive budget"
@@ -818,14 +834,24 @@ class DysonKernel:
             )
         )
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -835,7 +861,7 @@ class DysonKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> _BoundInput | None:
         """Contract one key/port's common source or prefix input in its row basis.
 
@@ -846,6 +872,7 @@ class DysonKernel:
         reserved margin. Workers retain all remaining paths in original order;
         they do not spend any further per-row pruning allowance.
         """
+        budget = context.budget
         if not isinstance(prepared, _Prepared):
             raise ValueError("Dyson requires model-only prepared data for binding")
         if not np.isfinite(budget) or budget <= 0:
@@ -857,14 +884,7 @@ class DysonKernel:
         modes = source_initial.ravel() @ entry.inverse.T
         pruning = np.r_[np.max(abs(entry.vectors), axis=0), budget]
         params = parameters(table, rows)
-        size = len(source_initial)
-        # Adjoint each column of W, then express it in modal coordinates. Unlike
-        # nearest-eigenvalue matching, this handles repeated coherence roots and
-        # complex-conjugate population eigenmodes of a real rate generator.
-        adjoints = entry.vectors.reshape(size, size, -1).conj().swapaxes(0, 1)
-        conjugates = np.argmax(
-            abs(entry.inverse @ adjoints.reshape(size**2, -1)), axis=0
-        )
+        conjugates = entry.conjugates
         path_modes, spent = modes, 0.0
         if np.any(source_initial != np.diag(np.diag(source_initial))):
             # Reserve half the omission budget for modes, half for path pruning.
@@ -915,7 +935,7 @@ class DysonKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance states in place; return a bool exceedance mask aligned with rows.
 
@@ -925,6 +945,8 @@ class DysonKernel:
         population block. Exceedance is not failure: retain the uncorrected
         output without retry. Numerical failure raises RuntimeError.
         """
+        context.require_no_plan()
+        budget = context.budget
         if not np.isfinite(budget) or budget <= 0:
             raise ValueError("Dyson requires positive budget")
         if not isinstance(prepared, (_Prepared, _BoundInput)):

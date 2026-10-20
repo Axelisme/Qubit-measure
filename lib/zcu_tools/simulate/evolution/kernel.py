@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from ._validation import integers, owned, shape
 from .engine import EnvelopeSpec
 from .secular import FluxWaveform, ModelSource
+from .workplan import WorkPlan
 
 
 @dataclass(frozen=True)
@@ -189,6 +190,19 @@ class SegmentTable:
         object.__setattr__(self, "tone_envelope", envelopes)
 
 
+def prepared_key_indices(
+    available: NDArray[np.void], required: NDArray[np.void]
+) -> dict[bytes, int] | None:
+    """Index opaque prepared keys by bytes if they cover every required key.
+
+    Return None for a domain miss. Duplicate available keys use the last index.
+    """
+    indices = {key.tobytes(): i for i, key in enumerate(available)}
+    if any(key.tobytes() not in indices for key in required):
+        return None
+    return indices
+
+
 class Prepared(Protocol):
     """Opaque kernel payload, shared read-only by workers.
 
@@ -208,14 +222,69 @@ class Prepared(Protocol):
         ...
 
 
+class RowPlan(Protocol):
+    """Read-only per-row decisions dispatch made for one kernel family in one evolve.
+
+    Indexed by SegmentTable row. Only the kernel family that produced it reads
+    it. It lives for one evolve and never enters PrepareCache or kernel state.
+    """
+
+
+@dataclass(frozen=True)
+class KernelContext:
+    """Model source, allowance and shared ownership for one evolve call.
+
+    source owns immutable models and the source input, not a worker density.
+    budget is the finite positive absolute per-segment allowance. work_plan
+    belongs to this evolve and is shared by prefix and timeline workers.
+    Standalone callers supply a fresh WorkPlan and close it after use.
+    """
+
+    source: ModelSource
+    budget: float
+    work_plan: WorkPlan
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.budget) or self.budget <= 0:
+            raise ValueError("kernel budget must be finite and positive")
+
+
+@dataclass(frozen=True)
+class ApplyContext:
+    """Evolve-level inputs that every apply call of one kernel family shares.
+
+    budget: positive absolute per-segment allowance.
+    work_plan: shared evolve ownership. The default is only for standalone
+        calls; Engine always passes the same WorkPlan to every apply.
+    plan: this family's RowPlan from dispatch, or None when dispatch made none.
+        Kernels that never receive a plan raise ValueError for a non-None plan;
+        kernels that need one raise ValueError for None.
+    """
+
+    budget: float
+    plan: RowPlan | None = None
+    work_plan: WorkPlan = field(default_factory=WorkPlan)
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.budget) or self.budget <= 0:
+            raise ValueError("apply budget must be finite and positive")
+
+    def require_no_plan(self) -> None:
+        """Raise ValueError if a plan is supplied to a family that accepts none."""
+        if self.plan is not None:
+            raise ValueError("this kernel does not accept a row plan")
+
+
 @dataclass(frozen=True)
 class GuardPreparation:
     """Model-only preparation returned by a guard for this evolve's source/budget.
 
     keys: read-only unique fixed-width prepare keys, in the payload's entry order.
     prepared: opaque read-only payload equivalent to prepare(keys, ...), with
-        no density access. Keys may include rejected rows, but only accepted
-        rows are reused. No kernel may retain this record in its own state.
+        no density access. Keys may include rejected rows. Only accepted rows
+        receive apply bindings; fully rejected model-only domains may enter
+        low-priority resident storage for fresh guard admission on later calls.
+        No kernel may retain this record in its own state.
     Owns a read-only key copy; a non-vector/non-void key array raises ValueError.
     """
 
@@ -236,13 +305,18 @@ class GuardResult:
 
     accepted: read-only bool (len(rows),) mask identical to guard for the same arguments.
     preparations: disjoint key batches constructed with that call's source and
-        budget. Empty means no handoff. Records live only within this evolve;
-        shared keys may enter PrepareCache under its ordinary admission rules.
+        budget. Empty means no handoff. Accepted products use ordinary resident
+        admission; fully rejected products can only fill unused capacity and
+        yield to ordinary products. The accepted mask never enters the cache.
+    plan: optional kernel-defined per-row numerical decisions for this call's
+        accepted rows. Dispatch merges them into the family plan for apply.
+        They live only within this evolve and never enter PrepareCache.
     Owns a read-only mask copy; a non-vector/non-bool mask raises ValueError.
     """
 
     accepted: NDArray[np.bool_]
     preparations: tuple[GuardPreparation, ...] = ()
+    plan: RowPlan | None = None
 
     def __post_init__(self) -> None:
         if self.accepted.ndim != 1 or self.accepted.dtype != np.bool_:
@@ -275,8 +349,7 @@ class Kernel(Protocol):
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Pure validity mask (len(rows),) at positive per-segment error budget.
 
@@ -298,13 +371,12 @@ class Kernel(Protocol):
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> GuardResult | None:
         """Optionally return guard decisions and the preparations they required.
 
         Called instead of guard during classification. None declines the hook,
-        so the engine calls guard unchanged. Floquet supplies GuardResult; all
+        so the engine calls guard unchanged. Builder families supply GuardResult;
         other families return None. Acceptance must obey guard's row locality,
         including empty/reversed subsets. Only known inputs may be read; no density
         is evolved or mutated. Returned preparations remain model-only.
@@ -319,11 +391,29 @@ class Kernel(Protocol):
         """
         ...
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> GuardResult | None:
+        """Admit current rows using an existing immutable model-only payload.
+
+        Return None if the payload's domain does not cover every required row
+        product, so dispatch uses guard_prepared unchanged. Otherwise return
+        current row admissions and RowPlan, without building frames, periods or
+        certificates. Rejection is an accepted=False decision, not a domain miss.
+        Existing payloads never replace row-local numerical admission.
+        """
+        ...
+
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Fixed-width keys (len(rows),), equal keys sharing one preparation.
 
+        context shares immutable workload facts with guard and preparation.
         Keys include the model identity and exclude apply-only parameters;
         the exact algorithm determines which parameters belong in each half.
         """
@@ -338,8 +428,7 @@ class Kernel(Protocol):
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> Prepared:
         """Build data for unique keys in their given order; never read density.
 
@@ -360,7 +449,7 @@ class Kernel(Protocol):
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> Prepared | None:
         """Optionally contract a common input into an evolve-local read-only payload.
 
@@ -389,14 +478,14 @@ class Kernel(Protocol):
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance complex128 states (len(rows),M,M) in place through rows.
 
         prepared is either model-only prepare data or a bind_input payload;
         the latter requires the same input density supplied to bind_input.
-        key_index maps each row to its prepared entry. budget is the positive
-        absolute per-segment allowance. Called by a joblib worker thread;
+        key_index maps each row to its prepared entry. context supplies the
+        per-segment allowance and this family's optional dispatch plan. Called by a joblib worker thread;
         numba implementations must be nogil and single-threaded. Prepared
         data and table stay unchanged. Return a bool mask (len(rows),), aligned
         with rows: True marks a post-apply accuracy threshold exceedance, not

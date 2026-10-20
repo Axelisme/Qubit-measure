@@ -146,6 +146,7 @@ class InspectDialog(QDialog):
         open_arb_waveforms: Callable[[], None],
         dialog_presenter: DialogPresenter,
         alias_presets: AliasPresets | None,
+        placeholder_defaults: Callable[[], Mapping[str, str]] = dict,
         parent: QWidget | None = None,
     ) -> None:
         """Build the dialog, subscribe to session facts and show the current context.
@@ -158,12 +159,15 @@ class InspectDialog(QDialog):
         opens the host's ARB waveform dialog. dialog_presenter shows every
         question and failure of this dialog. alias_presets is the composition's
         named alias catalog offered by the Aliases page's Load preset; None
-        means no catalog and leaves Load preset disabled.
+        means no catalog and leaves Load preset disabled. placeholder_defaults
+        reads session template defaults when New captures a form; omitted means
+        no defaults. Existing captures are not updated.
         """
         super().__init__(parent)
         self._ctrl = ctrl
         self._bus = bus
         self._templates = templates
+        self._placeholder_defaults = placeholder_defaults
         self._arb_waveforms = arb_waveforms
         self._open_arb_waveforms = open_arb_waveforms
         self._presenter = dialog_presenter
@@ -184,20 +188,7 @@ class InspectDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-        toolbar = QHBoxLayout()
-        self._status_label = QLabel("No context")
-        toolbar.addWidget(self._status_label)
-        toolbar.addStretch()
-        self._arb_waveform_btn = QPushButton("Arb Waveforms…")
-        self._arb_waveform_btn.clicked.connect(self._on_arb_waveforms_clicked)
-        toolbar.addWidget(self._arb_waveform_btn)
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.refresh)
-        toolbar.addWidget(refresh_btn)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
-        toolbar.addWidget(close_btn)
-        layout.addLayout(toolbar)
+        layout.addLayout(self._build_toolbar())
 
         self._tabs = QTabWidget()
         self._component_tree = ComponentTreeWidget(ctrl)
@@ -218,6 +209,22 @@ class InspectDialog(QDialog):
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
+
+    def _build_toolbar(self) -> QHBoxLayout:
+        toolbar = QHBoxLayout()
+        self._status_label = QLabel("No context")
+        toolbar.addWidget(self._status_label)
+        toolbar.addStretch()
+        self._arb_waveform_btn = QPushButton("Arb Waveforms…")
+        self._arb_waveform_btn.clicked.connect(self._on_arb_waveforms_clicked)
+        toolbar.addWidget(self._arb_waveform_btn)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh)
+        toolbar.addWidget(refresh_btn)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        toolbar.addWidget(close_btn)
+        return toolbar
 
     def _build_modules_tab(self) -> QWidget:
         widget = QWidget()
@@ -471,7 +478,7 @@ class InspectDialog(QDialog):
             return False
         return (
             self._name_edit.text() != key[1]
-            or entry.state.input.data != entry.state.base.data
+            or entry.state.is_dirty
             or editor.local_parse_errors() is not None
         )
 
@@ -606,6 +613,7 @@ class InspectDialog(QDialog):
             self._ctrl,
             self._templates,
             arb_waveforms=self._arb_waveforms,
+            placeholder_defaults=self._placeholder_defaults,
             dialog_presenter=self._presenter,
             parent=self,
         )

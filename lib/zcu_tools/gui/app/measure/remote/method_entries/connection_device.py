@@ -43,7 +43,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "device across sessions (default true).",
             (
                 required_string(
-                    "type_name", "Driver class name, e.g. 'YOKOGS200' or 'FakeDevice'"
+                    "type_name",
+                    "Manually addable driver class, e.g. 'YOKOGS200'; FakeDevice is simulation-published only",
                 ),
                 required_string("name", "Friendly name for this device"),
                 required_string("address", "VISA, GPIB, or IP address"),

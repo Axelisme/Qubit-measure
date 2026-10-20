@@ -17,6 +17,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
 
@@ -27,10 +28,12 @@ class ObservedDyson(DysonKernel):
     def __init__(self):
         self.inputs = []
 
-    def bind_input(self, prepared, key_index, table, rows, source_initial, budget):
+    def bind_input(
+        self, prepared, key_index, table, rows, source_initial, context: KernelContext
+    ):
         self.inputs.append((table.start_ns[rows].copy(), source_initial.copy()))
         return super().bind_input(
-            prepared, key_index, table, rows, source_initial, budget
+            prepared, key_index, table, rows, source_initial, context
         )
 
 
@@ -267,19 +270,25 @@ def test_nested_shared_prefixes_use_their_own_known_input():
         applications.extend(zip(table.start_ns[rows], states.copy(), strict=True))
 
     class NestedDyson(ObservedDyson):
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             record(table, rows, states)
-            return super().apply(prepared, key_index, table, rows, states, budget)
+            return super().apply(prepared, key_index, table, rows, states, context)
 
     class NestedPeriod(FloquetPeriodKernel):
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             record(table, rows, states)
-            return super().apply(prepared, key_index, table, rows, states, budget)
+            return super().apply(prepared, key_index, table, rows, states, context)
 
     class NestedIdle(T4):
-        def apply(self, prepared, key_index, table, rows, states, budget):
+        def apply(
+            self, prepared, key_index, table, rows, states, context: ApplyContext
+        ):
             record(table, rows, states)
-            return super().apply(prepared, key_index, table, rows, states, budget)
+            return super().apply(prepared, key_index, table, rows, states, context)
 
     src, b, kernel = source(), batch(), NestedDyson()
     b = replace(

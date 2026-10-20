@@ -43,13 +43,15 @@ Adapter 可以公開不同於 core 的輸入。需要 extras 時，Form 接受�
 
 使用者 2026-10-13：「採用，更新草稿，form.py慣例也記進去」。
 
-Core 的 `Annotated[..., FieldMeta(...)]` 保存 label、unit、decimals、description 與 group。
+Core 的 `Annotated[..., FieldMeta(...)]` 保存 label、unit、decimals、description、group、readonly 與 element_label。
 group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此與其他欄位描述一起放在 core。
 前端決定實際的 widget、排版與折疊行為。
 沒有標記的欄位由生成器使用欄位名。FieldMeta 不改序列化格式。
 使用者 2026-10-12：「我想放core會比較簡單，而維護實驗的作者都是已一整個實驗為單位」。
 
 ### Form 的形狀與初值
+
+欄位切換與固定 model list 的新契約見 [[0079]]，已採用但尚待實作。以下切換與還原條款依此描述目標設計。
 
 `gui.form_adapter.Form(core_cfg, tree)` 從 Pydantic 型別推導 FormModel、起始 input
 與輸出轉換。純量、nullable、Literal／enum、巢狀 model 與 module／waveform
@@ -59,10 +61,36 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 
 Tree 對齊 model 的欄位。字串是 literal，`Expr` 才是 expression。
 `Range.around`／`Range.between` 宣告掃描，`AliasName` 產生 direct 名稱，
-`Locked` 與 `Hidden` 宣告表單偏差。Module 節點分為兩種。
+`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。
+生成器把中立 metadata 翻成 Display，由 Form core 強制唯讀，不生成單值 Literal。
 
-- `Slot(path, copy=False, set={}, lock={})` 使用捕捉的 library 槽位。Copy 產生 inline input。
-- `Template(id, set={}, lock={})` 從注入的持久範本建 fresh inline input。
+`LogPoints(max, points, include_zero=True)` 為指定的整數清單欄位宣告 Log 初值，`cfg_model` 不計算清單。
+`form_adapter` 擁有 Log／List 分支、換算與清單產生。Core 只接收 `list[int]`，普通 list 與 SweepCfg 不變。
+LogPoints 與 Range.between 使用相同的樹上初值邊界，依 advisor 2026-10-19 裁決。
+預設 Log 必含 0 與 max，含 0 的 points 至少為 2，geometric samples 的末點固定為 max。
+依 advisor 同日的正值分支裁決，include_zero=False 使用 `geomspace(1, max, points)`，首尾固定為 1 與 max，再四捨五入去重。
+此時 max 至少為 1；max>1 的 points 至少為 2，max=1 接受 points≥1 並產生 `[1]`。List 只接受正整數，保留順序與單點。
+兩種政策的 List→Log 都依最大值與長度回填，不補點；不符合所選政策的結果維持 invalid draft。
+
+Module 節點分為兩種。
+
+- `Slot(path, copy=False, set={})` 使用捕捉的 library 槽位。Copy 產生 inline input。
+- `Template(id, set={})` 從注入的持久範本建 fresh inline input。
+
+Slot／Template 不提供 lock 參數，也不提供 `Locked` 節點。List 各位置可有不同的唯讀初值。
+
+範本保留各自的 input projection／model，承載非 lock 初值、Expr requiredness 與 branch ancestry，不在其中生成單值 Literal 來實作 lock。範本初值、依 branch ancestry 的 inline 切換初值與 `input.model.default_input(env)` 重算維持既有行為，不改用通用 defaults。
+
+Module 子欄位唯讀時仍可選 library key。Module 節點本身標唯讀則固定整個 module 子樹，包含 ref／inline 選擇與所有子欄位，不論初值是 ref 或 inline。不另設 selector-only 宣告，也不自動強制 inline。使用者於 2026-10-19 裁定：「我會選B，lock應該被認知為只對子樹作用。」
+
+只為組實驗 cfg 存在的固定值不放進 Form 或實驗 cfg 型別，由 `run()` 補齊，例如單發的 reps／rounds=1。Mux tone name 需要給使用者看，保留並宣告唯讀。使用者於 2026-10-19 裁定：「有一些是為了方便轉換成experiment cfg而塞入的，其實可以改成直接不曝露欄位。run再補齊。」
+
+FTF roles 的 f1、f2、coupler、mux、tone index 與 tone_count 供驗證、離線 analysis 與 writeback 使用，不屬於只為組 cfg 存在的固定值。這些欄位保留唯讀，初值仍來自 captured group，cfg／result／保存契約不變。
+
+Bath reset freq 的 `tested_reset.pi2_cfg.phase` 移除舊 lock，由 Template 的 `set` 給初值 90，欄位可編輯。
+`run()` 組 program 時使用 cfg 的 phase，不覆寫為固定值。Guide 註明 90 是建議的 tomography offset。
+現有 Template 沒有 nested Hidden／readonly 作者入口，且只有這一處需要，因此不新增 nested metadata API。
+不複製共用 module 型別，也不另建局部 cfg 型別。
 
 缺 Slot 來源時，optional 欄位停用且有效，required 欄位留空且 Invalid。
 沒有 Slot fallback 或 init 模式。需要選來源時，make_form 明寫 if／else。
@@ -81,7 +109,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
 
 初值 expression 在建立 fresh input 時求值，成功後保存 direct 值。
 缺來源或求值失敗不補數字 fallback；必要欄位維持未填。
-使用者寫入的 expression 保留原式。普通換分支用 fresh defaults，不繼承 previous input。
+使用者寫入的 expression 保留原式。選項切換由欄位的一個 converter 決定子表單；沒有 converter 時只改 selection，保留原結構與 input，不補 fresh defaults。Inline 的明確繼承政策由 gui.form_adapter 集中宣告，見 [[0079]]。
 Sweep 的顯式指令是保值換算，不套 fresh defaults。座標換算只求值座標，保留 n／step 原稿。
 採樣換算求值座標與採樣欄位，成功原子安裝 direct 數字，失敗保留整組 input。
 未填參與欄位不補數字。非零 span 配 n=1、零 span 配多點都不能藉切換修成其他掃描。
@@ -98,7 +126,7 @@ Module／waveform 使用持久 Spec 與 FieldMeta。硬體專屬的不支援欄�
 Readout 的 `gen_ch` 與 `ro_ch` 必填且可編輯，`freq` 是唯一 generator／ADC 頻率。
 Readout 的 waveform 仍可引用 key，不推導通道或補值，見 [[0074]]。
 例如 `Template("readout", set={"gain": 0.1, "ro_length": 2.0})` 直接覆寫平鋪路徑。
-List 推導與多 qubit 顯示不在本設計內。
+固定具名 model list 的推導、picker 與獨立 participants 清單由 [[0079]] 擴充。Framework 不接管 mux group 關係或 lab runtime 的名稱到原始 index 轉換。
 
 ### 捕捉來源與使用時驗證
 
@@ -109,8 +137,9 @@ Make_form 回 `Form(Cfg, tree)`，不把 ctx 傳進 Form。
 `TabFormResource` 在 Open 與 Reset 捕捉來源，呼叫 make_form，然後綁定並驗證
 Registry 的範本目錄。Register 不執行 factory，也不預檢範本。
 Edit、preview、result 與 Run 使用同一捕捉，不重建 Form 或刷新來源。
-Reset 可以同時換形狀和初值；失敗保留原 Form。Memento 保存 Form input，
-不相容的葉按既有 best-effort 規則丟棄，不加舊版雙讀或 native cfg 反向回填。
+Reset 可以同時換形狀和初值；失敗保留原 Form。Memento 保存 selection／branch 與 Form input，
+由可信宣告重建，還原不執行 converter。唯讀欄位保留存檔值，不從宣告重算。型別或來源 identity 不匹配明確報錯，不靜默丟葉，
+不加舊版雙讀或 native cfg 反向回填，見 [[0079]]。
 Load 只載分析／writeback 所需結果，不覆蓋表單。
 
 資源擁有 mutation guard、通知與撤銷。Editor 只讀借用的 state，write 與 run_command
@@ -123,7 +152,11 @@ Measure 不再使用 CfgSchema 的跨 tab refresh／Unavailable 恢復模型。
 `cfg_model.TemplateDef` 宣告持久 Spec 型別、label 與 seeds。表在 `zcu_lab.templates`，
 組合根以 `Registry(templates=TEMPLATES)` 注入。Library 新建選單使用同一份表，
 reload candidate 從 current Registry 取得表，不重建角色表。
-`{qubit}`／`{resonator}` 佔位符預設展開成 `$qubit`／`$resonator`，caller 可明填綁定。
+佔位符使用具名 `Template.bindings`，顯式值覆蓋 session 的 `PlaceholderRegistry` 預設值，也可使用未登錄名稱。
+Registry 初始為空。Session 組裝擁有唯一 mutable instance，`ctx.placeholders` 提供登錄與讀取。
+Host 將 detached defaults 放進固定 `FormEnv`；Open／Reset 重新 capture，既有 input 與 env 不隨登錄變更。
+`TemplateDef` 建構只驗證語法與結構，實際展開缺 binding 時報 `ValueError`。
+Registry 不擁有名稱清單、alias 解析或保存政策，腳本自行保存與恢復。
 範本 seeds 疊在 Spec defaults 上。Trig_offset 政策由實驗室的範本工具參數宣告。
 
 範本目錄是固定資料。`bath_reset.pi2_cfg` 使用 x90 Slot，有來源時保留引用，
@@ -150,7 +183,8 @@ Flux_unit 獨立保存在 cfg。Recipe 的公開參數與來源政策不變，he
 單一實驗的初值政策留在該實驗的 form.py。已定案且供多個 Form 共用的初值政策，
 可集中在 zcu_lab 的具名 domain helper，目前包括 T1 時間尺度選源，以及 Rabi 的
 來源、有效性與首次初值。各 Form 仍明確選擇倍率或場景，並組合結構。
-政策不進入 generic framework，不擴及 writeback 或實驗順序。
+這些實驗初值政策不進入 generic framework，不擴及 writeback 或實驗順序。
+共用型別間的 inline 繼承則由 gui.form_adapter 擁有，不是實驗初值政策，見 [[0079]]。
 這個分工讓同類 Form 使用同一政策，避免改了一個、漏改另一個。
 跨 owner 的依賴方向仍由下述 C15、C16 與 form-adapter-no-host contracts 保護。
 

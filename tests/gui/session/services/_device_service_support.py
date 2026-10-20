@@ -32,6 +32,7 @@ def make_device_service(
     bus: EventBus | None = None,
     handles: OperationHandles | None = None,
     bg: BackgroundExecutor | None = None,
+    registry: FakeDeviceRegistry | None = None,
 ) -> tuple[DeviceService, MagicMock]:
     """Build a service and mock driver using this test's worker owner.
 
@@ -61,15 +62,15 @@ def make_device_service(
                 handles=handles,
             ),
             driver_factory=lambda type_name, address: device,
-            device_registry=FakeDeviceRegistry(),
+            device_registry=registry if registry is not None else FakeDeviceRegistry(),
         ),
         device,
     )
 
 
 def device_connect_request(name: str = "dev1") -> ConnectDeviceRequest:
-    """Request a FakeDevice named ``name`` at the mock driver address."""
-    return ConnectDeviceRequest(type_name="FakeDevice", name=name, address="addr")
+    """Request a manual hardware type named ``name`` at the mock driver address."""
+    return ConnectDeviceRequest(type_name="YOKOGS200", name=name, address="addr")
 
 
 def connect_device(svc: DeviceService, req: ConnectDeviceRequest) -> None:

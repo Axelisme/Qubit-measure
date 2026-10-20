@@ -78,7 +78,7 @@ class SessionEnv:
 
     parameters is None for EMPTY, otherwise a fixed capture without consumer
     roles targeting SavedPoint. soc/soccfg remain
-    live capabilities, not Run evidence. Names and paths are cached session
+    live capabilities, not Run evidence. Paths are cached session
     metadata; active_label is empty before point selection. readiness gates
     ACTIVE-only Run/save. values reads the published value-source cache.
     Retaining an environment does not update its parameter capture.
@@ -87,9 +87,6 @@ class SessionEnv:
     parameters: ParameterContext | None
     soc: SocHandle | None
     soccfg: SocCfgHandle | None
-    chip_name: str = "unknown_chip"
-    qub_name: str = "unknown_qubit"
-    res_name: str = "unknown_resonator"
     result_dir: str = ""
     database_path: str = ""
     active_label: str = ""

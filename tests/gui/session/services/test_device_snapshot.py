@@ -45,7 +45,10 @@ def fixture_quiesce_services():
 
 
 def _make_svc(
-    driver: DeviceProtocol | None = None, state: State | None = None
+    driver: DeviceProtocol | None = None,
+    state: State | None = None,
+    *,
+    publish_name: str | None = None,
 ) -> DeviceService:
     fake = driver if driver is not None else FakeDevice()
     gate = OperationGate(EventBus())
@@ -55,7 +58,10 @@ def _make_svc(
     bus = EventBus()
     _workers.watch(bus)
     runner = OperationRunner(gate, handles, progress, bg, bus)
-    return DeviceService(
+    registry = FakeDeviceRegistry()
+    if publish_name is not None:
+        registry.register_device(publish_name, fake)
+    service = DeviceService(
         bus,
         state or State(MagicMock()),
         OperationInfrastructure(
@@ -65,12 +71,15 @@ def _make_svc(
             handles=handles,
         ),
         driver_factory=lambda type_name, address: fake,
-        device_registry=FakeDeviceRegistry(),
+        device_registry=registry,
     )
+    if publish_name is not None:
+        service.publish_initial_devices()
+    return service
 
 
 def _connect(
-    svc: DeviceService, name: str = "flux", type_name: str = "FakeDevice"
+    svc: DeviceService, name: str = "flux", type_name: str = "YOKOGS200"
 ) -> None:
     connected: list[object] = []
     errors: list[str] = []
@@ -84,8 +93,7 @@ def _connect(
 
 
 def test_list_device_names_uses_connected_snapshot(qapp):
-    svc = _make_svc()
-    _connect(svc, "z")
+    svc = _make_svc(publish_name="z")
     svc.register_remembered_devices([])
     assert svc.list_device_names() == ["z"]
 
@@ -115,8 +123,7 @@ def test_get_cached_device_value_uses_state_without_reading_hardware(qapp):
 
 
 def test_get_cached_device_value_accepts_fake_device_info(qapp):
-    svc = _make_svc()
-    _connect(svc, "fake_flux", type_name="FakeDevice")
+    svc = _make_svc(publish_name="fake_flux")
 
     assert svc.get_cached_device_value("fake_flux") == pytest.approx(0.0)
 
@@ -217,8 +224,7 @@ def test_list_snapshots_does_not_read_hardware(qapp):
 
 
 def test_cached_fake_unit_is_native(qapp) -> None:
-    svc = _make_svc(driver=FakeDevice(fast_mode=True))
-    _connect(svc)
+    svc = _make_svc(driver=FakeDevice(fast_mode=True), publish_name="flux")
     before = svc.list_device_snapshots()
 
     assert svc.get_device_unit("flux") == "native"

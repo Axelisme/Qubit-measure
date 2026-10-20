@@ -13,6 +13,8 @@ from zcu_tools.resources.entry import (
     rename_entry,
 )
 
+from tests._filesystem import symlink_or_skip
+
 
 def read_entry_files(path: Path) -> dict[Path, bytes]:
     return {
@@ -29,7 +31,7 @@ def test_open_rejects_entry_links_that_escape_the_configured_root(
     results, database = entry_roots
     linked_path = entry_roots[root_index] / "entry"
     linked_path.parent.mkdir()
-    linked_path.symlink_to(results.parent / "external", target_is_directory=True)
+    symlink_or_skip(linked_path, results.parent / "external", target_is_directory=True)
 
     with pytest.raises(ValueError, match="entry escapes its root"):
         ResultEntry.open("entry", result_root=results, database_root=database)
@@ -242,9 +244,9 @@ def test_rename_refuses_existing_destination_before_moving_either_root(
         target = results.parent / "external"
         target.mkdir()
         (target / "external.bin").write_bytes(b"unrelated data")
-        destination.symlink_to(target, target_is_directory=True)
+        symlink_or_skip(destination, target, target_is_directory=True)
     else:
-        destination.symlink_to("missing-target")
+        symlink_or_skip(destination, "missing-target")
     before_result = read_entry_files(results / "entry")
     before_database = read_entry_files(database / "entry")
 
@@ -360,9 +362,9 @@ def test_create_rejects_existing_destination_without_touching_either_entry(
         target.mkdir()
         marker = target / "legacy-data.hdf5"
         marker.write_bytes(b"original measurement")
-        existing.symlink_to(target, target_is_directory=True)
+        symlink_or_skip(existing, target, target_is_directory=True)
     else:
-        existing.symlink_to("missing-target")
+        symlink_or_skip(existing, "missing-target")
         marker = None
     other = entry_roots[1 - root_index] / "entry"
 

@@ -180,10 +180,14 @@ class MigrationSession:
     def baseline(self, source: Path) -> str:
         """Hash an absolute source and checkpoint its first baseline.
 
-        A later mismatch raises MigrationInputError without changing baseline.
+        Any mismatch with the complete verified backup or an existing baseline
+        raises MigrationInputError before publication or individual source removal.
         Missing/unreadable sources propagate filesystem errors.
         """
         current = file_hash(source)
+        backup = self.manifest.backup
+        if backup is not None and backup.source_hashes.get(str(source)) != current:
+            raise MigrationInputError(f"{source}: source differs from verified backup")
         recorded = self.manifest.source_hashes.get(str(source))
         if recorded is not None and recorded != current:
             raise MigrationInputError(f"{source}: source hash changed")

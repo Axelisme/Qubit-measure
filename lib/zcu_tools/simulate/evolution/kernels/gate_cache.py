@@ -7,18 +7,12 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
-from ..declarations import (
-    AlgorithmIdentity,
-    Eligibility,
-    GuardDeclaration,
-    KernelDeclaration,
-    ReuseDeclaration,
-)
-from ..kernel import Prepared, SegmentTable
-from ..secular import ModelSource
+from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from . import gate_phase
 from ._gate_endpoints import build_endpoints
-from ._shaped import drive_bounds, envelope_bounds
+from ._secular import coherence_decay, population_generator, split_step
+from ._shaped import drive_bounds
+from ._workload_facts import envelope_bounds
 
 _PHASE_COUNT = 16
 _SUBSEGMENTS = 4
@@ -63,16 +57,7 @@ def _apply_gates(
                     np.exp(1j * _MODES[mode] * phases[row])
                     * coefficients[key, segment, mode]
                 )
-            for half in range(2):
-                diagonal = np.empty(size, dtype=np.complex128)
-                for i in range(size):
-                    diagonal[i] = rho[i, i]
-                updated = populations[key].astype(np.complex128) @ diagonal
-                rho *= coherences[key]
-                for i in range(size):
-                    rho[i, i] = updated[i]
-                if half == 0:
-                    rho = unitary @ rho @ unitary.conj().T
+            rho = split_step(rho, unitary, populations[key], coherences[key])
         states[row] = rho
 
 
@@ -84,22 +69,13 @@ class GateCacheKernel:
     envelope-local offset, frequency, signed amplitude and duration. Absolute
     segment start and carrier theta do not affect preparation. Four closed U
     subsegments retain 16 phase modes each, with half-step secular D on both
-    sides. Short gates first try six nodes checked at two independent phases;
-    failed phase convergence uses the original sixteen-node builder.
+    sides. Dispatch selects which keys first try six nodes checked at two
+    independent phases; failed convergence uses the sixteen-node builder.
     A model-only secular split guard rejects long dissipative gates before
     preparation. Numerical build failures raise RuntimeError; invalid budgets,
     unsupported rows or mismatched representative keys raise ValueError. This
     fixed-order approximation does not certify arbitrary drives against budget.
     """
-
-    declaration = KernelDeclaration(
-        identity=AlgorithmIdentity("gate_cache", "phase-adaptive-dop853-v3"),
-        eligibility=Eligibility(1, 1, "shaped"),
-        guard=GuardDeclaration(),
-        accuracy="guarded-approximation",
-        reuse=ReuseDeclaration("gate_cache/phase-adaptive-dop853-v3/serial"),
-        fallback="legacy-order",
-    )
 
     name = "gate_cache"
     guard_builds = False
@@ -108,14 +84,14 @@ class GateCacheKernel:
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         """Accept shaped single tones with a small model-only split estimate.
 
         Repetition count belongs to the engine. The four-way secular splitting
         uses duration**3 * Gamma * V**2 / 16 <= 0.01, without reading density.
         """
+        source, budget = context.source, context.budget
         _check_budget(budget)
         accepted = table.tones[rows] == 1
         if table.tone_envelope.shape[1]:
@@ -127,8 +103,8 @@ class GateCacheKernel:
         if not np.any(accepted):
             return accepted
         selected = rows[accepted]
-        strength, gamma = drive_bounds(table, selected, source)
-        peaks, _ = envelope_bounds(table)
+        strength, gamma = drive_bounds(table, selected, source, context.work_plan)
+        peaks = envelope_bounds(table, context.work_plan).peaks
         peak = peaks[table.tone_envelope[selected, 0]]
         estimate = (
             table.duration_ns[selected] ** 3
@@ -140,9 +116,10 @@ class GateCacheKernel:
         return accepted
 
     def prepare_keys(
-        self, table: SegmentTable, rows: NDArray[np.int64]
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
         """Return fixed-width content keys, excluding theta and absolute start."""
+        del context
         if np.any(table.tones[rows] != 1):
             raise ValueError("gate cache keys require single-tone rows")
         dtype = np.dtype(
@@ -183,35 +160,41 @@ class GateCacheKernel:
         keys: NDArray[np.void],
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
+        *,
+        phase_adaptive: NDArray[np.bool_] | None = None,
     ) -> Prepared:
         """Build immutable U Fourier coefficients and compact D from representatives.
 
         rows aligns one representative per key; equal keys give equal payloads.
-        No initial density is accessed. nbytes counts all retained table arrays.
+        phase_adaptive is a key-aligned bool vector selected by dispatch. True
+        tries six phase nodes with two probes, falling back to sixteen nodes
+        on failed convergence. None uses sixteen nodes for every key. A
+        misaligned mask raises ValueError. No duration-based selection occurs
+        here. No density is accessed; nbytes counts all retained table arrays.
         """
+        source, budget = context.source, context.budget
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
-            keys, self.prepare_keys(table, rows)
+            keys, self.prepare_keys(table, rows, context)
         ):
             raise ValueError("gate cache representative rows must match keys")
-        if not self.guard(table, rows, source, budget).all():
+        if not self.guard(table, rows, context).all():
             raise ValueError("gate cache requires shaped single-tone rows")
+        if phase_adaptive is None:
+            phase_adaptive = np.zeros(len(keys), dtype=bool)
+        if phase_adaptive.shape != (len(keys),) or phase_adaptive.dtype != np.bool_:
+            raise ValueError(
+                "gate phase builder mask must be a key-aligned bool vector"
+            )
         coefficients, populations, coherences = [], [], []
-        for row in rows:
+        for row, adaptive in zip(rows, phase_adaptive, strict=True):
             model = source.model(tuple(int(v) for v in table.level[row]))
             half_step = float(table.duration_ns[row]) / (2 * _SUBSEGMENTS)
-            outgoing = model.rates_per_ns.sum(axis=0)
-            population = expm(half_step * (model.rates_per_ns - np.diag(outgoing)))
-            coherence = np.exp(
-                -half_step
-                * ((outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns)
-            )
-            # Keep zero/long-duration keys on the original builder. Routing and
-            # its split guard are deliberately independent of this optimization.
+            population = expm(half_step * population_generator(model.rates_per_ns))
+            coherence = np.exp(-half_step * coherence_decay(model))
             coefficient = None
-            if 0 < table.duration_ns[row] <= gate_phase.MAX_DURATION_NS:
+            if adaptive:
                 coefficient = gate_phase.build(model, table, int(row), budget)
             if coefficient is None:
                 phases = np.asarray(
@@ -241,14 +224,24 @@ class GateCacheKernel:
             array.setflags(write=False)
         return _GatePrepared(*arrays)
 
+    def admit_prepared(
+        self,
+        prepared: Prepared,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> None:
+        """Decline cached-domain admission; use the ordinary guard build path."""
+        del prepared, table, rows, context
+
     def guard_prepared(
         self,
         table: SegmentTable,
         rows: NDArray[np.int64],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline guard preparation handoff; the engine calls guard normally."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -258,9 +251,10 @@ class GateCacheKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> None:
         """Decline input binding; apply uses the model-only prepared payload."""
+        budget = context.budget
         del prepared, key_index, table, rows, source_initial, budget
 
     def apply(
@@ -270,7 +264,7 @@ class GateCacheKernel:
         table: SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         """Advance aligned densities in place using read-only prepared data.
 
@@ -280,6 +274,8 @@ class GateCacheKernel:
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
+        context.require_no_plan()
+        budget = context.budget
         _check_budget(budget)
         if not isinstance(prepared, _GatePrepared):
             raise ValueError("gate cache requires its own prepared payload")

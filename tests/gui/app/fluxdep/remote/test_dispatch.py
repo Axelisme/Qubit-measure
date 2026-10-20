@@ -18,11 +18,11 @@ from typing import Literal, overload
 import numpy as np
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.fluxdep.remote.dto import PointcloudReply, SpectrumListReply
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
-from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.remote.param_spec import validate_params
 
 

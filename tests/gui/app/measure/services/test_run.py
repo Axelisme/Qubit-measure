@@ -23,7 +23,6 @@ from zcu_tools.cfg_model import ConfigBase, Expr, Range
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
@@ -142,8 +141,8 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     assert tab.run.source_operation_id == token
     assert tab.run.parameters is captured
     if tab.run.parameters is not None:
-        assert tab.run.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
-        assert tab.run.parameters.value("source_qubit.rate") == 1.0
+        assert tab.run.parameters.resolve_path("$source_qubit.rate") == "Q1.rate"
+        assert tab.run.parameters.value("$source_qubit.rate") == 1.0
     assert not state.is_tab_running(tab_id)
     assert not gate.has_active(OperationKind.RUN)
 
@@ -155,7 +154,7 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     next_source = state.get_tab(tab_id).run.parameters
     assert next_source is not None
     assert next_source is q2
-    assert next_source.value("source_qubit.rate") == 2.0
+    assert next_source.value("$source_qubit.rate") == 2.0
     assert tab.run.source_operation_id == next_token
 
     state.clear_tab_results(tab_id)
@@ -442,9 +441,12 @@ def test_cancel_run_stops_selected_flux_before_first_write():
     dev = FakeDevice(fast_mode=True)
 
     def run_flux(*_args: Any, context: RunContext) -> object:
-        set_flux(
-            context.devices["run-dev"], 1.0, unit="native", stop=context.cancel_signal
-        )
+        if not context.cancel_signal.is_set():
+            context.devices["run-dev"].setup(
+                dev.get_info().with_updates(value=1.0),
+                progress=False,
+                stop_event=context.cancel_signal.event,
+            )
         return object()
 
     adapter.run.side_effect = run_flux
@@ -469,9 +471,13 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
 
     def run_flux(*_args: Any, context: RunContext) -> object:
         contexts.append(context)
-        set_flux(
-            context.devices["flux"], 0.5, unit="native", stop=context.cancel_signal
-        )
+        device = context.devices["flux"]
+        if not context.cancel_signal.is_set():
+            device.setup(
+                device.get_info().with_updates(value=0.5),
+                progress=False,
+                stop_event=context.cancel_signal.event,
+            )
         if len(contexts) == 1:
             context.cancel_signal.set_error("failed", "first run failed", None)
         return object()

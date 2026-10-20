@@ -22,7 +22,7 @@ from ._types import members, type_tag
 
 
 def slot_key(slot: Slot, env: FormEnv) -> str | None:
-    path = expand_path(slot.path)
+    path = expand_path(slot.path, defaults=env.placeholders)
     if env.library is None:
         return None
     if not path.startswith("$") and path in env.library.module_keys():
@@ -199,8 +199,9 @@ def complete_input(
     """Overlay persistent-space seeds with defaults, before tagged projection.
 
     Report ambiguous inline field paths. Wrapper content remains in persistent
-    space so authors keep Spec paths for seeds, locks and Slots. Seeds for fields absent from the generated model, including unsupported
-    module fields, raise ValueError with their dotted paths under path.
+    space so authors keep Spec paths for seeds and Slots. Seeds for fields
+    absent from the generated model, including unsupported module fields,
+    raise ValueError with their dotted paths under path.
     """
     unknown = authored.keys() - model.model_fields.keys()
     if unknown:
@@ -341,8 +342,13 @@ def template_input(
             f"Template {template.id!r} has incompatible module {definition.module.__name__}"
         )
     model = compatible[0]
-    seeds = definition.expanded_seeds(
-        qubit=template.qubit, resonator=template.resonator
+    # Binding-independent validation runs before a host has captured defaults.
+    seeds = (
+        dict(definition.seeds)
+        if env is None
+        else definition.expanded_seeds(
+            bindings=template.bindings, defaults=env.placeholders
+        )
     )
     seeds.update(template.set)
     data: dict[str, JsonValue] = {}
@@ -365,9 +371,6 @@ def template_input(
                 and (value := nested_slot(seed, allowed, env)) is not None
             ):
                 set_path(data, path, value)
-    for path, value in template.lock.items():
-        _path_annotation(model, data, path)
-        set_path(data, path, scalar_seed(value))
     return _complete_template_input(model, data, template.id)
 
 
@@ -378,11 +381,10 @@ def template_seed_tree(
 
     Call after template_input validates IDs, families and paths.
     This tree is only for deriving field requirements, never for Slot presence
-    or actual input. Literal overrides and locks replace earlier Expr seeds.
+    or actual input. Literal overrides replace earlier Expr seeds.
     """
-    seeds = catalog[template.id].expanded_seeds(
-        qubit=template.qubit, resonator=template.resonator
-    )
+    # Requirements depend on the authored seed kinds, not replacement values.
+    seeds = dict(catalog[template.id].seeds)
     seeds.update(template.set)
     data: dict[str, JsonValue] = {}
     for path, seed in seeds.items():
@@ -390,13 +392,9 @@ def template_seed_tree(
             nested: dict[str, JsonValue] = {}
             for child_path, value in seed.set.items():
                 set_path(nested, child_path, scalar_seed(value))
-            for child_path, value in seed.lock.items():
-                set_path(nested, child_path, scalar_seed(value))
             set_path(data, path, nested)
         else:
             set_path(data, path, scalar_seed(seed))
-    for path, value in template.lock.items():
-        set_path(data, path, scalar_seed(value))
     return data
 
 
@@ -410,7 +408,7 @@ def nested_slot(
         spec = env.library.module_spec(key)
         if type_tag(type(spec)) not in {type_tag(model) for model in expected}:
             raise ValueError(f"Slot {slot.path!r} has incompatible module family")
-        if not slot.copy and not slot.lock:
+        if not slot.copy:
             return key
         selected = next(
             model for model in expected if type_tag(model) == type_tag(type(spec))
@@ -421,7 +419,5 @@ def nested_slot(
         )
         for path, seed in slot.set.items():
             set_slot_path(selected, data, path, scalar_seed(seed), env)
-        for path, value in slot.lock.items():
-            set_path(data, path, scalar_seed(value))
         return data
     return None

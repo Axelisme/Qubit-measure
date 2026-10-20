@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-17，shared loss spectra 與 coherence units
+**Last updated:** 2026-10-20，predictor 檔案 I/O 改由 resources 擁有
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -79,7 +79,7 @@ FluxoniumParams 是可未知的具名輸入。EJ／EC／EL 用 GHz，flux_half�
 
 應用層預測器,連接實驗電流/電壓值與理論模型。
 
-- 建構: `(params, flux_half, flux_period, flux_bias)`;另可 `FluxoniumPredictor.from_file(result_path, flux_bias)` 經 `resources.qubit_params.QubitParams` 從 `fluxdep_fit` 結果載入，缺少 `fluxdep_fit` 時 raise `ValueError`。
+- 建構: `(params, flux_half, flux_period, flux_bias)`。讀檔由 `resources.predictor_file.load_predictor_file` 處理，caller 再呼叫 `params.build_predictor()`。舊 `params.json` 需先離線遷移成 predictor 檔，不提供相容讀取。
 - 座標轉換: `value_to_flux` / `flux_to_value` 委派 `FluxAffineMap`,使用
   `flux = (value + bias − flux_half)/flux_period + 0.5`。
 - `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。scalar/array 都委派到 `FluxoniumPrediction.predict_frequencies_mhz` 的批次路徑，不保留共享 mutable `Fluxonium` instance；reverse transition 仍回傳帶符號頻差。
@@ -131,8 +131,10 @@ floquet 效能要點(design search 的 snr stage 主成本即在此):
 ## 典型使用流程
 
 ```python
+from pathlib import Path
+
+from zcu_tools.resources.predictor_file import load_predictor_file
 from zcu_tools.simulate.fluxonium import (
-    FluxoniumPredictor,
     calculate_energy_vs_flux,
     calculate_dispersive_vs_flux,
     calculate_eff_t1_vs_flux,
@@ -143,7 +145,8 @@ spec, E = calculate_energy_vs_flux(params, fluxs)             # 重用 spec
 rf0, rf1 = calculate_dispersive_vs_flux(params, fluxs, rf, g)
 t1 = calculate_eff_t1_vs_flux(fluxs, noise_channels, T, params)
 
-predictor = FluxoniumPredictor.from_file("result/Q1.hdf5", flux_bias=0.0)
+predictor_file = load_predictor_file(Path("result/Q1/predictors/default.json"))
+predictor = predictor_file.params.build_predictor()
 f01 = predictor.predict_freq(current_value)                    # MHz
 ```
 

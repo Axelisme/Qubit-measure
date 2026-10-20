@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-19，destructive confirmation inputs
+**Last updated:** 2026-10-20，destructive confirmation inputs；分析 project owner 移至 app 層
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -57,8 +57,10 @@ write controls and pushes availability into existing and new tabs/views. Domain
 busy/valid gates and pure viewing remain separate. Local modal dialogs refuse
 owner acquisition with `local_busy` and "Local 使用中" on the Qt owner turn.
 Choosers use non-native presentation so Qt can detect them. Dialogs do not
-subscribe to authority or recheck holder after choices. Remote Inspect/Device
-open with static read-only modes. Only Measure Run and device Stop reclaim
+subscribe to authority or recheck holder after choices. Measure Setup, Inspect,
+Device and ARB windows receive read-only state on open and on control transfers.
+Local restores editing without overriding busy/valid gates.
+Only Measure Run and device Stop reclaim
 locked Local before requesting cancellation. Main windows dispose their own
 watch on final teardown; domain sessions and background drains retain their
 existing lifetimes. See [ADR-0070](../../../docs/adr/0070-control-identity.md).
@@ -126,8 +128,9 @@ close still saves current input. Launch does not restore native runs or connect
 hardware.
 
 `gui.launcher` is the import-light CLI edge companion for runtime launchers. It
-declares shared logging/control/project flags and converts parser output into
-`GuiLaunchOptions` / `ProjectInfo`. It deliberately avoids importing Qt or
+declares shared logging/control flags and converts parser output into
+`GuiLaunchOptions`. Analysis project flags and `ProjectInfo` conversion belong to
+`app.analysis_project.launcher`. The shared `gui.launcher` avoids importing Qt,
 matplotlib or app modules at module import time. Runtime initializes the explicit
 plot host, shutdown callback and mathtext support after QApplication exists;
 it does not select a process-wide Matplotlib backend.
@@ -152,9 +155,10 @@ Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 R
 列出含 setup.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
 不自選 point，不連硬體，也不從 chip／qubit／resonator 名稱推導路徑。
 
-`ResultScopeManager` 仍供 `widgets.ProjectDialog` 的 analysis path picker 使用。
-它掃描 project root 下的 `result/**/params.json`，提供 result scope 候選；
-fluxdep／dispersive 保留 typed path 和 Browse。這不是 Measure 的 entry binding。
+Fluxdep／dispersive 的 `ProjectInfo`、`ProjectDialog`、`ResultScopeManager`、
+project CLI 與 RPC 投影由 [`app.analysis_project`](app/analysis_project/README.md)
+共用過渡 owner 擁有。它保留 chip／qubit 與 `result/**/params.json` 的資料流，
+不是 Measure 的 entry binding。共用 GUI 不依賴此分析 owner。
 
 ## Shared session dialogs (`session/ui/`)
 
@@ -169,18 +173,19 @@ App 保留 dialog lifecycle 與呈現政策，shared dialog 不反向 import app
 
 ## Dialog presentation and lifetime
 
-Remote control does not change a dialog's modal presentation. Long-running flows
-use `open()` and their owner retains the dialog until accepted/finished cleanup.
+Hosts choose dialog presentation separately from lifetime. Measure named windows
+use NonModal plus `show()`; `open()` remains window-modal and is not a synonym
+for non-modal. The owner retains dialogs until accepted/finished cleanup.
 Short-lived modal choices may use a nested event loop, including measure's
-single RunLoadDialog interaction. The global unhandled-exception presenter also
-blocks while the process is crashing. Modal owner admission protects Local
+single RunLoadDialog interaction. Measure exception reports retain a non-modal
+message box with traceback. Modal owner admission protects Local
 input, including file choosers and confirmations, without dialog control wiring.
 
 RunLoadDialog discards further input on finished. MainWindow rejects it before
 teardown, and a late file chooser cannot accept a new selection. Persistent
 dialogs that hide and reopen keep their existing owner lifetime.
 
-Short-lived modal confirmations, error reports, and text prompts are the
+Short-lived modal confirmations and text prompts are the
 deliberate exception. A synchronous `QMessageBox.question` / `.warning` /
 `.critical` or `QInputDialog.getText` may block: it is raised by a direct,
 synchronous user action while no operation is in flight, carries no
@@ -194,8 +199,9 @@ Widgets that need information messages, warnings, critical errors,
 confirmations, or explicit destructive confirmations receive the shared
 `DialogPresenter` port. Production uses `QtDialogPresenter`; when a
 `DialogRefStore` is supplied, information, warning, and critical boxes stay
-non-blocking and retained through the shared lifecycle helper. Close paths or
-operation-running prompts use callback-style `confirm_async` /
+non-blocking and retained through the shared lifecycle helper, but remain
+window-modal by default. Measure explicitly selects non-modal notifications;
+confirmation policy is unchanged. Close paths or operation-running prompts use callback-style `confirm_async` /
 `destructive_confirm`, so the Qt event loop keeps pumping while the decision is
 pending. `destructive_confirm` takes a `DestructiveConfirmation` with the title,
 message, action label, safe-alternative label and default choice; the parent and
@@ -203,7 +209,7 @@ decision callback remain explicit inputs. Tests inject a recording presenter
 instead of monkeypatching `QMessageBox`, so dialog decisions are scripted at the
 object boundary.
 
-Non-modal dialogs opened with `open()` use the shared dialog lifecycle helper,
+Non-modal dialogs shown with `show()` use the shared dialog lifecycle helper,
 or an equivalent named registry when remote screenshot/list semantics require
 stable names. Either path keeps a Python reference until `finished` / `destroyed`
 cleanup runs.

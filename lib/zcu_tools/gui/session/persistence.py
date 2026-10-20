@@ -6,10 +6,11 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile, gettempdir
+from tempfile import NamedTemporaryFile
 from typing import Generic, Protocol, TypeVar
 
-from platformdirs import user_cache_dir
+from zcu_tools.utils import atomic_replace
+from zcu_tools.utils.cache import user_cache_root
 
 StateT = TypeVar("StateT")
 ReportT = TypeVar("ReportT")
@@ -23,7 +24,11 @@ class PersistenceError(RuntimeError):
 
 
 class SnapshotCodec(Protocol[StateT]):
-    """App-owned snapshot schema boundary."""
+    """App-owned snapshot schema boundary.
+
+    decode raises ValueError for incompatible persisted data. Unexpected provider
+    or programming failures must use other exception types and propagate.
+    """
 
     def default(self) -> StateT: ...
     def decode(self, raw: object) -> StateT: ...
@@ -39,20 +44,29 @@ class SnapshotOriginator(Protocol[StateT, ReportT_co]):
 
 @dataclass(frozen=True)
 class RestoreOutcome(Generic[ReportT]):
+    """Completed originator restore and any recoverable startup failure.
+
+    report is the app-owned result of the installed state. load_error is None on
+    clean/missing/successful reads, otherwise the error the host must display;
+    invalid persisted data opens defaults without changing the original file.
+    """
+
     report: ReportT
     load_error: PersistenceError | None
 
 
-def _safe_cache_root() -> Path:
-    try:
-        return Path(user_cache_dir("zcu_tools", "zcu_tools")) / "gui"
-    # tolerated: Platform cache lookup has no closed failure set; retain the temporary-root fallback.
-    except Exception:  # noqa: BLE001
-        return Path(gettempdir()) / ".zcu_tools_gui"
-
-
 class SingleFileCaretaker(Generic[StateT, ReportT]):
-    """Load and atomically replace one JSON snapshot file."""
+    """Load and atomically replace one JSON snapshot file.
+
+    Invalid JSON/UTF-8 and codec ValueError open defaults with a visible error.
+    Loading never renames or rewrites the original file. Other provider/restore
+    failures propagate. Hosts display RestoreOutcome.load_error and own save
+    timing; recovered startup does not disable later flush.
+
+    cache_dir selects an explicit directory, bypassing user cache resolution.
+    When omitted, use <user_cache_root()>/gui; invalid ZCU_TOOLS_CACHE_DIR values
+    raise ValueError during construction.
+    """
 
     def __init__(
         self,
@@ -66,7 +80,7 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
             raise ValueError("filename must be a non-empty basename")
         self._originator = originator
         self._codec = codec
-        base_dir = cache_dir if cache_dir is not None else _safe_cache_root()
+        base_dir = cache_dir if cache_dir is not None else user_cache_root() / "gui"
         self._path = base_dir / filename
 
     @property
@@ -74,6 +88,13 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
         return self._path
 
     def restore_all(self, *, load: bool = True) -> RestoreOutcome[ReportT]:
+        """Restore persisted state or defaults and return the host display report.
+
+        load=False skips reading an existing file. Invalid persisted data opens
+        defaults without writing. Read I/O errors retain the existing
+        default/error policy.
+        Unclassified provider or originator failures propagate unchanged.
+        """
         logger.info("persistence restore: load=%s path=%s", load, self._path)
         if load:
             state, load_error = self._load()
@@ -94,7 +115,7 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
             ) as file:
                 temp_path = Path(file.name)
                 file.write(json.dumps(payload, ensure_ascii=True, indent=2))
-            temp_path.replace(self._path)
+            atomic_replace(temp_path, self._path)
         except Exception as exc:
             if temp_path is not None:
                 try:
@@ -112,18 +133,23 @@ class SingleFileCaretaker(Generic[StateT, ReportT]):
         try:
             if not self._path.exists():
                 return self._codec.default(), None
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-            return self._codec.decode(raw), None
-        # tolerated: App-owned codecs can raise arbitrary errors; restore defaults and report the load failure.
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "persistence load failed (%s); using defaults",
-                self._path,
-                exc_info=exc,
-            )
+            text = self._path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            return self._codec.default(), self._load_error(exc)
+        except OSError as exc:
+            logger.warning("persistence read failed: %s", self._path, exc_info=exc)
             return self._codec.default(), PersistenceError(
                 f"Failed to read GUI state ({exc}); using defaults"
             )
+        try:
+            return self._codec.decode(json.loads(text)), None
+        except ValueError as exc:
+            return self._codec.default(), self._load_error(exc)
+
+    def _load_error(self, cause: Exception) -> PersistenceError:
+        error = PersistenceError(f"Failed to read GUI state ({cause}); using defaults")
+        logger.warning("%s", error)
+        return error
 
 
 __all__ = [

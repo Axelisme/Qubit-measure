@@ -10,6 +10,20 @@
 
 CLI 以 `python -m migrations.migrate_storage` 執行。操作授權、dry-run、pending 與 resume 步驟見 [Agent 離線遷移說明書](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 在 `storage_mapping.py`，固定 native declarations 在 `migration_experiments.py`，兩者都只為遷移存在，跟本目錄一起保留或刪除。`lib` 與 `zcu_lab` 都不 import 本目錄。
 
+`--result-root` 指定舊來源根目錄，`--entry-result-root` 指定新 entry 根目錄。兩者可同為 `<checkout>/result`，但新 entry 不得與本次來源樹互相包含。以下只做 dry-run，不建立備份或寫入目的地：
+
+```bash
+uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage \
+  --repo-root <checkout> \
+  --result-root <checkout>/result --database-root <checkout>/Database \
+  --entry-result-root <checkout>/result \
+  --source-chip <chip> --source-qubit <qubit> --name <new-entry-name> \
+  --part all --qubit-kind qubit/fluxonium \
+  --backup-parent <external-backup-parent> --dry-run
+```
+
+正式執行前，依遷移說明書核對報告與備份位置。`--qubit-kind` 須符合來源元件，不由工具推論。
+
 ## Sample CSV → JSONL
 
 `migrations.sample_csv.convert_sample_csv` 接受一或多份 CSV、已開啟的 `ResultEntry` 與元件名，追加到該條目的 `samples/<component>.jsonl`。來源位元組不變。公開函式回傳 `MigrationReport`，列出追加列數、待判斷列及原因、輸出路徑。
@@ -34,7 +48,7 @@ CLI 使用既有 Result／Database 條目：
 
 ```bash
 uv run --directory <checkout> --no-sync -- python -m migrations old.csv \
-  --result-root <results-root> --database-root <database-root> \
+  --result-root <result-root> --database-root <database-root> \
   --entry <entry-name> --component Q1 \
   --dev-value-column "calibrated mA" --source-unit mA
 ```

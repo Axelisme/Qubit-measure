@@ -39,7 +39,7 @@ def test_generator_run_analysis_and_snapshot_capture_do_not_query_gui(tmp_path):
         try:
             assert type(gain) is float
             tab = session.open_tab("lookback")
-            tab.set("rounds", int(gain))
+            tab.set(("rounds",), int(gain))
             run_result = yield from tab.run_step()
             run = run_result.run
             assert isinstance(run, RecipeRun)
@@ -332,7 +332,7 @@ def test_between_yield_cancel_suppresses_once_but_keeps_fast_steps(tmp_path):
         assert isinstance(run, RecipeRun)
         between.set()
         wait_for_event(continue_recipe)
-        tab.set("rounds", 9)
+        tab.set(("rounds",), 9)
         result = yield from run.analyze_step("primary")
         analysis, status = result.analysis, result.status
         delivered.extend((analysis, status))

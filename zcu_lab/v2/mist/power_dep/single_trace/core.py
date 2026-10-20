@@ -35,6 +35,8 @@ from zcu_tools.program.v2 import (
 
 @dataclass(frozen=True)
 class PowerDepResult:
+    """Hardware probe gains and mean complex readout IQ at each gain."""
+
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
 
@@ -88,6 +90,16 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
         *,
         context: RunContext,
     ) -> PowerDepResult:
+        """Measure a MIST response trace versus probe gain.
+
+        Reset, apply the optional init pulse, apply the gain-swept probe,
+        then read out. The board sweeps gain while the other pulse settings
+        stay fixed. Return hardware gain coordinates and mean complex IQ
+        per gain. IQ displacement reveals the probe-induced response; it
+        is not a calibrated state population. ``config`` supplies the
+        probe/readout modules and gain range.
+        """
+        # 1. Prepare gain coordinates for the probe's generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -103,11 +115,15 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
             (len(gains),),
             on_update=lambda data: viewer.update(gains, mist_signal2real(data)),
         )
+
+        # 2. Bind the board gain sweep without changing the other probe settings.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             modules.probe_pulse.set_param(
                 "gain", sweep2param("gain", sched.cfg.sweep.gain)
             )
+
+            # 3. Reset and initialize before each probe/readout sequence.
             _ = (
                 sched.prog_builder(soc, soccfg)
                 .add(
@@ -120,6 +136,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
                 .build_and_acquire()
             )
 
+        # 4. Preserve complex IQ so analysis can choose its own reference.
         return PowerDepResult(gains=gains, signals=signals_buffer.array)
 
     def analyze(
@@ -129,6 +146,13 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the IQ displacement from ``options.g0`` using ``source`` data.
+
+        If g0 is None, use the first measured IQ, not the live view's mean
+        over the first 5% of gains. ``ac_coeff`` maps gain squared to photon
+        number when supplied; ``e0`` only sets the vertical display range.
+        Return no fit or calibrated population estimate.
+        """
         result = source.result
         g0, e0, ac_coeff = options.g0, options.e0, options.ac_coeff
 

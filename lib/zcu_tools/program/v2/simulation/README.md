@@ -1,10 +1,15 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-19，board 自述身分與 caller-owned 啟動
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
 and supplies numeric round data to the existing QICK acquisition pipeline.
+`SimulationBinding` optionally accepts a `wait_ready` callback. Admission calls
+it before consuming the acquire sequence or constructing a request. Failure
+releases admission and propagates; the environment callback owns any optional
+startup-compilation fallback. External timers must wait at the environment's
+ready interface before starting if startup time should be excluded.
 Other SoC objects use the original path. Classification, hooks, tracker,
 normalization, averaging and Stop still belong to that pipeline.
 
@@ -23,10 +28,11 @@ def build_environment():
     )
 ```
 
-The measure launcher accepts `--simulate /absolute/path/noise_environment.py`.
-It imports the file and calls `build_environment()` without arguments once.
-No environment path means normal mode, without an automatic board connection.
-Load or installation errors abort startup without a fallback.
+The caller imports the builder and owns the returned environment. GUI startup
+scripts can install its board and register its built drivers through public
+facets. The GUI does not load or select an environment. `SimulationSoc.is_mock`
+is True, so consumers can forward the board's identity without importing the
+simulation implementation.
 
 Notebook callers import the same builder and use its returned objects:
 
@@ -54,13 +60,13 @@ finally:
 ```
 
 `SimulationEnvironment` returns `soc`, matching `soccfg`, `devices` and a public
-`description`. The builder owns cleanup before successful return. The host owns
-cleanup after return, even if publication or window assembly fails. GUI injects
-the same `DeviceManager`, publishes live drivers through `DeviceService`, and
-restores preferences afterward. Same-name live devices win; other remembered
-rows remain offline. After operation admission closes and work drains, composition
-closes the manager. Failed driver closes remain registered and propagate. There
-is no automatic retry. `Controller.close()` drains work but does not close drivers.
+`description`. The builder owns cleanup before successful return. The caller
+owns cleanup after return. GUI registration transfers each accepted driver's
+lifetime to DeviceService; rejected candidates remain caller-owned. The caller
+retains ownership of the board and other environment resources. Register their
+cleanup with the startup script's on-close hook when needed. After callbacks and
+operation drain, the GUI tries every registered driver once. Failed closes stay
+registered with an error; they do not prevent GUI exit or trigger automatic retry.
 
 ## Compact timelines and statistics
 
@@ -91,13 +97,12 @@ points or reps.
 `core.simulation` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary. Time is us, frequency MHz, phase degrees and
 gain normalized DAC amplitude. The frontend interprets exact supported Module
-classes, not arbitrary tProcessor instructions. Unknown subclasses (including mux
-readouts), raw program setup/body/cleanup or make_program overrides, raw loop
+classes, not arbitrary tProcessor instructions. Unknown subclasses, raw program setup/body/cleanup or make_program overrides, raw loop
 hooks and undefined or
 incorrectly typed registers fail before the backend produces any data. Errors
 identify the concrete Module type/name, loop coordinates and relevant register.
 
-Supported controls are Pulse, PulseReadout, Delay, SoftDelay, DelayAuto,
+Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
 LoadValue, LoadWord, Repeat, Branch, ScanWith, ComputedPulse, TableLengthPulse,
 TablePulseReadout, Join and the existing reset wrappers. Join interleaves branches
 in the same static minimum-time order as hardware emission and rejects
@@ -124,6 +129,14 @@ Const uses a unity envelope (`None`). A flat-top with at least 10 ns of plateau
 becomes adjacent up-ramp, half-gain constant and down-ramp slots. Short flat-tops
 keep whole sampled-envelope candidates. Long plateaus never expand onto a fine
 grid. Ramp boundary samples preserve the scalar envelope's linear interpolation.
+
+MuxReadout lowers the real compiled mixmux tones into simultaneous EventSlots
+on one generator, with one static PFB ADC slot per declared tone. DDS, gain,
+phase and demodulation rounding come from QICK's compiled parameters. Tone order
+is ADC declaration order; channels are not sorted. The fixed mux compile profile
+is opt-in through `make_mux_mock_soccfg`, with 1..8 explicit ADC routes. The
+ordinary `make_mock_soccfg` defaults and clocks do not change. Numeric environments
+must separately bind every requested route and supply any physical mux response.
 
 `ReadoutWindow` keeps ADC samples/rate independent of generator duration. Per-point
 windows retain trigger emission order, demodulation MHz/degrees and the generator

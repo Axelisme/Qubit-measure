@@ -15,7 +15,6 @@ import pytest
 from qtpy.QtWidgets import QApplication, QListWidget, QPushButton, QWidget
 from zcu_tools.device import FakeDevice
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
-from zcu_tools.gui.session.device_models import ConnectDeviceRequest
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
 from tests.gui._user_input import ComponentDriver
@@ -29,11 +28,7 @@ RUN_ID = "devices"
 def connect_flux(session: WindowSession) -> None:
     """Connect one FakeDevice named flux through the session's device service."""
     harness = session.harness
-    harness.services.device.start_connect_device(
-        ConnectDeviceRequest("FakeDevice", "flux", "none")
-    )
-    harness.background.execute()
-    harness.background.deliver()
+    harness.publish_devices("flux")
 
 
 def devices_button(window: QWidget) -> QPushButton:

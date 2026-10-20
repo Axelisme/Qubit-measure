@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,6 +27,8 @@ from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 from zcu_tools.gui.widgets import error_colour
+
+from tests.gui._user_input import ComponentDriver
 
 
 @pytest.fixture
@@ -145,6 +148,107 @@ class NoParameters:
 @dataclass
 class WithParameters:
     threshold: float = 0.5
+
+
+@dataclass
+class OptionalParameters:
+    threshold: float = 0.5
+    cutoff: float | None = None
+
+
+@dataclass(frozen=True)
+class TextExtent:
+    """Visible text's available height versus one unclipped font line, in pixels."""
+
+    text: str
+    available_height: int
+    font_height: int
+    fully_visible: bool
+
+
+class AnalysisLayoutDriver(ComponentDriver):
+    """Observe text readability through public rendered Qt widgets only."""
+
+    def __init__(self, window: QWidget) -> None:
+        super().__init__(window)
+        self.window = window
+
+    def parameter_text(self) -> tuple[TextExtent, ...]:
+        """Snapshot the visible parameter labels and scalar input text."""
+        return tuple(
+            TextExtent(
+                widget.text(),
+                widget.contentsRect().height(),
+                widget.fontMetrics().height(),
+                widget.visibleRegion().contains(widget.rect()),
+            )
+            for widget in self.window.findChildren(QWidget)
+            if (
+                isinstance(widget, QLineEdit)
+                or isinstance(widget, QLabel)
+                and widget.text() in ("threshold:", "cutoff:")
+            )
+            and widget.isVisible()
+            and not widget.visibleRegion().isEmpty()
+        )
+
+
+@pytest.mark.parametrize("hydration", ["dynamic", "static"])
+def test_analysis_parameter_text_remains_readable_after_hydration(
+    qapp: QApplication, tmp_path: Path, hydration: str
+) -> None:
+    ctrl = MagicMock()
+    ctrl.get_left_panel_width.return_value = 500
+    ctrl.progress_control.attach_progress.return_value = lambda: None
+    ctrl.progress_control.progress_bars.return_value = []
+    ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
+    tab = ExpTabWidget("layout", ctrl, AdapterCapabilities())
+    if hydration == "static":
+        tab.populate_analyze_params(OptionalParameters())
+    tab.resize(1700, 1000)
+    tab.show()
+    flow = AnalysisLayoutDriver(tab)
+    try:
+        flow.select_tab("Analysis")
+        flow.screenshot(tmp_path / "00-initial.png")
+        if hydration == "dynamic":
+            flow.select_tab("Run")
+            # Public view delivery while the already-shown Analysis pane is hidden.
+            tab.populate_analyze_params(OptionalParameters())
+            flow.select_tab("Analysis")
+        flow.screenshot(tmp_path / "01-hydrated.png")
+        extents = flow.parameter_text()
+        assert {item.text for item in extents} >= {"threshold:", "cutoff:"}
+        assert all(
+            item.available_height >= item.font_height and item.fully_visible
+            for item in extents
+        ), f"Analysis parameter text is vertically clipped: {extents}"
+        assert len(extents) == 4
+        assert flow.observe("Analyze").fully_visible
+        assert flow.observe("Analyze").enabled
+
+        flow.click("▼")
+        flow.screenshot(tmp_path / "02-collapsed.png")
+        assert not flow.parameter_text()
+        flow.click("▶")
+        flow.screenshot(tmp_path / "03-expanded.png")
+        assert flow.parameter_text() == extents
+        # Resize is window-manager fixture delivery, not a domain command.
+        tab.resize(1200, 700)
+        flow.screenshot(tmp_path / "04-resized.png")
+        assert all(
+            item.available_height >= item.font_height and item.fully_visible
+            for item in flow.parameter_text()
+        )
+        flow.enter_text(value="0.75", object_name="qt_spinbox_lineedit")
+        flow.enter_text("cutoff:", "0.25")
+        flow.click("Analyze")
+        flow.screenshot(tmp_path / "05-edited.png")
+        assert {item.text for item in flow.parameter_text()} >= {"0.75", "0.25"}
+    finally:
+        tab.close()
+        tab.deleteLater()
+        qapp.processEvents()
 
 
 def test_analysis_parameter_hint_tracks_empty_and_populated_forms(qapp):

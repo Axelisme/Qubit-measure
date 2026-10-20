@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import importlib
 import logging
 import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
@@ -11,9 +12,8 @@ from typing import (
 
 from zcu_tools.device import DeviceActivity, DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
-from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.device.yoko import YOKOGS200Info
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.device_models import (
     ActiveDeviceOperation,
@@ -24,6 +24,8 @@ from zcu_tools.gui.session.device_models import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.devices import device_adapters, get_device_adapter
+from zcu_tools.gui.session.devices.base import DeviceProtocol
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceOperationFinishedPayload,
@@ -41,7 +43,6 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
     DeviceMemoryInfo,
-    DeviceProtocol,
     DeviceRegistryPort,
     DriverFactoryPort,
     OperationConflictError,
@@ -68,26 +69,15 @@ class _InflightOp:
     terminal path needs for that device's operation, independent of any other:
 
     - ``token``: the operation token (handle + gate lease key), unique per op.
-    - ``kind``: the operation kind — outcome handling branches on it
-      (``_on_operation_failed`` distinguishes a failed first-connect from a
-      failed mutation of an existing device).
+    - ``kind``: the operation kind, used to distinguish setup from other mutations.
     - ``prior``: the device-state rollback buffer captured at begin (the State
-      entry before the optimistic write); ``None`` when there was no prior entry
-      (a brand-new connect), which the rollback paths interpret as "remove".
+      entry before the optimistic write); ``None`` for a brand-new connect.
+      Failed first connections retain a memory-only row with the error.
     """
 
     token: int
     kind: OperationKind
     prior: DeviceState | None
-
-
-_DEVICE_TYPE_REGISTRY: dict[str, tuple[str, bool]] = {
-    "FakeDevice": ("zcu_tools.device.fake.FakeDevice", False),
-    "YOKOGS200": ("zcu_tools.device.yoko.YOKOGS200", True),
-    "RohdeSchwarzSGS100A": ("zcu_tools.device.sgs100a.RohdeSchwarzSGS100A", True),
-}
-
-_FLUX_DEVICE_TYPES = {"FakeDevice", "YOKOGS200"}
 
 
 def _extract_numeric_device_value(info: BaseDeviceInfo | None) -> float | None:
@@ -100,21 +90,11 @@ def _extract_numeric_device_value(info: BaseDeviceInfo | None) -> float | None:
     return float(raw)
 
 
-def list_supported_device_types() -> list[str]:
-    return list(_DEVICE_TYPE_REGISTRY.keys())
-
-
 def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
-    if type_name not in _DEVICE_TYPE_REGISTRY:
+    adapter = get_device_adapter(type_name)
+    if adapter is None:
         raise DeviceRegistrationError(f"Unknown device type: {type_name!r}")
-    class_path, requires_address = _DEVICE_TYPE_REGISTRY[type_name]
-    module_path, cls_name = class_path.rsplit(".", 1)
-    cls = getattr(importlib.import_module(module_path), cls_name)
-    if requires_address:
-        import pyvisa
-
-        return cls(address, pyvisa.ResourceManager())
-    return cls()
+    return adapter.connect(address)
 
 
 class DeviceService:
@@ -137,6 +117,7 @@ class DeviceService:
         """
         self._bus = bus
         self._state = state
+        self._owner_guard = OwnerThreadGuard()
         # Device composes both leaves (ADR-0066): Exclusion (device mutation vs
         # run / another mutation of the same device) + a Handle (operation_id +
         # await + cancel for setup). OperationRunner owns the mechanism (ADR-0066);
@@ -159,12 +140,115 @@ class DeviceService:
         # of the same device. ProgressService owns per-operation setup progress.
         self._inflight: dict[str, _InflightOp] = {}
 
+    def register_device[Info: BaseDeviceInfo](
+        self, name: str, driver: BaseDevice[Info]
+    ) -> None:
+        """Adopt an already built driver and publish its current info on owner thread.
+
+        ``name`` is a nonblank session name, preserved verbatim. ``driver`` must
+        be a BaseDevice; its info supplies type and address. Replace only an idle
+        MEMORY_ONLY row, preserving its remember flag, or create a nonremembered
+        row. Reject live names with FailedPreconditionError, invalid inputs with
+        InvalidInputError, and Run or same-device mutation with
+        OperationConflictError. Info/registry failures propagate without changing
+        the cache. Ownership transfers to this service only on success; rejected
+        candidates remain caller-owned and are not closed. No driver is rebuilt.
+        """
+        self._owner_guard.assert_owner()
+        if not name.strip():
+            raise InvalidInputError("Device name must not be empty or all whitespace")
+        with self._device_lease(name, OperationKind.DEVICE_CONNECT):
+            prior = self._state.get_device(name)
+            if (
+                prior is not None and prior.is_live()
+            ) or name in self._registry.get_all_devices():
+                raise FailedPreconditionError(f"Device {name!r} is already registered")
+            info = driver.get_info()
+            self._registry.register_device(name, driver)
+            self._state.put_device(
+                DeviceState(
+                    name=name,
+                    type_name=info.type,
+                    address=info.address,
+                    status=DeviceStatus.CONNECTED,
+                    remember=prior.remember if prior is not None else False,
+                    info=info,
+                )
+            )
+            self._emit_device_changed(name)
+
+    def close_all_devices(self) -> None:
+        """Try every registered driver once, publishing each result on owner thread.
+
+        Call after app work drains. Run or a device mutation rejects the whole
+        call before any close. Successful closes remove registry entries and
+        publish MEMORY_ONLY rows; failures retain CONNECTED rows with error.
+        Raise ExceptionGroup containing all close failures after every attempt.
+        No RF/output changes or retries are implied. Remaining drivers stay
+        service-owned; another explicit call may retry them. GUI teardown must
+        isolate/log this aggregate rather than prevent window closure.
+        """
+        self._owner_guard.assert_owner()
+        names = tuple(self._registry.get_all_devices())
+        for name in names:
+            self._gate.ensure_can_start(
+                OperationKind.DEVICE_DISCONNECT, resource_id=name
+            )
+        errors: list[Exception] = []
+        for name in names:
+            prior = self._state.get_device(name)
+            with self._device_lease(name, OperationKind.DEVICE_DISCONNECT):
+                try:
+                    self._registry.close_device(name)
+                except Exception as exc:
+                    errors.append(exc)
+                    logger.exception("Failed to close registered device %r", name)
+                    if prior is not None:
+                        self._state.put_device(
+                            replace(
+                                prior, status=DeviceStatus.CONNECTED, error=str(exc)
+                            )
+                        )
+                else:
+                    if prior is not None:
+                        self._state.put_device(
+                            replace(prior, status=DeviceStatus.MEMORY_ONLY, error=None)
+                        )
+                if prior is not None:
+                    self._emit_device_changed(name)
+        if errors:
+            raise ExceptionGroup("Failed to close registered devices", errors)
+
+    @contextmanager
+    def _device_lease(self, name: str, kind: OperationKind) -> Generator[None]:
+        self._gate.ensure_can_start(kind, resource_id=name)
+        origin = self._bus.current_origin
+        token = self._handles.create(cancel_hook=None, origin=origin)
+        self._gate.register(
+            token,
+            kind,
+            owner_id=name,
+            origin_kind=origin.kind,
+            note=f"{kind.value}: {name}",
+            resource_id=name,
+        )
+        try:
+            yield
+        except Exception as exc:
+            self._handles.settle(token, OperationOutcome("failed", str(exc)))
+            raise
+        else:
+            self._handles.settle(token, OperationOutcome("finished"))
+        finally:
+            self._gate.release(token)
+
     def publish_initial_devices(self) -> None:
         """Publish injected live drivers before preference restore, on owner loop.
 
-        No drivers are reconstructed or connected. Read failure aborts startup;
-        the composition host retains cleanup responsibility for the same manager.
-        Existing published rows are rejected rather than overwritten.
+        No drivers are reconstructed or connected. Read failure propagates;
+        the caller must drain work and close the service's registered drivers.
+        Existing published rows are rejected rather than overwritten. Known
+        instrument rows may reconnect at their stored address, also after rename.
         """
         entries = self._registry.get_all_devices()
         infos = {name: driver.get_info() for name, driver in entries.items()}
@@ -184,6 +268,23 @@ class DeviceService:
             self._emit_device_changed(name)
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
+        """Manually add a user-connectable instrument off-main; return its token.
+
+        Non-user-connectable known types raise FailedPreconditionError before
+        admission, even for an existing offline row. Use start_reconnect_device
+        for a trusted stored identity. Live/busy names also fail before admission.
+        Driver failures settle failed and retain an offline snapshot with a reason
+        so callers can correct the address and retry.
+        """
+        adapter = get_device_adapter(req.type_name)
+        if adapter is not None and not adapter.capabilities.user_connectable:
+            raise FailedPreconditionError(
+                f"{req.type_name} cannot be added manually; register a driver or "
+                "remember its identity, then use Reconnect."
+            )
+        return self._start_connection(req)
+
+    def _start_connection(self, req: ConnectDeviceRequest) -> int:
         current = self._state.get_device(req.name)
         if current is not None and current.is_live():
             raise FailedPreconditionError(
@@ -237,16 +338,8 @@ class DeviceService:
 
         def _on_operation_failed(message: str, settle: SettleFn) -> None:
             logger.warning("device operation failed: name=%r error=%s", name, message)
-            op = self._inflight.pop(name, None)
-            # first-connect fail (no prior) → remove; mutation fail → restore prior
-            if (
-                op is not None
-                and op.kind is OperationKind.DEVICE_CONNECT
-                and prior is None
-            ):
-                self._state.remove_device(name)
-            else:
-                self._restore_prior_device_from(name, prior, message)
+            self._inflight.pop(name, None)
+            self._restore_prior_device_from(name, prior, message)
             # State is observable before settle.
             settle(OperationOutcome("failed", message))
             self._emit_device_changed(name)
@@ -288,17 +381,19 @@ class DeviceService:
         return token
 
     def start_reconnect_device(self, name: str) -> int:
-        # Reconnect is a thin alias for connect of a remembered (memory-only)
-        # device: it reuses the stored type/address. Return the connect
-        # operation's token so the wire/MCP layers can expose it as an async
-        # handle (FC1 — reconnect must produce an operation_id like the other
-        # device starts, otherwise MCP wait(op) cannot track a name-only reconnect).
+        """Reconnect an idle stored row off-main using its type/address.
+
+        Manual Add policy does not apply to identities from trusted register,
+        publish or remember callers. Unknown types have no default factory and
+        fail the operation; live/busy rows reject before admission. Returns the
+        token; failures retain the offline row and error.
+        """
         dev = self._require_device(name)
         if not dev.is_memory_only():
             raise FailedPreconditionError(
                 f"Device {name!r} is not a memory-only device"
             )
-        return self.start_connect_device(
+        return self._start_connection(
             ConnectDeviceRequest(
                 type_name=dev.type_name,
                 name=dev.name,
@@ -511,6 +606,33 @@ class DeviceService:
         # signal — no direct worker.cancel() coupling.
         self._handles.cancel(op.token)
 
+    def remember_device(self, name: str, type_name: str, address: str) -> None:
+        """Publish one idle memory-only identity on-owner, without hardware I/O.
+
+        name is session-unique; type_name is the driver's adapter key and address
+        its connection string. Unknown types are allowed but have no factory.
+        Empty/blank fields raise InvalidInputError. Live or mutating rows and
+        Run conflicts reject before changing state. Repeating an idle identity
+        retains its error; changing it clears the obsolete error. No driver is
+        owned or closed and no disk file is written. Reconnect uses this row.
+        """
+        self._owner_guard.assert_owner()
+        if not all(value.strip() for value in (name, type_name, address)):
+            raise InvalidInputError("Device name, type and address must not be blank")
+        self._gate.ensure_can_start(OperationKind.DEVICE_CONNECT, resource_id=name)
+        current = self._state.get_device(name)
+        if current is not None and not current.is_memory_only():
+            raise FailedPreconditionError(
+                f"Device {name!r} is already connected or busy"
+            )
+        if current is not None and (current.type_name, current.address) == (
+            type_name,
+            address,
+        ):
+            return
+        self.register_remembered_devices([DeviceMemoryInfo(type_name, name, address)])
+        self._emit_device_changed(name)
+
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None:
         for entry in entries:
             current = self._state.get_device(entry.name)
@@ -526,6 +648,42 @@ class DeviceService:
                     remember=True,
                 )
             )
+
+    def rename_device(self, old_name: str, new_name: str) -> None:
+        """Rename a MEMORY_ONLY device on the session owner thread, without I/O.
+
+        Names are preserved verbatim. Empty or all-whitespace names and names
+        already used by another device raise InvalidInputError. Unknown, live,
+        or in-flight devices raise FailedPreconditionError, even for a same-name
+        request. A same-name request on an idle memory row is a silent no-op.
+        Rejection leaves all state unchanged. Success preserves the row's other
+        fields and publishes one whole-device-set change after both keys have
+        been updated, refreshing value sources and future settings captures.
+        Aliases, open tabs and historical captures are not rewritten.
+        """
+        dev = self._require_device(old_name)
+        if old_name in self._inflight or self._gate.is_device_mutating(old_name):
+            raise FailedPreconditionError(
+                f"Device {old_name!r} has an in-flight operation; wait before renaming"
+            )
+        if not dev.is_memory_only():
+            raise FailedPreconditionError(
+                f"Disconnect device {old_name!r} before renaming"
+            )
+        if not new_name or not new_name.strip():
+            raise InvalidInputError("Device name must not be empty or all whitespace")
+        if new_name == old_name:
+            return
+        if (
+            self._state.has_device(new_name)
+            or new_name in self._registry.get_all_devices()
+        ):
+            raise InvalidInputError(f"Device name {new_name!r} is already in use")
+        # No callbacks or I/O between the two writes: observers see only the
+        # committed set, and MEMORY_ONLY has no driver or lease key to migrate.
+        self._state.remove_device(old_name)
+        self._state.put_device(replace(dev, name=new_name))
+        self._bus.emit(DeviceChangedPayload(name=None))
 
     def forget_device(self, name: str) -> None:
         dev = self._require_device(name)
@@ -706,41 +864,52 @@ class DeviceService:
         infer a unit from device type or change connection/cache state.
         """
         dev = self._state.get_device(name)
-        if dev is not None and isinstance(dev.info, (YOKOGS200Info, FakeDeviceInfo)):
-            return dev.info.value_unit
-        return "none"
+        if dev is None or dev.info is None:
+            return "none"
+        adapter = get_device_adapter(dev.info.type)
+        if adapter is None:
+            return "none"
+        return adapter.bias_unit(dev.info) or "none"
 
     def get_device_unit_strict(self, name: str) -> str:
         """Read a cached flux unit for context binding, without hardware I/O.
 
-        The device must be registered as YOKOGS200 or FakeDevice and have valid
-        flux Info. Otherwise DeviceRegistrationError names the device. Missing
-        Info never selects a unit from type; connection/cache state is unchanged.
+        The registered type's adapter must declare bias_source and the cached
+        Info must provide a validated bias unit. Otherwise DeviceRegistrationError
+        names the device. Missing Info never selects a unit from type;
+        connection/cache state is unchanged.
         """
         dev = self._state.get_device(name)
         if dev is None:
             raise DeviceRegistrationError(f"No such device: {name!r}")
-        if dev.type_name not in _FLUX_DEVICE_TYPES:
+        adapter = get_device_adapter(dev.type_name)
+        if adapter is None or not adapter.capabilities.bias_source:
+            supported = sorted(
+                known.driver_cls.__name__
+                for known in device_adapters()
+                if known.capabilities.bias_source
+            )
             raise DeviceRegistrationError(
                 f"Device {name!r} of type {dev.type_name!r} cannot bind a "
-                f"flux context (supported: {sorted(_FLUX_DEVICE_TYPES)})"
+                f"flux context (supported: {supported})"
             )
-        if not isinstance(dev.info, (YOKOGS200Info, FakeDeviceInfo)):
+        unit = self.get_device_unit(name)
+        if unit == "none":
             raise DeviceRegistrationError(f"Device {name!r} has no cached flux Info")
-        return dev.info.value_unit
+        return unit
 
     def get_cached_device_value(self, name: str) -> float | None:
         """Return the cached numeric predictor/flux value for a live device.
 
         This is a cheap State-only query: it does not touch hardware, refresh the
-        cache, bump versions, or emit events. The type whitelist intentionally
-        matches the existing flux-device unit whitelist so RF sources are not
-        treated as predictor device-value providers by accident.
+        cache, bump versions, or emit events. The registered type's bias_source
+        capability excludes RF sources from predictor device-value providers.
         """
         dev = self._state.get_device(name)
         if dev is None or dev.status is not DeviceStatus.CONNECTED:
             return None
-        if dev.type_name not in _FLUX_DEVICE_TYPES:
+        adapter = get_device_adapter(dev.type_name)
+        if adapter is None or not adapter.capabilities.bias_source:
             return None
         return _extract_numeric_device_value(dev.info)
 
@@ -869,9 +1038,7 @@ class DeviceService:
 
     def _disconnect(self, name: str) -> object:
         # Was @staticmethod; now instance method so it can use self._registry.
-        device: DeviceProtocol = self._registry.get_device(name)
-        device.close()
-        self._registry.drop_device(name)
+        self._registry.close_device(name)
         return None
 
     def _restore_prior_device_from(

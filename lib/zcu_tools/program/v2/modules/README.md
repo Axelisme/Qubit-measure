@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-16 — fixed mux readout and route protection
+**Last updated:** 2026-10-18, tone-ordered raw IQ acquisition
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -44,8 +44,14 @@ route declarations through `ModularProgramV2.protect_readout_routes`, including
 when nested; unprotected routes retain QICK's declaration semantics.
 `collect_iq` selects one standard averaged read using that program's actual
 channel ordering and returns tone-ordered float64 I/Q. The experiment owns
-complex conversion, interpretation and persistence. Mux has no physical
-simulation support.
+complex conversion, interpretation and persistence. `collect_raw_iq(prog)` reads
+that initialized program's last-round QICK buffers, normalizes each ADC's sums by
+its rounded integration length, and keeps all loops, reads and paired shots in
+tone order. A shared `read_index` optionally selects one read. It leaves DC
+offsets and preparation meaning to the caller; unlike `collect_iq`, it does not
+average reps or rounds. To retain every round, collect in the completed-round
+hook. The method docstring specifies dtype, axes, units and failures. Mux has no
+physical simulation support.
 
 ## Readout Runtime Words
 

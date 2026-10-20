@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import TypeAdapter
 
+from zcu_tools.core.element import ElementIdentity
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.remote.form_description import (
     RecipeFieldObservation,
@@ -17,6 +18,28 @@ from zcu_tools.gui.app.measure.remote.form_description import (
     RecipeSourceWire,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
+
+type RecipeFieldPath = tuple[str | int, ...]
+"""Logical field names and original list indexes; numeric strings stay names."""
+
+
+def field_path(path: RecipeFieldPath) -> RecipeFieldPath:
+    """Validate a nonempty typed path carrier, without resolving owner fields.
+
+    Strings are field names and nonnegative integers are original list indexes.
+    Booleans, blank names and dotted-string carriers raise ValueError. Names
+    containing dots are literal names; no splitting or name/index lookup occurs.
+    """
+    if isinstance(path, str) or not path:
+        raise ValueError("field must be a nonempty typed path")
+    if any(
+        (isinstance(part, str) and (not part or part != part.strip()))
+        or (type(part) is int and part < 0)
+        or (not isinstance(part, str) and type(part) is not int)
+        for part in path
+    ):
+        raise ValueError("field requires nonblank names or nonnegative int indexes")
+    return tuple(path)
 
 
 @dataclass(frozen=True)
@@ -43,17 +66,19 @@ class RecipeFormField:
     mode is key for a library key, inline for an inline module/Spec, or None for
     scalar, ordinary section, range, disabled or unfilled fields.
     key is the actual library key in key mode, never an alias, otherwise None.
-    locked is the owner's selection_fixed or fixed flag: this level has a
-    declaration-fixed branch or complete value. It does not freeze inner
-    choices, hide children or imply readonly descendants.
+    locked is the owner's selection_fixed, fixed or readonly flag: this level
+    has a declaration-fixed branch, complete value or readonly subtree.
+    A fixed branch alone does not freeze its inner choices or hide children.
     fields lists logical direct children, including readable captured Spec
     children. Only generated wrappers are hidden; real module fields remain.
     value_status is available (including null), missing or unavailable. selector
     is owner-supplied generated identity or None for ordinary fields. source is
-    the nearest captured ref identity or None. readonly means a ref ancestor was
-    crossed, not declaration-fixed. errors contains relevant logical directed
-    failures, including root and affecting ancestors. Reading grants no writes.
-    All containers are detached from the current reply.
+    the nearest captured ref identity or None. via_ref means a ref ancestor was
+    crossed, independently of declaration readonly. errors contains relevant
+    logical directed failures, including root and affecting ancestors.
+    Reading grants no writes.
+    element is the declaring owner's same-read original index/name, or None
+    outside declared fixed elements. All containers are detached from the reply.
     """
 
     input: YamlValue
@@ -67,7 +92,8 @@ class RecipeFormField:
     value_status: Literal["available", "missing", "unavailable"]
     selector: RecipeSelectorWire | None
     source: RecipeSourceWire | None
-    readonly: bool
+    via_ref: bool
+    element: ElementIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -76,8 +102,8 @@ class RecipeModuleValues:
 
     value contains materialized module fields in their declared units. It is not
     the full native cfg after to_cfg and excludes extras lowering. mode is key
-    or inline. source is library:<actual-key> for key mode, or the dotted Form
-    module field for inline. Other invalid draft fields do not block this view;
+    or inline. source is the owner's display label: library:<actual-key> for
+    key mode or its inline module label. It is not a parsed field locator. Other invalid draft fields do not block this view;
     invalid module fields raise instead of returning unavailable/empty values.
     All containers are detached from input, library and retained observations.
     """
@@ -135,7 +161,7 @@ def field_observation(reply: Mapping[str, object]) -> RecipeFieldObservation:
 
 
 def directed_errors(
-    publication: Mapping[str, object], path: tuple[str, ...]
+    publication: Mapping[str, object], path: RecipeFieldPath
 ) -> tuple[RecipeFormError, ...]:
     """Decode errors at root, consuming ancestors, target or descendants.
 
@@ -170,7 +196,7 @@ def directed_errors(
 
 
 def read_form_field(
-    observation: RecipeFieldObservation, path: tuple[str, ...]
+    observation: RecipeFieldObservation, path: RecipeFieldPath
 ) -> RecipeFormField:
     """Project one decoded atomic field read into the author's detached view.
 
@@ -181,7 +207,7 @@ def read_form_field(
     description = observation["description"]
     target = description["target"]
     if target is None or (target["hidden"] and target["fixed"]):
-        raise ValueError(f"Unknown cfg field: {'.'.join(path)}")
+        raise ValueError(f"Unknown cfg field: {path!r}")
     raw = observation["input"]
     mode: Literal["key", "inline"] | None = None
     selector = observation["selector"]
@@ -198,7 +224,7 @@ def read_form_field(
         value=wire_value(observation["value"]),
         mode=mode,
         key=key,
-        locked=target["selection_fixed"] or target["fixed"],
+        locked=target["selection_fixed"] or target["fixed"] or target["readonly"],
         fields=tuple(
             child["name"]
             for child in description["children"]
@@ -211,5 +237,6 @@ def read_form_field(
         value_status=observation["value_status"],
         selector=selector,
         source=observation["source"],
-        readonly=observation["readonly"],
+        via_ref=observation["readonly"],
+        element=observation.get("element"),
     )

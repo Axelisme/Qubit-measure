@@ -77,6 +77,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 "reset": Hidden(),
                 "readout": Template(
                     "readout",
+                    bindings={"resonator": "$resonator"},
                     set={
                         "gain": 0.05,
                         "ro_length": initial_ro_length(),

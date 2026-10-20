@@ -16,7 +16,6 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
@@ -29,9 +28,13 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 
+from zcu_lab.v2._support.device import set_flux
+
 
 @dataclass(frozen=True)
 class OneToneFluxResult:
+    """Flux device values, readout MHz, and complex IQ [flux, frequency]."""
+
     fluxes: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -89,6 +92,18 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
     )
 
     def run(self, cfg: OneToneFluxCfg, *, context: RunContext) -> OneToneFluxResult:
+        """Map the readout reflection spectrum versus JPA flux bias.
+
+        Step the external flux bias on the host. At each bias, reset and
+        apply a readout pulse while sweeping its frequency on the board.
+        Return flux device values, readout frequencies in MHz, and mean
+        complex IQ shaped [flux, frequency]. The map is a spectral survey,
+        not a qubit SNR measurement or an automatic bias selection.
+
+        ``jpa_flux_dev`` must name a device in ``context.devices``;
+        ``flux_unit`` selects its working unit without conversion.
+        """
+        # 1. Prepare host flux values and the board's readout-frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
@@ -113,6 +128,8 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
             (len(jpa_fluxs), len(freqs)),
             on_update=lambda data: viewer.update(jpa_fluxs, freqs, np.abs(data)),
         )
+
+        # 2. Set the external flux bias before measuring each spectrum.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
                 set_flux(
@@ -122,6 +139,8 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
                     stop=context.cancel_signal,
                     progress=False,
                 )
+
+                # 3. Reset, then read out at each board-swept frequency.
                 modules = step.cfg.modules
                 modules.readout.set_param(
                     "freq", sweep2param("freq", step.cfg.sweep.freq)
@@ -135,6 +154,8 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
                     .declare_sweep("freq", step.cfg.sweep.freq)
                     .build_and_acquire()
                 )
+
+        # 4. Preserve complex IQ in flux-major order for the reflection map.
         signals = signals_buffer.array
 
         return OneToneFluxResult(fluxes=jpa_fluxs, freqs=freqs, signals=signals)

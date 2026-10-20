@@ -146,15 +146,21 @@ def test_run_inputs_detaches_reference_shape_and_values() -> None:
     state.get_tab(tab_id).cfg = cfg
     cfg.write(
         {
-            ("asset", "kind"): "inline",
-            ("asset", "module", "ch"): 0,
-            ("asset", "module", "nqz"): 1,
-            ("asset", "module", "waveform", "kind"): "inline",
-            ("asset", "module", "waveform", "module", "style"): "const",
-            ("asset", "module", "waveform", "module", "length"): 0.4,
-            ("asset", "module", "gain"): 0.25,
-            ("asset", "module", "freq"): 4000,
-            ("asset", "module", "phase"): 0,
+            ("asset",): {
+                "kind": "inline",
+                "module": {
+                    "type": "pulse",
+                    "ch": 0,
+                    "nqz": 1,
+                    "gain": 0.25,
+                    "freq": 4000,
+                    "phase": 0,
+                    "waveform": {
+                        "kind": "inline",
+                        "module": {"style": "const", "length": 0.4},
+                    },
+                },
+            },
         }
     )
     inputs = _make_guard(state).capture_run_inputs(tab_id)

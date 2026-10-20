@@ -14,6 +14,7 @@ from zcu_tools.core.waveform_format import (
     decode_npz,
     encode_npz,
 )
+from zcu_tools.utils import atomic_replace
 
 from ._waveform_data import ArbWaveformData, ArbWaveformError
 from ._waveform_formula import FormulaRecipe
@@ -87,7 +88,7 @@ def write_npz(path: Path, data: ArbWaveformData) -> None:
         ) as tmp:
             tmp_name = tmp.name
             tmp.write(payload)
-        Path(tmp_name).replace(path)
+        atomic_replace(Path(tmp_name), path)
     except Exception:
         if tmp_name is not None:
             Path(tmp_name).unlink(missing_ok=True)

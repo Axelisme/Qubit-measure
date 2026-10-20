@@ -91,7 +91,7 @@ Ruff 的 RUF100 與 Pyright 的 reportUnnecessaryTypeIgnoreComment 檢查過期 
 
 在模組接縫與對外契約驗證框架的可觀察行為。Notebook helper 與共用分析工具可測其公開契約，不以 caller 數量或目錄層級判定可測性。保留介面後方的內部實作自由，不直接測私有函式。
 
-`zcu_lab` 的 adapter、workflow 與 recipes 是實驗定義，不寫個別實驗測試。框架測試使用最小合成 workflow／adapter，不 import `zcu_lab`，也不用其 fake 實驗。Review 檢查 tests 沒有 import `zcu_lab`，必要時以 grep 輔助。不暫移目錄跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。若測試只因實驗定義改動而失敗，刪除該測試，不固定實驗預設值來修它。
+`zcu_lab` 的 adapter、workflow 與 recipes 是實驗定義，不寫個別實驗測試。框架測試使用最小合成 workflow／adapter，不 import `zcu_lab`。Review 檢查 tests 沒有 import `zcu_lab`，必要時以 grep 輔助。不暫移目錄跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。若測試只因實驗定義改動而失敗，刪除該測試，不固定實驗預設值來修它。
 
 Notebook 的主要探索流程、腳本的主要行為、文件、設定與靜態資料以直接審閱處理，不為定位或內容新增測試，也不在測試內啟獨立程序。舊測試不自動構成較寬鬆的先例。
 

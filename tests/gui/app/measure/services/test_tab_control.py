@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
+from zcu_tools.gui.app.measure.services.tab_input import TabInput
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from tests.gui._control_fakes import CallLog, call
@@ -54,7 +55,7 @@ class RecordingWorkspace:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def new_tab(self, adapter_name: str) -> str:
+    def new_tab(self, adapter_name: str, *, input: TabInput | None = None) -> str:
         self._log.add("workspace", "new_tab", adapter_name)
         return "new-tab"
 

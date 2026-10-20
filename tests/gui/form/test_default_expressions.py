@@ -16,6 +16,8 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from tests.gui._form_converters import RebuildingForm
+
 SEEDED_EXPRESSIONS: dict[str, JsonValue] = {
     "device": {"expr": "$device"},
     "level": {"expr": "general.ext.seed"},
@@ -71,8 +73,10 @@ class Derived(FormModel):
         return data
 
 
-class Switching(FormModel):
+class Switching(RebuildingForm):
     """Switch between the branches above."""
+
+    branch_models = {("branch",): (Manual, Derived)}
 
     branch: Annotated[Manual | Derived, Field(discriminator="kind")] = Field(
         default_factory=Manual
@@ -131,7 +135,7 @@ def test_branch_switch_evaluates_new_defaults() -> None:
     env = environment(4.0)
     state = FormState(Switching.default_input(env))
     state.write({("branch", "offset"): {"expr": "general.ext.seed / 8"}}, env)
-    state.write({("branch", "kind"): "derived"}, env)
+    state.select(("branch",), {"kind": "derived"}, env)
     assert state.input.data == {
         "branch": {
             "kind": "derived",
@@ -177,7 +181,7 @@ def test_uncomputable_or_invalid_defaults_leave_only_field_required(
 def test_invalid_branch_default_leaves_the_branch_field_unfilled() -> None:
     env = environment(-3.0)
     state = FormState(Switching.default_input(env))
-    state.write({("branch", "kind"): "derived"}, env)
+    state.select(("branch",), {"kind": "derived"}, env)
     assert state.input.data == {"branch": {"kind": "derived", "offset": 0.0}}
     result = state.result(env)
     assert isinstance(result, FormErrors)

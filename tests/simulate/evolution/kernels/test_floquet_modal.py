@@ -16,7 +16,9 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     kernel,
 )
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 
 def _integrated_orders(
@@ -125,13 +127,22 @@ def test_modal_apply_matches_independent_dyson_orders(
     )
     floquet = FloquetKernel()
     rows = np.arange(count, dtype=np.int64)
-    assert floquet.guard(table, rows, source, 1e-3).all()
-    keys, representatives, inverse = np.unique(
-        floquet.prepare_keys(table, rows), return_index=True, return_inverse=True
+    guarded = floquet.guard_prepared(
+        table, rows, KernelContext(source, 0.001, WorkPlan())
     )
-    prepared = floquet.prepare(keys, table, rows[representatives], source, 1e-3)
+    assert guarded.accepted.all()
+    keys, representatives, inverse = np.unique(
+        floquet.prepare_keys(table, rows, KernelContext(source, 0.001, WorkPlan())),
+        return_index=True,
+        return_inverse=True,
+    )
+    prepared = floquet.prepare(
+        keys, table, rows[representatives], KernelContext(source, 0.001, WorkPlan())
+    )
     actual = states.copy()
-    exceeded = floquet.apply(prepared, inverse, table, rows, actual, 1e-3)
+    exceeded = floquet.apply(
+        prepared, inverse, table, rows, actual, ApplyContext(1e-3, guarded.plan)
+    )
     expected = np.stack(
         [
             _integrated_orders(

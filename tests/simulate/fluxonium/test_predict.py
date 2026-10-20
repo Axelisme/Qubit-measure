@@ -19,7 +19,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scqubits.settings as scq_settings
-from zcu_tools.resources.qubit_params import ParamsProject, QubitParams
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 scq_settings.PROGRESSBAR_DISABLED = True
@@ -274,11 +273,3 @@ def test_clone_is_independent() -> None:
 def test_predictor_does_not_keep_shared_fluxonium_instance() -> None:
     p = _make_predictor(PARAMS[0])
     assert not hasattr(p, "fluxonium")
-
-
-def test_from_file_requires_fluxdep_fit(tmp_path) -> None:
-    path = tmp_path / "params.json"
-    QubitParams(path).ensure_project(ParamsProject("ChipA", "Q1"))
-
-    with pytest.raises(ValueError, match="fluxdep_fit"):
-        FluxoniumPredictor.from_file(str(path))

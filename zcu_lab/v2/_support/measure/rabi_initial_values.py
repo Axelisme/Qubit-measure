@@ -12,11 +12,12 @@ if TYPE_CHECKING:
 
 
 def len_rabi_initial_values(
-    parameters: ParameterContext | None,
+    parameters: ParameterContext | None, *, qubit: str = "$qubit"
 ) -> tuple[Slot | Template, float | None]:
     """Return the Length Rabi pulse source and sweep stop in microseconds.
 
-    parameters is the fixed Open/Reset capture, or None. A missing/null x180
+    parameters is the fixed Open/Reset capture, or None. qubit is a direct
+    component name or captured alias (default $qubit). A missing/null x180
     slot selects a fresh qub_probe Template with editable gain 1.0 and stop
     1.0 us. An existing x180 selects its Slot without changing its gain.
     Read pi_len from its persistent waveform, following a waveform library key
@@ -30,21 +31,24 @@ def len_rabi_initial_values(
     A non-pulse x180 raises TypeError. Nothing is refreshed or written back.
     """
     if parameters is None:
-        return Template("qub_probe", set={"gain": 1.0}), 1.0
-    pulse = _x180_spec(parameters)
+        return Template("qub_probe", bindings={"qubit": qubit}, set={"gain": 1.0}), 1.0
+    pulse = _x180_spec(parameters, qubit)
     if pulse is None:
-        return Template("qub_probe", set={"gain": 1.0}), 1.0
+        return Template("qub_probe", bindings={"qubit": qubit}, set={"gain": 1.0}), 1.0
     waveform = _waveform_spec(parameters, pulse)
     if isinstance(waveform, ArbWaveformCfg):
-        return Slot("$qubit.module.x180"), 1.0
+        return Slot(f"{qubit}.module.x180"), 1.0
     pi_len = _valid_pi_len(waveform)
     stop = None if pi_len is None else 4 * pi_len
-    return Slot("$qubit.module.x180"), stop
+    return Slot(f"{qubit}.module.x180"), stop
 
 
-def amp_rabi_initial_pulse(parameters: ParameterContext | None) -> Slot | Template:
+def amp_rabi_initial_pulse(
+    parameters: ParameterContext | None, *, qubit: str = "$qubit"
+) -> Slot | Template:
     """Return an editable Amplitude Rabi pulse from the fixed Open/Reset capture.
 
+    qubit is a direct component name or captured alias (default $qubit).
     Missing capture or missing/null x180 selects qub_probe with gain 1.0 and
     explicit waveform length 1.0 us. Arb x180 keeps its original Slot and data,
     without copying, reading assets or overriding its asset-derived length.
@@ -62,18 +66,28 @@ def amp_rabi_initial_pulse(parameters: ParameterContext | None) -> Slot | Templa
     raises TypeError. No source is refreshed, mutated or written back.
     """
     if parameters is None:
-        return Template("qub_probe", set={"gain": 1.0, "waveform.length": 1.0})
-    pulse = _x180_spec(parameters)
+        return Template(
+            "qub_probe",
+            bindings={"qubit": qubit},
+            set={"gain": 1.0, "waveform.length": 1.0},
+        )
+    pulse = _x180_spec(parameters, qubit)
     if pulse is None:
-        return Template("qub_probe", set={"gain": 1.0, "waveform.length": 1.0})
+        return Template(
+            "qub_probe",
+            bindings={"qubit": qubit},
+            set={"gain": 1.0, "waveform.length": 1.0},
+        )
     waveform = _waveform_spec(parameters, pulse)
     if isinstance(waveform, ArbWaveformCfg):
-        return Slot("$qubit.module.x180")
+        return Slot(f"{qubit}.module.x180")
     pi_len = _valid_pi_len(waveform)
     pi_gain = pulse.gain
     if not isfinite(pi_gain):
         return Slot(
-            "$qubit.module.x180", copy=True, set={"gain": None, "waveform.length": None}
+            f"{qubit}.module.x180",
+            copy=True,
+            set={"gain": None, "waveform.length": None},
         )
     if (
         pi_len is None
@@ -84,7 +98,7 @@ def amp_rabi_initial_pulse(parameters: ParameterContext | None) -> Slot | Templa
         length = None
     else:
         length = 1.5 * pi_len * pi_gain
-    return Slot("$qubit.module.x180", copy=True, set={"waveform.length": length})
+    return Slot(f"{qubit}.module.x180", copy=True, set={"waveform.length": length})
 
 
 def _waveform_spec(parameters: ParameterContext, pulse: PulseSpec) -> WaveformSpec:
@@ -109,11 +123,11 @@ def _valid_pi_len(waveform: WaveformSpec) -> float | None:
     return pi_len
 
 
-def _x180_spec(parameters: ParameterContext) -> PulseSpec | None:
-    source = parameters.lookup("$qubit.module.x180")
+def _x180_spec(parameters: ParameterContext, qubit: str) -> PulseSpec | None:
+    source = parameters.lookup(f"{qubit}.module.x180")
     if not source.present or source.value is None:
         return None
-    key = parameters.library_key("$qubit.module.x180")
+    key = parameters.library_key(f"{qubit}.module.x180")
     pulse = parameters.library.module_spec(key)
     if not isinstance(pulse, PulseSpec):
         raise TypeError("Rabi x180 must reference a PulseSpec")

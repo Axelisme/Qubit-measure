@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-17，共用初值 owner 邊界與 arb Rabi 來源
+**Last updated:** 2026-10-19，mux native Forms、captured identity 與 indexed quality summaries
 
 # Measure domain support
 
@@ -7,7 +7,20 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
 
-`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
+`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。Mux caller 指定 `summary.tones[row].fit_quality`，單 qubit 預設維持 `summary.fit_quality`。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
+
+`mux_forms.py` 集中七個 native mux Forms 的固定捕捉名稱與共同 recovery 初值。
+它先要求完整 qubit/resonator 綁定，已設 readout slot 時另外核對 mux family 與完整 tone 數。
+沒有 readout 時由各 Form 提供 blank template，缺少必要欄位仍擋 Run。
+每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
+所有元素共用宣告，不把逐位置 lock 套成共同限制。
+Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
+Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
+
+`mux_results.py` 集中七個 mux qubit adapters 的固定來源身分核對與 position/name summary。目的地只來自同次 Run／Load capture；缺 capture 不產生 proposal。來源 cfg 有完整名稱時，必須與捕捉的完整 qubits 相同。Summary 的名稱只取來源 cfg，缺 cfg 時保留 None，不讀目前 Form 或 library。
+來源名稱可用時，作者附 `ElementIdentity` 給 native summary rows 與候選；原始位置不由
+row offset 推測。直接 NumPy scalar 在 summary 邊界轉為 Python scalar，不改數值、fit
+或 proposal eligibility。
 
 Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitions` 組合 adapters。
 本 package 不 import concrete adapter 或 `zcu_lab.definitions`，也不宣告 experiment order。只屬於
@@ -17,6 +30,10 @@ helper 留在群組內 `_shared.py`。
 表單形狀與初值由各實驗的 `form.py` 提供 `make_form(ctx)`，共用生成器位於
 `zcu_tools.gui.form_adapter`。持久範本表由 `zcu_lab.templates.TEMPLATES` 擁有，
 組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
+
+`mux_bindings` 擁有固定 ParameterContext 的 qubit／resonator 對應驗證。
+Onetone 的缺 qubits bring-up 政策與 qubit 實驗的完整綁定要求分開，兩者不讀 live 來源。
+Group model 仍擁有長度與重複 qubit 的結構規則。
 
 `ctx_helpers.t1_initial_time` 集中 T1 衍生初值的選源。它從固定 capture 讀普通 T1，tone 掃描先讀歷史 tone T1，只有缺值才下探普通 T1。無 capture 或所有候選 leaf 缺失／null 時使用 30 µs 時間尺度；已存無效值回 None，讓衍生必填欄位留空。來源與 alias／path 錯誤仍傳遞，不寫回校準。各 Form 明確指定等待或掃描所需倍率，自然等待不使用 tone T1。
 
@@ -36,6 +53,37 @@ pi_len 須為有限正數，pi_gain 須為有限數且在 (0, 1]。無效來源�
 有限的無效 gain 保留原值。沒有 x180 時使用 qub_probe Template，明確設定 gain=1 與 length=1 µs。
 Nested waveform key 的複製由 Form adapter 負責。來源與其他欄位不變，不寫回校準。
 
+## Mux 綁定驗證
+
+`mux_bindings.validate_mux_bindings(parameters: ParameterContext | None) -> None`
+集中 onetone、mux qubit 與 FTF two-qubit Forms 共用的跨 component 驗證。
+它只讀借用的固定 capture，不刷新來源、不讀 live 檔案或裝置，也不 materialize library assets。
+有 qubits 時，它驗證完整有序清單的 component 存在、kind 與逐項 qubit.resonator 對應。
+錯誤保留欄位、原始 index 及實際值。MuxGroup model 仍擁有名稱、等長及重複 qubit 的結構驗證。
+
+None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不增加 bring-up 門檻。
+其他 alias 錯誤與來源故障照常傳遞。FTF caller 自行要求 group、qubits 及 F1/F2；
+新 mux qubit caller 自行要求完整 tone 數對齊與 active drive。共用函式不選 tone、不猜角色、不寫回。
+
+在 concrete `form.py` 使用下列 import，並在自己的 `make_form(ctx)` 建立 Form 前呼叫。
+`TwoQubitCfg` 是該 caller 的既有 core cfg；範例省略 caller 自己的角色要求與 tree 內容。
+
+```python
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
+
+from .core import TwoQubitCfg
+
+
+def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
+    validate_mux_bindings(ctx.parameters)
+    # Enforce this caller's required group, qubits and F1/F2 here.
+    return Form(TwoQubitCfg, tree={})
+```
+
+## 其他 measure helpers
+
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa
 與可選分析校準。缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
 
@@ -49,3 +97,5 @@ Reset Form 從 Open／Reset 的固定 capture 讀 qubit ext 初值。Expr 與 Ra
 SingleToneFreq、DualTonePower 與 BathPhase 各自擁有 finisher。它們直接 materialize 該 Run
 的完整 tested_reset，只換本次分析欄位，不重讀 ext 或方案 slot。三個 length adapter
 不擬合參數，返回空 proposal collection。框架與本 support package 不檢查 reset 校準是否齊全。
+
+`require_mux_qubits(parameters, tone_count)` 是 qubit caller 的嚴格 admission：要求 capture、MuxGroup 及完整 qubits，呼叫公開 validate 契約，再比對完整 numeric tone 數。回傳完整有序 qubit 名稱，不投影 active subset。

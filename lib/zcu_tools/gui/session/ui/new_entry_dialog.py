@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
@@ -76,19 +76,28 @@ class NewEntryDialog(QDialog):
         *,
         arb_waveforms: ArbWaveformKeys,
         dialog_presenter: DialogPresenter,
+        placeholder_defaults: Callable[[], Mapping[str, str]] = dict,
         parent: QWidget | None = None,
     ) -> None:
         """Build the dialog and the form of the first template.
 
         ctrl supplies captures and the library write; templates is the
         persistent catalog by template id; arb_waveforms lists the arb asset
-        names offered to arb data fields at each capture; dialog_presenter
-        shows Create failures. A template whose module is not a persistent
-        module or waveform Spec raises TypeError.
+        names offered to arb data fields at each capture; placeholder_defaults
+        reads session template defaults at each capture (empty when omitted).
+        These defaults must cover every placeholder required by the selected
+        template: the dialog supplies no explicit Template bindings. Missing
+        bindings raise ValueError while building the first form or selecting
+        another template. ctrl must provide a readable working-point capture;
+        FailedPreconditionError from read_context is shown in the dialog.
+        Other capture, arb_waveforms and placeholder_defaults provider failures
+        propagate. dialog_presenter shows Create failures. A template whose
+        module is not a persistent module or waveform Spec raises TypeError.
         """
         super().__init__(parent)
         self._ctrl = ctrl
         self._templates = templates
+        self._placeholder_defaults = placeholder_defaults
         self._arb_waveforms = arb_waveforms
         self._presenter = dialog_presenter
         self._entry: ModuleEntryForm | WaveformEntryForm | None = None
@@ -170,6 +179,7 @@ class NewEntryDialog(QDialog):
             Template(template_id),
             self._templates,
             arb_names=self._arb_waveforms.list_data_keys(),
+            placeholders=self._placeholder_defaults(),
         )
         editor = FormEditor(entry.state, entry.env)
         # setWidget deletes the previous form, so folds and scroll start fresh.

@@ -13,7 +13,13 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import GuardResult, Prepared, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    GuardResult,
+    KernelContext,
+    Prepared,
+    SegmentTable,
+)
 
 from .contract.kernel_suite import synthetic_model
 
@@ -74,10 +80,10 @@ class RecordingKernel:
             tuple[SegmentTable, NDArray[np.int64], NDArray[np.complex128]]
         ] = []
 
-    def guard(self, table, rows, source, budget):
+    def guard(self, table, rows, context: KernelContext):
         return np.full(len(rows), self.accepts)
 
-    def prepare_keys(self, table, rows):
+    def prepare_keys(self, table, rows, context: KernelContext):
         keys = np.empty(
             len(rows), dtype=[("level", "i8", table.level.shape[1]), ("duration", "f8")]
         )
@@ -88,20 +94,27 @@ class RecordingKernel:
     def cost(self, table, rows):
         return np.ones(len(rows))
 
-    def prepare(self, keys, table, rows, source, budget):
+    def prepare(self, keys, table, rows, context: KernelContext):
         self.preparations += len(keys)
         return Payload(len(keys))
 
-    def guard_prepared(self, table, rows, source, budget) -> GuardResult | None:
+    def admit_prepared(self, prepared, table, rows, context) -> GuardResult | None:
+        """Decline cached-domain admission in this synthetic collaborator."""
+        del prepared, table, rows, context
+
+    def guard_prepared(self, table, rows, context: KernelContext) -> GuardResult | None:
         """Keep the ordinary guard path for this test collaborator."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
-        self, prepared, key_index, table, rows, source_initial, budget
+        self, prepared, key_index, table, rows, source_initial, context: KernelContext
     ) -> Prepared | None:
         return None
 
-    def apply(self, prepared: Prepared, key_index, table, rows, states, budget):
+    def apply(
+        self, prepared: Prepared, key_index, table, rows, states, context: ApplyContext
+    ):
         self.calls.append((table, rows.copy(), states.copy()))
         if self.cancel is not None:
             self.cancel.set()

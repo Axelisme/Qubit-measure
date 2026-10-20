@@ -14,6 +14,14 @@ Starts with a fresh inline pulse readout and a const waveform. It does not adopt
 
 Proposes fitted values to resonator.freq, resonator.kappa, and resonator.ext.theta0 through the captured role binding. With a pulse-readout run snapshot, it also proposes resonator.readout.readout_rf from that template, changing only pulse/readout frequency while preserving gain, lengths, channels, and trigger timing. The compound resonator.ext.edelay proposal keeps delay and route together; it requires an identifiable absolute branch or a trusted prior/manual seed.
 
+## MCP recipe
+
+`onetone_spectrum` can omit `center_mhz` and `span_mhz`. Omitted center uses
+current `$resonator.freq`; omitted span uses 3 times current `$resonator.kappa`
+for the full frequency span. The recipe reads these values during preparation
+and writes numeric endpoints at center ± span/2, not live formulas. Omitted
+`points` retains the GUI count.
+
 ## Recommended
 
 Analysis defaults to the hanger-model fit ('hm') with multiplicative amplitude-background fitting on. A sweep spanning a few linewidths around the known resonator frequency usually captures the dip cleanly; widen it if the resonator has drifted. Use homophasal sampling after a fit has written 'theta0' when you want equal resonator-circle phase spacing instead of a linear frequency grid. Select Homophasal to view the captured calibration values and fill any missing fields before Run. There is no separate Enabled switch. Selecting Linear removes the calibration fields and outputs no homophasal parameters. Switching back to Homophasal uses fresh defaults from the same capture, not your previous edits. Source changes affect a new Open or Reset, not an existing Form. Electrical-delay mode 'auto' uses a route-matched calibration when available and otherwise runs bounded adaptive search; use 'calibrated' to require that prior or 'manual' to supply a seed.

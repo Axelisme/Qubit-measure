@@ -27,6 +27,7 @@ from zcu_tools.analysis.fluxdep.search import (
     TransitionResidual,
 )
 from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.app.fluxdep.services.fit import (
@@ -40,7 +41,6 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpectrumEntry,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.project import ProjectInfo
 
 from tests.gui.app.fluxdep._search_result import perfect_fit_result
 

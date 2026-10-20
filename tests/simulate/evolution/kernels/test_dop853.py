@@ -5,12 +5,14 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import (
     KernelCase,
     KernelContract,
     assert_budget,
+    kernel_context,
     reference,
     synthetic_model,
 )
@@ -94,18 +96,25 @@ class TestDOP853(KernelContract):
 def prepare(case: KernelCase):
     rows = np.arange(len(case.states), dtype=np.int64)
     keys, first, inverse = np.unique(
-        case.kernel.prepare_keys(case.table, rows),
+        case.kernel.prepare_keys(
+            case.table, rows, KernelContext(case.source, case.budget, WorkPlan())
+        ),
         return_index=True,
         return_inverse=True,
     )
     return case.kernel.prepare(
-        keys, case.table, rows[first], case.source, case.budget
+        keys,
+        case.table,
+        rows[first],
+        KernelContext(case.source, case.budget, WorkPlan()),
     ), inverse
 
 
 def test_model_keys_exclude_apply_parameters(kernel_case: KernelCase) -> None:
     case = kernel_case
-    keys = case.kernel.prepare_keys(case.table, np.arange(4))
+    keys = case.kernel.prepare_keys(
+        case.table, np.arange(4), KernelContext(case.source, case.budget, WorkPlan())
+    )
     assert keys[0] == keys[2]
     assert keys[1] == keys[3]
     assert keys[0] != keys[1]
@@ -127,7 +136,14 @@ def test_chains_stop_at_boundaries_and_can_restart(kernel_case: KernelCase) -> N
     actual = case.states.copy()
     # Later slots are outputs only, not fresh inputs to the same timeline.
     actual[1:] = 0
-    case.kernel.apply(prepared, inverse, case.table, np.arange(4), actual, case.budget)
+    case.kernel.apply(
+        prepared,
+        inverse,
+        case.table,
+        np.arange(4),
+        actual,
+        kernel_context(case.kernel.name, case.table, case.budget),
+    )
     expected = []
     state = case.states[0]
     previous = case.source.model((0,))
@@ -141,14 +157,24 @@ def test_chains_stop_at_boundaries_and_can_restart(kernel_case: KernelCase) -> N
 
     split = case.states.copy()
     case.kernel.apply(
-        prepared, inverse[:2], case.table, np.arange(2), split[:2], case.budget
+        prepared,
+        inverse[:2],
+        case.table,
+        np.arange(2),
+        split[:2],
+        kernel_context(case.kernel.name, case.table, case.budget),
     )
     # Engine owns basis conversion between calls, not inside one chain.
     left, right = case.source.model((1,)), case.source.model((0,))
     overlap = right.eigenvectors.conj().T @ left.eigenvectors
     split[2] = overlap @ split[1] @ overlap.conj().T
     case.kernel.apply(
-        prepared, inverse[2:], case.table, np.arange(2, 4), split[2:], case.budget
+        prepared,
+        inverse[2:],
+        case.table,
+        np.arange(2, 4),
+        split[2:],
+        kernel_context(case.kernel.name, case.table, case.budget),
     )
     assert_budget(actual, split, case.budget)
 
@@ -162,7 +188,14 @@ def test_noncontiguous_rows_of_same_timeline_are_independent(
     )
     prepared, inverse = prepare(case)
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, case.table, np.arange(4), actual, case.budget)
+    case.kernel.apply(
+        prepared,
+        inverse,
+        case.table,
+        np.arange(4),
+        actual,
+        kernel_context(case.kernel.name, case.table, case.budget),
+    )
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(case.states)]
     )
@@ -173,9 +206,50 @@ def test_tight_budget_preserves_complex_density(kernel_case: KernelCase) -> None
     case = replace(kernel_case, budget=1e-8)
     prepared, inverse = prepare(case)
     actual = case.states.copy()
-    case.kernel.apply(prepared, inverse, case.table, np.arange(4), actual, case.budget)
+    case.kernel.apply(
+        prepared,
+        inverse,
+        case.table,
+        np.arange(4),
+        actual,
+        kernel_context(case.kernel.name, case.table, case.budget),
+    )
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(case.states)]
     )
     assert_budget(actual, expected, case.budget)
     np.testing.assert_allclose(actual.trace(axis1=1, axis2=2), 1, atol=1e-11)
+
+
+def test_shared_preparation_keeps_concurrent_lab_applies_independent(
+    kernel_case: KernelCase,
+) -> None:
+    """Model-only preparations may be borrowed by two timeline workers."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from zcu_tools.simulate.evolution.kernel import ApplyContext
+    from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
+
+    case = kernel_case
+    prepared, inverse = prepare(case)
+    rows = np.arange(len(case.states))
+    plan = DOP853Plan(np.full(len(rows), "lab"), np.full(len(rows), -1))
+
+    def apply(states: np.ndarray) -> np.ndarray:
+        actual = states.copy()
+        case.kernel.apply(
+            prepared,
+            inverse,
+            case.table,
+            rows,
+            actual,
+            ApplyContext(case.budget, plan),
+        )
+        return actual
+
+    inputs = [case.states, case.states.conj()]
+    expected = [apply(states) for states in inputs]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        actual = list(pool.map(apply, inputs))
+    for serial, concurrent in zip(expected, actual, strict=True):
+        np.testing.assert_array_equal(concurrent, serial)

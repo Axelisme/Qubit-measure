@@ -11,10 +11,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.device import FakeDevice, FakeDeviceInfo
+from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.device_models import (
     ConnectDeviceRequest,
@@ -30,8 +31,10 @@ from zcu_tools.gui.session.operation_runner import (
     OperationInfrastructure,
     OperationRunner,
 )
+from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.gui.session.services.device import DeviceRegistrationError, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._completion_helpers import (
     on_device_connected,
@@ -91,10 +94,71 @@ def _connect(svc: DeviceService) -> None:
     on_device_connected(svc, connected.append)
     on_device_operation_failed(svc, lambda _name, error: errors.append(error))
     svc.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name="test_dev", address="none")
+        ConnectDeviceRequest(type_name="YOKOGS200", name="test_dev", address="none")
     )
     qt_until(lambda: bool(connected or errors), label="connect test_dev")
     assert not errors
+
+
+@pytest.mark.parametrize("origin", ["register", "remember"])
+def test_script_rows_reconnect_after_rename_without_manual_admission(qapp, origin):
+    bus = EventBus()
+    gate = OperationGate(bus)
+    bg = _bg()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    registry = DeviceManager()
+    service = DeviceService(
+        bus,
+        State(MagicMock()),
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=OperationRunner(gate, handles, progress, bg, bus),
+            handles=handles,
+        ),
+        device_registry=registry,
+    )
+    driver = FakeDevice(address="script-bias", fast_mode=True)
+    driver.set_value(1.25)
+    _workers.watch(bus)
+    if origin == "register":
+        service.register_device("bias", driver)
+        done: list[object] = []
+        on_device_disconnected(service, done.append)
+        service.start_disconnect_device(DisconnectDeviceRequest("bias"))
+        # The no-op fake close must produce a terminal owner delivery.
+        qt_until(lambda: bool(done or _workers.errors), label="script disconnect")
+        assert not _workers.errors
+    else:
+        service.register_remembered_devices(
+            [DeviceMemoryInfo("FakeDevice", "bias", "script-bias")]
+        )
+    service.rename_device("bias", "renamed")
+    with pytest.raises(FailedPreconditionError):
+        service.start_connect_device(
+            ConnectDeviceRequest("FakeDevice", "renamed", "script-bias")
+        )
+    connected: list[object] = []
+    on_device_connected(service, connected.append)
+    try:
+        admission_errors: list[str] = []
+        try:
+            service.start_reconnect_device("renamed")
+        except FailedPreconditionError as exc:
+            admission_errors.append(str(exc))
+        assert admission_errors == [], "Stored script rows must admit Reconnect"
+        # Known adapter creates/retrieves the addressed fake, then owner settles.
+        qt_until(lambda: bool(connected or _workers.errors), label="script reconnect")
+        assert not _workers.errors
+        row = service.get_device_snapshot("renamed")
+        assert row is not None and row.status is DeviceStatus.CONNECTED
+        assert row.address == "script-bias"
+        assert service.get_cached_device_value("renamed") == 1.25
+        assert registry.get_device("renamed") is driver
+    finally:
+        _workers.close()
+        registry.close_all_devices()
 
 
 def test_device_setup_failure_emits_setup_failed(qapp):
@@ -169,6 +233,8 @@ def _make_real_svc(
     driver: FakeDevice | None = None,
 ) -> tuple[DeviceService, FakeDevice]:
     fake_device = driver if driver is not None else FakeDevice(fast_mode=True)
+    manager = DeviceManager()
+    manager.register_device("flux", fake_device)
     gate = OperationGate(EventBus())
     bg = _bg()
     handles = OperationHandles()
@@ -186,17 +252,13 @@ def _make_real_svc(
             handles=handles,
         ),
         driver_factory=lambda type_name, address: fake_device,
+        device_registry=manager,
     )
     return svc, fake_device
 
 
 def _register(svc: DeviceService, name: str = "flux") -> None:
-    loop = _workers.completion()
-    on_device_connected(svc, lambda _request: loop.quit())
-    svc.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name=name, address="")
-    )
-    loop.exec()
+    svc.publish_initial_devices()
 
 
 def _disconnect(svc: DeviceService, name: str = "flux") -> None:
@@ -318,7 +380,7 @@ def test_direct_poll_skips_terminal_admission_without_reading_driver(qapp) -> No
         device_registry=FakeDeviceRegistry(),
     )
     try:
-        svc.start_connect_device(ConnectDeviceRequest("FakeDevice", "test_dev", "none"))
+        svc.start_connect_device(ConnectDeviceRequest("YOKOGS200", "test_dev", "none"))
         # The accepted connect worker posts its terminal to this manual owner.
         assert scheduler.pump_once(block=True, timeout=30)
         assert svc.get_connected_devices()

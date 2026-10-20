@@ -40,6 +40,8 @@ from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signa
 
 @dataclass(frozen=True)
 class PowerResult:
+    """Normalized readout gains and moment-SNR scores (gain,)."""
+
     gains: NDArray[np.float64]
     signals: NDArray[np.float64]
 
@@ -96,6 +98,16 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> PowerResult:
+        """Measure readout-gain dependence of ground/excited IQ separation.
+
+        At each gain, apply the optional reset, omit or apply qub_pulse,
+        then read out. Configure qub_pulse for the intended excitation.
+        Return normalized gains and moment-based SNR shaped (Ngain,),
+        optionally reduced by skew_penalty for distorted IQ distributions.
+        This score is not assignment fidelity. acquire_kwargs is forwarded
+        to acquisition.
+        """
+        # Quantize normalized readout gain on the pulse generator.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -106,6 +118,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
         )
 
+        # Display ground/excited separation rather than either mean IQ trace.
         viewer = context.plots.liveplot_1d(
             "measurement",
             "Readout Power",
@@ -116,6 +129,8 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(gains, np.abs(data)),
         )
+
+        # Compare pulse-off/on branches at each hardware-swept readout gain.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             gain_sweep = sched.cfg.sweep.gain
@@ -142,6 +157,8 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
                     **(acquire_kwargs or {}),
                 )
             )
+
+        # Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
         return PowerResult(gains, signals)
@@ -153,6 +170,13 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         *,
         plots: Plots,
     ) -> PowerAnalysis:
+        """Choose readout gain using smoothed SNR and an optional gain penalty.
+
+        options controls smoothing and penalty_ratio. Maximize
+        SNR * exp(-gain * penalty_ratio); zero penalty selects pure SNR.
+        NaN scores become zero before smoothing. Return normalized best_gain
+        and publish the unpenalized SNR curve as fit. source.cfg may be None.
+        """
         result = source.result
         powers, snrs = result.gains, result.signals
         snrs = np.abs(snrs)

@@ -13,6 +13,8 @@ from uuid import UUID
 from filelock import FileLock, Timeout
 from pydantic import TypeAdapter
 
+from zcu_tools.utils import atomic_replace
+
 from .ledger_models import JsonObject, LedgerEvent
 
 _JSON_OBJECT = TypeAdapter(JsonObject)
@@ -199,7 +201,7 @@ class RecordsLedger:
                 stream.write(_JSON_OBJECT.dump_json(content).decode("utf-8") + "\n")
                 stream.flush()
                 stream.close()
-                temporary.replace(path)
+                atomic_replace(temporary, path)
             finally:
                 # replace consumed it on success; never remove a published record.
                 temporary.unlink(missing_ok=True)

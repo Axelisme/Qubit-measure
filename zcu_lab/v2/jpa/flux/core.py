@@ -20,7 +20,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -38,9 +37,13 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 
+from zcu_lab.v2._support.device import set_flux
+
 
 @dataclass(frozen=True)
 class FluxResult:
+    """JPA flux device values and moment-based GE SNR at each value."""
+
     fluxes: NDArray[np.float64]
     signals: NDArray[np.float64]
 
@@ -105,6 +108,18 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
     )
 
     def run(self, cfg: FluxCfg, *, context: RunContext) -> FluxResult:
+        """Measure qubit readout SNR versus JPA flux bias.
+
+        At each bias, reset, select no pulse or a pi pulse, then read out
+        both preparation branches. IQ moments give a real SNR with the
+        configured skew penalty, not an assignment fidelity. Return flux
+        device values and one SNR per point; no flux-unit conversion occurs.
+
+        ``jpa_flux_dev`` names a device in ``context.devices`` and
+        ``flux_unit`` selects its working unit. None skips bias control
+        while retaining the requested coordinates in the result.
+        """
+        # 1. Prepare the flux coordinates and an SNR trace for the bias scan.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         jpa_fluxs = sweep2array(cfg.sweep.jpa_flux, allow_array=True)
@@ -117,6 +132,8 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(jpa_fluxs, np.abs(data)),
         )
+
+        # 2. Move the external flux bias before each readout comparison.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
                 if step.cfg.jpa_flux_dev is not None:
@@ -127,6 +144,8 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
                         stop=context.cancel_signal,
                         progress=False,
                     )
+
+                # 3. Compare reset-only and pi-prepared readout in one GE sweep.
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (
@@ -148,6 +167,8 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
                         trackers=[tracker],
                     )
                 )
+
+        # 4. Return the SNR trace in the requested flux-coordinate order.
         signals = signals_buffer.array
 
         return FluxResult(fluxes=jpa_fluxs, signals=signals)
@@ -155,6 +176,12 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
     def analyze(
         self, source: RunRecord[FluxCfg, FluxResult], options: None, *, plots: Plots
     ) -> FluxAnalysis:
+        """Select the sampled flux with peak Gaussian-smoothed SNR.
+
+        Smooth ``source.result.signals`` with sigma=1 sample, plot its
+        magnitude, and return the peak's device value without conversion.
+        ``options`` is None; this is a smoothed peak, not a model fit.
+        """
         del options
         result = source.result
 

@@ -159,29 +159,17 @@ class StepFailed(IterationResult):
 
 
 @dataclass(frozen=True)
-class ChangedValue:
-    """One applied leaf change with detached ordinary values.
-
-    path is the model-field leaf dot path. old/new are validated JSON values.
-    """
-
-    path: str
-    old: JsonValue
-    new: JsonValue
-
-
-@dataclass(frozen=True)
 class TunablesChanged:
-    """One validated tunables batch attributed to actor.
+    """One complete validated native tunables snapshot attributed to actor.
 
-    revision_before/after identify consecutive versions. changes records the
-    applied values in request order, not unvalidated caller input.
+    revision_before/after identify consecutive versions. tunables contains all
+    new model fields as detached JSON, including nested models and lists.
     """
 
     actor: Actor
     revision_before: int
     revision_after: int
-    changes: tuple[ChangedValue, ...]
+    tunables: dict[str, JsonValue]
     kind: Literal["tunables_changed"] = field(default="tunables_changed", init=False)
 
 

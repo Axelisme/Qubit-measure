@@ -20,12 +20,12 @@ class CoordinateCfg(ConfigBase):
     other: float = 1
 
 
-def switch(state: FormState[FormModel], env: FormEnv, field: str, label: str) -> None:
-    target = state.describe(("sweep", field), env).target
+def switch(state: FormState[FormModel], env: FormEnv, _field: str, label: str) -> None:
+    target = state.describe(("sweep",), env).target
     commands = getattr(target, "commands", ())
     command = next((item for item in commands if item.label == label), None)
     assert command is not None, f"Missing coordinate command {label}"
-    state.run_command(("sweep", field), command.name, env)
+    state.run_command(("sweep",), command.name, env)
 
 
 def test_descending_coordinate_roundtrip_and_lowering():
@@ -88,12 +88,12 @@ def test_failed_coordinate_command_is_atomic(endpoint: JsonValue):
     if endpoint is not None:
         raw["start"] = endpoint
     state = FormState(FormInput(form.model, {"sweep": raw}))
-    target = state.describe(("sweep", "stop"), env).target
+    target = state.describe(("sweep",), env).target
     commands = getattr(target, "commands", ())
-    assert commands, "Coordinate commands must exist on endpoint fields"
+    assert commands, "Coordinate commands must exist on the sweep row"
     before = state.input.to_json()
     with pytest.raises(ValueError, match="Cannot convert coordinates"):
-        state.run_command(("sweep", "stop"), commands[0].name, env)
+        state.run_command(("sweep",), commands[0].name, env)
     assert state.input.to_json() == before
 
 
@@ -126,10 +126,10 @@ def test_failed_authored_endpoint_cannot_convert_using_inherited_default():
     env = FormEnv()
     form = Form(CoordinateCfg, {"sweep": Range(Expr("$missing.value"), 10, 4)})
     state = FormState(form.default_input(env))
-    target = state.describe(("sweep", "stop"), env).target
+    target = state.describe(("sweep",), env).target
     commands = getattr(target, "commands", ())
     assert commands, "Coordinate commands must exist"
     before = state.input.to_json()
     with pytest.raises(ValueError, match="Cannot convert coordinates"):
-        state.run_command(("sweep", "stop"), commands[0].name, env)
+        state.run_command(("sweep",), commands[0].name, env)
     assert state.input.to_json() == before

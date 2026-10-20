@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-20
 
 MCP server entry 位於 `zcu_tools.mcp.fluxdep.server`；本 package 只包含 GUI app、
 state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Import path 固定為
@@ -45,6 +45,7 @@ Controller owners。
 
 - [`app.py`](app.py) 只做 controller/window/adapter wiring；程序入口位於 `scripts/run_fluxdep_gui.py`。
 - [`state.py`](state.py)： `FluxDepState`（領域容器）。
+- [`analysis_project`](../analysis_project/README.md)：與 dispersive 共用的過渡 project owner，包含 ProjectInfo、ProjectDialog、ResultScopeManager、project CLI 與 RPC 投影，保留 chip／qubit 資料流。
 - [`services/`](services/)： 薄包裝純運算，mutate State。
   全部 Qt-free、同步、可獨立測。純運算核心複用
   `zcu_tools.analysis.fluxdep` + `zcu_tools.analysis.spectrum`。

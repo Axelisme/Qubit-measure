@@ -6,6 +6,8 @@ from abc import ABC
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.core.element import ElementIdentity
+
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec
     from zcu_tools.resources.entry.ledger_models import JsonObject
@@ -17,9 +19,13 @@ class WritebackItem(ABC):
 
     The destination is a direct container path or captured role path. Selection
     and session identity belong to the service, not the proposing adapter.
+    element optionally carries the author's original index/name from the same
+    Run/Load result; None means no element identity was supplied. It is display
+    metadata only and never changes target_name, destination or write permission.
     """
 
     stderr: float | None = field(default=None, kw_only=True)
+    element: ElementIdentity | None = field(default=None, kw_only=True)
     # ``target_name`` is the apply destination name (point parameter / library
     # module / sample component). It is mutable: agent/UI
     # may retarget the writeback before applying.
@@ -59,9 +65,10 @@ class ModuleWriteback(WritebackItem):
 class SampleWriteback(WritebackItem):
     """Propose producer-defined JSON fields for target_name, a concrete component.
 
-    Only adapters whose Run keeps the flux device fixed provide this proposal.
-    WritebackService adds dev_value/dev_unit from the Run's fixed $flux_dev and
-    device snapshot, replacing those fields if supplied here. Missing captured
+    Only adapters whose Run keeps the coordinate device fixed provide this proposal.
+    The adapter declares sample_device_alias; None disables Sample writeback.
+    WritebackService adds dev_value/dev_unit from that alias in the Run's fixed
+    parameters and device snapshot, replacing those fields if supplied here. Missing captured
     device facts omit this item with a public reason. The sample can be selected
     independently; it needs no cfg schema or editor session.
     """

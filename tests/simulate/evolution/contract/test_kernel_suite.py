@@ -10,6 +10,7 @@ import pytest
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.linalg import expm
+from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 
 from .kernel_suite import KernelCase, KernelContract, synthetic_model
 
@@ -38,13 +39,15 @@ class DemoKernel:
         self,
         table: kernel.SegmentTable,
         rows: NDArray[np.int64],
-        source: evolution.ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> NDArray[np.bool_]:
         return table.tones[rows] == 0
 
     def prepare_keys(
-        self, table: kernel.SegmentTable, rows: NDArray[np.int64]
+        self,
+        table: kernel.SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
     ) -> NDArray[np.void]:
         keys = np.empty(len(rows), dtype=[("duration", "f8")])
         keys["duration"] = table.duration_ns[rows]
@@ -60,9 +63,9 @@ class DemoKernel:
         keys: NDArray[np.void],
         table: kernel.SegmentTable,
         rows: NDArray[np.int64],
-        source: evolution.ModelSource,
-        budget: float,
+        context: KernelContext,
     ) -> DemoPrepared:
+        source = context.source
         model = source.model((0,))
         size = len(model.energies_ghz)
         rates = model.rates_per_ns
@@ -84,8 +87,13 @@ class DemoKernel:
             )
         )
 
-    def guard_prepared(self, table, rows, source, budget) -> None:
+    def admit_prepared(self, prepared, table, rows, context) -> None:
+        """Decline cached-domain admission in this synthetic collaborator."""
+        del prepared, table, rows, context
+
+    def guard_prepared(self, table, rows, context: KernelContext) -> None:
         """Keep the ordinary guard path for this test collaborator."""
+        source, budget = context.source, context.budget
         del table, rows, source, budget
 
     def bind_input(
@@ -95,7 +103,7 @@ class DemoKernel:
         table: kernel.SegmentTable,
         rows: NDArray[np.int64],
         source_initial: NDArray[np.complex128],
-        budget: float,
+        context: KernelContext,
     ) -> kernel.Prepared | None:
         return None
 
@@ -106,7 +114,7 @@ class DemoKernel:
         table: kernel.SegmentTable,
         rows: NDArray[np.int64],
         states: NDArray[np.complex128],
-        budget: float,
+        context: ApplyContext,
     ) -> NDArray[np.bool_]:
         if not isinstance(prepared, DemoPrepared):
             raise ValueError("demo requires DemoPrepared")
@@ -171,7 +179,7 @@ def test_suite_detects_incorrect_dynamics(kernel_case: KernelCase) -> None:
             table: kernel.SegmentTable,
             rows: NDArray[np.int64],
             states: NDArray[np.complex128],
-            budget: float,
+            context: ApplyContext,
         ) -> NDArray[np.bool_]:
             return np.zeros(len(rows), dtype=np.bool_)
 
@@ -188,11 +196,11 @@ def test_suite_detects_prepare_reading_density(kernel_case: KernelCase) -> None:
             keys: NDArray[np.void],
             table: kernel.SegmentTable,
             rows: NDArray[np.int64],
-            source: evolution.ModelSource,
-            budget: float,
+            context: KernelContext,
         ) -> DemoPrepared:
+            source = context.source
             _ = source.initial_density
-            return super().prepare(keys, table, rows, source, budget)
+            return super().prepare(keys, table, rows, context)
 
     with pytest.raises(AssertionError, match="must not read density"):
         KernelContract().test_prepare_is_density_independent(
@@ -209,9 +217,9 @@ def test_suite_detects_row_position_dependence(kernel_case: KernelCase) -> None:
             table: kernel.SegmentTable,
             rows: NDArray[np.int64],
             states: NDArray[np.complex128],
-            budget: float,
+            context: ApplyContext,
         ) -> NDArray[np.bool_]:
-            mask = super().apply(prepared, key_index, table, rows, states, budget)
+            mask = super().apply(prepared, key_index, table, rows, states, context)
             states[:] *= (np.arange(len(rows)) + 1)[:, None, None]
             return mask
 

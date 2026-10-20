@@ -9,6 +9,7 @@ import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.state import (
     PROJECT_VERSION_KEY,
     SELECTION_VERSION_KEY,
@@ -26,7 +27,6 @@ from zcu_tools.gui.expected_error import (
     FailedPreconditionError,
     InvalidInputError,
 )
-from zcu_tools.gui.project import ProjectInfo
 
 
 def _empty_points() -> PointsData:

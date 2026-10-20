@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.form import FormEnv, FormErrors
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormInputRejected
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -26,6 +26,114 @@ from zcu_tools.resources.entry.schema import (
     PointDocument,
     PointGeneral,
 )
+
+
+def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
+    from tests.gui.form_adapter._indexed_models import indexed_env, indexed_form
+
+    captures = []
+
+    def capture(_aliases):
+        captures.append("capture")
+        return resource_api.TabFormSources(indexed_env())
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: indexed_form(),
+        capture=capture,
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "read_elements"), "Missing single owner aggregate read"
+    events = []
+    resource.subscribe(lambda: events.append("changed"))
+    try:
+        resource.write(
+            {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): ["B"]}
+        )
+        resource.select(("tones", 1, "sweep"), {"kind": "center"})
+        before, base = resource.input, resource.editor_state.base
+        observed = resource.read_elements(("tones",))
+        assert [(item.index, item.name, item.path) for item in observed.elements] == [
+            (0, "A", ("tones", 0)),
+            (1, "B", ("tones", 1)),
+        ]
+        first, second = observed.elements
+        assert first.input["phase"] == {"expr": "1 / 0"}
+        assert (
+            first.errors is not None and ("tones", 0, "phase") in first.errors.messages
+        )
+        assert first.values[("tones", 0, "sweep", "start")] == 2
+        assert second.values[("tones", 1, "sweep", "start")] == 10
+        assert second.errors is None
+        assert hasattr(second, "selections"), (
+            "Aggregate must retain authored selection overrides"
+        )
+        assert second.selections == {("tones", 1, "sweep"): {"kind": "center"}}
+        assert second.input["sweep"] == {
+            "kind": "linrange",
+            "start": 10,
+            "stop": 14,
+            "n": 3,
+        }
+        first.input["name"] = "detached"
+        assert resource.input.same_as(before)
+        assert resource.editor_state.base.same_as(base)
+        assert captures == ["capture"] and events == ["changed", "changed"]
+        with pytest.raises(CfgPreconditionError, match="not valid"):
+            resource.accept()
+    finally:
+        resource.revoke()
+    with pytest.raises(CfgPreconditionError):
+        resource.read_elements(("tones",))
+
+
+def test_indexed_restore_uses_saved_positions_selections_and_reports_dropped():
+    from tests.gui.form_adapter._indexed_models import (
+        element,
+        indexed_env,
+        indexed_form,
+    )
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: indexed_form(),
+        capture=lambda _aliases: resource_api.TabFormSources(indexed_env()),
+        mutation_allowed=lambda: True,
+    )
+    try:
+        resource.run_command(("tones", 1, "drive"), "to_inline")
+        resource.write({("tones", 1, "drive", "module", "gain"): {"expr": "2 / 5"}})
+        saved = resource.input
+        raw = saved.data
+        retained = element(raw, 1)
+        retained.pop("phase")
+        retained["old_gain"] = 99
+        raw["tones"] = [retained]
+        raw["participants"] = ["B"]
+        saved = FormInput.from_json(
+            saved.model,
+            FormInput(
+                saved.model,
+                raw,
+                selections={("tones", 0, "sweep"): {"kind": "center"}},
+            ).to_json(),
+        )
+        dropped = resource.restore_input(saved)
+        assert ("tones", 0, "old_gain") in dropped
+        restored = resource.input.data["tones"]
+        assert isinstance(restored, list) and len(restored) == 1
+        assert element(resource.input.data, 0)["phase"] == 0
+        assert resource.input.selections[("tones", 0, "sweep")] == {"kind": "center"}
+        sweep = element(resource.input.data, 0)["sweep"]
+        assert isinstance(sweep, dict) and sweep["kind"] == "linrange"
+        assert resource.read_module(("tones", 0, "drive")).value["gain"] == 0.4
+        before = resource.input
+        with pytest.raises(ValueError, match="identity"):
+            resource.write({("tones", 0, "name"): "A"})
+        assert resource.input.same_as(before)
+        resource.reset()
+        reset = resource.input.data["tones"]
+        assert isinstance(reset, list) and len(reset) == 2
+    finally:
+        resource.revoke()
 
 
 class ScalarCore(ConfigBase):
@@ -205,6 +313,73 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
     assert resource.input.data["amount"] == {"expr": "unfinished +"}
 
 
+def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
+    latest = 2.0
+    captures: list[Mapping[str, str] | None] = []
+
+    def capture(aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
+        captures.append(aliases)
+        return resource_api.TabFormSources(captured_env(latest))
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(ScalarCore, {"amount": Expr("general.ext.amount * 2")}),
+        capture=capture,
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "refresh_sources"), (
+        "Tabs need an explicit capture-only command that preserves authored input"
+    )
+    published: list[object] = []
+    resource.subscribe(lambda: published.append(resource.preview().values[("amount",)]))
+    latest = 5.0
+    resource.refresh_sources(aliases={"selected": "Q2"})
+    assert resource.input.data == {"amount": 4.0}
+    assert resource.result() == ScalarCore(amount=4.0)
+    resource.write({("amount",): {"expr": "general.ext.amount * 3"}})
+    assert resource.result() == ScalarCore(amount=15.0)
+    before = resource.input.to_json()
+    latest = 7.0
+    resource.refresh_sources()
+    assert resource.input.to_json() == before
+    assert resource.result() == ScalarCore(amount=21.0)
+    assert published == [4.0, 15.0, 21.0]
+    assert captures == [None, {"selected": "Q2"}, None]
+    resource.reset()
+    assert resource.input.data == {"amount": 14.0}
+    assert resource.result() == ScalarCore(amount=14.0)
+    assert captures == [None, {"selected": "Q2"}, None, None]
+
+
+def test_refresh_retains_explicit_selections_and_reports_missing_library_source() -> (
+    None
+):
+    from tests.gui.form_adapter._indexed_models import indexed_env, indexed_form
+
+    env = indexed_env()
+    resource = resource_api.TabFormResource(
+        lambda _ctx: indexed_form(),
+        capture=lambda _aliases: resource_api.TabFormSources(env),
+        mutation_allowed=lambda: True,
+    )
+    try:
+        resource.select(("tones", 1, "sweep"), {"kind": "center"})
+        resource.write({("tones", 0, "phase"): {"expr": "unfinished +"}})
+        original = resource.input
+        env = FormEnv()
+        resource.refresh_sources()
+        assert resource.input.data == original.data
+        assert resource.input.selections == original.selections
+        assert resource.input.selections[("tones", 1, "sweep")] == {"kind": "center"}
+        errors = resource.preview().errors
+        assert errors is not None
+        assert ("tones", 0, "phase") in errors.messages
+        assert any("drive" in path for path in errors.messages)
+        with pytest.raises(CfgPreconditionError):
+            resource.accept()
+    finally:
+        resource.revoke()
+
+
 def test_describe_keeps_fixed_capture_and_revokes_retained_handle() -> None:
     captures: list[Mapping[str, str] | None] = []
     current = 2.0
@@ -263,17 +438,22 @@ def test_compatible_restore_preserves_unfinished_input_and_reports_dropped_paths
         capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
         mutation_allowed=lambda: True,
     )
-    assert hasattr(resource, "write_compatible"), (
-        "Missing public compatible input restoration"
-    )
-    dropped = resource.write_compatible(
-        {"amount": {"expr": "unfinished +"}, "removed": 9}
+    dropped = resource.restore_input(
+        FormInput(
+            resource.input.model, {"amount": {"expr": "unfinished +"}, "removed": 9}
+        )
     )
     assert dropped == (("removed",),)
     assert resource.input.data == {"amount": {"expr": "unfinished +"}}
     assert isinstance(resource.result(), FormErrors)
-    assert resource.write_compatible({"amount": "not a number"}) == (("amount",),)
-    assert resource.input.data == {"amount": {"expr": "unfinished +"}}
+    assert (
+        resource.restore_input(
+            FormInput(resource.input.model, {"amount": "not a number"})
+        )
+        == ()
+    )
+    assert resource.input.data == {"amount": "not a number"}
+    assert isinstance(resource.result(), FormErrors)
 
 
 def test_subscriber_failure_keeps_committed_result_and_notifies_other_subscribers(
@@ -327,6 +507,7 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
         for command in (
             lambda: second.write({("amount",): 9.0}),
             second.reset,
+            second.refresh_sources,
             second.accept,
             lambda: pool.retire("second"),
             lambda: pool.create("third", lambda _ctx: form, capture=capture),
@@ -338,13 +519,14 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
 
     first.subscribe(notification)
     first.write({("amount",): 4.0})
-    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 5
+    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 6
     assert second.result() == ScalarCore(amount=1.0)
     allowed = False
     for command in (
         lambda: second.write({("amount",): 9.0}),
-        lambda: second.write_compatible({"amount": 9.0}),
+        lambda: second.restore_input(FormInput(second.input.model, {"amount": 9.0})),
         second.reset,
+        second.refresh_sources,
     ):
         with pytest.raises(CfgPreconditionError) as caught:
             command()
@@ -352,15 +534,19 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
     assert second.result() == ScalarCore(amount=1.0)
     allowed = True
     pool.retire("second")
-    with pytest.raises(CfgPreconditionError) as caught:
-        second.write({("amount",): 9.0})
-    assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
+    for command in (lambda: second.write({("amount",): 9.0}), second.refresh_sources):
+        with pytest.raises(CfgPreconditionError) as caught:
+            command()
+        assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
     assert pool.create(
         "second", lambda _ctx: form, capture=capture
     ).result() == ScalarCore(amount=1.0)
 
 
-def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> None:
+@pytest.mark.parametrize("command", ["reset", "refresh_sources"])
+def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources(
+    command: str,
+) -> None:
     assert hasattr(resource_api, "TabFormResources"), (
         "Missing state-owned Form resource pool"
     )
@@ -383,8 +569,9 @@ def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> No
     )
     resource.write({("amount",): 5.0})
     amount, fail_capture = 2.0, True
+    recapture = resource.reset if command == "reset" else resource.refresh_sources
     with pytest.raises(RuntimeError, match="capture failed"):
-        resource.reset()
+        recapture()
     assert resource.result() == ScalarCore(amount=5.0)
     assert resource.input.data == {"amount": 5.0}
     parameters = resource.env.parameters
@@ -392,8 +579,8 @@ def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> No
     assert parameters.value("general.ext.amount") == 1.0
     assert captures == 2
     fail_capture = False
-    resource.reset()
-    assert resource.result() == ScalarCore(amount=2.0)
+    recapture()
+    assert resource.result() == ScalarCore(amount=2.0 if command == "reset" else 5.0)
     assert captures == 3
 
 
@@ -437,6 +624,46 @@ def test_duplicate_create_does_not_replace_existing_resource() -> None:
         )
     assert pool.lookup("tab") is first
     assert first.result() == ScalarCore(amount=4.0)
+
+
+def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
+    from pydantic import create_model
+
+    from tests.gui.form_adapter._fixed_models import named_form, named_input
+
+    model = named_form()
+    core = create_model(
+        "NamedCore",
+        __base__=ConfigBase,
+        tones=(
+            model.model_fields["tones"].rebuild_annotation(),
+            named_input(model).data["tones"],
+        ),
+        participants=(model.model_fields["participants"].rebuild_annotation(), ["B"]),
+    )
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(core, {}, fixed_elements=model.fixed_elements),
+        capture=lambda _aliases: resource_api.TabFormSources(env=FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    assert resource.accept().values["participants"] == ["B"]
+    target = resource.describe(("tones", 1, "gain")).target
+    assert target is not None
+    assert target.path == ("tones", 1, "gain")
+    resource.write({("tones", 0, "gain"): -2})
+    result = resource.result()
+    assert isinstance(result, FormErrors)
+    assert ("tones", 0, "gain") in result.messages
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.accept()
+    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+    resource.write({("tones", 0, "gain"): 5, ("participants",): ["B", "A"]})
+    assert resource.accept().values["participants"] == ["B", "A"]
+    assert resource.preview().values[("tones", 0, "gain")] == 5
+    before = resource.input
+    with pytest.raises(FormInputRejected, match="Readonly"):
+        resource.write({("tones",): []})
+    assert resource.input.same_as(before)
 
 
 def test_failed_creation_does_not_reserve_tab_identity() -> None:

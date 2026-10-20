@@ -7,6 +7,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.search import ParamBounds
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
@@ -19,7 +20,6 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.project import ProjectInfo
 
 
 def _ctrl() -> Controller:

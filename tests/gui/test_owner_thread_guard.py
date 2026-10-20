@@ -4,10 +4,10 @@ import threading
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
+from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.state import DispersiveState
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.project import ProjectInfo
 
 
 def _foreign_error(callback: Callable[[], None]) -> BaseException:

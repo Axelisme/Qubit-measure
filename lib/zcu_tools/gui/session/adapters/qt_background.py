@@ -30,11 +30,12 @@ from contextlib import AbstractContextManager
 from typing import Any
 
 from qtpy.QtCore import (
-    QCoreApplication,
+    QEventLoop,
     QObject,
     QRunnable,
     QThread,
     QThreadPool,
+    QTimer,
     # tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
     Signal,  # pyright: ignore[reportPrivateImportUsage]
 )
@@ -202,30 +203,51 @@ class BackgroundRunner(QObject):
         signals.deleteLater()
 
     def quiesce(self, timeout_ms: int = 5000) -> bool:
-        """Wait for all in-flight work AND flush its queued main-thread deliveries.
+        """Pump the owner loop until workers and terminal deliveries drain.
 
-        ``QThreadPool.waitForDone`` only joins the worker *threads*; the outcome of a
-        pooled task is delivered to ``on_done``/``on_error`` via a *queued* cross-thread
-        signal that is still sitting in the main-thread event queue when ``run()``
-        returns. If the runner (and its signal carriers) are destroyed before that
-        queued ``QMetaCallEvent`` is dispatched — e.g. a short-lived runner GC'd at the
-        end of a test — ``processEvents`` later crashes delivering to a dead carrier.
+        Owner-thread only. timeout_ms is one nonnegative total deadline, not a
+        separate wait for each worker. Return True only after both substrates
+        finish and their tracked owner deliveries have run. Workers may call the
+        owner synchronously while draining; blocking joins here would deadlock.
+        A zero deadline only checks current completion. Timeout returns False
+        without discarding live workers or queued deliveries; retain and retry.
 
-        ``quiesce`` closes that gap: join the pool and the dedicated workers, then
-        ``processEvents`` so every pending delivery (and the carrier's own deferred
-        delete) lands while its target is still alive. Call it from widget close and
-        test teardown before the runner goes out of scope. Returns ``True`` if every
-        substrate drained within ``timeout_ms``. Does not change admission: other
-        Qt apps may submit again. Terminal callers first use stop_accepting so
-        callbacks dispatched while draining cannot enqueue another producer.
+        This nested loop permits normal Qt reentrancy. Terminal callers must
+        stop_accepting first so callbacks cannot admit new producers. quiesce
+        itself does not close admission or establish hardware safety.
         """
-        drained = self._pool.waitForDone(timeout_ms)
-        for worker in list(self._workers):
-            drained = worker.wait(timeout_ms) and drained
-        # Dispatch the queued done/failed deliveries (and the deferred-delete events
-        # they schedule) now, while the carriers/workers are still alive.
-        app = QCoreApplication.instance()
-        if app is not None:
-            app.processEvents()
-            app.processEvents()
-        return drained
+        if timeout_ms < 0:
+            raise ValueError("drain timeout must be nonnegative")
+
+        def drained() -> bool:
+            # Carriers/workers leave these sets only after owner terminal
+            # delivery. The pool can still be returning from its final emit.
+            return (
+                not self._workers
+                and not self._pool_signals
+                and self._pool.activeThreadCount() == 0
+            )
+
+        if drained():
+            return True
+        if timeout_ms == 0:
+            return False
+        loop = QEventLoop()
+        probe = QTimer()
+        deadline = QTimer()
+        deadline.setSingleShot(True)
+
+        def check_completion() -> None:
+            if drained():
+                loop.quit()
+
+        probe.timeout.connect(check_completion)
+        deadline.timeout.connect(loop.quit)
+        probe.start(0)
+        deadline.start(timeout_ms)
+        try:
+            loop.exec()
+        finally:
+            probe.stop()
+            deadline.stop()
+        return drained()

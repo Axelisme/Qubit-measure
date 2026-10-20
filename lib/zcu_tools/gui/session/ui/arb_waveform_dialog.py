@@ -30,6 +30,8 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.widgets import (
+    DialogPresenter,
+    QtDialogPresenter,
     error_colour,
     secondary_colour,
     set_foreground,
@@ -213,9 +215,17 @@ class ArbWaveformDialog(QDialog):
         self,
         assets: ArbWaveformPort,
         parent: QWidget | None = None,
+        *,
+        dialog_presenter: DialogPresenter | None = None,
     ) -> None:
+        """Manage assets with host-selected notification presentation.
+
+        None uses Qt's modal notification default. Rename input and destructive
+        confirmations remain modal regardless of the notification presenter.
+        """
         super().__init__(parent)
         self._assets = assets
+        self._dialog_presenter = dialog_presenter or QtDialogPresenter()
         self._read_only = False
         self._current_data_key: str | None = None
         self._suppress_segment_change = False
@@ -696,7 +706,7 @@ class ArbWaveformDialog(QDialog):
             self._assets.set_formula(data_key, recipe, overwrite=exists)
         # tolerated: Isolate provider/render/I/O failures; keep the draft unsaved.
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Save failed", str(exc))
+            self._dialog_presenter.critical(self, "Save failed", str(exc))
             return
         self._current_data_key = data_key
         # A pending debounce render would re-render the same recipe we just
@@ -707,7 +717,7 @@ class ArbWaveformDialog(QDialog):
             data = self._assets.load_data(data_key)
         # tolerated: Keep the saved asset/revision on provider reload failure.
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Reload failed", str(exc))
+            self._dialog_presenter.critical(self, "Reload failed", str(exc))
             self.refresh()
             self._select_data_key(data_key)
             return
@@ -735,14 +745,14 @@ class ArbWaveformDialog(QDialog):
         if new_key == old_key:
             return
         if not _DATA_KEY_RE.fullmatch(new_key):
-            QMessageBox.warning(
+            self._dialog_presenter.warning(
                 self,
                 "Invalid data_key",
                 "data_key must match ^[A-Za-z][A-Za-z0-9_]*$",
             )
             return
         if new_key in self._known_data_keys():
-            QMessageBox.warning(
+            self._dialog_presenter.warning(
                 self,
                 "Rename failed",
                 f"Arbitrary waveform {new_key!r} already exists.",
@@ -752,7 +762,7 @@ class ArbWaveformDialog(QDialog):
             self._assets.rename(old_key, new_key)
         # tolerated: Isolate provider/I/O failures before changing draft or selection.
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Rename failed", str(exc))
+            self._dialog_presenter.critical(self, "Rename failed", str(exc))
             return
         self._current_data_key = new_key
         self._data_key_edit.setText(new_key)
@@ -774,7 +784,7 @@ class ArbWaveformDialog(QDialog):
             self._assets.delete(data_key)
         # tolerated: Isolate provider/I/O failures before clearing the selected draft.
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Delete failed", str(exc))
+            self._dialog_presenter.critical(self, "Delete failed", str(exc))
             return
         self._current_data_key = None
         self.refresh()

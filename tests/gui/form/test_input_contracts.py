@@ -45,10 +45,17 @@ def test_source_hook_directs_nested_failures_and_restore_reverts_only_consumer()
     errors = invalid.result(env)
     assert isinstance(errors, form.FormErrors)
     assert ("child", "name") in errors.messages
-    assert state.write_compatible({"child": {"name": "missing"}, "count": 4}, env) == (
-        ("child", "name"),
+    assert (
+        state.restore_input(
+            form.FormInput(
+                state.input.model, {"child": {"name": "missing"}, "count": 4}
+            ),
+            env,
+        )
+        == ()
     )
-    assert state.input.data == {"child": {"name": "ok"}, "count": 4}
+    assert state.input.data == {"child": {"name": "missing"}, "count": 4}
+    assert isinstance(state.result(env), form.FormErrors)
 
 
 def test_prepare_install_is_detached_preserves_base_and_notifies_once() -> None:
@@ -84,8 +91,14 @@ def test_input_policy_disables_expression_across_description_defaults_and_restor
     assert description.target is not None and not description.target.expression
     assert isinstance(state.result(env), form.FormErrors)
     restored = form.FormState(form.FormInput(model, {"text": "$literal"}))
-    assert restored.write_compatible(state.input.data, env) == (("text",),)
-    assert restored.input.data == {"text": "$literal"}
+    assert (
+        restored.restore_input(
+            form.FormInput(restored.input.model, state.input.data), env
+        )
+        == ()
+    )
+    assert restored.input.data == {"text": {"expr": "1 / 0"}}
+    assert isinstance(restored.result(env), form.FormErrors)
 
 
 def test_expression_restriction_does_not_disable_complex_literal_restore() -> None:
@@ -96,6 +109,11 @@ def test_expression_restriction_does_not_disable_complex_literal_restore() -> No
     )
     env = form.FormEnv()
     state = form.FormState(form.FormInput(model, {}))
-    assert state.write_compatible({"value": {"__complex__": [1, 2]}}, env) == ()
+    assert (
+        state.restore_input(
+            form.FormInput(state.input.model, {"value": {"__complex__": [1, 2]}}), env
+        )
+        == ()
+    )
     preview = state.preview(env)
     assert preview.values[("value",)] == 1 + 2j and preview.errors is None

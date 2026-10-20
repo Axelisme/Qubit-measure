@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -24,6 +23,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
+    GENumericalError,
     singleshot_ge_analysis,
 )
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -280,7 +280,22 @@ class GEModuleCfg(ConfigBase):
     readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
-class GE_Cfg(ProgramV2Cfg, ExpCfgModel):
+class GE_Cfg(ExpCfgModel):
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay", unit="us", description="Delay before the first shot."
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Delay after each shot.",
+        ),
+    ] = 1.0
     modules: GEModuleCfg
     shots: Annotated[int, FieldMeta(label="Shots")]
 
@@ -309,35 +324,43 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=GE_Result,
         cfg_type=GE_Cfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/ge",
     )
 
     def run(self, config: GE_Cfg, *, context: RunContext) -> GE_Result:
+        """Collect probe-off/on IQ clouds for ground/excited readout calibration.
+
+        Each shot applies optional reset and init, omits or applies the probe
+        pulse, then reads out. Return complex IQ shaped (2, cfg.shots), shot
+        indices, and prepared_states=[0, 1] denoting probe off/on, not guaranteed
+        pure ground/excited states. Primary analysis maps these rows to physical
+        G/E using its initial_state option; post-analysis derives the radius
+        and confusion matrix from that fit.
+
+        Use one round and cfg.shots reps on a copied cfg. Raw-shot conversion
+        requires exactly one readout channel.
+        """
+
+        # Configure raw-shot acquisition rather than averaging the IQ clouds.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
-
-        # Validate and setup configuration
-        if cfg.rounds != 1:
-            warnings.warn(
-                "rounds will be overwritten to 1 for singleshot measurement",
-                stacklevel=1,
-            )
-            cfg.rounds = 1
-
-        if cfg.reps != 1:
-            warnings.warn(
-                "reps will be overwritten by singleshot measurement shots", stacklevel=1
-            )
-        cfg.reps = cfg.shots
+        program_cfg = ProgramV2Cfg(
+            reps=cfg.shots,
+            rounds=1,
+            initial_delay=cfg.initial_delay,
+            relax_delay=cfg.relax_delay,
+        )
 
         signals_buffer = SignalBuffer((2, cfg.shots))
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
                 modules = step.cfg.modules
                 probe_cfg = modules.probe_pulse if with_probe else None
+
+                # Compare identical preparations with the probe omitted/applied.
                 program = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(soc, soccfg, cfg=program_cfg)
                     .add(
                         Reset("reset", modules.reset),
                         Pulse("init_pulse", modules.init_pulse),
@@ -346,6 +369,8 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                     )
                     .build()
                 )
+
+                # Store each cloud independently, preserving every complex shot.
                 try:
                     program.acquire(soc, progress=True, cancel_flag=step.stop)
                 except StoppedPartialAcquireError:
@@ -354,6 +379,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                 signals_buffer[step].set(raw_shots_to_signal(program))
         signals = signals_buffer.array
 
+        # Keep acquisition order; physical G/E mapping belongs to analysis.
         return GE_Result(
             signals=signals,
             shot_indices=np.arange(signals.shape[1], dtype=np.int64),
@@ -366,8 +392,21 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         options: GEAnalyzeOptions,
         *,
         plots: Plots,
+        figure_name: str = "fit",
     ) -> GEAnalysis:
-        """Fit probe-off/on shots, recording a named fit figure in this operation."""
+        """Fit readout separation and preparation populations from raw IQ clouds.
+
+        source contains probe-off/on IQ shaped (2, N), in normalized ADC units.
+        options.initial_state maps the rows to physical G/E. Return fitted
+        centers, width, initial populations and readout fidelity; publish the
+        distribution fit to plots as figure_name. cfg=None is supported.
+
+        Rotation/classification, histogram fitting, fitted population/center
+        validation and fidelity calculations wrap ValueError, RuntimeError,
+        ArithmeticError and numpy.linalg.LinAlgError in GENumericalError with
+        the original cause. Plotting, invalid backend/initial_state and final
+        calibration validation errors propagate unchanged.
+        """
         # Acquisition order is always probe off/on; fit in physical g/e order.
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
         if options.backend not in ("pca", "center"):
@@ -382,6 +421,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                 length_ratio=options.length_ratio,
             ),
             plots=plots,
+            figure_name=figure_name,
         )
         analysis = GEAnalysis(
             initial_state=options.initial_state,
@@ -404,15 +444,36 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         options: GEPostAnalyzeOptions,
         *,
         plots: Plots,
+        figure_name: str = "post",
     ) -> GEPostAnalysis:
-        """Classify shots with the adopted primary calibration; do not refit."""
+        """Derive classification radius and confusion matrix without refitting IQ.
+
+        source contains probe-off/on IQ shaped (2, N), in normalized ADC units.
+        primary supplies physical G/E mapping and fitted populations/centers.
+        options sets the radius policy, in the same IQ units. Return the
+        classification diagnostic and publish it as figure_name in plots.
+        cfg=None is supported.
+
+        Radius optimization, classification and confusion-matrix solving wrap
+        ValueError, RuntimeError, ArithmeticError and numpy.linalg.LinAlgError
+        in GENumericalError with the original cause. Primary validation, row
+        mapping and plotting errors, including name conflicts, propagate unchanged.
+        """
         primary.validate_calibration()
         g_signals, e_signals = ge_signals_by_state(
             source.result.signals, primary.initial_state
         )
         signals = (g_signals, e_signals)
-        confusion = self._calc_confusion_matrix(signals, primary, options)
-        self._plot_confusion_matrix(confusion, signals, primary, plots)
+        try:
+            confusion = self._calc_confusion_matrix(signals, primary, options)
+        except (
+            ValueError,
+            RuntimeError,
+            ArithmeticError,
+            np.linalg.LinAlgError,
+        ) as exc:
+            raise GENumericalError(str(exc)) from exc
+        self._plot_confusion_matrix(confusion, signals, primary, plots, figure_name)
         return GEPostAnalysis(confusion=confusion)
 
     def _calc_confusion_matrix(
@@ -474,10 +535,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
         primary: GEAnalysis,
         plots: Plots,
+        figure_name: str,
     ) -> None:
         g_signals, e_signals = signals
         g_center, e_center = primary.g_center, primary.e_center
-        fig, raw_axes = plots.subplots("post", nrows=2, ncols=2, figsize=(8, 8))
+        fig, raw_axes = plots.subplots(figure_name, nrows=2, ncols=2, figsize=(8, 8))
         # tolerated(cast): Native 2x2 subplots return Axes | object ndarray;
         # the array type encodes neither this shape nor its Axes elements.
         ((ax1, ax4), (ax2, ax3)) = cast(

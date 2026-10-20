@@ -4,8 +4,10 @@ import numpy as np
 import scipy.linalg
 from numpy.typing import NDArray
 
-from .model import RealArray
-from .request import ReadoutPulse
+from ._integrated import IntegratedLine
+from ._sampled import SampledLine
+from .model import ReadoutModel, RealArray
+from .request import ReadoutPulse, SampleGrid
 
 
 class ConstantLine:
@@ -53,6 +55,40 @@ class ConstantLine:
         self._homogeneous: dict[
             float, tuple[NDArray[np.complex128], NDArray[np.complex128]]
         ] = {}
+        self._integrated: IntegratedLine | None = None
+
+    def integrated_sums(
+        self, model: ReadoutModel, pulse: ReadoutPulse, grids: tuple[SampleGrid, ...]
+    ) -> tuple[RealArray, NDArray[np.complex128]] | None:
+        """Calibrated flat sums and final populations, or fallback.
+
+        model is the validated model that constructed this line. Grids specify
+        physical ADC times and demodulation. Unsupported or ill-conditioned
+        spectral sums return None, leaving the original field route in charge.
+        """
+        if self._integrated is None:
+            self._integrated = IntegratedLine(self._q, self._m, self._b, self._output)
+        return self._integrated.sums(model, pulse, grids)
+
+    def integrated_batch_sums(self, model, pulses, grids):
+        """Calibrated per-content sums/final populations, or individual fallback.
+
+        Inputs share exact timing and per-read sample coordinates; caller bounds
+        tiles to 64 flat single-carrier contents. Demodulation may vary.
+        """
+        if self._integrated is None:
+            self._integrated = IntegratedLine(self._q, self._m, self._b, self._output)
+        return self._integrated.batch_sums(model, pulses, grids)
+
+    def sampled_trajectory(self, pulse: ReadoutPulse, times: RealArray, omega: float):
+        """Emitted sampled-envelope fields/final carrier state, or ODE fallback.
+
+        times are retarded absolute ns, omega is carrier/reference rad/ns.
+        Uses affine convolution blocks without assuming diagonalizable rates.
+        """
+        return SampledLine(self._q, self._m, self._b, self._output, omega).trajectory(
+            pulse, times
+        )
 
     def trajectory(
         self, pulse: ReadoutPulse, times: RealArray, omega: float

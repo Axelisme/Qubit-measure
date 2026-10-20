@@ -17,10 +17,15 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 from zcu_tools.simulate.evolution.kernels.t4 import T4
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 
 class Fallback(T4):
@@ -28,10 +33,10 @@ class Fallback(T4):
 
     name = "t6"
 
-    def guard(self, table, rows, source, budget):
+    def guard(self, table, rows, context: KernelContext):
         return np.ones(len(rows), dtype=bool)
 
-    def apply(self, prepared, key_index, table, rows, states, budget):
+    def apply(self, prepared, key_index, table, rows, states, context: ApplyContext):
         return np.zeros(len(rows), dtype=bool)
 
 
@@ -152,11 +157,13 @@ def ordinary_probe(src, b, initial):
     kernel = DysonKernel()
     rows = np.arange(n)
     keys, first, inverse = np.unique(
-        kernel.prepare_keys(table, rows), return_index=True, return_inverse=True
+        kernel.prepare_keys(table, rows, KernelContext(src, 0.001, WorkPlan())),
+        return_index=True,
+        return_inverse=True,
     )
-    prepared = kernel.prepare(keys, table, first, src, 1e-3)
+    prepared = kernel.prepare(keys, table, first, KernelContext(src, 0.001, WorkPlan()))
     expected = initial.copy()
-    mask = kernel.apply(prepared, inverse, table, rows, expected, 1e-3)
+    mask = kernel.apply(prepared, inverse, table, rows, expected, ApplyContext(1e-3))
     return expected, mask
 
 

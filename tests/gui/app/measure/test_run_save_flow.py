@@ -23,11 +23,6 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.persistence_types import (
-    AppPersistedState,
-    PersistedSession,
-    PersistedTab,
-)
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -114,7 +109,7 @@ def measure_window(qapp, tmp_path: Path) -> Generator[QWidget]:
         launched_measure_app(qapp, tmp_path, registry=registry) as app,
     ):
         installed = registry_state()
-        # Fixture bootstrap only: create an isolated entry/point before restoring tabs.
+        # Fixture bootstrap only: create an isolated entry/point before opening a tab.
         app.controller.setup_control.new_entry(EntryRequest("component-flow"))
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Synthetic component flow", CommandOrigin("gui"))
@@ -122,14 +117,7 @@ def measure_window(qapp, tmp_path: Path) -> Generator[QWidget]:
         app.controller.context_control.add_component(
             "calibration", "synthetic/calibration", {}
         )
-        app.controller.restore_persisted_state(
-            AppPersistedState(
-                session=PersistedSession(
-                    tabs=(PersistedTab(adapter_name="synthetic", form_input={}),),
-                    active_tab_index=0,
-                )
-            )
-        )
+        app.controller.new_tab("synthetic")
         yield app.window
         assert registry_state() == installed
     assert registry_state() == before

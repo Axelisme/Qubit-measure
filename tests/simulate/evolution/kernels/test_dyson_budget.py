@@ -7,8 +7,13 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
 )
-from zcu_tools.simulate.evolution.kernel import SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
+from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 
 def test_resonant_third_order_coherence_error_exceeds_budget_and_is_rejected():
@@ -48,7 +53,7 @@ def test_resonant_third_order_coherence_error_exceeds_budget_and_is_rejected():
     assert 1.31e-3 < error < 1.33e-3
     kernel = DysonKernel()
     rows = np.array([0])
-    assert not kernel.guard(table, rows, source, 1e-3)[0]
+    assert not kernel.guard(table, rows, KernelContext(source, 0.001, WorkPlan()))[0]
 
 
 def test_detuned_third_order_error_rejects_ratio_above_budget_limit():
@@ -86,12 +91,14 @@ def test_detuned_third_order_error_rejects_ratio_above_budget_limit():
     )
     kernel = DysonKernel()
     rows = np.array([0])
-    keys = kernel.prepare_keys(table, rows)
-    prepared = kernel.prepare(keys, table, rows, source, 1e-3)
+    keys = kernel.prepare_keys(table, rows, KernelContext(source, 0.001, WorkPlan()))
+    prepared = kernel.prepare(
+        keys, table, rows, KernelContext(source, 0.001, WorkPlan())
+    )
     actual = initial[None].copy()
-    kernel.apply(prepared, np.array([0]), table, rows, actual, 1e-3)
+    kernel.apply(prepared, np.array([0]), table, rows, actual, ApplyContext(1e-3))
     # At f=0 the full Hamiltonian is constant, giving an exact reference.
     unitary = expm(-2j * np.pi * (np.diag(energies) + 0.01 * x) * 5)
     expected = unitary @ initial @ unitary.conj().T
     assert 1e-3 < np.max(abs(actual[0] - expected)) < 1.2e-3
-    assert not kernel.guard(table, rows, source, 1e-3)[0]
+    assert not kernel.guard(table, rows, KernelContext(source, 0.001, WorkPlan()))[0]

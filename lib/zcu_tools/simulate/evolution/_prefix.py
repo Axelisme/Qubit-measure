@@ -9,11 +9,12 @@ import numpy as np
 from ._dispatch import classify
 from ._parallel import Executor
 from ._planning import Geometry
+from ._resident import ResidentAdmission
 from ._schedule import Schedule
 from .cache import PrepareCache
 from .engine import Cancelled
-from .kernel import Kernel, SegmentTable
-from .secular import FluxWaveform, ModelSource
+from .kernel import Kernel, KernelContext, SegmentTable
+from .secular import FluxWaveform
 
 
 def certify(table: SegmentTable) -> SegmentTable:
@@ -143,25 +144,21 @@ class PrefixResolver:
         self,
         geometry: Geometry,
         kernels: Mapping[str, Kernel],
-        source: ModelSource,
-        budget: float,
+        context: KernelContext,
         cancel: Event,
+        resident: ResidentAdmission,
     ):
         self.geometry = geometry
         self.kernels = kernels
-        self.source = source
-        self.budget = budget
+        self.context = context
         self.cancel = cancel
+        self.resident = resident
 
     def resolve(self, cache: PrepareCache, pool: Executor, chunks: int) -> Geometry:
         """Resolve nested groups in time order, never storing inputs in the LRU."""
-        geometry, kernels, source, budget, cancel = (
-            self.geometry,
-            self.kernels,
-            self.source,
-            self.budget,
-            self.cancel,
-        )
+        geometry, kernels, cancel = self.geometry, self.kernels, self.cancel
+        context = self.context
+        source = context.source
         table = geometry.table
         representatives: dict[int, int] = {}
         for row, group in enumerate(table.prefix_group or ()):
@@ -191,8 +188,10 @@ class PrefixResolver:
             table = replace(table, prefix_inputs=inputs)
             geometry = replace(geometry, table=table, prefix_paths=paths)
             prefix = _representative(geometry, first, row)
-            dispatch = classify(prefix, kernels, source, budget)
-            schedule = Schedule(prefix, dispatch, source, budget, cancel, initial)
+            dispatch = classify(prefix, kernels, context, admission=self.resident)
+            schedule = Schedule(
+                prefix, dispatch, context, cancel, self.resident, initial
+            )
             result = schedule.run(kernels, cache, pool, chunks)
             inputs[group] = result.densities[0]
             paths[group] = result.paths

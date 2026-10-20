@@ -2,8 +2,9 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import TypedDict
 
-from zcu_tools.gui.form import FormPathError
+from zcu_tools.gui.form import FormInputRejected, FormPathError
 from zcu_tools.gui.form_adapter import LogicalEditError, LogicalSourceError
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
@@ -12,6 +13,13 @@ from zcu_tools.gui.remote.errors import (
 )
 
 from ..services.form_contracts import CfgPreconditionError
+
+
+class FormError(TypedDict):
+    """One validation error; path contains model fields and sequence indexes."""
+
+    path: list[str | int]
+    message: str
 
 
 def cfg_error_to_remote(exc: CfgPreconditionError) -> RemoteError:
@@ -27,6 +35,23 @@ def cfg_error_to_remote(exc: CfgPreconditionError) -> RemoteError:
     )
 
 
+def input_rejected_to_remote(exc: FormInputRejected) -> RemoteError:
+    """Preserve a refusal path, adding reason/current only for readonly input.
+
+    Keep the existing form_input_rejected taxonomy. Readonly current is raw JSON,
+    including null; ordinary owner refusals retain only form_path in data.
+    """
+    data: dict[str, object] = {"form_path": list(exc.path)}
+    if exc.reason == "readonly":
+        data.update(reason="readonly", current=exc.current)
+    return RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        str(exc),
+        reason="form_input_rejected",
+        data=data,
+    )
+
+
 @contextmanager
 def recipe_form_errors() -> Generator[None]:
     """Translate declared logical/cfg failures without reclassifying author bugs.
@@ -38,6 +63,8 @@ def recipe_form_errors() -> Generator[None]:
         yield
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
+    except FormInputRejected as exc:
+        raise input_rejected_to_remote(exc) from exc
     except FormPathError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,

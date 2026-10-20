@@ -302,7 +302,7 @@ def test_rpc_start_model_errors_leave_both_panel_drafts_and_bases_untouched(
     ]
     plan = start_plan_batch()
     tunables: list[FormWrite] = []
-    path = ["scale"] if form == "plan" else ["sample", "count"]
+    path: list[str | int] = ["scale"] if form == "plan" else ["sample", "count"]
     if form == "plan":
         for edit in plan:
             if edit["path"] == path:
