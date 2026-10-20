@@ -94,7 +94,7 @@ Setup 的 alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<
 
 `EntryAliases` 保留名稱到原字串的 mapping 順序、空列與 `$` softlinks，不保存解析後名稱。檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 與缺檔都讀成空表。格式、結構或 alias 語法錯誤直接失敗，不回退 preset。
 
-Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。EMPTY 只改 memory；普通 `set_alias_rows` 也只改 memory。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
+Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。未選 point 時 Apply 以 `FailedPreconditionError(no_context)` 拒絕，不寫 setup。普通 `set_alias_rows` 只改 memory，不要求 point。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
 
 切換 point 載入該 point 的表，Open／Reset 捕捉目前 point 的 alias。已保存的空表或空列不自填。Run 保留原 capture，後續改表或切 entry 不改歷史 Analyze／Writeback／Save 的來源。這個單檔替換不承諾跨檔交易、多 writer merge 或掉電恢復。
 

@@ -61,7 +61,8 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
         original = control.get_alias_rows()
         error = rpc_error(application, "context.aliases_set", {"rows": rows})
         assert (error["code"], error["reason"]) == (
-            ErrorCode.PRECONDITION_FAILED, "no_context"
+            ErrorCode.PRECONDITION_FAILED,
+            "no_context",
         )
         assert control.get_alias_rows() == original
         return
@@ -117,7 +118,9 @@ def test_alias_apply_rejects_entire_payload_and_preserves_persisted_table(
     error = rpc_error(application, "context.aliases_set", {"rows": rows})
     assert error["code"] == ErrorCode.INVALID_PARAMS
     assert control.get_alias_rows() == original
-    assert (info.result_path / "points" / "base" / "aliases.yaml").read_bytes() == old_file
+    assert (
+        info.result_path / "points" / "base" / "aliases.yaml"
+    ).read_bytes() == old_file
     assert entry_resource(info).ledger.events() == ()
 
 
@@ -137,23 +140,35 @@ def test_alias_apply_storage_failure_does_not_install_candidate(
     assert (info.result_path / "points" / "base" / "aliases.yaml").is_dir()
 
 
-def test_open_and_reset_capture_selected_point_aliases(application: PointApplication) -> None:
+def test_open_and_reset_capture_selected_point_aliases(
+    application: PointApplication,
+) -> None:
     info = application.open_entry()
     control = application.controller.context_control
     control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
     control.add_component("Q2", "fake/drive/a", {"rate": 20.0}, setup=True)
     application.result("point.new", {"label": "first"})
-    application.result("context.aliases_set", {"rows": [{"alias": "driver", "value": "Q1"}]})
+    application.result(
+        "context.aliases_set", {"rows": [{"alias": "driver", "value": "Q1"}]}
+    )
     application.result("point.new", {"label": "second"})
-    application.result("context.aliases_set", {"rows": [{"alias": "driver", "value": "Q2"}]})
+    application.result(
+        "context.aliases_set", {"rows": [{"alias": "driver", "value": "Q2"}]}
+    )
     application.result("point.use", {"label": "first"})
     tab = application.controller.new_tab("pointed")
     query = {"tab_id": tab, "paths": ["$driver.rate"], "module_refs": []}
-    assert application.result("tab.parameter_read", query)["values"] == {"$driver.rate": 10.0}
+    assert application.result("tab.parameter_read", query)["values"] == {
+        "$driver.rate": 10.0
+    }
     application.result("point.use", {"label": "second"})
-    assert application.result("tab.parameter_read", query)["values"] == {"$driver.rate": 10.0}
+    assert application.result("tab.parameter_read", query)["values"] == {
+        "$driver.rate": 10.0
+    }
     application.result("tab.reset_cfg", {"tab_id": tab})
-    assert application.result("tab.parameter_read", query)["values"] == {"$driver.rate": 20.0}
+    assert application.result("tab.parameter_read", query)["values"] == {
+        "$driver.rate": 20.0
+    }
     entry = entry_resource(info)
     assert entry.load_aliases(point="first").aliases == {"driver": "Q1"}
     assert entry.load_aliases(point="second").aliases == {"driver": "Q2"}

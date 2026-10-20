@@ -147,7 +147,8 @@ def test_point_table_replaces_named_default_without_automatic_initialization(
         entry.new_point("first")
         if saved is not None:
             entry.save_aliases(
-                EntryAliases(aliases={row.alias: row.value for row in saved}), point="first"
+                EntryAliases(aliases={row.alias: row.value for row in saved}),
+                point="first",
             )
         try:
             controller = Controller(

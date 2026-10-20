@@ -286,7 +286,9 @@ def test_startup_creates_point_then_persists_its_aliases(startup_app, tmp_path):
         assert ctrl.context_control.current_point_label() == "initial"
         assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
         entry = ResultEntry.open(
-            "created", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+            "created",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
         )
         assert entry.load_aliases(point="initial").aliases == {"qubit": "Q1"}
         ctrl.setup_control.open_entry(EntryRequest("synthetic"))

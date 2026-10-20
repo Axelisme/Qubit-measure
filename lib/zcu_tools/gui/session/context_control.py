@@ -225,8 +225,9 @@ class ContextControlPort(Protocol):
     def get_alias_rows(self) -> tuple[AliasRow, ...]:
         """Read immutable authored global rows on the owner thread without I/O.
 
-        Links remain authored strings, not resolved component names. No entry
-        is required; an uninitialized table may be empty.
+        Links remain authored strings, not resolved component names. No point
+        is required. Entry installation/clearing resets the table to empty;
+        selecting a point loads its saved rows without setup/preset fallback.
         """
         ...
 
@@ -237,20 +238,21 @@ class ContextControlPort(Protocol):
         required. Invalid syntax, duplicate names and links to self/later rows
         raise InvalidInputError(alias_invalid) and preserve rows and versions.
         Changed rows publish AliasesChangedPayload after installation; identical
-        submissions publish nothing. Either submission disables later default
-        initialization. No files, preferences or ledger records are written.
+        submissions publish nothing. Selecting a point replaces memory-only
+        edits with its saved rows. No files, preferences or ledger records are written.
         """
         ...
 
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Confirm the ordered table on the owner thread.
 
-        Validate syntax/order, then atomically save to the opened entry before
-        memory/event installation. EMPTY is memory-only. InvalidInputError or
-        storage errors propagate, retaining old rows, versions and file. Saved
-        empty rows are authoritative on reopen. Identical rows still save but
-        emit no change; successful confirmation disables default initialization.
-        No point, ledger or preferences write occurs.
+        No selected point raises FailedPreconditionError(no_context) before
+        validation or I/O. Validate syntax/order, then atomically save the
+        selected point's aliases.yaml before memory/event installation.
+        Never write setup aliases. InvalidInputError or storage errors propagate,
+        retaining old rows, versions and file. Empty rows are authoritative.
+        Identical rows still save but emit no change. No other point container,
+        ledger or preferences write occurs.
         """
         ...
 

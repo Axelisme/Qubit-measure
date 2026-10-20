@@ -205,7 +205,8 @@ def test_apply_failure_preserves_file_rows_and_events_then_retries(
 
 @pytest.mark.parametrize("opened", [False, True])
 def test_apply_without_point_fails_without_changing_memory_or_setup(
-    tmp_path: Path, opened: bool,
+    tmp_path: Path,
+    opened: bool,
 ) -> None:
     context = service()
     entry = entry_at(tmp_path)

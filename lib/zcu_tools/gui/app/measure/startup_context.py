@@ -247,7 +247,7 @@ class StartupSetup:
     def open_entry(self, name: str) -> EntryInfo:
         """Open an existing entry by single-segment name; do not select a point.
 
-        Owner validates name and loads entry aliases. I/O/binding failures
+        Owner validates name and clears alias rows until a point is selected. I/O/binding failures
         propagate and preserve the old binding. Safe from worker/owner callback.
         """
         return self.calls.call(lambda: self.control.open_entry(EntryRequest(name)))
@@ -271,7 +271,7 @@ class StartupParameters:
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Replace ordered authored aliases in memory, without saving aliases.yaml.
 
-        Invalid rows propagate without changing the old table. Entry-owned
+        Invalid rows propagate without changing the old table. Point-local
         disk aliases remain governed by Inspect Apply. Worker/owner safe.
         """
         self.calls.call(lambda: self.control.set_alias_rows(rows))
@@ -279,8 +279,9 @@ class StartupParameters:
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Validate and persist ordered authored rows, then publish them in memory.
 
-        Save aliases.yaml in the opened entry; without an entry only change
-        memory. Unlike set_alias_rows, this commits entry-owned aliases. Invalid
+        Save the selected point's aliases.yaml, then install memory. Without a
+        selected point raise FailedPreconditionError(no_context) before I/O.
+        Unlike set_alias_rows, this commits point-local aliases. Invalid
         rows and storage errors propagate, preserving the prior table/file.
         The context owner manages validation and atomic file replacement.
         Synchronous from a worker or owner callback.

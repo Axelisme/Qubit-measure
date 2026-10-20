@@ -243,7 +243,9 @@ def _fresh_rows(entry: ResultEntry) -> tuple[AliasRow, ...]:
     return fresh.get_alias_rows()
 
 
-def test_apply_without_point_shows_actionable_error(qapp: QApplication, tmp_path: Path) -> None:
+def test_apply_without_point_shows_actionable_error(
+    qapp: QApplication, tmp_path: Path
+) -> None:
     bus = BaseEventBus()
     control = ContextControlFacet(context=_service(bus, (AliasRow("qubit", "Q1"),)))
     session = _Session(control, bus)
@@ -273,7 +275,9 @@ def test_clean_alias_draft_follows_selected_point(entry_session) -> None:
 
 @pytest.mark.parametrize("switch", ["point", "entry"])
 def test_dirty_alias_draft_rejects_different_target_without_writing(
-    entry_session, tmp_path: Path, switch: str,
+    entry_session,
+    tmp_path: Path,
+    switch: str,
 ) -> None:
     entry = entry_session.entry
     assert entry is not None
@@ -282,7 +286,9 @@ def test_dirty_alias_draft_rejects_different_target_without_writing(
     source_rows = entry.load_aliases(point="working")
     if switch == "entry":
         destination = ResultEntry.create(
-            "different", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+            "different",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
         )
         label = "working"
     else:
@@ -306,7 +312,9 @@ def test_dirty_alias_draft_rejects_different_target_without_writing(
     assert destination.load_aliases(point=label).aliases == {"destination": "R2"}
 
 
-def test_alias_revert_loads_current_target_then_apply_saves_there(entry_session) -> None:
+def test_alias_revert_loads_current_target_then_apply_saves_there(
+    entry_session,
+) -> None:
     entry = entry_session.entry
     assert entry is not None
     entry.new_point("other")
