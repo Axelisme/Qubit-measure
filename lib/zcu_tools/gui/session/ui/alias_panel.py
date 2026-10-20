@@ -20,7 +20,10 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.session.alias_presets import AliasPresets
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
+from zcu_tools.gui.session.context_types import (
+    ContextSourceUnavailableError,
+    SavedPoint,
+)
 from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
@@ -36,7 +39,8 @@ class AliasPanel(QWidget):
 
     Public child object names: inspect.aliases.table (QTableWidget with the
     columns Alias, Value and Resolves to), the QPushButtons
-    inspect.aliases.add, inspect.aliases.remove and inspect.aliases.apply,
+    inspect.aliases.add, inspect.aliases.remove, inspect.aliases.revert and
+    inspect.aliases.apply,
     inspect.aliases.load_preset (a QPushButton whose QMenu has one action per
     preset, titled with the preset name, in catalog order), and
     inspect.aliases.error (the QLabel showing the last rejected Apply).
@@ -51,7 +55,10 @@ class AliasPanel(QWidget):
     until Apply. Without a selected point it stays blank; source faults
     appear as diagnostics in the column. The draft is unsaved while its rows
     differ from the rows last loaded or applied. The panel never asks questions;
-    its host decides what to do with an unsaved draft.
+    its host decides what to do with an unsaved draft. The draft captures its
+    entry/point identity. refresh follows the selected point while clean and
+    preserves dirty drafts. Apply rejects a different target, including another
+    entry with the same point label. Revert loads the current point instead.
     """
 
     def __init__(
@@ -72,6 +79,7 @@ class AliasPanel(QWidget):
         # Each menu action loads its own preset's rows, independent of its text.
         self._preset_rows: dict[QAction, tuple[AliasRow, ...]] = {}
         self._base: tuple[AliasRow, ...] = ()
+        self._target: SavedPoint | None = None
         layout = QVBoxLayout(self)
         hint = QLabel(
             "Enter a component name, leave a value empty, or use a $ link "
@@ -110,6 +118,9 @@ class AliasPanel(QWidget):
         row_actions.addWidget(self._remove_btn)
         row_actions.addWidget(self._preset_btn)
         row_actions.addStretch()
+        self._revert_btn = self._action_button("Revert", "inspect.aliases.revert")
+        self._revert_btn.clicked.connect(self.revert)
+        row_actions.addWidget(self._revert_btn)
         self._apply_btn = self._action_button("Apply", "inspect.aliases.apply")
         self._apply_btn.clicked.connect(self.apply)
         row_actions.addWidget(self._apply_btn)
@@ -138,15 +149,34 @@ class AliasPanel(QWidget):
     def apply(self) -> bool:
         """Submit every shown row through control.apply_alias_rows().
 
-        The owner saves to the opened entry or stays memory-only in EMPTY.
+        Reject a target different from the loaded entry/point before owner
+        validation or I/O. Keep the draft and show a Revert instruction.
+        The owner saves the selected point; no point is a precondition error.
         Return True after the table is installed; the resolution column then
-        reprojects it. Input and storage errors return False, appear in
+        reprojects it. Precondition, input and storage errors return False, appear in
         inspect.aliases.error and keep both the installed table and the draft.
         """
+        current = self._current_target()
+        if current != self._target:
+            source = (
+                "no selected point"
+                if self._target is None
+                else f"point '{self._target.point}' in entry {self._target.entry_id}"
+            )
+            destination = (
+                "no selected point"
+                if current is None
+                else f"point '{current.point}' in entry {current.entry_id}"
+            )
+            self._error.setText(
+                f"Alias draft is from {source}; current target is {destination}. "
+                "Use Revert to load the current point before applying."
+            )
+            return False
         rows = self._draft_rows()
         try:
             self._control.apply_alias_rows(rows)
-        except (InvalidInputError, OSError) as error:
+        except (FailedPreconditionError, InvalidInputError, OSError) as error:
             self._error.setText(str(error))
             return False
         self._base = rows
@@ -157,21 +187,46 @@ class AliasPanel(QWidget):
     def revert(self) -> None:
         """Replace the draft with the installed rows and clear the error.
 
-        Used to load the rows and to discard a draft. An earlier successful
-        Apply is not undone; read failures propagate.
+        Capture the current entry/point identity and discard the previous draft,
+        even across target changes. An earlier successful Apply is not undone;
+        read failures propagate. Run on the control's owner thread.
         """
+        self._target = self._current_target()
         self._base = self._control.get_alias_rows()
         self._show_rows(self._base)
         self._refresh_resolutions()
 
+    def refresh(self) -> None:
+        """Load current rows/target if clean; preserve an unsaved draft unchanged.
+
+        Called by the host after session publications on the owner thread.
+        Dirty drafts retain their source identity; Apply refuses a different
+        current entry/point until Revert or the original target is selected.
+        Read failures propagate.
+        """
+        if not self.is_unsaved():
+            self.revert()
+
+    def _current_target(self) -> SavedPoint | None:
+        info = self._control.get_entry_info()
+        label = self._control.current_point_label()
+        if info is None or label is None:
+            return None
+        return SavedPoint(entry_id=info.entry_id, point=label)
+
     def set_read_only(self, *, read_only: bool) -> None:
         """Lock or unlock edits while keeping the rows selectable and scrollable.
 
-        Read-only disables Add, Remove, Load preset and Apply and stops cell
+        Read-only disables Add, Remove, Load preset, Revert and Apply and stops cell
         editing. Unlocking leaves Load preset disabled without presets. A
         draft made before locking stays shown.
         """
-        for button in (self._add_btn, self._remove_btn, self._apply_btn):
+        for button in (
+            self._add_btn,
+            self._remove_btn,
+            self._revert_btn,
+            self._apply_btn,
+        ):
             button.setEnabled(not read_only)
         self._preset_btn.setEnabled(not read_only and bool(self._preset_rows))
         self._table.setEditTriggers(

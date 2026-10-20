@@ -128,9 +128,11 @@ class InspectDialog(QDialog):
     opens a NewEntryDialog over templates and selects the created entry.
     "Arb Waveforms…" calls the host's open_arb_waveforms.
 
-    Aliases loads the installed alias rows when the dialog is built and
-    commits them only through its Apply; its Load preset menu replaces the
-    whole draft with one of alias_presets without committing. Closing with an Unsaved module entry
+    Aliases fixes its draft to the loaded entry/point. Clean drafts follow
+    session switches; dirty drafts stay shown and Apply rejects a different
+    current entry/point. Revert loads the current point's table. Apply saves
+    only that selected point. Its Load preset menu replaces the whole draft
+    with one of alias_presets without committing. Closing with an Unsaved module entry
     or alias draft asks Save, Discard or Cancel for each in turn; a rejected
     alias Save keeps the dialog open on the Aliases page with its error.
     """
@@ -145,7 +147,6 @@ class InspectDialog(QDialog):
         open_arb_waveforms: Callable[[], None],
         dialog_presenter: DialogPresenter,
         alias_presets: AliasPresets | None,
-        placeholder_defaults: Callable[[], Mapping[str, str]] = dict,
         parent: QWidget | None = None,
     ) -> None:
         """Build the dialog, subscribe to session facts and show the current context.
@@ -158,15 +159,12 @@ class InspectDialog(QDialog):
         opens the host's ARB waveform dialog. dialog_presenter shows every
         question and failure of this dialog. alias_presets is the composition's
         named alias catalog offered by the Aliases page's Load preset; None
-        means no catalog and leaves Load preset disabled. placeholder_defaults
-        reads session template defaults when New captures a form; omitted means
-        no defaults. Existing captures are not updated.
+        means no catalog and leaves Load preset disabled.
         """
         super().__init__(parent)
         self._ctrl = ctrl
         self._bus = bus
         self._templates = templates
-        self._placeholder_defaults = placeholder_defaults
         self._arb_waveforms = arb_waveforms
         self._open_arb_waveforms = open_arb_waveforms
         self._presenter = dialog_presenter
@@ -316,7 +314,12 @@ class InspectDialog(QDialog):
         self._update_controls()
 
     def refresh(self) -> None:
-        """Reread the component tree and the library from a new capture."""
+        """Refresh components/library and follow alias selection only while clean.
+
+        Unsaved alias drafts keep their loaded entry/point and reject Apply
+        after selection changes. Revert explicitly loads the current point.
+        """
+        self._aliases.refresh()
         self._component_tree.refresh()
         try:
             parameters = self._ctrl.read_context()
@@ -612,7 +615,6 @@ class InspectDialog(QDialog):
             self._ctrl,
             self._templates,
             arb_waveforms=self._arb_waveforms,
-            placeholder_defaults=self._placeholder_defaults,
             dialog_presenter=self._presenter,
             parent=self,
         )

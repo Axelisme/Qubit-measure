@@ -122,7 +122,6 @@ class LibraryEntryForm[S: ConfigBase](ABC):
         parameters: ParameterContext,
         *,
         arb_names: Sequence[str],
-        placeholders: Mapping[str, str] | None = None,
     ) -> Self:
         """Build a fresh entry state from a template for this family's spec_type.
 
@@ -130,9 +129,8 @@ class LibraryEntryForm[S: ConfigBase](ABC):
         generator resolves Expr and Slot seeds against parameters. Its returned
         specialized input model owns the new state; no existing state is reset.
         arb_names supplies the same captured choices as the Spec constructor.
-        placeholders supplies captured registry defaults, empty when omitted;
-        the entry detaches them before resolving the template. Explicit Template
-        bindings override these defaults. Missing bindings raise ValueError.
+        Only Template.bindings supplies placeholder replacements.
+        Missing bindings raise ValueError.
         Bad templates raise the generator's errors; incomplete inputs remain
         editable and spec()/put() reject them with LibraryEntryInvalid.
         """
@@ -143,7 +141,6 @@ class LibraryEntryForm[S: ConfigBase](ABC):
         entry._env = FormEnv(
             parameters=parameters,
             library=parameters.library,
-            placeholders=dict(placeholders or {}),
         )
         projected = entry._form.template_input(template, catalog, entry._env)
         model = _with_arb_choices(projected.model, spec_type, tuple(arb_names))
@@ -253,14 +250,13 @@ def new_library_entry(
     catalog: Mapping[str, TemplateDef],
     *,
     arb_names: Sequence[str],
-    placeholders: Mapping[str, str] | None = None,
 ) -> ModuleEntryForm | WaveformEntryForm:
     """Build an editable library entry from the injected persistent template.
 
     Capture, input lifecycle and arb choices follow from_template.
-    placeholders supplies fixed registry defaults, empty when omitted; explicit
-    Template bindings override them. Missing bindings raise ValueError. Unknown IDs
-    raise KeyError; a definition outside both families raises TypeError (see
+    Only Template.bindings supplies replacements. Missing bindings raise
+    ValueError. Unknown IDs raise KeyError; a definition outside both families
+    raises TypeError (see
     library_entry_kind); invalid definitions propagate without writing any
     library. The returned entry produces the same Spec put/replace contract
     as an opened entry. The caller owns its state and commits explicitly.
@@ -273,7 +269,6 @@ def new_library_entry(
             catalog,
             parameters,
             arb_names=arb_names,
-            placeholders=placeholders,
         )
     if is_waveform_spec_type(spec_type):
         return WaveformEntryForm.from_template(
@@ -282,7 +277,6 @@ def new_library_entry(
             catalog,
             parameters,
             arb_names=arb_names,
-            placeholders=placeholders,
         )
     raise TypeError(
         "Template must define a concrete persistent module or waveform Spec"
