@@ -67,7 +67,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
 
     from ..writeback import WritebackControlPort
     from .operation_control import OperationControlPort
@@ -109,6 +109,7 @@ class AppServices:
     context: ContextService
     context_control: ContextControlPort
     setup_control: SetupControlPort
+    soc_control: SocControlPort
     tab: TabService
     tab_forms: TabFormResources
     tab_control: TabControlPort
@@ -326,6 +327,7 @@ def build_app_services(
         context=context,
         context_control=session.context_control,
         setup_control=session.setup_control,
+        soc_control=session.soc_control,
         tab=tab,
         tab_forms=tab_forms,
         tab_control=tab_control,
