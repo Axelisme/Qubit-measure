@@ -1,4 +1,4 @@
-"""Creation and identity of a result entry across two explicit roots."""
+"""Result-owned entry identity with a separate Database output location."""
 
 from __future__ import annotations
 
@@ -6,11 +6,13 @@ import errno
 import os
 import shutil
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+from pydantic import TypeAdapter
 from ruamel.yaml import YAML
 
 from zcu_tools.cfg_model import WaveformAssetInfo
@@ -20,7 +22,7 @@ from zcu_tools.resources.sample_table import JsonlSampleTable
 from . import _point_origin
 from ._path_segments import validate_path_segment
 from .aliases import EntryAliases, load_entry_aliases, save_entry_aliases
-from .errors import DestinationExistsError, RenameRecoveryError
+from .errors import DestinationExistsError
 from .ledger import RecordsLedger
 from .ledger_models import (
     AnalyzedPayload,
@@ -47,6 +49,22 @@ if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
 
 
+def _create_empty_library(path: Path) -> None:
+    from zcu_tools.resources.context.library import (
+        MODULE_LIBRARY_FORMAT,
+        MODULE_LIBRARY_VERSION,
+    )
+
+    with path.open("x", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(
+            {
+                "format": MODULE_LIBRARY_FORMAT,
+                "format_version": f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
+            },
+            stream,
+        )
+
+
 def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -> Path:
     validate_path_segment(name, field="name")
     root_path = Path(root)
@@ -58,33 +76,35 @@ def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -
     return path
 
 
-def rename_entry(
-    old: str, new: str, *, result_root: str | Path, database_root: str | Path
-) -> None:
+def rename_entry(old: str, new: str, *, result_root: str | Path) -> None:
+    """Rename only result_root/old to result_root/new without rewriting contents.
+
+    Names must be safe single path segments within result_root. An existing
+    destination, including a symlink, raises DestinationExistsError before moving.
+    Filesystem errors propagate; Database outputs are not inspected or moved.
+    Existing handles remain bound to their original paths; reopen using new.
+    """
     result_old = _entry_path(result_root, old)
-    database_old = _entry_path(database_root, old)
     result_new = _entry_path(result_root, new, new_destination=True)
-    database_new = _entry_path(database_root, new, new_destination=True)
-    ResultEntry.open(old, result_root=result_root, database_root=database_root)
     result_old.rename(result_new)
-    try:
-        database_old.rename(database_new)
-    except OSError as cause:
-        try:
-            if result_old.exists() or result_old.is_symlink():
-                raise FileExistsError(
-                    errno.EEXIST, os.strerror(errno.EEXIST), str(result_old)
-                )
-            result_new.rename(result_old)
-        except OSError as recovery_cause:
-            raise RenameRecoveryError(
-                moved_result=result_new,
-                pending_database=database_new,
-                recovery_destination=result_old,
-                cause=cause,
-                recovery_cause=recovery_cause,
-            ) from cause
-        raise
+
+
+@dataclass(frozen=True, kw_only=True)
+class EntryIdentity:
+    """Fixed values for creating a new entry, not ownership of existing paths.
+
+    entry_id is the UUID to write to setup. created_at is a timezone-aware UTC
+    datetime; non-UTC or naive times raise ValueError, invalid IDs ValidationError.
+    These values do not authorize opening, replacing or repairing any entry.
+    """
+
+    entry_id: UUID
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        TypeAdapter(UUID).validate_python(self.entry_id, strict=True)
+        if self.created_at.utcoffset() != timedelta(0):
+            raise ValueError("created_at must be a timezone-aware UTC datetime")
 
 
 class ResultEntry:
@@ -141,6 +161,30 @@ class ResultEntry:
     def database_path(self) -> Path:
         """Return this entry's exact Database directory, not the parent root."""
         return self._database_path
+
+    @property
+    def dispersive_path(self) -> Path:
+        """Return the entry's dispersive directory without creating it.
+
+        File names and content belong to resources.dispersive_file. A symlink
+        escaping this entry raises ValueError; no component or ledger is read.
+        """
+        path = self._result_path / "dispersive"
+        if not path.resolve().is_relative_to(self._result_path.resolve()):
+            raise ValueError(f"{path}: dispersive directory escapes its entry")
+        return path
+
+    @property
+    def t1_curve_path(self) -> Path:
+        """Return the entry's T1 curve directory without creating it.
+
+        File names and content belong to resources.t1_curve_file. A symlink
+        escaping this entry raises ValueError; no component or ledger is read.
+        """
+        path = self._result_path / "t1_curve"
+        if not path.resolve().is_relative_to(self._result_path.resolve()):
+            raise ValueError(f"{path}: t1_curve directory escapes its entry")
+        return path
 
     def load_aliases(self, *, point: str | None = None) -> EntryAliases:
         """Read setup aliases, or one existing point's aliases when point is set.
@@ -324,19 +368,7 @@ class ResultEntry:
                 draft.general.created_at = (
                     datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
-        from zcu_tools.resources.context.library import (
-            MODULE_LIBRARY_FORMAT,
-            MODULE_LIBRARY_VERSION,
-        )
-
-        with (destination / "module_cfg.yaml").open("x", encoding="utf-8") as stream:
-            YAML(typ="rt").dump(
-                {
-                    "format": MODULE_LIBRARY_FORMAT,
-                    "format_version": f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
-                },
-                stream,
-            )
+        _create_empty_library(destination / "module_cfg.yaml")
         aliases = self._result_path / "aliases.yaml"
         if aliases.exists():
             shutil.copyfile(aliases, destination / "aliases.yaml")
@@ -349,7 +381,6 @@ class ResultEntry:
             identity = _point_origin.clone_source(
                 clone_from,
                 result_root=result_root,
-                database_root=database_root,
             )
             source = identity.source.parent
             name = source.parent.parent.name
@@ -507,11 +538,13 @@ class ResultEntry:
         )
 
     def module_library(
-        self, label: str, *, assets: WaveformAssetInfo | None = None
+        self, label: str | None = None, *, assets: WaveformAssetInfo | None = None
     ) -> ModuleLibrary:
-        """Open a point-local library with this entry's ledger and optional assets.
+        """Open the setup or point library with this entry's ledger and optional assets.
 
-        label follows use_point's safe single-segment rules. Only module_cfg.yaml
+        None selects entry/module_cfg.yaml, initialized by create. A string
+        selects a point library and follows use_point's safe single-segment rules.
+        Only module_cfg.yaml
         is loaded; the point and assets are not read and no active point is selected.
         Omit assets for Spec-only reads/edits; materializing Arb requires a provider.
         The existing library must have a valid header and container. Invalid
@@ -523,7 +556,11 @@ class ResultEntry:
         # Avoid the library -> entry.provenance -> ResultEntry import cycle.
         from zcu_tools.resources.context.library import ModuleLibrary
 
-        directory = _entry_path(self._result_path / "points", label)
+        directory = (
+            self._result_path
+            if label is None
+            else _entry_path(self._result_path / "points", label)
+        )
         return ModuleLibrary(
             directory / "module_cfg.yaml",
             assets=assets,
@@ -560,47 +597,68 @@ class ResultEntry:
 
     @classmethod
     def create(
-        cls, name: str, *, result_root: str | Path, database_root: str | Path
+        cls,
+        name: str,
+        *,
+        result_root: str | Path,
+        database_root: str | Path,
+        identity: EntryIdentity | None = None,
     ) -> ResultEntry:
+        """Create a new Result entry and bind a Database output location.
+
+        name is a safe single path segment. identity fixes the setup UUID and UTC
+        creation time, or None generates both now. An existing Result destination
+        raises DestinationExistsError before writes. Database is neither inspected
+        nor created; its configured path is database_root/name, for later Save.
+        Schema/I/O failures propagate and remove only directories created by this
+        call, retaining caller roots. No cross-file/power-loss guarantee is made.
+        """
+        if identity is None:
+            identity = EntryIdentity(
+                entry_id=uuid4(), created_at=datetime.now(timezone.utc)
+            )
         result_path = _entry_path(result_root, name, new_destination=True)
-        database_path = _entry_path(database_root, name, new_destination=True)
-        created: list[Path] = []
+        database_path = Path(database_root) / name
+        result_path.mkdir(parents=True)
         try:
-            for destination in (result_path, database_path):
-                destination.mkdir(parents=True)
-                created.append(destination)
             (result_path / "records").mkdir()
             (result_path / "points").mkdir()
             document = {
                 "format": PARAMETER_FORMAT,
                 "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
                 "general": {
-                    "entry_id": str(uuid4()),
-                    "created_at": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
+                    "entry_id": str(identity.entry_id),
+                    "created_at": identity.created_at.isoformat().replace(
+                        "+00:00", "Z"
+                    ),
                 },
                 "components": {},
                 "metadata": {},
             }
             with (result_path / "setup.yaml").open("x", encoding="utf-8") as stream:
                 YAML(typ="rt").dump(document, stream)
+            _create_empty_library(result_path / "module_cfg.yaml")
             return cls(result_path, database_path)
         except BaseException:
-            # These entry directories belong to this call, not to the caller's roots.
-            for directory in reversed(created):
-                shutil.rmtree(directory)
+            # mkdir succeeded, so this call owns the new Result directory.
+            shutil.rmtree(result_path)
             raise
 
     @classmethod
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> ResultEntry:
+        """Open a complete Result entry and bind database_root/name for Save.
+
+        name must be a safe single path segment. The Result entry, points and
+        records directories must exist; setup must validate its format and UUID.
+        Missing paths and invalid documents propagate their filesystem/schema
+        errors. Database is not inspected or created, regardless of its state.
+        """
         result_path = _entry_path(result_root, name)
-        database_path = _entry_path(database_root, name)
+        database_path = Path(database_root) / name
         for directory in (
             result_path,
-            database_path,
             result_path / "points",
             result_path / "records",
         ):

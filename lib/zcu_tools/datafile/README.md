@@ -1,12 +1,14 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-19，native 2.1 未知歷史值與 grouped independent Labber layout
+**Last updated:** 2026-10-20，完整 run_id 路徑與 metadata 身分權威
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
 facade。caller 優先從 package root import model 與 function。Facade 在 caller 首次選用公開名稱時
 載入該名稱的 owner。Path helpers 不要求 HDF5，HDF5 reader／writer 仍在使用時載入 h5py。
 `data.h5` 是單次 Experiment Result 的正規資料，Labber 是獨立 writer 產生的衍生輸出，供 Log Browser 使用。
+
+`resources.entry.SaveLayout` 決定一般 Save 的 `Database/<name>/runs/<experiment>_<run_id>/data.h5`，使用完整 run_id，實驗名中的 `/` 轉 `_`。Result 圖片副本與 workflow 雙側路徑也由 resources owner 計算，見 [entry 輸出位置](../resources/entry/README.md#輸出位置)。Labber 新檔名維持 `<experiment>_<id6>_<序號>.hdf5`；離線遷移保留舊 Labber 原名。Datafile writer 只寫 caller 的 exact path，不解析目錄名還原 run_id，也不決定 entry 的存在或改名。Run 身分仍以 `RunMetadata` 為準，見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
 - `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.1。
   `RunMetadata.started_at` 可以是 UTC ISO 字串或 None，`completion` 接受
@@ -18,6 +20,7 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
+- `read_run_metadata(path)` 共用 native header 與 metadata／cfg envelope 解碼，回傳歷史 `RunMetadata`，不讀量測 arrays。它保留未知時間與 completion，不查 ledger，不保證 payload 完整或可供分析。格式／I/O 錯誤沿 native reader 契約拋出；GUI 檔案清單逐檔隔離錯誤。
 - `read_fluxdep_database_info(path)` 回 `FluxdepDatabaseInfo`，擁有 fluxonium search HDF5 的 dataset 名稱、shape 與有限值驗證。
   Reader 只讀參數／flux ranges 與 energies 維度，不讀 energy values、不建立 search cache。
   EJ／EC／EL ranges 為 GHz，flux range 為 normalized flux。
@@ -26,6 +29,7 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 - `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要。Summary 的直接 mapping 值將 numpy floating／integer scalar 轉為 Python float／int，轉後必須有限。
   Parameters 與更深 nested 值仍只接受有限的 strict JSON，不遞迴轉換。
   `encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
+- `validate_run_id` 檢查 native 身分 token：`YYYYMMDDTHHMMSSZ-` 加六個小寫 ASCII 英數字元。Native metadata 與離線 evidence 共用此規則。它不驗 calendar 語意，不從 ID 推導歷史 started_at；格式錯誤拋 ValueError，非字串拋 TypeError。
 - `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
   Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
   Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
@@ -74,6 +78,17 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
   inner-first axes 的 Labber dataset。
 - `DataVariable`、`GroupedLabberData` 描述 grouped Labber 衍生輸出：同一 Labber file 內含多個 variable payload，metadata 共用。正規 Experiment Data File 的 variable 分組由 native payload 表示。
 - `save_labber_data` / `load_labber_data` 處理 single-variable file。
+- `load_labber_logs` 唯讀拆出未標記檔案的 root、Log_2、Log_3 等，各自保留
+  signal、inner-first axes、獨立 grid 與 epoch timestamps，不堆疊、不指定 domain variable。
+  Caller 明示順序對應與 schema；reader 拒絕不一致的已存 step dimensions。
+- `load_labber_device_snapshot` 唯讀取得 `Instrument config` 的 group 名稱與 attributes，
+  不存取儀器、不推論欄名或單位。缺 group 回 None，空 group 回 {}。
+  NumPy scalar／array 轉為 JSON scalar／list，空 array 為 []，bytes 嚴格解 UTF-8。
+  Complex 逐元素編碼為 `{real, imag}`，非有限值（含 complex 分量）編碼為
+  `{nonfinite: "nan" | "inf" | "-inf"}`。原數值與單位不換算。
+  不能表示的型別、非法 UTF-8 或非 attribute-only instrument group 回
+  `LabberSnapshotError`，不回部分 snapshot；I/O 錯誤原樣傳遞。
+  Caller 可以只隔離這個錯誤，省略 snapshot 並保留原 Labber，繼續處理量測資料。
 - `save_grouped_labber_data` / `load_grouped_labber_data` 處理 canonical one-shot
   grouped v2。所有 variables 必須共享完全相同的 inner-first axes、shape 與
   timestamps。saver 在建立目的檔前驗證 common-grid contract，並把 variables 寫成

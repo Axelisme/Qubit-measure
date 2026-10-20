@@ -1,4 +1,4 @@
-"""Errors that locate invalid components, destinations and rename failures."""
+"""Errors that locate invalid components and existing destinations."""
 
 from pathlib import Path
 
@@ -82,35 +82,3 @@ class RoleResolutionError(ValueError):
                 message += f" (focus {focus!r})"
             message += f": {reason}"
         super().__init__(message)
-
-
-class RenameRecoveryError(OSError):
-    """The Database rename failed and the Result directory could not be restored.
-
-    moved_result is the Result directory at its new name. pending_database is
-    the intended Database destination; that move failed. recovery_destination is
-    the original Result path, which recovery could not reach. These are filesystem
-    paths derived from rename_entry's explicit roots. cause and recovery_cause
-    are the two original I/O errors. No repair runs in this exception.
-    """
-
-    def __init__(
-        self,
-        *,
-        moved_result: Path,
-        pending_database: Path,
-        recovery_destination: Path,
-        cause: OSError,
-        recovery_cause: OSError,
-    ) -> None:
-        self.moved_result = moved_result
-        self.pending_database = pending_database
-        self.recovery_destination = recovery_destination
-        self.cause = cause
-        self.recovery_cause = recovery_cause
-        super().__init__(
-            f"Rename recovery failed: moved_result={moved_result!r}, "
-            f"pending_database={pending_database!r}, "
-            f"recovery_destination={recovery_destination!r}; "
-            f"cause={cause}; recovery={recovery_cause}"
-        )

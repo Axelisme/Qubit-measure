@@ -21,7 +21,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 "qub_pulse": Template(
                     "qub_probe",
                     bindings={"qubit": "$qubit"},
-                    set={"gain": 0.1, "waveform.length": 0.05},
+                    # Run supplies the spectroscopy frequency scan.
+                    set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 0.05},
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")

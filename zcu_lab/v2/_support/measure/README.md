@@ -9,9 +9,12 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 
 `analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。Mux caller 指定 `summary.tones[row].fit_quality`，單 qubit 預設維持 `summary.fit_quality`。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
 
-`mux_forms.py` 集中七個 native mux Forms 的固定捕捉名稱與共同 recovery 初值。
-它先要求完整 qubit/resonator 綁定，已設 readout slot 時另外核對 mux family 與完整 tone 數。
-沒有 readout 時由各 Form 提供 blank template，缺少必要欄位仍擋 Run。
+`mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
+Qubit Forms 先要求完整 qubit/resonator 綁定。Readout 清單由 group 的 resonators 產生，每個 resonator 一個槽位。
+Freq 取捕捉的 resonator.freq，gain 初值為 0.1，ro_ch 依 group 順序從 0 起算，label 初值為 resonator 名稱。
+有 readout 時以 Slot(copy=True) 保留其 scalar 設定，沒有時使用 blank template。兩者都以 group 清單覆寫 tones。
+READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
+Label 不是 identity。這些初值不保證硬體安全，操作員仍須核對接線。缺少必要欄位仍擋 Run。
 每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
 所有元素共用宣告，不把逐位置 lock 套成共同限制。
 Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。

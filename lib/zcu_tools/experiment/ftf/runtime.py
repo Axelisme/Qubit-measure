@@ -506,9 +506,10 @@ def ftf(
     Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory engine cache. FTFSource.close explicitly clears it.
     warmup=False keeps direct callers/tests free of background CPU work. True
-    starts process-wide single-flight numeric preparation; the shared production
-    GUI/Notebook entry opts in while setting production workers. An explicit
-    EnvironmentWarmup supplies named preparation items instead. It must not
+    starts process-wide single-flight numeric preparation. The Notebook example
+    opts in and reserves two host CPUs; GUI startup uses one worker without
+    warmup. An explicit EnvironmentWarmup supplies named preparation items
+    instead. It must not
     sample or mutate live devices. env.wait_ready() waits before caller timing;
     acquire also waits automatically. Failure status permits on-demand compiling.
     min_round_duration_s overrides numerics.min_round_duration_s (default 0.2 s)

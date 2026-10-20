@@ -18,6 +18,7 @@
 - 2026-10-18 [Direct integration 的 RHS、step controls 與 interaction picture](2026-10-18-direct-integration.md)：採 Hermitian RHS、sample-spacing ceiling 與 row-independent IP，撤掉依賴 partition 的 gain grouping。
 - 2026-10-18 [Readout 的 guarded discrete sums](2026-10-18-readout-discrete-sums.md)：flat integrated readout 直接求 ADC 樣本和，unsupported contents 保留 field fallback，正式比較另補 clean pairs。
 - 2026-10-18 [Planner 的 evidence admission 與固定成本](2026-10-18-planner-evidence-and-overhead.md)：accuracy 通過仍未取得 performance admission，144 組比較有 100 組較慢，stage estimates 不代替完整 acquire。
+- 2026-10-20 [FTF 示範環境的 t2ramsey 尾部失準：熱態拍頻與固定相位](2026-10-20-ftf-t2ramsey-thermal-beat.md)：主因是 50 mK 旁觀 qubit 熱占據造成 58.8 kHz cross-Kerr 拍頻，次因是分析鎖相位；fit_phase 預設改 True，溫度與 reset 不動。
 
 - 2026-10-17 [FTF 分段引擎：Dyson 門檻、分類成本與事後檢查](2026-10-17-ftf-dyson-guard-and-classification.md)：分類只做輕量判斷，同一段不演化兩次；Dyson 的 |Δp| 改為 apply 後只報告不重算，治本靠分類時的解析指標；門檻由每段預算推出，係數由掃描校準；不用 Rust。
 - 2026-10-16 [FTF 模擬加速：快速路徑、shot 統計、分段快取與分派決策圖](2026-10-16-ftf-simulation-speedup.md)：主要瓶頸是 acquire 重複 reps × rounds 次。改為每點只算一次並用統計抽樣，各段依決策圖分派到 Dyson、週期、靜態、gate 快取、Floquet 或 numba DOP853，使用者規模從約 8 天降到 13 分鐘至 2 小時；只用 numba，刪除離線 U 表與 density record。
@@ -29,6 +30,10 @@
 - 2026-10-17 [Measure Form 的校準初值與 sweep 模式切換](2026-10-17-measure-form-initial-values-and-sweep-mode.md)：缺值給公允值、無效值留空、故障報錯，「可預測與一致比正確重要」，初值開 Form 時算成數字；sweep 模式存於共用 Form 輸入，recipe 一次設定並重設為 range + expts。
 - 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 ADR draft `measure-form-derivation`。
 - 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：選項清單由生成器產生、核心通用、widget 只照清單畫；換分支不繼承舊值；ref 轉 inline 用選項指令；key-or-inline 統一成有 tag 的形狀；決策見 Pydantic 表單 ADR draft。
+
+## 模組邊界
+
+- 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：具體 alias、儀器與模型的認知放 zcu_lab；模板綁定只由呼叫端明填，alias 是 setup／point 各自的檔案；predictor 讀自己的格式檔；框架內建支援能力用內聚子模組而非注入；session 清掉 chip／qubit 假設，分析工具改 entry＋component。
 
 ## 測試與驗證
 

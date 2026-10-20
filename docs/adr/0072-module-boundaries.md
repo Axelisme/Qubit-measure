@@ -60,7 +60,7 @@
 
 `zcu_lab.components` 是 package。共用欄位型別、通用 wiring 與基礎元件放在 `base.py`；qubit 共用定義與參數轉換放在 `qubit.py`。Fluxonium、transmon、resonator、JPA 與 mux 各自擁有一個子模組。Package 入口保留明確的 `register_all()` 與公開匯出，不作 import-time 註冊。
 
-GUI／Notebook 共用的範例環境、FTF YAML 與相鄰離線建庫入口放在 `zcu_lab/simulation_envs/`，不放在 Notebook 文件目錄。框架仍以 caller 傳入的路徑載入可信 Python，不自動探索這個目錄；C14 與 C16 繼續禁止框架反向 import 使用者定義。
+GUI／Notebook 共用的模擬參數檔與 startup 範例放在 `zcu_lab/simulation_envs/`，不放在 Notebook 文件目錄。FTF 沒有離線建庫入口。GUI 以 caller 選定的路徑執行可信 startup 腳本，不自動探索這個目錄；Notebook 可直接呼叫公開 `experiment.ftf.ftf(...)`。C14 與 C16 繼續禁止框架反向 import 使用者定義。
 
 2026-10-16，使用者要求：「比如components我希望除了基礎原件，其他的都是獨立的子模塊檔。」對上述拆分與環境搬移確認：「可以移到zcu_lab/simulation_envs/中嗎？2同意」。
 
@@ -163,6 +163,7 @@ ResultScopeManager、project CLI 與 RPC 投影，保留既有 chip／qubit 資�
 
 - 需要另一個模組負責的能力，而它沒有提供時，擴充那個模組或停下來問。不在呼叫端重做。
 - 兩個有狀態模組需要合作時，由需要的一方定義最小 Protocol，由組合根注入實作；或把組合邏輯放到上一層。
+- 注入留給真正由外部決定的實作。框架常用的幾種支援能力直接內建，以內部內聚的子模組實現；使用者腳本為了獨立性自行集成演算法也可以。使用者於 2026-10-20 裁定：「C太多注入也不是很好維護，有些可以是框架提供支援的幾種功能，已內部內聚子模塊實現，而不是用注入的方式。script有些是為了獨立性而集成算法。」
 - 呼叫端驗證被呼叫者的輸出格式、組被呼叫者的內部版面、或修補被呼叫者回傳的資料，都表示責任放錯位置。
 
 ### 可執行投影

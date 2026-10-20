@@ -141,6 +141,13 @@ class NativeSaveSession:
     artifact_completions: list[SaveArtifactsFinishedPayload]
     background: BackgroundRunner
 
+    @property
+    def native_data_path(self) -> Path:
+        """Return this fixture's canonical native destination, even before Save."""
+        experiment = self.state.get_tab("tab").adapter_name.replace("/", "_")
+        run_name = f"{experiment}_{self.metadata.run_id}"
+        return self.entry.database_path / "runs" / run_name / "data.h5"
+
     def capture_parameters(
         self, aliases: Mapping[str, str] | None
     ) -> ParameterContext | None:

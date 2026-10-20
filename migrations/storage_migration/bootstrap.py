@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -12,9 +13,18 @@ from zcu_tools.resources.entry import (
     ResultEntry,
 )
 
-from .backup import backup_location, create_backup, validate_backup_sources
+from .backup import (
+    backup_location,
+    backup_records_path,
+    validate_backup_report_path,
+    validate_backup_sources,
+)
+from .documents import capture_document, recover_documents, validate_document_baselines
 from .errors import MigrationInputError
+from .evidence import validate_run_evidence
+from .initialization import initialize_entry
 from .models import (
+    MigrationDeclarations,
     MigrationDestination,
     MigrationIdentity,
     MigrationManifest,
@@ -25,6 +35,8 @@ from .models import (
     ModuleRule,
 )
 from .paths import contained_path, validate_segment
+from .points import recover_points, validate_points
+from .preservation import preflight_preservation
 from .recovery import validate_owned_state
 from .state import MigrationSession, read_manifest, report_json, write_json
 
@@ -159,16 +171,19 @@ def _resume_session(
     if not path.is_file():
         raise MigrationInputError(f"{path}: resume requires this tool's manifest")
     manifest = read_manifest(path)
+    if manifest.report.declarations != _declarations(request):
+        raise MigrationInputError(f"{path}: operator declarations changed on resume")
     backup = manifest.backup
     if backup is None or backup.path != backup_location(request, source):
         raise MigrationInputError(
             f"{path}: verified backup identity changed or missing"
         )
-    if manifest.report_path.is_relative_to(backup.path):
-        raise MigrationInputError(f"{path}: report cannot write into verified backup")
-    validate_backup_sources(MigrationSession(path, manifest, dry_run=True))
+    validate_backup_report_path(backup.path, manifest.report_path)
     _validate_report_location(manifest.report_path, source, destination)
     manifest = _recover_first_report(manifest)
+    verification = MigrationSession(path, manifest, dry_run=True)
+    validate_backup_sources(verification)
+    manifest = verification.manifest
     expected = _identity(request, manifest.identity.entry_id)
     if (
         manifest.identity != expected
@@ -189,6 +204,14 @@ def _resume_session(
         and request.report_path.resolve() != manifest.report_path
     ):
         raise MigrationInputError(f"{path}: report_path is fixed on resume")
+    if manifest.cleanup_phase == "pending":
+        preflight_preservation(
+            source, destination, manifest.report.declarations, manifest=manifest
+        )
+    validate_points(manifest)
+    validation = MigrationSession(path, manifest, dry_run=True)
+    validate_document_baselines(validation)
+    manifest = validation.manifest
     entry = ResultEntry.open(
         request.name,
         result_root=expected.results_root,
@@ -196,8 +219,12 @@ def _resume_session(
     )
     if UUID(entry.entry_id) != manifest.identity.entry_id:
         raise MigrationInputError(f"{path}: entry_id changed")
+    ignored = {
+        point.temporary_label for point in manifest.points if not point.published
+    }
     for label in entry.list_points():
-        entry.use_point(label)
+        if label not in ignored:
+            entry.use_point(label)
     union = request.part if manifest.report.part == request.part else "all"
     return replace(manifest, report=replace(manifest.report, part=union)), entry
 
@@ -209,12 +236,11 @@ def _validate_report_location(
 ) -> None:
     for root in (source.result_path, source.database_path):
         _protect_source(root, report_path.resolve())
-    default = destination.result_path / "records" / "migration-report.json"
     if not report_path.is_absolute() or report_path.resolve() != report_path:
         raise MigrationInputError(
             f"{report_path}: report path must be resolved and absolute"
         )
-    if report_path != default and any(
+    if any(
         report_path.is_relative_to(root)
         for root in (
             source.result_path,
@@ -234,16 +260,14 @@ def _new_session(
     source: MigrationSource,
     destination: MigrationDestination,
 ) -> tuple[MigrationManifest, ResultEntry | None]:
-    for target in (destination.result_path, destination.database_path):
-        if target.exists() or target.is_symlink():
-            raise FileExistsError(target)
+    backup_path = backup_location(request, source)
+    report_date = datetime.now(timezone.utc).date()
     report_path = (
         request.report_path.resolve()
         if request.report_path is not None
-        else destination.result_path / "records" / "migration-report.json"
+        else backup_records_path(backup_path, source)
+        / f"migration-report-{report_date}.json"
     )
-    if report_path.exists() or report_path.is_symlink():
-        raise FileExistsError(report_path)
     if request.report_path is not None:
         if any(
             report_path.is_relative_to(root)
@@ -259,28 +283,20 @@ def _new_session(
             )
         if not report_path.parent.is_dir():
             raise MigrationInputError(f"{report_path}: report parent must exist")
-    backup_path = backup_location(request, source)
-    backup = create_backup(backup_path, source, dry_run=request.dry_run)
-    entry = None
     entry_id = uuid4()
-    if not request.dry_run:
-        entry = ResultEntry.create(
-            request.name,
-            result_root=request.results_root,
-            database_root=request.database_root,
-        )
-        entry_id = UUID(entry.entry_id)
     report = MigrationReport(
         source=source,
         destination=destination,
         entry_id=entry_id,
         part=request.part,
         backup_path=backup_path,
+        declarations=_declarations(request),
     )
     manifest = MigrationManifest(
         identity=_identity(request, entry_id),
         mapping_version=mapping.mapping_version,
         report_path=report_path,
+        report_date=report_date,
         source_hashes={},
         evidence=None,
         files=(),
@@ -288,19 +304,24 @@ def _new_session(
         parameters_complete=False,
         data_complete=False,
         report=report,
-        backup=backup,
     )
-    return manifest, entry
+    return initialize_entry(request, manifest)
 
 
 def publish_report(session: MigrationSession) -> None:
     """Publish the session's accumulated JSON report at its immutable owned path.
 
     First publication is exclusive; later updates replace only the recorded report.
-    Checkpoint first-publication ownership. dry_run writes nothing. I/O/collisions
-    propagate; the durable manifest can rebuild an interrupted report update."""
+    Checkpoint first-publication ownership. After cleanup completes, also publish
+    the dated entry records copy, recovering only an exact interrupted first copy.
+    dry_run writes nothing. I/O/collisions propagate; the durable manifest can
+    rebuild an interrupted report update."""
     if session.dry_run:
         return
+    backup = session.manifest.backup
+    if backup is None:
+        raise MigrationInputError("manifest: verified backup is required")
+    validate_backup_report_path(backup.path, session.manifest.report_path)
     write_json(
         session.manifest.report_path,
         report_json(session.manifest.report),
@@ -308,6 +329,29 @@ def publish_report(session: MigrationSession) -> None:
     )
     if not session.manifest.report_published:
         session.manifest = replace(session.manifest, report_published=True)
+        session.checkpoint()
+    if session.manifest.cleanup_phase == "complete":
+        _publish_completion_report(session)
+
+
+def _publish_completion_report(session: MigrationSession) -> None:
+    manifest = session.manifest
+    path = (
+        manifest.report.destination.result_path
+        / "records"
+        / f"migration-report-{manifest.report_date}.json"
+    )
+    if path.is_symlink() or path.parent.is_symlink():
+        raise MigrationInputError(f"{path}: completion report symlink conflict")
+    owned = manifest.completion_report_published
+    if not owned and path.exists():
+        existing = _JSON.validate_json(path.read_text(encoding="utf-8"), strict=True)
+        if not json_values_equal(existing, report_json(manifest.report)):
+            raise MigrationInputError(f"{path}: unowned completion report collision")
+        owned = True
+    write_json(path, report_json(manifest.report), replace_existing=owned)
+    if not manifest.completion_report_published:
+        session.manifest = replace(manifest, completion_report_published=True)
         session.checkpoint()
 
 
@@ -324,26 +368,82 @@ def _recover_first_report(manifest: MigrationManifest) -> MigrationManifest:
     return manifest
 
 
+def _declarations(request: MigrationRequest) -> MigrationDeclarations:
+    if (
+        request.assume_jpa_flux_unit is not None
+        and request.assume_jpa_flux_unit not in ("A", "V")
+    ):
+        raise MigrationInputError(
+            f"Unsupported JPA assumed unit: {request.assume_jpa_flux_unit!r}"
+        )
+    for unit in (request.assume_flux_unit, request.sample_source_unit):
+        if unit is not None and unit not in ("A", "mA", "V", "mV"):
+            raise MigrationInputError(f"Unsupported declared unit: {unit!r}")
+    if request.sample_value_column is not None and not request.sample_value_column:
+        raise MigrationInputError("sample_value_column must be nonempty")
+    return MigrationDeclarations(
+        assume_flux_unit=request.assume_flux_unit,
+        assume_jpa_flux_unit=request.assume_jpa_flux_unit,
+        sample_value_column=request.sample_value_column,
+        sample_source_unit=request.sample_source_unit,
+    )
+
+
 def prepare_session(
     request: MigrationRequest, mapping: MigrationMapping
 ) -> tuple[MigrationSession, ResultEntry | None]:
     """Resolve and validate request paths, then create or resume this tool's entry.
 
     mapping supplies the exact revision required on resume. Return a session and
-    entry handle, or None for a new dry-run entry. Refuse collisions, overlapping
+    entry handle, or None for a dry-run initial entry. Refuse collisions, overlapping
     trees, invalid current containers or conflicting manifest/hash/identity with
     MigrationInputError/FileExistsError. Checkpoint initial ownership before source
-    operations. Complete and verify the external backup before creating any entry;
-    resume verifies that backup independently of removed old sources. Bootstrap
-    does not delete sources; I/O/schema failures propagate."""
+    operations. An external initialization record fixes values before backup or
+    staging writes and permits direct reruns before the first manifest. Complete
+    and verify the external backup before creating any entry. Matching backups
+    are reused; missing items are filled without replacing differing content.
+    Manifest resume verifies the backup independently of removed old sources.
+    Bootstrap does not delete sources; I/O/schema failures propagate."""
+    _declarations(request)
+    automatic = request.results_root / request.name / "records/migration-state.json"
+    if automatic.is_file():
+        request = replace(request, resume=True)
     source, destination = _locations(request)
     path = destination.result_path / "records" / "migration-state.json"
-    if request.resume:
+    if request.resume and path.is_file():
         manifest, entry = _resume_session(request, mapping, path, source, destination)
     else:
+        ownership_path = (
+            backup_records_path(backup_location(request, source), source)
+            / "migration-initialization.json"
+        )
+        if request.resume and not ownership_path.is_file():
+            raise MigrationInputError(f"{path}: resume requires this tool's manifest")
         manifest, entry = _new_session(request, mapping, source, destination)
     session = MigrationSession(path, manifest, dry_run=request.dry_run)
+    if not path.is_file() and entry is not None and not request.dry_run:
+        capture_document(
+            session, source.result_path, destination.result_path / "setup.yaml", "setup"
+        )
+        capture_document(
+            session,
+            source.result_path,
+            destination.result_path / "module_cfg.yaml",
+            "library",
+        )
     validate_owned_state(session, entry=entry)
+    if request.resume:
+        validate_run_evidence(request, session)
+    if session.manifest.cleanup_phase == "complete":
+        return session, entry
+    refresh_setup = any(
+        item.kind == "setup" and item.phase == "prepared"
+        for item in (session.manifest.documents or {}).values()
+    )
+    recover_documents(session)
+    recover_points(session)
+    if refresh_setup and entry is not None and not session.dry_run:
+        entry.setup.refresh()
     session.checkpoint()
     publish_report(session)
     return session, entry

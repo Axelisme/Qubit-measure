@@ -19,10 +19,13 @@ def make_form(ctx: FormContext) -> Form[MistCfg]:
                 "flux_pulse": Template(
                     "flux_pulse",
                     bindings={"qubit": "$qubit"},
-                    set={"waveform.length": 1.0},
+                    # Run supplies flux gain, independent of MIST gain.
+                    set={"gain": Hidden(0.0), "waveform.length": 1.0},
                 ),
                 "mist_pulse": Template(
-                    "res_probe", bindings={"resonator": "$resonator"}
+                    "res_probe",
+                    bindings={"resonator": "$resonator"},
+                    set={"gain": Hidden(0.0)},
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")

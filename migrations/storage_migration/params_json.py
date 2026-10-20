@@ -1,11 +1,10 @@
 """Offline conversion of legacy analysis handoffs into entry-scoped resources."""
 
+from copy import deepcopy
 from dataclasses import dataclass, replace
-from datetime import datetime
-from math import isfinite
 from pathlib import Path
 
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 from zcu_tools.datafile import JsonObject, json_values_equal
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import (
@@ -15,11 +14,20 @@ from zcu_tools.resources.entry import (
     document_value,
     snapshot,
 )
+from zcu_tools.resources.predictor_file import (
+    PredictorFile,
+    PredictorSource,
+    save_predictor_file,
+    validate_predictor_file,
+)
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
-from .errors import MigrationInputError
+from .analysis_files import convert_analysis_files, proven_created_at
+from .backup import backup_source_path
+from .documents import edit_parameter, publish_document
 from .models import KeyMappingItem, MigrationMapping
 from .paths import contained_path
-from .state import MigrationSession, record_pending, write_json
+from .state import MigrationSession, record_pending
 
 _JSON = TypeAdapter(JsonObject)
 _YAML = TypeAdapter(YamlValue)
@@ -32,6 +40,8 @@ class _Context:
     """Setup metadata, including seed values when no dry-run handle exists."""
 
     target: Path
+    session: MigrationSession
+    source: Path
     view: SetupView | None
     values: YamlMap
 
@@ -45,7 +55,7 @@ class _Context:
 
     def set(self, path: str, value: YamlValue) -> None:
         if self.view is not None:
-            with self.view.edit() as draft:
+            with edit_parameter(self.session, self.source, self.view) as draft:
                 draft.set(path, value)
         self.values[path] = value
 
@@ -63,6 +73,8 @@ def _setup_context(
     model = component_registry.get(kind).model_validate(seed)
     return _Context(
         target=session.manifest.report.destination.result_path / "setup.yaml",
+        session=session,
+        source=session.manifest.report.source.result_path / "params.json",
         view=entry.setup if entry is not None and not session.dry_run else None,
         values={
             f"{name}.{key}": _YAML.validate_python(value, strict=True)
@@ -71,7 +83,11 @@ def _setup_context(
     )
 
 
-def _flux_unit(values: JsonObject, fit: JsonObject) -> tuple[str | None, str | None]:
+def _flux_unit(
+    values: JsonObject, fit: JsonObject, assumed: str | None
+) -> tuple[str | None, str | None]:
+    if "flux_unit" not in values and "flux_unit" not in fit and assumed is not None:
+        return assumed, None
     root_unit, fit_unit = values.get("flux_unit"), fit.get("flux_unit")
     if "flux_unit" in values and "flux_unit" in fit and root_unit != fit_unit:
         return None, "params.json flux_unit and fluxdep_fit.flux_unit disagree"
@@ -81,35 +97,70 @@ def _flux_unit(values: JsonObject, fit: JsonObject) -> tuple[str | None, str | N
     return unit, None
 
 
-def _created_at(value: object) -> str | None:
-    if not isinstance(value, str) or "T" not in value.upper():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return (
-        value if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
-    )
-
-
-def _write_predictor(path: Path, document: JsonObject) -> None:
-    # The destination belongs to this migration, but an interrupted write may
-    # already have committed it. Never replace a conflicting document on resume.
-    if path.is_symlink():
-        raise MigrationInputError(f"{path}: predictor symlink conflict")
-    if path.exists():
-        existing = _JSON.validate_json(path.read_text(encoding="utf-8"), strict=True)
-        # JSON numeric equivalence is valid for params, not the integer version.
-        if type(existing.get("version")) is not int or not json_values_equal(
-            existing, document
-        ):
-            raise MigrationInputError(
-                f"{path}: predictor differs from planned legacy fit"
+def _project_model_params(
+    source: Path, target: Path, fit: JsonObject, prefix: tuple[str, ...]
+) -> tuple[FluxoniumParams, list[KeyMappingItem]]:
+    """Project supported numeric fields through the model owner, recording exact source subtrees."""
+    energies = fit.get("params")
+    params: JsonObject = {"flux_bias": 0.0}
+    rows: list[KeyMappingItem] = []
+    if energies == {}:
+        rows.append(
+            KeyMappingItem(
+                old_file=source,
+                old_key=".".join((*prefix, "params")),
+                source_keys=(*prefix, "params"),
+                new_file=target,
+                new_path="params",
+                action="value",
+                reason="Empty supported parameter container transferred to predictor",
             )
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_json(path, document, replace_existing=False)
+        )
+    flux_fields = (
+        tuple((field, field) for field in _FLUX_FIELDS)
+        if prefix
+        else (("half flux", "flux_half"), ("period", "flux_period"))
+    )
+    for source_field, field in (
+        *((energy, energy) for energy in _ENERGIES),
+        *flux_fields,
+    ):
+        container = energies if field in _ENERGIES else fit
+        if not isinstance(container, dict) or source_field not in container:
+            continue
+        value = container[source_field]
+        reason = None
+        try:
+            FluxoniumParams.from_mapping({field: value})
+        except ValueError:
+            reason = "Expected a finite numeric value or null; no expression evaluation or coercion"
+        else:
+            params[field] = value
+        keys = (
+            (*prefix, "params", source_field)
+            if field in _ENERGIES
+            else (*prefix, source_field)
+        )
+        rows.append(
+            KeyMappingItem(
+                old_file=source,
+                old_key=".".join(keys),
+                source_keys=keys,
+                new_file=target,
+                new_path=f"params.{field}",
+                action="pending" if reason else "value",
+                reason=reason or "Preserve legacy fluxonium parameter in native units",
+            )
+        )
+    return FluxoniumParams.from_mapping(params), rows
+
+
+def _unsupported_model_params(energies: JsonValue) -> bool:
+    return (
+        isinstance(energies, dict)
+        and not {"EJ", "EL"}.intersection(energies)
+        and bool(energies.keys() - set(_ENERGIES))
+    )
 
 
 def _project_fit(
@@ -119,6 +170,12 @@ def _project_fit(
     values: JsonObject,
 ) -> list[KeyMappingItem]:
     fit = values.get("fluxdep_fit")
+    prefix = ("fluxdep_fit",)
+    if "fluxdep_fit" not in values and (
+        "params" in values or "half flux" in values or "period" in values
+    ):
+        fit = values
+        prefix = ()
     if not isinstance(fit, dict):
         return []
     target = (
@@ -127,9 +184,10 @@ def _project_fit(
     energies = fit.get("params")
     unsupported = None
     if "model" in fit:
-        unsupported = "fluxdep_fit.model"
-    elif isinstance(energies, dict) and energies.keys() - set(_ENERGIES):
-        unsupported = "fluxdep_fit.params"
+        unsupported = ".".join((*prefix, "model"))
+    elif _unsupported_model_params(energies):
+        # Unsupported model shapes are preserved, not missing-evidence pending.
+        return []
     if unsupported is not None:
         return [
             KeyMappingItem(
@@ -141,55 +199,34 @@ def _project_fit(
                 reason="Model or parameter names have no supported legacy fluxdep_fit contract; preserve without guessing",
             )
         ]
-    params: JsonObject = {"flux_bias": 0.0}
-    rows: list[KeyMappingItem] = []
-    for field in (*_ENERGIES, *_FLUX_FIELDS):
-        container = energies if field in _ENERGIES else fit
-        if not isinstance(container, dict) or field not in container:
-            continue
-        value = container[field]
-        reason = None
-        if value is not None and (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not isfinite(value)
-        ):
-            reason = "Expected a finite numeric value or null; no expression evaluation or coercion"
-        else:
-            params[field] = value
-        key = (
-            f"fluxdep_fit.params.{field}"
-            if field in _ENERGIES
-            else f"fluxdep_fit.{field}"
-        )
-        rows.append(
-            KeyMappingItem(
-                old_file=source,
-                old_key=key,
-                new_file=target,
-                new_path=f"params.{field}",
-                action="pending" if reason else "value",
-                reason=reason or "Preserve legacy fluxonium parameter in native units",
-            )
-        )
-    unit, unit_error = _flux_unit(values, fit)
-    created_at = _created_at(fit.get("timestamp"))
+    params, rows = _project_model_params(source, target, fit, prefix)
+    assumed = session.manifest.report.declarations.assume_flux_unit
+    unit, unit_error = _flux_unit(values, fit, assumed)
+    created_at = proven_created_at(fit.get("timestamp"))
     backup = session.manifest.report.backup_path
     original = (
-        backup
-        / "result"
-        / source.relative_to(session.manifest.report.source.result_path)
+        backup_source_path(backup, session.manifest.report.source, source)
         if backup is not None
         else source
     )
+    unit_key = (
+        "flux_unit"
+        if unit_error is None and "flux_unit" in values
+        else ".".join((*prefix, "flux_unit"))
+    )
+    unit_source_keys = (
+        ("flux_unit",) if "flux_unit" in values else (*prefix, "flux_unit")
+    )
+    timestamp_keys = (*prefix, "timestamp")
+    timestamp_key = ".".join(timestamp_keys)
     for key, path, reason in (
-        ("fluxdep_fit.flux_unit", "flux_unit", unit_error),
+        (unit_key, "flux_unit", unit_error),
         (
-            "fluxdep_fit.timestamp",
+            timestamp_key,
             "source.created_at",
             None
             if created_at is not None
-            else f"No proven timezone-aware ISO 8601 timestamp; original at {original}#fluxdep_fit.timestamp",
+            else f"No proven timezone-aware ISO 8601 timestamp; original at {original}#{timestamp_key}",
         ),
     ):
         rows.append(
@@ -199,25 +236,178 @@ def _project_fit(
                 new_file=target,
                 new_path=path,
                 action="pending" if reason else "value",
-                reason=reason or "Preserve explicit legacy source metadata",
+                source_keys=unit_source_keys if path == "flux_unit" else timestamp_keys,
+                reason=reason
+                or (
+                    f"假設單位: {assumed}; operator supplied, no numeric conversion"
+                    if path == "flux_unit"
+                    and assumed is not None
+                    and "flux_unit" not in values
+                    and "flux_unit" not in fit
+                    else "Preserve explicit legacy source metadata"
+                ),
             )
         )
-    document: JsonObject = {
-        "format": "zcu.predictor",
-        "version": 1,
-        "model": "fluxonium",
-        "params": params,
-        "flux_unit": unit,
-        "source": {"run_id": None, "created_at": created_at},
-    }
+    if prefix and unit_error is None and "flux_unit" in values and "flux_unit" in fit:
+        rows.append(
+            KeyMappingItem(
+                old_file=source,
+                old_key="fluxdep_fit.flux_unit",
+                new_file=target,
+                new_path="flux_unit",
+                source_keys=("fluxdep_fit", "flux_unit"),
+                action="value",
+                reason="Matching explicit fit unit shares the predictor unit destination",
+            )
+        )
+    predictor = PredictorFile(
+        model="fluxonium",
+        params=params,
+        flux_unit=unit,
+        source=PredictorSource(run_id=None, created_at=created_at),
+    )
+    validate_predictor_file(predictor)
     if not session.dry_run:
-        _write_predictor(target, document)
+        publish_document(
+            session,
+            source,
+            target,
+            "predictor",
+            lambda path: save_predictor_file(path, predictor),
+        )
     return rows
 
 
-def _preserve_sections(
-    context: _Context, source: Path, name: str, values: JsonObject, *, has_ext: bool
+def _compare_source_values(
+    formal: KeyMappingItem,
+    old_keys: tuple[str, ...],
+    newer_keys: tuple[str, ...],
+    old: JsonValue,
+    newer: JsonValue,
+    *,
+    newer_present: bool = True,
 ) -> list[KeyMappingItem]:
+    """Compare corresponding source leaves, never unrelated equal numbers."""
+    if isinstance(old, dict) and old and isinstance(newer, dict):
+        rows: list[KeyMappingItem] = []
+        for key, value in old.items():
+            rows.extend(
+                _compare_source_values(
+                    formal,
+                    (*old_keys, key),
+                    (*newer_keys, key),
+                    value,
+                    newer.get(key),
+                    newer_present=key in newer,
+                )
+            )
+        return rows
+    equal = newer_present and json_values_equal(old, newer)
+    newer_display = repr(newer) if newer_present else "<absent>"
+    return [
+        KeyMappingItem(
+            old_file=formal.old_file,
+            old_key=".".join(old_keys),
+            source_keys=old_keys,
+            compared_source_keys=newer_keys,
+            new_file=formal.new_file if equal else None,
+            new_path=formal.new_path if equal else None,
+            action="remove" if equal else "preserved",
+            reason=(
+                f"{'.'.join(old_keys)}={old!r} "
+                f"{'matches' if equal else 'differs from'} "
+                f"{'.'.join(newer_keys)}={newer_display}; "
+                + (
+                    "deduplicated against its formal destination"
+                    if equal
+                    else "newer source takes precedence; preserve historical value verbatim"
+                )
+            ),
+        )
+    ]
+
+
+def _compare_top_sources(
+    values: JsonObject, converted: list[KeyMappingItem]
+) -> list[KeyMappingItem]:
+    fit = values.get("fluxdep_fit")
+    if not isinstance(fit, dict):
+        return []
+    rows: list[KeyMappingItem] = []
+    pairs = (
+        *((("params", field), ("fluxdep_fit", "params", field)) for field in _ENERGIES),
+        (("params",), ("fluxdep_fit", "params")),
+        (("half flux",), ("fluxdep_fit", "flux_half")),
+        (("period",), ("fluxdep_fit", "flux_period")),
+        (("allows",), ("fluxdep_fit", "plot_transitions")),
+    )
+    for old_keys, newer_keys in pairs:
+        formal = next(
+            (
+                row
+                for row in converted
+                if row.action == "value" and row.source_keys == newer_keys
+            ),
+            None,
+        )
+        old_container = values.get("params") if len(old_keys) == 2 else values
+        newer_container = fit.get("params") if len(newer_keys) == 3 else fit
+        if (
+            formal is not None
+            and isinstance(old_container, dict)
+            and isinstance(newer_container, dict)
+            and old_keys[-1] in old_container
+            and newer_keys[-1] in newer_container
+        ):
+            rows.extend(
+                _compare_source_values(
+                    formal,
+                    old_keys,
+                    newer_keys,
+                    old_container[old_keys[-1]],
+                    newer_container[newer_keys[-1]],
+                )
+            )
+    return rows
+
+
+def _unconverted_values(
+    values: JsonObject, converted: list[KeyMappingItem]
+) -> JsonObject:
+    """Subtract only successfully transferred source subtrees and prune their empty parents."""
+    remaining = deepcopy(values)
+    for row in converted:
+        if not row.source_keys or not (
+            row.action == "value"
+            or (row.action == "remove" and row.compared_source_keys is not None)
+        ):
+            continue
+        cursor = remaining
+        parents: list[tuple[JsonObject, str]] = []
+        for key in row.source_keys[:-1]:
+            child = cursor.get(key)
+            if not isinstance(child, dict):
+                break
+            parents.append((cursor, key))
+            cursor = child
+        else:
+            cursor.pop(row.source_keys[-1], None)
+            for parent, key in reversed(parents):
+                if parent[key] == {}:
+                    del parent[key]
+    return remaining
+
+
+def _preserve_sections(
+    context: _Context,
+    source: Path,
+    name: str,
+    values: JsonObject,
+    converted: list[KeyMappingItem],
+    *,
+    has_ext: bool,
+) -> list[KeyMappingItem]:
+    remaining = _unconverted_values(values, converted)
     rows: list[KeyMappingItem] = []
     ext: YamlMap = {}
     current = context.value(f"{name}.ext")
@@ -227,22 +417,68 @@ def _preserve_sections(
     existing = ext.get("legacy_params")
     if isinstance(existing, dict):
         legacy.update(existing)
-    for key, value in values.items():
+    for key in values:
+        legacy.pop(key, None)
+    for key, value in remaining.items():
         legacy[key] = _YAML.validate_python(value, strict=True)
+
+    def record(value: JsonValue, keys: tuple[str, ...]) -> None:
+        if isinstance(value, dict) and value:
+            for key, child in value.items():
+                record(child, (*keys, key))
+            return
+        comparison = next(
+            (
+                row
+                for row in converted
+                if row.action == "preserved"
+                and row.source_keys is not None
+                and keys[: len(row.source_keys)] == row.source_keys
+            ),
+            None,
+        )
+        model_prefix = ("fluxdep_fit",) if "fluxdep_fit" in values else ()
+        fit = values.get("fluxdep_fit") if model_prefix else values
+        unsupported = (
+            isinstance(fit, dict)
+            and "model" not in fit
+            and _unsupported_model_params(fit.get("params"))
+            and keys[: len(model_prefix) + 1] == (*model_prefix, "params")
+        )
+        reason = (
+            comparison.reason
+            if comparison is not None
+            else "Unsupported model parameter shape; original value preserved verbatim"
+            if unsupported
+            else "Unconverted legacy value preserved verbatim; not semantic conversion"
+        )
         rows.append(
             KeyMappingItem(
                 old_file=source,
-                old_key=key,
+                old_key=".".join(keys),
+                source_keys=keys,
+                compared_source_keys=comparison.compared_source_keys
+                if comparison is not None
+                else None,
                 new_file=context.target if has_ext else None,
-                new_path=f"{name}.ext.legacy_params.{key}" if has_ext else None,
-                action="pending",
-                reason="Legacy analysis section and metadata preserved verbatim; review before formal use"
+                new_path=None,
+                destination_keys=(name, "ext", "legacy_params", *keys)
                 if has_ext
-                else "Destination component has no ext field; original handoff remains preserved",
+                else None,
+                action="preserved" if has_ext else "pending",
+                reason=reason
+                if has_ext
+                else "Destination component has no ext field; original handoff remains in source backup",
             )
         )
+
+    for key, value in remaining.items():
+        record(value, (key,))
     if has_ext:
-        ext["legacy_params"] = legacy
+        if legacy:
+            ext["legacy_params"] = legacy
+        else:
+            ext.pop("legacy_params", None)
         context.set(f"{name}.ext", ext)
     return rows
 
@@ -252,20 +488,39 @@ def convert_params_json(
     entry: ResultEntry | None,
     mapping: MigrationMapping,
 ) -> None:
-    """Preserve setup metadata and publish an entry predictor from legacy params.
+    """Preserve metadata and publish entry predictor/dispersive/T1 fit files.
 
     session owns baselines and report; entry is its destination handle or None in
     dry-run. mapping supplies seeds with exactly one qubit/* kind; otherwise the
-    whole handoff stays pending. Call before points so they inherit raw metadata,
+    whole handoff stays pending. Call before points so they inherit raw residuals,
     then apply each context's meta_info normally. Legacy EJ/EC/EL fits use the
     documented fluxonium model and zero bias; flux_int is alignment-only. An
-    explicit model is unsupported and stays pending. Unknown/invalid numbers
+    explicit model is unsupported and stays pending. Earlier root params.EJ/EC/EL,
+    half flux and period use the same predictor owner, without numeric conversion.
+    EJ or EL identifies fluxonium even with extra parameters; only EC plus unknown
+    parameters is an unsupported model, preserved without pending. If both shapes
+    occur, fluxdep_fit takes precedence; corresponding equal old leaves are removed
+    from raw residuals, while different values retain both-source comparison rows.
+    Unknown/invalid numbers
     remain unknown, with invalid values located in pending. Units only come from
-    explicit root/fit flux_unit; missing/conflicting units become null and pending,
+    explicit root/fit flux_unit, or the declared assumption only when both keys
+    are absent. Otherwise missing/conflicting units become null and pending,
     without conversion. Source run_id is unknown; only a timezone-aware ISO 8601
-    timestamp supplies created_at. Preserve full raw sections and metadata in
-    component.ext.legacy_params with located pending. Predictors remain entry
-    resources and never participate in setup/point inheritance. Dry-run reports
+    timestamp supplies created_at. Preserve only unconverted source values in
+    component.ext.legacy_params. Successful formal mappings remove their source
+    subtrees from that raw container, including supported empty containers, and
+    prune emptied parents. Unknown empty objects/lists remain original values;
+    unsupported or invalid content is never removed merely because a file exists.
+    Report each remaining leaf, list or empty object with a typed preserved action
+    and literal source_keys/destination_keys; raw preservation alone is not pending.
+    Without an ext field, preservation stays pending and reports no destination.
+    Predictors remain entry
+    resources and never participate in setup/point inheritance. Dispersive and T1
+    file owners validate partial data and source evidence; invalid content stays
+    pending with its original ext copy. plot_transitions joins the dispersive
+    file without inventing fit values. Earlier allows transfers unchanged as opaque
+    plot_transitions annotations. Newer fluxdep_fit.plot_transitions wins when both
+    occur; only different/unmatched allows leaves remain raw. Dry-run reports
     the same plan without writes. The parameters owner checkpoints completion;
     input/I/O failures propagate and sources are never changed here.
     """
@@ -296,9 +551,14 @@ def convert_params_json(
     fields = set(component_registry.get(kind).model_fields)
     context = _setup_context(session, entry, mapping, name)
     rows = _project_fit(session, source, name, values)
-    rows.extend(
-        _preserve_sections(context, source, name, values, has_ext="ext" in fields)
+    rows.extend(convert_analysis_files(session, entry, source, name, values))
+    rows.extend(_compare_top_sources(values, rows))
+    preserved = _preserve_sections(
+        context, source, name, values, rows, has_ext="ext" in fields
     )
+    # Finalize comparison differences through the same ext capability/location
+    # check as all other raw residuals, without duplicate diagnostic rows.
+    rows = [row for row in rows if row.action != "preserved"] + preserved
     report = session.manifest.report
     session.report(
         replace(
