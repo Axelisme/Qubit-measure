@@ -279,6 +279,12 @@ class KeyMappingItem:
     an unavailable ext capability stays pending with no destination. A completed
     report records the original action, not later user edits. Encoding/decoding
     rejects unknown actions or wrongly typed keys; it does not resolve the target.
+    compared_source_keys optionally identifies the corresponding newer source
+    path in old_file whose formal projection takes precedence. That path can be
+    absent within a successfully transferred subtree; reason then says <absent>.
+    For comparison rows, remove means equal values deduplicated against that
+    projection; preserved means different or unmatched values retained at
+    destination_keys. reason records both source values for comparison.
     library_kind is module/waveform for a library entry, or None for meta keys.
     Same-name library keys in different source partitions remain distinct.
     """
@@ -292,6 +298,7 @@ class KeyMappingItem:
     source_keys: tuple[str, ...] | None = None
     destination_keys: tuple[str, ...] | None = None
     library_kind: Literal["module", "waveform"] | None = None
+    compared_source_keys: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

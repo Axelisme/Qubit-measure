@@ -129,10 +129,10 @@ label 不合法時，由使用者決定新名，報告記舊名、新名與理�
 | 舊檔 | 新位置 | 做法 |
 | --- | --- | --- |
 | 根層 `meta_info.json` | `setup.yaml` | 第 4 步 |
-| 根層 `params.json` 的 `fluxdep_fit` | `predictors/<Q>.json` | 第 5 步 |
-| 根層 `params.json` 的 `dispersive`，以及 `fluxdep_fit.plot_transitions` | `dispersive/<Q>.json` | 第 5 步 |
+| 根層 `params.json` 的 `fluxdep_fit`，或更早的 `params.EJ/EC/EL`、`half flux`、`period` | `predictors/<Q>.json` | 第 5 步 |
+| 根層 `params.json` 的 `dispersive`，以及 `fluxdep_fit.plot_transitions` 或舊 `allows` | `dispersive/<Q>.json` | 第 5 步 |
 | 根層 `params.json` 的 `t1_curve_fit` | `t1_curve/<Q>.json` | 第 5 步 |
-| 根層 `params.json` 的每個區塊原文 | `components.<Q>.ext.legacy_params.<區塊名>` | 第 4 步。`params.json` 本身不複製進新 entry。 |
+| 根層 `params.json` 的未轉原文 | `components.<Q>.ext.legacy_params.<原key>` | 第 4 步。只留未轉 leaf；`params.json` 本身不複製進新 entry。 |
 | 根層 `module_cfg.yaml` | entry 的 setup library | 第 6 步 |
 | `exps/<sub>/meta_info.json` | `points/<sub>/point.yaml` | 第 6 步 |
 | `exps/<sub>/module_cfg.yaml` | `points/<sub>/module_cfg.yaml` | 第 6 步 |
@@ -256,13 +256,13 @@ metadata:
 - `source.run_id`：遷移一律 `null`。
 - `source.created_at`：只有原區塊 `timestamp` 是 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM` 的形式（例：`2026-10-20T08:00:00Z`）時才照抄原字串；否則 `null`，報告列 pending，附備份內原文位置。entry UUID、mtime 與遷移時間都不能代填。
 - 未知數值填 `null` 或省略，不補 0。已知數值必須是有限數字，不接受 bool 或數字字串。
-- 格式檔只放在 entry 層，不複製到 points。原區塊仍在 `legacy_params` 與備份裡。
+- 格式檔只放在 entry 層，不複製到 points。`legacy_params` 只留未轉原文，不再存已轉 leaf；完整來源仍在備份裡。
 
-寫完每個檔都要用 owner 讀回一次：predictor 用 `zcu_tools.resources.predictor_file.load_predictor_file(path)`，它會驗證欄名、數值與 source。dispersive、t1_curve 的 owner 模組 land 前，先用 JSON parser 讀回，land 後改用對應的 `load_*`。見 [resources README](../lib/zcu_tools/resources/README.md)。
+寫完每個檔都要用 owner 讀回一次：predictor 用 `zcu_tools.resources.predictor_file.load_predictor_file(path)`，dispersive 用 `zcu_tools.resources.dispersive_file.load_dispersive_file(path)`，T1 用 `zcu_tools.resources.t1_curve_file.load_t1_curve_file(path)`。它們會驗證欄名、數值與 source。見 [resources README](../lib/zcu_tools/resources/README.md)。
 
 ### predictor：`predictors/<Q>.json`
 
-只轉舊 Fluxonium fit（`fluxdep_fit.params` 含 `EJ`、`EC`、`EL`）。transmon 或已帶 `model` 的 fit 列 permanent-pending。
+舊 Fluxonium fit 的 `fluxdep_fit.params` 有 `EJ` 或 `EL` 時，支援欄照轉，extra key 原名原值留在 `component.ext.legacy_params`。只有 `EC` 加陌生 key 或只有陌生 key 時，不建 predictor，原樣保留並報不支援模型，不列 pending。已帶 `model` 的 fit 仍列 pending，不推論模型。原本支援的乾淨部分參數或空參數容器仍可轉換。非法已知值不寫成成功數值，原文保留並列 pending。
 
 | 舊值 | predictor 欄位 |
 | --- | --- |
@@ -272,6 +272,19 @@ metadata:
 | `fluxdep_fit.flux_int` | 不寫入；它只用於舊 alignment，原文留在 `legacy_params` |
 | params 根層 `flux_unit` 或 `fluxdep_fit.flux_unit` | `flux_unit`。只有一處時用該值；兩處相同時用該值；兩處衝突時寫 `null` 並列 pending；兩處都沒有時用使用者宣告的假設單位並標「假設單位」，沒有宣告就寫 `null` 並列 pending |
 | `fluxdep_fit.timestamp` | `source.created_at`，規則見上 |
+| 更早的根層 `params.EJ`、`EC`、`EL` | `params.EJ`、`params.EC`、`params.EL`，不改數字 |
+| 更早的根層 `half flux`、`period` | `params.flux_half`、`params.flux_period`，不換算 |
+| 更早形狀的根層 `timestamp` | `source.created_at`，仍須符合上列含時區形式 |
+
+更早的完整形狀如下。這裡的 `params` 是舊檔根層的 key，不是 `fluxdep_fit.params`：
+
+```json
+{"name": "old author", "params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8}, "half flux": 0.25, "period": 1.5, "allows": {"sample_f": 9.7, "transitions": [[0, 1]], "mirror": [[1, 2]]}}
+```
+
+手動轉換時先看有沒有 `fluxdep_fit`。兩種形狀同時存在，就用較新的 `fluxdep_fit` 寫 predictor。逐項比較根層舊值與它對應的新來源；同值不再抄進 ext，不同值以原名留在 `legacy_params`。例如舊 `half flux=0.25`、新 `fluxdep_fit.flux_half=0.3`，predictor 寫 `0.3`，ext 留 `half flux: 0.25`。`name`、`project`、`schema_version` 等 metadata 不改名，也不冒充 predictor 欄位。
+
+腳本報告使用 `source_keys` 定位根層來源，`compared_source_keys` 定位同檔較新來源。同值列 `action="remove"`；不同值列 `action="preserved"`，`destination_keys` 指向 ext，reason 列出雙值。這兩種狀況不因來源不同就列 pending。
 
 `cur_A` 這類欄名、meta_info 的單位、目前裝置的單位都不能當 predictor 的單位證據。
 
@@ -289,9 +302,11 @@ metadata:
 ### dispersive：`dispersive/<Q>.json`
 
 `dispersive` 的 `g`、`bare_rf` 寫進 `params`；`fluxdep_fit.plot_transitions` 寫進 `params.plot_transitions`。
-只有 `plot_transitions`、沒有 `dispersive` 區塊時也要產檔，`g`、`bare_rf` 寫 `null`。
+更早的根層 `allows` 也寫到 `params.plot_transitions`，原 key 與內容不變。`sample_f` 不改成 `r_f`，`transitions`／`mirror` 的內容不改。Owner 把這些內容當 annotations 保存，不代表新舊分析公式等價。
+只有 transition 內容、沒有 `dispersive` 區塊時也要產檔，`g`、`bare_rf` 可以省略或寫 `null`。
+只有 `allows` 來源時，不在 `legacy_params` 再存一份。若同時有 `fluxdep_fit.plot_transitions`，後者優先寫正式檔。按對應 key 比較 `allows`，同值 leaf 去重，不同或無對應 leaf 原名原值留在 `legacy_params.allows`，清空的父分支移除。腳本沿用上述 typed 比較報告。
 `g`、`bare_rf`、`plot_transitions.r_f` 的單位是 GHz；`plot_transitions` 其他欄位原文照抄。
-`source.created_at` 取 `dispersive.timestamp`；只有 `plot_transitions` 時取 `fluxdep_fit.timestamp`。
+`source.created_at` 取 `dispersive.timestamp`；只有 `fluxdep_fit.plot_transitions` 時取 `fluxdep_fit.timestamp`；只有根層 `allows` 時取根層 `timestamp`。都必須符合含時區形式，否則寫 null 並列出備份定位，不用檔案時間代填。
 
 ```json
 {
