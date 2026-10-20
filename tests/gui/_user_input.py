@@ -89,6 +89,16 @@ class WidgetObservation:
 
 
 @dataclass(frozen=True)
+class TextInputObservation:
+    """Visible line-edit text, focus, editing policy and accessible description."""
+
+    text: str  # Rendered input, empty when hidden.
+    focused: bool  # Visible input currently owns keyboard focus.
+    read_only: bool  # Qt read-only policy; copying remains possible.
+    description: str  # Accessible description of the visible input and hints.
+
+
+@dataclass(frozen=True)
 class TreeRowObservation:
     """One on-screen tree row; fully clipped/hidden cells have empty captions.
 
@@ -883,6 +893,35 @@ class ComponentDriver:
         if (popup := QApplication.activePopupWidget()) is not None:
             key_click(popup, Qt.Key.Key_Escape)
         chooser.click("&Open")
+
+    def press_key(
+        self,
+        key: Qt.Key,
+        *,
+        object_name: str,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ) -> None:
+        """Send one real key to a usable named widget without moving focus."""
+        widget = self._find(None, object_name)
+        if self._can_interact(widget):
+            key_click(widget, key, modifiers)
+        QApplication.processEvents()
+
+    def text_input(self, *, object_name: str) -> TextInputObservation:
+        """Observe a named line edit; hidden controls expose no text or hints.
+
+        Raise TypeError for a control that is not a QLineEdit.
+        """
+        widget = self._find(None, object_name, editable=True)
+        if not isinstance(widget, QLineEdit):
+            raise TypeError("Expected a line edit")
+        visible = self._on_screen(widget)
+        return TextInputObservation(
+            text=widget.text() if visible else "",
+            focused=visible and widget.hasFocus(),
+            read_only=widget.isReadOnly(),
+            description=widget.accessibleDescription() if visible else "",
+        )
 
     def enter_text(
         self,
