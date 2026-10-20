@@ -32,8 +32,10 @@ def endpoint():
     def register(link: ClientLink) -> socket.socket:
         sock = socket.socket()
         sockets.append(sock)
-        with value._clients_lock:
-            value._clients[sock] = link
+        # tolerated: Synthetic registry setup uses the endpoint's own synchronization.
+        with value._clients_lock:  # pyright: ignore[reportPrivateUsage]
+            # tolerated: Existing queue/backpressure cases need synthetic recipients without a live writer.
+            value._clients[sock] = link  # pyright: ignore[reportPrivateUsage]
         return sock
 
     yield value, register
