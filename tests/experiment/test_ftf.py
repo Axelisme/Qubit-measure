@@ -17,6 +17,8 @@ from zcu_tools.resources.ftf import parse_ftf
 from tests.core._simulation import single_point_template
 from tests.resources._ftf_data import ftf_document
 
+pytestmark = pytest.mark.sim
+
 
 def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     from zcu_tools.experiment.ftf import plan_template

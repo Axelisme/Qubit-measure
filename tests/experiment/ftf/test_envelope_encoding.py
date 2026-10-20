@@ -166,6 +166,7 @@ class RecordingEngine(Engine):
 
 
 @pytest.mark.parametrize("change", ["equal", "borrowed", "eviction", "disabled"])
+@pytest.mark.sim
 def test_execute_keeps_signals_and_densities_exact_across_fingerprint_reuse(change):
     engine, reference_engine = RecordingEngine(), RecordingEngine()
     source = FTFSource(settings(), DeviceManager(), engine=engine)
@@ -238,6 +239,7 @@ def test_execute_keeps_signals_and_densities_exact_across_fingerprint_reuse(chan
         reference.close()
 
 
+@pytest.mark.sim
 def test_shared_envelope_encodes_once_and_preserves_exact_stream():
     source = FTFSource(settings(), DeviceManager())
     try:
@@ -264,6 +266,7 @@ def test_shared_envelope_encodes_once_and_preserves_exact_stream():
         source.close()
 
 
+@pytest.mark.sim
 def test_changed_envelope_and_borrowed_arrays_change_key_without_stale_reuse():
     source = FTFSource(settings(), DeviceManager())
     try:
@@ -294,6 +297,7 @@ def test_changed_envelope_and_borrowed_arrays_change_key_without_stale_reuse():
 
 
 @pytest.mark.parametrize("change", ["snapshot", "settings", "engine"])
+@pytest.mark.sim
 def test_generation_still_invalidates_preparation_and_keeps_output_exact(change):
     source = FTFSource(settings(), DeviceManager(), engine=RecordingEngine())
     reference_engine = RecordingEngine()
@@ -344,6 +348,7 @@ def test_generation_still_invalidates_preparation_and_keeps_output_exact(change)
         old_engine.close()
 
 
+@pytest.mark.sim
 def test_encoder_byte_budget_eviction_disable_and_source_close():
     source = FTFSource(settings(), DeviceManager())
     try:

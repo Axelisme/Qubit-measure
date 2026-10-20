@@ -1,6 +1,7 @@
 """FTF playback preserves valid one-sample envelopes in template playback."""
 
 import numpy as np
+import pytest
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
     PointTimeline,
@@ -13,6 +14,8 @@ from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import single_point_template
 from tests.resources._ftf_data import ftf_document
+
+pytestmark = pytest.mark.sim
 
 
 def test_single_signed_complex_sample_keeps_full_plateau_and_identity():

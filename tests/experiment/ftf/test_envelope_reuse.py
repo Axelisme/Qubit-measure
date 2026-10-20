@@ -9,6 +9,8 @@ from zcu_tools.experiment.ftf import plan_template
 
 from tests.experiment._ftf_templates import settings, snapshot, template
 
+pytestmark = pytest.mark.sim
+
 
 def test_plan_reuses_specs_without_changing_samples_or_candidate_indices():
     base = template(tones=3)

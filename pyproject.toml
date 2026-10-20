@@ -214,9 +214,11 @@ testpaths = ["tests"]
 # lanes stay isolated. pytest clears this directory at session start.
 # Installing the quality group must not randomize ordinary collection or runs.
 # Diagnostics opt in explicitly with `pytest -p randomly --randomly-seed=<seed>`.
-# Ticket checks omit slow tests. Before land review, CLI -m "" includes all tests;
-# -m slow selects only the slow subset, not the full suite.
-addopts = "--import-mode=importlib --basetemp=.pytest-tmp --strict-markers --strict-config -p no:randomly -m 'not slow'"
+# Ordinary runs exclude slow and sim tests. Before land review, use -m 'not sim'
+# (including slow) unless lib/zcu_tools/simulate/ changed; then use -m "" for all tests.
+# Ticket checks use -m sim (or an affected subset including sim) only when that
+# simulation package changed.
+addopts = "--import-mode=importlib --basetemp=.pytest-tmp --strict-markers --strict-config -p no:randomly -m 'not slow and not sim'"
 filterwarnings = [
   "ignore::DeprecationWarning:matplotlib.*",
   "ignore:invalid escape sequence.*:SyntaxWarning:qick\\..*",
@@ -225,6 +227,7 @@ filterwarnings = [
 markers = [
   "requires_loopback: integration tests that bind or connect a real loopback socket",
   "slow: expensive validation reserved for pre-land review (see tests/README.md)",
+  "sim: tests that drive the evolution/adc/ftf simulation engines (see tests/README.md)",
   # Capability markers. A module declares what it uses; tools/check_test_capabilities.py
   # checks the declaration. These name a capability, not permission to be slow, so
   # mismarking makes a test wrong rather than exempt.

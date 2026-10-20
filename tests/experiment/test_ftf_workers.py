@@ -13,6 +13,8 @@ from zcu_tools.simulate.evolution import Engine
 
 from tests.resources._ftf_data import ftf_document
 
+pytestmark = pytest.mark.sim
+
 
 def test_ftf_workers_reach_engine_and_preserve_small_acquire(monkeypatch):
     widths = []

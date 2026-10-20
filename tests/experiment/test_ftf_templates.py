@@ -21,6 +21,8 @@ from tests.experiment._ftf_templates import (
     template,
 )
 
+pytestmark = pytest.mark.sim
+
 
 def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
     import zcu_tools.experiment.ftf as ftf

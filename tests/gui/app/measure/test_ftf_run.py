@@ -34,6 +34,8 @@ from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure.remote._helpers import call, open_client
 from tests.resources._ftf_data import ftf_document
 
+pytestmark = pytest.mark.sim
+
 
 class FTFAcquisitionAdapter(SavingAdapter):
     capabilities: ClassVar[AdapterCapabilities] = replace(
