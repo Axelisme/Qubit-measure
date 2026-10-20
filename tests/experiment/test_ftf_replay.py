@@ -5,15 +5,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import RoundRequest, RoundSignals
+from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, ftf, replay_round
-from zcu_tools.program.v2.simulation import IntegratedRound
-from zcu_tools.resources.simulation_replay import replay_paths
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.ftf import parse_ftf
+from zcu_tools.resources.simulation_replay import replay_paths
 
 from tests.resources._ftf_data import ftf_document
 
@@ -39,7 +39,9 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
         if isinstance(result, IntegratedRound):
             expected = result.raw.materialize(acquire.reps, acquire.avg_level)
         else:
-            expected = {channel.channel: channel.iq.copy() for channel in result.channels}
+            expected = {
+                channel.channel: channel.iq.copy() for channel in result.channels
+            }
         archived_round = replay_paths(tmp_path / "archive")[0]
         # Eviction and a later round must not change this delivery's identity.
         source.preparation_cache.max_bytes = 0
@@ -66,7 +68,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
     replayed = replay_round(archived_round)
     if isinstance(replayed, IntegratedRound):
         actual = replayed.raw.materialize(acquire.reps, acquire.avg_level)
-    elif isinstance(replayed, RoundSignals):
+    else:
         actual = {channel.channel: channel.iq for channel in replayed.channels}
     for channel, values in actual.items():
         np.testing.assert_array_equal(values, expected[channel])

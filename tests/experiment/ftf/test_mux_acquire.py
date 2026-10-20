@@ -51,10 +51,7 @@ def jumping_program(env, mux, *, rounds=1):
             mixer_freq=6000.0,
             length=0.020,
             ro_length=0.026,
-            tones=[
-                MuxReadoutTone(ro_ch=ch, freq=6000.0, gain=0.1)
-                for ch in (4, 1)
-            ],
+            tones=[MuxReadoutTone(ro_ch=ch, freq=6000.0, gain=0.1) for ch in (4, 1)],
         )
     else:
         readout = PulseReadoutCfg(
