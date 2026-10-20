@@ -299,18 +299,20 @@ def _validate_prepared(
 def _validate_staging(ownership: InitializationOwnership) -> None:
     destination = ownership.manifest.report.destination
     source = ownership.manifest.report.source
-    for root in (destination.result_path, destination.database_path):
-        temporary = root.parent / ownership.temporary_name
-        if temporary == root or any(
-            temporary.is_relative_to(old) or old.is_relative_to(temporary)
-            for old in (source.result_path, source.database_path)
-        ):
-            raise MigrationInputError(f"{temporary}: staging overlaps protected paths")
-        if not ownership.prepared and root.exists():
-            raise FileExistsError(root)
-        for path in (root, temporary):
-            if path.is_symlink():
-                raise MigrationInputError(f"{path}: initialization symlink conflict")
+    if destination.database_path.exists() or destination.database_path.is_symlink():
+        raise FileExistsError(destination.database_path)
+    root = destination.result_path
+    temporary = root.parent / ownership.temporary_name
+    if temporary == root or any(
+        temporary.is_relative_to(old) or old.is_relative_to(temporary)
+        for old in (source.result_path, source.database_path)
+    ):
+        raise MigrationInputError(f"{temporary}: staging overlaps protected paths")
+    if not ownership.prepared and root.exists():
+        raise FileExistsError(root)
+    for path in (root, temporary):
+        if path.is_symlink():
+            raise MigrationInputError(f"{path}: initialization symlink conflict")
 
 
 def _publish_entry(
@@ -319,9 +321,8 @@ def _publish_entry(
     destination = ownership.manifest.report.destination
     staged = {
         "result": destination.result_path.parent / ownership.temporary_name,
-        "Database": destination.database_path.parent / ownership.temporary_name,
     }
-    final = {"result": destination.result_path, "Database": destination.database_path}
+    final = {"result": destination.result_path}
     _validate_staging(ownership)
     if not ownership.prepared:
         # Only the exact sibling names fixed before creation belong to this tool.
@@ -371,17 +372,11 @@ def _publish_entry(
 
 
 def _validate_available_prepared(ownership: InitializationOwnership) -> None:
-    destination = ownership.manifest.report.destination
-    roots: dict[str, Path] = {}
-    for label, final in (
-        ("result", destination.result_path),
-        ("Database", destination.database_path),
-    ):
-        staged = final.parent / ownership.temporary_name
-        if final.exists() and staged.exists():
-            raise MigrationInputError(f"{final}: both staged and final paths exist")
-        roots[label] = final if final.exists() else staged
-    _validate_prepared(ownership, roots)
+    final = ownership.manifest.report.destination.result_path
+    staged = final.parent / ownership.temporary_name
+    if final.exists() and staged.exists():
+        raise MigrationInputError(f"{final}: both staged and final paths exist")
+    _validate_prepared(ownership, {"result": final if final.exists() else staged})
 
 
 def _load_or_plan(
@@ -414,13 +409,11 @@ def _load_or_plan(
     ):
         if target.exists() or target.is_symlink():
             raise FileExistsError(target)
-    for root in (
-        candidate.report.destination.result_path,
-        candidate.report.destination.database_path,
-    ):
-        temporary = root.parent / ownership.temporary_name
-        if temporary.exists():
-            raise FileExistsError(temporary)
+    temporary = (
+        candidate.report.destination.result_path.parent / ownership.temporary_name
+    )
+    if temporary.exists():
+        raise FileExistsError(temporary)
     return ownership
 
 
@@ -435,10 +428,11 @@ def initialize_entry(
     report date/path and complete source baseline before the first backup write.
     Existing ownership must match that intent and live sources before any write.
     Complete/verify the backup, create via the owner under the recorded sibling
-    temporary name, checkpoint its initial content, then rename each root once.
+    temporary name, checkpoint its initial content, then rename the result root.
+    Database remains absent until data publication creates its destinations.
     Interrupted unprepared staging is discarded only at those recorded paths.
     Prepared/final content is never rewritten: typed YAML (including unknown raw
-    fields) and other file hashes/directories must match before either rename.
+    fields) and other file hashes/directories must match before the rename.
     Return the initial manifest and opened final entry; dry_run validates without
     writes and returns no handle. Conflicts raise MigrationInputError or
     FileExistsError; schema/I/O failures propagate. No writer coordination,

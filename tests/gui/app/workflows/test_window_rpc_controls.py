@@ -45,7 +45,7 @@ def test_rpc_pending_status_and_stop(
     assert harness.gate.snapshot()
     harness.complete_segment()
     assert not harness.gate.snapshot()
-    assert not (entry.result_path / "workflows/pending-rpc").exists()
+    assert not (entry.result_path / "workflows/sample_pending-rpc").exists()
     assert form_editable(window.plan_panel)
 
 

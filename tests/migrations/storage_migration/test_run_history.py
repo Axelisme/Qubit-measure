@@ -20,9 +20,11 @@ from zcu_tools.experiment import (
 
 from migrations.storage_migration import (
     MigrationInputError,
+    MigrationManifest,
     MigrationMapping,
     MigrationReport,
     MigrationRequest,
+    RunAssignment,
     load_run_evidence,
     migrate_storage,
 )
@@ -40,7 +42,7 @@ def allocated_run(
     request_data: MigrationRequest,
     mapping: MigrationMapping,
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[MigrationRequest, MigrationReport]:
+) -> tuple[MigrationRequest, MigrationReport, RunAssignment]:
     """Interrupt filesystem lookup of native output after identity allocation.
 
     The public report identifies the allocated output. No manifest is fabricated
@@ -79,7 +81,10 @@ def allocated_run(
     report = TypeAdapter(MigrationReport).validate_json(
         request.report_path.read_bytes()
     )
-    return request, report
+    manifest = TypeAdapter(MigrationManifest).validate_json(
+        manifest_path(request).read_bytes()
+    )
+    return request, report, manifest.runs[0]
 
 
 class SyntheticCfg(ExpCfgModel):
@@ -230,7 +235,38 @@ def test_unknown_history_resume_reuses_assigned_id_and_published_bytes(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     request, source = write_run(request_data)
-    request = history_request(request, {"started_at": None, "completion": "unknown"})
+    request = history_request(
+        request,
+        {
+            "started_at": None,
+            "completion": "unknown",
+            "run_id": "20251001T000000Z-abc123",
+        },
+    )
+    source_bytes = source.read_bytes()
+    expected = (
+        request.database_root
+        / request.name
+        / "runs"
+        / "synthetic_scan_20251001T000000Z-abc123"
+        / "data.h5"
+    )
+    planned = migrate_storage(
+        replace(request, dry_run=True),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=lambda path, tag, cfg_type: pytest.fail(
+            "Dry-run must not call native validation"
+        ),
+    )
+    assert [
+        item.new_file for item in planned.key_mappings if item.old_key == "run_id"
+    ] == [expected]
+    assert source.read_bytes() == source_bytes
+    assert not expected.parent.exists()
+    assert not manifest_path(request).exists()
+    assert planned.backup_path is not None
+    assert not planned.backup_path.exists()
     paths: list[Path] = []
 
     def interrupt(path: Path, tag: str, cfg_type: str) -> None:
@@ -246,8 +282,9 @@ def test_unknown_history_resume_reuses_assigned_id_and_published_bytes(
             validate_native=interrupt,
         )
     before = json.loads(manifest_path(request).read_text())
+    assert paths == [expected]
     native_bytes = paths[0].read_bytes()
-    assert source.is_file()
+    assert source.read_bytes() == source_bytes
 
     def validate(path: Path, tag: str, cfg_type: str) -> None:
         assert path == paths[0]
@@ -313,15 +350,14 @@ def test_unknown_history_does_not_relax_other_required_evidence(
 
 @pytest.mark.parametrize("claim", ["different_id", "assigned_id_as_history"])
 def test_allocated_identity_rejects_changed_evidence_before_any_resume_writes(
-    allocated_run: tuple[MigrationRequest, MigrationReport],
+    allocated_run: tuple[MigrationRequest, MigrationReport, RunAssignment],
     mapping: MigrationMapping,
     claim: str,
 ) -> None:
-    request, allocated = allocated_run
-    identity = next(item for item in allocated.key_mappings if item.old_key == "run_id")
-    assert identity.new_file is not None
-    assigned_id = identity.new_file.parent.name
-    claimed_id = "20251001T000000Z-abc123" if claim == "different_id" else assigned_id
+    request, allocated, assignment = allocated_run
+    claimed_id = (
+        "20251001T000000Z-abc123" if claim == "different_id" else assignment.run_id
+    )
     request = history_request(request, {"run_id": claimed_id})
     # Observe all owned artifacts, including byte-identical replacements, without
     # relying on manifest internals or an implementation's checkpoint count.
@@ -365,9 +401,10 @@ def test_allocated_identity_rejects_changed_evidence_before_any_resume_writes(
 
 
 def test_allocated_identity_resume_keeps_original_id_and_assignment_origin(
-    allocated_run: tuple[MigrationRequest, MigrationReport], mapping: MigrationMapping
+    allocated_run: tuple[MigrationRequest, MigrationReport, RunAssignment],
+    mapping: MigrationMapping,
 ) -> None:
-    request, allocated = allocated_run
+    request, allocated, assignment = allocated_run
     identity = next(item for item in allocated.key_mappings if item.old_key == "run_id")
     assert "遷移賦值" in identity.reason
     assert identity.new_file is not None
@@ -381,7 +418,7 @@ def test_allocated_identity_resume_keeps_original_id_and_assignment_origin(
     )
     assert report.converted_files[0].destination == identity.new_file
     metadata = load_run_data(identity.new_file).metadata
-    assert metadata.run_id == identity.new_file.parent.name
+    assert metadata.run_id == assignment.run_id
     assert metadata.started_at is None
     assert (
         next(item for item in report.key_mappings if item.old_key == "run_id")

@@ -1,12 +1,14 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-20，native metadata-only 讀取、公開 native run ID 驗證、Labber 多 log 與保存的儀器設定
+**Last updated:** 2026-10-20，完整 run_id 路徑與 metadata 身分權威
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
 facade。caller 優先從 package root import model 與 function。Facade 在 caller 首次選用公開名稱時
 載入該名稱的 owner。Path helpers 不要求 HDF5，HDF5 reader／writer 仍在使用時載入 h5py。
 `data.h5` 是單次 Experiment Result 的正規資料，Labber 是獨立 writer 產生的衍生輸出，供 Log Browser 使用。
+
+`resources.entry.SaveLayout` 決定一般 Save 的 `Database/<name>/runs/<experiment>_<run_id>/data.h5`，使用完整 run_id，實驗名中的 `/` 轉 `_`。Result 圖片副本與 workflow 雙側路徑也由 resources owner 計算，見 [entry 輸出位置](../resources/entry/README.md#輸出位置)。Labber 新檔名維持 `<experiment>_<id6>_<序號>.hdf5`；離線遷移保留舊 Labber 原名。Datafile writer 只寫 caller 的 exact path，不解析目錄名還原 run_id，也不決定 entry 的存在或改名。Run 身分仍以 `RunMetadata` 為準，見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
 - `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.1。
   `RunMetadata.started_at` 可以是 UTC ISO 字串或 None，`completion` 接受

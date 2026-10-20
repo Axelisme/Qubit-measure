@@ -1,5 +1,6 @@
 """File-backed Load listing through the shipped Save control and Load seams."""
 
+import os
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -22,6 +23,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests._native_support import native_cfg, native_payload
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     native_save_session,
@@ -36,7 +38,12 @@ def session(tmp_path: Path, qapp: QApplication) -> Iterator[NativeSaveSession]:
 
 def native_file(session: NativeSaveSession, *, completion: str = "complete") -> Path:
     """Write a synthetic native run at its canonical entry path."""
-    path = session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+    path = (
+        session.entry.database_path
+        / "runs"
+        / f"scan_{session.metadata.run_id}"
+        / "data.h5"
+    )
     path.parent.mkdir(parents=True)
     metadata = session.metadata
     if completion == "unknown":
@@ -139,6 +146,7 @@ def test_query_metadata_and_load_validity_are_independent(
         assert row.experiment == session.metadata.experiment
     else:
         assert row.metadata_error
+        assert row.run_id == ""
         assert row.experiment == ""
         assert row.started_at is None
         assert row.completion is None
@@ -241,6 +249,40 @@ def test_query_real_shared_saver_file_is_listed(session: NativeSaveSession) -> N
     assert row.run_id == session.metadata.run_id
     assert row.point == session.metadata.snapshot.point
     assert row.experiment == session.metadata.experiment
+
+
+def test_unreadable_metadata_selection_uses_exact_path_without_inferred_identity(
+    session: NativeSaveSession, qapp: QApplication, tmp_path: Path
+) -> None:
+    path = native_file(session)
+    with h5.File(path, "r+") as file:
+        del file.attrs["experiment"]
+    (row,) = session.control.list_saved_runs()
+    dialog = RunLoadDialog((row,), initial_point="", start_directory="")
+    images = Path(os.environ.get("LOAD_FALLBACK_EVIDENCE", str(tmp_path / "images")))
+    try:
+        dialog.show()
+        qapp.processEvents()
+        driver = ComponentDriver(dialog)
+        driver.screenshot(images / "01-unreadable.png")
+        (visible,) = driver.table_rows(object_name="load_runs")
+        assert visible.columns[:6] == ("", "", "", "", "", "")
+        assert row.metadata_error
+        assert visible.columns[6] == f"Metadata error: {row.metadata_error}"
+        assert str(path) in visible.tooltips[6]
+        assert not driver.observe("Load selected").enabled
+
+        driver.select_table_row(visible.columns[6], object_name="load_runs")
+        driver.screenshot(images / "02-selected.png")
+        assert driver.observe("Load selected").enabled
+        assert driver.table_rows(object_name="load_runs")[0].selected
+        driver.click("Load selected")
+        assert not driver.observe(object_name="load_runs").visible
+        assert dialog.selected_path() == str(path)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 def test_query_empty_entry_and_no_opened_entry(session: NativeSaveSession) -> None:

@@ -1,12 +1,14 @@
 """Offline migration recovery ownership."""
 
+import json
 import re
 from pathlib import Path
 
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ArtifactKey, ResultEntry, SaveLayout
 
 from .documents import difference, validate_document_baselines
 from .errors import MigrationInputError
+from .evidence import parse_run_evidence
 from .models import (
     MigrationFileState,
     MigrationManifest,
@@ -69,17 +71,45 @@ def _validate_file_paths(
                 "manifest: invalid processed spectrum publication paths"
             )
     elif state.operation == "native":
-        assignment = next(
-            (run for run in manifest.runs if run.source == state.source), None
+        _validate_native_destination(state, manifest)
+
+
+def _validate_native_destination(
+    state: MigrationFileState, manifest: MigrationManifest
+) -> None:
+    assignment = next(
+        (run for run in manifest.runs if run.source == state.source), None
+    )
+    if assignment is None or manifest.evidence is None:
+        raise MigrationInputError(
+            "manifest: native destination has no matching run assignment"
         )
-        if (
-            assignment is None
-            or state.destination
-            != destination.database_path / "runs" / assignment.run_id / "data.h5"
-        ):
-            raise MigrationInputError(
-                "manifest: native destination has no matching run assignment"
-            )
+    evidence = parse_run_evidence(json.dumps(manifest.evidence), source=state.source)
+    legacy = next(
+        (
+            item
+            for item in evidence.entries
+            if manifest.report.source.database_path / item.source == state.source
+        ),
+        None,
+    )
+    if legacy is None:
+        raise MigrationInputError("manifest: native destination has no run evidence")
+    destination = manifest.report.destination
+    layout = SaveLayout(
+        result_path=destination.result_path,
+        database_path=destination.database_path,
+        run_id=assignment.run_id,
+        experiment=legacy.experiment,
+        point=legacy.snapshot.point,
+        saved_at=assignment.assigned_at,
+    )
+    outputs = layout.outputs(ArtifactKey(section="run", name="data", member="data"))
+    expected = next(item.path for item in outputs if item.format == "data_h5")
+    if state.destination != expected:
+        raise MigrationInputError(
+            "manifest: native destination has no matching run assignment"
+        )
 
 
 def _validate_file_phase(

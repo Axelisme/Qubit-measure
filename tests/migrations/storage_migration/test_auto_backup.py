@@ -600,7 +600,7 @@ def test_initial_manifest_interruption_reruns_with_fixed_identity_and_future_fie
     assert json.loads(interrupted_initialization.read_text())["future"] == raw["future"]
 
 
-@pytest.mark.parametrize("window", ["before-entry", "result-rename", "database-rename"])
+@pytest.mark.parametrize("window", ["before-entry", "result-rename"])
 def test_initialization_windows_resume_without_an_explicit_resume_flag(
     request_data: MigrationRequest,
     mapping: MigrationMapping,
@@ -620,9 +620,7 @@ def test_initialization_windows_resume_without_an_explicit_resume_flag(
         mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
 
     def fail_rename(path: Path, target: str | Path) -> Path:
-        if (window == "result-rename" and Path(target) == result_target) or (
-            window == "database-rename" and Path(target) == database_target
-        ):
+        if window == "result-rename" and Path(target) == result_target:
             raise OSError("initialization interrupted")
         return rename(path, target)
 
@@ -637,7 +635,7 @@ def test_initialization_windows_resume_without_an_explicit_resume_flag(
     )
     assert ownership.is_file()
     raw = json.loads(ownership.read_text())
-    assert not result_target.exists() or window == "database-rename"
+    assert not result_target.exists()
     assert not database_target.exists()
     migrate(request_data, mapping)
     entry = ResultEntry.open(

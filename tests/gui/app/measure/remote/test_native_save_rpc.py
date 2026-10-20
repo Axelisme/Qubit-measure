@@ -114,9 +114,7 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         session.save()
-        path = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-        )
+        path = session.native_data_path
         stored = load_run_data(path)
         events = session.entry.ledger.events()
         tab = session.state.get_tab("tab")
@@ -196,9 +194,7 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         session.save()
-        path = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
-        )
+        path = session.native_data_path
         history = load_run_data(path).metadata
         events = session.entry.ledger.events()
         session.state.set_active_tab("tab")
@@ -386,14 +382,10 @@ def test_save_rpc_reports_partial_and_initial_all_failed_identity(
     tmp_path: Path, qapp: QApplication, block_native: bool, method: str
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
+        session.entry.database_path.mkdir(parents=True, exist_ok=True)
         (session.entry.database_path / "Labber").write_text("blocked")
         if block_native:
-            (
-                session.entry.database_path
-                / "runs"
-                / session.metadata.run_id
-                / "data.h5"
-            ).mkdir(parents=True)
+            (session.native_data_path).mkdir(parents=True)
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
         params: dict[str, object] = {"tab_id": "tab"}
         if method == "tab.save_artifacts":
