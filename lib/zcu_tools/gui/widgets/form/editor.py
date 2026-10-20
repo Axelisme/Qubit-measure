@@ -67,8 +67,8 @@ class FormEditor[F: FormModel](QWidget):
     """Edit a caller-owned FormState on the Qt GUI thread, without submitting it.
 
     The editor borrows state and the host-captured env. A text field commits
-    its text when the user presses Enter or the field loses focus, not on each
-    keystroke; text that already shows the state's input writes nothing, and
+    its text after 500 ms without typing, on Enter or on ordinary focus loss,
+    not on each keystroke. Text that already shows state's input writes nothing, and
     read-only rows commit nothing. Checkboxes, dropdowns, Enabled boxes and the
     Expression action write at once. Committed parsed input writes the state,
     or goes to the host's write callable (see __init__); committed unparseable

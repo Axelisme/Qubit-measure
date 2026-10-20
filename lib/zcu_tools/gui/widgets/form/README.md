@@ -1,12 +1,12 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-20，來源拒絕顯示為欄位錯誤
+**Last updated:** 2026-10-20，文字欄位 idle commit
 
 `FormEditor` 借用 caller-owned `FormState` 與 host 捕捉的 `FormEnv`。Editor 直接讀 `state.describe(path, env)` 與完整 `preview`，不產生 JSON Schema，也不解析 annotation、union 或選項匹配。Core 擁有 choices、active option、固定欄位與 lone ordinary wrapper 攤平規則。攤平只改版面，controls 的完整 path 仍含 wrapper。
 
 Editor 初次只建立可見層與初始展開的 model rows。Group 預設折疊，model 沿 `Display(collapsed=...)`。Core 的 `can_expand` 只提供結構上的展開能力，首次展開才查下一層；實際沒有可畫 children 時，該列回到普通標題，不留空白區塊。收起已建區塊會保留 QWidget 與未提交文字，不偷寫 state。實際 branch 改變或啟停普通 nullable model 時只替換該子樹，無關 rows 與使用者設定的 folds 保持不變。沒有 converter 的選項切換只更新 selector，不清除仍相同的 children 與 local parse text。Editor 以 description.branch 判斷子結構，不用 selected 猜 branch。Editor 以已建立的 Qt 子層記錄展開情況，不另持 writable draft。
 
-文字欄位在 Enter 或一般 focus loss 提交，typing 本身不改 state。折疊與移除舊分支引起的 focus loss 不提交，重新展開後的一般 focus loss 仍提交保留文字。Expression action、dropdown、checkbox 與 Enabled 立即提交。未解析或 host 拒絕的輸入保留在 view，`local_parse_errors()` 讓 host 阻止提交。`discard_local_text()` 只丟掉 view-local 輸入，不重設 FormState。外部 publication 仍以 state 的輸入更新已建 controls。完整 preview 與 local errors 決定 validity，折疊、hidden 或尚未建立的 child 不會隱藏錯誤；錯誤標示落在可見祖先或 group 標題。
+文字欄位停止輸入 0.5 秒後提交，Enter 或一般 focus loss 仍立即提交。新輸入重新排程，立即提交會取消 pending timer。打到一半的值也走同一 parse／validation，錯誤保留原文，修正後自動清除。折疊、移除舊分支、唯讀與 detach 會取消 pending timer，不偷偷提交。折疊引起的 focus loss 不提交，重新展開後的一般 focus loss 仍提交保留文字。Expression action、dropdown、checkbox 與 Enabled 立即提交。未解析或 host 拒絕的輸入保留在 view，`local_parse_errors()` 讓 host 阻止提交。`discard_local_text()` 只丟掉 view-local 輸入，不重設 FormState。外部 publication 仍以 state 的輸入更新已建 controls。完整 preview 與 local errors 決定 validity，折疊、hidden 或尚未建立的 child 不會隱藏錯誤；錯誤標示落在可見祖先或 group 標題。
 
 Host 可訂閱 `errors_changed`，在 `errors()` 結果改變時取得新的 `FormErrors`，全部有效時取得 `None`。本地 parse／拒絕錯誤與 state publication 都會觸發比較；錯誤集合相同時不重送，detach 後不再發出。`validity_changed` 仍只在有效與無效之間切換時發出 bool。
 

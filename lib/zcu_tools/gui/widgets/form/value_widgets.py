@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any, cast
 
-from qtpy.QtGui import QDoubleValidator, QIntValidator
+from qtpy.QtCore import QEvent, QObject, Qt, QTimer
+from qtpy.QtGui import QDoubleValidator, QFocusEvent, QIntValidator, QKeyEvent
 from qtpy.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
@@ -143,11 +144,129 @@ def connect_value_widget(widget: QWidget, callback: Callable[..., object]) -> No
     raise TypeError(f"Unsupported value widget {type(widget).__name__}")
 
 
+class _TextCommit(QObject):
+    """Own one text input's idle timer and merge explicit commit notifications.
+
+    The widget owns this filter and its timer. Hiding, reparenting, disabling,
+    read-only changes and programmatic text replacement cancel pending expiry.
+    Cancelling does not discard the text: a later normal focus loss may commit
+    it. Signal-blocked focus loss (fold/retirement) never commits.
+    """
+
+    def __init__(
+        self,
+        widget: QLineEdit | QSpinBox | TrimDoubleSpinBox,
+        text: QLineEdit,
+        callback: Callable[..., object],
+    ) -> None:
+        super().__init__(widget)
+        self._widget = widget
+        self._text = text
+        self._callback = callback
+        self._last_text = text.text()
+        self._pending_text: str | None = None
+        self._interpreting = False
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(500)
+        self._timer.timeout.connect(self._expired)
+        text.textEdited.connect(self._edited)
+        text.textChanged.connect(self._text_changed)
+        widget.editingFinished.connect(self._finish)
+        widget.installEventFilter(self)
+        if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
+            text.installEventFilter(self)
+            widget.setKeyboardTracking(False)
+            widget.valueChanged.connect(self._numeric_changed)
+
+    def _cancel(self) -> None:
+        self._timer.stop()
+        self._pending_text = None
+
+    def _editable(self) -> bool:
+        return self._widget.isEnabled() and not self._widget.isReadOnly()
+
+    def _edited(self, text: str) -> None:
+        if self._editable():
+            self._pending_text = text
+            self._timer.start()
+
+    def _text_changed(self, text: str) -> None:
+        # textEdited precedes textChanged for a user edit. Host publications
+        # and setText emit only textChanged and must not leave an old timer.
+        if text != self._pending_text:
+            self._cancel()
+
+    def _expired(self) -> None:
+        if self._pending_text is not None:
+            self._finish()
+
+    def _finish(self) -> None:
+        self._cancel()
+        if (
+            not self._editable()
+            or self._widget.signalsBlocked()
+            or self._text.signalsBlocked()
+            or self._text.text() == self._last_text
+        ):
+            return
+        if isinstance(self._widget, (QSpinBox, TrimDoubleSpinBox)):
+            self._interpreting = True
+            try:
+                self._widget.interpretText()
+            finally:
+                self._interpreting = False
+        self._last_text = self._text.text()
+        self._callback()
+
+    def _numeric_changed(self, value: int | float) -> None:
+        if not self._interpreting:
+            self._cancel()
+            self._last_text = self._text.text()
+            self._callback(value)
+
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        """Cancel invalid lifetimes and commit ordinary focus/Enter immediately."""
+        event = a1
+        if a0 is None or event is None:
+            return False
+        if event.type() in (
+            QEvent.Type.Hide,
+            QEvent.Type.ParentChange,
+            QEvent.Type.EnabledChange,
+            QEvent.Type.ReadOnlyChange,
+        ):
+            self._cancel()
+        elif isinstance(event, QFocusEvent) and event.type() == QEvent.Type.FocusOut:
+            if event.reason() != Qt.FocusReason.PopupFocusReason:
+                self._finish()
+        elif (
+            isinstance(event, QKeyEvent)
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        ):
+            # Validators may suppress editingFinished for partial input.
+            self._finish()
+        return False
+
+
 def connect_committed_value_widget(
     widget: QWidget, callback: Callable[..., object]
 ) -> None:
-    """Connect committed text edits and immediate non-text value changes."""
+    """Commit user text after 500 ms idle, Enter or ordinary focus loss.
+
+    Text commits call callback with no arguments. New input restarts the idle
+    interval; explicit commits consume it. Programmatic text changes do not
+    schedule commits. Hidden, reparented, disabled or read-only controls cancel
+    pending expiry without discarding text. The widget owns the connection.
+    Spinbox text uses the same policy; stepping, checkboxes and dropdowns keep
+    immediate native value-change callbacks (including their signal arguments).
+    """
     if isinstance(widget, QLineEdit):
-        widget.editingFinished.connect(callback)
+        _TextCommit(widget, widget, callback)
+        return
+    if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
+        text = widget.findChild(QLineEdit)
+        _TextCommit(widget, text, callback)
         return
     connect_value_widget(widget, callback)
