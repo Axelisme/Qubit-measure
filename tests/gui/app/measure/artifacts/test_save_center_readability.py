@@ -65,11 +65,13 @@ def saving_view(
             metadata=session.metadata,
             parameters=original.run.parameters,
         )
+        ctrl.update_tab_analyze_param_instance(tab_id, PaneParams())
         window = MainWindow(
             ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
         )
         ctrl.add_view(window)
         window.add_tab_widget(tab_id, "saving")
+        window.refresh_tab_analyze_form(tab_id)
         center = window.findChild(ArtifactSaveCenter)
         assert center is not None
         window.resize(1600, 900)
