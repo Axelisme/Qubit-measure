@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import RoundSignals, RoundStatistics, SamplingIdentity
+from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate import adc
 
 
@@ -29,71 +29,197 @@ def channels(*, covariance=None) -> tuple[adc.ChannelReadout, ...]:
     return tuple(adc.ChannelReadout(ch, conditional, index, receiver) for ch in (3, 1))
 
 
-def test_decimated_shots_share_states_and_keep_content_and_sample_order():
+def physical_batches(*, covariance=None, rates=None):
+    model = adc.ReadoutModel(
+        "batch-traces",
+        ("g", "e"),
+        np.array([[6.0, 6.1], [6.04, 6.1]]),
+        6.0,
+        np.array([0.04, 0.02]),
+        np.array([0.16, 0.0]),
+        np.zeros((2, 2)) if rates is None else rates,
+        receiver=adc.Receiver(
+            noise_covariance=np.zeros((2, 2)) if covariance is None else covariance
+        ),
+    )
+    pulse = adc.ReadoutPulse(5, 65, 1.0, 6.0)
+    grid = adc.SampleGrid(np.array([0.0, 15, 35, 85]), 6.0)
+    contents = (
+        (pulse, replace(pulse, start_ns=15, frequency_ghz=6.021, amplitude=0.3j)),
+    )
+    batch = adc.ReadoutBatch(
+        model, contents, ((grid, grid),), np.array([0, 0], dtype=np.int64)
+    )
+    return {3: batch, 1: batch}
+
+
+def test_decimated_shots_share_states_paths_and_keep_content_and_sample_order():
+    batches = physical_batches(rates=np.array([[0, 0.04], [0.02, 0]]))
     result = adc.sample_traces(
-        np.array([[[0.25, 0.75], [0.0, 1.0]]]),
-        channels(),
-        reps=2000,
-        seed=71,
-        acquire_sequence=2,
-        round_index=3,
+        np.array([[[0.0, 1.0], [0.0, 1.0]]]),
+        batches,
+        reps=400,
+        identity=SamplingIdentity(71, (2, 3, 0)),
     )
     first, second = result.channels
-    assert first.channel == 3
-    assert second.channel == 1
-    assert first.iq.shape == (4000, 1, 2, 2)
+    assert (first.channel, second.channel) == (3, 1)
+    assert first.iq.shape == (800, 2, 4, 2)
     np.testing.assert_array_equal(first.iq, second.iq)
-    np.testing.assert_array_equal(
-        first.iq[2000:, 0, 0], np.tile([111.0, 112.0], (2000, 1))
-    )
-    np.testing.assert_array_equal(first.iq[:, 0, 1] - first.iq[:, 0, 0], 2)
-    assert abs(np.mean(first.iq[:2000, 0, 0, 0] == 11) - 0.75) < 0.035
+    np.testing.assert_array_equal(first.iq[:, 0], first.iq[:, 1])
+    assert first.iq[:, 0, 2].var(axis=0).sum() > 0.01
+    np.testing.assert_array_equal(first.iq[:, :, 0], 0)
 
 
 def test_decimated_noise_is_per_sample_independent_and_has_no_rounding_term():
-    inputs = channels(covariance=np.array([[2.0, 0.5], [0.5, 1.0]]))
+    batches = physical_batches(covariance=np.array([[2.0, 0.5], [0.5, 1.0]]))
+    populations = np.array([[[1.0, 0.0], [0.0, 1.0]]])
     result = adc.sample_traces(
-        np.array([[[1.0, 0.0], [0.0, 1.0]]]),
-        inputs,
-        reps=12000,
-        seed=72,
-        acquire_sequence=2,
-        round_index=3,
+        populations, batches, reps=12000, identity=SamplingIdentity(72, (2, 3, 0))
     )
+    noiseless = (
+        adc.ADC(batches[3].model)
+        .responses(replace(batches[3], include_traces=True))
+        .traces
+    )
+    assert noiseless is not None
+    expected = np.repeat(noiseless[0].transpose(1, 0, 2, 3), 12000, axis=0)
     residuals = []
     for channel in result.channels:
-        expected = np.repeat(
-            np.array([[[1.0, 2.0], [3.0, 4.0]], [[111.0, 112.0], [113.0, 114.0]]]),
-            12000,
-            axis=0,
-        )
-        residual = channel.iq[:, 0] - expected
-        np.testing.assert_allclose(residual.mean(axis=(0, 1)), 0, atol=0.025)
+        residual = channel.iq - expected
+        np.testing.assert_allclose(residual.mean(axis=(0, 1, 2)), 0, atol=0.025)
         np.testing.assert_allclose(
             np.cov(residual.reshape(-1, 2).T), [[2.0, 0.5], [0.5, 1.0]], atol=0.035
         )
-        assert abs(np.cov(residual[:, 0, 0], residual[:, 1, 0])[0, 1]) < 0.04
+        assert abs(np.cov(residual[:, 0, 0, 0], residual[:, 1, 0, 0])[0, 1]) < 0.04
         residuals.append(residual)
     assert abs(np.cov(residuals[0].ravel(), residuals[1].ravel())[0, 1]) < 0.025
 
 
-@pytest.mark.parametrize("sampler", [adc.round_statistics, adc.sample_traces])
-def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
+def test_decimated_zero_reps_reproducibility_global_rng_and_content_order():
+    batches = physical_batches()
+    content = batches[3]
+    later = tuple(replace(p, amplitude=p.amplitude * 2) for p in content.pulses[0])
+    content = replace(
+        content,
+        pulses=(content.pulses[0], later),
+        grids=content.grids * 2,
+        content_index=np.array([0, 1], dtype=np.int64),
+    )
+    batches = {3: content, 1: content}
+    populations = np.array([[[0.25, 0.75], [0.0, 1.0]]])
+    original = populations.copy()
+    before = legacy_rng_state()
+    identity = SamplingIdentity(73, (2, 3, 0))
+    first = adc.sample_traces(populations, batches, reps=100, identity=identity)
+    repeated = adc.sample_traces(populations, batches, reps=100, identity=identity)
+    np.testing.assert_array_equal(first.channels[0].iq, repeated.channels[0].iq)
+    expected = (
+        adc.ADC(content.model).responses(replace(content, include_traces=True)).traces
+    )
+    assert expected is not None
+    np.testing.assert_allclose(
+        first.channels[0].iq[100:],
+        np.broadcast_to(expected[1, :, 1], first.channels[0].iq[100:].shape),
+        atol=3e-8,
+    )
+    g = (
+        np.max(np.abs(first.channels[0].iq[:100] - expected[0, :, 0]), axis=(1, 2, 3))
+        < 3e-8
+    )
+    assert 0.1 < g.mean() < 0.4
+    empty = adc.sample_traces(
+        populations, batches, reps=0, identity=SamplingIdentity(1, (0, 0, 0))
+    )
+    assert empty.channels[0].iq.shape == (0, 2, 4, 2)
+    np.testing.assert_array_equal(populations, original)
+    after = legacy_rng_state()
+    assert before[0] == after[0]
+    np.testing.assert_array_equal(before[1], after[1])
+    assert before[2:] == after[2:]
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "negative",
+        "nan",
+        "sum",
+        "states",
+        "points",
+        "reps",
+        "unequal_reads",
+        "rates",
+        "channel",
+    ],
+)
+def test_physical_traces_reject_invalid_joint_inputs(invalid):
+    populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
+    batches = physical_batches()
+    reps = 17
+    if invalid == "negative":
+        populations[0, 0] = [-1e-12, 1 + 1e-12]
+    elif invalid == "nan":
+        populations[0, 0, 0] = np.nan
+    elif invalid == "sum":
+        populations[0, 0] = [0.3, 0.8]
+    elif invalid == "states":
+        populations = np.ones((1, 2, 1))
+    elif invalid == "points":
+        populations = populations[:, :1]
+    elif invalid == "reps":
+        reps = -1
+    elif invalid == "unequal_reads":
+        batch = batches[3]
+        grid = batch.grids[0][0]
+        batches[3] = replace(
+            batch, grids=((grid, replace(grid, times_ns=grid.times_ns[:2])),)
+        )
+    elif invalid == "rates":
+        batch = batches[3]
+        batches[3] = replace(
+            batch, model=replace(batch.model, rates_per_ns=np.array([[0, 0.1], [0, 0]]))
+        )
+    else:
+        batches[-1] = batches.pop(3)
+    with pytest.raises(
+        ValueError, match="probabilit|population|state|point|reps|sample|rates|channel"
+    ):
+        adc.sample_traces(
+            populations, batches, reps=reps, identity=SamplingIdentity(73)
+        )
+
+
+def test_physical_traces_accept_engine_trace_tolerance_without_normalizing():
+    identity = SamplingIdentity(1, (0, 0, 0))
+    rng = np.random.Generator(np.random.PCG64(np.random.SeedSequence((1, 0, 0, 0))))
+    boundary = rng.random() * (1 + 4e-7)
+    populations = np.array([[[boundary, 1 + 9e-7 - boundary], [0.4, 0.6]]])
+    original = populations.copy()
+    batches = physical_batches()
+    result = adc.sample_traces(populations, batches, reps=3, identity=identity)
+    expected = (
+        adc.ADC(batches[3].model)
+        .responses(replace(batches[3], include_traces=True))
+        .traces
+    )
+    assert expected is not None
+    # The unnormalized CDF selects g, whereas dividing by the row sum would
+    # select e. Sampling validates the solver residual but does not repair it.
+    np.testing.assert_allclose(result.channels[0].iq[0], expected[0, :, 0], atol=3e-8)
+    np.testing.assert_array_equal(populations, original)
+
+
+def test_round_draws_reproduce_without_mutating_inputs_or_global_rng():
     populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
     original = populations.copy()
     inputs = channels()
     global_state = legacy_rng_state()
     kwargs = dict(reps=17, seed=73, acquire_sequence=2, round_index=3)
-    first = sampler(populations, inputs, **kwargs)
-    second = sampler(populations, inputs, **kwargs)
-    if isinstance(first, RoundStatistics) and isinstance(second, RoundStatistics):
-        np.testing.assert_array_equal(first.state_counts, second.state_counts)
-        np.testing.assert_array_equal(first.channels[0].sums, second.channels[0].sums)
-        assert first.raw_identity == SamplingIdentity(73, (2, 3, 1))
-    elif isinstance(first, RoundSignals) and isinstance(second, RoundSignals):
-        np.testing.assert_array_equal(first.channels[0].iq, second.channels[0].iq)
-    else:
-        pytest.fail("sampler returned inconsistent result types")
+    first = adc.round_statistics(populations, inputs, **kwargs)
+    second = adc.round_statistics(populations, inputs, **kwargs)
+    np.testing.assert_array_equal(first.state_counts, second.state_counts)
+    np.testing.assert_array_equal(first.channels[0].sums, second.channels[0].sums)
+    assert first.raw_identity == SamplingIdentity(73, (2, 3, 1))
     np.testing.assert_array_equal(populations, original)
     after = legacy_rng_state()
     assert global_state[0] == after[0]
@@ -101,7 +227,6 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
     assert global_state[2:] == after[2:]
 
 
-@pytest.mark.parametrize("sampler", [adc.round_statistics, adc.sample_traces])
 @pytest.mark.parametrize(
     "invalid",
     [
@@ -116,7 +241,7 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
         "unequal_reads",
     ],
 )
-def test_round_draws_reject_invalid_joint_inputs(sampler, invalid):
+def test_round_draws_reject_invalid_joint_inputs(invalid):
     populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
     inputs = channels()
     reps, seed = 17, 73
@@ -145,29 +270,12 @@ def test_round_draws_reject_invalid_joint_inputs(sampler, invalid):
         ValueError,
         match="probabilit|population|state|point|reps|identity|channel|sample",
     ):
-        sampler(
+        adc.round_statistics(
             populations, inputs, reps=reps, seed=seed, acquire_sequence=2, round_index=3
         )
 
 
-def test_decimated_requires_traces_and_zero_reps_returns_empty_shots():
-    inputs = channels()
-    populations = np.array([[[1.0, 0.0], [0.0, 1.0]]])
-    result = adc.sample_traces(
-        populations, inputs, reps=0, seed=1, acquire_sequence=0, round_index=0
-    )
-    assert result.channels[0].iq.shape == (0, 1, 2, 2)
-    missing = replace(
-        inputs[0], conditional=replace(inputs[0].conditional, traces=None)
-    )
-    with pytest.raises(ValueError, match="traces"):
-        adc.sample_traces(
-            populations, (missing,), reps=1, seed=1, acquire_sequence=0, round_index=0
-        )
-
-
-@pytest.mark.parametrize("sampler", [adc.round_statistics, adc.sample_traces])
-def test_round_draws_accept_engine_trace_tolerance_without_mutation(sampler):
+def test_round_draws_accept_engine_trace_tolerance_without_mutation():
     def rng():
         return np.random.Generator(
             np.random.PCG64(np.random.SeedSequence((1, 0, 0, 0)))
@@ -177,9 +285,9 @@ def test_round_draws_accept_engine_trace_tolerance_without_mutation(sampler):
     boundary = rng().random() * (1 + 4e-7)
     populations = np.array([[[boundary, 1 + 9e-7 - boundary], [0.4, 0.6]]])
     original = populations.copy()
-    reps = 1_000_000_000 if sampler is adc.round_statistics else 3
+    reps = 1_000_000_000
     try:
-        result = sampler(
+        result = adc.round_statistics(
             populations,
             channels(),
             reps=reps,
@@ -189,15 +297,12 @@ def test_round_draws_accept_engine_trace_tolerance_without_mutation(sampler):
         )
     except ValueError as error:
         pytest.fail(f"in-budget engine trace residual must be accepted: {error}")
-    if isinstance(result, RoundStatistics):
-        expected = rng().multinomial(reps, populations)
-        repaired = rng().multinomial(
-            reps, populations / populations.sum(axis=-1, keepdims=True)
-        )
-        np.testing.assert_array_equal(result.state_counts, expected)
-        assert not np.array_equal(expected, repaired)
-    else:
-        np.testing.assert_array_equal(result.channels[0].iq[0, 0, 0], [1, 2])
+    expected = rng().multinomial(reps, populations)
+    repaired = rng().multinomial(
+        reps, populations / populations.sum(axis=-1, keepdims=True)
+    )
+    np.testing.assert_array_equal(result.state_counts, expected)
+    assert not np.array_equal(expected, repaired)
     np.testing.assert_array_equal(populations, original)
 
 

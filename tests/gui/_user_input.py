@@ -952,6 +952,24 @@ class ComponentDriver:
                 key_click(widget, Qt.Key.Key_Return)
         QApplication.processEvents()
 
+    def press_key(
+        self,
+        key: Qt.Key,
+        text: str | None = None,
+        *,
+        object_name: str | None = None,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ) -> None:
+        """Press a key on an interactive control found by label, caption or name.
+
+        This sends a keyboard event without forcing focus. Tab uses Qt's normal
+        focus traversal. Hidden, disabled and clipped controls are not driven.
+        """
+        widget = self._field_control(text, object_name)
+        if self._can_interact(widget):
+            key_click(widget, key, modifiers)
+        QApplication.processEvents()
+
     def select_combo(self, value: str, *, object_name: str) -> None:
         """Select an exact combo-box option using keyboard events, if usable."""
         widget = self._find(None, object_name)

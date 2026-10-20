@@ -268,7 +268,7 @@ class FieldRow:
     the input or name label and lead the row tooltip, without adding height.
     The coloured widget carries the boolean formError property.
     These controls never own or evaluate form state.
-    Typed text is written when Enter is pressed or the field loses focus,
+    Typed text is written after 500 ms idle, on Enter or ordinary focus loss,
     unless it already shows state's input; switching mode writes at once,
     and switching a computed Expression to Direct writes its computed value.
     While display is called with editable=False the row is read-only: see
@@ -624,7 +624,7 @@ class FieldRow:
         header.addWidget(widget)
         if self.field.expression and isinstance(widget, QLineEdit):
             self.mode = self._build_mode(widget)
-        # Text commits on Enter or focus loss, not per keystroke; a checkbox
+        # Shared text policy commits on idle/Enter/focus loss; a checkbox
         # commits each toggle.
         connect_committed_value_widget(widget, self._input_changed)
 

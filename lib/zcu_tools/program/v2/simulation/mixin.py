@@ -8,10 +8,12 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
-from zcu_tools.core.simulation import RoundStatistics
+from zcu_tools.core.simulation import AcquireRequest, RoundStatistics
 from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
 from zcu_tools.progress_bar import make_pbar
 
+from .result import IntegratedRound, RawShots
+from .signals import materialize_shots
 from .soc import SimulationSoc
 
 if TYPE_CHECKING:
@@ -30,7 +32,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     """
 
     _simulation_active: bool = False
-    _simulation_raw: tuple[RoundStatistics, int, int] | None = None
+    _simulation_raw: tuple[RawShots, AcquireRequest] | None = None
 
     def _acquire_configured(self, soc, *args, **kwargs) -> list[NDArray[np.float64]]:
         if not isinstance(soc, SimulationSoc):
@@ -83,6 +85,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         program.config_all(soc, load_envelopes=False, load_mem=False)
         if options.get("load_envelopes", True):
             self._validate_simulation_uploads()
+        self._prepare_statistics_averaging()
         self.rounds_pbar = make_pbar(
             total=rounds, disable=not options.get("progress", True), leave=False
         )
@@ -96,6 +99,28 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             return result
         finally:
             self._close_rounds_pbar()
+
+    def _prepare_statistics_averaging(self) -> None:
+        assert self.acquire_params is not None
+        assert self.loop_dims is not None
+        params = self.acquire_params
+        self._simulation_needs_raw = any(
+            params.get(key) is not None
+            for key in ("threshold", "ge_radius", "trackers")
+        )
+        self._simulation_normalization: list[tuple[int | None, float | None]] = []
+        for ch, ro in self._program().ro_chs.items():
+            length = None if ro["edge_counting"] else ro["length"]
+            offset = (
+                self._ro_offset(ch, ro.get("ro_config"))
+                if length is not None and params["remove_offset"]
+                else None
+            )
+            self._simulation_normalization.append((length, offset))
+        # Compact sums omit reps and end in (read, IQ). Moving reads first is
+        # a fixed transpose, independent of the values returned in each round.
+        point_ndim = len(self.loop_dims) - 1
+        self._simulation_average_axes = (point_ndim, *range(point_ndim), point_ndim + 1)
 
     def _validate_simulation_uploads(self) -> None:
         program = self._program()
@@ -138,8 +163,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             soc.cleanup_round()
             self._close_rounds_pbar()
             return False
-        if not isinstance(result, RoundStatistics):
-            raise ValueError("integrated acquisition requires RoundStatistics")
+        if not isinstance(result, IntegratedRound):
+            raise ValueError("integrated acquisition requires IntegratedRound")
         self._consume_integrated_result(soc, result)
         soc.cleanup_round()
         self.rounds_pbar.update()
@@ -160,54 +185,53 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         return self
 
     def _consume_integrated_result(
-        self, soc: SimulationSoc, result: RoundStatistics
+        self, soc: SimulationSoc, result: IntegratedRound
     ) -> None:
         assert self.acquire_params is not None
         assert self.rounds_buf is not None
         assert self.avg_level is not None
-        params = self.acquire_params
         prog = self._program()
         assert self.loop_dims is not None
         request = soc.binding.last_request
         if request is None:
             raise RuntimeError("simulation round requires installed request")
-        self._simulation_raw = (result, request.reps, request.avg_level)
-        needs_raw = any(
-            params.get(key) is not None
-            for key in ("threshold", "ge_radius", "trackers")
-        )
-        if not needs_raw:
+        self._simulation_raw = (result.raw, request)
+        if not self._simulation_needs_raw:
             self.acc_buf = None
-            self.rounds_buf.append(self._average_statistics(result, request.reps))
+            self.rounds_buf.append(
+                self._average_statistics(result.statistics, request.reps)
+            )
             return
-        raw = result.materialize_raw(request.reps, request.avg_level)
+        raw = materialize_shots(request, result.raw)
         self.acc_buf = [raw[ch] for ch in prog.ro_chs]
         self.rounds_buf.append(prog._process_accumulated(self.acc_buf))
 
     def _average_statistics(
         self, result: RoundStatistics, reps: int
     ) -> list[NDArray[np.float64]]:
-        assert self.acquire_params is not None
-        by_channel = {ch.channel: ch for ch in result.channels}
         averaged = []
-        for ch, ro in self._program().ro_chs.items():
-            avg = by_channel[ch].sums / reps
-            if not ro["edge_counting"]:
-                avg /= ro["length"]
-                if self.acquire_params["remove_offset"]:
-                    avg -= self._ro_offset(ch, ro.get("ro_config"))
-            averaged.append(np.moveaxis(avg, -2, 0))
+        # SimulationSoc has validated and detached channels in request order.
+        for ch, (length, offset) in zip(
+            result.channels, self._simulation_normalization, strict=True
+        ):
+            avg = ch.sums / reps
+            # Keep the two divisions and subtraction in their original order.
+            if length is not None:
+                avg /= length
+                if offset is not None:
+                    avg -= offset
+            averaged.append(avg.transpose(self._simulation_average_axes))
         return averaged
 
     def get_raw(self) -> list[NDArray[np.int64]] | None:
         """Return last-round int64 QICK sums, materializing compact shots once.
 
-        Deferred shots use the retained round identity, never a new backend call.
+        Deferred shots use the retained environment source, never a new backend call.
         Hardware and decimated data use QICK buffers.
         """
         if self.acc_buf is None and self._simulation_raw is not None:
-            result, reps, avg_level = self._simulation_raw
-            raw = result.materialize_raw(reps, avg_level)
+            source, request = self._simulation_raw
+            raw = materialize_shots(request, source)
             self.acc_buf = [raw[ch] for ch in self._program().ro_chs]
         return super().get_raw()
 

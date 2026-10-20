@@ -150,14 +150,8 @@ def _validate_options(params: OneToneFreqAnalyzeParams) -> None:
         params.fit_bg_phase_curvature
     ):
         raise ValueError("Background fit options must be bool")
-    if params.edelay_mode not in ("auto", "calibrated", "manual"):
-        raise ValueError(f"Invalid electrical-delay mode: {params.edelay_mode!r}")
-    if params.edelay_mode == "manual" and finite_real(params.manual_edelay) is None:
-        raise ValueError("manual_edelay must be a finite real scalar in manual mode")
-    if params.edelay_mode == "auto":
-        radius = finite_real(params.max_edelay_search_radius)
-        if radius is None or radius <= 0:
-            raise ValueError("max_edelay_search_radius must be positive and finite")
+    if params.edelay is not None and finite_real(params.edelay) is None:
+        raise ValueError("edelay must be a finite real scalar or None")
 
 
 def _resonators(
@@ -208,12 +202,8 @@ def _fit_tone(
         delay_source: Literal["global", "calibrated", "manual"] = (
             "calibrated" if prior is not None else "global"
         )
-        if params.edelay_mode == "manual":
-            seed, delay_source = finite_real(params.manual_edelay), "manual"
-        elif params.edelay_mode == "calibrated" and prior is None:
-            raise ValueError(
-                "calibrated edelay mode requires a finite route-matched resonator.ext.edelay prior"
-            )
+        if params.edelay is not None:
+            seed, delay_source = params.edelay, "manual"
         fit = fit_resonance(
             freqs,
             source.result.signals[:, column],
@@ -222,9 +212,7 @@ def _fit_tone(
                 fit_bg_amp_slope=params.fit_bg_amp_slope,
                 fit_bg_phase_curvature=params.fit_bg_phase_curvature,
                 edelay_branch_seed=seed,
-                edelay_max_search_radius=params.max_edelay_search_radius
-                if seed is None
-                else None,
+                edelay_max_search_radius=100.0 if seed is None else None,
             ),
             fig,
         )
@@ -313,7 +301,7 @@ class MuxOnetoneAdapter(
             if (
                 resonators is not None
                 and req.parameters is not None
-                and params.edelay_mode != "manual"
+                and params.edelay is None
             ):
                 tone = cfg.modules.readout.tones[index]
                 raw = req.parameters.lookup(f"{resonators[index]}.ext.edelay")
@@ -330,8 +318,10 @@ class MuxOnetoneAdapter(
         """Propose fitted frequencies without changing inactive or failed tones.
 
         req supplies the saved run and its analysis. Return a full readout module
-        for $mux.readout.readout_rf and separate resonator calibration rows when
-        bindings are available. All-failed fits return no proposals; missing or
+        for $mux.readout.readout_rf, a following readout slot row when capture
+        is available, and separate resonator calibration rows when bindings are
+        available. The slot points to the captured module root; alias and source
+        failures propagate. All-failed fits return no proposals; missing or
         inconsistent saved cfg raises. Proposals do not write until Apply.
         """
         # 1. Only successful fits can propose changes.
@@ -371,6 +361,17 @@ class MuxOnetoneAdapter(
                 role_id="readout",
             )
         ]
+
+        if req.ctx.parameters is not None:
+            items.append(
+                ParameterWriteback(
+                    target_name="$mux.module.readout",
+                    description="Select fitted mux readout for downstream experiments",
+                    proposed_value=req.ctx.parameters.resolve_path(
+                        "$mux.readout.readout_rf"
+                    ),
+                )
+            )
 
         # 3. Map scalar calibrations by original tone index to captured resonators.
         if answer.resonators is not None:

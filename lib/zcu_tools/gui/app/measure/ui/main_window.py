@@ -250,6 +250,9 @@ class MainWindow(QMainWindow):
         """Project Local write availability to this window and all mounted views."""
         self._writable = writable
         self._toolbar.set_writable(writable=writable)
+        self._dialog_registry.set_running(
+            running=self._ctrl.get_running_tab_id() is not None
+        )
         self._dialog_registry.set_writable(writable=writable)
         self._tabs.setTabsClosable(writable)
         self._tabs.setMovable(writable)
@@ -472,6 +475,7 @@ class MainWindow(QMainWindow):
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
+        self._dialog_registry.set_running(running=running_tab_id is not None)
         self._refresh_tab_activity_markers(running_tab_id)
         self._toolbar.set_new_tab_enabled(enabled=True)
         for tab_id, tab_w in self._tab_widgets.items():
@@ -1055,11 +1059,15 @@ class MainWindow(QMainWindow):
         """
         if not self._writable and name not in (
             DialogName.SETUP,
+            DialogName.SOC,
             DialogName.INSPECT,
             DialogName.DEVICE,
             DialogName.ARB_WAVEFORM,
         ):
             return
+        self._dialog_registry.set_running(
+            running=self._ctrl.get_running_tab_id() is not None
+        )
         self._dialog_registry.open(name, writable=self._writable)
 
     def close_dialog(self, name: DialogName) -> None:

@@ -123,6 +123,17 @@ class RWACoefficients(NamedTuple):
     diagonal: NDArray[np.float64]
 
 
+class _DensitySupport(NamedTuple):
+    # Row-major density coordinates, inverse lookup and Hamiltonian CSR graph.
+    # Every population is present. Cross-component rectangles are present iff
+    # either input rectangle contains an exactly nonzero entry.
+    coordinates: NDArray[np.int64]
+    lookup: NDArray[np.int64]
+    offsets: NDArray[np.int64]
+    neighbors: NDArray[np.int64]
+    edges: NDArray[np.int64]
+
+
 class _Context(NamedTuple):
     models: Models
     segments: Segments
@@ -131,6 +142,7 @@ class _Context(NamedTuple):
     diagonal: NDArray[np.float64]
     row: int
     model: int
+    support: _DensitySupport
 
 
 @dataclass(frozen=True)
@@ -428,7 +440,7 @@ def _coefficients(models, ports, frequencies, tones, retained=None):
 
 
 @njit(nogil=True, cache=True)
-def interaction_hamiltonian(time, energies, coefficients, amplitudes):
+def interaction_hamiltonian(time, energies, coefficients, amplitudes, edges=None):
     """Assemble the joint RWA interaction Hamiltonian, in GHz.
 
     time is row-local ns. energies is the static interaction-picture diagonal,
@@ -437,6 +449,9 @@ def interaction_hamiltonian(time, energies, coefficients, amplitudes):
     phase-independent diagonal terms. amplitudes contains gain*envelope*phase
     for every active tone. Diagonal terms come from the coefficient record;
     the gate cache must not assemble its own RHS or add a separate shift.
+    edges optionally lists all nonzero Fourier coordinates as (count,2) int64;
+    ordinary RWA uses this exact sparsity, while other consumers default to the
+    full matrix. Diagonal virtual shifts are always assembled for every state.
     Returns a new Hermitian matrix; input arrays remain unchanged. Restoring
     the static picture at endpoints remains the integrator's responsibility.
     """
@@ -445,25 +460,87 @@ def interaction_hamiltonian(time, energies, coefficients, amplitudes):
     phases = np.exp(2j * np.pi * energies * time)
     for tone in range(len(amplitudes)):
         z = amplitudes[tone]
-        for i in range(size):
-            for j in range(size):
-                h[i, j] += (
-                    (
-                        coefficients.positive[tone, i, j] * z
-                        + coefficients.negative[tone, i, j] * z.conjugate()
-                    )
-                    * phases[i]
-                    * phases[j].conjugate()
+        count = size * size if edges is None else len(edges)
+        for edge in range(count):
+            if edges is None:
+                i, j = edge // size, edge % size
+            else:
+                i, j = edges[edge, 0], edges[edge, 1]
+            h[i, j] += (
+                (
+                    coefficients.positive[tone, i, j] * z
+                    + coefficients.negative[tone, i, j] * z.conjugate()
                 )
+                * phases[i]
+                * phases[j].conjugate()
+            )
+        for i in range(size):
             h[i, i] += coefficients.diagonal[tone, i] * abs(z) ** 2
     return h
 
 
 @njit(nogil=True, cache=True)
+def _retained_graph(positive, negative):
+    """Return exact Fourier adjacency (with diagonals) and its components."""
+    size = positive.shape[1]
+    adjacency = np.eye(size, dtype=np.bool_)
+    for tone in range(len(positive)):
+        for i in range(size):
+            for j in range(size):
+                if positive[tone, i, j] != 0 or negative[tone, i, j] != 0:
+                    adjacency[i, j] = adjacency[j, i] = True
+    connected = adjacency.copy()
+    for k in range(size):
+        for i in range(size):
+            for j in range(size):
+                connected[i, j] |= connected[i, k] and connected[k, j]
+    return adjacency, connected
+
+
+@njit(nogil=True, cache=True)
+def _density_support(positive, negative, rho):
+    """Close exact input support under the retained graph, never under the bath.
+
+    The secular bath transfers only populations, all of which are retained.
+    Hamiltonian components can create every within-component coherence. A
+    nonzero cross-component rectangle evolves homogeneously and must be kept
+    in full, including its reverse for the Hermitian commutator calculation.
+    No amplitude threshold removes small coefficients or input coherences.
+    """
+    size = len(rho)
+    adjacency, connected = _retained_graph(positive, negative)
+    active = connected.copy()
+    for i in range(size):
+        for j in range(size):
+            if rho[i, j] != 0:
+                for a in range(size):
+                    for b in range(size):
+                        if connected[a, i] and connected[b, j]:
+                            active[a, b] = active[b, a] = True
+    coordinates = np.empty((int(np.sum(active)), 2), dtype=np.int64)
+    edges = np.empty((int(np.sum(adjacency)), 2), dtype=np.int64)
+    lookup = np.full((size, size), -1, dtype=np.int64)
+    offsets = np.zeros(size + 1, dtype=np.int64)
+    neighbors = np.empty(len(edges), dtype=np.int64)
+    count, edge = 0, 0
+    for i in range(size):
+        for j in range(size):
+            if active[i, j]:
+                coordinates[count, 0], coordinates[count, 1] = i, j
+                lookup[i, j] = count
+                count += 1
+            if adjacency[i, j]:
+                edges[edge, 0], edges[edge, 1] = i, j
+                neighbors[edge] = j
+                edge += 1
+        offsets[i + 1] = edge
+    return _DensitySupport(coordinates, lookup, offsets, neighbors, edges)
+
+
+@njit(nogil=True, cache=True)
 def _rhs(time, state, context):
-    models, segments, positive, negative, diagonal, row, model = context
+    models, segments, positive, negative, diagonal, row, model, support = context
     size = models.energies.shape[1]
-    rho = state.reshape(size, size)
     amplitudes = np.empty(segments.tones[row], dtype=np.complex128)
     for tone in range(segments.tones[row]):
         env = segments.envelope[row, tone]
@@ -482,18 +559,30 @@ def _rhs(time, state, context):
         models.energies[model],
         RWACoefficients(positive[model], negative[model], diagonal[model]),
         amplitudes,
+        support.edges,
     )
-    product = h @ rho
-    derivative = np.empty_like(rho)
+    product = np.zeros_like(state)
+    for entry in range(len(state)):
+        i, j = support.coordinates[entry]
+        for edge in range(support.offsets[i], support.offsets[i + 1]):
+            k = support.neighbors[edge]
+            product[entry] += h[i, k] * state[support.lookup[k, j]]
+    derivative = np.empty_like(state)
+    for entry in range(len(state)):
+        i, j = support.coordinates[entry]
+        reverse = support.lookup[j, i]
+        derivative[entry] = (
+            -2j * np.pi * (product[entry] - product[reverse].conjugate())
+            - models.decay[model, i, j] * state[entry]
+        )
+    # Bath edges need not belong to the Hamiltonian graph. In particular an
+    # isolated excited population must still feed a driven lower component.
     for i in range(size):
         for j in range(size):
-            derivative[i, j] = (
-                -2j * np.pi * (product[i, j] - product[j, i].conjugate())
-                - models.decay[model, i, j] * rho[i, j]
+            derivative[support.lookup[i, i]] += (
+                models.rates[model, i, j] * state[support.lookup[j, j]]
             )
-        for j in range(size):
-            derivative[i, i] += models.rates[model, i, j] * rho[j, j]
-    return derivative.ravel()
+    return derivative
 
 
 @njit(nogil=True, cache=True)
@@ -502,7 +591,14 @@ def _run(data, row_models, states, controls):
     rows, indices = row_models
     for index in range(len(rows)):
         row, model = rows[index], indices[index]
-        context = _Context(models, segments, positive, negative, diagonal, row, model)
+        support = _density_support(positive[model], negative[model], states[index])
+        context = _Context(
+            models, segments, positive, negative, diagonal, row, model, support
+        )
+        initial = np.empty(len(support.coordinates), dtype=np.complex128)
+        for entry in range(len(initial)):
+            i, j = support.coordinates[entry]
+            initial[entry] = states[index, i, j]
         constant = segments.tones[row] == 2
         for tone in range(segments.tones[row]):
             env = segments.envelope[row, tone]
@@ -512,20 +608,25 @@ def _run(data, row_models, states, controls):
             )
         ceiling = _CONSTANT_STEP_NS if constant else _STEP_NS
         row_controls = Tolerances(
-            controls.rtol, controls.atol, min(controls.max_step, ceiling)
+            controls.rtol,
+            controls.atol,
+            min(controls.max_step, ceiling),
+            controls.phase_budget,
+            states.shape[1] ** 2,
         )
         result = integrate(
             _rhs,
             context,
-            states[index].copy().ravel(),
+            initial,
             float(segments.duration[row]),
             row_controls,
             0.1,
-        ).reshape(states.shape[1:])
+        )
         phases = np.exp(-2j * np.pi * models.energies[model] * segments.duration[row])
-        for i in range(len(phases)):
-            for j in range(len(phases)):
-                states[index, i, j] = result[i, j] * phases[i] * phases[j].conjugate()
+        states[index] = 0
+        for entry in range(len(result)):
+            i, j = support.coordinates[entry]
+            states[index, i, j] = result[entry] * phases[i] * phases[j].conjugate()
 
 
 def _smooth(table: SegmentTable, envelope: int, context: KernelContext) -> bool:
@@ -1199,8 +1300,14 @@ class MultitoneRWAKernel:
     ) -> NDArray[np.bool_]:
         """Advance independent rows in place and return an all-False exceedance mask.
 
-        Every row starts in its joint eigenbasis, integrates all retained tones
-        and envelope-squared omitted-edge shifts through interaction_hamiltonian
+        Every row starts in its joint eigenbasis. Exact Fourier union components
+        retain all populations and within-component coherences. Cross-component
+        rectangles are skipped only when both input rectangles are exactly zero;
+        arbitrary nonzero residuals retain the complete rectangle. The full bath
+        transfers populations across components. The compressed integrator keeps
+        the dense M² error-norm denominator, so removing zeros does not change
+        adaptive controls. It integrates all retained tones and envelope-squared
+        omitted-edge shifts through interaction_hamiltonian
         in a row-local interaction picture, then restores Schrödinger coordinates.
         theta is the phase at row start; offsets preserve pulse-local envelopes.
         Adaptive integration uses the ordinary budget tolerance and 0.1 ns seed,

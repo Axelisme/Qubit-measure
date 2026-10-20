@@ -3,13 +3,13 @@
 from zcu_tools.cfg_model import Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.onetone._shared import initial_ro_length
+from zcu_lab.v2.onetone._shared import initial_readout_timing
 from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg
 
 
 def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
     """Build starting values and shape from the captured source availability."""
-    del ctx
+    timing = initial_readout_timing(ctx)
     return Form(
         PowerDepCfg,
         tree={
@@ -22,7 +22,7 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                     set={
                         "freq": Hidden(0.0),
                         "gain": Hidden(0.0),
-                        "ro_length": initial_ro_length(),
+                        **timing,
                     },
                 ),
             },

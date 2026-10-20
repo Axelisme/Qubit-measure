@@ -42,8 +42,8 @@ def test_white_noise_integrated_round_is_compact_and_decimated_remains_signals()
         ReadoutWindow,
         RoundRequest,
         RoundSignals,
-        RoundStatistics,
     )
+    from zcu_tools.program.v2.simulation import IntegratedRound
 
     env = white_noise(std_adc=3, seed=17)
     try:
@@ -57,10 +57,11 @@ def test_white_noise_integrated_round_is_compact_and_decimated_remains_signals()
             sequence=0,
             rng_version=env.soc.binding.rng_version,
         )
-        result = env.soc.binding.execute(
+        delivery = env.soc.binding.execute(
             RoundRequest(request, env.soc.binding.capture_snapshot(), 0)
         )
-        assert isinstance(result, RoundStatistics)
+        assert isinstance(delivery, IntegratedRound)
+        result = delivery.statistics
         np.testing.assert_array_equal(result.state_counts, [100])
         assert result.channels[0].sums.shape == (1, 2)
         np.testing.assert_array_equal(result.channels[0].conditional_sums, 0)

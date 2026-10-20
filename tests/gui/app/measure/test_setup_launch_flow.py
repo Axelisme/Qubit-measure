@@ -66,12 +66,12 @@ def test_setup_survives_screenshot_and_toolbar(
         assert not app.controller.has_project()
         assert not app.controller.has_soc()
 
-        connect = _button(dialog, "Connect")
+        open_entry = _button(dialog, "Open")
         dialog.activateWindow()
-        connect.setFocus()
+        open_entry.setFocus()
         qapp.processEvents()
         before = (QApplication.activeWindow(), QApplication.focusWidget())
-        assert before[1] is connect
+        assert before[1] is open_entry
 
         shot = Path(
             app.invoke(
@@ -113,7 +113,7 @@ def test_startup_setup_allows_owner_connect_and_tracks_control(qapp, tmp_path):
         assert "agent-entry" in _field_texts(setup)
         app.invoke("rpc_call", {"method": "control.release"})
         assert _button(setup, "New entry…").isEnabled()
-        assert _button(setup, "Connect").isEnabled()
+        assert _button(setup, "Open").isEnabled()
 
 
 @pytest.mark.uses_wall_clock

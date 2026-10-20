@@ -186,33 +186,34 @@ class PredictorDialog(QDialog):
         # Matrix curves are an optional model capability, learned from the built model.
         self._matrix_supported = True
 
-        # Root layout: left controls | right tab widget.
+        # Root layout: left curve tabs | right controls column, so Close sits at
+        # the dialog's right edge like the other dialogs.
         root_layout = QHBoxLayout(self)
 
-        # ── Left: controls column ─────────────────────────────────────────
-        left_widget = QWidget()
-        left_widget.setMinimumWidth(480)
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        # ── Right: controls column ────────────────────────────────────────
+        controls_widget = QWidget()
+        controls_widget.setMinimumWidth(480)
+        controls_layout = QVBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
 
-        left_layout.addWidget(self._build_model_group())
+        controls_layout.addWidget(self._build_model_group())
 
-        left_layout.addWidget(self._build_transition_group(), stretch=1)
+        controls_layout.addWidget(self._build_transition_group(), stretch=1)
 
-        left_layout.addWidget(self._build_calibration_group())
+        controls_layout.addWidget(self._build_calibration_group())
 
         # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
         make_label_selectable(self._status_label)
         self._status_label.setObjectName("predictor_status")
-        left_layout.addWidget(self._status_label)
+        controls_layout.addWidget(self._status_label)
 
-        left_layout.addLayout(self._build_transition_actions())
+        controls_layout.addLayout(self._build_transition_actions())
 
         self._build_curve_tabs()
 
-        root_layout.addWidget(left_widget, stretch=0)
         root_layout.addWidget(self._tab_widget, stretch=1)
+        root_layout.addWidget(controls_widget, stretch=0)
 
         self._initialize_trial(params)
 
@@ -433,7 +434,7 @@ class PredictorDialog(QDialog):
         return action_row
 
     def _build_curve_tabs(self) -> None:
-        # ── Right: QTabWidget with three canvases ─────────────────────────
+        # ── Left: QTabWidget with three canvases ──────────────────────────
         # Frequency, |n|, |phi|. All three share one marker value and one set of
         # follow/lock callbacks, so a click-follow on any tab drives the others.
         # Each tab owns a native Matplotlib toolbar; x-ranges stay synced across
