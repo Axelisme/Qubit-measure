@@ -4,27 +4,34 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
+# All tuple arrays are borrowed inputs; read-only arrays are accepted.
 FrameData = tuple[
-    NDArray[np.float64],
-    NDArray[np.complex128],
-    NDArray[np.complex128],
-    NDArray[np.complex128],
+    NDArray[np.float64],  # energies (M,) in GHz.
+    NDArray[np.complex128],  # bath (M²,M²) per ns.
+    NDArray[np.complex128],  # probe x (ports,M,M) in GHz per gain.
+    NDArray[np.complex128],  # probe y (ports,M,M) in GHz per gain.
 ]
-Bounds = tuple[bool, NDArray[np.float64], float, float, float]
+Bounds = tuple[
+    bool,  # valid: whether the frame is valid.
+    NDArray[np.float64],  # omitted drive norms (ports,) in GHz per gain.
+    float,  # bath omitted norm per ns.
+    float,  # convergence: max zero-mode residual (bath per ns, drive GHz/gain).
+    float,  # frame error, dimensionless.
+]
 ModalData = tuple[
-    NDArray[np.complex128],
-    NDArray[np.complex128],
-    NDArray[np.complex128],
-    NDArray[np.complex128],
-    NDArray[np.float64],
-    NDArray[np.complex128],
+    NDArray[np.complex128],  # lam (M²,) modal eigenvalues per ns.
+    NDArray[np.complex128],  # modes (M²,M²), dimensionless.
+    NDArray[np.complex128],  # inverse (M²,M²) of modes, dimensionless.
+    NDArray[np.complex128],  # rotation Fourier coefficients (K,M,M), dimensionless.
+    NDArray[np.float64],  # harmonic (K,) integer-valued float64 indices.
+    NDArray[np.complex128],  # couplings (ports,2,M²,M²) per ns/gain; sign axis -1,+1.
 ]
 PeriodicData = tuple[
-    NDArray[np.complex128],
-    NDArray[np.complex128],
-    NDArray[np.complex128],
-    NDArray[np.complex128],
-    NDArray[np.float64],
+    NDArray[np.complex128],  # base (M²,M²) Liouvillian per ns.
+    NDArray[np.complex128],  # probe x (ports,M²,M²) Liouvillians per ns per gain.
+    NDArray[np.complex128],  # probe y (ports,M²,M²) Liouvillians per ns per gain.
+    NDArray[np.complex128],  # rotation Fourier coefficients (K,M,M), dimensionless.
+    NDArray[np.float64],  # harmonic (K,) integer-valued float64 indices.
 ]
 
 
