@@ -24,6 +24,8 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
                     "res_probe",
                     bindings={"resonator": "$resonator"},
                     set={
+                        # Run supplies the resonator-frequency sweep.
+                        "freq": Hidden(0.0),
                         "gain": 0.015,
                         "waveform.length": Expr(
                             f"1.5 + {5.1 / (2 * pi)} / $resonator.kappa"
@@ -34,6 +36,8 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
                     "qub_probe",
                     bindings={"qubit": "$qubit"},
                     set={
+                        # Run supplies the qubit-frequency sweep.
+                        "freq": Hidden(0.0),
                         "gain": 0.01,
                         "waveform.length": 1.5,
                         "pre_delay": Expr(f"{5.0 / (2 * pi)} / $resonator.kappa"),
