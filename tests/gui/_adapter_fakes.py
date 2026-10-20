@@ -60,6 +60,7 @@ class DummyAdapter:
 
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
     experiment_tag: ClassVar[str | None] = None
+    sample_device_alias: ClassVar[str | None] = None
     exp_cls = DummyExp
 
     @staticmethod

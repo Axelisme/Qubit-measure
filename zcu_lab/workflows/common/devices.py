@@ -2,8 +2,9 @@
 
 from collections.abc import Generator
 
-from zcu_tools.experiment.utils import check_flux_unit
 from zcu_tools.experiment.workflows import Effect, WorkflowEnv
+
+from zcu_lab.v2._support.device import check_flux_unit
 
 
 def set_flux[C](

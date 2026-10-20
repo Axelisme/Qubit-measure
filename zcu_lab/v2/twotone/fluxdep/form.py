@@ -14,10 +14,10 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
                 "init_pulse": Hidden(),
-                "qub_pulse": Template("qub_probe"),
+                "qub_pulse": Template("qub_probe", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "flux_dev": AliasName("flux_dev"),
             "flux_unit": "A",

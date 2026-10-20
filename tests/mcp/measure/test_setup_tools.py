@@ -605,12 +605,11 @@ def setup_calls(client: MeasureClient) -> list[dict[str, Any]]:
     ]
 
 
-@pytest.mark.parametrize("mode", ["current", "voltage"])
-def test_device_setup_yoko_value_requires_patch_unit_before_rpc(
-    complete_setup_client, mode
-):
+@pytest.mark.parametrize("kind", ["current", "voltage", "fake"])
+def test_device_setup_value_requires_patch_unit_before_rpc(complete_setup_client, kind):
     client, gui = complete_setup_client
-    set_yoko(gui, mode)
+    if kind != "fake":
+        set_yoko(gui, kind)
     before = deepcopy(gui.device)
     result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 0.001}})
     assert result.is_error
@@ -715,6 +714,24 @@ def test_device_setup_retains_native_validation_rejection(
     ]
 
 
+def test_device_setup_unitless_info_allows_value_patch(complete_setup_client):
+    client, gui = complete_setup_client
+    info = {"type": "SyntheticScalar", "address": "", "value": 0.25}
+    gui.device = {
+        "name": "fake_flux",
+        "type_name": "SyntheticScalar",
+        "status": "connected",
+        "unit": "none",
+        "info": info,
+        "fields": [{"name": "value", "settable": True, "type": "float"}],
+    }
+    candidate = {**info, "value": 1}
+    result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 1}})
+    assert not result.is_error
+    assert result.data["after"]["device"]["info"] == candidate
+    assert setup_calls(client) == [{"name": "fake_flux", "cfg": candidate}]
+
+
 @pytest.mark.parametrize("kind", ["rf-valid"])
 def test_device_setup_nonflux_cfg_uses_native_rpc_contract(complete_setup_client, kind):
     client, gui = complete_setup_client
@@ -746,7 +763,10 @@ def test_device_setup_reports_native_terminal_outcome_and_snapshots(
     if outcome != "finished":
         native["error"] = {"reason": "driver_outcome", "message": "partial ramp"}
     client.transport.replies["operation.await"] = {"ok": True, "result": native}
-    result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 1}})
+    result = client.call(
+        "device_setup",
+        {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
+    )
     assert result.data["status"] == outcome
     assert result.is_error == (outcome != "finished")
     assert result.data["operation"]["status"] == outcome
@@ -768,7 +788,10 @@ def test_device_setup_timeout_retains_handle_without_cancellation(
         tools_operation, "time", SimpleNamespace(monotonic=lambda: 100.0)
     )
     gui.wait_reason = "timeout"
-    result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 1}})
+    result = client.call(
+        "device_setup",
+        {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
+    )
     assert not result.is_error
     assert result.data["status"] == "running"
     assert result.data["op"] is not None

@@ -831,6 +831,14 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError("GUI hardware has already closed")
         self._dev_svc.register_device(name, driver)
 
+    def placeholder_defaults(self) -> dict[str, str]:
+        """Capture detached template defaults from this session on the owner thread.
+
+        Empty until a startup script registers defaults. Later registration does
+        not change the returned mapping. This query does not load or save files.
+        """
+        return self._services.startup_context.placeholders.current()
+
     def start_startup(self, path: Path) -> int:
         """Run trusted path's startup(ctx) off-owner after the Qt loop starts.
 
@@ -1103,6 +1111,7 @@ class Controller(SessionControllerMixin):
             Template(template_id),
             self._registry.templates,
             arb_names=self._arb_waveform_svc.list_data_keys(),
+            placeholders=self.placeholder_defaults(),
         )
         self.apply_library_change(parameters, entry.put(name))
 

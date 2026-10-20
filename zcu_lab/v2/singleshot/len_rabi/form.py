@@ -19,7 +19,7 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
                 "qub_pulse": qub_pulse,
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {"length": Range.between(0.03, length_stop, expts=51)},
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),

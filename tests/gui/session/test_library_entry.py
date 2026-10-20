@@ -277,6 +277,17 @@ def test_opening_an_unknown_entry_is_rejected(session: LibrarySession) -> None:
         open_library_entry(capture, "module", "Q1.pulses.missing", arb_names=())
 
 
+def test_library_family_accepts_subclasses_of_persistent_specs() -> None:
+    class CustomPulse(PulseSpec):
+        pass
+
+    class CustomWaveform(ConstWaveformCfg):
+        pass
+
+    assert library_entry_kind(CustomPulse) == "module"
+    assert library_entry_kind(CustomWaveform) == "waveform"
+
+
 def test_new_mux_kind_requires_tones_and_saves_labels(session: LibrarySession) -> None:
     try:
         kind = library_entry_kind(MuxReadoutSpec)

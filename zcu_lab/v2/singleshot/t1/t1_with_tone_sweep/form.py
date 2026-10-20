@@ -18,11 +18,13 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "pi_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse"),
-                "probe_pulse": Template("res_probe"),
+                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                "probe_pulse": Template(
+                    "res_probe", bindings={"resonator": "$resonator"}
+                ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "length": Range.between(0.0, sweep_stop, expts=51),
@@ -52,11 +54,13 @@ def make_form_freq(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "pi_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse"),
-                "probe_pulse": Template("res_probe"),
+                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                "probe_pulse": Template(
+                    "res_probe", bindings={"resonator": "$resonator"}
+                ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "length": Range.between(0.0, sweep_stop, expts=51),

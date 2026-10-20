@@ -14,7 +14,7 @@ def make_form(ctx: FormContext) -> Form[OneToneFluxCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "readout": Template("readout"),
+                "readout": Template("readout", bindings={"resonator": "$resonator"}),
             },
             "jpa_flux_dev": AliasName("flux_dev"),
             "flux_unit": "A",

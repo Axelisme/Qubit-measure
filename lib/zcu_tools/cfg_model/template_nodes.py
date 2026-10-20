@@ -29,9 +29,10 @@ class Template:
     """Request a fresh inline module from an injected template catalog.
 
     ``id`` names a TemplateDef in that catalog. ``set`` maps dotted paths relative
-    to the module root to initial literal, Expr or Slot seeds. ``qubit`` and
-    ``resonator`` bind component placeholders to authored paths, defaulting to
-    primary aliases.
+    to the module root to initial literal, Expr or Slot seeds. ``bindings`` maps
+    plain placeholder names to authored replacement text. Explicit bindings
+    override captured registry defaults and may use unregistered names; omitted
+    bindings are empty.
 
     Construction detaches the mappings. Consumers validate the ID, module family,
     path compatibility and placeholder syntax; this node does not read sources.
@@ -39,11 +40,11 @@ class Template:
 
     id: str
     set: Mapping[str, TemplateSeed] = field(default_factory=dict)
-    qubit: str = "$qubit"
-    resonator: str = "$resonator"
+    bindings: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "set", MappingProxyType(dict(self.set)))
+        object.__setattr__(self, "bindings", MappingProxyType(dict(self.bindings)))
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,6 +13,10 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 
 `ContextService.apply_writeback` 是底層 accept 入口，先驗 captured SavedPoint 的 entry、point label、存在性與文件，再綁定資源交共用 executor。Executor 先 append accepted event，再沿項目順序呼叫 setters。Parameter／library setter 要求目前已有選取的 point，sample-only 不要求 selection，直接追加 entry JSONL 並記 captured point label。直接呼叫底層入口時，未選 point 的 parameter／library 項目可在 append 後失敗；成功前綴與 accepted event 保留，首錯停止，不 rollback 或 retry。Application 的 `GuardService.check_writeback` 才在未選工作點時以 no_context 提前拒絕，提示先選或建立工作點。同 entry 現選 B 只允許開始命令，不把 captured SavedPoint(E, A) 改成 B；跨 entry 在 append 前拒絕。入口不寫記憶體、不自動建點。成功前綴依每項實際提交發布。樣本 preview／receipt 經 sample owner 讀 entry JSONL，不維護另一份樣本或延後 flush。
 
+`SessionServices.placeholders` 是 session 專屬的 `PlaceholderRegistry`，初始為空。
+Host 在建立 FormEnv 或 Library 新表單時取 detached defaults，既有 capture 不跟隨登錄變化。
+Measure 的 startup facet 提供登錄與讀取；session 不保存或恢復這些 defaults，腳本自行決定。
+
 ## Context、session environment 與 Run snapshot
 
 - **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
