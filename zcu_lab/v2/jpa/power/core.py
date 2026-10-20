@@ -19,7 +19,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import set_rf_power
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -36,6 +35,8 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
+
+from zcu_lab.v2._support.device import set_rf_power
 
 
 @dataclass(frozen=True)

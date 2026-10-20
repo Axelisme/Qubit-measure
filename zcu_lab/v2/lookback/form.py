@@ -82,6 +82,7 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
                 "init_pulse": Hidden(),
                 "readout": Template(
                     "readout",
+                    bindings={"resonator": "$resonator"},
                     set={
                         "gain": 1.0,
                         "freq": _initial_frequency(ctx),

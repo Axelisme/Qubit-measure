@@ -15,10 +15,12 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
                 "init_pulse": Slot("$qubit.module.x180"),
-                "probe_pulse": Template("res_probe"),
+                "probe_pulse": Template(
+                    "res_probe", bindings={"resonator": "$resonator"}
+                ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {"gain": Range.between(0.0, 1.0, expts=151)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

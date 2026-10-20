@@ -225,6 +225,9 @@ class FormEnv:
     host device names to captured detached BaseDeviceInfo snapshots, including
     custom driver infos, or is empty when unused. Shared tools read only the
     names; a form that needs driver-specific fields narrows with isinstance.
+    placeholders maps plain placeholder names to detached default bindings from
+    the host's registry at capture time; empty means no defaults. Later registry
+    changes must not alter this capture. Explicit Template bindings override it.
     The frozen shell does not make these borrowed objects deeply immutable.
     Tools never mutate, load, refresh or poll them. A used missing capability
     fails with its field path, rather than being treated as an unfilled value.
@@ -233,6 +236,7 @@ class FormEnv:
     parameters: ParameterContext | None = None
     library: LibrarySnapshot | None = None
     devices: Mapping[str, BaseDeviceInfo] = field(default_factory=dict)
+    placeholders: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -22,7 +22,7 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
             "name": name,
             "drive": Slot(f"{name}.module.x180")
             if ctx.has(f"{name}.module.x180")
-            else Template("pi_pulse", qubit=name),
+            else Template("pi_pulse", bindings={"qubit": name}),
         }
         for name in names
     ]

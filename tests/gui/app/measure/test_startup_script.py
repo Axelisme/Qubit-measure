@@ -110,6 +110,40 @@ def run_script(ctrl: Controller, path: Path) -> None:
     assert outcome is not None and outcome.status == "finished", outcome
 
 
+def test_placeholder_facet_restores_script_session_and_saves_live_defaults(
+    startup_app, tmp_path
+):
+    behavior, assembly, ctrl, _window, probe = startup_app
+    session_path = tmp_path / "synthetic-session.json"
+    session_path.write_text(
+        '{"drive": "$source", "sensor": "$detector"}', encoding="utf-8"
+    )
+    path = write_script(
+        tmp_path,
+        "    import json\n"
+        f"    from pathlib import Path\n    path = Path({str(session_path)!r})\n"
+        "    assert hasattr(ctx, 'placeholders'), 'startup requires placeholder facet'\n"
+        "    assert ctx.placeholders.current() == {}\n"
+        "    for name, binding in json.loads(path.read_text()).items():\n"
+        "        ctx.placeholders.register(name, binding)\n"
+        "    assert ctx.placeholders.current() == {'drive': '$source', 'sensor': '$detector'}\n"
+        "    def closing():\n"
+        "        ctx.placeholders.register('sensor', '$later')\n"
+        "        path.write_text(json.dumps(ctx.placeholders.current()))\n"
+        "        p.calls.append('placeholders-saved')\n"
+        "    ctx.on_close(closing)\n",
+    )
+    run_script(ctrl, path)
+    behavior.close(assembly)
+    import json
+
+    assert json.loads(session_path.read_text()) == {
+        "drive": "$source",
+        "sensor": "$later",
+    }
+    assert probe.calls == ["placeholders-saved"]
+
+
 def test_script_selection_uses_only_default_custom_or_clean(tmp_path):
     default = tmp_path / "default.py"
     custom = tmp_path / "custom.py"

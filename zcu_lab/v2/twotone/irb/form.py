@@ -17,13 +17,13 @@ def make_form(ctx: FormContext) -> Form[IRBCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "X90_pulse": Slot("$qubit.module.x90")
                 if ctx.has("$qubit.module.x90")
-                else Template("pi2_pulse"),
+                else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
                 "X180_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse"),
+                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
                 "I_pulse": Hidden(),
             },
             "depths": LogPoints(max=128, points=9),

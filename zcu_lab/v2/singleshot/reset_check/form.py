@@ -16,13 +16,13 @@ def make_form(ctx: FormContext) -> Form[ResetCheckCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "rabi_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse"),
+                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
                 "tested_reset": Slot("$qubit.module.reset")
                 if ctx.has("$qubit.module.reset")
-                else Template("reset"),
+                else Template("reset", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "gain": Range.between(0.0, "4.0 * $qubit.module.x180.gain", expts=51)

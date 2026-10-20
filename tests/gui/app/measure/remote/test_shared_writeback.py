@@ -148,6 +148,7 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
         experiment_name="test/t1",
         run_id="run-fixed",
         device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
+        sample_device_alias="$flux_dev",
     )
     entry.new_point("b")
     context.use_point(PointUseRequest("b"))
@@ -223,6 +224,7 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
         experiment_name="test/t1",
         run_id="run-fixed",
         device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
+        sample_device_alias="$flux_dev",
     )
     context.set_alias_rows((AliasRow("flux_dev", "later_device"),))
     entry.new_point("b")
@@ -317,6 +319,7 @@ def test_sample_omission_reason_is_projected_without_a_sample(
         experiment_name="test/freq",
         run_id="run-fixed",
         device_snapshot=snapshot,
+        sample_device_alias="$flux_dev",
     )
     assert draft.items == ()
     preview = dispatch_handler(

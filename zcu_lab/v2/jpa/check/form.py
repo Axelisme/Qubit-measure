@@ -14,7 +14,7 @@ def make_form(ctx: FormContext) -> Form[CheckCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "readout": Template("readout"),
+                "readout": Template("readout", bindings={"resonator": "$resonator"}),
             },
             "jpa_rf_dev": AliasName("jpa_rf_dev"),
             "sweep": {

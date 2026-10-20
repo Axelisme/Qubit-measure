@@ -22,7 +22,7 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
             "name": name,
             "drive": Slot(f"{name}.module.x90")
             if ctx.has(f"{name}.module.x90")
-            else Template("pi2_pulse", qubit=name),
+            else Template("pi2_pulse", bindings={"qubit": name}),
             "detune": 0.0,
         }
         for name in names

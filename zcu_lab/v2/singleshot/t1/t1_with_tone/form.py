@@ -19,11 +19,13 @@ def make_form(ctx: FormContext) -> Form[T1WithToneCfg]:
                 "init_pulse": Slot("$qubit.module.x180"),
                 "pi_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse"),
-                "probe_pulse": Template("res_probe"),
+                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                "probe_pulse": Template(
+                    "res_probe", bindings={"resonator": "$resonator"}
+                ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {"length": Range.between(0.0, sweep_stop, expts=101)},
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
