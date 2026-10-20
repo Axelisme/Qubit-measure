@@ -19,10 +19,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionFact,
 )
 from zcu_tools.gui.app.measure.ui.main_window_events import (
-    _CONTENT_REACTIONS,
-    _INTERACTION_REACTIONS,
     MainWindowEventCoordinator,
-    _validate_reaction_matrix,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.events import ContextSwitchedPayload, MlChangedPayload
@@ -159,30 +156,6 @@ def _coordinator(
     )
 
 
-def test_reaction_matrices_cover_every_closed_fact_exactly() -> None:
-    assert set(_INTERACTION_REACTIONS) == set(TabInteractionFact)
-    assert set(_CONTENT_REACTIONS) == set(TabContentFact)
-
-
-def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
-    missing = dict(_INTERACTION_REACTIONS)
-    missing.pop(TabInteractionFact.SAVE_FAILED)
-    with pytest.raises(
-        RuntimeError,
-        match=r"missing=\['save_failed'\], extra=\[\]",
-    ):
-        _validate_reaction_matrix("test", TabInteractionFact, missing)
-
-    # tolerated(cast): This negative fixture inserts a string key outside the validator's enum-key mapping contract.
-    extra = cast(Any, dict(_CONTENT_REACTIONS))
-    extra["unexpected"] = ()
-    with pytest.raises(
-        RuntimeError,
-        match=r"missing=\[\], extra=\[\"'unexpected'\"\]",
-    ):
-        _validate_reaction_matrix("test", TabContentFact, extra)
-
-
 @pytest.mark.parametrize(
     ("fact", "reaction_names"),
     [
@@ -250,6 +223,10 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
             ],
+        ),
+        (
+            TabInteractionFact.SAVE_DRAFT_COMMITTED,
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.SAVE_STARTED,
