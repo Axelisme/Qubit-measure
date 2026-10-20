@@ -419,9 +419,7 @@ def test_source_acceptance_reads_ledger_once_for_all_provenance_leaves(
             draft.accept_source("Q1.pulses.pi", provenance=source)
         assert draft.snapshot().meta("Q1.pulses.pi.gain") == source
 
-    ledger_reads = [
-        call for call in opened.call_args_list if call.args[0] == files[1]
-    ]
+    ledger_reads = [call for call in opened.call_args_list if call.args[0] == files[1]]
     assert len(ledger_reads) == 1
     assert library.snapshot().meta("Q1.pulses.pi.freq") == source
 
@@ -490,13 +488,19 @@ def test_unchanged_library_bytes_recheck_attachments_without_reparsing_yaml(
     write_document(files, value)
     library = open_library(files)
     (files[1].parent / f"{EVENT_ID}.json").unlink()
-    with patch.object(YAML, "load", autospec=True, side_effect=YAML.load) as load:
-        with pytest.raises(FileNotFoundError):
-            if action == "refresh":
-                library.refresh()
-            else:
-                with library.edit():
-                    pass
+
+    def reload_library() -> None:
+        if action == "refresh":
+            library.refresh()
+        else:
+            with library.edit():
+                pass
+
+    with (
+        patch.object(YAML, "load", autospec=True, side_effect=YAML.load) as load,
+        pytest.raises(FileNotFoundError),
+    ):
+        reload_library()
     assert load.call_count == 0
     assert library.snapshot().meta("Q1.pulses.pi.gain") is not None
 

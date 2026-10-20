@@ -508,6 +508,8 @@ class DocumentStore[T: BaseModel]:
         self._observers: dict[int, Callable[[DocumentChange], None]] = {}
         self._next_subscription_id = 0
         self._deferred_until_unlock: list[DocumentChange] = []
+        self._parsed_bytes: bytes | None = None
+        self._parsed_document: YamlMap | None = None
         if read_cleanup is None:
             self._document, _, self._snapshot = self._read()
         else:
@@ -643,13 +645,20 @@ class DocumentStore[T: BaseModel]:
         No lock is acquired here. Edit/refresh callers own their lock scope;
         initial construction may run while a different owner already holds it.
         """
-        yaml = YAML(typ="rt")
-        yaml.preserve_quotes = True
         original = self._path.read_bytes()
-        raw = yaml.load(original.decode("utf-8"))
+        if original == self._parsed_bytes and self._parsed_document is not None:
+            raw = deepcopy(self._parsed_document)
+        else:
+            yaml = YAML(typ="rt")
+            yaml.preserve_quotes = True
+            raw = yaml.load(original.decode("utf-8"))
         # Validate the recursive shape without discarding ruamel's round-trip nodes.
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
         document = cast(YamlMap, raw)
+        if original != self._parsed_bytes:
+            # Retain raw nodes, never cleanup or external validation outcomes.
+            self._parsed_document = deepcopy(document)
+            self._parsed_bytes = original
         removed: tuple[str, ...] = ()
         if self._read_cleanup is not None:
             version = validate_header(

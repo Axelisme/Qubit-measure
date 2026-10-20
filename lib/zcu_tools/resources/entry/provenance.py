@@ -95,7 +95,14 @@ def validate_source(provenance: Provenance, ledger: Path, entry_id: str) -> None
     raise MissingSourceError with their KeyError cause; schema, attachment and I/O errors
     from RecordsLedger.get propagate. Manual sources do not access the ledger.
     """
-    validate_sources((provenance,), ledger, entry_id)
+    if provenance.source == "manual":
+        return
+    try:
+        RecordsLedger(ledger.parent, entry_id=entry_id).get(provenance.source)
+    except KeyError as exc:
+        raise MissingSourceError(
+            f"{ledger}: source {provenance.source!r} does not exist"
+        ) from exc
 
 
 def validate_sources(
