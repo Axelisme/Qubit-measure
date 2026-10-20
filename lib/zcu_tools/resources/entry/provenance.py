@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,11 +95,27 @@ def validate_source(provenance: Provenance, ledger: Path, entry_id: str) -> None
     raise MissingSourceError with their KeyError cause; schema, attachment and I/O errors
     from RecordsLedger.get propagate. Manual sources do not access the ledger.
     """
-    if provenance.source == "manual":
+    validate_sources((provenance,), ledger, entry_id)
+
+
+def validate_sources(
+    provenances: Iterable[Provenance], ledger: Path, entry_id: str
+) -> None:
+    """Validate all local sources with one ledger read, preserving input order.
+
+    ledger is this entry's ledger.jsonl path, entry_id its UUID. Manual sources
+    need no I/O. Duplicate event IDs and attachments are checked once per call.
+    Missing IDs raise MissingSourceError with the original KeyError cause;
+    ledger schema, attachment and I/O failures propagate unchanged.
+    """
+    sources = tuple(
+        dict.fromkeys(p.source for p in provenances if p.source != "manual")
+    )
+    if not sources:
         return
     try:
-        RecordsLedger(ledger.parent, entry_id=entry_id).get(provenance.source)
+        RecordsLedger(ledger.parent, entry_id=entry_id).get_many(sources)
     except KeyError as exc:
         raise MissingSourceError(
-            f"{ledger}: source {provenance.source!r} does not exist"
+            f"{ledger}: source {exc.args[0]!r} does not exist"
         ) from exc
