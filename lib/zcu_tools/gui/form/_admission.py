@@ -26,8 +26,8 @@ def _equal(before: JsonValue, after: JsonValue) -> bool:
 
 def _readonly_fields(
     model: type[BaseModel],
-    before: Mapping[str, JsonValue],
-    after: Mapping[str, JsonValue],
+    before: JsonValue,
+    after: JsonValue,
     prefix: FormWritePath = (),
 ) -> Iterator[tuple[FormWritePath, JsonValue, bool]]:
     """Yield readonly paths, current raw values and raw-change flags.
@@ -36,6 +36,8 @@ def _readonly_fields(
     An ancestor branch switch or nullable deactivation is not a child edit.
     Missing fields/items in a replacement still count as removals, not switches.
     """
+    before = before if isinstance(before, dict) else {}
+    after = after if isinstance(after, dict) else {}
     for name, info in model.model_fields.items():
         path = (*prefix, name)
         old, new = before.get(name), after.get(name)
@@ -54,8 +56,8 @@ def _readonly_fields(
                 replacement = items[index] if index < len(items) else None
                 yield from _readonly_fields(
                     element,
-                    item if isinstance(item, dict) else {},
-                    replacement if isinstance(replacement, dict) else {},
+                    item,
+                    replacement,
                     (*path, index),
                 )
             continue
@@ -68,8 +70,8 @@ def _readonly_fields(
         if child is not None and (next_child is None or child is next_child):
             yield from _readonly_fields(
                 child,
-                old if isinstance(old, dict) else {},
-                new if isinstance(new, dict) else {},
+                old,
+                new,
                 path,
             )
 
