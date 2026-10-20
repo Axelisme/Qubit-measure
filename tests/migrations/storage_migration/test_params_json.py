@@ -235,6 +235,80 @@ def test_historical_top_level_fit_projects_exact_source_leaves(
     assert load_migrated_predictor(request) == predictor
 
 
+@pytest.mark.parametrize("energy_key", ["EJ", "EL"])
+def test_fluxonium_identifying_parameter_allows_unknown_siblings(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    energy_key: str,
+) -> None:
+    legacy_fit["params"] = {energy_key: 0.8, "custom.energy": {"note": "untouched"}, "EC": True}
+    source = write_params(request_data, {"fluxdep_fit": legacy_fit, "flux_unit": "mA"})
+    report = migrate(request_data, analysis_mapping)
+    predictor = request_data.results_root / request_data.name / "predictors/Qlegacy.json"
+    assert predictor.is_file(), "an extra key must not block supported fluxonium data"
+    assert load_predictor_file(predictor).params == FluxoniumParams.from_mapping({energy_key: 0.8, "flux_half": 0.2, "flux_period": 1.0, "flux_bias": 0.0})
+    assert document_value(snapshot(open_entry(request_data).setup), "Qlegacy.ext.legacy_params.fluxdep_fit") == {
+        "params": {"custom.energy": {"note": "untouched"}, "EC": True},
+        "flux_int": -0.3,
+    }
+    assert any(item.location == "fluxdep_fit.params.EC" for item in report.pending)
+    assert not any(item.location == "fluxdep_fit.params" for item in report.pending)
+    assert any(row.old_file == source and row.action == "preserved" and row.source_keys == ("fluxdep_fit", "params", "custom.energy", "note") for row in report.key_mappings)
+
+
+@pytest.mark.parametrize("allows", [{}, {"r_f": 5.2, "sample_f": 9.7, "transitions": [[0, 1]], "mirror": [[1, 2]], "author.note": "unchanged"}])
+def test_historical_allows_are_owner_annotations_without_reinterpretation(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    allows: JsonObject,
+) -> None:
+    source = write_params(request_data, {"allows": allows, "timestamp": "2020-07-07T16:30:00+08:00", "name": "old author"})
+    report = migrate(request_data, analysis_mapping)
+    entry = open_entry(request_data)
+    target = entry.dispersive_path / "Qlegacy.json"
+    assert target.is_file(), "historical allows must reach the dispersive owner"
+    dispersive = load_dispersive_file(target)
+    assert dispersive.params.plot_transitions.model_dump(exclude_unset=True) == allows
+    assert dispersive.params.g is None
+    assert dispersive.params.bare_rf is None
+    assert dispersive.source.run_id is None
+    assert dispersive.source.created_at == "2020-07-07T16:30:00+08:00"
+    assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {"name": "old author"}
+    assert any(row.old_file == source and row.action == "value" and row.source_keys == ("allows",) and row.new_path == "params.plot_transitions" for row in report.key_mappings)
+
+
+@pytest.mark.parametrize("equal", [True, False])
+def test_newer_fit_wins_and_top_level_values_are_compared_by_source(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    equal: bool,
+) -> None:
+    values: JsonObject = {
+        "flux_unit": "mA",
+        "fluxdep_fit": legacy_fit,
+        "params": {"EJ": 6.27 if equal else 8.2, "EC": 1.41, "EL": 0.8, "author": "keep"},
+        "half flux": 0.2 if equal else 0.7,
+        "period": 1.0,
+    }
+    source = write_params(request_data, values)
+    report = migrate(request_data, analysis_mapping)
+    assert load_migrated_predictor(request_data).params == FluxoniumParams(EJ=6.27, EC=1.41, EL=0.8, flux_half=0.2, flux_period=1.0, flux_bias=0.0)
+    assert document_value(snapshot(open_entry(request_data).setup), "Qlegacy.ext.legacy_params") == {
+        "fluxdep_fit": {"flux_int": -0.3},
+        "params": {"author": "keep", **({} if equal else {"EJ": 8.2})},
+        **({} if equal else {"half flux": 0.7}),
+    }
+    compared = [row for row in report.key_mappings if row.old_file == source and row.source_keys == ("params", "EJ")]
+    assert len(compared) == 1
+    assert compared[0].action == ("remove" if equal else "preserved")
+    assert compared[0].compared_source_keys == ("fluxdep_fit", "params", "EJ")
+    assert "fluxdep_fit" in compared[0].reason
+    saved = read_manifest(manifest_path(request_data)).report
+    assert [row for row in saved.key_mappings if row.source_keys == ("params", "EJ")] == compared
+
+
 @pytest.fixture
 def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
     concrete = build_mapping(
@@ -1586,19 +1660,19 @@ def test_undefined_transmon_parameter_shape_stays_pending(
     fit: JsonObject = {"params": {"EJmax": 12.0, "EC": 0.3, "d": 0.2}}
     source = write_params(request_data, {"fluxdep_fit": fit})
     report = migrate(request_data, analysis_mapping)
+    assert not any(item.source == source for item in report.pending)
     assert any(
-        item.source == source
-        and item.location == "fluxdep_fit.params"
-        and "legacy" in item.reason.lower()
-        for item in report.pending
+        row.old_file == source
+        and row.action == "preserved"
+        and row.source_keys == ("fluxdep_fit", "params", "EJmax")
+        and "unsupported model" in row.reason.lower()
+        for row in report.key_mappings
     )
-    assert (
-        document_value(
-            snapshot(open_entry(request_data).setup),
-            "Qlegacy.ext.legacy_params.fluxdep_fit",
-        )
-        == fit
-    )
+    assert not (request_data.results_root / request_data.name / "predictors/Qlegacy.json").exists()
+    assert document_value(
+        snapshot(open_entry(request_data).setup),
+        "Qlegacy.ext.legacy_params.fluxdep_fit",
+    ) == fit
 
 
 @pytest.fixture
