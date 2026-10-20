@@ -1,10 +1,10 @@
-**Last updated:** 2026-10-19，mux native Forms、captured identity 與 indexed quality summaries
+**Last updated:** 2026-10-20，mux ringup 初值與可編輯 timing
 
 # Measure domain support
 
 這個 private package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
-已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
+已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值，以及 mux readout 的 ringup 等待。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
 
 `analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。Mux caller 指定 `summary.tones[row].fit_quality`，單 qubit 預設維持 `summary.fit_quality`。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
@@ -12,7 +12,11 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。Readout 清單由 group 的 resonators 產生，每個 resonator 一個槽位。
 Freq 取捕捉的 resonator.freq，gain 初值為 0.1，ro_ch 依 group 順序從 0 起算，label 初值為 resonator 名稱。
-有 readout 時以 Slot(copy=True) 保留其 scalar 設定，沒有時使用 blank template。兩者都以 group 清單覆寫 tones。
+`mux_readout_initial` 有 captured readout 時以 Slot(copy=True) 複製其 scalar 設定，沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源。兩者都以 group 清單覆寫 tones。
+`mux/onetone` 以 `wait_for_ringup=True` 啟用 timing 初值。Helper 從固定 capture 取完整 group 的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
+Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
+每個成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
+Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
 Label 不是 identity。這些初值不保證硬體安全，操作員仍須核對接線。缺少必要欄位仍擋 Run。
 每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
