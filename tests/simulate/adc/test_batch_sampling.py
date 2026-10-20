@@ -59,9 +59,7 @@ def test_decimated_shots_share_states_paths_and_keep_content_and_sample_order():
         np.array([[[0.0, 1.0], [0.0, 1.0]]]),
         batches,
         reps=400,
-        seed=71,
-        acquire_sequence=2,
-        round_index=3,
+        identity=SamplingIdentity(71, (2, 3, 0)),
     )
     first, second = result.channels
     assert (first.channel, second.channel) == (3, 1)
@@ -76,7 +74,7 @@ def test_decimated_noise_is_per_sample_independent_and_has_no_rounding_term():
     batches = physical_batches(covariance=np.array([[2.0, 0.5], [0.5, 1.0]]))
     populations = np.array([[[1.0, 0.0], [0.0, 1.0]]])
     result = adc.sample_traces(
-        populations, batches, reps=12000, seed=72, acquire_sequence=2, round_index=3
+        populations, batches, reps=12000, identity=SamplingIdentity(72, (2, 3, 0))
     )
     noiseless = (
         adc.ADC(batches[3].model)
@@ -111,7 +109,7 @@ def test_decimated_zero_reps_reproducibility_global_rng_and_content_order():
     populations = np.array([[[0.25, 0.75], [0.0, 1.0]]])
     original = populations.copy()
     before = legacy_rng_state()
-    kwargs = dict(reps=100, seed=73, acquire_sequence=2, round_index=3)
+    kwargs = dict(reps=100, identity=SamplingIdentity(73, (2, 3, 0)))
     first = adc.sample_traces(populations, batches, **kwargs)
     repeated = adc.sample_traces(populations, batches, **kwargs)
     np.testing.assert_array_equal(first.channels[0].iq, repeated.channels[0].iq)
@@ -130,7 +128,7 @@ def test_decimated_zero_reps_reproducibility_global_rng_and_content_order():
     )
     assert 0.1 < g.mean() < 0.4
     empty = adc.sample_traces(
-        populations, batches, reps=0, seed=1, acquire_sequence=0, round_index=0
+        populations, batches, reps=0, identity=SamplingIdentity(1, (0, 0, 0))
     )
     assert empty.channels[0].iq.shape == (0, 2, 4, 2)
     np.testing.assert_array_equal(populations, original)
