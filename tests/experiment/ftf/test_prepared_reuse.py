@@ -126,6 +126,61 @@ def test_cached_small_acquire_reselects_route_after_source_usage_grows():
     assert routes[0].get("single_tone_gate") == 2
 
 
+def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put():
+    import numpy as np
+    from zcu_tools.core.simulation import PulseEnvelope
+    from zcu_tools.experiment.ftf.preparation import PreparationCache
+    class CountingPreparations(PreparationCache):
+        def __init__(self):
+            super().__init__()
+            self.puts = 0
+
+        def put(self, key, value):
+            self.puts += 1
+            super().put(key, value)
+
+    source = FTFSource(settings(), DeviceManager())
+    cache = CountingPreparations()
+    source.preparation_cache = cache
+    base = template(tones=1)
+    drive, readout = base.events
+    times = np.linspace(0.0, 0.128, 129)
+    waveform = PulseEnvelope(
+        tuple(times),
+        tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex)),
+    )
+    acquire = request(
+        templates=(
+            replace(
+                base,
+                events=(
+                    replace(
+                        drive,
+                        start_us=np.zeros(2),
+                        duration_us=np.full(2, 0.128),
+                        gain=np.full(2, -0.002),
+                        envelopes=(waveform,),
+                    ),
+                    replace(readout, start_us=np.full(2, 0.140)),
+                ),
+            ),
+        )
+    )
+    try:
+        draw(source, acquire)
+        numeric = source.model_facts(snapshot()).source
+        first_usage = numeric.gate_usage
+        assert first_usage
+        first_paths = source.evaluations[0].paths
+        draw(source, replace(acquire, sequence=8))
+        assert source.evaluations[0].paths == first_paths
+        assert numeric.gate_usage == {k: 2 * n for k, n in first_usage.items()}
+        assert cache.hits == 1
+        assert cache.puts == 1, "unchanged results must retain their population preparation"
+    finally:
+        source.close()
+
+
 def test_equal_content_acquires_skip_adc_preparation_and_keep_streams_exact():
     source = FTFSource(settings(), DeviceManager())
     reference = FTFSource(settings(), DeviceManager())
