@@ -34,7 +34,7 @@ uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
 這個選項不改 code、lab catalog、log 或腳本路徑的解析。
 
 [FTF 範例](../zcu_lab/simulation_envs/FTF/README.md) 從相鄰 entry template 建立
-`ftf-demo/initial`，安裝離線資源，首次建立時開 tab，不需先執行 entry CLI 或手動 Setup。
+`ftf-demo/initial`，安裝離線資源，不開 tab，不需先執行 entry CLI 或手動 Setup。
 Entry 已存在時直接重開並選 `initial`，不覆寫。它使用一個 worker，且不預編譯數值路徑。
 一般腳本可以連硬體，執行前須審閱並取得授權。
 腳本失敗保留已完成部分，GUI 顯示錯誤後仍可使用，不改跑其他腳本。
