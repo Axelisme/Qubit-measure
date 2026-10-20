@@ -95,9 +95,17 @@ def cavity_field_average(
     n = len(model.state_labels)
     products = np.zeros((n, 2, n, 2), dtype=np.complex128)
     if pulses:
-        # A common carrier reference removes microwave rotation without changing
-        # any same-time product, including cross-carrier interference phases.
+        # Pulse-local phases need +2*pi*delta_f*start so the reference change
+        # rotates every field by the same exp(+2*pi*i*delta_f*t).
         near = replace(model, reference_frequency_ghz=pulses[0].frequency_ghz)
+        delta_f = near.reference_frequency_ghz - model.reference_frequency_ghz
+        pulses = tuple(
+            replace(
+                pulse,
+                phase_rad=pulse.phase_rad + 2 * np.pi * delta_f * pulse.start_ns,
+            )
+            for pulse in pulses
+        )
         if all(pulse.envelope is None for pulse in pulses):
             products = _flat_average(near, pulses, start_ns, end_ns)
         else:
