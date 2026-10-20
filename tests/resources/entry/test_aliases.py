@@ -67,10 +67,11 @@ def test_point_alias_io_requires_a_safe_complete_point(
     directory = entry.result_path / "points" / "partial"
     directory.mkdir()
     (directory / "point.yaml").write_text("{}\n", encoding="utf-8")
-    with pytest.raises(error):
-        if operation == "load":
+    if operation == "load":
+        with pytest.raises(error):
             entry.load_aliases(point=label)
-        else:
+    else:
+        with pytest.raises(error):
             entry.save_aliases(EntryAliases(aliases={}), point=label)
 
 
@@ -103,7 +104,7 @@ def test_point_aliases_reject_invalid_documents_without_setup_fallback(
         f'format: zcu.aliases\nformat_version: "{version}"\naliases: {body}\n',
         encoding="utf-8",
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="aliases"):
         entry.load_aliases(point="one")
     assert entry.load_aliases() == authored
 
