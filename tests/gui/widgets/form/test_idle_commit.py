@@ -5,6 +5,7 @@ write boundary and FormState. Only the external Qt timer is replaced.
 """
 
 import os
+import sys
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Annotated, Literal
@@ -13,9 +14,10 @@ import pytest
 from pydantic import Field, JsonValue
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QObject, Qt
-from qtpy.QtWidgets import QApplication, QLineEdit, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QApplication, QLineEdit, QSpinBox, QVBoxLayout, QWidget
 from zcu_tools.gui.form import Display, FormEnv, FormModel, FormState, FormWritePath
 from zcu_tools.gui.widgets.form import FormEditor, value_widgets
+from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 from tests.gui._user_input import ComponentDriver, key_click, type_text
 
@@ -295,4 +297,38 @@ def test_shared_scalar_helpers_use_the_same_idle_policy(
     finally:
         window.close()
         window.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("factory", [QSpinBox, TrimDoubleSpinBox])
+def test_scalar_steps_preserve_qt_callback_argument_adaptation(
+    qapp: QApplication,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+    factory,
+) -> None:
+    """Public scalar steps support both no-argument and value-taking callbacks."""
+    exceptions: list[BaseException] = []
+    # Qt reports slot exceptions through this external boundary. Capture them
+    # so a missing callback remains an assertion failure rather than aborting.
+    monkeypatch.setattr(
+        sys, "excepthook", lambda kind, error, trace: exceptions.append(error)
+    )
+    no_argument = factory()
+    with_value = factory()
+    notifications: list[str] = []
+    values: list[int | float] = []
+    value_widgets.connect_committed_value_widget(
+        no_argument, lambda: notifications.append("committed")
+    )
+    value_widgets.connect_committed_value_widget(with_value, values.append)
+    try:
+        no_argument.stepUp()
+        with_value.stepUp()
+        assert notifications == ["committed"]
+        assert values == [1]
+        assert exceptions == []
+    finally:
+        no_argument.deleteLater()
+        with_value.deleteLater()
         qapp.processEvents()
