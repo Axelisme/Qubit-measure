@@ -125,7 +125,7 @@ def test_soc_dialog_reopen_prefills_preferences_and_observes_soc_changes(
         dialog.show()
         qapp.processEvents()
         assert driver.observe(object_name="soc_ip").text == "10.4.5.6"
-        assert driver.observe(object_name="soc_port").text == "7000"
+        assert driver.observe(object_name="qt_spinbox_lineedit").text == "7000"
         bus.emit(SocChangedPayload(soc=None, soccfg=None))
         driver.screenshot(tmp_path / "soc-reopened-disconnected.png")
         assert any(widget.text == "Disconnected" for widget in driver.visible().widgets)
