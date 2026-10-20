@@ -45,9 +45,7 @@ def _convert(request: MigrationRequest, mapping: MigrationMapping) -> MigrationR
 def _legacy_collection(request: MigrationRequest, frequency_major: bool) -> Path:
     source = request.result_root / "chip/qubit/data/fluxdep/spectrums.hdf5"
     source.parent.mkdir(parents=True)
-    signals = np.array(
-        [[1 + 2j, 3 - 4j, 5j], [6j, 7 + 8j, 9 - 1j]], dtype=np.complex64
-    )
+    signals = np.array([[1 + 2j, 3 - 4j, 5j], [6j, 7 + 8j, 9 - 1j]], dtype=np.complex64)
     with h5py.File(source, "w") as handle:
         group = handle.create_group("scan.with.dots")
         group.attrs["type"] = "TwoTone"
@@ -96,7 +94,9 @@ def test_processed_spectrums_convert_axes_calibration_and_complex_values(
     assert not any(item.destination == target for item in report.preserved_files)
     assert not any(item.source == source for item in report.pending)
     assert report.backup_path is not None
-    assert (report.backup_path / "result/chip/qubit/data/fluxdep/spectrums.hdf5").read_bytes() == original
+    assert (
+        report.backup_path / "result/chip/qubit/data/fluxdep/spectrums.hdf5"
+    ).read_bytes() == original
     assert not source.exists()
     before = target.read_bytes()
     resumed = _convert(replace(request_data, resume=True), mapping)
@@ -134,7 +134,9 @@ def test_unknown_spectrum_content_is_preserved_without_duplicate_converted_data(
         group["unknown.values"] = np.array([3, 8], dtype=np.int16)
     report = _convert(request_data, mapping)
     companion = report.destination.result_path / "data/fluxdep/spectrums.legacy.hdf5"
-    assert companion.is_file(), "Unsupported HDF5 leaves must be visible in the new entry"
+    assert companion.is_file(), (
+        "Unsupported HDF5 leaves must be visible in the new entry"
+    )
     with h5py.File(companion, "r") as handle:
         assert handle.attrs["origin"] == "synthetic"
         group = _group(handle, "scan.with.dots")
@@ -145,7 +147,11 @@ def test_unknown_spectrum_content_is_preserved_without_duplicate_converted_data(
         assert set(group) == {"spectrum", "unknown.values"}
         assert "type" not in group.attrs
     preserved = [item for item in report.key_mappings if item.action == "preserved"]
-    row = next(item for item in preserved if item.source_keys == ("scan.with.dots", "unknown.values"))
+    row = next(
+        item
+        for item in preserved
+        if item.source_keys == ("scan.with.dots", "unknown.values")
+    )
     assert row.destination_keys == ("scan.with.dots", "unknown.values")
     assert row.new_file == companion
     assert row.new_path is None
@@ -170,7 +176,9 @@ def test_square_axis_without_version_evidence_is_preserved_and_pending(
         spectrum["data"] = np.array([[1j, 2j], [3j, 4j]], dtype=np.complex64)
     report = _convert(request_data, mapping)
     companion = report.destination.result_path / "data/fluxdep/spectrums.legacy.hdf5"
-    assert companion.is_file(), "Ambiguous original data must remain visible, not only in backup"
+    assert companion.is_file(), (
+        "Ambiguous original data must remain visible, not only in backup"
+    )
     with h5py.File(companion, "r") as handle:
         np.testing.assert_array_equal(
             _dataset(handle, "scan.with.dots/spectrum/data")[()], [[1j, 2j], [3j, 4j]]
@@ -195,7 +203,9 @@ def test_each_ambiguous_group_has_a_located_pending_reason(
         handle.copy("scan.with.dots", "second.scan")
     report = _convert(replace(request_data, part="data"), mapping)
     reasons = " ".join(item.reason for item in report.pending)
-    assert "scan.with.dots" in reasons, "Pending must not lose the first ambiguous group"
+    assert "scan.with.dots" in reasons, (
+        "Pending must not lose the first ambiguous group"
+    )
     assert "second.scan" in reasons
 
 
@@ -205,7 +215,9 @@ def test_processed_spectrum_publication_rejects_user_edits_on_resume(
     _legacy_collection(request_data, False)
     request = replace(request_data, part="data")
     report = _convert(request, mapping)
-    assert report.converted_files, "Processed collection needs an owned conversion publication"
+    assert report.converted_files, (
+        "Processed collection needs an owned conversion publication"
+    )
     target = report.destination.result_path / "data/fluxdep/spectrums.hdf5"
     with h5py.File(target, "a") as handle:
         handle.attrs["caller_edit"] = "keep"

@@ -141,6 +141,7 @@ label 不合法時，由使用者決定新名，報告記舊名、新名與理�
 | exps 以外的圖 | `result/<name>/figures/<原相對路徑>` | 第 7 步 |
 | `samples.csv` | `samples/<Q>.jsonl` | 第 7 步。有列轉不了時，原檔另外原樣放 `result/<name>/samples.csv`。 |
 | `arb_waveforms/**`（result 或 Database） | `Database/<name>/arb_waveforms/**` | 第 7 步 |
+| `data/fluxdep/spectrums.hdf5` | 新 entry 同相對位置；未轉原文另存 `data/fluxdep/spectrums.legacy.hdf5` | 第 7 步的 processed spectrum 規則。不能整檔當 generic raw copy。 |
 | `autofluxdep_runs/**`、其他不支援的 result 檔 | `result/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
 | Database 的 Labber 檔 | 原檔一律放 `Database/<name>/Labber/<原相對路徑>`；能轉的另產 `Database/<name>/runs/<run_id>/data.h5` | 第 8 步 |
 | 其他 Database 檔 | `Database/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
@@ -425,6 +426,41 @@ print(report)
 
 完成條件：每對 hash 相同；每張 `exps` 圖都掛在正確的 point。helper 中斷可能留下半份目的檔，記入 `unfinished_publications`，從備份核對後再補。
 
+### Processed spectrum
+
+舊 `data/fluxdep/spectrums.hdf5` 不能只複製到新 entry。從 `$BR` 的備份讀取，正式目的為 `$NEW_R/data/fluxdep/spectrums.hdf5`，剩餘原文目的為同目錄 `spectrums.legacy.hdf5`。現有 processed publication 只重用 matching manifest 的 prepared/published ownership 且 hash 一致的目的，不認領任意同名檔。遇到衝突不覆寫。手動接手時先保存已有目的及 hash，依原文逐項比對，不按同名檔猜測已完成。
+
+以每個原 group 名建立一個 `SpectrumResult`。欄位依下表轉換，陣列不改值或 dtype，不按數字量級換算單位。
+
+| 舊位置 | 正式位置／公式 |
+| --- | --- |
+| `mA_c` | `flux_half` |
+| `period` | `flux_period` |
+| `mA_c`、`period` | `flux_int = mA_c + 0.5 * period` |
+| `spectrum/mAs`、`points/mAs` | 同 section 的 `dev_values` |
+| `spectrum/fpts`、`points/fpts` | 同 section 的 `freqs`，不再做 Hz→GHz 換算 |
+| 各 section 的 `mAs`、group 的 `mA_c/period` | `fluxs = (mAs - mA_c) / period + 0.5` |
+| `spectrum/data` | `spectrum/signals`，按下述軸向規則處理 |
+| 字串 group attr `type` | 正式 group attr `type`，原字串不改 |
+
+`mAs/fpts/data` 格式曾使用兩種軸向。若兩條軸長度不同，shape 為 `[len(mAs), len(fpts)]` 就直接使用，反過來就轉置。現行 `signals` 的第一維是 device，第二維是 frequency。平方矩陣缺歷史版本證據時不能猜軸向，整個 group 先留 companion，報 permanent-pending 並指出缺少版本證據。其他 group 照常轉換。中繼格式的 `flx_half/flx_int/flx_period` 改名為 `flux_half/flux_int/flux_period`，已有的 `dev_values/fluxs/freqs/signals` 直接沿用。非字串 `type` 留 companion，不捏造 OneTone／TwoTone。
+
+公式與欄位的依據是 repo Git 的實際讀寫程式。`3904bec70:lib/zcu_tools/analysis/fluxdep/persistence.py` 寫讀 `mA_c/period/mAs/fpts/data`。`187e2d75a:notebook_md/analysis/fluxdep_fit.md` 使用 `mA_e=mA_c+0.5*period`。`8d08978c2:lib/zcu_tools/simulate/__init__.py` 定義上述 fluxs 公式。`646fb3e33:lib/zcu_tools/analysis/fluxdep/processing.py` 的舊陣列是 frequency-major，`8d08978c2:lib/zcu_tools/notebook/persistance.py` 是 device-major。`664019b8d` 把 `flx_*` 改為 `flux_*`。
+
+正式檔交給現有 owner，不手寫其 HDF5 layout：
+
+```python
+from zcu_tools.analysis.fluxdep.io import dump_spectrums, load_spectrums
+
+# converted maps each original group name to the SpectrumResult built above.
+dump_spectrums(str(new_r / "data/fluxdep/spectrums.hdf5"), converted)
+restored = load_spectrums(str(new_r / "data/fluxdep/spectrums.hdf5"))
+```
+
+逐一核對 restored 的 scalar、兩條軸、picked points、signals 數值及 dtype。另用 h5py 的 `File(..., "x")` 建 companion，只寫尚未轉換的 datasets、groups 與 attrs。每項都沿原 hierarchy，dataset 可用 h5py `Group.copy` 保留 dtype 與 attrs。已轉 dataset 若仍有 attrs，改建同路徑 group 承載 attrs，不再存 data。Attr 用原名、原值與原 dtype 建立。已正式轉換的 `type` 不重存。沒有剩餘原文就不建 companion。
+
+Companion 是 migration 保留的原文，不是 SpectrumResult 格式，正常 runtime 不讀它。用 h5py 讀回逐項核對原值、shape、dtype 與 attrs，不能只核對整個來源備份存在。報告逐項分成正式轉換、`preserved` 及缺證據 pending。工具的 `key_mappings` 保留 literal source/destination keys，attr 定位為 object path 加原 attr 名，display key 以 `attribute:` 開頭。保留 row 的 `new_path` 為 null，`new_file` 指 companion。手動報告也記下同樣位置及正式／companion 各自的 SHA256。兩檔都核對後才算這項完成。
+
 ## 8. Labber 檔轉 native
 
 Labber 與 native 都是 HDF5，但格式不同，把 `.hdf5` 改名成 `data.h5` 不會得到 native。
@@ -580,6 +616,7 @@ test ! -e "$OLD_R" && test ! -e "$OLD_D"
 | fit 被寫進了 setup 或 point 的 component 欄位 | 另寫 entry predictor；只移除能證明是 fit 誤寫的欄位。 | meta_info 本身的正式欄位保留。 |
 | point 有 flux 數字卻缺單位 | 依第 4 步的單位規則補單位或標「假設單位」。 | 沒有單位證據也沒有宣告時，移除數字並列 pending。 |
 | library 只換了 header，或有 dangling slot | 依第 6 步補轉換，有效的 Spec 不動。 | Spec、child key、slot 都核對過。 |
+| processed spectrum 只做了原樣複製 | 保存現有檔與 hash，依第 7 步逐 group 建正式輸出與 residual companion，不在原檔上覆寫。 | 正式檔經 load_spectrums 讀回；未轉 datasets／attrs 在 companion 可見；已轉 data 不重複。 |
 | Labber 已搬走，但沒有 native | 用原始 hash 清單確認備份裡有原 bytes，再依第 8 步轉換。 | 「已搬」與「已轉」分開記錄。 |
 | 已有 native 或已固定 run_id | 用 reader 核對，沿用既有 ID。 | 有效的 native 不覆寫，固定的 ID 不重新分配。 |
 | 來源與目的都在，但 hash 不同 | 兩份都保存，不看 mtime 選新的。 | 列衝突，使用者決定前不刪來源。 |

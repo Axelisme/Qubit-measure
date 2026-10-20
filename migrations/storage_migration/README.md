@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-20，params 未轉原文去重與 literal 欄位報告
+**Last updated:** 2026-10-20，processed spectrum 轉換與剩餘 HDF5 保留
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
@@ -8,6 +8,8 @@
 - Native schema 與兩個 callbacks 以 `(source tag, cfg_type)` 的明確歷史身分配對。缺 cfg identity、無對應 schema 或 typed-invalid cfg 時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
 - `exps/<sub>/` 與舊直屬 child 都轉成同名 point，沿用 parameters mapping 與 pending 規則。兩種來源同名就拒絕，報告列出兩個來源，不合併或覆寫。
 - `exps/<sub>/image/*.png` 經 copy、hash、manifest 與 resume 發布到 `result/<entry>/points/<sub>/figures/<原檔名>`。其他 exps 附屬未支援檔保留在該 point 的來源相對位置。Data-only 不建立缺少的 point，所有附屬檔都列為 located pending；parameters 建 point 後可 resume data 完成發布。`exps` 外的 `image/` 檔案仍發布到 entry 的 `figures/<來源相對路徑>`。
+- `data/fluxdep/spectrums.hdf5` 是支援的 processed collection，不走 generic raw copy。Legacy 解析只在 `processed_spectrums.py`。正式結果經既有 `analysis.fluxdep.io.dump_spectrums`／`load_spectrums` 寫讀到新 entry 同相對位置，不在 migration 複製 owner layout。`mA_c/period` 對應 `flux_half/flux_period`，`mAs/fpts/data` 對應 `dev_values/freqs/signals`。`flux_int=mA_c+0.5*period`，`fluxs=(mAs-mA_c)/period+0.5`，不因數值量級換單位。兩種舊 signal 軸向以非平方 shape 與歷史 processing 規則唯一判定，frequency-major 轉置為 device-major；平方且無版本證據則保留原文並列 located pending。中繼 `flx_half/int/period` 依歷史改名，已存 `fluxs` 不重算。Group 名、陣列數值與 dtype 不變，字串 `type` 原樣交給 owner，不推定 OneTone／TwoTone。
+- Processed 未轉 datasets／attrs 留在 `data/fluxdep/spectrums.legacy.hdf5`，保留原 hierarchy、值與 dtype。已轉 dataset 只有 attrs 時，在 companion 建同路徑的 metadata-only group，不重存其 data。空的未知 group 也保留。Companion 由 migrations 擁有，runtime 不讀，不是正式 spectrum 格式。`key_mappings` 用 typed `action="preserved"`、literal `source_keys/destination_keys`、`new_path=None` 定位。Attribute row 的 display key 以 `attribute:` 開頭，literal keys 是 object path 加原 attr 名。未知原文不列 pending，真正缺少必要轉換證據才列 pending。正式與 companion 分別走 `spectrums`／`spectrums_legacy` publication，保留 prepared/published、hash 與 resume。Preflight 一次保護兩個目的，拒絕同名來源路由、既有未認領檔或 hash 改變；沒有剩餘原文就不建 companion。Dry-run 只列相同轉換／保留計畫，不寫檔。
 - 其他未支援 result 檔，包括 `autofluxdep_runs/**`，保留在 `result/<entry>/<來源相對路徑>`。未支援 Database 檔保留在 `Database/<entry>/<來源相對路徑>`。原樣保全保持檔名、bytes 與 SHA256，報告只標 `preserved`，不宣稱已轉格式或可供 native／分析 owner 解析。沒有額外轉換目標的未知檔完成保全後，不另列永久 pending。
 - `preservation.py` 在首次備份及 entry 建立前預檢所有原樣目的，resume 在 checkpoint／report 寫入前再檢查。新格式保留檔／目錄、來源路由互撞、目的既有檔及祖先／後代佔用都會列出來源與目的並停止。不覆寫、不改名、不認領任意既有檔。只有同 manifest 的發布且 hash 一致才可重用；prepared publication 的既有復原協定不變。
 - `params.json` 以本次建立的唯一 qubit component 為對象，找不到唯一對應就整份 pending。Converter 先發布正式分析檔，只把未轉、非法或缺證據的來源值存入 setup 的 `component.ext.legacy_params`，再建 points。成功轉換的來源 leaf 不另存 raw 副本，清空的父分支也會移除。已成功轉換的已知空容器不再 raw 雙存，未知原文中的空 object／list 仍保留。Points 繼承完整 YAML，屬於獨立可編輯 context，不在原文去重範圍。根層與各 point 的 meta_info 值優先，params 只補缺；衝突保留 meta_info 值，並報告兩來源與 pending。
@@ -40,6 +42,6 @@
 - 未支援 expression、Spec、缺 mapping 或 child reference 不能轉換時保留來源與定位，不 evaluate。Arb asset key 保持原值，不搬 asset，也不保證全部模組已可 materialize。
 - Library dry-run 驗證隔離候選，不取得目的 handle。其 report rows 保留 canonical `new_path`，`new_file=None` 本身不表示 pending。正常提交後 manifest 保存來源與目的 hash，resume 核對已記錄完成的 library 而不重做。
 
-`state.py` 集中 report／manifest encoding 與 copy、native、samples、move 共用的 publication recovery。ModuleLibrary 的單檔提交與 manifest 不是跨檔原子。Library 已寫入但未記錄完成的窗口沒有專門 recovery，需取得清理授權後刪目的地重跑。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
+`state.py` 集中 report／manifest encoding 與 copy、native、samples、processed spectrums、move 共用的 publication recovery。ModuleLibrary 的單檔提交與 manifest 不是跨檔原子。Library 已寫入但未記錄完成的窗口沒有專門 recovery，需取得清理授權後刪目的地重跑。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
 
 `migrations/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於同目錄上層的 `migrations/storage_mapping.py` 與 `migrations/migration_experiments.py`，沒有動態 discovery 或新 runtime registry。單獨 Parameters 模式不執行 data 搬移；只有同一 manifest 的兩部分都完成才可清理，包含第二部分以 parameters resume 的情況。操作授權、來源保全、pending／resume 與修改 kind 的步驟見 [Agent 離線遷移說明書](../../docs/storage-migration.md)。
