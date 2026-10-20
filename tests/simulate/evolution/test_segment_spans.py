@@ -79,7 +79,7 @@ def test_driven_shift_identities_do_not_alias_models_preparations_or_results():
             shifted = replace(timeline, segment_shifts=((evolution.SegmentShift(
                 0, 8, np.array([0, detuning]), np.zeros((2, 2))
             ),),))
-            result = engine.evolve(source, (shifted,), cancel=Event())
+            result = engine.evolve(source, (shifted,), cancel=Event(), budget=1e-9)
             unitary = expm(-2j * np.pi * 8 * (np.diag([0, 0.08 + detuning]) + operator))
             np.testing.assert_allclose(result.densities[0], unitary @ initial @ unitary.conj().T, atol=1e-8)
     assert built_levels == [(0,)]
