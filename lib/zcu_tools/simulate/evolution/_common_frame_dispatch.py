@@ -9,15 +9,18 @@ from numpy.typing import NDArray
 from ._multitone_dispatch import populate_multitone_inventory
 from .kernel import KernelContext, SegmentTable
 from .kernels._workload_facts import envelope_bounds
-from .kernels.common_frame import coefficient_keys, common_frame_strengths
+from .kernels.common_frame import (
+    coefficient_keys,
+    common_frame_cost_viable,
+    common_frame_strengths,
+)
 from .kernels.multitone_rwa import MultitoneRWAKernel, multitone_retention
-from .secular import ModelSource
-from .workplan import FactKey, WorkPlan
+from .workplan import FactKey
 
 
 @dataclass(frozen=True)
 class CommonFramePrice:
-    """One complete coefficient group's cold CPU prices, in relative seconds.
+    """One coefficient group's cold prices in relative scheduling units.
 
     key identifies coefficient physics. common and original are mean consumer
     prices, including the complete common build once across the group's rows.
@@ -41,7 +44,46 @@ class CommonFramePricing:
     prices: tuple[CommonFramePrice, ...]
 
 
-def _prices(table: SegmentTable, source: ModelSource) -> CommonFramePricing:
+def _constant_rwa_price(table: SegmentTable, row: int, context: KernelContext) -> float:
+    """Price admitted constant integration by occupied blocks and fast edges.
+
+    Native 16-state dimension-52 unexpanded rows cost about 3.8 ms at 1 us,
+    versus 12.9 ms for cold common build/apply. In the existing relative common
+    units this is .12 versus .45, not the dense M**3 estimate of 2.58.
+    Restored edges charge their actual interaction-picture frequencies. The
+    50 MHz floor prices the constant solver's 16 ns step ceiling, not accuracy.
+    """
+    retained = multitone_retention(table, row, context)
+    assert retained.dimension is not None
+    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    frequencies = table.tone_frequency_ghz[row, :2]
+    bandwidth = max(
+        (
+            abs(model.energies_ghz[i] - model.energies_ghz[j] + frequency)
+            for frequency, edges in zip(frequencies, retained.edges, strict=True)
+            for i, j in edges
+        ),
+        default=0.0,
+    )
+    bandwidth = max(0.05, float(np.ptp(frequencies)), bandwidth)
+    blocks = retained.dimension / 9
+    return (
+        0.003 * blocks**1.5
+        + 0.000014 * table.duration_ns[row] * blocks * bandwidth / 0.05
+    )
+
+
+def _prices(
+    table: SegmentTable, context: KernelContext, *, price_rwa: bool
+) -> CommonFramePricing:
+    source = context.source
+    admitted = (
+        populate_multitone_inventory(
+            table, source, context.work_plan, context.budget
+        ).admitted
+        if price_rwa
+        else ()
+    )
     rows = np.flatnonzero(table.tones == 2)
     keys = coefficient_keys(table, rows, source)
     constant = table.constant_envelopes(rows)
@@ -53,11 +95,14 @@ def _prices(table: SegmentTable, source: ModelSource) -> CommonFramePricing:
         original = 0.001 + 0.000040 * duration
         if fixed:
             original = min(original, 0.003 + 0.000014 * duration)
+        original *= size**3
+        if fixed and row in admitted:
+            original = min(original, _constant_rwa_price(table, int(row), context))
         grouped[key.tobytes()].append(
             (
                 0.0035 * size**2,
                 (0.0005 + 0.000028 * duration) * size**1.5,
-                original * size**3,
+                original,
             )
         )
     prices = tuple(
@@ -74,20 +119,21 @@ def _prices(table: SegmentTable, source: ModelSource) -> CommonFramePricing:
 
 
 def populate_common_frame_plan(
-    table: SegmentTable, source: ModelSource, plan: WorkPlan
+    table: SegmentTable, context: KernelContext, *, price_rwa: bool
 ) -> CommonFramePricing:
     """Publish complete-group prices lazily; prefix/worker subsets only borrow.
 
     Three-level calibration charges a 3.5 ms coefficient build including its
     handoff, plus .5 ms/row and 28 us/ns apply. Legacy constant prices use the
-    lower direct/RWA estimate; shaped rows have no constant-RWA floor. Dense
-    legacy integration scales cubically with state count. Small-matrix CF4
+    lower direct/RWA estimate; admitted constant RWA uses retained dimension,
+    restored bandwidth and duration instead of dense cubic scaling. Shaped
+    rows retain dense integration prices. Small-matrix CF4
     prices scale as M**1.5 and coefficient work as M**2. These are scheduling
     estimates, not runtime bounds. No tensors live in this inventory.
     """
-    return plan.fact(
-        FactKey("common-frame-prices", CommonFramePricing),
-        lambda: _prices(table, source),
+    return context.work_plan.fact(
+        FactKey(("common-frame-prices", price_rwa), CommonFramePricing),
+        lambda: _prices(table, context, price_rwa=price_rwa),
     )
 
 
@@ -140,7 +186,7 @@ def preferred(
     complete = context.work_plan.common_frame_table
     if complete is None:
         raise RuntimeError("common-frame pricing requires complete geometry")
-    pricing = populate_common_frame_plan(complete, context.source, context.work_plan)
+    pricing = populate_common_frame_plan(complete, context, price_rwa=rwa is not None)
     keys = (
         pricing.keys[rows]
         if table is complete
@@ -160,6 +206,11 @@ def preferred(
         representative = int(rows[indices[0]])
         model = context.source.model(tuple(int(v) for v in table.level[representative]))
         ports = tuple(int(v) for v in table.tone_port[representative, :2])
+        if not common_frame_cost_viable(
+            model, ports, table.tone_frequency_ghz[representative, :2]
+        ):
+            selected[indices] = False
+            continue
         strengths = context.work_plan.fact(
             FactKey(("common-frame-cost-strength", price.key), np.ndarray),
             lambda row=representative, model=model, ports=ports: common_frame_strengths(

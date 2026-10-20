@@ -168,6 +168,41 @@ def _monomial_inventory(count: int):
     )
 
 
+def _first_order_step(energies, full, frequencies) -> float:
+    carrier = float(frequencies.mean())
+    labels = np.rint(energies / carrier)
+    mask = labels[:, None] - labels[None, :] + 1 == 0
+    active = np.any(np.abs(full[:, mask]) > 1e-16, axis=1)
+    frequency = float(np.max(np.abs(frequencies[active] - carrier), initial=0))
+    return _step(frequency)
+
+
+def common_frame_cost_viable(
+    model: SecularModel, ports: tuple[int, ...], frequencies_ghz: NDArray[np.float64]
+) -> bool:
+    """Whether first-order playback can meet the unchanged build work policy.
+
+    Inputs are the ordered ports and signed carriers used by build_common_frame.
+    False proves its first-order cost exit without building SW2/remainders or
+    evaluating numerical admission. True says nothing about later admission.
+    This is an active-channel work bound, not a carrier-spacing accuracy veto.
+    """
+    if abs(float(np.mean(frequencies_ghz))) < 1e-10:
+        return False
+    full = np.array(
+        [
+            (model.drives[p].in_phase_ghz - 1j * model.drives[p].quadrature_ghz) / 2
+            for p in ports
+        ]
+    )
+    return (
+        _first_order_step(
+            model.energies_ghz - model.energies_ghz[0], full, frequencies_ghz
+        )
+        >= _MIN_STEP_NS
+    )
+
+
 def common_frame_strengths(
     model: SecularModel, ports: tuple[int, ...], frequencies_ghz: NDArray[np.float64]
 ) -> NDArray[np.float64]:
@@ -229,12 +264,8 @@ def build_common_frame(
             for p in ports
         ]
     )
-    carrier = float(frequencies.mean())
-    labels = np.rint(energies / carrier)
-    mask = labels[:, None] - labels[None, :] + 1 == 0
-    active = np.any(np.abs(full[:, mask]) > 1e-16, axis=1)
-    first_frequency = float(np.max(np.abs(frequencies[active] - carrier), initial=0))
-    step = _step(first_frequency)
+    labels = np.rint(energies / float(frequencies.mean()))
+    step = _first_order_step(energies, full, frequencies)
     channels = None
     monomials = np.empty((0, 2 * len(ports)), dtype=np.int64)
     degrees = np.empty(0, dtype=np.int64)

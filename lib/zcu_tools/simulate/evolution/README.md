@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-20, documented dispatch contracts and shared Floquet policies, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone and single shaped-gate omitted-channel retention, close-carrier multitone admission and cold-cost selection of expanded retained graphs, optional routing CPU reports, and cold-priced common-frame dispatch with charged coefficient reuse
+**Last updated:** 2026-10-20, documented dispatch contracts and shared Floquet policies, source-cumulative gate costs and route-aware exact-result reuse, adaptive covariant gate splitting and mixed cold plans, WorkPlan ownership, joint-basis multi-tone RWA including dual constant drives with recalibrated phase admission, sampled-support simultaneous and single-tone covariant gate reuse with compiled builders and fact-backed admissions, unified resident/pending budget, long-period playback, guarded CF4 carrier anchors and shared coarse-node eigensystems, single-tone block RWA with iterative omission-driven retention, exact final-mask graph sharing and shared omission admission, iterative multitone and single shaped-gate omitted-channel retention, close-carrier multitone admission and cold-cost selection of expanded retained graphs, optional routing CPU reports, and cold-priced common-frame dispatch with charged coefficient reuse, retained-block constant pricing and pre-build work bounds
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -106,10 +106,14 @@ for injected registries whose DOP853-named kernel can reject.
 Common-frame pricing includes the full coefficient build, complete-acquire key
 reuse, duration, model dimension, and a wasted-build risk estimated from
 first-order SW strength weighted by the current gain and envelope peak. This
-risk is a **cost estimate**, not an accuracy veto. Cheap admitted unexpanded RWA
-graphs keep their original route. Constant singletons at the three-level cold
-calibration stay on the original chain; larger native models can amortize the
-build against their higher integration cost. Cache warmth never chooses a variant.
+risk is a **cost estimate**, not an accuracy veto. Admitted constant RWA prices
+use retained population/coherence dimension, restored oscillation bandwidth and
+duration, rather than assuming dense cubic work from state count. This keeps
+cheap native block integration on the original route, including unique keys.
+The numerical owner's first-order active-channel playback bound skips products
+that would necessarily exit on build cost, before SW2 construction or admission.
+It is not a carrier-spacing accuracy veto. Constant singletons at the three-level
+cold calibration retain the original chain. Cache warmth never chooses a variant.
 Shaped and constant consumers share coefficient builds before legacy preparation.
 Rejected common rows retain the complete original RWA/Floquet/DOP853 ordering.
 
