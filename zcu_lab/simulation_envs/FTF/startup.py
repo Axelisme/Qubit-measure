@@ -27,9 +27,19 @@ def startup(ctx: StartupContext) -> None:
     """
     try:
         ctx.setup.new_entry("ftf-demo")
-    except DestinationExistsError:
+    except DestinationExistsError as exists:
         ctx.progress("Reopening FTF demo entry")
-        ctx.setup.open_entry("ftf-demo")
+        try:
+            ctx.setup.open_entry("ftf-demo")
+        except FileNotFoundError as missing:
+            # Result and Database halves are created together; one alone is a
+            # partial entry that startup must neither reuse nor overwrite.
+            raise RuntimeError(
+                f"ftf-demo is only partially present ({exists.filename} exists, "
+                f"{missing.filename} is missing). Remove both ftf-demo directories "
+                "under result/ and Database/ to start fresh, or restore the "
+                "missing one."
+            ) from missing
         ctx.setup.use_point("initial")
     else:
         ctx.progress("Seeding FTF demo entry from template")
