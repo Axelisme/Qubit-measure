@@ -600,9 +600,9 @@ def sample_row(
     )
     item.session_id = "sample-1"
     ctrl = MagicMock()
-    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {
-        item.session_id: applied
-    }
+    applied_states = {item.session_id: applied}
+    ctrl.get_writeback_applied_for_pane.return_value = applied_states
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied_states
     host = QTabWidget()
     host.addTab(QWidget(), "Overview")
     page = QWidget()
