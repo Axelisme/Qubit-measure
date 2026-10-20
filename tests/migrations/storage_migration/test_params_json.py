@@ -172,6 +172,69 @@ def predictor_params(request: MigrationRequest) -> JsonObject:
     return TypeAdapter(JsonObject).validate_python(read_predictor(request)["params"])
 
 
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("unit", [None, "mA"])
+def test_historical_top_level_fit_projects_exact_source_leaves(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    dry_run: bool,
+    unit: str | None,
+) -> None:
+    request = replace(request_data, dry_run=dry_run, assume_flux_unit=unit)
+    values: JsonObject = {
+        "params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8, "custom.energy": [3, None]},
+        "half flux": 0.25,
+        "period": 1.5,
+        "name": "historical author",
+        "project": {"name": "old project"},
+        "schema_version": "legacy",
+        "timestamp": "unproven local time",
+    }
+    source = write_params(request, values)
+    before = {p: p.read_bytes() for p in request.repo_root.rglob("*") if p.is_file()}
+    report = migrate(request, analysis_mapping)
+    converted = {
+        row.source_keys: row.new_path
+        for row in report.key_mappings
+        if row.old_file == source and row.action == "value"
+    }
+    assert converted.get(("params", "EJ")) == "params.EJ"
+    assert converted.get(("params", "EC")) == "params.EC"
+    assert converted.get(("params", "EL")) == "params.EL"
+    assert converted.get(("half flux",)) == "params.flux_half"
+    assert converted.get(("period",)) == "params.flux_period"
+    assert any(item.location == "timestamp" for item in report.pending)
+    assert any(item.location == "flux_unit" for item in report.pending) == (unit is None)
+    preserved = {
+        row.source_keys: row.destination_keys
+        for row in report.key_mappings
+        if row.action == "preserved"
+    }
+    assert preserved[("params", "custom.energy")] == (
+        "Qlegacy", "ext", "legacy_params", "params", "custom.energy"
+    )
+    if dry_run:
+        assert {p: p.read_bytes() for p in request.repo_root.rglob("*") if p.is_file()} == before
+        assert not backup_path(request).exists()
+        return
+    predictor = load_migrated_predictor(request)
+    assert predictor == PredictorFile(
+        model="fluxonium",
+        params=FluxoniumParams(EJ=6.27, EC=1.41, EL=0.8, flux_half=0.25, flux_period=1.5, flux_bias=0.0),
+        flux_unit=unit,
+        source=PredictorSource(None, None),
+    )
+    assert document_value(snapshot(open_entry(request).setup), "Qlegacy.ext.legacy_params") == {
+        "params": {"custom.energy": [3, None]},
+        "name": "historical author",
+        "project": {"name": "old project"},
+        "schema_version": "legacy",
+        "timestamp": "unproven local time",
+    }
+    migrate(replace(request, resume=True), analysis_mapping)
+    assert load_migrated_predictor(request) == predictor
+
+
 @pytest.fixture
 def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
     concrete = build_mapping(
