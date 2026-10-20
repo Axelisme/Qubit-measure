@@ -1,11 +1,11 @@
-"""Entry-scoped authored aliases through public storage and session seams."""
+"""Point-local authored aliases through public storage and session seams."""
 
 from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import AliasesChangedPayload
@@ -13,6 +13,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry, RoleResolutionError
+from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -57,7 +58,7 @@ def entry_at(root: Path, name: str = "entry") -> ResultEntry:
 
 
 def write_table(entry: ResultEntry, body: str, *, version: str = "1.0") -> None:
-    (entry.result_path / "aliases.yaml").write_text(
+    (entry.result_path / "points" / "first" / "aliases.yaml").write_text(
         f'format: zcu.aliases\nformat_version: "{version}"\naliases: {body}\n',
         encoding="utf-8",
     )
@@ -82,22 +83,24 @@ def test_saved_table_loads_in_order_without_filling_empty_rows(tmp_path: Path) -
     assert context.get_alias_rows() == PRESET
 
 
-def test_missing_file_resets_caller_preset_and_first_point_initialization(
+def test_switch_point_reloads_local_table_without_setup_or_preset_fallback(
     tmp_path: Path,
 ) -> None:
-    first = entry_at(tmp_path, "one")
-    second = entry_at(tmp_path, "two")
+    entry = entry_at(tmp_path)
+    entry.new_point("second")
+    entry.save_aliases(EntryAliases(aliases={"setup_only": "Q1"}))
+    entry.save_aliases(EntryAliases(aliases={"driver": "R1"}), point="second")
     context = service()
-    context.install_entry(first)
+    context.install_entry(entry)
+    assert context.get_alias_rows() == ()
     context.use_point(PointUseRequest("first"))
-    context.set_alias_rows((AliasRow("custom", "Q1"),))
-    context.install_entry(second)
-    assert context.get_alias_rows() == PRESET
+    assert context.get_alias_rows() == ()
+    context.set_alias_rows(AUTHORED)
+    context.use_point(PointUseRequest("second"))
+    assert context.get_alias_rows() == (AliasRow("driver", "R1"),)
+    assert context.read_context().value("$driver.rate") == 6500.0
     context.use_point(PointUseRequest("first"))
-    assert context.get_alias_rows() == AUTHORED[:2]
-    context.set_alias_rows(())
-    context.install_entry(first)
-    assert context.get_alias_rows() == PRESET
+    assert context.get_alias_rows() == ()
 
 
 @pytest.mark.parametrize(
@@ -119,10 +122,14 @@ def test_bad_file_preserves_old_binding_and_aliases(
     context.use_point(PointUseRequest("first"))
     binding = context.get_source_binding()
     rows = context.get_alias_rows()
-    second = entry_at(tmp_path, "two")
-    write_table(second, body, version=version)
+    entry = first
+    entry.new_point("second")
+    (entry.result_path / "points" / "second" / "aliases.yaml").write_text(
+        f'format: zcu.aliases\nformat_version: "{version}"\naliases: {body}\n',
+        encoding="utf-8",
+    )
     with pytest.raises(expected_error) as failure:
-        context.install_entry(second)
+        context.use_point(PointUseRequest("second"))
     if isinstance(failure.value, InvalidInputError):
         assert failure.value.reason_code == "alias_invalid"
     assert context.get_source_binding() == binding
@@ -137,10 +144,9 @@ def test_apply_round_trip_entry_isolation_and_memory_only_set(tmp_path: Path) ->
     second = entry_at(tmp_path, "two")
     context = service()
     context.install_entry(first)
+    context.use_point(PointUseRequest("first"))
     context.apply_alias_rows(AUTHORED)
-    assert (first.result_path / "aliases.yaml").is_file()
-    saved = first.load_aliases()
-    assert saved is not None
+    saved = first.load_aliases(point="first")
     assert list(saved.aliases.items()) == [
         ("driver", "Q1"),
         ("sense", "$driver.sense"),
@@ -152,13 +158,15 @@ def test_apply_round_trip_entry_isolation_and_memory_only_set(tmp_path: Path) ->
     )
     fresh = service()
     fresh.install_entry(reopened)
+    fresh.use_point(PointUseRequest("first"))
     assert fresh.get_alias_rows() == AUTHORED
     fresh.install_entry(second)
+    fresh.use_point(PointUseRequest("first"))
     fresh.apply_alias_rows(())
-    empty = second.load_aliases()
-    assert empty is not None
-    assert empty.aliases == {}
+    assert second.load_aliases(point="first").aliases == {}
+    assert first.load_aliases().aliases == {}
     fresh.install_entry(reopened)
+    fresh.use_point(PointUseRequest("first"))
     assert fresh.get_alias_rows() == AUTHORED
     fresh.install_entry(second)
     fresh.use_point(PointUseRequest("first"))
@@ -172,6 +180,7 @@ def test_apply_failure_preserves_file_rows_and_events_then_retries(
     context = service(bus)
     entry = entry_at(tmp_path)
     context.install_entry(entry)
+    context.use_point(PointUseRequest("first"))
     context.apply_alias_rows(AUTHORED)
     events: list[AliasesChangedPayload] = []
     bus.subscribe(AliasesChangedPayload, events.append)
@@ -187,24 +196,41 @@ def test_apply_failure_preserves_file_rows_and_events_then_retries(
     assert not events
     fresh = service()
     fresh.install_entry(entry)
+    fresh.use_point(PointUseRequest("first"))
     assert fresh.get_alias_rows() == AUTHORED
     context.apply_alias_rows(())
     assert context.get_alias_rows() == ()
     assert len(events) == 1
 
 
-def test_invalid_apply_validates_before_storage_and_empty_apply_is_memory_only(
-    tmp_path: Path,
+@pytest.mark.parametrize("opened", [False, True])
+def test_apply_without_point_fails_without_changing_memory_or_setup(
+    tmp_path: Path, opened: bool,
 ) -> None:
     context = service()
-    context.apply_alias_rows(AUTHORED)
+    entry = entry_at(tmp_path)
+    entry.save_aliases(EntryAliases(aliases={"setup": "Q1"}))
+    if opened:
+        context.install_entry(entry)
+    context.set_alias_rows(AUTHORED)
+    with pytest.raises(FailedPreconditionError) as failure:
+        context.apply_alias_rows(())
+    assert failure.value.reason_code == "no_context"
     assert context.get_alias_rows() == AUTHORED
+    assert entry.load_aliases().aliases == {"setup": "Q1"}
+    context.clear_context()
+    assert context.get_alias_rows() == ()
+
+
+def test_invalid_apply_preserves_point_table(tmp_path: Path) -> None:
+    context = service()
     entry = entry_at(tmp_path)
     context.install_entry(entry)
+    context.use_point(PointUseRequest("first"))
     with pytest.raises(InvalidInputError):
         context.apply_alias_rows((AliasRow("driver", "$later.rate"),))
-    assert entry.load_aliases() is None
-    assert context.get_alias_rows() == PRESET
+    assert entry.load_aliases(point="first").aliases == {}
+    assert context.get_alias_rows() == ()
 
 
 def test_missing_names_are_diagnosed_only_when_used(tmp_path: Path) -> None:

@@ -40,6 +40,7 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import ComponentDriver
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -76,10 +77,17 @@ def _close_all(session: _Session, qapp: QApplication) -> None:
 
 
 @pytest.fixture
-def memory_session(qapp: QApplication) -> Generator[_Session]:
-    """No opened entry: Apply stays memory-only and nothing resolves."""
+def memory_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
+    """A selected point with authored rows that need not resolve."""
+    entry = ResultEntry.create(
+        "draft", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
+    entry.new_point("working")
     bus = BaseEventBus()
-    control = ContextControlFacet(context=_service(bus))
+    service = _service(bus)
+    service.install_entry(entry)
+    service.use_point(PointUseRequest("working"))
+    control = ContextControlFacet(context=service)
     control.set_alias_rows(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
     )
@@ -92,13 +100,16 @@ def memory_session(qapp: QApplication) -> Generator[_Session]:
 
 @pytest.fixture
 def entry_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
-    """An opened entry without a selected point; Apply saves aliases.yaml."""
+    """A selected point; Apply saves its point-local aliases.yaml."""
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
     bus = BaseEventBus()
-    service = _service(bus, (AliasRow("qubit", "Q1"),))
+    service = _service(bus)
+    entry.new_point("working")
     service.install_entry(entry)
+    service.use_point(PointUseRequest("working"))
+    service.set_alias_rows((AliasRow("qubit", "Q1"),))
     session = _Session(ContextControlFacet(context=service), bus, entry)
     try:
         yield session
@@ -226,7 +237,26 @@ def _fresh_rows(entry: ResultEntry) -> tuple[AliasRow, ...]:
     """Reopen entry in a new owner, reading only its saved aliases.yaml."""
     fresh = _service(BaseEventBus())
     fresh.install_entry(entry)
+    fresh.use_point(PointUseRequest("working"))
     return fresh.get_alias_rows()
+
+
+def test_apply_without_point_shows_actionable_error(qapp: QApplication, tmp_path: Path) -> None:
+    bus = BaseEventBus()
+    control = ContextControlFacet(context=_service(bus, (AliasRow("qubit", "Q1"),)))
+    session = _Session(control, bus)
+    try:
+        ui = ComponentDriver(_open(session))
+        ui.select_tab("Aliases")
+        ui.screenshot(tmp_path / "aliases-before-apply.png")
+        ui.click(object_name="inspect.aliases.apply")
+        error = ui.observe(object_name="inspect.aliases.error")
+        ui.screenshot(tmp_path / "aliases-no-point-error.png")
+        assert error.visible
+        assert "Select or create a working point" in error.text
+        assert ui.observe(object_name="inspect.aliases.apply").enabled
+    finally:
+        _close_all(session, qapp)
 
 
 def test_aliases_page_shows_the_installed_ordered_rows(memory_session) -> None:
@@ -311,7 +341,7 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     value = _cell(_table(page), 0, 1)
     value.setText("Q2")
     # A directory where aliases.yaml belongs makes the atomic replace fail.
-    blocker = entry.result_path / "aliases.yaml"
+    blocker = entry.result_path / "points" / "working" / "aliases.yaml"
     blocker.mkdir()
     _button(page, "apply").click()
     assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
@@ -369,16 +399,18 @@ def test_resolution_stays_applied_until_successful_apply(resolved_session) -> No
     assert linked.toolTip() == linked.text()
 
 
-@pytest.mark.parametrize("fixture_name", ["memory_session", "entry_session"])
-def test_resolution_without_entry_or_selected_point_is_empty(
-    fixture_name: str, request: pytest.FixtureRequest
-) -> None:
-    table = _table(_aliases_page(_open(request.getfixturevalue(fixture_name))))
+def test_resolution_without_selected_point_is_empty(qapp: QApplication) -> None:
+    bus = BaseEventBus()
+    control = ContextControlFacet(context=_service(bus, (AliasRow("qubit", "Q1"),)))
+    session = _Session(control, bus)
+    dialog = _open(session)
+    table = _table(_aliases_page(dialog))
     assert table.rowCount() > 0
     for row in range(table.rowCount()):
         result = _cell(table, row, 2)
         assert result.text() == ""
         assert not result.flags() & Qt.ItemFlag.ItemIsEditable
+    _close_all(session, qapp)
 
 
 def test_added_resolution_cell_is_read_only_and_updates_on_apply(
@@ -589,7 +621,7 @@ def test_failed_apply_keeps_owner_file_and_preset_draft(entry_session) -> None:
     page = _aliases_page(_open_with_presets(entry_session, PRESETS))
     _load_preset(page, "zeta")
     # A directory where aliases.yaml belongs makes the atomic replace fail.
-    blocker = entry.result_path / "aliases.yaml"
+    blocker = entry.result_path / "points" / "working" / "aliases.yaml"
     blocker.mkdir()
     _button(page, "apply").click()
     assert _error(page)
@@ -618,7 +650,7 @@ def test_unsaved_preset_draft_close_follows_save_discard_cancel(
     assert dialog.isVisible()
     assert _shown_rows(_table(page)) == _rows(PRESETS["zeta"])
 
-    blocker = entry.result_path / "aliases.yaml"
+    blocker = entry.result_path / "points" / "working" / "aliases.yaml"
     blocker.mkdir()
     presenter.queue_save_discard_cancel("save")
     dialog.close()

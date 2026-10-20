@@ -24,7 +24,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.resources.entry import component_registry
+from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
@@ -261,7 +261,7 @@ def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
     assert probe.calls == ["worker finished", "callback", "hardware"]
 
 
-def test_startup_creates_entry_seed_aliases_and_first_point(startup_app, tmp_path):
+def test_startup_creates_point_then_persists_its_aliases(startup_app, tmp_path):
     _behavior, _assembly, ctrl, _window, _probe = startup_app
     before = registry_state()
     try:
@@ -271,8 +271,8 @@ def test_startup_creates_entry_seed_aliases_and_first_point(startup_app, tmp_pat
             "    from zcu_tools.gui.session.aliases import AliasRow\n"
             "    ctx.setup.new_entry('created')\n"
             "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, setup=True)\n"
-            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n"
-            "    ctx.setup.new_point('initial')\n",
+            "    ctx.setup.new_point('initial')\n"
+            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n",
         )
         token = ctrl.start_startup(path)
         qt_until(
@@ -285,6 +285,10 @@ def test_startup_creates_entry_seed_aliases_and_first_point(startup_app, tmp_pat
         assert outcome is not None and outcome.status == "finished"
         assert ctrl.context_control.current_point_label() == "initial"
         assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+        entry = ResultEntry.open(
+            "created", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+        )
+        assert entry.load_aliases(point="initial").aliases == {"qubit": "Q1"}
         ctrl.setup_control.open_entry(EntryRequest("synthetic"))
         ctrl.setup_control.open_entry(EntryRequest("created"))
         ctrl.setup_control.use_point(PointUseRequest("initial"))
