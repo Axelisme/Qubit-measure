@@ -16,8 +16,8 @@ def startup(ctx: StartupContext) -> None:
     ctx is the GUI's typed startup capability, called on its background worker
     after lab components/adapters are registered. Use the GUI's data project
     roots, not the shell cwd. An existing ftf-demo is reopened unchanged at its
-    initial point, so later edits survive restarts; the template only seeds a
-    new entry. Template, entry, environment and binding failures propagate to
+    initial point, so later edits survive restarts; the template and the demo
+    onetone/freq tab only come with a new entry. Template, entry, environment and binding failures propagate to
     the startup runner, which retains completed work and registered cleanup.
 
     Build with one worker and no numeric warmup; this script never acquires or
@@ -25,6 +25,7 @@ def startup(ctx: StartupContext) -> None:
     close callback releases borrowed references and closes only untransferred
     drivers, after background work drains and before GUI driver cleanup.
     """
+    fresh = False
     try:
         ctx.setup.new_entry("ftf-demo")
     except DestinationExistsError as exists:
@@ -42,6 +43,7 @@ def startup(ctx: StartupContext) -> None:
             ) from missing
         ctx.setup.use_point("initial")
     else:
+        fresh = True
         ctx.progress("Seeding FTF demo entry from template")
         _seed_entry(ctx)
 
@@ -61,8 +63,11 @@ def startup(ctx: StartupContext) -> None:
     for name, driver in environment.devices.get_all_devices().items():
         ctx.devices.register(name, driver)
         transferred.add(name)
-    ctx.progress("Opening FTF frequency tab")
-    ctx.tabs.new_tab("onetone/freq")
+    # The demo tab belongs to the seed; a reopened entry starts without tabs
+    # so a tab the user closed does not come back on every launch.
+    if fresh:
+        ctx.progress("Opening FTF frequency tab")
+        ctx.tabs.new_tab("onetone/freq")
 
 
 def _seed_entry(ctx: StartupContext) -> None:

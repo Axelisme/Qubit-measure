@@ -35,7 +35,8 @@ Script 用 `ctx.context.apply_alias_rows` 初始化該 point 的 alias，框架�
 首次建立中途失敗可能留下部分 entry，沒有跨檔交易或自動 rollback。
 
 Script 接著建立離線 FTF 環境，安裝 SoC，登記 f1_bias、coupler_bias、
-f2_bias 三個 live device，並開啟 `onetone/freq` tab。毋須手動 Open 或選 point。
+f2_bias 三個 live device。首次建立 entry 時開啟 `onetone/freq` tab；重開既有 entry 不建 tab，
+關掉的 tab 不會在下次啟動回來。毋須手動 Open 或選 point。
 Template 不含 module library 或校準值；tab 可編輯，但執行量測前仍須設定有效輸入。
 Script 用 `workers=1, warmup=False`，不在啟動時預編譯或執行 acquisition。
 
