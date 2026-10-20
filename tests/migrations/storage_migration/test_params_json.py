@@ -1166,6 +1166,46 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
     assert not report.pending
 
 
+@pytest.mark.parametrize(
+    ("values", "formal_kind", "source_keys"),
+    [
+        ({"dispersive": {}}, "dispersive", ("dispersive",)),
+        ({"t1_curve_fit": {}}, "t1_curve", ("t1_curve_fit",)),
+        (
+            {"fluxdep_fit": {"params": {}, "flux_unit": "A", "timestamp": "2020-07-07T16:30:00+08:00"}},
+            "predictors", ("fluxdep_fit", "params"),
+        ),
+    ],
+)
+def test_successful_empty_analysis_containers_are_not_preserved_twice(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    values: JsonObject,
+    formal_kind: str,
+    source_keys: tuple[str, ...],
+) -> None:
+    values.update({"unknown.empty": {}, "unknown_list": []})
+    source = write_params(request_data, values)
+    report = migrate(request_data, analysis_mapping)
+    entry = open_entry(request_data)
+    assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
+        "unknown.empty": {}, "unknown_list": []
+    }, "Only successfully transferred known empty containers should leave raw storage"
+    formal = entry.result_path / formal_kind / "Qlegacy.json"
+    assert any(
+        row.action == "value" and row.source_keys == source_keys
+        and row.old_file == source and row.new_file == formal
+        and row.new_path == "params"
+        for row in report.key_mappings
+    )
+    if formal_kind == "predictors":
+        assert load_predictor_file(formal).params == FluxoniumParams(flux_bias=0.0)
+    elif formal_kind == "dispersive":
+        assert load_dispersive_file(formal).params.model_dump(exclude_unset=True) == {}
+    else:
+        assert load_t1_curve_file(formal).params.model_dump(exclude_unset=True) == {}
+
+
 def test_lossless_sections_are_inherited_before_point_meta_overrides(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
@@ -1390,13 +1430,17 @@ def test_partial_fit_keeps_unknowns_without_enforcing_physical_constraints(
 
 
 @pytest.mark.parametrize("model", ["fluxonium", "transmon", "unrecognized"])
+@pytest.mark.parametrize("empty_params", [False, True])
 def test_undefined_explicit_model_contract_remains_located_pending(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
     legacy_fit: JsonObject,
     model: str,
+    empty_params: bool,
 ) -> None:
     legacy_fit["model"] = model
+    if empty_params:
+        legacy_fit["params"] = {}
     source = write_params(request_data, {"fluxdep_fit": legacy_fit})
     report = migrate(request_data, analysis_mapping)
     assert any(
@@ -1410,8 +1454,16 @@ def test_undefined_explicit_model_contract_remains_located_pending(
             snapshot(open_entry(request_data).setup),
             "Qlegacy.ext.legacy_params.fluxdep_fit",
         )
-        == {key: value for key, value in legacy_fit.items() if key != "plot_transitions"}
+        == {
+            key: value for key, value in legacy_fit.items()
+            if key not in ("plot_transitions", "timestamp")
+        }
     )
+    entry = open_entry(request_data)
+    dispersive = load_dispersive_file(entry.dispersive_path / "Qlegacy.json")
+    assert dispersive.source.created_at == legacy_fit["timestamp"]
+    assert dispersive.params.plot_transitions is not None
+    assert dispersive.params.plot_transitions.model_extra == {"0.1": [1, 2]}
 
 
 def test_undefined_transmon_parameter_shape_stays_pending(
