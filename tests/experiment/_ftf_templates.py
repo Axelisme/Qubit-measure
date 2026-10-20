@@ -15,6 +15,7 @@ from zcu_tools.core.simulation import (
     RoundStatistics,
     TimelineTemplate,
 )
+from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.resources._ftf_data import ftf_document
@@ -93,8 +94,8 @@ def request(mode: AcquisitionMode = "integrated", *, templates=None) -> AcquireR
     )
 
 
-def expect_statistics(result: RoundStatistics | RoundSignals) -> RoundStatistics:
+def expect_statistics(result: IntegratedRound | RoundSignals) -> RoundStatistics:
     """Narrow the integrated result once for typed numerical assertions."""
-    if not isinstance(result, RoundStatistics):
-        raise AssertionError("integrated FTF round must return RoundStatistics")
-    return result
+    if not isinstance(result, IntegratedRound):
+        raise AssertionError("integrated FTF round must return IntegratedRound")
+    return result.statistics

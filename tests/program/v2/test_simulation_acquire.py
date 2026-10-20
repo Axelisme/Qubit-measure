@@ -69,6 +69,9 @@ def test_integrated_normalization_round_buffers_and_delayed_raw(edge_counting):
         RoundStatistics,
         SamplingIdentity,
     )
+    from zcu_tools.program.v2.simulation import IntegratedRound
+
+    from tests.program.v2.simulation.support import FixedRawShots
 
     env = environment(std_adc=0, seed=13, n_gens=2, n_readouts=2)
     for ch in (0, 1):
@@ -79,7 +82,7 @@ def test_integrated_normalization_round_buffers_and_delayed_raw(edge_counting):
     sums = np.array([[13.0, -29.0]])
 
     def source(request):
-        return RoundStatistics(
+        statistics = RoundStatistics(
             np.array([3], dtype=np.int64),
             tuple(
                 ChannelStatistics(
@@ -88,6 +91,9 @@ def test_integrated_normalization_round_buffers_and_delayed_raw(edge_counting):
                 for ch in (0, 1)
             ),
             SamplingIdentity(13, (request.acquire.sequence, request.index, 1)),
+        )
+        return IntegratedRound(
+            statistics, FixedRawShots({ch: sums * (ch + 1) / 3 for ch in (0, 1)})
         )
 
     env.soc.binding.execute = source
@@ -233,6 +239,10 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
             "synthetic-v1", "retained-model-v1", (("bias", value),)
         )
 
+    from zcu_tools.program.v2.simulation import IntegratedRound
+
+    from tests.program.v2.simulation.support import FixedRawShots
+
     def source(request):
         seen.append(request)
         bias = request.snapshot.values[0][1]
@@ -245,10 +255,13 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
             channels.append(
                 ChannelStatistics(ch, sums, sums[:, None, :], np.zeros((2, 2)))
             )
-        return RoundStatistics(
+        statistics = RoundStatistics(
             np.array([1], dtype=np.int64),
             tuple(channels),
             SamplingIdentity(12, (request.index,)),
+        )
+        return IntegratedRound(
+            statistics, FixedRawShots({ch.channel: ch.sums for ch in channels})
         )
 
     def hook(count, data, stop):

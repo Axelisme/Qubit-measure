@@ -54,6 +54,33 @@ Kernel 不呼叫另一個 kernel class 的方法來取得共用運算。
 C12 穩定工具不依賴有狀態模組檢查。本決策不新增依賴方向，也不放寬 ignore_imports。
 Package root 的對外入口規則由介面與 caller review 維持；上述 contracts 不檢查內部子模組的匯入路徑。
 
+### Integrated raw 由環境生成，介面由 program 擁有
+
+使用者於 2026-10-20 裁決：「1-1」「基本認同丙，但我質疑有需要進core嗎？」。
+介面改放 program 後，使用者答「同意」。
+
+`program.v2.simulation.RawShots` 定義延遲產生完整單發 ADC sums 的介面。
+環境以 `IntegratedRound` 一起交付純統計資料和 raw source。
+Program 只在單發 processing 或 getter 需要資料時呼叫 source，不重跑 backend。
+`core.simulation.RoundStatistics` 只有資料，不定義 materializer、Protocol 或 callback。
+Core 的 no-callback 邊界不變。
+
+ADC 和 white_noise 各自生成完整 raw，包含物理訊號、receiver noise、nearest-even int64 轉換和排列。
+兩者以結構型別符合 RawShots，不 import program。
+`experiment.simulation` 和 `experiment.ftf` 是現有組合根。
+`simulate.rounding` 擁有兩種環境和 decimated transport 共用的數值取整及 shot-axis 排列。
+這些函式處理數值 ADC sums，不負責 QICK averaging 或硬體操作。
+依賴方向由 C8、C9、C12 和 C19 保護，不增加 ignore_imports。
+
+單 carrier raw 直接抽 CTMC waiting times 和 directional transitions。
+零跳直接取 noiseless sums，有跳以 compiled exact 腔記憶傳播計算離散 sample sums。
+所有多跳都保留，不設跳數上限，不建 shot LUT，也不改成先抽跳數的 sampler。
+已知 flat 輸入用閉式傳播，其他 envelope 保留 noiseless baseline 的 solver tolerances。
+每次跳躍沿用原有腔場，不重設 vacuum。
+直接平均維持 conditional moments 和既有 RNG stream，不做逐 shot 工作。
+Raw 和直接平均只要求期望一致，不平移 raw 以匹配有限 shots 的平均 realization。
+Prepare cache 只存 noiseless inputs，不存 noisy shots 或 round identity。
+
 ## 取捨
 
 新增或改動算法時，dispatch 也可能需要一起修改。

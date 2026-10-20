@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-20, direct FTF callers and separate GUI/Notebook cost policies
+**Last updated:** 2026-10-20
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -278,29 +278,43 @@ then calibrate once per receiver. Single-carrier fast paths and evolution are un
 
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
-does not scale noise. Integrated acquisition returns `RoundStatistics` with joint
-state counts shared across all ADCs/reads, and separate channel totals. Decimated acquisition returns `RoundSignals`,
-reordering point-major samples into QICK loop order. The adapter owns packing,
-rounding, deferred raw generation and averaging. All channels at the same shot
+does not scale noise. Integrated acquisition returns `IntegratedRound` with pure
+`RoundStatistics` and an ADC-owned RawShots source. Counts remain shared across
+all ADCs/reads, with separate direct totals. ADC retains noiseless model/pulse/grid
+inputs for delayed raw; no shot paths or noisy outputs enter prepare caches.
+The raw source retains its round's physical inputs and sampling identity after
+later rounds, prepare-cache eviction and `FTFSource.close()`. A program getter
+uses that source without capturing devices or rerunning evolution/readout
+preparation. It cannot switch to another program's more recent round.
+The same physical inputs feed ADC's required batch-based trace interface in
+decimated mode. Both modes share each shot's full CTMC path across carriers,
+ADCs and windows. Decimated acquisition returns `RoundSignals`,
+reordering point-major samples into QICK loop order. ADC owns integrated raw generation, noise, rounding and loop layout. Program
+owns detached buffers, declaration order and acquisition averaging. All channels at the same shot
 index share one sampled joint state; receiver noise is independent. There is no
 extra tone axis: each declared ADC has its own raw-shot array. Output follows
 program ADC declaration order, which is mux tone order, not sorted channel index.
 
 The model assumes weak dispersive readout, independent weak-coupling Markov
 secular baths and exponential echo-characteristic dephasing. Truncations and
-numerical tolerances remain user choices. Conditional means include multilevel
-relaxation, not random jump times. Variance includes initial-state mixture,
+numerical tolerances remain user choices. Direct conditional means include
+multilevel relaxation. Direct-mean variance includes initial-state mixture,
 receiver noise and the integrated rounding term.
+Physical raw and traces additionally resolve continuous jump times and cavity
+memory. They need only agree with direct means in expectation, not realization.
 
 `private_replay=absolute_directory` opts into checked private input archives.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v10`, which identifies closed-form sampled-envelope
-readout and tiled flat integrated sums, retaining common-origin phase conversion.
-Archives from `ftf-segment-v9` and earlier backends fail explicitly because
-readout floating-point results change. Evolution's numeric version and RNG
-sampling contract are unchanged.
+The backend is `ftf-segment-v11`. Integrated raw and decimated traces resolve
+continuous CTMC jump times and cavity memory, with one physical path per shot
+shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v10`
+and earlier backends fail explicitly because their raw sampling is incompatible.
+Direct means retain conditional moments, their numeric values and their existing
+RNG stream. Raw getters do not advance that stream or shift shots to match a
+finite-shot direct mean. Each acquisition route reproduces itself for equal
+seed, inputs and recorded versions. Evolution's numeric version is unchanged.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

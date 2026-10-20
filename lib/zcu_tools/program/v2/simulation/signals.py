@@ -14,18 +14,31 @@ from zcu_tools.core.simulation import (
     RoundSignals,
     RoundStatistics,
 )
+from zcu_tools.simulate.rounding import rounded_sums
+
+from .result import RawShots
 
 
-def rounded_sums(values: NDArray[np.float64]) -> NDArray[np.int64]:
-    rounded = np.rint(values)
-    # float64 represents 2**63, but not INT64_MAX; the upper bound is exclusive.
-    if (
-        not np.all(np.isfinite(rounded))
-        or np.any(rounded < -(2.0**63))
-        or np.any(rounded >= 2.0**63)
-    ):
-        raise ValueError("ADC sums must be finite and representable as int64")
-    return rounded.astype(np.int64)
+def materialize_shots(
+    request: AcquireRequest, source: RawShots
+) -> dict[int, NDArray[np.int64]]:
+    """Call an environment raw source and detach validated QICK shot arrays.
+
+    request fixes ADC keys, loop dimensions and read counts. source owns signal,
+    noise, rounding and layout. Wrong keys, dtype or shapes raise ValueError.
+    Returned buffers are owned by the adapter, independent of future source calls.
+    """
+    raw = source.materialize(request.reps, request.avg_level)
+    if set(raw) != {w.channel for w in request.readouts}:
+        raise ValueError("raw ADC channels do not match request")
+    detached = {}
+    for window in request.readouts:
+        values = raw[window.channel]
+        shape = (*request.loop_dims, window.reads, 2)
+        if values.dtype != np.int64 or values.shape != shape:
+            raise ValueError(f"raw ADC {window.channel} requires int64 shape {shape}")
+        detached[window.channel] = values.copy()
+    return detached
 
 
 def pack_signals(

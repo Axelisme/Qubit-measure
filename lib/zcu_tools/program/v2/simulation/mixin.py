@@ -8,10 +8,12 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
-from zcu_tools.core.simulation import RoundStatistics
+from zcu_tools.core.simulation import AcquireRequest, RoundStatistics
 from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
 from zcu_tools.progress_bar import make_pbar
 
+from .result import IntegratedRound, RawShots
+from .signals import materialize_shots
 from .soc import SimulationSoc
 
 if TYPE_CHECKING:
@@ -30,7 +32,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     """
 
     _simulation_active: bool = False
-    _simulation_raw: tuple[RoundStatistics, int, int] | None = None
+    _simulation_raw: tuple[RawShots, AcquireRequest] | None = None
 
     def _acquire_configured(self, soc, *args, **kwargs) -> list[NDArray[np.float64]]:
         if not isinstance(soc, SimulationSoc):
@@ -161,8 +163,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             soc.cleanup_round()
             self._close_rounds_pbar()
             return False
-        if not isinstance(result, RoundStatistics):
-            raise ValueError("integrated acquisition requires RoundStatistics")
+        if not isinstance(result, IntegratedRound):
+            raise ValueError("integrated acquisition requires IntegratedRound")
         self._consume_integrated_result(soc, result)
         soc.cleanup_round()
         self.rounds_pbar.update()
@@ -183,7 +185,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         return self
 
     def _consume_integrated_result(
-        self, soc: SimulationSoc, result: RoundStatistics
+        self, soc: SimulationSoc, result: IntegratedRound
     ) -> None:
         assert self.acquire_params is not None
         assert self.rounds_buf is not None
@@ -193,12 +195,14 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         request = soc.binding.last_request
         if request is None:
             raise RuntimeError("simulation round requires installed request")
-        self._simulation_raw = (result, request.reps, request.avg_level)
+        self._simulation_raw = (result.raw, request)
         if not self._simulation_needs_raw:
             self.acc_buf = None
-            self.rounds_buf.append(self._average_statistics(result, request.reps))
+            self.rounds_buf.append(
+                self._average_statistics(result.statistics, request.reps)
+            )
             return
-        raw = result.materialize_raw(request.reps, request.avg_level)
+        raw = materialize_shots(request, result.raw)
         self.acc_buf = [raw[ch] for ch in prog.ro_chs]
         self.rounds_buf.append(prog._process_accumulated(self.acc_buf))
 
@@ -222,12 +226,12 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     def get_raw(self) -> list[NDArray[np.int64]] | None:
         """Return last-round int64 QICK sums, materializing compact shots once.
 
-        Deferred shots use the retained round identity, never a new backend call.
+        Deferred shots use the retained environment source, never a new backend call.
         Hardware and decimated data use QICK buffers.
         """
         if self.acc_buf is None and self._simulation_raw is not None:
-            result, reps, avg_level = self._simulation_raw
-            raw = result.materialize_raw(reps, avg_level)
+            source, request = self._simulation_raw
+            raw = materialize_shots(request, source)
             self.acc_buf = [raw[ch] for ch in self._program().ro_chs]
         return super().get_raw()
 
