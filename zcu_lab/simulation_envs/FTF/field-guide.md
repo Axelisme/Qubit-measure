@@ -150,6 +150,8 @@ Flux operator 在每 round 的 live DC 工作點用解析導數求值，經固�
 
 樣板的兩條 charge line 各對主迴路填 real 0.1、對 coupler 填 real 0.01、對另一 fluxonium 填 0，imag 全為 0，單位 GHz/gain。這些是模擬假設，不是實測校準。把某迴路兩個分量都填 0 才表示不驅動該迴路。Frequency、phase、signed gain 與 waveform 由 program 提供。
 
+模擬保留完整的多能階電荷算符，所以強驅動會出現相鄰能階引起的二階 AC Stark 頻移。樣板參數下，48 ns 方波要反轉 f1 需要 gain 約 0.6，此時 0↔5 躍遷（矩陣元約為 01 躍遷的 7 倍、失諧約 211 MHz）把 01 共振點推高約 4.7 MHz；gain 0.3 的 π/2 脈衝約 1.2 MHz，頻移正比 gain²。用弱探針 twotone/freq 的頻率直接驅動這種脈衝時，旋轉軸會出平面，AllXY 出現 (X,Y) 與 (Y,X) 門對分裂、單次 π 比兩次 π/2 激發更少。要看乾淨的單 qubit 門階梯，把門用 Gaussian 或帶 ramp 的 flat-top、或把長度放到 64 到 128 ns，並在 Rabi 校準後用同一脈衝找動態共振點。辨別方法與案例在量測知識庫的 Rabi 條目。
+
 ## Readout：drive → 物理 resonators → ADC
 
 訊號路徑是 `readout.drive` 的 incident field 進入兩個物理 resonators 共用的 reciprocal、co-located two-port line，再由 `readout.adc` 轉成接收樣本。兩個 resonator 不是兩個 ADC，也不是兩條獨立 readout drive。
