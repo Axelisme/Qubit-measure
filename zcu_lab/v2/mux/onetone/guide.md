@@ -29,11 +29,9 @@ Live 圖以共同 offset 為橫軸，顯示 K 條 active magnitude 曲線。Lege
 
 ## FIT
 
-所有 active tones 共用 onetone/freq 的設定。Model type 可選 hanger `hm`、transmission `t` 或 `auto`。Amplitude background 與 phase curvature 可獨立開關。Electrical-delay mode 有三種：
+所有 active tones 共用 onetone/freq 的四欄設定。Model type 可選 hanger `hm`、transmission `t` 或 `auto`，預設 `hm`。Fit amplitude background 預設開啟，Fit phase curvature 預設關閉，兩者可獨立切換。
 
-- `auto` 先找對應 resonator.ext.edelay 的 generator／ADC route 校準，沒有匹配時作 global 搜尋。Maximum electrical-delay search radius 必須是正的有限 scalar。
-- `calibrated` 要求每個 tone 有匹配的有限 route prior，缺少時只讓該 tone 失敗。
-- `manual` 對所有 active tone 使用同一個有限 Manual electrical delay 作 branch seed。Delay 單位是 MHz⁻¹，不是固定模型參數。
+Electrical delay seed 單位為 us，預設留空。留空時，每個 tone 各自使用對應 resonator.ext.edelay 的有限 generator／ADC route 校準作 branch seed。沒有匹配時，該 tone 使用內部固定 100 us 上限作 global 搜尋。明填有限數字時，所有 active tones 共用此 branch seed，0 與負值也有效。Seed 只選擇擬合起點，不固定模型 delay。非有限或非數字 delay 輸入會拒絕整次 FIT。
 
 FIT 只處理 active columns。每條曲線以保存的原始 base frequency 加共同 nominal dfs 作 MHz 座標，去掉首尾點。這不是 DDS 實際頻率。Cfg、selection、tone_indices 或 shape 不符時整次拒絕。單一 tone 的數值擬合失敗會留下原因與診斷圖，其餘 tone 繼續。
 

@@ -37,7 +37,6 @@ from zcu_lab.v2.onetone.freq.form import make_form
 
 OneToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 SamplingMode: TypeAlias = Literal["linear", "homophasal"]
-EDelayMode: TypeAlias = Literal["auto", "calibrated", "manual"]
 EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
 
 _EDELAY_PARAMETER_PATH = "resonator.ext.edelay"
@@ -46,6 +45,16 @@ _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
 
 @dataclass
 class OneToneFreqAnalyzeParams:
+    """Shared single-tone and mux resonance fit controls.
+
+    model_type selects hanger (hm), transmission (t), or automatic selection.
+    The background switches independently fit amplitude slope and phase curvature.
+    edelay is a finite branch seed in us, including zero or negative values,
+    never a fixed delay. None uses a finite route-matched prior, or an internal
+    100 us search cap when no matching prior exists. Invalid seeds raise ValueError
+    at analyze entry.
+    """
+
     model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
         "hm"
     )
@@ -55,15 +64,9 @@ class OneToneFreqAnalyzeParams:
     fit_bg_phase_curvature: Annotated[bool, ParamMeta(label="Fit phase curvature")] = (
         False
     )
-    edelay_mode: Annotated[EDelayMode, ParamMeta(label="Electrical-delay mode")] = (
-        "auto"
-    )
-    manual_edelay: Annotated[
-        float | None, ParamMeta(label="Manual electrical delay")
+    edelay: Annotated[
+        float | None, ParamMeta(label="Electrical delay seed (us; blank = auto)")
     ] = None
-    max_edelay_search_radius: Annotated[
-        float, ParamMeta(label="Maximum electrical-delay search radius")
-    ] = _DEFAULT_MAX_EDELAY_SEARCH_RADIUS
 
 
 @dataclass
@@ -126,27 +129,16 @@ class OneToneFreqAdapter(
         parameters: ParameterContext | None,
         route: tuple[int, int] | None,
     ) -> tuple[float | None, EDelaySource]:
-        if params.edelay_mode == "manual":
-            if params.manual_edelay is None:
-                raise ValueError("manual edelay mode requires manual_edelay")
-            seed = finite_real(params.manual_edelay)
+        if params.edelay is not None:
+            seed = finite_real(params.edelay)
             if seed is None:
-                raise ValueError("manual_edelay must be finite")
+                raise ValueError("edelay must be a finite real scalar or None")
             return seed, "manual"
 
         prior = cls._route_matched_prior(parameters, route)
-        if params.edelay_mode == "calibrated":
-            if prior is None:
-                raise ValueError(
-                    "calibrated edelay mode requires a finite route-matched "
-                    "resonator.ext.edelay prior"
-                )
+        if prior is not None:
             return prior, "calibrated"
-        if params.edelay_mode == "auto":
-            if prior is not None:
-                return prior, "calibrated"
-            return None, "global"
-        raise ValueError(f"Invalid electrical-delay mode: {params.edelay_mode!r}")
+        return None, "global"
 
     @staticmethod
     def _has_nonuniform_fitting_grid(result: OneToneFreqRunResult) -> bool:
@@ -178,14 +170,9 @@ class OneToneFreqAdapter(
         edelay_seed, edelay_source = self._resolve_edelay_seed(
             params, req.parameters, route
         )
-        max_search_radius: float | None = None
-        if edelay_seed is None:
-            max_search_radius = finite_real(params.max_edelay_search_radius)
-            if max_search_radius is None or max_search_radius <= 0.0:
-                raise ValueError(
-                    "max_edelay_search_radius must be positive and finite, got "
-                    f"{params.max_edelay_search_radius!r}"
-                )
+        max_search_radius = (
+            _DEFAULT_MAX_EDELAY_SEARCH_RADIUS if edelay_seed is None else None
+        )
         answer = FreqExp().analyze(
             req.run_result,
             FreqAnalyzeOptions(
