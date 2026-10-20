@@ -194,8 +194,9 @@ class ArtifactSaveCenter(QWidget):
     """Render whole-artifact Save actions and read-only per-output evidence.
 
     Empty sections produce no placeholder artifact. Status and path refreshes
-    retain existing widgets and text selections. Save All includes Saved items;
-    close warnings concern only incompletely saved measurement data.
+    retain existing widgets and text selections. Save actions are disabled when
+    every artifact is Saved; close warnings concern only incompletely saved
+    measurement data.
     """
 
     def __init__(
@@ -443,19 +444,26 @@ class ArtifactSaveCenter(QWidget):
     ) -> None:
         """Refresh evidence and enable commands only for idle, ready tabs.
 
-        A complete live snapshot is required. Saved artifacts remain saveable.
-        The annotation is disabled while an operation owns the captured content.
+        A complete live snapshot is required. Save All and every row's Save need
+        at least one artifact that is not Saved. The annotation is disabled while
+        an operation owns the captured content.
         """
         if snapshot.interaction is None or snapshot.capabilities is None:
             raise RuntimeError("Save center needs a live tab snapshot")
         self.update_from_snapshot(snapshot)
         state = snapshot.interaction
         idle = writable and not (state.is_running or state.is_analyzing)
+        can_save = (
+            idle
+            and state.has_active_context
+            and any(
+                artifact.status is not SaveStatus.SAVED
+                for artifact in self._snapshots.values()
+            )
+        )
         for row in self._rows.values():
-            row.save.setEnabled(idle and state.has_active_context)
+            row.save.setEnabled(can_save)
         self._comment_edit.setEnabled(idle)
         if self._has_load:
             self.load_button.setEnabled(idle and state.has_context)
-        self.save_all_button.setEnabled(
-            idle and state.has_active_context and bool(self._snapshots)
-        )
+        self.save_all_button.setEnabled(can_save)

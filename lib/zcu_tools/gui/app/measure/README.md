@@ -18,6 +18,8 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
 - [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
+  保存中心在全部 artifact 都是 SAVED 時停用 Save All 與各列 Save。
+  任一 artifact 不是 SAVED 時恢復啟用，但仍須符合 idle、可寫與 active context 條件。
 - [`writeback/`](writeback/service.py)：parameter／module／sample proposals、draft、service、control 與 Qt review widget。
 - [`ui/`](ui/main_window.py)：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   feedback widgets；writeback view 由 `writeback/` 擁有，generic cfg form不屬於app package。

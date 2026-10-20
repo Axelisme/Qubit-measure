@@ -5,10 +5,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -26,7 +26,7 @@ from zcu_tools.gui.session.ui.predictor_dialog import (
     PredictorDialog,
     PredictorDialogState,
 )
-from zcu_tools.gui.widgets.spinbox import FiniteFloatSpinBox, TrimDoubleSpinBox
+from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 
@@ -92,9 +92,8 @@ def test_live_mode_locks_model_and_transition_controls(qapp):
 
     for widget_type in (
         QDoubleSpinBox,
-        FiniteFloatSpinBox,
+        QLineEdit,
         QSpinBox,
-        QCheckBox,
         QComboBox,
         EvalNumericField,
     ):

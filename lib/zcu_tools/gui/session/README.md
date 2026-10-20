@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，Inspect general/ext、entry 資產與 point-local aliases
+**Last updated:** 2026-10-20，predictor 空白欄位表示未知
 
 # gui/session/ — 量測 session core
 
@@ -206,6 +206,6 @@ Run、WB 與目前 point 的 Inspect Set 都要求先選取或建立工作點。
 `simulate.fluxonium.predict.FluxoniumParams` 與 `simulate.transmon.TransmonParams` 保存可未知的具名物理輸入，missing() 指出缺項。
 齊全且有效才建立中性 query model。Service 不持有 installed model，不讀 dialog。
 PredictorService 透過 ContextControlPort 取得 ResultEntry 擁有的 predictors_path。list_files 列出當前 entry 的 predictors/*.json 檔名，load_file 只接受含 .json 的單一檔名，拒絕絕對路徑與路徑片段。resources.predictor_file 擁有 JSON 格式與驗證。未開 entry 時清單為空，load_file 拒絕；開 entry 後不必選工作點就能載入。格式與檔案錯誤向 caller 傳遞，不以預設參數代替。
-Dialog 選檔後按 Load 才預填本地 trial。Refresh files 保留仍存在的選取，不載入參數。沒有檔案時顯示開 entry 或新增 predictor 檔案的提示。選取與重開視窗不改 trial，載入後可手動修改。校準式預設空白。欄位勾選代表已知，取消勾選保留 None；完整且有效才計算。查詢與 Calibrate 不寫元件、來源檔案或版本。
+Dialog 選檔後按 Load 才預填本地 trial。Refresh files 保留仍存在的選取，不載入參數。沒有檔案時顯示開 entry 或新增 predictor 檔案的提示。選取與重開視窗不改 trial，載入後可手動修改。校準式預設空白。參數欄位留空代表 None，載入 null 也留空，欄位仍可直接編輯。非法文字顯示具名欄位錯誤並擋計算，完整且有效才計算。查詢與 Calibrate 不寫元件、來源檔案或版本。
 模型選單有 Fluxonium 與 SQUID transmon，各自顯示自己的能量欄位，flux 欄位共用。載入檔案會依其 model 選模型。Fluxonium 顯示頻率與 |n|、|phi| 曲線。Transmon 沒有矩陣元素能力，只顯示頻率曲線。
-Measure registry 啟用獨立 predictor.json user cache。Dialog 持有 versioned PredictorSnapshot 與 SingleFileCaretaker，保存 model 與 nullable params；每次編輯與關閉保存，重建 dialog 還原。Standalone callers 以 enable_parameter_cache(cache_dir=...) 明確啟用與隔離 cache，啟用時立即還原。Cache decode failure 回空 trial 並顯示錯誤，不讀寫 component DocumentStore。
+Measure registry 啟用獨立 predictor.json user cache。Dialog 持有 versioned PredictorSnapshot 與 SingleFileCaretaker，保存 model 與 nullable params。可解析的編輯與關閉會保存，非法文字草稿不覆寫上次 cache；重建 dialog 還原。Standalone callers 以 enable_parameter_cache(cache_dir=...) 明確啟用與隔離 cache，啟用時立即還原。Cache decode failure 回空 trial 並顯示錯誤，不讀寫 component DocumentStore。
