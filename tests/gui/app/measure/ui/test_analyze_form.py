@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Literal
 
 import pytest
@@ -9,6 +10,8 @@ from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
+
+from tests.gui._user_input import ComponentDriver
 
 
 @dataclass
@@ -20,6 +23,11 @@ class _TestParams:
 @dataclass
 class _OptionalParams:
     t0: Annotated[float | None, ParamMeta(label="T0")] = None
+
+
+@dataclass
+class _OptionalIntParams:
+    t0: Annotated[int | None, ParamMeta(label="T0")] = None
 
 
 def test_analyze_form_round_trips_values(qapp):
@@ -177,6 +185,70 @@ def test_analyze_form_text_edit_emits_only_when_committed(qapp):
 
     edit.editingFinished.emit()
     assert emitted == [_OptionalParams(t0=1.5)]
+
+
+@pytest.mark.parametrize("commit", ["enter", "focus_loss"])
+@pytest.mark.parametrize(
+    ("params_type", "valid_text", "valid_value"),
+    [(_OptionalParams, "1.5", 1.5), (_OptionalIntParams, "3", 3)],
+)
+def test_optional_invalid_commit_blocks_params_and_recovers(
+    qapp, tmp_path: Path, commit, params_type, valid_text, valid_value
+):
+    """Public params/validity evidence, with keyboard input through the UI driver."""
+    window = QtWidgets.QWidget()
+    layout = QtWidgets.QVBoxLayout(window)
+    form = AnalyzeFormWidget()
+    form.populate(params_type())
+    layout.addWidget(form)
+    layout.addWidget(QtWidgets.QPushButton("Commit"))
+    emitted: list[object] = []
+    form.params_changed.connect(emitted.append)
+    window.resize(420, 180)
+    window.show()
+    qapp.processEvents()
+    driver = ComponentDriver(window)
+    try:
+        driver.screenshot(tmp_path / "01-blank.png")
+        assert form.read_params() == params_type()
+        driver.enter_text("T0:", "-", commit=commit == "enter")
+        if commit == "focus_loss":
+            driver.click("Commit")
+        driver.screenshot(tmp_path / "02-invalid.png")
+        with pytest.raises(ValueError, match="T0"):
+            form.read_params()
+        assert form.is_valid() is False
+        assert emitted == []
+
+        driver.enter_text("T0:", valid_text, commit=commit == "enter")
+        if commit == "focus_loss":
+            driver.click("Commit")
+        driver.screenshot(tmp_path / "03-valid.png")
+        assert form.read_params() == params_type(valid_value)
+        assert form.is_valid() is True
+        assert emitted[-1] == params_type(valid_value)
+        assert all(item == params_type(valid_value) for item in emitted)
+        emitted.clear()
+
+        driver.enter_text("T0:", "-", commit=commit == "enter")
+        if commit == "focus_loss":
+            driver.click("Commit")
+        driver.screenshot(tmp_path / "04-invalid-after-valid.png")
+        assert form.is_valid() is False
+        assert emitted == []
+        with pytest.raises(ValueError):
+            form.read_params()
+
+        driver.enter_text("T0:", "", commit=commit == "enter")
+        if commit == "focus_loss":
+            driver.click("Commit")
+        driver.screenshot(tmp_path / "05-blank-again.png")
+        assert form.read_params() == params_type()
+        assert form.is_valid() is True
+        assert emitted and all(item == params_type() for item in emitted)
+    finally:
+        window.close()
+        window.deleteLater()
 
 
 # --- optional analyze fields (blank = None) --------------------------------
