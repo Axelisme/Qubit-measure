@@ -503,6 +503,75 @@ def _constant_domain(
     )
 
 
+def _row_admissible(
+    table: SegmentTable,
+    row: int,
+    count: np.int64,
+    context: KernelContext,
+    *,
+    single_tone: bool,
+) -> bool:
+    """Require the existing budget, tone-count and fixed-flux domain."""
+    return not (
+        context.budget < _MIN_BUDGET
+        or (count != 1 if single_tone else count < 2)
+        or not fixed_flux(table, int(row))
+    )
+
+
+def _admissible_frequencies(
+    table: SegmentTable,
+    row: int,
+    count: np.int64,
+    envs: NDArray[np.int64],
+    context: KernelContext,
+    *,
+    adaptive_multitone: bool,
+) -> NDArray[np.float64] | None:
+    """Require smooth envelopes, then allocate and check absolute carriers."""
+    if not all(_smooth(table, int(e), context) for e in envs):
+        return None
+    frequencies = np.abs(table.tone_frequency_ghz[row, :count])
+    if np.min(frequencies) < _rwa_fourier.EDGE_GHZ or (
+        not adaptive_multitone
+        and np.any(np.diff(np.sort(frequencies)) < 2 * _rwa_fourier.EDGE_GHZ)
+    ):
+        return None
+    return frequencies
+
+
+def _resolved_retention_admissible(resolved: RWARetention) -> bool:
+    """Check the requested transfer, phase and retained-block limits."""
+    # Shaped single gates and ordinary multitone request both limits.
+    assert resolved.dimension is not None and resolved.omission_phase is not None
+    return (
+        resolved.omission_transfer <= _rwa_fourier.MAX_OMISSION_TRANSFER
+        and resolved.omission_phase <= _MAX_OMISSION_PHASE_RAD
+        and resolved.dimension <= _MAX_RETAINED_DIMENSION
+    )
+
+
+def _retained_limits_admissible(
+    table: SegmentTable,
+    row: int,
+    ratio: float | np.float64,
+    phase: float | np.float64,
+    retention: RWARetention | None,
+    *,
+    dual_constant: bool | np.bool_,
+) -> bool:
+    """Check retained strength before reading duration for the phase cap."""
+    phase_limit = _MAX_CONSTANT_PHASE_RAD if dual_constant else _MAX_PHASE_RAD
+    return bool(
+        ratio <= _MAX_RATIO
+        and 2 * np.pi * table.duration_ns[row] * phase <= phase_limit
+        and (
+            retention is None
+            or retention.omission_transfer <= _rwa_fourier.MAX_OMISSION_TRANSFER
+        )
+    )
+
+
 def _admit_rows(
     table: SegmentTable,
     rows: NDArray[np.int64],
@@ -516,13 +585,10 @@ def _admit_rows(
     bounds = envelope_bounds(table, context.work_plan)
     accepted = np.zeros(len(rows), dtype=np.bool_)
     retentions = None
-    for index, row in enumerate(rows):
+    for index, raw_row in enumerate(rows):
+        row = int(raw_row)
         count = table.tones[row]
-        if (
-            context.budget < _MIN_BUDGET
-            or (count != 1 if single_tone else count < 2)
-            or not fixed_flux(table, int(row))
-        ):
+        if not _row_admissible(table, row, count, context, single_tone=single_tone):
             continue
         envs = table.tone_envelope[row, :count]
         constant = all(table.envelopes[e].kind == "constant" for e in envs)
@@ -530,26 +596,15 @@ def _admit_rows(
             table, int(row), constant=constant, single=constant_single
         ):
             continue
-        if not all(_smooth(table, int(e), context) for e in envs):
-            continue
-        frequencies = np.abs(table.tone_frequency_ghz[row, :count])
-        if np.min(frequencies) < _rwa_fourier.EDGE_GHZ or (
-            not adaptive_multitone
-            and np.any(np.diff(np.sort(frequencies)) < 2 * _rwa_fourier.EDGE_GHZ)
-        ):
+        frequencies = _admissible_frequencies(
+            table, row, count, envs, context, adaptive_multitone=adaptive_multitone
+        )
+        if frequencies is None:
             continue
         model = context.source.model(tuple(int(v) for v in table.level[row]))
         if adaptive_multitone or (single_tone and not constant_single):
             resolved = multitone_retention(table, int(row), context)
-            # Shaped single gates and ordinary multitone request both limits.
-            assert (
-                resolved.dimension is not None and resolved.omission_phase is not None
-            )
-            accepted[index] = (
-                resolved.omission_transfer <= _rwa_fourier.MAX_OMISSION_TRANSFER
-                and resolved.omission_phase <= _MAX_OMISSION_PHASE_RAD
-                and resolved.dimension <= _MAX_RETAINED_DIMENSION
-            )
+            accepted[index] = _resolved_retention_admissible(resolved)
             continue
         retention = None
         if constant_single:
@@ -590,16 +645,8 @@ def _admit_rows(
                 * (norms.in_phase + norms.quadrature)
                 / frequencies[tone]
             )
-        phase_limit = (
-            _MAX_CONSTANT_PHASE_RAD if constant and count == 2 else _MAX_PHASE_RAD
-        )
-        accepted[index] = (
-            ratio <= _MAX_RATIO
-            and 2 * np.pi * table.duration_ns[row] * phase <= phase_limit
-            and (
-                retention is None
-                or retention.omission_transfer <= _rwa_fourier.MAX_OMISSION_TRANSFER
-            )
+        accepted[index] = _retained_limits_admissible(
+            table, row, ratio, phase, retention, dual_constant=constant and count == 2
         )
     return accepted
 
