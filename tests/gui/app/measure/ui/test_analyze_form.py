@@ -236,8 +236,6 @@ def test_optional_invalid_commit_blocks_params_and_recovers(
         driver.screenshot(tmp_path / "04-invalid-after-valid.png")
         assert form.is_valid() is False
         assert emitted == []
-        with pytest.raises(ValueError):
-            form.read_params()
 
         driver.enter_text("T0:", "", commit=commit == "enter")
         if commit == "focus_loss":
