@@ -309,6 +309,31 @@ def test_newer_fit_wins_and_top_level_values_are_compared_by_source(
     assert [row for row in saved.key_mappings if row.source_keys == ("params", "EJ")] == compared
 
 
+def test_newer_transition_annotations_preserve_only_different_historical_leaves(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+) -> None:
+    source = write_params(request_data, {
+        "allows": {"r_f": 5.2, "sample_f": 9.7, "transitions": [[0, 1]], "mirror": [[1, 2]], "nested": {"equal": [], "different": "old"}},
+        "fluxdep_fit": {"plot_transitions": {"r_f": 5.2, "sample_f": 8.1, "transitions": [[0, 1]], "mirror": [[2, 3]], "nested": {"equal": [], "different": "new"}}},
+    })
+    report = migrate(request_data, analysis_mapping)
+    entry = open_entry(request_data)
+    assert load_dispersive_file(entry.dispersive_path / "Qlegacy.json").params.plot_transitions.model_dump(exclude_unset=True) == {
+        "r_f": 5.2, "sample_f": 8.1, "transitions": [[0, 1]], "mirror": [[2, 3]], "nested": {"equal": [], "different": "new"}
+    }
+    assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
+        "allows": {"sample_f": 9.7, "mirror": [[1, 2]], "nested": {"different": "old"}}
+    }
+    comparisons = {row.source_keys: row for row in report.key_mappings if row.old_file == source and row.compared_source_keys is not None}
+    assert comparisons[("allows", "r_f")].action == "remove"
+    assert comparisons[("allows", "nested", "equal")].action == "remove"
+    different = comparisons[("allows", "nested", "different")]
+    assert different.action == "preserved"
+    assert different.compared_source_keys == ("fluxdep_fit", "plot_transitions", "nested", "different")
+    assert different.destination_keys == ("Qlegacy", "ext", "legacy_params", "allows", "nested", "different")
+
+
 @pytest.fixture
 def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
     concrete = build_mapping(
