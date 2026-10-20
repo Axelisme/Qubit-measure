@@ -63,13 +63,13 @@ def make_form(ctx: FormContext) -> Form[CPMGFormCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "pi_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse"),
+                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
                 "pi2_pulse": Slot("$qubit.module.x90")
                 if ctx.has("$qubit.module.x90")
-                else Template("pi2_pulse"),
+                else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "times": LogPoints(max=16, points=5, include_zero=False),

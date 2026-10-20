@@ -16,11 +16,17 @@ def make_form(ctx: FormContext) -> Form[MistCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "init_pulse": Slot("$qubit.module.x180"),
                 # The template supplies wiring, not a calibrated flux pulse.
-                "flux_pulse": Template("flux_pulse", set={"waveform.length": 1.0}),
-                "mist_pulse": Template("res_probe"),
+                "flux_pulse": Template(
+                    "flux_pulse",
+                    bindings={"qubit": "$qubit"},
+                    set={"waveform.length": 1.0},
+                ),
+                "mist_pulse": Template(
+                    "res_probe", bindings={"resonator": "$resonator"}
+                ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "flux_gain": Range.between(0.0, 0.1, expts=101),

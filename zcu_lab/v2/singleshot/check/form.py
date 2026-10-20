@@ -15,10 +15,10 @@ def make_form(ctx: FormContext) -> Form[CheckCfg]:
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
                 "init_pulse": Slot("$qubit.module.x180"),
-                "probe_pulse": Template("qub_probe"),
+                "probe_pulse": Template("qub_probe", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "shots": 5000,

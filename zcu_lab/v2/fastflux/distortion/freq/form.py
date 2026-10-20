@@ -13,13 +13,19 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "flux_pulse": Template("flux_pulse", set={"waveform.length": 0.5}),
+                "flux_pulse": Template(
+                    "flux_pulse",
+                    bindings={"qubit": "$qubit"},
+                    set={"waveform.length": 0.5},
+                ),
                 "qub_pulse": Template(
-                    "qub_probe", set={"gain": 0.1, "waveform.length": 0.05}
+                    "qub_probe",
+                    bindings={"qubit": "$qubit"},
+                    set={"gain": 0.1, "waveform.length": 0.05},
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "length": Range.between(0.0, 1.0, expts=101),

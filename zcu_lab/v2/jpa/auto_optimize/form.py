@@ -16,10 +16,10 @@ def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "pi_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse"),
+                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "jpa_rf_dev": AliasName("jpa_rf_dev"),
             "jpa_flux_dev": AliasName("flux_dev"),

@@ -20,10 +20,12 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
                 "init_pulse": Slot("$qubit.module.x180"),
-                "probe_pulse": Template("res_probe"),
+                "probe_pulse": Template(
+                    "res_probe", bindings={"resonator": "$resonator"}
+                ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "flux_dev": AliasName("flux_dev"),
             "flux_unit": "A",

@@ -13,11 +13,15 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "stark_pulse1": Template("res_probe", set={"waveform.length": 1.0}),
-                "stark_pulse2": Template("qub_probe"),
+                "stark_pulse1": Template(
+                    "res_probe",
+                    bindings={"resonator": "$resonator"},
+                    set={"waveform.length": 1.0},
+                ),
+                "stark_pulse2": Template("qub_probe", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "gain": Range.between(0.0, 0.1, expts=21),
@@ -38,13 +42,17 @@ def make_ramsey_form(ctx: FormContext) -> Form[AcStarkRamseyCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "stark_pulse": Template("res_probe", set={"waveform.length": 10.0}),
+                "stark_pulse": Template(
+                    "res_probe",
+                    bindings={"resonator": "$resonator"},
+                    set={"waveform.length": 10.0},
+                ),
                 "pi2_pulse": Slot("$qubit.module.x90")
                 if ctx.has("$qubit.module.x90")
-                else Template("pi2_pulse"),
+                else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "gain": Range.between(0.0, 0.1, expts=21),

@@ -15,12 +15,13 @@ def make_form(ctx: FormContext) -> Form[TwotoneCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "flux_pulse": Template(
                     "flux_pulse",
+                    bindings={"qubit": "$qubit"},
                     set={"waveform.length": 1.0},
                 ),
-                "qub_pulse": Template("qub_probe"),
+                "qub_pulse": Template("qub_probe", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "gain": Range.between(0.0, 0.0, expts=1),

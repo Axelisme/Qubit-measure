@@ -18,7 +18,7 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
                 "qub_pulse": amp_rabi_initial_pulse(ctx.parameters),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {"gain": Range.between(-0.3, 1.0, expts=51)},
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),

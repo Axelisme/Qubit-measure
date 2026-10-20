@@ -85,9 +85,14 @@ class NewEntryDialog(QDialog):
         persistent catalog by template id; arb_waveforms lists the arb asset
         names offered to arb data fields at each capture; placeholder_defaults
         reads session template defaults at each capture (empty when omitted).
-        Explicit Template bindings override these fixed defaults. dialog_presenter
-        shows Create failures. A template whose module is not a persistent
-        module or waveform Spec raises TypeError.
+        These defaults must cover every placeholder required by the selected
+        template: the dialog supplies no explicit Template bindings. Missing
+        bindings raise ValueError while building the first form or selecting
+        another template. ctrl must provide a readable working-point capture;
+        FailedPreconditionError from read_context is shown in the dialog.
+        Other capture, arb_waveforms and placeholder_defaults provider failures
+        propagate. dialog_presenter shows Create failures. A template whose
+        module is not a persistent module or waveform Spec raises TypeError.
         """
         super().__init__(parent)
         self._ctrl = ctrl
