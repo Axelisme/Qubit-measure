@@ -27,11 +27,13 @@ def run(engine, source, timeline):
     )
 
 
-def fallback(source, timeline):
+def fallback(source, timeline, *, budget=0.01):
     with closing(
         Engine(1, 0, kernels=tuple(k for k in REGISTRY if k.name != "common_frame"))
     ) as engine:
-        return run(engine, source, timeline)
+        return engine.evolve(
+            source, (timeline,), cancel=Event(), budget=budget, telemetry=True
+        )
 
 
 def test_shared_constant_coefficients_build_once_and_recheck_apply_only_inputs():
@@ -63,6 +65,73 @@ def test_shared_constant_coefficients_build_once_and_recheck_apply_only_inputs()
         assert repeated.paths.routing["common_frame"].admission_rows == 0
         assert repeated.paths.frontend_cpu_s == 0
         assert first.paths.frontend_cpu_s > 0
+
+
+@pytest.mark.parametrize("far,sampled", [(False, False), (True, False), (True, True)])
+def test_constant_block_rwa_avoids_unprofitable_unique_common_builds(far, sampled):
+    # Two independent three-state blocks have retained dimension 18, above the
+    # small-graph shortcut, but cheap constant RWA work even for long rows.
+    x = np.zeros((6, 6), dtype=np.complex128)
+    for i in (0, 1, 3, 4):
+        x[i, i + 1] = x[i + 1, i] = 0.005
+    model = SecularModel(
+        (0,),
+        "constant-blocks",
+        np.array([0.0, 0.29, 0.58, 1.1, 1.39, 1.68]),
+        np.eye(6, dtype=np.complex128),
+        (
+            SecularDrive("a", x, np.zeros_like(x)),
+            SecularDrive("b", x, np.zeros_like(x)),
+        ),
+        np.zeros((6, 6)),
+        np.zeros((6, 6)),
+    )
+    source = ModelSource(
+        np.diag([1.0, 0, 0, 0, 0, 0]).astype(np.complex128),
+        lambda level: replace(model, level=level),
+    )
+    timeline = batch([1000] * 4, gain=0.1)
+    if sampled:
+        envelope = EnvelopeSpec(
+            "sampled",
+            np.array([0.8, 1.0], dtype=np.complex128),
+            np.array([0.0, 1000.0]),
+        )
+        timeline = replace(
+            timeline,
+            tracks=tuple(replace(t, envelopes=(envelope,)) for t in timeline.tracks),
+        )
+    timeline = replace(
+        timeline,
+        tracks=(
+            timeline.tracks[0],
+            replace(
+                timeline.tracks[1],
+                frequency_ghz=np.linspace(0.7, 0.703, 4)
+                if far
+                else np.linspace(0.291, 0.294, 4),
+            ),
+        ),
+    )
+    with closing(Engine(1, 0)) as engine:
+        result = engine.evolve(
+            source, (timeline,), cancel=Event(), budget=1e-3, telemetry=True
+        )
+    if not sampled:
+        assert result.paths.segments_by_kernel == {"multitone_rwa": 4}
+    report = result.paths.routing.get("common_frame", FamilyRouting())
+    assert report.prepare_builds == report.admission_rows == 0
+    original = fallback(source, timeline, budget=1e-3)
+    assert result.paths.segments_by_kernel == original.paths.segments_by_kernel
+    np.testing.assert_array_equal(result.densities, original.densities)
+
+    # A genuinely amortized coefficient group must still be eligible. This is
+    # cold selection with no resident cache, not a cache-warmth exception.
+    with closing(Engine(1, 0)) as engine:
+        reused = run(engine, model_source(), batch([32] * 24, gain=0.3))
+    assert reused.paths.segments_by_kernel == {"common_frame": 24}
+    assert reused.paths.routing["common_frame"].prepare_builds == 1
+    assert reused.paths.routing["common_frame"].admission_rows == 24
 
 
 def test_common_frame_selection_and_results_are_row_order_invariant():
