@@ -8,8 +8,9 @@ two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
 maps logical Q0 to F1 and Q1 to F2. Their tone positions come from the captured
 MuxGroup `qubits` order, not labels or ADC numbers.
 
-The Form copies `$f1.module.x90`, `$f2.module.x90`, `$mux.module.readout`,
-`$coupler.module.cz_f1` and `$coupler.module.cz_f2`. Missing slots stay Invalid.
+Readout references `$mux.module.readout`, preserving the library's complete tones and scalar settings. A missing readout slot stays Invalid.
+The Form copies `$f1.module.x90`, `$f2.module.x90`,
+`$coupler.module.cz_f1` and `$coupler.module.cz_f2`. Missing pulse slots stay Invalid.
 No simulator value or blank pulse substitutes for calibration. The ordinary
 CZ pulses use independent generators, the same frequency and envelope duration,
 and a common start. Their individual gains and constructive relative phase

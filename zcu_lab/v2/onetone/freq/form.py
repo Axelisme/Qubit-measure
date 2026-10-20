@@ -1,13 +1,25 @@
 """One-tone starting values; the Run sweep owns the shared generator/ADC frequency."""
 
+from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
 from zcu_tools.cfg_model import Hidden, Range, Template
-from zcu_tools.gui.form import Display, FormEnv, FormModel
+from zcu_tools.gui.form import (
+    Display,
+    FormCommandContext,
+    FormCommandSnapshot,
+    FormConversionError,
+    FormConversionResult,
+    FormEnv,
+    FormModel,
+    FormPath,
+    InputConverter,
+)
+from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.onetone._shared import initial_ro_length
+from zcu_lab.v2.onetone._shared import initial_readout_timing
 from zcu_lab.v2.onetone.freq.core import FreqCfg, HomophasalSamplingCfg
 
 
@@ -46,6 +58,32 @@ class SamplingInput(FormModel):
         Display(label="Sampling mode"),
     ] = Field(default_factory=LinearInput)
 
+    @classmethod
+    def converters(cls, env: FormEnv) -> Mapping[FormPath, InputConverter]:
+        """Install fresh branch input from the fixed capture when sampling changes.
+
+        Linear discards calibration fields. Homophasal uses captured defaults;
+        missing calibration stays required rather than falling back to Linear.
+        """
+
+        def convert(
+            snapshot: FormCommandSnapshot,
+            selection: ReadonlyFormInput,
+            context: FormCommandContext,
+        ) -> FormConversionResult:
+            del snapshot, context
+            if selection == {"kind": "Linear"}:
+                return FormConversionResult(
+                    LinearInput, LinearInput.default_input(env).data
+                )
+            if selection == {"kind": "Homophasal"}:
+                return FormConversionResult(
+                    HomophasalInput, HomophasalInput.default_input(env).data
+                )
+            raise FormConversionError("Unknown sampling mode")
+
+        return {("sampling",): InputConverter(convert)}
+
 
 def lower_sampling(extras: SamplingInput, cfg: FreqCfg) -> FreqCfg:
     """Translate the selected branch to the core's unchanged paired sampling fields.
@@ -69,7 +107,7 @@ def lower_sampling(extras: SamplingInput, cfg: FreqCfg) -> FreqCfg:
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     """Build starting values and shape from the captured source availability."""
-    del ctx
+    timing = initial_readout_timing(ctx)
     return Form(
         FreqCfg,
         tree={
@@ -82,7 +120,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                         # Run supplies the linear sweep or homophasal frequency grid.
                         "freq": Hidden(0.0),
                         "gain": 0.05,
-                        "ro_length": initial_ro_length(),
+                        **timing,
                     },
                 ),
             },

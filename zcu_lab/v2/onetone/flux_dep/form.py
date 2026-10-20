@@ -3,13 +3,13 @@
 from zcu_tools.cfg_model import AliasName, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.onetone._shared import initial_ro_length
+from zcu_lab.v2.onetone._shared import initial_readout_timing
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg
 
 
 def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
     """Build starting values and shape from the captured source availability."""
-    del ctx
+    timing = initial_readout_timing(ctx)
     return Form(
         FluxDepCfg,
         tree={
@@ -22,7 +22,7 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                         # Run supplies the frequency sweep at every flux point.
                         "freq": Hidden(0.0),
                         "gain": 0.05,
-                        "ro_length": initial_ro_length(),
+                        **timing,
                     },
                 ),
             },

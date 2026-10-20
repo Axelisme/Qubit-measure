@@ -41,7 +41,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
             "modules": {
                 "x180_f1": Slot("$f1.module.x180", copy=True),
                 "x180_f2": Slot("$f2.module.x180", copy=True),
-                "readout": Slot("$mux.module.readout", copy=True)
+                "readout": Slot("$mux.module.readout")
                 if ctx.has("$mux.module.readout")
                 else Template("readout/mux:blank"),
             },

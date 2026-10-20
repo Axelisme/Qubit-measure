@@ -1,5 +1,7 @@
 # Local Z
 
+Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 scalar 設定。缺 slot 時從 blank mux 範本開始，須手填全部必要讀出欄位。
+
 在幅度與 frequency 選定後，選 `ftf/local_z`。同一次 Run 分別量 F1、F2。每個 target 從 `B(00)` 熱初態做 X90、n 次雙線 CZ、projection 與完整 mux readout，另一 qubit 不翻轉。X/Y projection 是兩次獨立 acquisition，不是同 shot 連續量測。沒有 heralding、shot 排除或純態初始化。
 
 ## Run 前

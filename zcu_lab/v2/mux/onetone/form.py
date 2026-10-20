@@ -15,7 +15,9 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
     readout scalar settings when present, otherwise use the blank template.
     Start with all tones selected and 101 offsets from -1 to 1 MHz. If the group
     names qubits, invalid pairings raise at Open/Reset. Groups without qubits
-    still support resonator bring-up.
+    still support resonator bring-up. Add five ringup times using the smallest
+    group kappa to the original scalar trigger offset and extend the pulse to
+    cover the unchanged ADC window. Invalid member kappa rejects Open/Reset.
     """
     # Check declared qubit/resonator pairs before choosing readout defaults.
     validate_mux_bindings(ctx.parameters)
@@ -26,7 +28,7 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
         tree={
             "modules": {
                 "reset": Hidden(),
-                "readout": mux_readout_initial(ctx),
+                "readout": mux_readout_initial(ctx, wait_for_ringup=True),
             },
             "sweep": {"df": Range.between(-1.0, 1.0, expts=101)},
             "initial_delay": Hidden(),

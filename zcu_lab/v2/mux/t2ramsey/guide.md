@@ -4,8 +4,9 @@
 
 Open `mux/t2ramsey` from **New Tab** after binding `$mux` to a MuxGroup.
 The capture must contain every qubit and its matching resonator in readout order.
-An existing readout slot must use the mux family with that full tone count.
-If no readout is stored, fill the blank mux readout before running.
+Readout references `$mux.module.readout` when present, preserving the library's tones and scalar settings.
+The stored module must use the mux family with the full group tone count.
+Without a slot, Readout starts inline from the blank mux template with group calibration tones; complete its required fields before running.
 
 The Tones picker chooses which element to edit, not which qubit runs.
 Name is read-only. Ordinary edits cannot add, remove, rename or reorder tones.

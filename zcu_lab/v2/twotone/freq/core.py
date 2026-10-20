@@ -29,7 +29,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.process import minus_background
+from zcu_tools.utils.process import minus_background, rotate2real
 
 
 @dataclass(frozen=True)
@@ -40,8 +40,39 @@ class FreqResult:
     signals: NDArray[np.complex128]
 
 
-def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(minus_background(signals))
+def qubfreq_signal2real(
+    signals: NDArray[np.complex128], *, model_type: Literal["lor", "sinc"] = "lor"
+) -> NDArray[np.float64]:
+    """Convert one complex128 IQ spectrum of shape (N,) to float64 contrast.
+
+    Subtract component-wise median background without mutating signals. ``lor``
+    returns the legacy absolute magnitude, also used by the Run live preview.
+    ``sinc`` projects onto the IQ principal axis with the largest absolute
+    excursion positive, retaining opposite-signed sidelobes instead of folding
+    them. The axis has no absolute physical sign; this convention makes the
+    dominant resonance positive at any fixed IQ rotation.
+
+    Return the same shape, preserving NaNs in partial spectra. Constant or
+    single-acquired-point spectra have zero contrast; all-NaN spectra remain
+    NaN. Raise ValueError for an unknown model, empty/non-1-D input, non-complex128
+    dtype or infinities. Principal-axis numerical failures propagate.
+    """
+    if model_type not in ("lor", "sinc"):
+        raise ValueError(f"Invalid frequency model: {model_type!r}")
+    if signals.ndim != 1 or signals.size == 0 or signals.dtype != np.complex128:
+        raise ValueError("Expected a nonempty complex128 spectrum of shape (N,)")
+    if np.any(np.isinf(signals)):
+        raise ValueError("Frequency spectrum must not contain infinities")
+
+    centered = minus_background(signals)
+    if model_type == "lor":
+        return np.abs(centered)
+
+    projected = rotate2real(centered).real
+    acquired = projected[~np.isnan(projected)]
+    if acquired.size and acquired[np.argmax(np.abs(acquired))] < 0:
+        projected = -projected
+    return projected
 
 
 class FreqSweepCfg(ConfigBase):
@@ -106,7 +137,9 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
         Apply reset, the frequency-swept qubit probe, then readout; this
         sequence does not use modules.init_pulse. Return mean complex IQ
-        at each frequency in MHz, not a fitted transition frequency.
+        at each frequency in MHz, not a fitted transition frequency. The live
+        preview always uses background-subtracted magnitude (``lor``), independent
+        of the model selected later for analyze.
         """
         # Prepare the frequency axis and display the background-subtracted contrast.
         cfg = deepcopy(cfg)
@@ -123,7 +156,9 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         )
         signals_buffer = SignalBuffer(
             (len(freqs),),
-            on_update=lambda data: viewer.update(freqs, qubfreq_signal2real(data)),
+            on_update=lambda data: viewer.update(
+                freqs, qubfreq_signal2real(data, model_type="lor")
+            ),
         )
 
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
@@ -155,11 +190,16 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
-        """Fit the background-subtracted IQ magnitude to a Lorentzian or sinc line.
+        """Fit one (N,) complex IQ spectrum using options.model_type.
 
+        ``lor`` uses background-subtracted magnitude; ``sinc`` uses a signed
+        principal-axis projection to preserve sidelobes. Unlike Run's magnitude
+        preview, the plotted observations follow the selected analysis model.
         Ignore unacquired NaN points. Return transition frequency, FWHM and
         their fit uncertainties in MHz, and publish the spectrum as ``fit``.
         The source cfg may be None; only the acquired data enter the fit.
+        Invalid projection inputs raise ValueError; fitting/plotting errors and
+        optimizer warnings propagate.
         """
         result = source.result
 
@@ -171,7 +211,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         freqs = freqs[val_mask]
         signals = signals[val_mask]
 
-        real_signals = qubfreq_signal2real(signals)
+        real_signals = qubfreq_signal2real(signals, model_type=options.model_type)
 
         # fit_qubit_freq computes both fit uncertainties; surface them so the GUI
         # summary carries freq_err / fwhm_err (the figure title already shows them).
