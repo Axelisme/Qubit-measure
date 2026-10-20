@@ -258,7 +258,7 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
         "status": None,
     }
     assert controller.status() is None and not observed
-    assert not (entry.result_path / "workflows/partial-rpc").exists()
+    assert not (entry.result_path / "workflows/sample_partial-rpc").exists()
     for panel in (window.plan_panel, window.tunables_panel):
         assert panel.state.base.data == panel.state.input.data
         assert not form_editable(panel)

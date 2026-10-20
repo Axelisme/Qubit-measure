@@ -465,7 +465,9 @@ def test_partial_error_retains_handle_and_explicit_resave_reuses_directory(
     exp = experiment()
     source = exp.run(SavingCfg())
     run_id = exp.acquisition_for(source).run_id
-    blocker = tmp_path / "Database" / "entry" / "runs" / run_id / "figures"
+    blocker = (
+        tmp_path / "Database" / "entry" / "runs" / f"test_saving_{run_id}" / "figures"
+    )
     blocker.parent.mkdir(parents=True)
     blocker.write_text("block run PNGs")
     with pytest.raises(PartialSaveError, match="outputs failed") as caught:
@@ -612,7 +614,7 @@ def test_ledger_append_failure_propagates_after_files_are_written(
         / "Database"
         / "entry"
         / "runs"
-        / exp.acquisition_for(source).run_id
+        / f"test_saving_{exp.acquisition_for(source).run_id}"
         / "data.h5"
     )
     assert load_run_data(native).metadata.run_id == exp.acquisition_for(source).run_id

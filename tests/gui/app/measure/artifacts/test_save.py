@@ -110,7 +110,10 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     assert labber.output.path.name == "saving_a1b2c3_1.hdf5"
     assert (
         native.output.path
-        == session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+        == session.entry.database_path
+        / "runs"
+        / f"saving_{session.metadata.run_id}"
+        / "data.h5"
     )
     stored = load_run_data(native.output.path)
     assert stored.metadata.run_id == session.metadata.run_id
@@ -139,10 +142,14 @@ def test_each_output_failure_preserves_the_other_and_reports_both(
     session = native_session
     if blocked == "native":
         path = (
-            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+            session.entry.database_path
+            / "runs"
+            / f"saving_{session.metadata.run_id}"
+            / "data.h5"
         )
         path.mkdir(parents=True)
     else:
+        session.entry.database_path.mkdir(parents=True, exist_ok=True)
         (session.entry.database_path / "Labber").write_text("not a directory")
     completed = session.save()
     native, labber = completed.outputs
@@ -192,6 +199,7 @@ def test_save_events_observe_committed_state_and_complete_report(
     session = native_session
     declare_panes(session)
     if output_failure:
+        session.entry.database_path.mkdir(parents=True, exist_ok=True)
         (session.entry.database_path / "Labber").write_text("not a directory")
     completions: list[
         tuple[
@@ -305,6 +313,7 @@ def test_controller_projects_native_save_completion_to_diagnostic_sinks(
     session = native_session
     declare_panes(session)
     if output_failure:
+        session.entry.database_path.mkdir(parents=True, exist_ok=True)
         (session.entry.database_path / "Labber").write_text("not a directory")
     report = session.save_artifacts() if batch else session.save()
     payload = (session.artifact_completions if batch else session.completions)[-1]
@@ -751,9 +760,13 @@ def test_initial_all_failed_save_does_not_confirm_run_identity(
 ) -> None:
     session = native_session
     native_path = (
-        session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+        session.entry.database_path
+        / "runs"
+        / f"saving_{session.metadata.run_id}"
+        / "data.h5"
     )
     native_path.mkdir(parents=True)
+    session.entry.database_path.mkdir(parents=True, exist_ok=True)
     (session.entry.database_path / "Labber").write_text("not a directory")
     completed = session.save()
     assert [item.status for item in completed.outputs] == ["failed", "failed"]
