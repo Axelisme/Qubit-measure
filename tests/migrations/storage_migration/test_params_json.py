@@ -1357,6 +1357,36 @@ def analysis_sections() -> JsonObject:
     }
 
 
+@pytest.mark.parametrize("kind", ["predictors", "dispersive", "t1_curve"])
+def test_completed_analysis_rerun_uses_typed_values_and_locates_legal_edits(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    analysis_sections: JsonObject,
+    kind: str,
+) -> None:
+    values = dict(analysis_sections)
+    values["fluxdep_fit"] = {"params": {"EJ": 8.0, "EC": 1.0, "EL": 0.5}}
+    write_params(request_data, values)
+    report = migrate(request_data, analysis_mapping)
+    target = report.destination.result_path / kind / "Qlegacy.json"
+    raw = json.loads(target.read_text())
+    target.write_text(json.dumps(raw, sort_keys=True, separators=(",", ":")))
+    before = target.read_bytes(), target.stat().st_mtime_ns
+    rerun = migrate(replace(request_data, resume=True), analysis_mapping)
+    assert any(row.destination == target for row in rerun.skipped)
+    assert (target.read_bytes(), target.stat().st_mtime_ns) == before
+    raw["source"]["run_id"] = "legal-user-edit"
+    target.write_text(json.dumps(raw))
+    edited = target.read_bytes()
+    with pytest.raises(MigrationInputError) as caught:
+        migrate(replace(request_data, resume=True), analysis_mapping)
+    assert any(
+        row.destination == target and row.expected != row.actual
+        for row in caught.value.differences
+    )
+    assert target.read_bytes() == edited
+
+
 def test_analysis_files_publish_typed_unknowns_and_keep_original_sections(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,

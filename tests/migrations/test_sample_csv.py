@@ -7,6 +7,7 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.sample_table import LegacyDeviceValueUnit
 
 from migrations import sample_csv
+from migrations.storage_migration import MigrationInputError
 
 
 @pytest.fixture
@@ -54,6 +55,35 @@ def test_v2_conversion_renames_measurements_preserves_source_and_appends(
     assert row["t2r_err_us"] == 1
     assert row["t2e_us"] == 60
     assert row["t2e_err_us"] == 3
+
+
+def test_synthetic_key_rerun_skips_equal_history_and_rejects_differences(
+    tmp_path: Path, entry: ResultEntry
+) -> None:
+    source = tmp_path / "rerun.csv"
+    source.write_text("dev_value,dev_unit,T1 (us),comment\n0.1,V,50,raw\n")
+    first = sample_csv.convert_sample_csv([source], entry=entry, component="Q1")
+    before = first.output_path.read_bytes(), first.output_path.stat().st_mtime_ns
+    report = sample_csv.convert_sample_csv([source], entry=entry, component="Q1")
+    assert report.converted_rows == 0, "Same synthetic key must not append history"
+    assert len(report.skipped) == 1
+    assert (
+        first.output_path.read_bytes(),
+        first.output_path.stat().st_mtime_ns,
+    ) == before
+    source.write_text("dev_value,dev_unit,T1 (us),comment\n0.1,V,51,changed\n")
+    with pytest.raises(MigrationInputError) as caught:
+        sample_csv.convert_sample_csv([source], entry=entry, component="Q1")
+    assert any(
+        row.source == source
+        and row.destination == first.output_path
+        and row.expected != row.actual
+        for row in caught.value.differences
+    )
+    assert (
+        first.output_path.read_bytes(),
+        first.output_path.stat().st_mtime_ns,
+    ) == before
 
 
 def test_v2_native_unit_is_preserved_without_scaling(
