@@ -19,6 +19,20 @@ from migrations.storage_migration import (
 pytestmark = pytest.mark.usefixtures("registry_guard")
 
 
+def _group(handle: h5py.Group, path: str) -> h5py.Group:
+    item = handle[path]
+    if not isinstance(item, h5py.Group):
+        raise TypeError(f"Expected HDF5 group at {path}")
+    return item
+
+
+def _dataset(handle: h5py.Group, path: str) -> h5py.Dataset:
+    item = handle[path]
+    if not isinstance(item, h5py.Dataset):
+        raise TypeError(f"Expected HDF5 dataset at {path}")
+    return item
+
+
 def _convert(request: MigrationRequest, mapping: MigrationMapping) -> MigrationReport:
     return migrate_storage(
         request,
@@ -67,7 +81,7 @@ def test_processed_spectrums_convert_axes_calibration_and_complex_values(
     assert spectrum["flux_half"] == 2.0
     assert spectrum["flux_int"] == 4.0
     assert spectrum["flux_period"] == 4.0
-    assert spectrum["type"] == "TwoTone"
+    assert spectrum.get("type") == "TwoTone"
     np.testing.assert_array_equal(spectrum["spectrum"]["dev_values"], [0.0, 4.0])
     np.testing.assert_array_equal(spectrum["spectrum"]["freqs"], [4.0, 5.0, 6.0])
     np.testing.assert_array_equal(spectrum["spectrum"]["fluxs"], [0.0, 1.0])
@@ -114,21 +128,20 @@ def test_unknown_spectrum_content_is_preserved_without_duplicate_converted_data(
     source = _legacy_collection(request_data, False)
     with h5py.File(source, "a") as handle:
         handle.attrs["origin"] = "synthetic"
-        group = handle["scan.with.dots"]
+        group = _group(handle, "scan.with.dots")
         group.attrs["operator.note"] = "unchanged"
-        group["spectrum/data"].attrs["gain"] = np.int16(7)
+        _dataset(group, "spectrum/data").attrs["gain"] = np.int16(7)
         group["unknown.values"] = np.array([3, 8], dtype=np.int16)
     report = _convert(request_data, mapping)
     companion = report.destination.result_path / "data/fluxdep/spectrums.legacy.hdf5"
     assert companion.is_file(), "Unsupported HDF5 leaves must be visible in the new entry"
     with h5py.File(companion, "r") as handle:
         assert handle.attrs["origin"] == "synthetic"
-        group = handle["scan.with.dots"]
+        group = _group(handle, "scan.with.dots")
         assert group.attrs["operator.note"] == "unchanged"
-        np.testing.assert_array_equal(group["unknown.values"][()], [3, 8])
-        assert group["unknown.values"].dtype == np.dtype("int16")
-        assert group["spectrum/data"].attrs["gain"] == 7
-        assert isinstance(group["spectrum/data"], h5py.Group)
+        np.testing.assert_array_equal(_dataset(group, "unknown.values")[()], [3, 8])
+        assert _dataset(group, "unknown.values").dtype == np.dtype("int16")
+        assert _group(group, "spectrum/data").attrs["gain"] == 7
         assert set(group) == {"spectrum", "unknown.values"}
         assert "type" not in group.attrs
     preserved = [item for item in report.key_mappings if item.action == "preserved"]
@@ -138,7 +151,7 @@ def test_unknown_spectrum_content_is_preserved_without_duplicate_converted_data(
     assert row.new_path is None
     assert not any(item.source == source for item in report.pending)
     target = report.destination.result_path / "data/fluxdep/spectrums.hdf5"
-    assert load_spectrums(str(target))["scan.with.dots"]["type"] == "TwoTone"
+    assert load_spectrums(str(target))["scan.with.dots"].get("type") == "TwoTone"
     before = companion.read_bytes()
     resumed = _convert(replace(request_data, resume=True), mapping)
     assert resumed.key_mappings == report.key_mappings
@@ -150,7 +163,7 @@ def test_square_axis_without_version_evidence_is_preserved_and_pending(
 ) -> None:
     source = _legacy_collection(request_data, False)
     with h5py.File(source, "a") as handle:
-        spectrum = handle["scan.with.dots/spectrum"]
+        spectrum = _group(handle, "scan.with.dots/spectrum")
         del spectrum["fpts"]
         del spectrum["data"]
         spectrum["fpts"] = np.array([4.0, 5.0])
@@ -160,13 +173,30 @@ def test_square_axis_without_version_evidence_is_preserved_and_pending(
     assert companion.is_file(), "Ambiguous original data must remain visible, not only in backup"
     with h5py.File(companion, "r") as handle:
         np.testing.assert_array_equal(
-            handle["scan.with.dots/spectrum/data"][()], [[1j, 2j], [3j, 4j]]
+            _dataset(handle, "scan.with.dots/spectrum/data")[()], [[1j, 2j], [3j, 4j]]
         )
+    assert report.backup_path is not None
+    backup_source = report.backup_path / "result/chip/qubit/data/fluxdep/spectrums.hdf5"
     assert any(
-        item.source == source and "axis" in item.reason.lower()
+        item.source == backup_source and "axis" in item.reason.lower()
         for item in report.pending
     )
     assert not (report.destination.result_path / "data/fluxdep/spectrums.hdf5").exists()
+
+
+def test_each_ambiguous_group_has_a_located_pending_reason(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    source = _legacy_collection(request_data, False)
+    with h5py.File(source, "a") as handle:
+        spectrum = _group(handle, "scan.with.dots/spectrum")
+        del spectrum["fpts"]
+        spectrum["fpts"] = np.array([4.0, 5.0])
+        handle.copy("scan.with.dots", "second.scan")
+    report = _convert(replace(request_data, part="data"), mapping)
+    reasons = " ".join(item.reason for item in report.pending)
+    assert "scan.with.dots" in reasons, "Pending must not lose the first ambiguous group"
+    assert "second.scan" in reasons
 
 
 def test_processed_spectrum_publication_rejects_user_edits_on_resume(
