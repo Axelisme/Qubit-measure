@@ -65,7 +65,8 @@ class DeviceManager:
         performs no device I/O. The manager coordinates the driver's lifetime;
         retrieval only borrows the registered object.
         """
-        if not isinstance(device, BaseDevice):
+        # tolerated: Reject non-BaseDevice runtime inputs before changing the registry.
+        if not isinstance(device, BaseDevice):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(
                 f"register_device expected BaseDevice for {name!r}, "
                 f"got {type(device).__name__}"

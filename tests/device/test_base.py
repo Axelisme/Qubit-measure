@@ -72,8 +72,8 @@ class DummyDevice(BaseDevice[DummyDeviceInfo]):
 
 def test_subclass_without_info_model_raises_at_class_definition() -> None:
     with pytest.raises(TypeError, match="MissingInfoModel.*info_model"):
-
-        class MissingInfoModel(BaseDevice[FakeDeviceInfo]):
+        # tolerated: Missing info_model raises during class definition, before name binding.
+        class MissingInfoModel(BaseDevice[FakeDeviceInfo]):  # pyright: ignore[reportUnusedClass]
             def _setup(
                 self,
                 cfg: FakeDeviceInfo,
@@ -89,8 +89,8 @@ def test_subclass_without_info_model_raises_at_class_definition() -> None:
 
 def test_subclass_with_base_info_model_raises_at_class_definition() -> None:
     with pytest.raises(TypeError, match="BaseInfoModelDevice.*concrete"):
-
-        class BaseInfoModelDevice(BaseDevice[BaseDeviceInfo]):
+        # tolerated: BaseDeviceInfo itself is rejected at class definition, before name binding.
+        class BaseInfoModelDevice(BaseDevice[BaseDeviceInfo]):  # pyright: ignore[reportUnusedClass]
             info_model = BaseDeviceInfo
 
             def _setup(
@@ -108,8 +108,8 @@ def test_subclass_with_base_info_model_raises_at_class_definition() -> None:
 
 def test_subclass_with_invalid_info_model_raises_at_class_definition() -> None:
     with pytest.raises(TypeError, match="InvalidInfoModelDevice.*BaseDeviceInfo"):
-
-        class InvalidInfoModelDevice(BaseDevice[BaseDeviceInfo]):
+        # tolerated: Non-BaseDeviceInfo model raises during class definition, before name binding.
+        class InvalidInfoModelDevice(BaseDevice[BaseDeviceInfo]):  # pyright: ignore[reportUnusedClass]
             # tolerated: Invalid info_model must fail at subclass definition.
             info_model = object  # pyright: ignore[reportAssignmentType]
 
