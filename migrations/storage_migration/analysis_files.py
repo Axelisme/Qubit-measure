@@ -68,7 +68,13 @@ def _publish[Fit: BaseModel](
 
 
 def _row(
-    source: Path, key: str, target: Path, path: str, reason: str | None = None
+    source: Path,
+    key: str,
+    target: Path,
+    path: str,
+    reason: str | None = None,
+    *,
+    source_keys: tuple[str, ...] | None = None,
 ) -> KeyMappingItem:
     return KeyMappingItem(
         old_file=source,
@@ -76,6 +82,7 @@ def _row(
         new_file=target,
         new_path=path,
         action="pending" if reason else "value",
+        source_keys=source_keys,
         reason=reason or "Preserve legacy analysis values through the format owner",
     )
 
@@ -102,7 +109,14 @@ def _source_rows(
         )
     )
     return {"run_id": None, "created_at": created_at}, [
-        _row(source, f"{key}.timestamp", target, "source.created_at", reason)
+        _row(
+            source,
+            f"{key}.timestamp",
+            target,
+            "source.created_at",
+            reason,
+            source_keys=(key, "timestamp"),
+        )
     ]
 
 
@@ -119,8 +133,11 @@ def convert_analysis_files(
     its handle (None only in dry-run). source is the baselined legacy params.json,
     name is the unique migrated qubit, and values is the parsed JSON object.
     Format owners validate known content; invalid sections remain located pending
-    without a file. Unknown section fields remain in the caller's verbatim ext
-    preservation. Timestamp provenance uses only proven_created_at evidence;
+    without a file. Successful rows identify transferred source subtrees through
+    literal source_keys, including supported empty containers. Section summaries
+    without source_keys do not claim that unknown nested fields were transferred.
+    The caller retains only unconverted values in ext, not a second full copy.
+    Timestamp provenance uses only proven_created_at evidence;
     run_id stays null. Transition-only input creates a dispersive file with no
     invented g/bare_rf. Dry-run validates/reports without writes. An unfinished
     resume accepts equal owner-loaded files unchanged and rejects conflicts;
@@ -206,7 +223,26 @@ def _convert_dispersive(
                     )
                 rows.extend(evidence_rows)
                 if "dispersive" in values:
-                    rows.append(_row(source, "dispersive", target, "params"))
+                    rows.append(
+                        _row(
+                            source,
+                            "dispersive",
+                            target,
+                            "params",
+                            source_keys=("dispersive",) if not raw else None,
+                        )
+                    )
+                    for key in ("g", "bare_rf"):
+                        if key in raw:
+                            rows.append(
+                                _row(
+                                    source,
+                                    f"dispersive.{key}",
+                                    target,
+                                    f"params.{key}",
+                                    source_keys=("dispersive", key),
+                                )
+                            )
                 if isinstance(fit, dict) and "plot_transitions" in fit:
                     rows.append(
                         _row(
@@ -214,6 +250,7 @@ def _convert_dispersive(
                             "fluxdep_fit.plot_transitions",
                             target,
                             "params.plot_transitions",
+                            source_keys=("fluxdep_fit", "plot_transitions"),
                         )
                     )
     return rows
@@ -282,5 +319,23 @@ def _convert_t1(
             if not session.dry_run:
                 _publish(target, t1_document, load_t1_curve_file, save_t1_curve_file)
             rows.extend(evidence_rows)
-            rows.append(_row(source, "t1_curve_fit", target, "params"))
+            rows.append(
+                _row(
+                    source,
+                    "t1_curve_fit",
+                    target,
+                    "params",
+                    source_keys=("t1_curve_fit",) if not raw else None,
+                )
+            )
+            rows.extend(
+                _row(
+                    source,
+                    f"t1_curve_fit.{key}",
+                    target,
+                    f"params.{key}",
+                    source_keys=("t1_curve_fit", key),
+                )
+                for key in params
+            )
     return rows

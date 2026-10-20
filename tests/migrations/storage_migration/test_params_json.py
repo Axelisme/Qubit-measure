@@ -1056,17 +1056,26 @@ def test_raw_params_preservation_is_typed_located_and_durable(
     }, "Every remaining raw leaf needs a typed literal preservation decision"
     for row in preserved:
         assert row.old_file == source
-        assert row.new_file == request_data.results_root / request_data.name / "setup.yaml"
+        assert (
+            row.new_file == request_data.results_root / request_data.name / "setup.yaml"
+        )
         assert row.new_path is None
         assert row.source_keys is not None
-        assert row.destination_keys == ("Qlegacy", "ext", "legacy_params", *row.source_keys)
+        assert row.destination_keys == (
+            "Qlegacy",
+            "ext",
+            "legacy_params",
+            *row.source_keys,
+        )
     expected_pending = {
         "fluxdep_fit.params.EJ",
         "fluxdep_fit.flux_unit",
         "fluxdep_fit.timestamp",
         "dispersive.timestamp",
     }
-    assert {item.location for item in dry.pending if item.source == source} == expected_pending
+    assert {
+        item.location for item in dry.pending if item.source == source
+    } == expected_pending
     assert not (request_data.results_root / request_data.name).exists()
     assert not backup_path(request_data).exists()
 
@@ -1079,7 +1088,10 @@ def test_raw_params_preservation_is_typed_located_and_durable(
     )
     assert not any(row.action == "preserved" for row in unavailable.key_mappings)
     assert {item.location for item in unavailable.pending if item.source == source} >= {
-        "unknown.section.list", "unknown.section.x.y", "unknown.section", "project.chip"
+        "unknown.section.list",
+        "unknown.section.x.y",
+        "unknown.section",
+        "project.chip",
     }
 
     report = migrate(request_data, analysis_mapping)
@@ -1090,7 +1102,9 @@ def test_raw_params_preservation_is_typed_located_and_durable(
         assert document_value(snapshot(view), "Qlegacy.ext.legacy_params") == {
             "dispersive": {"timestamp": "unproven", "future": [1, None]},
             "fluxdep_fit": {
-                "params": {"EJ": True}, "flux_int": -0.3, "timestamp": "unproven"
+                "params": {"EJ": True},
+                "flux_int": -0.3,
+                "timestamp": "unproven",
             },
             "unknown.section": values["unknown.section"],
             "unknown": values["unknown"],
@@ -1102,19 +1116,29 @@ def test_raw_params_preservation_is_typed_located_and_durable(
     )
     assert predictor.flux_unit is None
     assert predictor.source.created_at is None
-    assert load_dispersive_file(entry.dispersive_path / "Qlegacy.json").params.bare_rf == 5.1
-    assert load_t1_curve_file(entry.t1_curve_path / "Qlegacy.json").params.model_dump(exclude_unset=True)["params"] == {"Q_cap": None, "Temp": 0.04}
+    assert (
+        load_dispersive_file(entry.dispersive_path / "Qlegacy.json").params.bare_rf
+        == 5.1
+    )
+    assert load_t1_curve_file(entry.t1_curve_path / "Qlegacy.json").params.model_dump(
+        exclude_unset=True
+    )["params"] == {"Q_cap": None, "Temp": 0.04}
 
     # Both report encoding and durable manifest decoding must retain typed status/keys.
     encoded = report_json(report)
-    restored = TypeAdapter(MigrationReport).validate_json(json.dumps(encoded), strict=True)
+    restored = TypeAdapter(MigrationReport).validate_json(
+        json.dumps(encoded), strict=True
+    )
     assert restored.key_mappings == report.key_mappings
     manifest = read_manifest(manifest_path(request_data))
     assert manifest.report.key_mappings == report.key_mappings
     for view in (entry.setup, entry.use_point("bias")):
         with view.edit() as draft:
             draft.set("Qlegacy.ext.legacy_params", {"user.edit": ["keep"]})
-    paths = [entry.result_path / "setup.yaml", entry.result_path / "points/bias/point.yaml"]
+    paths = [
+        entry.result_path / "setup.yaml",
+        entry.result_path / "points/bias/point.yaml",
+    ]
     before = [path.read_bytes() for path in paths]
     resumed = migrate(replace(request_data, resume=True), analysis_mapping)
     assert resumed.key_mappings == report.key_mappings
@@ -1128,22 +1152,31 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
 ) -> None:
     timestamp = "2020-07-07T16:30:00+08:00"
     write_meta(request_data, "bias", {})
-    write_params(request_data, {
-        "flux_unit": "A",
-        "fluxdep_fit": {
-            "params": {"EJ": 6.0, "EC": None, "EL": 0.8},
-            "flux_half": 0.2, "flux_period": 1.0, "timestamp": timestamp,
-            "plot_transitions": {"r_f": 5.2, "literal.key": [1, None]},
+    write_params(
+        request_data,
+        {
+            "flux_unit": "A",
+            "fluxdep_fit": {
+                "params": {"EJ": 6.0, "EC": None, "EL": 0.8},
+                "flux_half": 0.2,
+                "flux_period": 1.0,
+                "timestamp": timestamp,
+                "plot_transitions": {"r_f": 5.2, "literal.key": [1, None]},
+            },
+            "dispersive": {
+                "g": 0.03,
+                "bare_rf": 5.1,
+                "timestamp": timestamp,
+                "future.key": {"g": 0.03, "empty": {}, "list": []},
+            },
+            "t1_curve_fit": {
+                "params": {"Temp": 0.04},
+                "fixed": ["Temp"],
+                "timestamp": timestamp,
+            },
+            "metadata": {"EJ": 6.0},
         },
-        "dispersive": {
-            "g": 0.03, "bare_rf": 5.1, "timestamp": timestamp,
-            "future.key": {"g": 0.03, "empty": {}, "list": []},
-        },
-        "t1_curve_fit": {
-            "params": {"Temp": 0.04}, "fixed": ["Temp"], "timestamp": timestamp,
-        },
-        "metadata": {"EJ": 6.0},
-    })
+    )
     report = migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
     expected = {
@@ -1151,7 +1184,9 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
         "metadata": {"EJ": 6.0},
     }
     for view in (entry.setup, entry.use_point("bias")):
-        assert document_value(snapshot(view), "Qlegacy.ext.legacy_params") == expected, (
+        assert (
+            document_value(snapshot(view), "Qlegacy.ext.legacy_params") == expected
+        ), (
             "Converted source leaves must live only in formal analysis files; keep unknown leaves"
         )
     assert load_migrated_predictor(request_data).params == FluxoniumParams(
@@ -1172,8 +1207,15 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
         ({"dispersive": {}}, "dispersive", ("dispersive",)),
         ({"t1_curve_fit": {}}, "t1_curve", ("t1_curve_fit",)),
         (
-            {"fluxdep_fit": {"params": {}, "flux_unit": "A", "timestamp": "2020-07-07T16:30:00+08:00"}},
-            "predictors", ("fluxdep_fit", "params"),
+            {
+                "fluxdep_fit": {
+                    "params": {},
+                    "flux_unit": "A",
+                    "timestamp": "2020-07-07T16:30:00+08:00",
+                }
+            },
+            "predictors",
+            ("fluxdep_fit", "params"),
         ),
     ],
 )
@@ -1189,12 +1231,15 @@ def test_successful_empty_analysis_containers_are_not_preserved_twice(
     report = migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
     assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
-        "unknown.empty": {}, "unknown_list": []
+        "unknown.empty": {},
+        "unknown_list": [],
     }, "Only successfully transferred known empty containers should leave raw storage"
     formal = entry.result_path / formal_kind / "Qlegacy.json"
     assert any(
-        row.action == "value" and row.source_keys == source_keys
-        and row.old_file == source and row.new_file == formal
+        row.action == "value"
+        and row.source_keys == source_keys
+        and row.old_file == source
+        and row.new_file == formal
         and row.new_path == "params"
         for row in report.key_mappings
     )
@@ -1225,14 +1270,16 @@ def test_lossless_sections_are_inherited_before_point_meta_overrides(
         assert document_value(doc, "Qlegacy.EJ") == energy
         assert document_value(doc, "Qlegacy.ext.keep") == 7
         assert document_value(doc, "Qlegacy.ext.legacy_params.dispersive") == {
-            "timestamp": "original", "future": {"x": True}
+            "timestamp": "original",
+            "future": {"x": True},
         }
         assert document_value(doc, "Qlegacy.ext.legacy_params.project") == {
             "chip": "old"
         }
     assert any(
         item.source_keys == ("dispersive", "future", "x")
-        and item.destination_keys == ("Qlegacy", "ext", "legacy_params", "dispersive", "future", "x")
+        and item.destination_keys
+        == ("Qlegacy", "ext", "legacy_params", "dispersive", "future", "x")
         and item.action == "preserved"
         for item in report.key_mappings
     )
@@ -1290,12 +1337,15 @@ def test_dry_run_reports_preservation_without_destination_writes(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
 ) -> None:
-    source = write_params(request_data, {"t1_curve_fit": {"params": {"Q_cap": 1}, "note": "keep"}})
+    source = write_params(
+        request_data, {"t1_curve_fit": {"params": {"Q_cap": 1}, "note": "keep"}}
+    )
     dry = migrate(replace(request_data, dry_run=True), analysis_mapping)
     assert any(
         item.old_file == source
         and item.source_keys == ("t1_curve_fit", "note")
-        and item.destination_keys == ("Qlegacy", "ext", "legacy_params", "t1_curve_fit", "note")
+        and item.destination_keys
+        == ("Qlegacy", "ext", "legacy_params", "t1_curve_fit", "note")
         and item.action == "preserved"
         for item in dry.key_mappings
     )
@@ -1337,7 +1387,9 @@ def test_legacy_fit_publishes_named_entry_predictor_with_native_values(
     point = snapshot(open_entry(request_data).use_point("bias"))
     assert document_value(point, "Qlegacy.EJ") == 11.0
     assert document_value(point, "general.ext.flux_unit") == "mV"
-    assert document_value(point, "Qlegacy.ext.legacy_params.fluxdep_fit") == {"flux_int": -0.3}
+    assert document_value(point, "Qlegacy.ext.legacy_params.fluxdep_fit") == {
+        "flux_int": -0.3
+    }
 
 
 @pytest.mark.parametrize(
@@ -1449,16 +1501,14 @@ def test_undefined_explicit_model_contract_remains_located_pending(
         and "legacy" in item.reason.lower()
         for item in report.pending
     )
-    assert (
-        document_value(
-            snapshot(open_entry(request_data).setup),
-            "Qlegacy.ext.legacy_params.fluxdep_fit",
-        )
-        == {
-            key: value for key, value in legacy_fit.items()
-            if key not in ("plot_transitions", "timestamp")
-        }
-    )
+    assert document_value(
+        snapshot(open_entry(request_data).setup),
+        "Qlegacy.ext.legacy_params.fluxdep_fit",
+    ) == {
+        key: value
+        for key, value in legacy_fit.items()
+        if key not in ("plot_transitions", "timestamp")
+    }
     entry = open_entry(request_data)
     dispersive = load_dispersive_file(entry.dispersive_path / "Qlegacy.json")
     assert dispersive.source.created_at == legacy_fit["timestamp"]

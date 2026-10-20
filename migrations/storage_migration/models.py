@@ -257,13 +257,28 @@ class MigrationDestination:
 class KeyMappingItem:
     """Report location of one key decision.
 
-    old_file is an absolute source file; old_key is its literal legacy key.
-    new_file is the absolute target file, or None when no destination handle is
-    acquired (including library dry-run rows) or the key is removed/pending.
+    old_file is an absolute source file; old_key is the legacy key or a dotted
+    display label for nested analysis data. source_keys is the exact sequence of
+    literal JSON keys when recorded, authoritative over that display label; None
+    means no exact source-key sequence was recorded. A value row with source_keys
+    identifies content transferred to a formal destination, not a whole section
+    implied by a summary row. Pending display labels can retain their historical
+    location, such as fluxdep_fit.flux_unit even when source_keys is ("flux_unit",).
+    Preserved rows always record source_keys.
+    new_file is the absolute target file, or None when no destination is available
+    or acquired (including library dry-run rows), or the key is removed.
     new_path is the proposed dotted target path, or None without a declared target.
     A library dry-run may have new_path with new_file=None; this alone is not pending.
-    action selects the explicit rule operation. reason explains conversion, deferral
-    or removal without evaluating values.
+    action selects the explicit rule operation, or preserved when raw content is
+    retained without claiming semantic conversion. reason explains the decision
+    without evaluating values. destination_keys is the complete sequence of literal
+    target keys for preserved content, including a source key containing dots as
+    one segment. It is None when no literal-key destination is recorded (including
+    failed preservation). Preserved rows use new_path=None, not a dotted path.
+    In dry-run, preserved means the validated destination plan, without writes;
+    an unavailable ext capability stays pending with no destination. A completed
+    report records the original action, not later user edits. Encoding/decoding
+    rejects unknown actions or wrongly typed keys; it does not resolve the target.
     library_kind is module/waveform for a library entry, or None for meta keys.
     Same-name library keys in different source partitions remain distinct.
     """
@@ -272,8 +287,10 @@ class KeyMappingItem:
     old_key: str
     new_file: Path | None
     new_path: str | None
-    action: MappingAction
+    action: MappingAction | Literal["preserved"]
     reason: str
+    source_keys: tuple[str, ...] | None = None
+    destination_keys: tuple[str, ...] | None = None
     library_kind: Literal["module", "waveform"] | None = None
 
 

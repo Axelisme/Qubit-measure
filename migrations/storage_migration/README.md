@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-20，CSV 未知欄位保全、具名欄位報告與已發布 Spec 的 slots
+**Last updated:** 2026-10-20，params 未轉原文去重與 literal 欄位報告
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
@@ -10,10 +10,11 @@
 - `exps/<sub>/image/*.png` 經 copy、hash、manifest 與 resume 發布到 `result/<entry>/points/<sub>/figures/<原檔名>`。其他 exps 附屬未支援檔保留在該 point 的來源相對位置。Data-only 不建立缺少的 point，所有附屬檔都列為 located pending；parameters 建 point 後可 resume data 完成發布。`exps` 外的 `image/` 檔案仍發布到 entry 的 `figures/<來源相對路徑>`。
 - 其他未支援 result 檔，包括 `autofluxdep_runs/**`，保留在 `result/<entry>/<來源相對路徑>`。未支援 Database 檔保留在 `Database/<entry>/<來源相對路徑>`。原樣保全保持檔名、bytes 與 SHA256，報告只標 `preserved`，不宣稱已轉格式或可供 native／分析 owner 解析。沒有額外轉換目標的未知檔完成保全後，不另列永久 pending。
 - `preservation.py` 在首次備份及 entry 建立前預檢所有原樣目的，resume 在 checkpoint／report 寫入前再檢查。新格式保留檔／目錄、來源路由互撞、目的既有檔及祖先／後代佔用都會列出來源與目的並停止。不覆寫、不改名、不認領任意既有檔。只有同 manifest 的發布且 hash 一致才可重用；prepared publication 的既有復原協定不變。
-- `params.json` 以本次建立的唯一 qubit component 為對象，找不到唯一對應就整份 pending。Converter 先將原文區塊與 metadata 存入 setup 的 `component.ext.legacy_params`，再建 points，讓 points 繼承完整 YAML。根層與各 point 的 meta_info 值優先，params 只補缺；衝突保留 meta_info 值，並報告兩來源與 pending。
+- `params.json` 以本次建立的唯一 qubit component 為對象，找不到唯一對應就整份 pending。Converter 先發布正式分析檔，只把未轉、非法或缺證據的來源值存入 setup 的 `component.ext.legacy_params`，再建 points。成功轉換的來源 leaf 不另存 raw 副本，清空的父分支也會移除。已成功轉換的已知空容器不再 raw 雙存，未知原文中的空 object／list 仍保留。Points 繼承完整 YAML，屬於獨立可編輯 context，不在原文去重範圍。根層與各 point 的 meta_info 值優先，params 只補缺；衝突保留 meta_info 值，並報告兩來源與 pending。
 - `fluxdep_fit` 寫入 entry 的 `predictors/<component名>.json`，不寫 component fit 欄位，也不複製到 points。Converter 使用 `resources.predictor_file` 的 `PredictorFile`／`PredictorSource` 與 simulate 的 nullable Params。Dry-run 走 owner 的 pure validation，不建立暫存檔。正式寫入先建 parent directory，再由 `save_predictor_file` 執行原子 I/O。未完成的 parameters resume 經 `load_predictor_file` 驗證格式並比較 typed 值，numeric 省略與 null 都表示未知，不按 JSON 排版比較。完整性與物理限制仍交給 build_predictor。
 - 舊 EJ/EC/EL fit 寫 `model=fluxonium`、`flux_bias=0.0`，`flux_int` 只作 alignment，不寫 predictor。舊 owner 未定義的 transmon 或明示 model fit 保持 pending。predictor 單位只讀 params 根層或 fit 的明示 `flux_unit`。兩處都沒有時才可用 `assume_flux_unit`，報告標「假設單位」。未提供假設，或明示值衝突、不合法時，單位寫 null 並列 pending。meta_info 不能作 predictor 單位證據，也不換算數字。`source.run_id` 固定 null；`source.created_at` 由公開 `proven_created_at` 重用 `resources.analysis_source.AnalysisSource` 驗證，只接受有效的 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`，小數秒為一至六位，接受時保留原文。其他形式或無效日期時間回傳 None，寫 null 並列 pending。這三個 nullable 欄位仍必須存在；報告保留備份內原文定位。
-- `dispersive` 與 `fluxdep_fit.plot_transitions` 經 resources owner 寫入 entry 的 `dispersive/<component名>.json`，`t1_curve_fit` 寫入 `t1_curve/<component名>.json`。只有 transition seed 時也產生 dispersive 檔，不補 g 或 bare_rf。兩檔保留缺項、null 與 active T1 名稱的差異，source 時間只採各自 section 的 timestamp，沿用上述窄形式與原文保真規則。無法驗證的內容保持 located pending，原文、未知欄位與 metadata 仍留在 setup ext 並由 points 繼承。Parameters 未完成時 resume 經 owner load 比對欄位存在性與內容，衝突就拒絕；完成後保留使用者編輯。Dry-run 列出相同檔案但不寫入。
+- `dispersive` 與 `fluxdep_fit.plot_transitions` 經 resources owner 寫入 entry 的 `dispersive/<component名>.json`，`t1_curve_fit` 寫入 `t1_curve/<component名>.json`。只有 transition seed 時也產生 dispersive 檔，不補 g 或 bare_rf。兩檔保留缺項、null 與 active T1 名稱的差異，source 時間只採各自 section 的 timestamp，沿用上述窄形式與原文保真規則。無法驗證的內容保持 located pending，未轉原文、未知欄位與未採用的 metadata 留在 setup ext 並由 points 繼承。未知欄位不阻斷可支援的正式輸出，也不因保全原文就列 pending。Parameters 未完成時 resume 經 owner load 比對欄位存在性與內容，衝突就拒絕；完成後保留使用者編輯。Dry-run 列出相同檔案但不寫入。
+- `MigrationReport.key_mappings` 用 `action="preserved"` 區分原樣保留與正式轉換，不能只按 reason 文字判斷。Params 的保留 rows 逐項記錄 literal `source_keys` 與 `destination_keys`，`new_file` 指向 setup，`new_path=None`。例如原 key `unknown.section` 是一個 segment，不拆成巢狀路徑。`value` rows 的 `source_keys` 只標實際轉進正式檔的來源 subtree，不把 section summary 當整份成功。缺少 ext 能力時仍 pending，不能宣稱已保留。Dry-run 記錄同一份計畫但不寫入；manifest、累積 report 與 resume 保留狀態及定位，完成後不重寫使用者編輯。
 - Parameters 與 data 可分開執行。第二部分明確 resume 同一 manifest，不合併任意既有條目。完成的 setup／point 仍可編輯；resume 驗證當前文件，不恢復舊值。
 - Legacy evidence 1.x 的 params 與來源稽核使用本 package 的 `LegacyParameterSnapshot`、
   `LegacyParameterSource`、`LegacyCloneOrigin`。Wire shape 不變，完整 raw evidence 留在 manifest。
