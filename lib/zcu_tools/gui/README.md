@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-20，destructive confirmation inputs；分析 project owner 移至 app 層
+**Last updated:** 2026-10-20，destructive confirmation inputs、分析 project app owner 與 point-local alias／Inspect 草稿來源
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -166,9 +166,10 @@ project CLI 與 RPC 投影由 [`app.analysis_project`](app/analysis_project/READ
 `PredictorDialog` 由 shared session UI 擁有，依賴各 domain 的窄 control facet。
 `session/ui/alias_panel.py` 的 AliasPanel 是共用 Inspect 的 Aliases 頁，編輯元件與 device
 共用的有序 alias 表；沒有獨立的 Aliases 對話框或入口。
-Apply 先驗表，再由 entry owner 原子保存，成功後才安裝 memory 並發布 fact。
-EMPTY 只改 memory；失敗保舊表、舊檔與 draft。未存 draft 在關閉 Inspect 時走 Save／Discard／Cancel。
-開 entry 載入自己的表，無檔才重設 caller preset；切 point 不換表。
+Apply 要求已選 point，先驗表，再由 entry owner 原子保存該 point 的 `aliases.yaml`，成功後才安裝 memory 並發布 fact。
+空表也會保存。失敗保留舊表、舊檔與 draft。切 point 載入該 point 的表，缺檔就是空表，不回退 setup 或 caller preset。
+Inspect 的 clean draft 隨切換換表。Dirty draft 固定來源 entry／point，跨 target 拒絕 Apply；Revert 載入目前 point 的表。
+未存 draft 在關閉 Inspect 時走 Save／Discard／Cancel。
 App 保留 dialog lifecycle 與呈現政策，shared dialog 不反向 import app。
 
 ## Dialog presentation and lifetime

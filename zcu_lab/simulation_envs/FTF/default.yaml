@@ -42,19 +42,19 @@ dc_bias:
   sources:
     f1_bias:
       unit: A
-      limits: [-0.01, 0.01] # -10 to +10 mA
+      limits: [-0.02, 0.02] # -20 to +20 mA
       initial: 0.0
       ramp_step: 0.000001 # A, equivalent to 0.001 mA
       flux_per_unit: { f1: 128.2, coupler: 2, f2: -1 }
     coupler_bias:
       unit: A
-      limits: [-0.01, 0.01]
+      limits: [-0.02, 0.02]
       initial: 0.0
       ramp_step: 0.000001
       flux_per_unit: { f1: 1.5, coupler: 125.0, f2: -1.5 }
     f2_bias:
       unit: A
-      limits: [-0.01, 0.01]
+      limits: [-0.02, 0.02]
       initial: 0.0
       ramp_step: 0.000001
       flux_per_unit: { f1: -1, coupler: 2, f2: 122.0 }

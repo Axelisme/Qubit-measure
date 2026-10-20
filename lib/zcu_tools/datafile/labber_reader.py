@@ -21,7 +21,7 @@ from .labber_format import (
 from .models import Axis, LabberData, LabberMetadata
 from .paths import format_ext
 
-__all__ = ["load_labber_data"]
+__all__ = ["load_labber_data", "load_labber_logs"]
 
 
 def load_labber_data(path: str) -> LabberData:
@@ -46,6 +46,59 @@ def load_labber_data(path: str) -> LabberData:
         Also unpacks as ``z, x, y``.
     """
     return _load_labber_data(path)
+
+
+def load_labber_logs(path: str) -> tuple[LabberData, ...]:
+    """Read each unmarked Labber log independently, without stacking grids.
+
+    path names an existing Labber file (the usual suffix resolution applies).
+    Return root then numerically ordered Log_N entries, each with its own
+    inner-first axes, signal label/unit and absolute epoch timestamps. Shared
+    comment, tags, project, user and creation time accompany every entry.
+    This format reader assigns no domain variable identity. Callers must supply
+    an explicit ordered mapping and validate schemas. Marked grouped files and
+    inconsistent stored scalar-log step dimensions raise ValueError; I/O errors
+    propagate. Trace grids retain the existing trace reader's shape semantics.
+    No source data is changed, padded or truncated.
+    """
+    path = resolve_labber_path(path)
+    with h5py.File(path, "r") as file:
+        if "zcu_tools.grouped_dataset_version" in file.attrs:
+            raise ValueError("marked grouped file requires load_grouped_labber_data")
+        comment = decode_labber_attribute(file.attrs.get("comment", "")) or ""
+        tags, project, user = read_labber_tags(file)
+        creation_time = float(file.attrs.get("creation_time", 0.0) or 0.0)
+        entries: list[LabberData] = []
+        for log in labber_log_refs(file):
+            z, axes, timestamps = read_single_log(file, log)
+            name, unit = read_log_label(file, log)
+            data = log["Data"]
+            if "Step dimensions" in data.attrs and "Traces" not in log:
+                declared = tuple(
+                    int(value) for value in np.asarray(data.attrs["Step dimensions"])
+                )
+                actual = tuple(len(values) for _name, _unit, values in axes)
+                if declared != actual:
+                    raise ValueError(
+                        f"{path}:{log.name}: step dimensions disagree with axes shape"
+                    )
+            entries.append(
+                LabberData(
+                    data=Axis(name, unit, z),
+                    axes=[Axis(*axis) for axis in axes],
+                    timestamps=None
+                    if timestamps is None
+                    else creation_time + np.asarray(timestamps),
+                    metadata=LabberMetadata(
+                        comment=comment,
+                        tags=tags,
+                        project=project,
+                        user=user,
+                        creation_time=creation_time,
+                    ),
+                )
+            )
+    return tuple(entries)
 
 
 def _load_labber_data(path: str) -> LabberData:

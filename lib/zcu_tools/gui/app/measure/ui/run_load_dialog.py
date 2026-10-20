@@ -1,4 +1,4 @@
-"""Native file or opened-entry ledger selection, without loading data itself."""
+"""Native file selection from opened-entry file metadata, without loading data."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from qtpy.QtWidgets import (
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -21,14 +22,15 @@ from zcu_tools.gui.app.measure.artifacts import SavedRunInfo
 
 
 class RunLoadDialog(QDialog):
-    """Choose a native file or one loadable ledger row on the Qt owner thread.
+    """Choose a native file on the Qt owner thread, even if metadata is unreadable.
 
     runs contains ordered SavedRunInfo from the opened entry; no files are read.
     initial_point selects a known point, or all points when empty/unknown.
     start_directory is QFileDialog's initial folder, not a reserved destination.
     Accepted implies selected_path() is nonempty. Reject/cancel returns no path.
-    Point/experiment filters are exact; time filter matches recorded_at text.
-    Rows without data_path remain visible but cannot be loaded. Paths may have
+    Point/experiment filters are exact; time filter matches started_at text.
+    Metadata errors remain visible in the native-data column and its tooltip.
+    Every row is selectable regardless of metadata validity. Paths may have
     disappeared; the existing Load owner reports that failure after selection.
     This is a single Load interaction; finished discards further selection input.
     The owning window must reject it before window teardown. The caller reads
@@ -52,16 +54,28 @@ class RunLoadDialog(QDialog):
         self._start_directory = start_directory
         self._selected_path: str | None = None
         self.setWindowTitle("Load Data")
-        self.resize(850, 440)
+        self.resize(1100, 440)
         layout = QVBoxLayout(self)
         filters = QWidget()
         filters.setLayout(self._build_filters(initial_point))
         layout.addWidget(filters)
-        self._table = QTableWidget(0, 5)
+        self._table = QTableWidget(0, 7)
         self._table.setObjectName("load_runs")
         self._table.setHorizontalHeaderLabels(
-            ["Run", "Point", "Experiment", "Recorded at", "Native data"]
+            [
+                "Run",
+                "Point",
+                "Experiment",
+                "Started at",
+                "Finished at",
+                "Completion",
+                "Native data",
+            ]
         )
+        header = self._table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -111,8 +125,8 @@ class RunLoadDialog(QDialog):
         for experiment in sorted({run.experiment for run in self._runs}):
             self._experiment.addItem(experiment, experiment)
         self._time = QLineEdit()
-        self._time.setObjectName("load_recorded_at")
-        self._time.setPlaceholderText("Recorded at contains (UTC)")
+        self._time.setObjectName("load_started_at")
+        self._time.setPlaceholderText("Started at contains (UTC)")
         filters.addWidget(QLabel("Point"))
         filters.addWidget(self._point)
         filters.addWidget(QLabel("Experiment"))
@@ -135,13 +149,13 @@ class RunLoadDialog(QDialog):
             if self._experiment.currentIndex() > 0
             else None
         )
-        recorded_at = self._time.text()
+        started_at = self._time.text()
         self._visible_runs = tuple(
             run
             for run in self._runs
             if (point is None or run.point == point)
             and (experiment is None or run.experiment == experiment)
-            and recorded_at in run.recorded_at
+            and started_at in (run.started_at or "")
         )
         self._selected_path = None
         self._table.setRowCount(0)
@@ -151,19 +165,26 @@ class RunLoadDialog(QDialog):
                 run.run_id,
                 run.point if run.point is not None else "",
                 run.experiment,
-                run.recorded_at,
-                str(run.data_path) if run.data_path is not None else "",
+                run.started_at or "",
+                run.finished_at or "",
+                run.completion or "",
+                f"Metadata error: {run.metadata_error}"
+                if run.metadata_error
+                else str(run.data_path),
             )
             for column, value in enumerate(values):
-                self._table.setItem(row, column, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                item.setToolTip(
+                    f"{run.data_path}\n{run.metadata_error}"
+                    if run.metadata_error
+                    else str(run.data_path)
+                )
+                self._table.setItem(row, column, item)
         self._selection_changed()
 
     def _selection_changed(self) -> None:
         row = self._table.currentRow()
-        self._load.setEnabled(
-            0 <= row < len(self._visible_runs)
-            and self._visible_runs[row].data_path is not None
-        )
+        self._load.setEnabled(0 <= row < len(self._visible_runs))
 
     def _load_selected(self) -> None:
         if self._interaction_finished:
@@ -172,8 +193,6 @@ class RunLoadDialog(QDialog):
         if not 0 <= row < len(self._visible_runs):
             return
         path = self._visible_runs[row].data_path
-        if path is None:
-            return
         self._selected_path = str(path)
         self.accept()
 

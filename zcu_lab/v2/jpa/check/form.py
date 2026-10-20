@@ -14,7 +14,12 @@ def make_form(ctx: FormContext) -> Form[CheckCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "readout": Template("readout", bindings={"resonator": "$resonator"}),
+                # Run supplies readout frequency for each external-device setting.
+                "readout": Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    set={"freq": Hidden(0.0)},
+                ),
             },
             "jpa_rf_dev": AliasName("jpa_rf_dev"),
             "sweep": {

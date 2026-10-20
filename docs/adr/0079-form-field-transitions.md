@@ -91,6 +91,20 @@ Core 對普通 `list[Model]` 提供中性描述、picker 與 indexed editing，�
 
 使用者於 2026-10-18 看過傳複本與宣告檢查方案後裁定：「可以」。這個檢查集中普通 mutation 的 admission，不把固定 identity 政策放回 Core。
 
+`FixedElements(list_path)` 不宣告 name 或 participants，使用固定槽位模式。
+它只拒絕目前 inline 清單的增刪，不限制各槽位的欄位值，也不把可編輯 label 當 identity。
+整列表交換值與逐槽位修改無法區分，因此本模式不保證 resonator 身份或禁止值的重排。
+它不產生 ElementIdentity，也不新增持久欄位。
+
+宣告路徑可穿過 nested ref／inline module，定位 active inline list。
+合法 ref／inline 切換仍可進行。切到 inline 時以新清單建立槽位數邊界，不跨分支保存隱藏身份。
+還原與 Reset 照既有規則建立新邊界。具名 list 與 participants 的原有規則不變。
+Lab 從 mux group 決定 resonator 清單與初值，Form adapter 依原 Spec 生成 typed model-list input。
+Core、widget 與 host 不辨識 mux group。
+
+使用者於 2026-10-20 同意從 mux group 產生固定清單並逐欄編輯，原話為「可以」。
+顧問同日採 typed model-list seeds 與無 participants 的固定槽位模式，保留合法 ref／inline 切換。
+
 需要名稱定位的表單在建立時拒絕重複元素名，錯誤指名重複名稱與原始 indices。宣告 owner 只檢查名稱的唯一性，不解讀 resonator，不改 [[0072]] 的 group schema。元素名取法歸實驗定義者；若實驗需要重複 resonator，可以宣告 R1#0、R1#1 等不同名稱，framework 不自行加後綴。這項限制由顧問於 2026-10-18 確認，避免 participants 與 recipe overrides 無法唯一定位。
 
 Workflow 的 Apply 以宣告的 Form.to_cfg() 轉成完整 native tunables model，再由 Engine 依 workflow 型別驗證、整體替換並增加 revision。List 與固定 list 隨完整 model 提交，不攤平 preview leaves，也不建立 native index path grammar。每次 Apply 的 journal 記 actor、revision_before／after 與完整新 tunables JSON。Append 成功後才發布值與 revision，宿主才接受 input／base。使用者於 2026-10-18 確認完整 model 直接套用、不比對差異，並在日誌寫法中確認「甲乙都可以」。採完整快照，不維護逐葉差異或舊格式相容層。當前 step capture 與 iteration record.json 格式不變，見 [[0062]]。

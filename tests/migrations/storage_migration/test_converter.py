@@ -1,9 +1,11 @@
 """Observable migration, source preservation and explicit resume contracts."""
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
 
+import h5py as h5
 import numpy as np
 import pytest
 from pydantic import TypeAdapter
@@ -12,7 +14,7 @@ from zcu_tools.datafile import (
     JsonObject,
     load_run_data,
 )
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.views import FieldView
 
 from migrations.storage_migration import (
@@ -27,7 +29,9 @@ from migrations.storage_migration import (
     load_run_evidence,
     migrate_storage,
 )
+from tests._native_support import hdf_group
 from tests.migrations.storage_migration.fakes import (
+    assert_difference,
     manifest_path,
     noop_validation,
     validate_cfg,
@@ -152,7 +156,11 @@ def test_two_complete_points_keep_working_units_and_sources(
     assert isinstance(unknown, FieldView)
     assert unknown["legacy"] == 1
     assert a.general.ext["expression"] == "${md.old_frequency}"
-    assert {item.location for item in report.pending} == {"unknown", "expression"}
+    assert {item.location for item in report.pending} == {"expression"}
+    unknown_row = next(row for row in report.key_mappings if row.old_key == "unknown")
+    assert unknown_row.action == "preserved"
+    assert unknown_row.old_file == source_a
+    assert unknown_row.destination_keys == ("general", "ext", "unknown")
     assert (source_a.read_bytes(), source_b.read_bytes()) == before
     entry.setup.C1.frequency = 77.0
     assert entry.use_point("context_a").C1.frequency == 12.5
@@ -181,13 +189,9 @@ def test_parts_accumulate_with_same_identity(
     assert result.entry_id == initial.entry_id
     assert result.part == "all"
     assert len(result.key_mappings) == 1
-    assert len(result.preserved_files) == 1
-    assert (
-        request_data.results_root / request_data.name / "params.json"
-    ).read_bytes() == b'{"legacy": true}'
 
 
-def test_data_resume_keeps_valid_user_edit(
+def test_data_resume_reports_valid_user_edit_without_overwriting(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     write_meta(request_data, "context", {"old_frequency": 8.0})
@@ -203,11 +207,15 @@ def test_data_resume_keeps_valid_user_edit(
         database_root=request_data.database_root,
     )
     entry.use_point("context").C1.frequency = 19.0
-    migrate_storage(
-        replace(request_data, part="data", resume=True),
-        mapping=mapping,
-        validate_cfg=validate_cfg,
-        validate_native=noop_validation,
+    assert_difference(
+        lambda: migrate_storage(
+            replace(request_data, part="data", resume=True),
+            mapping=mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        ),
+        request_data,
+        [entry.result_path / "points/context/point.yaml"],
     )
     assert entry.use_point("context").C1.frequency == 19.0
 
@@ -270,6 +278,97 @@ def test_resume_rejects_changed_identity(
         )
 
 
+@pytest.mark.parametrize("unsupported", [False, True])
+def test_instrument_snapshot_preserves_values_or_reports_isolated_pending(
+    request_data: MigrationRequest, mapping: MigrationMapping, unsupported: bool
+) -> None:
+    request_data, source = write_run(request_data)
+    with h5.File(source, "r+") as file:
+        instrument = hdf_group(file, "Instrument config").create_group(
+            "synthetic source"
+        )
+        instrument.attrs["frequency"] = np.float64(5.25e9)
+        instrument.attrs["enabled"] = np.bool_(True)
+        instrument.attrs["label"] = np.bytes_(b"offline")
+        instrument.attrs["points"] = np.array([1 + 2j, complex(np.inf, np.nan)])
+        instrument.attrs["bounds"] = np.array([np.nan, np.inf, -np.inf])
+        instrument.attrs["empty"] = np.array([], dtype=float)
+        if unsupported:
+            instrument.attrs["reference"] = file.ref
+    evidence_path = request_data.result_root.parent / "evidence.json"
+    raw = json.loads(evidence_path.read_text())
+    raw["entries"][0]["source_hash"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    evidence_path.write_text(json.dumps(raw))
+    request_data = replace(request_data, run_evidence=load_run_evidence(evidence_path))
+    original = source.read_bytes()
+    report = migrate_storage(
+        request_data,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    native = next(
+        (request_data.database_root / request_data.name / "runs").glob("*/data.h5")
+    )
+    stored = load_run_data(native)
+    if unsupported:
+        assert stored.metadata.device_snapshot is None
+        pending = [
+            item
+            for item in report.pending
+            if item.location == "device snapshot pending"
+        ]
+        assert len(pending) == 1
+        assert "reference" in pending[0].reason
+    else:
+        assert stored.metadata.device_snapshot is not None
+        assert stored.metadata.device_snapshot["synthetic source"] == {
+            "frequency": 5.25e9,
+            "enabled": True,
+            "label": "offline",
+            "points": [
+                {"real": 1.0, "imag": 2.0},
+                {"real": {"nonfinite": "inf"}, "imag": {"nonfinite": "nan"}},
+            ],
+            "bounds": [
+                {"nonfinite": "nan"},
+                {"nonfinite": "inf"},
+                {"nonfinite": "-inf"},
+            ],
+            "empty": [],
+        }
+        assert not report.pending
+    np.testing.assert_array_equal(
+        stored.payload.variables[DataVariable("signal")].z, [1 + 2j, 3 + 4j]
+    )
+    assert (
+        request_data.database_root / request_data.name / "Labber/2025/10/scan.hdf5"
+    ).read_bytes() == original
+    assert not report.failures
+
+
+def test_native_links_to_preserved_labber_relative_to_entry_database(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    request_data, source = write_run(request_data)
+    original = source.read_bytes()
+    report = migrate_storage(
+        request_data,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    native = next(
+        (request_data.database_root / request_data.name / "runs").glob("*/data.h5")
+    )
+    stored = load_run_data(native)
+    assert stored.metadata.labber_path == "Labber/2025/10/scan.hdf5"
+    assert (
+        request_data.database_root / request_data.name / stored.metadata.labber_path
+    ).read_bytes() == original
+    assert not report.failures
+
+
 def test_native_is_readable_and_validated_before_source_removal(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
@@ -285,7 +384,7 @@ def test_native_is_readable_and_validated_before_source_removal(
         assert stored.metadata.completion == "stopped"
         assert stored.metadata.snapshot.point == "point_at_acquisition"
         assert stored.metadata.snapshot.entry_name == "historical"
-        assert stored.metadata.labber_path is None
+        assert stored.metadata.labber_path == "Labber/2025/10/scan.hdf5"
         assert stored.cfg.values == {"frequency": 12.5}
         np.testing.assert_array_equal(
             stored.payload.variables[DataVariable("signal")].z, [1 + 2j, 3 + 4j]
@@ -549,7 +648,7 @@ def test_report_rebuild_retains_future_fields(
     assert report["part"] == "all"
 
 
-def test_preserved_archives_keep_paths_bytes_and_sources(
+def test_preserved_files_keep_entry_relative_paths_bytes_and_sources(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     source = request_data.result_root / "chip" / "qubit"
@@ -557,7 +656,6 @@ def test_preserved_archives_keep_paths_bytes_and_sources(
         "arb_waveforms/wave.npz": b"arbitrary wave bytes",
         "context/image/figure.png": b"unknown point image",
         "autofluxdep_runs/run/blob.h5": b"workflow archive",
-        "samples.csv": b"old,columns\n1,2\n",
         "unrecognized.bin": b"retained only at source",
     }
     for relative, content in originals.items():
@@ -575,22 +673,18 @@ def test_preserved_archives_keep_paths_bytes_and_sources(
         assert item.destination.read_bytes() == item.source.read_bytes()
         assert item.source_hash == item.destination_hash
     assert (
-        request_data.database_root / request_data.name / "arb_waveforms" / "wave.npz"
+        request_data.results_root / request_data.name / "arb_waveforms" / "wave.npz"
     ).read_bytes() == originals["arb_waveforms/wave.npz"]
-    preserved = (
-        request_data.database_root
-        / request_data.name
-        / "migration-preserved"
-        / "result"
-    )
-    assert (preserved / "context" / "image" / "figure.png").read_bytes() == originals[
+    figures = request_data.results_root / request_data.name / "figures"
+    assert (figures / "context/image/figure.png").read_bytes() == originals[
         "context/image/figure.png"
     ]
-    assert any(
-        item.source == source / "unrecognized.bin"
-        and item.location == "unconverted file"
-        for item in report.pending
-    )
+    entry = request_data.results_root / request_data.name
+    assert (entry / "unrecognized.bin").read_bytes() == originals["unrecognized.bin"]
+    assert (entry / "autofluxdep_runs/run/blob.h5").read_bytes() == originals[
+        "autofluxdep_runs/run/blob.h5"
+    ]
+    assert report.converted_files == ()
     assert all(
         (source / relative).read_bytes() == content
         for relative, content in originals.items()
@@ -600,10 +694,11 @@ def test_preserved_archives_keep_paths_bytes_and_sources(
 def test_owned_copy_hash_conflict_is_not_repaired(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
-    source = request_data.result_root / "chip" / "qubit" / "params.json"
-    source.write_bytes(b'{"legacy": true}')
+    source = request_data.result_root / "chip/qubit/image/fit.png"
+    source.parent.mkdir()
+    source.write_bytes(b"original image")
     report = migrate_storage(
-        replace(request_data, part="parameters"),
+        replace(request_data, part="data"),
         mapping=mapping,
         validate_cfg=validate_cfg,
         validate_native=noop_validation,
@@ -618,7 +713,7 @@ def test_owned_copy_hash_conflict_is_not_repaired(
             validate_native=noop_validation,
         )
     assert destination.read_bytes() == b"caller edit"
-    assert source.read_bytes() == b'{"legacy": true}'
+    assert source.read_bytes() == b"original image"
 
 
 def test_existing_independent_report_is_never_overwritten(
@@ -892,7 +987,7 @@ def test_wrapped_channel_creates_a_complete_optional_container(
     assert decision.new_path == "C1.channel.ch"
 
 
-def test_module_candidates_keep_destinations_and_declared_reference_priority(
+def test_unsupported_module_candidates_preserve_source_without_slot(
     request_data: MigrationRequest,
     mapping: MigrationMapping,
 ) -> None:
@@ -908,6 +1003,7 @@ def test_module_candidates_keep_destinations_and_declared_reference_priority(
         "future_root: {keep: true}\n",
         encoding="utf-8",
     )
+    original = library.read_bytes()
     rules = tuple(
         ModuleRule(
             old_name=name,
@@ -928,28 +1024,36 @@ def test_module_candidates_keep_destinations_and_declared_reference_priority(
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     ).use_point("context")
-    module = point.C1.module
-    assert isinstance(module, FieldView)
-    assert module.chosen == "C1.pulses.first_choice"
-    destinations = {
-        item.old_key: item.new_path
-        for item in report.key_mappings
-        if item.old_file == library and item.library_kind == "module"
+    assert document_value(snapshot(point), "C1.module") == {}
+    assert document_value(snapshot(point), "general.ext.legacy_module_cfg") == {
+        "modules": {
+            "second_choice": {"type": "synthetic", "value": 2},
+            "third_choice": {"type": "synthetic", "value": 3},
+            "first_choice": {"type": "synthetic", "value": 1},
+            "unknown_module": {"type": "unknown"},
+        },
+        "waveforms": {"pulse": {"style": "const", "length": 1}},
+        "future_root": {"keep": True},
     }
-    assert destinations == {
-        "first_choice": "C1.pulses.first_choice",
-        "second_choice": "C1.pulses.second_choice",
-        "third_choice": "C1.pulses.third_choice",
-        "unknown_module": None,
-    }
-    pending = {
-        item.location: item.reason for item in report.pending if item.source == library
-    }
-    assert set(pending) == {
-        "modules.first_choice",
-        "modules.second_choice",
-        "modules.third_choice",
-        "modules.unknown_module",
-        "waveforms.pulse",
-        "future_root",
-    }
+    for keys in (
+        ("modules", "first_choice"),
+        ("modules", "second_choice"),
+        ("modules", "third_choice"),
+        ("modules", "unknown_module"),
+        ("waveforms", "pulse"),
+        ("future_root",),
+    ):
+        assert any(
+            item.old_file == library
+            and item.action == "preserved"
+            and item.source_keys == keys
+            and item.destination_keys == ("general", "ext", "legacy_module_cfg", *keys)
+            and item.new_file
+            == request_data.results_root
+            / request_data.name
+            / "points/context/point.yaml"
+            and item.new_path is None
+            for item in report.key_mappings
+        )
+    assert not any(item.source == library for item in report.pending)
+    assert library.read_bytes() == original

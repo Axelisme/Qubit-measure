@@ -1,5 +1,7 @@
 """Starting values for singleshot/amp_rabi; sources are captured at Open/Reset."""
 
+from dataclasses import replace
+
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -10,12 +12,15 @@ from zcu_lab.v2.singleshot.amp_rabi.core import AmpRabiCfg
 
 def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
     """Build starting values and shape from the captured source availability."""
+    pulse = amp_rabi_initial_pulse(ctx.parameters)
+    # Keep shape/calibration admission; Run supplies gain itself.
+    pulse = replace(pulse, set={**pulse.set, "gain": Hidden(0.0)})
     return Form(
         AmpRabiCfg,
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "qub_pulse": amp_rabi_initial_pulse(ctx.parameters),
+                "qub_pulse": pulse,
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),

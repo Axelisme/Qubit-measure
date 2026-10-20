@@ -258,7 +258,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     assert resume is not None and resume.isEnabled()
     with pytest.raises(InvalidRunState):
         window.start("replacement")
-    assert not (entry.result_path / "workflows/replacement").exists()
+    assert not (entry.result_path / "workflows/paused-close_replacement").exists()
     if action == "close":
         assert window.close()
     else:
@@ -307,7 +307,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     controller, panel = window.controller, window.tuning_panel
     assert panel is not None
     accepted = panel.host.accepted_input.data
-    journal = entry.result_path / "workflows/failed-read/journal.jsonl"
+    journal = entry.result_path / "workflows/failed-read_failed-read/journal.jsonl"
     original = journal.read_bytes()
     journal.unlink()
     journal.mkdir()
@@ -477,7 +477,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     if phase == "pending":
         assert harness.gate.snapshot()
         harness.complete_segment()
-        assert not (entry.result_path / "workflows/run-B").exists()
+        assert not (entry.result_path / "workflows/replacement-target_run-B").exists()
     else:
         stopped = controller.status()
         assert stopped is not None and stopped.lifecycle == "stopped"

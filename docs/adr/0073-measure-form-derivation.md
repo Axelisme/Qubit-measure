@@ -89,8 +89,18 @@ FTF roles 的 f1、f2、coupler、mux、tone index 與 tone_count 供驗證、�
 
 Bath reset freq 的 `tested_reset.pi2_cfg.phase` 移除舊 lock，由 Template 的 `set` 給初值 90，欄位可編輯。
 `run()` 組 program 時使用 cfg 的 phase，不覆寫為固定值。Guide 註明 90 是建議的 tomography offset。
-現有 Template 沒有 nested Hidden／readonly 作者入口，且只有這一處需要，因此不新增 nested metadata API。
-不複製共用 module 型別，也不另建局部 cfg 型別。
+Run 會覆寫的必填欄位由實驗 form 顯式宣告 `Hidden(合法值)`。普通 core tree、
+`Template.set` 與 `Slot.set` 的 dotted Spec 路徑共用這個節點。生成器供值並隱藏欄位，
+填入值仍受 core／Spec 驗證。沒有參數的 `Hidden()` 保留普通 core 欄位的 default 還原用途。
+生成器不推導 sweep 與 module 的關係，不另設 hidden_paths，也不改 core input 型別或 Run。
+Bath reset phase 仍可編輯。這個入口不擴充 nested readonly，不複製共用 module 型別，
+也不另建局部 cfg 型別。
+
+使用者於 2026-10-20 裁定：「應該有更簡單的做法，比如就隨便填一個合法值，或是給adapter生成時說明哪些路徑不重要。」
+同日補充：「不只是onetone/freq有這個問題」。各實驗依自己的 Run 覆寫路徑宣告 Hidden，不靠欄位同名推定。
+逐 tone list 的位置 Template／Slot 必須宣告相同 Hidden 路徑，才套用共享元素 model。
+路徑不一致時明確報錯。共享的只有隱藏路徑，各位置的值與來源獨立，不新增作者 API。
+普通位置 tree 直接放 Hidden 仍受 [[0079]] 的共同元素宣告限制。
 
 缺 Slot 來源時，optional 欄位停用且有效，required 欄位留空且 Invalid。
 沒有 Slot fallback 或 init 模式。需要選來源時，make_form 明寫 if／else。
@@ -152,11 +162,10 @@ Measure 不再使用 CfgSchema 的跨 tab refresh／Unavailable 恢復模型。
 `cfg_model.TemplateDef` 宣告持久 Spec 型別、label 與 seeds。表在 `zcu_lab.templates`，
 組合根以 `Registry(templates=TEMPLATES)` 注入。Library 新建選單使用同一份表，
 reload candidate 從 current Registry 取得表，不重建角色表。
-佔位符使用具名 `Template.bindings`，顯式值覆蓋 session 的 `PlaceholderRegistry` 預設值，也可使用未登錄名稱。
-Registry 初始為空。Session 組裝擁有唯一 mutable instance，`ctx.placeholders` 提供登錄與讀取。
-Host 將 detached defaults 放進固定 `FormEnv`；Open／Reset 重新 capture，既有 input 與 env 不隨登錄變更。
+佔位符只使用呼叫端明填的 `Template.bindings`，例如 `qubit → $qubit` 或 `qubit → $qubit1`。
+Session、startup 與 FormEnv 不提供模板綁定預設值。模板展開不解析 alias。
 `TemplateDef` 建構只驗證語法與結構，實際展開缺 binding 時報 `ValueError`。
-Registry 不擁有名稱清單、alias 解析或保存政策，腳本自行保存與恢復。
+使用者於 2026-10-20 裁定：「你搞錯了吧，模板/alias是不同的東西，後者才是startup填的」「模板是form adapter提供的工具的語法，讓呼叫端可以填需要的名子，比如$qubit或$qubit1，來展開成使用不同alias的表達式」。
 範本 seeds 疊在 Spec defaults 上。Trig_offset 政策由實驗室的範本工具參數宣告。
 
 範本目錄是固定資料。`bath_reset.pi2_cfg` 使用 x90 Slot，有來源時保留引用，

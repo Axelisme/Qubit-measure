@@ -130,7 +130,7 @@ NAMED_PRESETS = {
 
 
 @pytest.mark.parametrize("saved", [None, (), (AliasRow("saved", "R1"),)])
-def test_named_default_initializes_only_entries_without_saved_aliases(
+def test_point_table_replaces_named_default_without_automatic_initialization(
     saved: tuple[AliasRow, ...] | None, tmp_path: Path, qapp: QApplication
 ) -> None:
     before = registry_state()
@@ -147,7 +147,8 @@ def test_named_default_initializes_only_entries_without_saved_aliases(
         entry.new_point("first")
         if saved is not None:
             entry.save_aliases(
-                EntryAliases(aliases={row.alias: row.value for row in saved})
+                EntryAliases(aliases={row.alias: row.value for row in saved}),
+                point="first",
             )
         try:
             controller = Controller(
@@ -164,12 +165,9 @@ def test_named_default_initializes_only_entries_without_saved_aliases(
             context = controller.context_control
             assert context.get_alias_rows() == NAMED_PRESETS["default"]
             controller.setup_control.open_entry(EntryRequest("sample"))
-            assert context.get_alias_rows() == (
-                NAMED_PRESETS["default"] if saved is None else saved
-            )
+            assert context.get_alias_rows() == ()
             context.use_point(PointUseRequest("first"))
-            expected = (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
-            assert context.get_alias_rows() == (expected if saved is None else saved)
+            assert context.get_alias_rows() == (() if saved is None else saved)
         finally:
             controller.close()
             qapp.processEvents()

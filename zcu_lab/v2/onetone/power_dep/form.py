@@ -18,7 +18,12 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                 "readout": Template(
                     "readout",
                     bindings={"resonator": "$resonator"},
-                    set={"ro_length": initial_ro_length()},
+                    # Run supplies both scan coordinates, not the module literals.
+                    set={
+                        "freq": Hidden(0.0),
+                        "gain": Hidden(0.0),
+                        "ro_length": initial_ro_length(),
+                    },
                 ),
             },
             "sweep": {

@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.startup_context import (
     StartupContext,
     StartupDevices,
     StartupParameters,
-    StartupPlaceholders,
     StartupSetup,
     StartupSoc,
     StartupTabs,
@@ -205,7 +204,6 @@ def build_app_services(  # noqa: PLR0913
         return TabFormSources(
             env=FormEnv(
                 parameters=parameters,
-                placeholders=session.placeholders.current(),
                 library=None if parameters is None else parameters.library,
                 devices={
                     device.name: device.info.model_copy(deep=True)
@@ -307,7 +305,6 @@ def build_app_services(  # noqa: PLR0913
         devices=StartupDevices(calls, device, handles),
         setup=StartupSetup(calls, session.setup_control),
         context=StartupParameters(calls, session.context_control),
-        placeholders=StartupPlaceholders(calls, session.placeholders),
         tabs=StartupTabs(calls, tab_control),
         calls=calls,
         register_close=startup.on_close,

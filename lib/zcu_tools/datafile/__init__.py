@@ -14,8 +14,9 @@ if TYPE_CHECKING:
     from .fluxdep_database import FluxdepDatabaseInfo, read_fluxdep_database_info
     from .grouped import load_grouped_labber_data, save_grouped_labber_data
     from .labber import save_labber_data, save_labber_trace_data
-    from .labber_reader import load_labber_data
+    from .labber_reader import load_labber_data, load_labber_logs
     from .labber_schema import cast_labber_values, validate_labber_payload
+    from .labber_snapshot import LabberSnapshotError, load_labber_device_snapshot
     from .labber_writer import write_labber
     from .models import (
         Axis,
@@ -25,8 +26,17 @@ if TYPE_CHECKING:
         LabberMetadata,
         LabberPayload,
     )
-    from .native import load_run_data, save_run_data, validate_experiment_payload
-    from .native_metadata import json_values_equal, validate_cfg_snapshot
+    from .native import (
+        load_run_data,
+        read_run_metadata,
+        save_run_data,
+        validate_experiment_payload,
+    )
+    from .native_metadata import (
+        json_values_equal,
+        validate_cfg_snapshot,
+        validate_run_id,
+    )
     from .native_models import (
         AxisSchema,
         CfgSnapshot,
@@ -78,8 +88,10 @@ __all__ = [
     "write_labber",
     "save_run_data",
     "load_run_data",
+    "read_run_metadata",
     "validate_experiment_payload",
     "validate_cfg_snapshot",
+    "validate_run_id",
     "Axis",
     "LabberPayload",
     "LabberMetadata",
@@ -88,6 +100,9 @@ __all__ = [
     "GroupedLabberData",
     "save_labber_data",
     "load_labber_data",
+    "load_labber_logs",
+    "LabberSnapshotError",
+    "load_labber_device_snapshot",
     "save_grouped_labber_data",
     "load_grouped_labber_data",
     "StreamingLabberVariableSpec",
@@ -114,6 +129,9 @@ _EXPORT_MODULES = {
     "load_grouped_labber_data": ".grouped",
     "save_grouped_labber_data": ".grouped",
     "load_labber_data": ".labber_reader",
+    "load_labber_logs": ".labber_reader",
+    "LabberSnapshotError": ".labber_snapshot",
+    "load_labber_device_snapshot": ".labber_snapshot",
     "save_labber_data": ".labber",
     "save_labber_trace_data": ".labber",
     "cast_labber_values": ".labber_schema",
@@ -126,10 +144,12 @@ _EXPORT_MODULES = {
     "LabberMetadata": ".models",
     "LabberPayload": ".models",
     "load_run_data": ".native",
+    "read_run_metadata": ".native",
     "save_run_data": ".native",
     "validate_experiment_payload": ".native",
     "json_values_equal": ".native_metadata",
     "validate_cfg_snapshot": ".native_metadata",
+    "validate_run_id": ".native_metadata",
     "AxisSchema": ".native_models",
     "CfgSnapshot": ".native_models",
     "ExperimentPayload": ".native_models",

@@ -12,11 +12,12 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PointOrigin:
-    """Complete owning identity supplied once when constructing a PointView.
+    """Owning identity and output configuration bound when constructing a view.
 
     source is the bound point.yaml path and entry_id its owning entry's immutable
-    UUID. result_root and database_root are the resolved roots supplied by the
-    constructor. Identity does not depend on later ResultEntry registration.
+    UUID. result_root is the resolved root used for clone identity. database_root
+    is the resolved Save output root, not a clone boundary. Identity does not
+    depend on later ResultEntry registration.
     """
 
     source: Path
@@ -25,10 +26,8 @@ class PointOrigin:
     database_root: Path
 
 
-def clone_source(
-    view: PointView, *, result_root: Path, database_root: Path
-) -> PointOrigin:
-    """Return this view's constructor identity if both destination roots match.
+def clone_source(view: PointView, *, result_root: Path) -> PointOrigin:
+    """Return this view's constructor identity if the Result root matches.
 
     Root mismatch raises ValueError without I/O. The caller reloads the published
     point and checks the source entry's UUID before cloning; no cached view data
@@ -38,9 +37,6 @@ def clone_source(
     from .views import point_origin
 
     origin = point_origin(view)
-    if (
-        origin.result_root != result_root.resolve()
-        or origin.database_root != database_root.resolve()
-    ):
-        raise ValueError("PointView result/database roots do not match")
+    if origin.result_root != result_root.resolve():
+        raise ValueError("PointView result roots do not match")
     return origin

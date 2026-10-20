@@ -4,10 +4,12 @@ from collections.abc import Mapping
 from typing import Literal, get_args, get_origin
 
 from pydantic import BaseModel, JsonValue
+from pydantic_core import PydanticUndefinedType
 
 from zcu_tools.cfg_model import (
     ConfigBase,
     Expr,
+    Hidden,
     Slot,
     Template,
     TemplateDef,
@@ -22,7 +24,7 @@ from ._types import members, type_tag
 
 
 def slot_key(slot: Slot, env: FormEnv) -> str | None:
-    path = expand_path(slot.path, defaults=env.placeholders)
+    path = expand_path(slot.path)
     if env.library is None:
         return None
     if not path.startswith("$") and path in env.library.module_keys():
@@ -37,13 +39,30 @@ def slot_key(slot: Slot, env: FormEnv) -> str | None:
 
 
 def scalar_seed(seed: TemplateSeed) -> JsonValue:
+    if isinstance(seed, Hidden):
+        if isinstance(seed.value, PydanticUndefinedType):
+            raise ValueError("Hidden module seeds require an explicit literal value")
+        return scalar_seed(seed.value)
     if isinstance(seed, Expr):
         return {"expr": seed.text}
     if isinstance(seed, complex):
         return {"__complex__": [seed.real, seed.imag]}
     if isinstance(seed, Slot):
         raise TypeError("Slot seeds require captured source resolution")
+    if isinstance(seed, list):
+        return [
+            {name: scalar_seed(value) for name, value in item.items()} for item in seed
+        ]
     return seed
+
+
+def declaration_seed(seed: TemplateSeed) -> JsonValue:
+    """Retain Hidden metadata only in the private model-declaration seed tree.
+
+    Actual input uses scalar_seed instead, so this marker never becomes input.
+    """
+    value = scalar_seed(seed)
+    return {"hidden": True, "value": value} if isinstance(seed, Hidden) else value
 
 
 def set_path(data: dict[str, JsonValue], path: str, value: JsonValue) -> None:
@@ -211,6 +230,20 @@ def complete_input(
     data.update(authored)
     for name, value in tuple(data.items()):
         info = model.model_fields[name]
+        annotation = spec_annotation(info.annotation)
+        if get_origin(annotation) is list:
+            element = get_args(annotation)[0]
+            if (
+                isinstance(element, type)
+                and issubclass(element, BaseModel)
+                and isinstance(value, list)
+            ):
+                data[name] = [
+                    complete_input(element, item, path=(*path, name, str(index)))
+                    if isinstance(item, dict)
+                    else item
+                    for index, item in enumerate(value)
+                ]
         if (
             name in {"type", "style"}
             and get_origin(info.annotation) is Literal
@@ -342,20 +375,24 @@ def template_input(
             f"Template {template.id!r} has incompatible module {definition.module.__name__}"
         )
     model = compatible[0]
-    # Binding-independent validation runs before a host has captured defaults.
+    # Catalog binding validates structure before input expansion.
     seeds = (
         dict(definition.seeds)
         if env is None
-        else definition.expanded_seeds(
-            bindings=template.bindings, defaults=env.placeholders
-        )
+        else definition.expanded_seeds(bindings=template.bindings)
     )
     seeds.update(template.set)
     data: dict[str, JsonValue] = {}
     for path, seed in seeds.items():
         if not isinstance(seed, Slot):
             set_path(data, path, scalar_seed(seed))
-    data = _complete_template_input(model, data, template.id)
+    # Fill each row from the original Spec before a shared input declaration
+    # removes static defaults for any expression-authored position.
+    data = _complete_template_input(
+        model,
+        _complete_template_input(definition.module, data, template.id),
+        template.id,
+    )
     for path, seed in seeds.items():
         if isinstance(seed, Slot):
             annotation = _path_annotation(model, data, path)
@@ -391,10 +428,10 @@ def template_seed_tree(
         if isinstance(seed, Slot):
             nested: dict[str, JsonValue] = {}
             for child_path, value in seed.set.items():
-                set_path(nested, child_path, scalar_seed(value))
+                set_path(nested, child_path, declaration_seed(value))
             set_path(data, path, nested)
         else:
-            set_path(data, path, scalar_seed(seed))
+            set_path(data, path, declaration_seed(seed))
     return data
 
 

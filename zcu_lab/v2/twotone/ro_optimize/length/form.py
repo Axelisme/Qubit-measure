@@ -17,9 +17,14 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
                 "qub_pulse": Slot("$qubit.module.x180")
                 if ctx.has("$qubit.module.x180")
                 else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-                "readout": Slot("$qubit.module.readout")
+                # Run supplies ADC integration window; waveform length remains a shape baseline.
+                "readout": Slot("$qubit.module.readout", set={"ro_length": Hidden(0.0)})
                 if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
+                else Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    set={"ro_length": Hidden(0.0)},
+                ),
             },
             "sweep": {"length": Range.between(0.01, 3.5, expts=51)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

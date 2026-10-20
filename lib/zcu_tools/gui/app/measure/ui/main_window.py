@@ -920,7 +920,7 @@ class MainWindow(QMainWindow):
         try:
             runs = self._ctrl.save_control.list_saved_runs()
         except Exception as exc:
-            logger.exception("Ledger run listing failed: tab_id=%r", tab_id)
+            logger.exception("Native run listing failed: tab_id=%r", tab_id)
             self.show_error_dialog("Load data failed", str(exc))
             return
         dialog = RunLoadDialog(

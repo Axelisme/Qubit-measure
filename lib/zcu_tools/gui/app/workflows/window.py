@@ -240,7 +240,6 @@ class WorkflowWindow[C](QWidget):
             self._services.context_control,
             self._services.setup_control.get_bus(),
             templates=self._templates,
-            placeholder_defaults=self._services.placeholders.current,
             arb_waveforms=self._services.arb_waveform,
             open_arb_waveforms=self._open_arb_waveforms,
             dialog_presenter=self._dialog_presenter,
@@ -513,7 +512,6 @@ class WorkflowWindow[C](QWidget):
             parameters=parameters,
             library=parameters.library,
             devices=devices,
-            placeholders=self._services.placeholders.current(),
         )
 
     def _ensure_can_start(self) -> None:
@@ -613,6 +611,7 @@ class WorkflowWindow[C](QWidget):
         roots = workflow_roots(
             result_path=storage.result_path,
             database_path=storage.database_path,
+            workflow=attachment.name,
             run_id=run_id,
         )
         plots = Plots(self._figure_area)

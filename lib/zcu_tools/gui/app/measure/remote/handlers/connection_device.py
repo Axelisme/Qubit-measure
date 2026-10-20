@@ -31,7 +31,8 @@ def coerce_connect_request(params: Mapping[str, object]) -> ConnectRemoteRequest
         )
     raise RemoteError(
         ErrorCode.INVALID_PARAMS,
-        "soc.connect requires kind='remote'; select --simulate at startup for simulation",
+        "soc.connect requires kind='remote'; "
+        "use a trusted startup script (--script) to install simulation resources",
     )
 
 

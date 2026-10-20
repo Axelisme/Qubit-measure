@@ -40,6 +40,7 @@ from .module import (
     TwoPulseResetCfg,
     TwoPulseResetSpec,
 )
+from .partition import SpecPartition, partition_module_spec, partition_waveform_spec
 from .references import remap_module_references, remap_waveform_references
 from .spec_types import (
     concrete_spec_types,
@@ -47,7 +48,7 @@ from .spec_types import (
     is_waveform_spec_type,
 )
 from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
-from .templates import PlaceholderRegistry, TemplateDef, expand_path
+from .templates import TemplateDef, expand_path
 from .waveform import (
     AbsWaveformCfg,
     ArbWaveformCfg,
@@ -80,7 +81,6 @@ __all__ = [
     "is_module_spec_type",
     "is_waveform_spec_type",
     "expand_path",
-    "PlaceholderRegistry",
     "FieldMeta",
     "get_field_meta",
     "CfgValidationContext",
@@ -92,6 +92,9 @@ __all__ = [
     "WaveformCfgFactory",
     "module_spec_from_raw",
     "waveform_spec_from_raw",
+    "SpecPartition",
+    "partition_module_spec",
+    "partition_waveform_spec",
     "remap_module_references",
     "remap_waveform_references",
     "AbsModuleCfg",

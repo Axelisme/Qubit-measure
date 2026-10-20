@@ -25,56 +25,23 @@ def _validate_placeholders(text: str) -> None:
         raise ValueError(f"Invalid template placeholder in {text!r}: {exc}") from exc
 
 
-class PlaceholderRegistry:
-    """Session-owned defaults for named component placeholders, initially empty.
-
-    The host serializes access on its owner thread. This registry has no I/O,
-    process-global state or allowed-name policy: explicit template bindings may
-    introduce names not registered here. Snapshots detach defaults for fixed
-    captures and script-owned persistence.
-    """
-
-    def __init__(self) -> None:
-        self._defaults: dict[str, str] = {}
-
-    def register(self, name: str, default_binding: str) -> None:
-        """Set or replace one default without resolving its authored path.
-
-        name must be a plain identifier without braces. default_binding is
-        nonblank replacement text, typically a component path or alias. Invalid
-        names or blank bindings raise ValueError without changing the registry.
-        """
-        if not name.isidentifier():
-            raise ValueError(f"Invalid placeholder name {name!r}")
-        if not default_binding.strip():
-            raise ValueError("Placeholder default binding must not be blank")
-        self._defaults[name] = default_binding
-
-    def current(self) -> dict[str, str]:
-        """Return detached name-to-default bindings, empty before registration."""
-        return dict(self._defaults)
-
-
 def expand_path(
     path: str,
     *,
     bindings: Mapping[str, str] | None = None,
-    defaults: Mapping[str, str] | None = None,
 ) -> str:
     """Expand plain named placeholders using a fixed set of authored bindings.
 
-    defaults supplies captured registry defaults; bindings overrides them and
-    may introduce unregistered names. Both default to empty. Replacements are
-    literal text, not recursively expanded or resolved as aliases. Double braces
+    bindings supplies caller-authored replacements and defaults to empty.
+    Replacements are literal text, not recursively expanded or resolved as
+    aliases. Double braces
     escape literal braces. Standard string conversion and formatting are
     supported. Missing bindings, traversal fields or malformed placeholders
     raise ValueError naming the path and offending placeholder.
     """
     _validate_placeholders(path)
-    combined = dict(defaults or {})
-    combined.update(bindings or {})
     try:
-        return path.format_map(combined)
+        return path.format_map(bindings or {})
     except (KeyError, IndexError, ValueError) as exc:
         raise ValueError(f"Invalid template placeholder in {path!r}: {exc}") from exc
 
@@ -121,12 +88,10 @@ class TemplateDef:
         self,
         *,
         bindings: Mapping[str, str] | None = None,
-        defaults: Mapping[str, str] | None = None,
     ) -> dict[str, TemplateSeed]:
         """Return fresh seeds with component placeholders expanded.
 
-        defaults supplies fixed registry defaults (empty when omitted).
-        bindings overrides those defaults, including unregistered names.
+        bindings supplies caller-authored replacements, empty when omitted.
         Missing bindings raise ValueError only at expansion, not construction.
         Ordinary strings remain literal, Expr remains Expr and
         Slot remains Slot with only its path expanded, and other scalars remain
@@ -136,15 +101,13 @@ class TemplateDef:
         expanded: dict[str, TemplateSeed] = {}
         for path, seed in self.seeds.items():
             if isinstance(seed, Expr):
-                seed = Expr(
-                    expand_path(seed.text, bindings=bindings, defaults=defaults)
-                )
+                seed = Expr(expand_path(seed.text, bindings=bindings))
             elif isinstance(seed, Slot):
                 seed = replace(
                     seed,
-                    path=expand_path(seed.path, bindings=bindings, defaults=defaults),
+                    path=expand_path(seed.path, bindings=bindings),
                 )
             elif isinstance(seed, str):
-                seed = expand_path(seed, bindings=bindings, defaults=defaults)
+                seed = expand_path(seed, bindings=bindings)
             expanded[path] = seed
         return expanded

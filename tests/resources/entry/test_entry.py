@@ -1,4 +1,4 @@
-"""ResultEntry creation, identity and filesystem transactions through public APIs."""
+"""ResultEntry creation, identity and Result-only rename through public APIs."""
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,13 +7,59 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 from ruamel.yaml import YAML
+from zcu_tools.resources import entry as entry_api
 from zcu_tools.resources.entry import (
-    RenameRecoveryError,
     ResultEntry,
     rename_entry,
 )
 
 from tests._filesystem import symlink_or_skip
+
+
+def test_create_accepts_a_fixed_identity_without_changing_default_creation(
+    entry_roots: tuple[Path, Path],
+) -> None:
+    assert hasattr(entry_api, "EntryIdentity"), (
+        "owner must accept stable creation values"
+    )
+    result, database = entry_roots
+    identity = entry_api.EntryIdentity(
+        entry_id=UUID("00000000-0000-0000-0000-000000000042"),
+        created_at=datetime(2026, 10, 20, 1, 2, 3, tzinfo=timezone.utc),
+    )
+    fixed = ResultEntry.create(
+        "fixed", result_root=result, database_root=database, identity=identity
+    )
+    reopened = ResultEntry.open("fixed", result_root=result, database_root=database)
+    assert fixed.entry_id == reopened.entry_id == str(identity.entry_id)
+    assert (
+        entry_api.snapshot(reopened.setup).general.created_at == "2026-10-20T01:02:03Z"
+    )
+    fresh = ResultEntry.create("fresh", result_root=result, database_root=database)
+    assert fresh.entry_id != fixed.entry_id
+    assert (
+        datetime.fromisoformat(
+            entry_api.snapshot(fresh.setup).general.created_at
+        ).tzinfo
+        is not None
+    )
+
+
+def test_fixed_identity_rejects_naive_creation_time_before_creating_directories(
+    entry_roots: tuple[Path, Path],
+) -> None:
+    assert hasattr(entry_api, "EntryIdentity"), "fixed identity must validate UTC time"
+    with pytest.raises(ValueError, match="UTC"):
+        ResultEntry.create(
+            "fixed",
+            result_root=entry_roots[0],
+            database_root=entry_roots[1],
+            identity=entry_api.EntryIdentity(
+                entry_id=UUID("00000000-0000-0000-0000-000000000042"),
+                created_at=datetime(2026, 10, 20),
+            ),
+        )
+    assert all(not root.exists() for root in entry_roots)
 
 
 def read_entry_files(path: Path) -> dict[Path, bytes]:
@@ -24,12 +70,11 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
     }
 
 
-@pytest.mark.parametrize("root_index", [0, 1])
 def test_open_rejects_entry_links_that_escape_the_configured_root(
-    entry_roots: tuple[Path, Path], root_index: int
+    entry_roots: tuple[Path, Path],
 ) -> None:
     results, database = entry_roots
-    linked_path = entry_roots[root_index] / "entry"
+    linked_path = results / "entry"
     linked_path.parent.mkdir()
     symlink_or_skip(linked_path, results.parent / "external", target_is_directory=True)
 
@@ -157,85 +202,14 @@ def test_open_validates_uuid_and_utc_created_at_before_publishing_entry(
     assert setup_path.read_bytes() == before
 
 
-@pytest.mark.parametrize("recovery_reason", ["io-failure", "destination-reappeared"])
-def test_failed_rename_recovery_reports_current_paths_and_both_causes(
-    entry_roots: tuple[Path, Path],
-    entry: ResultEntry,
-    monkeypatch: pytest.MonkeyPatch,
-    recovery_reason: str,
-) -> None:
-    results, database = entry_roots
-    before = read_entry_files(results / "entry")
-    original_rename = Path.rename
-    cause = OSError("second rename failure")
-    recovery_cause = OSError("rename recovery failure")
-
-    def fail_second_and_recovery(source: Path, target: str | Path) -> Path:
-        if source == database / "entry":
-            if recovery_reason == "destination-reappeared":
-                (results / "entry").mkdir()
-                (results / "entry" / "external.bin").write_bytes(b"unrelated data")
-            raise cause
-        if source == results / "renamed" and recovery_reason == "io-failure":
-            raise recovery_cause
-        return original_rename(source, target)
-
-    monkeypatch.setattr(Path, "rename", fail_second_and_recovery)
-    with pytest.raises(RenameRecoveryError, match="Rename recovery failed") as failure:
-        rename_entry("entry", "renamed", result_root=results, database_root=database)
-
-    error = failure.value
-    assert error.moved_result == results / "renamed"
-    assert error.pending_database == database / "renamed"
-    assert error.recovery_destination == results / "entry"
-    assert error.cause is cause
-    assert error.__cause__ is cause
-    if recovery_reason == "io-failure":
-        assert error.recovery_cause is recovery_cause
-    else:
-        assert error.recovery_cause.filename == str(results / "entry")
-        assert (results / "entry" / "external.bin").read_bytes() == b"unrelated data"
-    assert read_entry_files(results / "renamed") == before
-    assert (database / "entry").is_dir()
-    assert not (database / "renamed").exists()
-
-
-def test_rename_recovers_first_root_when_second_rename_fails(
-    entry_roots: tuple[Path, Path], entry: ResultEntry, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    results, database = entry_roots
-    before = read_entry_files(results / "entry")
-    original_rename = Path.rename
-    cause = OSError("second rename failure")
-
-    def fail_second(source: Path, target: str | Path) -> Path:
-        if source == database / "entry":
-            raise cause
-        return original_rename(source, target)
-
-    monkeypatch.setattr(Path, "rename", fail_second)
-    with pytest.raises(OSError, match="second rename failure") as failure:
-        rename_entry("entry", "renamed", result_root=results, database_root=database)
-
-    assert failure.value is cause
-    assert read_entry_files(results / "entry") == before
-    assert not (results / "renamed").exists()
-    assert not (database / "renamed").exists()
-    assert (
-        ResultEntry.open("entry", result_root=results, database_root=database).entry_id
-        == entry.entry_id
-    )
-
-
-@pytest.mark.parametrize("root_index", [0, 1])
 @pytest.mark.parametrize(
     "shape", ["empty-directory", "file", "broken-symlink", "external-symlink"]
 )
-def test_rename_refuses_existing_destination_before_moving_either_root(
-    entry_roots: tuple[Path, Path], entry: ResultEntry, root_index: int, shape: str
+def test_rename_refuses_existing_result_destination(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, shape: str
 ) -> None:
     results, database = entry_roots
-    destination = entry_roots[root_index] / "renamed"
+    destination = results / "renamed"
     if shape == "empty-directory":
         destination.mkdir()
     elif shape == "file":
@@ -248,14 +222,12 @@ def test_rename_refuses_existing_destination_before_moving_either_root(
     else:
         symlink_or_skip(destination, "missing-target")
     before_result = read_entry_files(results / "entry")
-    before_database = read_entry_files(database / "entry")
 
     with pytest.raises(FileExistsError) as failure:
-        rename_entry("entry", "renamed", result_root=results, database_root=database)
+        rename_entry("entry", "renamed", result_root=results)
 
     assert failure.value.filename == str(destination)
     assert read_entry_files(results / "entry") == before_result
-    assert read_entry_files(database / "entry") == before_database
     assert (
         ResultEntry.open("entry", result_root=results, database_root=database).entry_id
         == entry.entry_id
@@ -273,31 +245,34 @@ def test_rename_refuses_existing_destination_before_moving_either_root(
         assert destination.is_dir()
 
 
-def test_rename_moves_both_roots_preserving_identity_and_all_file_bytes(
-    entry_roots: tuple[Path, Path], entry: ResultEntry
+@pytest.mark.parametrize("database_exists", [False, True])
+def test_rename_moves_only_result_and_retargets_future_save_paths(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, database_exists: bool
 ) -> None:
     results, database = entry_roots
     result_path = results / "entry"
     database_path = database / "entry"
     (result_path / "records" / "synthetic.json").write_bytes(b'{"unchanged": true}')
-    (database_path / "data.bin").write_bytes(b"synthetic data")
+    if database_exists:
+        database_path.mkdir(parents=True, exist_ok=True)
+        (database_path / "data.bin").write_bytes(b"synthetic data")
+        (database / "renamed").mkdir()
+        (database / "renamed/other.bin").write_bytes(b"unrelated output")
     result_before = read_entry_files(result_path)
-    database_before = read_entry_files(database_path)
+    database_before = read_entry_files(database)
 
-    rename_entry(
-        "entry", "renamed (no meaning)", result_root=results, database_root=database
-    )
+    try:
+        rename_entry("entry", "renamed", result_root=results)
+    except TypeError as error:
+        pytest.fail(f"Result-only rename must not require Database settings: {error}")
 
     assert not result_path.exists()
-    assert not database_path.exists()
-    assert read_entry_files(results / "renamed (no meaning)") == result_before
-    assert read_entry_files(database / "renamed (no meaning)") == database_before
-    assert (
-        ResultEntry.open(
-            "renamed (no meaning)", result_root=results, database_root=database
-        ).entry_id
-        == entry.entry_id
-    )
+    assert read_entry_files(results / "renamed") == result_before
+    assert read_entry_files(database) == database_before
+    assert database_path.exists() == database_exists
+    reopened = ResultEntry.open("renamed", result_root=results, database_root=database)
+    assert reopened.entry_id == entry.entry_id
+    assert reopened.database_path == database / "renamed"
 
 
 @pytest.mark.parametrize("operation", ["create", "open"])
@@ -327,28 +302,14 @@ def test_entry_names_are_safe_single_path_components(
         action(name, result_root=results, database_root=database)
 
 
-def test_create_cleans_only_new_entry_when_second_root_cannot_be_created(
-    entry_roots: tuple[Path, Path],
-) -> None:
-    results, database = entry_roots
-    database.write_bytes(b"unrelated preexisting file")
-
-    with pytest.raises(NotADirectoryError):
-        ResultEntry.create("entry", result_root=results, database_root=database)
-
-    assert not (results / "entry").exists()
-    assert database.read_bytes() == b"unrelated preexisting file"
-
-
-@pytest.mark.parametrize("root_index", [0, 1])
 @pytest.mark.parametrize(
     "shape", ["legacy-directory", "file", "broken-symlink", "external-symlink"]
 )
 def test_create_rejects_existing_destination_without_touching_either_entry(
-    entry_roots: tuple[Path, Path], root_index: int, shape: str
+    entry_roots: tuple[Path, Path], shape: str
 ) -> None:
     results, database = entry_roots
-    existing = entry_roots[root_index] / "entry"
+    existing = results / "entry"
     existing.parent.mkdir()
     if shape == "legacy-directory":
         existing.mkdir()
@@ -366,7 +327,7 @@ def test_create_rejects_existing_destination_without_touching_either_entry(
     else:
         symlink_or_skip(existing, "missing-target")
         marker = None
-    other = entry_roots[1 - root_index] / "entry"
+    other = database / "entry"
 
     with pytest.raises(FileExistsError) as failure:
         ResultEntry.create("entry", result_root=results, database_root=database)
@@ -380,15 +341,13 @@ def test_create_rejects_existing_destination_without_touching_either_entry(
         assert existing.readlink() == Path("missing-target")
 
 
-@pytest.mark.parametrize("missing", ["database", "setup.yaml", "points", "records"])
+@pytest.mark.parametrize("missing", ["setup.yaml", "points", "records"])
 def test_open_rejects_incomplete_entry_with_actual_missing_path(
     entry_roots: tuple[Path, Path], missing: str
 ) -> None:
     results, database = entry_roots
     ResultEntry.create("entry", result_root=results, database_root=database)
-    missing_path = (
-        database / "entry" if missing == "database" else results / "entry" / missing
-    )
+    missing_path = results / "entry" / missing
     if missing_path.is_dir():
         missing_path.rmdir()
     else:
@@ -417,6 +376,73 @@ def test_open_reads_existing_identity_without_rewriting_setup(tmp_path: Path) ->
     assert setup_path.read_bytes() == before
 
 
+def prepare_database_destination(database: Path, database_state: str) -> Path | None:
+    """Arrange an unrelated output location and return its existing data file."""
+    destination = database / "entry"
+    marker = None
+    target = database.parent / "external"
+    if database_state == "root-file":
+        database.write_bytes(b"unrelated root")
+        marker = database
+    elif database_state != "absent":
+        database.mkdir()
+        if database_state == "directory":
+            destination.mkdir()
+            marker = destination / "existing.bin"
+            marker.write_bytes(b"unrelated output")
+        elif database_state == "file":
+            destination.write_bytes(b"unrelated output")
+            marker = destination
+        elif database_state == "broken-symlink":
+            symlink_or_skip(destination, "missing-target")
+        else:
+            target.mkdir()
+            marker = target / "existing.bin"
+            marker.write_bytes(b"unrelated output")
+            symlink_or_skip(destination, target, target_is_directory=True)
+    return marker
+
+
+@pytest.mark.parametrize("operation", ["create", "open"])
+@pytest.mark.parametrize(
+    "database_state",
+    ["absent", "root-file", "directory", "file", "broken-symlink", "external-symlink"],
+)
+def test_entry_ignores_database_filesystem(
+    entry_roots: tuple[Path, Path], operation: str, database_state: str
+) -> None:
+    results, database = entry_roots
+    if operation == "open":
+        original = ResultEntry.create(
+            "entry", result_root=results, database_root=database.parent / "unused-db"
+        )
+        expected_id = original.entry_id
+    else:
+        expected_id = None
+    destination = database / "entry"
+    marker = prepare_database_destination(database, database_state)
+    before = marker.read_bytes() if marker is not None else None
+    action = ResultEntry.create if operation == "create" else ResultEntry.open
+
+    try:
+        opened = action("entry", result_root=results, database_root=database)
+    except (OSError, ValueError) as error:
+        pytest.fail(f"Entry {operation} must not inspect or create Database: {error}")
+
+    assert opened.result_path == results / "entry"
+    assert opened.database_path == destination
+    if expected_id is not None:
+        assert opened.entry_id == expected_id
+    if marker is not None:
+        assert marker.read_bytes() == before
+    if database_state == "absent":
+        assert not database.exists()
+    elif database_state == "broken-symlink":
+        assert destination.readlink() == Path("missing-target")
+    elif database_state == "external-symlink":
+        assert destination.readlink() == database.parent / "external"
+
+
 def test_create_builds_new_format_entry_with_uuid_and_utc_identity(
     tmp_path: Path,
 ) -> None:
@@ -428,7 +454,8 @@ def test_create_builds_new_format_entry_with_uuid_and_utc_identity(
     result_path = results / "Q12_2D[3]"
     assert (result_path / "records").is_dir()
     assert (result_path / "points").is_dir()
-    assert (database / "Q12_2D[3]").is_dir()
+    assert entry.database_path == database / "Q12_2D[3]"
+    assert not database.exists()
     with (result_path / "setup.yaml").open(encoding="utf-8") as stream:
         document = YAML(typ="safe").load(stream)
     assert document["format"] == "zcu.parameter-container"

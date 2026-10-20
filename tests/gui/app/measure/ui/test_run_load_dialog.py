@@ -1,4 +1,4 @@
-"""User selection and local ledger filters at the Qt Load dialog seam."""
+"""User selection and native history filters at the Qt Load dialog seam."""
 
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -33,19 +33,19 @@ from tests.gui.app.measure._form_fakes import configure_form_lookup
 def rows(tmp_path: Path) -> tuple[SavedRunInfo, ...]:
     return (
         SavedRunInfo("r1", "p", "scan", "2026-10-08T01:00:00Z", tmp_path / "r1.h5"),
-        SavedRunInfo("r2", "p", "fit", "2026-10-09T02:00:00Z", None),
+        SavedRunInfo("r2", "p", "fit", "2026-10-09T02:00:00Z", tmp_path / "r2.h5"),
         SavedRunInfo("r3", "other", "scan", "2026-10-09T03:00:00Z", tmp_path / "r3.h5"),
     )
 
 
-def test_dialog_filters_and_disables_unpersisted_selection(
+def test_dialog_filters_native_history_and_selects_file(
     qapp: QApplication, rows: tuple[SavedRunInfo, ...]
 ) -> None:
     dialog = RunLoadDialog(rows, initial_point="p", start_directory="")
     table = dialog.findChild(QTableWidget, "load_runs")
     point = dialog.findChild(QComboBox, "load_point")
     experiment = dialog.findChild(QComboBox, "load_experiment")
-    time = dialog.findChild(QLineEdit, "load_recorded_at")
+    time = dialog.findChild(QLineEdit, "load_started_at")
     load = dialog.findChild(QPushButton, "load_selected")
     assert (
         table is not None
@@ -56,7 +56,7 @@ def test_dialog_filters_and_disables_unpersisted_selection(
     )
     assert table.rowCount() == 2
     table.selectRow(1)
-    assert not load.isEnabled()
+    assert load.isEnabled()
     experiment.setCurrentIndex(experiment.findData("scan"))
     assert table.rowCount() == 1
     point.setCurrentIndex(0)

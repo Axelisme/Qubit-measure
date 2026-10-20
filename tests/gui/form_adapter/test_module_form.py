@@ -866,7 +866,15 @@ def test_template_input_propagates_unavailable_captured_source(
         form.template_input(Template("pulse"), creation_templates, env)
 
 
-def test_mux_module_form_edits_tone_labels_as_a_whole_json_leaf() -> None:
+def test_persistent_spec_rejects_nonempty_field_order() -> None:
+    try:
+        with pytest.raises(ValueError, match="field_order.*core"):
+            form_adapter.Form(MuxReadoutSpec, {}, field_order=("tones",))
+    except TypeError as error:
+        pytest.fail(f"Spec field ordering must be rejected explicitly: {error}")
+
+
+def test_mux_module_form_roundtrips_tone_labels() -> None:
     form = form_adapter.module_form(MuxReadoutSpec)
     env = FormEnv()
     source = MuxReadoutSpec.model_validate(

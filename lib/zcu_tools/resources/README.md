@@ -1,11 +1,11 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-20，predictor JSON 格式 owner
+**Last updated:** 2026-10-20，Result-only entry 與獨立 Database 輸出位置
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
-- `predictor_file.py` 擁有 `zcu.predictor` v1 JSON 的具名讀寫。它依模型名稱使用 simulate 的 nullable 參數型別，驗證欄名、有限數值與來源 metadata。完整性與物理約束由 `params.build_predictor()` 驗證。它不讀 component、alias 或舊 `params.json`。
+- `predictor_file.py` 擁有 `zcu.predictor` v1 JSON 的具名讀寫。它依模型名稱使用 simulate 的 nullable 參數型別，驗證欄名、有限數值與來源 metadata。`validate_predictor_file(PredictorFile)` 提供不做 I/O 的候選驗證，與 load/save 共用表示規則，供 dry-run 使用。完整性與物理約束由 `params.build_predictor()` 驗證。它不讀 component、alias 或舊 `params.json`。
 - `simulation_replay.py` owns opt-in private FTF input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit
@@ -25,6 +25,20 @@ SyncFile 與舊 CSV SampleTable 已退休。現行樣本歷史使用 JSONL，舊
 
 離線 legacy 轉換、evidence 與可續跑 publication 由 root [`migrations/storage_migration/`](../../../migrations/storage_migration/README.md) 擁有。Caller 注入具體 mapping 與 native 驗證。`lib` 不 import `migrations`。
 
+## Entry 分析格式檔
+
+`dispersive_file.py` 擁有 `zcu.dispersive` v1，公開 `DispersiveFile`、`DispersiveParams`、`PlotTransitions` 與 `load_dispersive_file`／`save_dispersive_file`。`t1_curve_file.py` 擁有 `zcu.t1-curve` v1，公開 `T1CurveFile`、`T1CurveParams`、`T1NoiseParams` 與 `load_t1_curve_file`／`save_t1_curve_file`。兩者共用 `analysis_source.AnalysisSource`。Resources root 不 re-export 這些名稱。
+
+兩種 JSON 都必須含 `format`、嚴格整數 `version: 1`、`params` 與 `source`。Envelope 與 source 不接受額外欄位。`source.run_id` 與 `source.created_at` 必填，未知寫 null。Run ID 是非空字串。Created_at 只接受 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`。日期須為有效的 extended calendar date，分隔字元須為大寫 `T`，小數秒可有一至六位。Basic、week-date、ordinal、其他分隔字元、無時區與無效日期時間都拒絕。讀寫共用驗證並保留原文，不改成 UTC，也不補目前時間。
+
+Dispersive 的 `params.g` 與 `params.bare_rf` 是 GHz，可省略或 null。`params.plot_transitions.r_f` 是 GHz 的 resonator seed，可省略或 null。其餘 transition keys 保留原始 JsonValue，不解釋躍遷名稱。T1 的 `params.params` 保存 `Q_cap`、`x_qp`、`Q_ind` 與 `Temp`。前三者無量綱，Temp 是 K。整個 noise params 可省略或 null；個別欄位也可省略或 null。已知數值須有限，拒絕 bool 和數字字串。
+
+T1 noise params 中存在的 key 是 active parameter，值為 null 表示 active 但數值未知。`fixed`、`free`、`bounds`、`stderr` 與 `init` 只能引用 active 名稱。Init 的 active noise channel 集合須與 params 一致。Bounds 保存兩個有限數值或 null 端點。`cost`、`reduced_chi2`、`success`、`message`、`residual_mode`、`loss`、`max_nfev` 保存 optimizer metadata，不代表實驗完成狀態。Storage 不要求正值、完整 Temp 或至少一個 noise channel。分析 owner 負責物理完整性，成功 load 不表示資料可直接做分析。
+
+Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出，不作 legacy fallback。Save 重新驗證具名 model，保留 explicit null、未提供的內容欄位與來源字串。Parent directory 必須存在。Writer 先寫 sibling temporary，再 atomic replace，失敗清 temporary。這不是多檔交易、multiwriter lock 或掉電持久保證。ResultEntry 只提供 `dispersive_path` 與 `t1_curve_path` 目錄，caller 選擇檔名，預設以 component 名命名。
+
+離線 migration 把 `params.json.dispersive` 與 `fluxdep_fit.plot_transitions` 合寫 `dispersive/<component>.json`，把 `t1_curve_fit` 寫 `t1_curve/<component>.json`。沒有 dispersive fit 時仍可只保存 transition seed，不補 g 或 bare_rf。遷移的 run_id 為 null，created_at 只用對應 section 的含時區 timestamp。未知欄位與原 timestamp 原文仍留在 component.ext.legacy_params，無法驗證的 section 只列 pending，不產生不合格式的檔案。
+
 ## 獨立參數
 
 Caller 從 `zcu_tools.resources.parameters` import `open_parameters`，提供既有文件路徑與 Pydantic value model。文件使用 `format: zcu.parameter-container` 和 `format_version: '2.0'`。`components` 保存 caller model 的直接值，`metadata` 是 logical dotted path 到 opaque YAML mapping 的旁表。入口接受同 major 的 forward minor，拒絕舊 major 或任何含 `provenance` 旁表的文件。錯誤包含文件路徑、讀到版本與期望版本 2.0。入口不建立缺檔、不轉換舊檔，也不修改其他成果格式。
@@ -41,7 +55,7 @@ Caller 從 `zcu_tools.resources.parameters` import `open_parameters`，提供既
 
 各 owner 的 scope、schema、commit 與失敗政策分開，不共用 ResourceManager：
 
-- `ResultEntry` 綁定條目與兩個 roots。Setup 是範本，point 是獨立的完整參數文件；ModuleLibrary 與 point 同目錄。
+- `ResultEntry` 只以 Result 構成條目，Database root 只設定輸出位置。Create／open 不檢查或建立 Database，首次 Save 才建立所需目錄。Rename 只移動 Result，舊 Database 輸出不動。Setup 是範本，point 是獨立的完整參數文件；ModuleLibrary 與 point 同目錄。
 - `ModuleLibrary` 綁定一個 point 的 module 與 waveform 文件。參數與 point 身分由 `entry/` 管理。
 - `QubitParams` 擁有 result scope 層級的 `params.json`，跨多個 point 共用。
 - `ResultEntry.samples(component)` 綁定元件 JSONL 樣本歷史。v2 座標協定保持 opt-in。

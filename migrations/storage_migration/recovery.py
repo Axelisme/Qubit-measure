@@ -1,17 +1,21 @@
 """Offline migration recovery ownership."""
 
+import json
 import re
 from pathlib import Path
 
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ArtifactKey, ResultEntry, SaveLayout
 
+from .documents import difference, validate_document_baselines
 from .errors import MigrationInputError
+from .evidence import parse_run_evidence
 from .models import (
     MigrationFileState,
     MigrationManifest,
     ModuleFilePublication,
 )
 from .paths import contained_path, source_identity, source_removed, validate_segment
+from .processed_spectrums import LEGACY_PATH, SPECTRUM_PATH
 from .state import MigrationSession, file_hash
 
 
@@ -49,18 +53,63 @@ def _validate_file_paths(
         )
         if state.destination != expected:
             raise MigrationInputError("manifest: invalid Labber move destination")
-    elif state.operation == "native":
-        assignment = next(
-            (run for run in manifest.runs if run.source == state.source), None
-        )
+    elif state.operation == "samples":
         if (
-            assignment is None
-            or state.destination
-            != destination.database_path / "runs" / assignment.run_id / "data.h5"
+            state.source != source.result_path / "samples.csv"
+            or state.destination.parent != destination.result_path / "samples"
+            or state.destination.suffix != ".jsonl"
+        ):
+            raise MigrationInputError("manifest: invalid samples publication paths")
+        validate_segment(state.destination.stem, "sample component")
+    elif state.operation in ("spectrums", "spectrums_legacy"):
+        relative = SPECTRUM_PATH if state.operation == "spectrums" else LEGACY_PATH
+        if (
+            state.source != source.result_path / SPECTRUM_PATH
+            or state.destination != destination.result_path / relative
         ):
             raise MigrationInputError(
-                "manifest: native destination has no matching run assignment"
+                "manifest: invalid processed spectrum publication paths"
             )
+    elif state.operation == "native":
+        _validate_native_destination(state, manifest)
+
+
+def _validate_native_destination(
+    state: MigrationFileState, manifest: MigrationManifest
+) -> None:
+    assignment = next(
+        (run for run in manifest.runs if run.source == state.source), None
+    )
+    if assignment is None or manifest.evidence is None:
+        raise MigrationInputError(
+            "manifest: native destination has no matching run assignment"
+        )
+    evidence = parse_run_evidence(json.dumps(manifest.evidence), source=state.source)
+    legacy = next(
+        (
+            item
+            for item in evidence.entries
+            if manifest.report.source.database_path / item.source == state.source
+        ),
+        None,
+    )
+    if legacy is None:
+        raise MigrationInputError("manifest: native destination has no run evidence")
+    destination = manifest.report.destination
+    layout = SaveLayout(
+        result_path=destination.result_path,
+        database_path=destination.database_path,
+        run_id=assignment.run_id,
+        experiment=legacy.experiment,
+        point=legacy.snapshot.point,
+        saved_at=assignment.assigned_at,
+    )
+    outputs = layout.outputs(ArtifactKey(section="run", name="data", member="data"))
+    expected = next(item.path for item in outputs if item.format == "data_h5")
+    if state.destination != expected:
+        raise MigrationInputError(
+            "manifest: native destination has no matching run assignment"
+        )
 
 
 def _validate_file_phase(
@@ -143,7 +192,11 @@ def _validate_module_publication(
     if (
         not source.is_absolute()
         or contained_path(source, source_root) != source
-        or source.parent.parent != source_root
+        or not (
+            source.parent == source_root
+            or source.parent.parent == source_root
+            or source.parent.parent == source_root / "exps"
+        )
         or source.name != "module_cfg.yaml"
     ):
         raise MigrationInputError("manifest: invalid point-local module source")
@@ -161,12 +214,18 @@ def _validate_module_publication(
         or re.fullmatch(r"[0-9a-f]{64}", publication.destination_hash) is None
     ):
         raise MigrationInputError("manifest: module baseline/hash disagrees")
-    if file_hash(publication.destination) != publication.destination_hash:
-        raise MigrationInputError(
-            f"{publication.destination}: module destination hash changed"
+    # Typed document comparison runs before opening a potentially cleaning library.
+    if str(publication.destination) not in (manifest.documents or {}):
+        raise difference(
+            source,
+            publication.destination,
+            "document-baseline",
+            "complete comparison evidence",
+            "缺比較依據",
         )
-    # Check the recorded hash before opening the library, which validates its schema.
-    expected = entry.module_library(source.parent.name).source_path
+    expected = entry.module_library(
+        None if source.parent == source_root else source.parent.name
+    ).source_path
     if publication.destination != expected:
         raise MigrationInputError("manifest: invalid point-local module destination")
 
@@ -183,6 +242,10 @@ def validate_owned_state(
     Raise MigrationInputError on conflict or an absent required entry;
     missing/unreadable files and library schema errors propagate. No files change."""
     manifest = session.manifest
+    if entry is not None:
+        validate_document_baselines(
+            session, labels=entry.list_points(), report_existing=session.path.is_file()
+        )
     _validate_assignments(manifest)
     seen: set[tuple[Path, str]] = set()
     for state in manifest.files:

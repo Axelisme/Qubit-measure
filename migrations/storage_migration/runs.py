@@ -9,10 +9,13 @@ from uuid import UUID
 from zcu_tools.datafile import (
     CfgSnapshot,
     ExperimentPayload,
+    JsonObject,
+    LabberSnapshotError,
     RunMetadata,
     RunSnapshot,
     decode_labber_comment,
     json_values_equal,
+    load_labber_device_snapshot,
     load_run_data,
     save_run_data,
 )
@@ -36,7 +39,8 @@ from .models import (
     RunAssignment,
 )
 from .paths import contained_path, source_removed
-from .preservation import preserve_result_files
+from .preservation import preserve_database_files, preserve_result_files
+from .processed_spectrums import convert_processed_spectrums
 from .state import MigrationSession, clear_pending, record_pending
 
 
@@ -64,15 +68,17 @@ def _run_metadata(
     assignment: RunAssignment,
     entry_id: UUID,
     native_tag: str,
+    labber_path: str,
+    device_snapshot: dict[str, JsonObject] | None,
 ) -> RunMetadata:
     snapshot = legacy.snapshot
     return RunMetadata(
         run_id=assignment.run_id,
         experiment=native_tag,
         started_at=legacy.started_at,
-        finished_at=legacy.finished_at,
-        completion=legacy.completion,
-        labber_path=None,
+        finished_at=None if legacy.started_at is None else legacy.finished_at,
+        completion="unknown" if legacy.started_at is None else legacy.completion,
+        labber_path=labber_path,
         snapshot=RunSnapshot(
             entry_id=entry_id,
             entry_name=snapshot.entry_name,
@@ -81,6 +87,7 @@ def _run_metadata(
             roles=snapshot.roles,
         ),
         provenance=legacy.provenance,
+        device_snapshot=device_snapshot,
     )
 
 
@@ -117,17 +124,20 @@ def _load_payload(
 
 
 def _assignment(
-    session: MigrationSession, source: Path, source_hash: str
+    session: MigrationSession, source: Path, source_hash: str, historical_id: str | None
 ) -> RunAssignment:
     assignment = next(
         (item for item in session.manifest.runs if item.source == source), None
     )
     if assignment is None:
         at = datetime.now(timezone.utc)
+        run_id = new_run_id(at=at) if historical_id is None else historical_id
+        if any(item.run_id == run_id for item in session.manifest.runs):
+            raise MigrationInputError(f"{source}: duplicate run_id {run_id!r}")
         assignment = RunAssignment(
             source=source,
             source_hash=source_hash,
-            run_id=new_run_id(at=at),
+            run_id=run_id,
             assigned_at=at,
         )
         session.manifest = replace(
@@ -178,11 +188,12 @@ def _convert_run(
             session,
             source,
             "run evidence",
-            "cfg.cfg_type: missing explicit historical identity; Labber source retained",
+            "cfg.cfg_type: missing explicit historical identity; native conversion pending",
         )
         return
     native = session.state(source, "native")
     payload = None
+    device_snapshot = None
     if native is None or native.phase == "planned":
         try:
             payload = _load_payload(source, legacy, session, entry, mapping)
@@ -192,8 +203,14 @@ def _convert_run(
         except ValueError as exc:
             record_pending(session, source, "run evidence", str(exc))
             return
+        try:
+            device_snapshot = load_labber_device_snapshot(source)
+        except LabberSnapshotError as error:
+            record_pending(session, source, "device snapshot pending", str(error))
+        else:
+            clear_pending(session, source, "device snapshot pending")
     clear_pending(session, source, "run evidence")
-    assignment = _assignment(session, source, legacy.source_hash)
+    assignment = _assignment(session, source, legacy.source_hash, legacy.run_id)
     destination = session.manifest.report.destination
     layout = SaveLayout(
         result_path=destination.result_path,
@@ -209,7 +226,10 @@ def _convert_run(
     mappings = tuple(
         item
         for item in report.key_mappings
-        if (item.old_file, item.old_key) != (source, "snapshot.entry_id")
+        if not (
+            item.old_file == source
+            and item.old_key in ("snapshot.entry_id", "run_id", "started_at")
+        )
     )
     session.report(
         replace(
@@ -224,6 +244,30 @@ def _convert_run(
                     action="value",
                     reason="Assign the new entry UUID; the legacy system did not record this historical UUID.",
                 ),
+                KeyMappingItem(
+                    old_file=source,
+                    old_key="run_id",
+                    new_file=native_path,
+                    new_path="/meta/run_id",
+                    action="value",
+                    reason=(
+                        f"遷移賦值: {assignment.run_id}; allocated by new_run_id, not a historical ID or acquisition time."
+                        if legacy.run_id is None
+                        else f"Preserve trusted historical run_id: {assignment.run_id}."
+                    ),
+                ),
+                KeyMappingItem(
+                    old_file=source,
+                    old_key="started_at",
+                    new_file=native_path,
+                    new_path="/meta/started_at",
+                    action="value",
+                    reason=(
+                        "Unproven start: native 2.1 started_at=None, completion=unknown, finished_at=None. Original evidence retained in migration manifest."
+                        if legacy.started_at is None
+                        else "Preserve proven historical times and completion; do not infer from the assigned ID."
+                    ),
+                ),
             ),
         )
     )
@@ -232,6 +276,8 @@ def _convert_run(
         assignment,
         session.manifest.identity.entry_id,
         mapping.native_tags.get((legacy.experiment, cfg.cfg_type), legacy.experiment),
+        (Path("Labber") / legacy.source).as_posix(),
+        device_snapshot,
     )
 
     def build(path: Path) -> None:
@@ -249,13 +295,18 @@ def _convert_run(
     )
     session.completed(native)
     relative = source.relative_to(session.manifest.report.source.database_path)
-    moved = session.publish(
-        source,
-        contained_path(
-            destination.database_path / "Labber" / relative, destination.database_path
-        ),
-        operation="move_labber",
+    labber_path = contained_path(
+        destination.database_path / "Labber" / relative, destination.database_path
     )
+    # Reuse only this manifest's verified raw copy after native validation, not
+    # an arbitrary existing destination. Keep the earlier preservation history.
+    if (
+        session.state(source, "copy") is not None
+        and session.state(source, "move_labber") is None
+    ):
+        copied = session.publish(source, labber_path, operation="copy")
+        session.update_file(replace(copied, operation="move_labber"))
+    moved = session.publish(source, labber_path, operation="move_labber")
     session.completed(moved)
 
 
@@ -267,7 +318,7 @@ def convert_data(
     validate_cfg: Callable[[str, CfgSnapshot], None],
     validate_native: Callable[[Path, str, str], None],
 ) -> None:
-    """Convert evidence-backed Labber sources, then copy/verify/remove only validated originals.
+    """Convert evidence-backed Labber sources and preserve all original Labber bytes.
 
     session owns fixed run identities and publication recovery. entry resolves
     historical ledger references; mapping supplies disk schemas and optional
@@ -276,9 +327,17 @@ def convert_data(
     validate_cfg purely checks the historical cfg before assignment/planning;
     ValueError is located pending, while other callback failures propagate.
     validate_native synchronously validates each published native before its source
-    can be removed. Missing/conflicting metadata is pending; execution, callback,
+    can be removed. Missing start uses native None/unknown/None. Missing run_id
+    receives a migration-assigned ID; trusted historical IDs are retained. Both
+    are fixed in the manifest before publication. Other missing/conflicting
+    metadata is pending; execution, callback,
     identity/hash and I/O failures propagate and retain owned recovery state.
+    All originals share Labber/<source-relative-path>. Failed conversion keeps
+    its evidence pending and publishes an exact preservation copy, not native.
+    Other unknown Database files keep entry-relative paths. Only validated native
+    permits individual source removal; full cleanup still requires both parts.
     dry_run invokes only the pure cfg check and never writes or validates native."""
+    convert_processed_spectrums(session)
     preserve_result_files(session)
     source_root = session.manifest.report.source.database_path
     evidence = (
@@ -305,9 +364,10 @@ def convert_data(
                 session,
                 source,
                 "run evidence",
-                "Missing explicit historical snapshot/acquisition/completion evidence; Labber source retained",
+                "Missing explicit historical experiment/cfg/snapshot evidence; native conversion pending",
             )
             continue
         _convert_run(session, entry, mapping, legacy, validate_cfg, validate_native)
+    preserve_database_files(session)
     session.manifest = replace(session.manifest, data_complete=True)
     session.checkpoint()
