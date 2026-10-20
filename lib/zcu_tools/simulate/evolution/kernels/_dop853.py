@@ -161,11 +161,17 @@ _E5 = np.array(
 
 
 class Tolerances(NamedTuple):
-    """Adaptive controls: positive relative/absolute errors and ns step ceiling."""
+    """Local errors, ns step ceiling and optional bare-phase allowance.
+
+    phase_budget is a positive rad allowance used by the density chain runner
+    to tighten lab-frame row controls. Infinity disables that extra control.
+    The interval integrator itself consumes only rtol, atol and max_step.
+    """
 
     rtol: float
     atol: float
     max_step: float = np.inf
+    phase_budget: float = np.inf
 
 
 def tolerances(budget: float) -> Tolerances:

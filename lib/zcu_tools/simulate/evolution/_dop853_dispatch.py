@@ -54,10 +54,10 @@ def direct_plans(
             # full acquire's Unicode frame vector in every timeline worker.
             frame = np.zeros(size, dtype="U11")
             frame[rows[selected]] = "lab"
-            if table.tone_amplitude.shape[1]:
-                interaction = selected & ~members & (table.tones[rows] == 1)
-                interaction &= table.tone_amplitude[rows, 0] != 0
-                frame[rows[interaction]] = "interaction"
+            # Removing bare GHz motion avoids an accumulating frequency bias.
+            # Even at half flux this is cheaper than phase-budgeted lab control.
+            # Chains retain lab endpoints for basis changes across row models.
+            frame[rows[selected & ~members]] = "interaction"
             frame.setflags(write=False)
             plans[name] = DOP853Plan(frame, chain)
         else:

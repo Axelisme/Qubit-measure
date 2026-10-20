@@ -61,7 +61,11 @@ def run_chain(
     to the smallest spacing between knots inside that row's envelope-local
     windows and, when packed, absolute flux window. Constant envelopes and
     ordinary DOP853's unpacked flux add no sampling ceiling. Chain membership
-    comes from dispatch, not apply-call adjacency.
+    comes from dispatch, not apply-call adjacency. A finite controls.phase_budget caps
+    local rtol by that allowance divided by bare spectral phase over this row,
+    scaling atol by the same factor. Lab-frame ordinary density propagation
+    supplies the allowance; interaction and continuous-flux callers retain
+    their original controls. This is a calibrated margin, not a global bound.
     Integration failures propagate; earlier endpoints may already be stored.
     """
     models, segments = data.models, data.segments
@@ -80,9 +84,17 @@ def run_chain(
                     )
                     state = overlap @ state @ overlap.conj().T
         context = make_context(data, row, model)
+        spectral_phase = (
+            2
+            * np.pi
+            * (np.max(models.energies[model]) - np.min(models.energies[model]))
+            * segments.duration[row]
+        )
+        phase_rtol = controls.phase_budget / max(1.0, spectral_phase)
+        scale = min(1.0, phase_rtol / controls.rtol)
         row_controls = Tolerances(
-            controls.rtol,
-            controls.atol,
+            controls.rtol * scale,
+            controls.atol * scale,
             min(controls.max_step, _sample_ceiling(segments, row)),
         )
         result = integrate(

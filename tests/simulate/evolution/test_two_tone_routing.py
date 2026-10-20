@@ -148,7 +148,7 @@ class PlannedDirect(RecordingKernel):
 
     def apply(self, prepared, key_index, table, rows, states, context):
         assert isinstance(context.plan, DOP853Plan)
-        assert np.all(context.plan.frame[rows] == "lab")
+        assert np.all(context.plan.frame[rows] == "interaction")
         return super().apply(prepared, key_index, table, rows, states, context)
 
 

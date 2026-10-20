@@ -53,7 +53,7 @@ def test_mixed_frames_follow_timeline_not_workers_or_chunks():
         np.array([0.0, 0.375, 0.75]),
     )
     # The first pair touches across a flux-level boundary. The next pulse is
-    # isolated, then the final two overlapping tracks require the lab frame.
+    # isolated, then the final two overlapping tracks share an interaction frame.
     # Shared and timeline-local level keys split the first pair's preparation.
     flux = FluxSchedule(
         np.arange(0, 2 * n + 1, 2),
@@ -91,7 +91,7 @@ def test_mixed_frames_follow_timeline_not_workers_or_chunks():
                 (0.0, "lab"),
                 (0.75, "lab"),
                 (2.0, "interaction"),
-                (3.25, "lab"),
+                (3.25, "interaction"),
             ]
             chain = [item[2] for item in decisions]
             assert chain[0] == chain[1] and chain[0] >= 0
