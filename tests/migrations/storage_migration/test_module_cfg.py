@@ -222,7 +222,7 @@ def test_historical_library_reconstructs_eight_modules_and_four_waveforms(
     assert len(library.module_keys()) == 8
     assert len(library.waveform_keys()) == 4
     pulse = library.module_spec("C1.pulses.pi_amp")
-    assert pulse == PulseSpec(**_historical_pulse())
+    assert pulse == PulseSpec.model_validate(_historical_pulse())
     assert library.value("C1.pulses.pi_amp.phase") == 0.0
     assert library.value("C1.pulses.pi_amp.pre_delay") == 0.0
     assert library.value("C1.pulses.pi_amp.post_delay") == 0.0
@@ -280,7 +280,7 @@ def test_module_unknown_content_is_visible_without_duplicate_converted_leaves(
     label: str,
 ) -> None:
     request = replace(request_data, part="parameters")
-    pulse = {
+    pulse: YamlMap = {
         **_pulse("same"),
         "desc": "Formal description",
         "mixer_freq": 80.0,
@@ -424,7 +424,7 @@ def test_base_readout_frequency_agreement_controls_publication(
     ro_frequency: float,
 ) -> None:
     request = replace(request_data, part="parameters")
-    readout = {
+    readout: YamlMap = {
         "type": "base",
         "pulse_cfg": _historical_pulse(),
         "ro_cfg": {
@@ -637,7 +637,21 @@ def test_slots_only_reference_published_specs_in_partial_or_pending_library(
     if has_success:
         assert library.module_spec("C1.pulses.pi").type == "pulse"
         assert library.value("C1.pulses.pi.gain") == 0.25
-    expected_pending = {"modules.unsupported", "modules.missing_child"}
+    expected_pending = {"modules.missing_child"}
+    assert document_value(
+        snapshot(view), "general.ext.legacy_module_cfg.modules.unsupported"
+    ) == {"type": "unknown"}
+    assert any(
+        item.old_file == source
+        and item.action == "preserved"
+        and item.source_keys == ("modules", "unsupported")
+        and item.destination_keys
+        == ("general", "ext", "legacy_module_cfg", "modules", "unsupported")
+        and item.new_file
+        == entry.result_path
+        / ("setup.yaml" if point is None else "points/context/point.yaml")
+        for item in report.key_mappings
+    )
     if not has_success:
         expected_pending.add("modules.same")
     assert {
@@ -693,9 +707,18 @@ def test_published_slots_preserve_point_inheritance_overrides_and_completed_edit
             elif has_spec:
                 draft.set("C1.module", {"user_choice": "C1.pulses.pi"})
     assert entry.module_library().snapshot().value("C1.readout.main.ro_length") == 2.5
+    assert document_value(
+        snapshot(entry.use_point("override")),
+        "general.ext.legacy_module_cfg.modules.unsupported",
+    ) == {"type": "unknown"}
     assert any(
-        item.source == source and item.location == "modules.unsupported"
-        for item in report.pending
+        item.old_file == source
+        and item.action == "preserved"
+        and item.source_keys == ("modules", "unsupported")
+        and item.destination_keys
+        == ("general", "ext", "legacy_module_cfg", "modules", "unsupported")
+        and item.new_file == entry.result_path / "points/override/point.yaml"
+        for item in report.key_mappings
     )
     resumed = _convert(replace(request, resume=True), slot_mapping)
     assert resumed.failures == ()
@@ -802,18 +825,38 @@ def test_unconvertible_entries_stay_located_pending_beside_successful_file(
     )
     original = source.read_bytes()
     report = _convert(request, mapping)
-    snapshot = _entry(request).module_library("context").snapshot()
-    assert snapshot.module_keys() == ("C1.pulses.pi",)
-    assert snapshot.waveform_keys() == ("C1.waveforms.base",)
+    library = _entry(request).module_library("context").snapshot()
+    assert library.module_keys() == ("C1.pulses.pi",)
+    assert library.waveform_keys() == ("C1.waveforms.base",)
     pending = [item for item in report.pending if item.source == source]
     assert {item.location for item in pending} == {
         "modules.missing_child",
         "modules.expression",
-        "modules.unsupported",
-        "modules.no_rule",
         "waveforms.expression",
-        "future_root",
     }
+    raw = document_value(
+        snapshot(_entry(request).use_point("context")), "general.ext.legacy_module_cfg"
+    )
+    assert raw == {
+        "modules": {
+            "missing_child": _pulse("not_mapped"),
+            "expression": _pulse("=ml.wave"),
+            "unsupported": {"type": "unknown"},
+            "no_rule": {"type": "reset/none"},
+        },
+        "waveforms": {"expression": {"style": "const", "length": "=md.duration"}},
+        "future_root": {"keep": True},
+    }
+    for keys in (("modules", "unsupported"), ("modules", "no_rule"), ("future_root",)):
+        assert any(
+            item.old_file == source
+            and item.action == "preserved"
+            and item.source_keys == keys
+            and item.destination_keys == ("general", "ext", "legacy_module_cfg", *keys)
+            and item.new_file
+            == _entry(request).result_path / "points/context/point.yaml"
+            for item in report.key_mappings
+        )
     assert all(item.reason for item in pending)
     assert any(item.source == source for item in report.converted_files)
     assert report.failures == ()

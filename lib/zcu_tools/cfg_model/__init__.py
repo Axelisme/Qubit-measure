@@ -40,6 +40,7 @@ from .module import (
     TwoPulseResetCfg,
     TwoPulseResetSpec,
 )
+from .partition import SpecPartition, partition_module_spec, partition_waveform_spec
 from .references import remap_module_references, remap_waveform_references
 from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
 from .templates import TemplateDef, expand_path
@@ -83,6 +84,9 @@ __all__ = [
     "WaveformCfgFactory",
     "module_spec_from_raw",
     "waveform_spec_from_raw",
+    "SpecPartition",
+    "partition_module_spec",
+    "partition_waveform_spec",
     "remap_module_references",
     "remap_waveform_references",
     "AbsModuleCfg",
