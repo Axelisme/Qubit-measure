@@ -90,8 +90,12 @@ Model 驗證名稱、qubits 與 resonators 等長及重複 qubit。
 錯誤指名欄位、index 與實際值，在 Run 前拒絕來源。不排序、猜配對或自動修正，不額外拒絕重複 resonator。
 Framework resources、session 與 program 不擁有這些關係。既有表單不隨全域來源編輯刷新。
 
-Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.resonators`，
-Readout 初值使用 `$mux.module.readout`。Framework 不認得 group/mux 或 resonators，
+Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.resonators`。
+一般 mux 與 FTF 表單在 `$mux.module.readout` 存在時引用 library，保留其完整 tones 與 scalar 設定。
+Mux 缺 slot 時用 blank 範本加 group tones；FTF 八張缺 slot 用 blank 範本，rb 保持 Invalid。
+Mux/onetone 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
+使用者於 2026-10-20 裁定：「不只twotone，應該說除了onetone與readout optimize/mist等本身就在處理readout相關，其他實驗的readout預設值請優先使用ref。」
+Framework 不認得 group/mux 或 resonators，
 也不新增 list alias、group registry、RPC 或保存格式。
 使用者於 2026-10-16 對只用 scalar mux alias 的方案裁定：「B」。
 
@@ -107,7 +111,9 @@ FormState 的 preview／describe 不執行 lowering，也不新增 FormEditor �
 此分界沿用 [[0065]]。使用者於 2026-10-16 裁定：「報錯我選B」。
 
 Writeback 由 adapter 經 Run／Load 既有 capture 讀取 `$mux.resonators`，以完整原始序號對應成功 active tones。
-Onetone 沒有 qubits 時保留手填 readout。缺 capture 或 resonators 數不等於完整 N 時只提 module，並顯示原因。
+Onetone 沒有 qubits 時保留手填 readout。缺 capture 時只提 module，並顯示原因。
+Capture 可解析時同時提出 readout slot 提案，將 `$mux.module.readout` 指向新模組的解析後 root。
+Resonators 數不等於完整 N 時仍保留 module 與 slot 提案，省略逐 resonator scalar，並顯示原因。
 有 qubits 時仍須通過上述逐項檢查。新 qubit 實驗另要求 resonators 數等於完整 tone 數，驗證後才投影 active_tones。
 新 qubit 實驗的成功 tone i 寫回 `qubits[i]`，onetone 則仍寫回 `resonators[i]`。
 目的地只從該次 Run／Load capture 解析，沒有 capture 時不得猜目的地或讀目前 alias。

@@ -1,12 +1,9 @@
 # v2 experiments
 
-**Last updated:** 2026-10-20，readout slot writeback
+**Last updated:** 2026-10-20，readout slot 引用初值
 
 ZigZag 的 `run()` 直接列出 pulse 序列，使用 register loop。
 公開 `build_zigzag_modules` 保留給離線編譯，另行列出相同序列。
-`reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
-相位，不新增 RF pulse 或 programmed wait。它平均初始化的橫向相干分量，不修正
-population 或 repeated-gate 誤差；支援 TwoPulse/Bath reset，需獨立驗證相位及初態投影。
 
 `twotone/time_domain/detune.actual_detune` 集中 Ramsey／Echo 的 actual MHz 計算。Native run 與 workflow callback 共用四個 caller，不各自複製 time／phase rounding 公式。Ramsey 必填 time_scaler=1.0，Echo 必填 0.5，保留兩half-delay的原量化。它使用既有 typed SweepCfg／QickConfig，零 nominal detune 回0.0，其他值保留原 quantization／NumPy failure 語意。不改 fitter、閾值、round_zcu 或 sweep2array。
 
@@ -28,10 +25,12 @@ MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯
 其他 mux／FTF Forms 共用此入口，精確 import 與呼叫例見
 [Measure support](_support/measure/README.md#mux-綁定驗證)。
 Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
-八個 mux Forms 的 readout 都從 group 產生每 resonator 一槽位的固定清單。
-Freq 使用 resonator 校準值，gain 初值為 0.1，ro_ch 按 group 順序從 0 起算。
+七個 mux qubit Forms 有 readout slot 時引用 library，完整 tones 與 scalar 設定取自該模組。
+缺 slot 時從 blank mux 範本加 group tones。Mux/onetone 使用副本或 blank 範本，並以 group tones 與 ringup timing 作初值。
+Group tones 的 freq 使用 resonator 校準值，gain 初值為 0.1，ro_ch 按 group 順序從 0 起算。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
-Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。實驗透過 typed model-list seeds 加入 tones。
+Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
+九個 FTF Forms 有 readout slot 時同樣引用 library。八張缺 slot 時提供 blank mux 範本，rb 缺 slot 時保持 Invalid。
 操作員必須確認通道與功率；範本不是硬體安全預設。
 
 ## Mux qubit numeric cores

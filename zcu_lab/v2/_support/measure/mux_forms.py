@@ -22,14 +22,15 @@ def captured_mux_names(ctx: FormContext) -> tuple[str, ...]:
 def mux_readout_initial(
     ctx: FormContext, *, wait_for_ringup: bool = False
 ) -> Slot | Template:
-    """Seed one editable readout slot per captured group resonator.
+    """Choose the readout source from ctx's fixed Open/Reset group capture.
 
-    Use each resonator calibration frequency, gain=0.1 and its group-order
-    index as ro_ch. Labels start as resonator names and remain editable text.
-    Missing/invalid frequency leaves required input blank. Preserve an existing
-    readout module's scalar settings via a detached copy; otherwise use the blank
-    template's scalar initial values. Both paths replace tones from the group.
-    The operator verifies the initial gain and channels against the lab wiring.
+    With a readout slot and wait_for_ringup=False, return a library reference,
+    preserving all stored tones and scalar settings. Without a slot, seed the
+    blank template with each resonator's calibration frequency, gain=0.1 and
+    group-order index as ro_ch. Labels start as resonator names. Missing/invalid
+    frequency leaves required input blank. The operator verifies initial gain
+    and channels against the lab wiring. Missing capture or a non-MuxGroup
+    source raises ValueError; alias/source faults propagate.
 
     wait_for_ringup opts spectroscopy into an editable Open/Reset timing seed.
     Require every member's kappa to be finite and positive in MHz, otherwise
@@ -37,8 +38,10 @@ def mux_readout_initial(
     to the captured scalar trigger offset, or the blank template's zero offset.
     A minimum kappa of 1 MHz adds approximately 0.795775 us. Preserve ro_length
     and seed length=max(original length, trig_offset+ro_length) in us.
-    Open/Reset leaves detached editable timing; subsequent cfg output retains
-    the operator's edits. Other mux consumers keep their original timing.
+    This spectroscopy exception uses a detached slot copy when available and
+    replaces tones from the group on both paths. Open/Reset leaves editable
+    timing; subsequent cfg output retains the operator's edits. No source is
+    mutated. Other mux consumers keep their original timing.
     """
     parameters = ctx.parameters
     if parameters is None:
@@ -47,6 +50,8 @@ def mux_readout_initial(
     group = parameters.document().components.get(name)
     if not isinstance(group, MuxGroupSchema):
         raise ValueError(f"$mux={name!r}: expected group/mux")
+    if not wait_for_ringup and ctx.has("$mux.module.readout"):
+        return Slot("$mux.module.readout")
     tones: list[dict[str, TemplateSeed]] = []
     for index, resonator in enumerate(group.resonators):
         component = parameters.document().components.get(resonator)
