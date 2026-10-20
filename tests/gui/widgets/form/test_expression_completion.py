@@ -180,6 +180,31 @@ def test_expression_completion_preserves_surrounding_text_and_focus(
     assert host.state.input.data["amount"] == {"expr": "0.8 * $qubit.freq + 5"}
 
 
+def test_hint_requires_whitespace_or_end_after_cursor(
+    host: Host, tmp_path: Path
+) -> None:
+    driver = ComponentDriver(host)
+    for step, (text, moves, expected) in enumerate(
+        (
+            ("$qubit.fre", 0, "Completion: q."),
+            ("0.8 * $qubit.fre + 5", 4, "Completion: q."),
+            ("($qubit.fre)", 1, ""),
+            ("$qubit.fre+5", 2, ""),
+        )
+    ):
+        driver.enter_text(value=text, object_name=INPUT, commit=False)
+        for _ in range(moves):
+            key(driver, Qt.Key.Key_Left)
+        shot(driver, tmp_path, f"{step:02}-next-character")
+        observed = driver.text_input(object_name=INPUT)
+        assert observed.focused
+        assert observed.text == text
+        if expected:
+            assert expected in observed.description
+        else:
+            assert observed.description == ""
+
+
 def test_token_middle_and_selection_hide_the_ghost(host: Host, tmp_path: Path) -> None:
     driver = ComponentDriver(host)
     driver.enter_text(value="$qubit.fre", object_name=INPUT, commit=False)
