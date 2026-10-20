@@ -34,6 +34,7 @@ from .models import (
     ModuleFilePublication,
     ModuleRule,
     PendingItem,
+    PreservedSampleField,
     RunAssignment,
 )
 from .state import report_json
@@ -65,6 +66,7 @@ __all__ = [
     "ModuleFilePublication",
     "ModuleRule",
     "PendingItem",
+    "PreservedSampleField",
     "RunAssignment",
     "load_run_evidence",
     "migrate_storage",

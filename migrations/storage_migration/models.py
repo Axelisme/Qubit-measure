@@ -15,6 +15,8 @@ from zcu_tools.datafile import (
     VariableSchema,
 )
 
+from migrations.sample_csv import PreservedCsvField
+
 type MigrationPart = Literal["parameters", "data", "all"]
 type MappingAction = Literal["value", "stderr", "module", "remove", "pending"]
 
@@ -328,6 +330,20 @@ class MigrationDeclarations:
 
 
 @dataclass(frozen=True, kw_only=True)
+class PreservedSampleField:
+    """Raw CSV cell retained in a planned or published JSONL sample row.
+
+    field locates the original CSV cell, unchanged string value, synthetic row
+    identity and literal destination JSON keys. output_path is the absolute
+    JSONL destination; dry-run plans it without creating a file. This records
+    preservation only, not semantic conversion or a later user's edited value.
+    """
+
+    field: PreservedCsvField
+    output_path: Path
+
+
+@dataclass(frozen=True, kw_only=True)
 class MigrationReport:
     """Cumulative report of attempted parts, not a claim that pending is empty.
 
@@ -340,6 +356,8 @@ class MigrationReport:
     backup_path is the external verified backup, or its planned path in dry_run;
     None is reserved for reports loaded without the backup extension.
     declarations records the operator inputs shared with the typed manifest.
+    preserved_sample_fields locates unsupported CSV cells retained verbatim in
+    planned/published JSONL rows, separately from converted file actions.
     """
 
     source: MigrationSource
@@ -350,6 +368,7 @@ class MigrationReport:
     converted_files: tuple[FileMigrationItem, ...] = ()
     moved_labber_files: tuple[FileMigrationItem, ...] = ()
     preserved_files: tuple[FileMigrationItem, ...] = ()
+    preserved_sample_fields: tuple[PreservedSampleField, ...] = ()
     pending: tuple[PendingItem, ...] = ()
     failures: tuple[FailureItem, ...] = ()
     backup_path: Path | None = None

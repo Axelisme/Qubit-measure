@@ -1,5 +1,7 @@
 # 離線遷移工具
 
+支援的檔案與格式就轉換，不支援的就原樣保留。欄位也一樣，未知欄位以原名原值留在新容器，報告區分已轉換與原樣保留。Pending 僅用於支援項目缺必要證據而無法轉換，原文仍須可見。非法輸入與安全衝突仍須回報，不當成成功。
+
 本目錄提供使用者明確執行的舊資料轉換。正常量測 runtime 不 import migrations。工具不操作硬體，也不替使用者選擇來源檔或推論單位。
 
 只為遷移存在的程式、對照表與宣告都放在本目錄，不放進 `zcu_lab` 或 `lib`。遷移完成後，刪除整個 `migrations/`（連同 `tests/migrations/` 與 `docs/storage-migration.md`）即可，不需要到其他目錄找殘留。使用者於 2026-10-14 表示：「我自己會預期，我遷移完後刪除migrations就可以了」。
@@ -43,7 +45,7 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
 
 ## Sample CSV → JSONL
 
-`migrations.sample_csv.convert_sample_csv` 接受一或多份 CSV、已開啟的 `ResultEntry` 與元件名，追加到該條目的 `samples/<component>.jsonl`。來源位元組不變。公開函式回傳 `MigrationReport`，列出追加列數、待判斷列及原因、輸出路徑。`plan_sample_csv` 使用相同欄位與單位宣告，回傳 `SampleCsvPlan(rows, pending)`，不取得 entry 或寫檔。Storage migration 與直接追加工具共用這個 owner 規劃介面。
+`migrations.sample_csv.convert_sample_csv` 接受一或多份 CSV、已開啟的 `ResultEntry` 與元件名，追加到該條目的 `samples/<component>.jsonl`。來源位元組不變。公開函式回傳 `MigrationReport`，列出追加列數、待判斷列及原因、輸出路徑與 `preserved_fields`。`plan_sample_csv` 使用相同欄位與單位宣告，回傳 `SampleCsvPlan(rows, pending, preserved_fields)`，不取得 entry 或寫檔。Storage migration 與直接追加工具共用這個 owner 規劃介面。
 
 ```python
 from migrations.sample_csv import convert_sample_csv
@@ -57,7 +59,11 @@ report = convert_sample_csv(
 )
 ```
 
-v2 CSV 已有 `dev_value` 和 `dev_unit`，不需提供 legacy 參數。舊格式必須明填來源欄位與 A／mA／V／mV；標題的單位文字不作推論。座標驗證與縮放重用 sample table owner。已知 measurement 欄位改名；未知欄位、非法值或缺少宣告使整列待判斷，不寫入。
+v2 CSV 已有 `dev_value` 和 `dev_unit`，不需提供 legacy 參數。舊格式必須明填來源欄位與 A／mA／V／mV；標題的單位文字不作推論。座標驗證與縮放重用 sample table owner。已知 measurement 欄位改名並保留原工作單位，空量測值寫 null。未知欄位以原名原字串保存在 JSONL 根層，空字串與空白也不改，不猜數字或改名。例如 `comment=Manual Added` 不改成 `Tcomment`。非法座標或量測值、缺少必要單位宣告的列仍不寫入，報告列出位置與原因。
+
+原欄名若碰到 `run_id`、`point`、`source`、`at` 或 canonical 量測名稱，原名原字串寫進該列的 `legacy_fields` mapping，不覆寫 converter 產生的值。來源本身的 `legacy_fields` 欄也存在 mapping 的同名 key。例如 `T1 (us)` 轉成數字 `t1_us`，原欄 `t1_us` 則存到 `legacy_fields["t1_us"]`。
+
+每筆 `PreservedCsvField` 記錄來源檔、從 1 起算且不含 header 的資料列號、原欄名與原值、synthetic run_id，以及 `destination_keys`。目的以 literal JSON keys 序列表示，`("extra.with.dot",)` 是根層的一個 key，`("legacy_fields", "t1_us")` 才是兩層位置。它只表示原樣保留，不宣稱已理解欄位語意。Storage migration 的 `preserved_sample_fields` 另附每筆欄位的 JSONL `output_path`，dry-run、正式報告與 manifest 都保留這份資訊。
 
 合成 key 為 `legacy-<Path.stem>-<資料列號>`。列號從 1 起算，不計 header。來源為 manual，point 預設為 null，可明填。同次輸入 stem 重複時，寫入任何列前拒絕。再次執行會追加相同 key 的歷史，讀取時取最後一列，不提供批次 rollback 或並行 writer 保證。
 

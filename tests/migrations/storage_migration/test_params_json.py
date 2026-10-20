@@ -513,6 +513,97 @@ def test_sample_declarations_publish_runtime_rows_and_resume_once(
     assert raw_csv.read_bytes() == original
 
 
+def test_unknown_csv_fields_survive_storage_publication_reports_and_completed_edits(
+    request_data: MigrationRequest, analysis_mapping: MigrationMapping
+) -> None:
+    request = replace(
+        request_data, sample_value_column="calibrated mA", sample_source_unit="mA"
+    )
+    source = request.result_root / "chip/qubit/samples.csv"
+    original = (
+        b"calibrated mA,T1 (us),comment,custom,empty\r\n"
+        b"2,50,Manual Added, 001 ,\r\n3,60,Manual Added,NaN,\r\n"
+    )
+    source.write_bytes(original)
+    before = {
+        path: path.read_bytes()
+        for root in (request.result_root, request.database_root)
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+    dry = migrate_storage(
+        replace(request, dry_run=True),
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    assert not any(item.source == source for item in dry.pending)
+    assert len(dry.preserved_sample_fields) == 6
+    assert not (request.results_root / request.name).exists()
+    assert dry.backup_path is not None and not dry.backup_path.exists()
+    assert {path: path.read_bytes() for path in before} == before
+    report = migrate_storage(
+        request,
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    assert report.preserved_sample_fields == dry.preserved_sample_fields
+    table = open_entry(request).samples("Qlegacy")
+    assert list(table.read()["comment"]) == ["Manual Added", "Manual Added"]
+    assert list(table.read()["custom"]) == [" 001 ", "NaN"]
+    assert list(table.read()["empty"]) == ["", ""]
+    assert list(table.read()["dev_value"]) == [0.002, 0.003]
+    assert list(table.read()["t1_us"]) == [50, 60]
+    assert [
+        (
+            item.field.source_path,
+            item.field.row_number,
+            item.field.column,
+            item.field.value,
+            item.field.run_id,
+            item.output_path,
+        )
+        for item in report.preserved_sample_fields
+    ] == [
+        (source, number, column, value, f"legacy-samples-{number}", table.path)
+        for number, custom in [(1, " 001 "), (2, "NaN")]
+        for column, value in [
+            ("comment", "Manual Added"),
+            ("custom", custom),
+            ("empty", ""),
+        ]
+    ]
+    assert not any(item.source == source for item in report.pending)
+    assert report.backup_path is not None
+    assert (
+        report.backup_path / "result/chip/qubit/samples.csv"
+    ).read_bytes() == original
+    assert not source.parent.exists()
+    assert not (request.database_root / "chip/qubit").exists()
+    published = table.path.read_bytes()
+    resumed = migrate_storage(
+        replace(request, resume=True),
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    assert resumed.preserved_sample_fields == report.preserved_sample_fields
+    assert table.path.read_bytes() == published
+    table.append(run_id="legacy-samples-1", comment="user edit")
+    edited = table.path.read_bytes()
+    with pytest.raises(MigrationInputError, match="hash changed"):
+        migrate_storage(
+            replace(request, resume=True),
+            mapping=analysis_mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        )
+    assert table.path.read_bytes() == edited
+    persisted = json.loads(manifest_path(request).read_text())["report"]
+    assert persisted["preserved_sample_fields"][0]["field"]["value"] == "Manual Added"
+
+
 def test_sample_prepared_publication_resumes_without_duplicate_rows(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,

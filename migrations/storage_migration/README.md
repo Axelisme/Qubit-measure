@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-20，未支援檔原樣位置、完整備份、可續跑發布、分析來源時間、predictor owner API 與已發布 Spec 的 slots
+**Last updated:** 2026-10-20，CSV 未知欄位保全、具名欄位報告與已發布 Spec 的 slots
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
@@ -34,6 +34,7 @@
 - Component 的 global 磁通組包含 `cur_A`、`flx_half/period/int`、`flux_bias`，單位寫 `general.ext.flux_unit`。來源順序是同檔 `flux_unit`、根 meta_info 同 key、params 根 `flux_unit`、operator assumption。JPA 組只採 `jpa_flux_unit`，依同檔、根 meta_info、獨立 `assume_jpa_flux_unit` 順序。JPA 假設只接受 A/V，未提供就保持 pending，不借 qubit params 或 global 假設。CLI 這批資料明填 `--assume-flux-unit mA --assume-jpa-flux-unit V`，報告分別標「假設單位」。報告寫實際來源檔。根 meta_info 與 params 同層明示單位衝突時，整組 pending，不用假設解衝突。
 - Point 自己明示的單位優先。單位改變時，移除未被 point 覆寫的同組 setup 繼承數值及其 metadata。Nullable typed 值設 null，ext 值從 mapping 移除，metadata 依 owner 契約清為空。候選值先過 owner 驗證，再與新單位同筆 edit 提交。其他組不變。`local_flux_unit` 只照抄到 `Q.flux_unit`，不作任何數值證據或清除依據。Owner 不接受來源單位時，該組 pending，不換算。
 - Parameters 將根 `samples.csv` 交給 `sample_csv.plan_sample_csv`。唯一 qubit component 決定 `ResultEntry.samples(component)`，找不到唯一元件就 located pending。Legacy CSV 的 `sample_value_column` 與 `sample_source_unit` 必須獨立宣告，不能借 `assume_flux_unit`。合法列寫入同目錄 temp JSONL，再走 manifest 的 samples publication、hash 與 prepared/published resume；不直接對既有目的地 append。無法轉換的列依 owner plan 的來源路徑、資料列號與原因 pending，並經 copy publication 另留完整原 CSV 到 `result/<entry>/samples.csv`。沒有合法列就不建 JSONL。
+- CSV 未知欄位保留原名原字串，空字串不改成 null。一般欄位留在 JSONL 根層，碰 producer metadata、canonical 量測名稱及 `legacy_fields` 的欄位放進 `legacy_fields` mapping。`MigrationReport.preserved_sample_fields` 記錄來源檔、資料列、欄名、原值、synthetic run_id、literal 目的 keys 與 JSONL 路徑，不冒充語意已轉換。Dry-run、正式發布與 manifest/resume 共用這份 typed 報告。
 - `MigrationReport.declarations` 記錄上述四個 operator 輸入，manifest 保存同一 typed report。Resume 在任何寫入前核對這些宣告，與首次不同就拒絕。已發布 samples 的 hash 改變也拒絕，不覆寫使用者編輯或重複追加。Dry-run 呼叫相同 CSV 規劃與元件驗證，不建 entry、temp、樣本表或備份。
 - 未支援 expression、Spec、缺 mapping 或 child reference 不能轉換時保留來源與定位，不 evaluate。Arb asset key 保持原值，不搬 asset，也不保證全部模組已可 materialize。
 - Library dry-run 驗證隔離候選，不取得目的 handle。其 report rows 保留 canonical `new_path`，`new_file=None` 本身不表示 pending。正常提交後 manifest 保存來源與目的 hash，resume 核對已記錄完成的 library 而不重做。
