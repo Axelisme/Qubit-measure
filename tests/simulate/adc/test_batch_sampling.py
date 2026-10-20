@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import RoundSignals, RoundStatistics, SamplingIdentity
+from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate import adc
 
 
@@ -209,23 +209,17 @@ def test_physical_traces_accept_engine_trace_tolerance_without_normalizing():
     np.testing.assert_array_equal(populations, original)
 
 
-@pytest.mark.parametrize("sampler", [adc.round_statistics])
-def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
+def test_round_draws_reproduce_without_mutating_inputs_or_global_rng():
     populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
     original = populations.copy()
     inputs = channels()
     global_state = legacy_rng_state()
     kwargs = dict(reps=17, seed=73, acquire_sequence=2, round_index=3)
-    first = sampler(populations, inputs, **kwargs)
-    second = sampler(populations, inputs, **kwargs)
-    if isinstance(first, RoundStatistics) and isinstance(second, RoundStatistics):
-        np.testing.assert_array_equal(first.state_counts, second.state_counts)
-        np.testing.assert_array_equal(first.channels[0].sums, second.channels[0].sums)
-        assert first.raw_identity == SamplingIdentity(73, (2, 3, 1))
-    elif isinstance(first, RoundSignals) and isinstance(second, RoundSignals):
-        np.testing.assert_array_equal(first.channels[0].iq, second.channels[0].iq)
-    else:
-        pytest.fail("sampler returned inconsistent result types")
+    first = adc.round_statistics(populations, inputs, **kwargs)
+    second = adc.round_statistics(populations, inputs, **kwargs)
+    np.testing.assert_array_equal(first.state_counts, second.state_counts)
+    np.testing.assert_array_equal(first.channels[0].sums, second.channels[0].sums)
+    assert first.raw_identity == SamplingIdentity(73, (2, 3, 1))
     np.testing.assert_array_equal(populations, original)
     after = legacy_rng_state()
     assert global_state[0] == after[0]
@@ -233,7 +227,6 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
     assert global_state[2:] == after[2:]
 
 
-@pytest.mark.parametrize("sampler", [adc.round_statistics])
 @pytest.mark.parametrize(
     "invalid",
     [
@@ -248,7 +241,7 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng(sampler):
         "unequal_reads",
     ],
 )
-def test_round_draws_reject_invalid_joint_inputs(sampler, invalid):
+def test_round_draws_reject_invalid_joint_inputs(invalid):
     populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
     inputs = channels()
     reps, seed = 17, 73
@@ -277,13 +270,12 @@ def test_round_draws_reject_invalid_joint_inputs(sampler, invalid):
         ValueError,
         match="probabilit|population|state|point|reps|identity|channel|sample",
     ):
-        sampler(
+        adc.round_statistics(
             populations, inputs, reps=reps, seed=seed, acquire_sequence=2, round_index=3
         )
 
 
-@pytest.mark.parametrize("sampler", [adc.round_statistics])
-def test_round_draws_accept_engine_trace_tolerance_without_mutation(sampler):
+def test_round_draws_accept_engine_trace_tolerance_without_mutation():
     def rng():
         return np.random.Generator(
             np.random.PCG64(np.random.SeedSequence((1, 0, 0, 0)))
@@ -293,9 +285,9 @@ def test_round_draws_accept_engine_trace_tolerance_without_mutation(sampler):
     boundary = rng().random() * (1 + 4e-7)
     populations = np.array([[[boundary, 1 + 9e-7 - boundary], [0.4, 0.6]]])
     original = populations.copy()
-    reps = 1_000_000_000 if sampler is adc.round_statistics else 3
+    reps = 1_000_000_000
     try:
-        result = sampler(
+        result = adc.round_statistics(
             populations,
             channels(),
             reps=reps,
@@ -305,15 +297,12 @@ def test_round_draws_accept_engine_trace_tolerance_without_mutation(sampler):
         )
     except ValueError as error:
         pytest.fail(f"in-budget engine trace residual must be accepted: {error}")
-    if isinstance(result, RoundStatistics):
-        expected = rng().multinomial(reps, populations)
-        repaired = rng().multinomial(
-            reps, populations / populations.sum(axis=-1, keepdims=True)
-        )
-        np.testing.assert_array_equal(result.state_counts, expected)
-        assert not np.array_equal(expected, repaired)
-    else:
-        np.testing.assert_array_equal(result.channels[0].iq[0, 0, 0], [1, 2])
+    expected = rng().multinomial(reps, populations)
+    repaired = rng().multinomial(
+        reps, populations / populations.sum(axis=-1, keepdims=True)
+    )
+    np.testing.assert_array_equal(result.state_counts, expected)
+    assert not np.array_equal(expected, repaired)
     np.testing.assert_array_equal(populations, original)
 
 
