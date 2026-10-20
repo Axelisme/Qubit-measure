@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal
-from scipy.optimize import minimize_scalar
+from scipy.optimize import OptimizeResult, minimize_scalar
 from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate.adc import (
     ADC,
@@ -109,6 +109,8 @@ def test_single_jump_preserves_cavity_memory_and_exponential_survival() -> None:
         bounds=(0, 20),
         method="bounded",
     )
+    if not isinstance(fit, OptimizeResult):
+        raise TypeError("scalar optimizer must return OptimizeResult")
     assert 0 < fit.x < 20
     assert_allclose(trace, expected(float(fit.x)), atol=2e-7)
 
