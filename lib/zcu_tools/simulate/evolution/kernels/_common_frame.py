@@ -294,17 +294,91 @@ def unitary(h, duration):
     return vectors @ adjoint
 
 
+# Absolute entrywise density allowance per row, apportioned by elapsed time.
+# This local coarse/fine estimate is separate from SW admission (.03/.01),
+# and leaves margin below the engine's qualitative population allowance (.1).
+# It is not a rigorous global error bound, especially after fixed-step fallback.
+_DENSITY_ALLOWANCE = 1e-3
+
+
 @njit(cache=True, nogil=True)
-def propagate(channels, args, control, rho, bath):
-    duration, steps = control
-    populations, coherences = bath
-    dt = duration / steps
+def density_step(dynamics, rho, time, dt, bath):
+    """One ordered CF4 / exact secular half-D, U, half-D density update."""
+    channels, args, packed = dynamics
     a, b = (3 - 2 * np.sqrt(3)) / 12, (3 + 2 * np.sqrt(3)) / 12
     c1, c2 = 0.5 - np.sqrt(3) / 6, 0.5 + np.sqrt(3) / 6
-    packed = pack_entries(channels)
+    h1 = hamiltonian(time + c1 * dt, channels, args, packed)
+    h2 = hamiltonian(time + c2 * dt, channels, args, packed)
+    u = unitary(a * h1 + b * h2, dt) @ unitary(b * h1 + a * h2, dt)
+    return split_step(rho, u, bath[0], bath[1])
+
+
+@njit(cache=True, nogil=True)
+def fixed_steps(dynamics, control, rho, bath):
+    """Run the fixed-step compatibility solver on (start, duration, steps)."""
+    start, duration, steps = control
+    dt = duration / steps
     for k in range(steps):
-        h1 = hamiltonian((k + c1) * dt, channels, args, packed)
-        h2 = hamiltonian((k + c2) * dt, channels, args, packed)
-        u = unitary(a * h1 + b * h2, dt) @ unitary(b * h1 + a * h2, dt)
-        rho = split_step(rho, u, populations, coherences)
+        rho = density_step(dynamics, rho, start + k * dt, dt, bath)
     return rho
+
+
+@njit(cache=True, nogil=True)
+def adaptive(dynamics, control, rho, bath):
+    """Step-double a knot-free interval, without retaining a density schedule.
+
+    control is (start_ns, interval_ns, fixed_steps, row_duration_ns). bath holds
+    exact half-step maps for base/2 through 32*base, where base <= 8 ns.
+    Returns density, accepted/rejected macro histograms and fixed fallback steps.
+    After two consecutive minimum-step failures the remaining interval uses the
+    fixed runner. No fallback update is claimed to meet the local allowance.
+    """
+    start, duration, steps, row_duration = control
+    populations, coherences = bath
+    base = duration / steps
+    remaining, elapsed, index = steps, start, 2
+    accepted, rejected = np.zeros(7, np.int64), np.zeros(7, np.int64)
+    minimum_failures, fallback_steps = 0, 0
+    while remaining > 0:
+        units = 2 ** (index - 1)
+        while units > remaining:
+            index -= 1
+            units = 2 ** (index - 1)
+        dt = base * units
+        coarse = density_step(
+            dynamics, rho, elapsed, dt, (populations[index], coherences[index])
+        )
+        fine_bath = populations[index - 1], coherences[index - 1]
+        fine = density_step(dynamics, rho, elapsed, dt / 2, fine_bath)
+        fine = density_step(dynamics, fine, elapsed + dt / 2, dt / 2, fine_bath)
+        # Raw full-density difference: no Richardson divisor or extrapolation.
+        error = np.max(np.abs(fine - coarse))
+        allowance = _DENSITY_ALLOWANCE * dt / row_duration
+        if error <= allowance:
+            rho = fine
+            accepted[index] += 1
+            minimum_failures = 0
+            remaining -= units
+            elapsed += dt
+            if error < allowance / 8 and index < 6:
+                index += 1
+        else:
+            rejected[index] += 1
+            if index > 1:
+                index -= 1
+                continue
+            minimum_failures += 1
+            rho = coarse
+            fallback_steps += 1
+            remaining -= 1
+            elapsed += dt
+            if minimum_failures == 2 and remaining > 0:
+                rho = fixed_steps(
+                    dynamics,
+                    (elapsed, base * remaining, remaining),
+                    rho,
+                    (populations[1], coherences[1]),
+                )
+                fallback_steps += remaining
+                remaining = 0
+    return rho, accepted, rejected, fallback_steps

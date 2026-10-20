@@ -17,10 +17,11 @@ from ..kernel import SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._common_frame import (
     Channels,
+    adaptive,
     amplitudes,
     coefficients,
     first_order_channels,
-    propagate,
+    pack_entries,
     remainder_channels,
     remainder_estimates,
 )
@@ -487,7 +488,10 @@ def advance_common_frame(
     invalid state shape/finiteness raise ValueError, never silently fall back.
     CF4 propagates explicit first/SW2 slow channels between exact secular bath
     half-steps. exp(S) endpoint dressing and the common-frame DC restoration
-    preserve coherences. No clipping, renormalization or thermal weighting.
+    preserve coherences. Knot-aware full-density step-doubling uses a 1e-3
+    row-local entrywise allowance, not a global error certificate. Repeated
+    minimum-step failure finishes the interval with the fixed solver without
+    changing admission. No clipping, renormalization or thermal weighting.
     """
     _validate_row(frame, table, row)
     size = len(frame.model.energies_ghz)
@@ -506,6 +510,44 @@ def advance_common_frame(
     if not admission.accepted or channels is None:
         raise ValueError(f"common-frame row rejected: {admission.reason}")
     return advance_admitted_common_frame(frame, table, row, state, admission)
+
+
+def _propagate_row(frame, args, control, rho):
+    """Split at every local envelope knot, including held-endpoint transitions.
+
+    Segment events already bound the row. Each knot-free interval gets an
+    apply-local dyadic bath bank; neither banks nor accepted schedules survive
+    this density. The base step never exceeds the admitted fixed-step ceiling.
+    """
+    duration, steps = control
+    offsets, times, counts = args[2], args[3], args[5]
+    knots = np.unique(
+        np.concatenate(
+            (
+                [0.0, duration],
+                *(times[a, :n] - offsets[a] for a, n in enumerate(counts)),
+            )
+        )
+    )
+    knots = knots[(knots >= 0) & (knots <= duration)]
+    generator, decay = secular_operators(frame.model)
+    dynamics = frame.channels, args, pack_entries(frame.channels)
+    for start, end in zip(knots[:-1], knots[1:], strict=True):
+        interval = end - start
+        interval_steps = max(1, int(np.ceil(interval / (duration / steps))))
+        base = interval / interval_steps
+        dts = base / 2 * 2.0 ** np.arange(7)
+        populations = np.stack([expm(generator * dt / 2) for dt in dts])
+        coherences = np.stack([np.exp(-decay * dt / 2) for dt in dts])
+        for coherence in coherences:
+            np.fill_diagonal(coherence, 1.0)
+        rho, _, _, _ = adaptive(
+            dynamics,
+            (float(start), float(interval), interval_steps, duration),
+            rho,
+            (populations, coherences),
+        )
+    return rho
 
 
 def advance_admitted_common_frame(
@@ -527,11 +569,6 @@ def advance_admitted_common_frame(
         raise ValueError(f"common-frame row rejected: {admission.reason}")
     args, _, _ = _row_envelopes(frame, table, row)
     duration = float(table.duration_ns[row])
-    dt = duration / admission.steps
-    generator, decay = secular_operators(frame.model)
-    populations = expm(generator * dt / 2)
-    coherences = np.exp(-decay * dt / 2)
-    np.fill_diagonal(coherences, 1.0)
 
     def dress(time: float):
         z = amplitudes(time, args)
@@ -549,12 +586,11 @@ def advance_admitted_common_frame(
         return expm(generator)
 
     start, end = dress(0.0), dress(duration)
-    result = propagate(
-        channels,
+    result = _propagate_row(
+        frame,
         args,
         (duration, admission.steps),
         start @ state @ start.conj().T,
-        (populations, coherences),
     )
     result = end.conj().T @ result @ end
     phase = np.exp(-2j * np.pi * channels.frame * duration)
