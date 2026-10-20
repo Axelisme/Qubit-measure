@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 import pytest
 from qtpy import QtWidgets
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
@@ -187,6 +188,13 @@ def test_analyze_form_text_edit_emits_only_when_committed(qapp):
     assert emitted == [_OptionalParams(t0=1.5)]
 
 
+def _finish_optional_edit(driver: ComponentDriver, commit: str) -> None:
+    """Leave by ordinary Tab and return for the next edit, without hiding fields."""
+    if commit == "focus_loss":
+        driver.press_key(Qt.Key.Key_Tab, "T0:")
+        driver.press_key(Qt.Key.Key_Tab, "Commit")
+
+
 @pytest.mark.parametrize("commit", ["enter", "focus_loss"])
 @pytest.mark.parametrize(
     ("params_type", "valid_text", "valid_value"),
@@ -212,8 +220,7 @@ def test_optional_invalid_commit_blocks_params_and_recovers(
         driver.screenshot(tmp_path / "01-blank.png")
         assert form.read_params() == params_type()
         driver.enter_text("T0:", "-", commit=commit == "enter")
-        if commit == "focus_loss":
-            driver.click("Commit")
+        _finish_optional_edit(driver, commit)
         driver.screenshot(tmp_path / "02-invalid.png")
         with pytest.raises(ValueError, match="T0"):
             form.read_params()
@@ -221,8 +228,7 @@ def test_optional_invalid_commit_blocks_params_and_recovers(
         assert emitted == []
 
         driver.enter_text("T0:", valid_text, commit=commit == "enter")
-        if commit == "focus_loss":
-            driver.click("Commit")
+        _finish_optional_edit(driver, commit)
         driver.screenshot(tmp_path / "03-valid.png")
         assert form.read_params() == params_type(valid_value)
         assert form.is_valid() is True
@@ -231,15 +237,13 @@ def test_optional_invalid_commit_blocks_params_and_recovers(
         emitted.clear()
 
         driver.enter_text("T0:", "-", commit=commit == "enter")
-        if commit == "focus_loss":
-            driver.click("Commit")
+        _finish_optional_edit(driver, commit)
         driver.screenshot(tmp_path / "04-invalid-after-valid.png")
         assert form.is_valid() is False
         assert emitted == []
 
         driver.enter_text("T0:", "", commit=commit == "enter")
-        if commit == "focus_loss":
-            driver.click("Commit")
+        _finish_optional_edit(driver, commit)
         driver.screenshot(tmp_path / "05-blank-again.png")
         assert form.read_params() == params_type()
         assert form.is_valid() is True
