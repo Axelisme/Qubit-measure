@@ -160,7 +160,6 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
                 {
                     "soccfg": soccfg,
                     "gen_ch": repeat_pulse.ch,
-                    "ro_ch": repeat_pulse.ro_ch,
                     "mixer_freq": repeat_pulse.mixer_freq,
                 },
             )

@@ -18,4 +18,4 @@ No analysis and no writeback. Preparation coherence, contrast, and drive history
 
 ## Recommended
 
-Repeat on X180_pulse to check the pi pulse; repeat on X90_pulse (applied in pairs) to check the pi/2 pulse. About 10 repetitions usually show a mis-calibration clearly. Use the zig-zag scan adapters to sweep the repeated pulse's gain or frequency. reset_phase_cycle alternates the final reset pi phase by 180 degrees between averaging sweeps (even reps, two-pulse/bath reset). It adds no RF pulse or programmed wait; verify population and phase witnesses.
+Repeat on X180_pulse to check the pi pulse; repeat on X90_pulse (applied in pairs) to check the pi/2 pulse. About 10 repetitions usually show a mis-calibration clearly. Use the zig-zag scan adapters to sweep the repeated pulse's gain or frequency.
