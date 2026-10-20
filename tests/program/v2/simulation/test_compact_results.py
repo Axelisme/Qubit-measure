@@ -15,8 +15,9 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound
 
-from tests.program.v2.simulation.support import raw_of, request_of
+from tests.program.v2.simulation.support import FixedRawShots, raw_of, request_of
 
 
 def make_program(env, *, rounds=2):
@@ -40,7 +41,7 @@ def make_program(env, *, rounds=2):
     )
 
 
-def statistics(request: RoundRequest) -> RoundStatistics:
+def statistics(request: RoundRequest) -> IntegratedRound:
     acquire = request.acquire
     point_dims = tuple(
         n for axis, n in enumerate(acquire.loop_dims) if axis != acquire.avg_level
@@ -71,10 +72,14 @@ def statistics(request: RoundRequest) -> RoundStatistics:
                 np.zeros((2, 2)),
             )
         )
-    return RoundStatistics(
+    summary = RoundStatistics(
         counts,
         tuple(channels),
         SamplingIdentity(acquire.root_seed, (acquire.sequence, request.index, 1)),
+    )
+    return IntegratedRound(
+        summary,
+        FixedRawShots({ch.channel: ch.conditional_sums[..., 0, :] for ch in channels}),
     )
 
 
@@ -116,13 +121,17 @@ def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
     np.testing.assert_array_equal(hooks[0][1][0][..., 0], expected[..., 0] - 0.5)
     np.testing.assert_array_equal(hooks[1][1][0], averaged[0])
     request = request_of(env)
-    deferred = records[-1].materialize_raw(request.reps, request.avg_level)
+    deferred = records[-1].raw.materialize(request.reps, request.avg_level)
     raw = raw_of(prog)
     assert raw[0].dtype == np.int64
     for ch, value in zip((1, 0), raw, strict=True):
         np.testing.assert_array_equal(value, deferred[ch])
     np.testing.assert_array_equal(raw_of(prog)[0], raw[0])
-    assert len(records) == 2  # getters must not rerun the backend
+    for ch, value in zip((1, 0), raw, strict=True):
+        np.testing.assert_array_equal(
+            env.soc.get_accumulated(ch, 0, value.size // 2), value.reshape(-1, 2)
+        )
+    assert len(records) == 2  # program and SoC getters must not rerun the backend
 
 
 @pytest.mark.parametrize("processing", ["threshold", "classification", "tracker"])
@@ -152,7 +161,7 @@ def test_shot_processing_uses_materialized_statistics(processing):
     result = prog.acquire(env.soc, progress=False, **kwargs)
     request = request_of(env)
     raw = raw_of(prog)
-    expected_raw = records[0].materialize_raw(request.reps, request.avg_level)
+    expected_raw = records[0].raw.materialize(request.reps, request.avg_level)
     np.testing.assert_array_equal(raw[0], expected_raw[1])
     if processing == "threshold":
         np.testing.assert_array_equal(result[0][0, ..., 0], [[0, 0, 0], [1, 1, 1]])
@@ -186,18 +195,36 @@ def test_invalid_statistics_raise_at_acquire_without_materializing(invalid):
     prog = make_program(env, rounds=1)
 
     def execute(request):
-        result = statistics(request)
+        delivery = statistics(request)
+        result = delivery.statistics
         ch = result.channels[0]
         if invalid == "missing":
-            return replace(result, channels=result.channels[:1])
+            return replace(
+                delivery, statistics=replace(result, channels=result.channels[:1])
+            )
         if invalid == "extra":
-            return replace(result, channels=(*result.channels, replace(ch, channel=2)))
+            return replace(
+                delivery,
+                statistics=replace(
+                    result, channels=(*result.channels, replace(ch, channel=2))
+                ),
+            )
         if invalid == "duplicate":
-            return replace(result, channels=(*result.channels, ch))
+            return replace(
+                delivery, statistics=replace(result, channels=(*result.channels, ch))
+            )
         if invalid == "counts_shape":
-            return replace(result, state_counts=np.full((6, 1), 4, dtype=np.int64))
+            return replace(
+                delivery,
+                statistics=replace(
+                    result, state_counts=np.full((6, 1), 4, dtype=np.int64)
+                ),
+            )
         if invalid == "counts_total":
-            return replace(result, state_counts=result.state_counts + 1)
+            return replace(
+                delivery,
+                statistics=replace(result, state_counts=result.state_counts + 1),
+            )
         if invalid == "sums_shape":
             ch = replace(ch, sums=ch.sums[..., 0])
         elif invalid == "conditional_shape":
@@ -212,7 +239,9 @@ def test_invalid_statistics_raise_at_acquire_without_materializing(invalid):
                 conditional_sums=np.full_like(ch.conditional_sums, 2.0**63),
                 sums=np.full_like(ch.sums, 4 * 2.0**63),
             )
-        return replace(result, channels=(ch, *result.channels[1:]))
+        return replace(
+            delivery, statistics=replace(result, channels=(ch, *result.channels[1:]))
+        )
 
     env.soc.binding.execute = execute
     with pytest.raises(

@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-19, immutable integrated sampling plans and bounded response ownership
+**Last updated:** 2026-10-20, shared mux shot paths and physical trace inputs
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -18,9 +18,9 @@ outside tolerance. Invalid shapes raise `ValueError`. Row validation raises
 counts rows failing the first reported rule. It returns no partial results.
 Callers can retain this count without parsing error text.
 
-`PopulationInput`, `round_statistics` and `sample_traces` validate the same trace
-interval and require nonnegative entries. They expect explicitly normalized
-distributions and do not normalize or clip them. Their tolerance accommodates
+`PopulationInput`, `round_statistics`, `PreparedRawShots` and `sample_traces`
+validate the same probability trace interval and require nonnegative entries.
+They expect explicitly normalized distributions and do not normalize or clip them. Their tolerance accommodates
 numeric residuals; it does not replace explicit preparation. State ordering must
 match the readout model and conditional responses. No basis inference occurs in
 ADC. Evolution retains its raw densities and reports trace drift separately.
@@ -124,11 +124,53 @@ ill-conditioned driven blocks retain the full matrix-exponential propagation.
 The field routes do not assume diagonalizable rate matrices. No route changes
 the evolution populations.
 Its lossless numeric cache key includes delay and both mismatch phases.
-Round samplers share an initial-state draw across channels and windows,
-then add independent receiver noise. The integrated sampler also accounts for
-nearest-even shot rounding variance. These are conditional moments, not random
-jump trajectories. QICK buffer layout and acquisition averaging belong to the
-program adapter.
+`ADC.sample` and `sample_windows` draw continuous-time Markov paths
+using the directional rates. The initial population origin is the earliest
+incident pulse start, or zero with no pulses.
+The path continues through ringdown to the latest emitted sample, including gaps
+between windows. Jumps retain both resonators' fields and reciprocal shared-line
+damping. Vacuum baselines support flat, piecewise-linear and opaque envelopes;
+no ODE is solved per shot. Delay, mismatch and receiver calibration follow the
+same conventions as conditional responses. Windows share one path per shot and
+add independent receiver noise. Zero rates retain deterministic conditional
+traces. Multiple incident carriers superpose their vacuum fields and retain
+one cavity memory on the same path. Integrated direct means retain conditional
+moments and nearest-even shot rounding variance. Acquisition averaging belongs to program.
+
+`PreparedRawShots(populations, batches, reps=...)` owns noiseless probabilities
+and per-channel ReadoutBatch inputs. `bind(identity)` returns an `ADCRawShots`
+source without doing shot work. `materialize(reps, avg_level)` alone draws full
+CTMC paths shared across every carrier, ADC and read. Each receiver adds
+independent noise. Zero jumps use direct vacuum sums. Jumped shots use compiled exact homogeneous propagation and discrete
+sample sums. Uniform samples use binary geometric sums; irregular samples keep
+their original coordinates. Flat baselines use singular-safe phi1 propagation.
+Shaped and opaque envelopes retain the existing DOP853 vacuum-baseline tolerances.
+There is no ODE per shot, jump-time LUT, path-count conditioning or tail cutoff.
+Reads share one path through ringdown and gaps; offset is added once per sample.
+All ADC models must declare identical state labels and directional rates.
+Different receivers may deduplicate contents differently; point mappings select
+physical inputs independently without changing the common path.
+
+The source retains its inputs independently of later rounds and prepare-cache
+eviction. Every call restarts its private PCG64 stream and returns fresh int64
+arrays, keyed by ADC channel with shape `(*loop_dims, reads, 2)`. It does not cache
+noisy results or adjust shots to independently drawn mean totals. Invalid reps,
+layout, shapes or states raise ValueError, as do unsafe integer sums. Solver
+failures raise RuntimeError. `simulate.rounding` owns shared numeric int64
+conversion and shot-axis layout. Numeric sources do not import program.
+
+`sample_traces(populations, batches, reps=..., identity=..., rtol=..., atol=...)`
+requires physical `ReadoutBatch` inputs keyed by ADC channel in declaration order.
+It returns `RoundSignals` with owned float64 arrays shaped
+`(prod(point_dims)*reps, reads, samples, 2)`, in point-major C order then shot order.
+Each ADC requires equal sample counts across reads and contents. The complete
+`SamplingIdentity` seeds PCG64 without an extra suffix. FTF supplies
+`(acquire_sequence, round_index, 0)` as its stream. Calls share the full CTMC path,
+including times not observed by any window. Delay, mismatch and demodulation
+remain per receiver/grid; noise is independent per ADC/read/sample/shot. There
+is no integrated rounding term. Invalid probabilities, states, rates, layouts,
+counts or tolerances raise `ValueError`; baseline/field failures raise
+`RuntimeError`. There is no conditional-only trace sampler or fallback.
 
 `PreparedStatistics(populations, channels, reps=...)` validates and owns immutable
 integrated sampling inputs. It expands conditional means and factors each ADC's

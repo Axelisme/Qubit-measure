@@ -460,8 +460,8 @@ class ChannelStatistics:
         Zero and singular covariance are valid. It excludes rounding variance.
 
     Final axes use [I, Q]. Producers must not mutate arrays during the borrow.
-    Constructors do not validate these layouts; materialize_raw checks inputs
-    it needs, and the adapter checks correspondence to the acquire request.
+    Constructors do not validate these layouts; the adapter checks
+    correspondence to the acquire request. This is pure statistics data.
     """
 
     channel: int
@@ -477,7 +477,8 @@ class RoundStatistics:
     state_counts: int64 (*point_dims, states) nonnegative multinomial counts,
         summing to reps per point. Counts are shared by all ADCs and reads.
     channels: One ChannelStatistics per requested ADC, in any order.
-    raw_identity: Local PCG64 identity for deferred shots. Producers use stream
+    raw_identity: Informational local PCG64 identity for the environment's raw
+        source. This record never generates shots. Producers use stream
         (acquire_sequence, round_index, 1), separate from counts/sums stream
         (acquire_sequence, round_index, 0). Drawing raw does not change either.
 
@@ -488,111 +489,3 @@ class RoundStatistics:
     state_counts: NDArray[np.int64]
     channels: tuple[ChannelStatistics, ...]
     raw_identity: SamplingIdentity
-
-    def materialize_raw(
-        self, reps: int, avg_level: int
-    ) -> dict[int, NDArray[np.int64]]:
-        """Generate detached per-shot int64 sums consistent with this summary.
-
-        reps and avg_level come from AcquireRequest; point_dims is inferred from
-        state_counts.shape[:-1]. Return arrays (*loop_dims, reads, 2), inserting
-        the reps axis at avg_level. A random permutation of each point's counts
-        assigns the same initial state to each ADC/read of a shot. Independent
-        receiver noise is shifted to match sums before nearest-even rounding.
-        Each total differs from sums by at most reps/2 ADC units after rounding.
-        The same identity and inputs reproduce raw without touching global RNG.
-
-        Raise ValueError for reps/count mismatch, avg_level outside
-        [0, len(point_dims)], invalid count/statistic layouts or values, duplicate
-        channels, or int64 overflow. Zero reps requires zero totals and returns
-        empty shot axes. No noise or rounding is added to the stored statistics.
-        """
-        counts = self.state_counts
-        if counts.ndim < 1 or counts.dtype != np.int64 or np.any(counts < 0):
-            raise ValueError("state_counts must be nonnegative int64 state rows")
-        point_dims = counts.shape[:-1]
-        if type(reps) is not int or reps < 0 or np.any(counts.sum(axis=-1) != reps):
-            raise ValueError("reps must match every state_counts row sum")
-        if type(avg_level) is not int or not 0 <= avg_level <= len(point_dims):
-            raise ValueError("avg_level is outside the point-axis layout")
-        rng = np.random.Generator(
-            np.random.PCG64(
-                np.random.SeedSequence(
-                    (self.raw_identity.seed, *self.raw_identity.stream)
-                )
-            )
-        )
-        points, state_count = prod(point_dims), counts.shape[-1]
-        # Flattened counts repeat state labels in point order. Shuffle rows
-        # together so Python work does not grow with points or repetitions.
-        states = np.repeat(
-            np.tile(np.arange(state_count, dtype=np.int64), points), counts.ravel()
-        ).reshape(points, reps)
-        order = rng.random((points, reps)).argsort(axis=1)
-        states = np.take_along_axis(states, order, axis=1)
-        raw: dict[int, NDArray[np.int64]] = {}
-        for channel in self.channels:
-            if channel.channel in raw:
-                raise ValueError("duplicate channel statistics")
-            shots = _materialize_channel(channel, point_dims, states, rng)
-            reads = channel.sums.shape[-2]
-            # Flat points become their C-order sweep axes before inserting reps
-            # at the hardware averaging axis, which may be between sweep axes.
-            layout = shots.swapaxes(1, 2).reshape((*point_dims, reps, reads, 2))
-            raw[channel.channel] = np.moveaxis(layout, -3, avg_level)
-        return raw
-
-
-def _materialize_channel(
-    channel: ChannelStatistics,
-    point_dims: tuple[int, ...],
-    states: NDArray[np.int64],
-    rng: np.random.Generator,
-) -> NDArray[np.int64]:
-    """Draw one ADC as (flat point, read, shot, IQ), rejecting unsafe conversion."""
-    points, reps = states.shape
-    sums, means, covariance = (
-        channel.sums,
-        channel.conditional_sums,
-        channel.shot_covariance,
-    )
-    if (
-        sums.ndim != len(point_dims) + 2
-        or sums.shape[:-2] != point_dims
-        or sums.shape[-1] != 2
-        or means.ndim != sums.ndim + 1
-        or means.shape[:-2] != sums.shape[:-1]
-        or means.shape[-1] != 2
-        or covariance.shape != (2, 2)
-        or not all(np.all(np.isfinite(x)) for x in (sums, means, covariance))
-    ):
-        raise ValueError("invalid channel statistics shape or nonfinite values")
-    reads, state_count = means.shape[-3:-1]
-    if reps and np.any(states >= state_count):
-        raise ValueError("conditional_sums must cover every sampled state")
-    if not np.allclose(covariance, covariance.T, rtol=0, atol=1e-12):
-        raise ValueError("shot_covariance must be symmetric")
-    eigenvalues, vectors = np.linalg.eigh(covariance)
-    if np.any(eigenvalues < -1e-12):
-        raise ValueError("shot_covariance must be positive semidefinite")
-    if not reps:
-        if np.any(sums != 0):
-            raise ValueError("zero reps requires zero sums")
-        return np.empty((points, reads, 0, 2), dtype=np.int64)
-    shots = np.take_along_axis(
-        means.reshape(points, reads, state_count, 2), states[:, None, :, None], axis=2
-    ).copy()
-    if np.any(covariance):
-        # A singular PSD covariance may have tiny negative eigenvalue residuals.
-        root = vectors @ np.diag(np.sqrt(np.maximum(eigenvalues, 0)))
-        shots += rng.standard_normal(shots.shape) @ root.T
-    shots += (sums.reshape(points, reads, 2) - shots.sum(axis=2))[:, :, None, :] / reps
-    rounded = np.rint(shots)
-    # float64(int64.max) equals 2**63, so the upper comparison must be strict.
-    if (
-        not np.all(np.isfinite(rounded))
-        or np.any(rounded < -(2.0**63))
-        or np.any(rounded >= 2.0**63)
-    ):
-        raise ValueError("raw sums overflow int64")
-    return rounded.astype(np.int64)
