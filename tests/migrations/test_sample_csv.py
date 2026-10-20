@@ -7,6 +7,7 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.sample_table import LegacyDeviceValueUnit
 
 from migrations import sample_csv
+from migrations.__main__ import main
 from migrations.storage_migration import MigrationInputError
 
 
@@ -84,6 +85,30 @@ def test_synthetic_key_rerun_skips_equal_history_and_rejects_differences(
         first.output_path.read_bytes(),
         first.output_path.stat().st_mtime_ns,
     ) == before
+
+
+def test_csv_cli_rerun_skips_and_conflict_exits_two(
+    tmp_path: Path, entry: ResultEntry, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+    source = tmp_path / "cli.csv"
+    source.write_text("dev_value,dev_unit,T1 (us)\n0.1,V,50\n")
+    arguments = [str(source), "--result-root", str(entry.result_path.parent),
+                 "--database-root", str(entry.database_path.parent),
+                 "--entry", "synthetic", "--component", "Q1"]
+    assert main(arguments) == 0
+    capsys.readouterr()
+    output = entry.samples("Q1").path
+    before = output.read_bytes(), output.stat().st_mtime_ns
+    assert main(arguments) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["converted_rows"] == 0, "CLI must not append the same synthetic row"
+    assert report["skipped"][0]["summary"] == "legacy-cli-1"
+    assert (output.read_bytes(), output.stat().st_mtime_ns) == before
+    source.write_text("dev_value,dev_unit,T1 (us)\n0.1,V,51\n")
+    assert main(arguments) == 2
+    assert "legacy-cli-1" in capsys.readouterr().err
+    assert (output.read_bytes(), output.stat().st_mtime_ns) == before
 
 
 def test_v2_native_unit_is_preserved_without_scaling(
