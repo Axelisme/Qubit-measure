@@ -1,5 +1,6 @@
 """Shared accepted-writeback executor over a bound point and opaque parameter metadata."""
 
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -138,15 +139,17 @@ def test_sample_numpy_producer_values_reach_ledger_and_sample_history(
         ("Q1", expected)
     ]
     row = bind_sample_table(storage.result_path, "Q1").latest("run-1")
+    assert row is not None
+    assert datetime.fromisoformat(str(row["at"])) == datetime.fromisoformat(event.at)
     assert row == expected | {
         "run_id": "run-1",
         "point": "a",
-        "at": event.at,
+        "at": row["at"],
         "source": event_id,
     }
     # Normalization must not replace values in the producer's original tree.
     assert isinstance(fields["freq"], np.float64)
-    assert isinstance(fit["stderr"], np.float32)
+    assert type(fit["stderr"]) is np.float32
 
 
 @pytest.mark.parametrize(
