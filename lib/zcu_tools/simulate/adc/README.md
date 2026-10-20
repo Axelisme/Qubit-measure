@@ -1,6 +1,15 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-20, shared mux shot paths and physical trace inputs
+**Last updated:** 2026-10-21, intracavity interval moments
+
+`cavity_fields` returns complex vacuum-start fields in fixed joint-state order,
+without population mixing or receiver calibration. `cavity_field_average`
+returns `CavityFieldAverage`: photon occupations and same-time field products
+averaged over an emitted-time interval, including coherent carriers and full
+ringdown. Flat inputs use analytic constant-line propagation and quadratic
+integrals. Shaped inputs retain the field ODE and converged quadrature, split at
+pulse boundaries, envelope corners and the decay timescale. ADC owns these
+field integrals; consumers project them into their own Stark or dephasing models.
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
