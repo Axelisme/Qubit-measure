@@ -76,6 +76,9 @@ def test_optional_invalid_input_disables_fit_and_shows_recoverable_error(
 
     driver.enter_text("Delay:", "")
     driver.screenshot(tmp_path / "04-blank-again.png")
+    fields = [item for item in driver.visible().widgets if item.kind == "QLineEdit"]
+    assert len(fields) == 1
+    assert fields[0].text == ""
     assert driver.observe("Analyze").enabled
     assert not any("number" in item.text for item in driver.visible().widgets)
 

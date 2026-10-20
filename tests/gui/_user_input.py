@@ -762,7 +762,10 @@ class ComponentDriver:
         if self._can_interact(widget):
             mouse_click(widget, widget.rect().center())
             key_click(widget, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
-            type_text(widget, value)
+            if value == "":
+                key_click(widget, Qt.Key.Key_Backspace)
+            else:
+                type_text(widget, value)
             if commit:
                 key_click(widget, Qt.Key.Key_Return)
         QApplication.processEvents()
