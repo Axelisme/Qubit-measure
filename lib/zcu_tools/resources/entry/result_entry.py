@@ -142,24 +142,46 @@ class ResultEntry:
         """Return this entry's exact Database directory, not the parent root."""
         return self._database_path
 
-    def load_aliases(self) -> EntryAliases | None:
-        """Read the entry-authored table, or None only when its file is absent.
+    def load_aliases(self, *, point: str | None = None) -> EntryAliases:
+        """Read setup aliases, or one existing point's aliases when point is set.
 
-        Preserve order, empty bindings and raw $ links. Accept zcu.aliases 1.x;
-        header/schema/YAML and I/O errors propagate without preset fallback.
+        point=None selects <entry>/aliases.yaml. Otherwise point is a safe
+        single-segment label selecting <entry>/points/<point>/aliases.yaml;
+        invalid labels raise ValueError, and missing point.yaml or module_cfg.yaml
+        raises FileNotFoundError. Neither parameter document is parsed or changed.
+        A missing alias file returns an empty EntryAliases, without copying or
+        falling back to setup. Preserve order, empty bindings and raw $ links.
+        Accept zcu.aliases 1.x; header/schema/YAML and I/O errors propagate.
         No component lookup or writes occur. Syntax validation belongs to the
-        caller\'s alias table owner.
+        caller's alias table owner.
         """
-        return load_entry_aliases(self._result_path / "aliases.yaml")
+        aliases = load_entry_aliases(self._aliases_path(point))
+        return EntryAliases(aliases={}) if aliases is None else aliases
 
-    def save_aliases(self, aliases: EntryAliases) -> None:
-        """Atomically save this named authored table as zcu.aliases 1.0.
+    def save_aliases(self, aliases: EntryAliases, *, point: str | None = None) -> None:
+        """Atomically replace setup or point aliases with the named raw table.
 
-        Strict string validation precedes sibling-temp replacement. Failure
-        retains the old file and propagates its storage error. No point, setup,
-        ledger or preferences change; no multiwriter/crash guarantee is offered.
+        aliases is an EntryAliases containing ordered string bindings, not
+        resolved names. point=None selects setup; a safe single-segment point
+        label selects only that point's aliases.yaml. Invalid labels raise
+        ValueError; missing point.yaml or module_cfg.yaml raises FileNotFoundError.
+        Neither parameter document is parsed or changed. Write zcu.aliases 1.0
+        after strict string validation, using sibling-temp replacement. Schema,
+        YAML and I/O errors propagate; failed replacement retains the old file.
+        Other alias tables, parameters, library, ledger and preferences do not
+        change. No multiwriter merge or crash guarantee is offered.
         """
-        save_entry_aliases(self._result_path / "aliases.yaml", aliases)
+        save_entry_aliases(self._aliases_path(point), aliases)
+
+    def _aliases_path(self, point: str | None) -> Path:
+        if point is None:
+            return self._result_path / "aliases.yaml"
+        directory = _entry_path(self._result_path / "points", point)
+        for name in ("point.yaml", "module_cfg.yaml"):
+            source = directory / name
+            if not source.is_file():
+                raise FileNotFoundError(source)
+        return directory / "aliases.yaml"
 
     @property
     def ledger(self) -> RecordsLedger:
@@ -250,8 +272,11 @@ class ResultEntry:
         otherwise the source point.yaml. Renew created_at in the independent copy.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
         PointView using the same resolved result/database roots. Reload published
-        point and module_cfg and renew creation time. Point values and opaque
-        metadata copy verbatim. Library sources keep the library contract:
+        point and module_cfg and renew creation time. Copy aliases.yaml from
+        setup when seeding, or from the source point when cloning, only if present.
+        Missing source aliases stay absent, without setup fallback during clone.
+        All alias tables remain independent after creation. Point values and
+        opaque metadata copy verbatim. Library sources keep the library contract:
         cross-entry nonmanual library sources become local import events with
         copied JSON attachments, and library sources mark the direct clone
         origin. origin identifies the importing frontend as gui, notebook or mcp.
@@ -312,6 +337,9 @@ class ResultEntry:
                 },
                 stream,
             )
+        aliases = self._result_path / "aliases.yaml"
+        if aliases.exists():
+            shutil.copyfile(aliases, destination / "aliases.yaml")
 
     def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
         result_root = self._result_path.parent
@@ -357,6 +385,9 @@ class ResultEntry:
             store.refresh()
             point_document = store.snapshot()
             shutil.copyfile(source / "point.yaml", destination / "point.yaml")
+        aliases = source / "aliases.yaml"
+        if aliases.exists():
+            shutil.copyfile(aliases, destination / "aliases.yaml")
         library_store = source_entry._library_store(source / "module_cfg.yaml")
         with library_store.locked():
             library_store.refresh()

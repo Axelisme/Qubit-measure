@@ -229,19 +229,19 @@ def test_composition_supplies_templates_presets_and_the_shared_arb_dialog(
         menu = child(dialog, QPushButton, "inspect.aliases.load_preset").menu()
         assert menu is not None
         assert [action.text() for action in menu.actions()] == ["default", "probe"]
-        menu.actions()[1].trigger()
-        child(dialog, QPushButton, "inspect.aliases.apply").click()
-        assert app.services.context.get_alias_rows() == presets["probe"]
         button(dialog, "Arb Waveforms…").click()
         qapp.processEvents()
         arb = [d for d in app.window.findChildren(ArbWaveformDialog) if d.isVisible()]
         assert len(arb) == 1
         arb[0].close()
-        # A point is needed to materialize a template into an editable entry.
+        # Alias Apply and template creation both require a selected point.
         app.services.settings.new_entry(EntryRequest("sample"))
         app.services.context.new_point(
             PointCreateRequest("source", "", CommandOrigin("gui"))
         )
+        menu.actions()[1].trigger()
+        child(dialog, QPushButton, "inspect.aliases.apply").click()
+        assert app.services.context.get_alias_rows() == presets["probe"]
         child(dialog, QTabWidget, "").setCurrentIndex(1)
         button(dialog, "New").click()
         qapp.processEvents()
@@ -254,6 +254,9 @@ def test_composition_supplies_templates_presets_and_the_shared_arb_dialog(
             "Q1.waveforms.flat"
         ) == ConstWaveformCfg(length=0.3)
     finally:
+        # A failed assertion after loading a preset must not open a native modal.
+        for dialog in app.window.findChildren(InspectDialog):
+            child(dialog, QPushButton, "inspect.aliases.revert").click()
         app.window.close()
         app.shutdown()
         app.window.deleteLater()

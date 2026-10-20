@@ -4,9 +4,7 @@ import pytest
 from zcu_tools import cfg_model
 
 
-def test_seeds_expand_default_and_explicit_bindings_without_losing_literals() -> None:
-    registry = cfg_model.PlaceholderRegistry()
-    assert registry.current() == {}
+def test_seeds_expand_explicit_bindings_without_losing_literals() -> None:
     definition = cfg_model.TemplateDef(
         cfg_model.PulseSpec,
         "Synthetic pulse",
@@ -18,26 +16,21 @@ def test_seeds_expand_default_and_explicit_bindings_without_losing_literals() ->
         },
     )
     with pytest.raises(ValueError, match="drive"):
-        definition.expanded_seeds(defaults=registry.current())
-    registry.register("drive", "$source")
-    registry.register("sensor", "$detector")
-    assert definition.expanded_seeds(defaults=registry.current()) == {
+        definition.expanded_seeds()
+    assert definition.expanded_seeds(
+        bindings={"drive": "$source", "sensor": "$detector"}
+    ) == {
         "freq": cfg_model.Expr("$source.freq + $detector.offset"),
         "desc": "Literal $source",
         "gain": 0.2,
         "ch": 2,
     }
-    assert definition.expanded_seeds(
-        defaults=registry.current(), bindings={"drive": "$other"}
-    )["freq"] == cfg_model.Expr("$other.freq + $detector.offset")
     assert (
         cfg_model.expand_path(
             "{unregistered}.module.readout", bindings={"unregistered": "S2"}
         )
         == "S2.module.readout"
     )
-    assert registry.current() == {"drive": "$source", "sensor": "$detector"}
-    assert cfg_model.PlaceholderRegistry().current() == {}
 
 
 @pytest.mark.parametrize("text", ["{drive.missing}", "{drive", "{}", "{drive[0]}"])
@@ -86,19 +79,14 @@ def test_path_expansion_requires_binding_even_for_former_primary_names() -> None
             cfg_model.expand_path("{" + name + "}.module.readout")
 
 
-def test_registry_snapshots_and_template_bindings_are_detached() -> None:
-    registry = cfg_model.PlaceholderRegistry()
-    registry.register("drive", "$source")
-    snapshot = registry.current()
-    registry.register("drive", "$later")
-    assert snapshot == {"drive": "$source"}
+def test_template_bindings_are_detached() -> None:
     bindings = {"drive": "$explicit"}
     template = cfg_model.Template("synthetic", bindings=bindings)
     bindings["drive"] = "$mutated"
     assert template.bindings == {"drive": "$explicit"}
     assert (
-        cfg_model.expand_path("{{literal}} {drive}", defaults=snapshot)
-        == "{literal} $source"
+        cfg_model.expand_path("{{literal}} {drive}", bindings=template.bindings)
+        == "{literal} $explicit"
     )
 
 

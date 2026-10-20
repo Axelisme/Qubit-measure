@@ -376,6 +376,7 @@ def test_existing_tab_and_run_keep_point_until_reset(
     assert first.snapshot is not None
     assert first.snapshot.point == "first"
     services.context.new_point(PointCreateRequest("second", "", CommandOrigin("gui")))
+    services.context.set_alias_rows((AliasRow("qubit", "Q1"), AliasRow("custom", "Q2")))
     parameters = services.context.read_context()
     services.context.set_parameter(parameters.target, "Q1.gain", 30.0)
     before_reset = services.guard.capture_run_inputs(tab_id)
