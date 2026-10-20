@@ -28,8 +28,9 @@ Script 透過公開 ctx 在該專案建立 `ftf-demo`，從相鄰 `entry-templat
 加入 Q1、Q2、coupler、R1、R2 與 mux group MG12，再建立並選取第一個 point `initial`。
 MG12 使用 `MuxGroupSchema`（`group/mux`），依序綁定 Q1／R1 與 Q2／R2。
 Script 用 `ctx.context.apply_alias_rows` 初始化該 point 的 alias，框架保存到 `points/initial/aliases.yaml`。
-新 point 從 setup 複製這些元件。任一 entry 目錄已存在就報錯，不覆寫。
-後續失敗可能留下部分 entry，沒有跨檔交易或自動 rollback。
+新 point 從 setup 複製這些元件。`ftf-demo` 已存在時，script 不套用 template，
+直接開啟該 entry 並選取 `initial`，保留之前的修改；`initial` 不存在就報錯。
+首次建立中途失敗可能留下部分 entry，沒有跨檔交易或自動 rollback。
 
 Script 接著建立離線 FTF 環境，安裝 SoC，登記 f1_bias、coupler_bias、
 f2_bias 三個 live device，並開啟 `onetone/freq` tab。毋須手動 Open 或選 point。
