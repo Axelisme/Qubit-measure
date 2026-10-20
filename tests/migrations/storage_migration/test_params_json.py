@@ -396,7 +396,8 @@ def test_unknown_meta_collision_keeps_formal_value_and_reports_exact_destination
     target = entry.result_path / ("points/bias/point.yaml" if context else "setup.yaml")
     assert document_value(snapshot(view), "general.ext.flux_value") == 0.4
     row = next(
-        row for row in report.key_mappings
+        row
+        for row in report.key_mappings
         if row.old_file == source and row.old_key == "flux_value"
     )
     assert row.source_keys == ("flux_value",)
@@ -411,7 +412,12 @@ def test_unknown_meta_collision_keeps_formal_value_and_reports_exact_destination
         }
         assert row.action == "preserved"
         assert row.new_path is None
-        assert row.destination_keys == ("general", "ext", "legacy_meta_info", "flux_value")
+        assert row.destination_keys == (
+            "general",
+            "ext",
+            "legacy_meta_info",
+            "flux_value",
+        )
     assert not [item for item in report.pending if item.source == source]
     assert dry.key_mappings == report.key_mappings
 
@@ -420,7 +426,8 @@ def test_unknown_expression_collision_preserves_pending_and_formal_value(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping
 ) -> None:
     source = write_meta(
-        request_data, "",
+        request_data,
+        "",
         {"cur_A": 0.4, "flux_unit": "V", "flux_value": "=md.other"},
     )
     report = migrate(request_data, metadata_mapping)
@@ -429,13 +436,19 @@ def test_unknown_expression_collision_preserves_pending_and_formal_value(
     assert document_value(setup, "general.ext.legacy_meta_info") == {
         "flux_value": "=md.other"
     }
-    row = next(row for row in report.key_mappings if row.old_file == source and row.old_key == "flux_value")
+    row = next(
+        row
+        for row in report.key_mappings
+        if row.old_file == source and row.old_key == "flux_value"
+    )
     assert row.action == "preserved"
     assert row.source_keys == ("flux_value",)
     assert row.destination_keys == ("general", "ext", "legacy_meta_info", "flux_value")
     assert row.new_path is None
     assert any(
-        item.source == source and item.location == "flux_value" and "expression" in item.reason
+        item.source == source
+        and item.location == "flux_value"
+        and "expression" in item.reason
         for item in report.pending
     )
 
@@ -469,9 +482,16 @@ def test_point_unknown_collision_protects_only_successful_setup_projection(
         assert row.new_path == "general.ext.flux_value"
         assert "inherited" in row.reason.lower()
     else:
-        assert document_value(point, "general.ext.legacy_meta_info") == {"flux_value": 0.9}
+        assert document_value(point, "general.ext.legacy_meta_info") == {
+            "flux_value": 0.9
+        }
         assert row.action == "preserved"
-        assert row.destination_keys == ("general", "ext", "legacy_meta_info", "flux_value")
+        assert row.destination_keys == (
+            "general",
+            "ext",
+            "legacy_meta_info",
+            "flux_value",
+        )
     assert not [item for item in report.pending if item.source == source]
     assert dry.key_mappings == report.key_mappings
 

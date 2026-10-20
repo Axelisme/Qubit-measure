@@ -28,6 +28,9 @@ class KeyRule:
     old_key is the literal legacy key. target_path is its dotted component,
     provenance or module destination, required for value/stderr/module actions.
     action selects value, stderr, deferred module conversion, removal or pending.
+    A remove rule's optional target_path names its documented formal alias target;
+    removal requires an equal value successfully converted in the same context.
+    Otherwise preserve the original source key/value in legacy_meta_info.
     reason explains the decision for the human-facing report. wrap_key, when
     non-None, wraps a value in one named field for a complete container write;
     only value actions support it. requires_keys lists explicit, non-expression
@@ -266,7 +269,8 @@ class KeyMappingItem:
     location, such as fluxdep_fit.flux_unit even when source_keys is ("flux_unit",).
     Preserved rows always record source_keys.
     new_file is the absolute target file, or None when no destination is available
-    or acquired (including library dry-run rows), or the key is removed.
+    or acquired (including library dry-run rows). A deduplicated alias records the
+    formal target file and new_path whose successfully converted value matches it.
     new_path is the proposed dotted target path, or None without a declared target.
     A library dry-run may have new_path with new_file=None; this alone is not pending.
     action selects the explicit rule operation, or preserved when raw content is

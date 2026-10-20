@@ -8,6 +8,7 @@ from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.document_store import YamlValue
 from zcu_tools.resources.entry import EditView, document_value, snapshot
 
+from ._meta_info import preserve_meta_field
 from .evidence import has_legacy_expression
 from .models import KeyMappingItem, KeyRule, MigrationMapping
 from .state import MigrationSession, clear_pending, record_key_mapping, record_pending
@@ -21,12 +22,14 @@ _UNIT_KEYS = ("flux_unit", "jpa_flux_unit")
 class ResolvedFluxUnits:
     """Isolated values plus adopted source labels and blocked group diagnostics.
 
+    source_values keeps actual source JSON, never the null used for blocked evidence.
     values adds accepted active unit keys, or null for blocked evidence.
     reasons names the actual source file or operator assumption by unit key.
     blocked names missing, invalid or conflicting evidence by unit key.
     local_flux_unit is a scalar value, not a numeric group's evidence.
     """
 
+    source_values: JsonObject
     values: JsonObject
     reasons: dict[str, str]
     blocked: dict[str, str]
@@ -124,7 +127,7 @@ def resolve_flux_units(
             blocked[key] = f"Missing explicit evidence keys: {key}"
         if key in blocked:
             result[key] = None
-    return ResolvedFluxUnits(result, reasons, blocked)
+    return ResolvedFluxUnits(dict(values), result, reasons, blocked)
 
 
 def _clear_value(view: EditView, path: str) -> tuple[str, YamlValue]:
@@ -193,6 +196,9 @@ def apply_flux_groups(
 ) -> set[str]:
     """Stage each active flux group before accepting it into the context draft.
 
+    units.source_values holds the actual JSON before unit resolution. Blocked
+    source fields stay in general.ext.legacy_meta_info with literal report keys;
+    synthetic evidence keys are never stored as original content.
     Owner-invalid units/values become located pending for the whole group.
     On a point unit change, clear inherited, unreplaced values and metadata only
     in that group. Accepted group updates share the caller's single edit commit.
@@ -200,6 +206,7 @@ def apply_flux_groups(
     Return consumed source keys so ordinary scalar mapping does not reapply them.
     """
     consumed: set[str] = set()
+    source_values = units.source_values
     is_point = source.parent != session.manifest.report.source.result_path
     for key in _UNIT_KEYS:
         unit_rule = next((rule for rule in mapping.rules if rule.old_key == key), None)
@@ -223,19 +230,41 @@ def apply_flux_groups(
                 for path in cleared:
                     view.set_meta(path, {})
         for rule in present:
+            destination_keys = None
+            reason = error or units.reasons[key]
             if error is None:
                 clear_pending(session, source, rule.old_key)
             else:
-                record_pending(session, source, rule.old_key, error)
+                reason = (
+                    f"{error}; blocked source group preserved at "
+                    "general.ext.legacy_meta_info"
+                )
+                if rule.old_key in source_values:
+                    destination_keys = preserve_meta_field(
+                        view, rule.old_key, source_values[rule.old_key], legacy=True
+                    )
+                    reason = (
+                        f"{error}; source preserved at "
+                        f"general.ext.legacy_meta_info[{rule.old_key!r}]"
+                    )
+                record_pending(session, source, rule.old_key, reason)
             record_key_mapping(
                 session,
                 KeyMappingItem(
                     old_file=source,
                     old_key=rule.old_key,
                     new_file=target,
-                    new_path=rule.target_path,
-                    action="pending" if error else "value",
-                    reason=error or units.reasons[key],
+                    new_path=None if destination_keys else rule.target_path,
+                    action="preserved"
+                    if destination_keys
+                    else "pending"
+                    if error
+                    else "value",
+                    reason=reason,
+                    source_keys=(rule.old_key,)
+                    if rule.old_key in source_values
+                    else None,
+                    destination_keys=destination_keys,
                 ),
             )
     return consumed

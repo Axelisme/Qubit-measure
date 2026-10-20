@@ -206,7 +206,11 @@ PY
    | `pi_gain`、`pi_len`、`pi2_gain`、`pi2_len` | 有對應的轉換後 module 時寫進該 module；沒有時存 `Q.ext.<舊 key>` |
 
    Q、R、J 是已確認的實際 component 名。缺 R 或 J 的實體對應時，相關欄位列 pending，不新增虛構元件。
-   未列出的 key 以原名原值保全在適用的 ext，報告標 `preserved`；缺必要轉換證據的支援項目才列 pending。歷史 key 全表在 [storage_mapping.py](../migrations/storage_mapping.py)。
+   未映射的 meta key 以原名原值放在該 setup 或 point 的 `general.ext` 根層，包含 scalar、nested object、list 與 null。來源 key 若是 `legacy_meta_info` 或 `legacy_module_cfg`，放在 `general.ext.legacy_meta_info` 的同名 key。例如 `legacy_module_cfg: [old]` 寫成 `general.ext.legacy_meta_info.legacy_module_cfg: [old]`，不覆寫容器。報告逐項標 `preserved`，不因未知欄位列 pending。`source_keys` 與 `destination_keys` 是 literal key 序列，含點的原 key 仍是一個 segment，保留 row 的 `new_path` 是 null。
+
+   如果未知原 key 撞本 context 正式投影的實際 ext 目的，先保留正式值。例如 `cur_A: 0.4` 已寫入 `general.ext.flux_value`，未知的 `flux_value: 0.9` 就存到 `general.ext.legacy_meta_info.flux_value`。若該未知原值也是 0.4，按這個正式目的去重，報告用 `remove` 列出 `general.ext.flux_value`。其他位置碰巧出現相同數字，不構成去重理由。Point 繼承 setup 已成功正式投影的 ext 目的後，也按此規則保護該目的。Point 的撞名原文不同值就存入該 point 的 `legacy_meta_info[原key]`，同值按對應繼承目的去重。必須能追到 setup 的成功正式 projection，不能只因 ext 目前有同名值就當成正式欄位。Point 若明示正式來源，仍依同檔優先與原子分組清除規則處理。
+
+   `qub_0_1_ch` 與 `qub_ch` 都存在時，正式 wiring 採前者。兩值不同就把落選的 `qub_ch` 原值放入 `general.ext.legacy_meta_info`；同值才去重。舊 remove 表中的 `readout_f`、`flx_bias`、`mA_c`、`mA_e`、`resetf1_w`、`cur_jpa_A`、`fake_peak`、`log_scale` 也不能直接丟棄。`readout_f` 的正式對應是 resonator 的 `freq`，`flx_bias` 的正式對應是 `flux_bias` 寫入的 qubit `ext.flux_bias`。只有同一份 meta 的對應正式來源成功寫入且同值時，才不另存原文，報告用 `remove` 指出正式檔案與欄位。不同值、未成功轉換或沒有可靠對應時，原名原值放入 `general.ext.legacy_meta_info`。不要拿繼承值或其他欄位碰巧相同的數字當去重依據。歷史 key 全表在 [storage_mapping.py](../migrations/storage_mapping.py)。
 
 2. **單位照抄，不換算。** 頻率 MHz、時間 us、能量 GHz。磁通數字分兩組：`flux_unit` 管 global 組（`cur_A`、`flx_half`、`flx_period`、`flx_int`、`flux_bias`），單位寫到 `general.ext.flux_unit`；`jpa_flux_unit` 管 `best_jpa_flux`，單位寫到 `J.flux_unit`。`local_flux_unit` 只照抄成 `Q.flux_unit`，不當任何數字的單位。每組依序取單位：
    1. 同一份 meta 明寫的單位。
@@ -214,7 +218,7 @@ PY
    3. 使用者宣告的假設單位，報告標「假設單位」。本專案的資料：global 組用 `mA`，JPA 組用 `V`。
    4. 以上都沒有：數字不寫入，列 pending。
 
-   同一組、同一層的兩個明寫單位互相衝突時（例如根層 meta 與 `params.json` 不同），列 pending，不擇一。單位不符合欄位型別時（`J.flux_unit`、`Q.flux_unit` 只接受 A 或 V），不換算，整組列 pending。數字與單位一起寫入或一起 pending。報告記下實際採用的是哪份檔的單位。
+   同一組、同一層的兩個明寫單位互相衝突時（例如根層 meta 與 `params.json` 不同），列 pending，不擇一。單位不符合欄位型別時（`J.flux_unit`、`Q.flux_unit` 只接受 A 或 V），不換算，整組列 pending。數字與單位一起寫入或一起 pending。被阻擋的原 source key/value 存入該 context 的 `general.ext.legacy_meta_info`，報告的 pending 指向此位置，保留 row 仍標 `preserved`。來源的未知單位或衝突單位保留原文，不寫成生效單位，也不改成解析後的 null。只保留來源實際存在的 key，不另存已轉換的值或工具補出的 evidence key。`local_flux_unit` 不被其他組借用，若 owner 不接受它，單獨 pending 並保留原文。報告記下實際採用的是哪份檔的單位。
 
 3. **params 原文 → `legacy_params`。** `params.json` 的每個區塊連同內含 metadata 原文寫進 `components.<Q>.ext.legacy_params.<區塊名>`。
    第 5 步轉成格式檔的區塊也照樣保留原文。`project`、`name`、`schema_version` 等識別資料也原文保留，不冒充 entry UUID。
