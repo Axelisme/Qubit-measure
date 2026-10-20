@@ -77,10 +77,12 @@ class FluxFrame:
 
     def __post_init__(self) -> None:
         if (
-            not isinstance(self.params, tuple)
+            # tolerated: Reject non-tuple runtime params with ValueError before len or iteration.
+            not isinstance(self.params, tuple)  # pyright: ignore[reportUnnecessaryIsInstance]
             or len(self.params) != 3
             or not all(
-                isinstance(value, (int, float)) and np.isfinite(value)
+                # tolerated: Reject nonnumeric runtime params with ValueError before np.isfinite.
+                isinstance(value, (int, float)) and np.isfinite(value)  # pyright: ignore[reportUnnecessaryIsInstance]
                 for value in self.params
             )
         ):
@@ -164,7 +166,8 @@ class SampleSource:
     f01_fit_scale_mhz: float = 20.0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.integer_flux_offset, int) or isinstance(
+        # tolerated: Reject non-int runtime offsets with ValueError; integral floats are not branches.
+        if not isinstance(self.integer_flux_offset, int) or isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
             self.integer_flux_offset, bool
         ):
             raise ValueError("integer_flux_offset must be an int")

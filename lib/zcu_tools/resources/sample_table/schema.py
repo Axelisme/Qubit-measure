@@ -269,7 +269,8 @@ def validate_sample_table_v2(
     empty table or a zero-row table with valid v2 headers; tables that still
     carry legacy/stale coordinate columns always fail.
     """
-    if not isinstance(samples, pd.DataFrame):
+    # tolerated: Reject non-DataFrame runtime inputs with invalid_input before column checks.
+    if not isinstance(samples, pd.DataFrame):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise SampleTableV2Error(
             "samples must be a pandas DataFrame", reason="invalid_input"
         )
@@ -508,7 +509,8 @@ def migrate_sample_table_v2(
     Frame values normalize to base A/V units; the frame physical kind must match
     the device value kind. The input DataFrame is never mutated.
     """
-    if not isinstance(samples, pd.DataFrame):
+    # tolerated: Reject non-DataFrame runtime inputs with invalid_input before unit or column checks.
+    if not isinstance(samples, pd.DataFrame):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise SampleTableV2Error(
             "samples must be a pandas DataFrame", reason="invalid_input"
         )
