@@ -25,7 +25,8 @@ uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
 
 `--project-root` 須指向既存的絕對目錄。省略時使用 repo root。
 Script 透過公開 ctx 在該專案建立 `ftf-demo`，從相鄰 `entry-template.yaml`
-加入 Q1、Q2、coupler、R1、R2，再建立並選取第一個 point `initial`。
+加入 Q1、Q2、coupler、R1、R2 與 mux group MG12，再建立並選取第一個 point `initial`。
+MG12 使用 `MuxGroupSchema`（`group/mux`），依序綁定 Q1／R1 與 Q2／R2。
 Script 用 `ctx.context.apply_alias_rows` 初始化該 point 的 alias，框架保存到 `points/initial/aliases.yaml`。
 新 point 從 setup 複製這些元件。任一 entry 目錄已存在就報錯，不覆寫。
 後續失敗可能留下部分 entry，沒有跨檔交易或自動 rollback。
@@ -46,6 +47,7 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 
 `entry-template.yaml` 使用 `default.yaml` 的 EJ/EC/EL 與 resonator 頻率。Energies 用 GHz，R1/R2 頻率為 7190/7080 MHz。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。範本提供接線與引用，不提供 module library 或校準完成的量測參數。若修改工作副本的模型或接線，也要調整 entry 範本或已建立的 entry。
 
+初始 alias `mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。Inspect > Aliases > Load preset 可選 FTF，再按 Apply 保存。載入 preset 只替換 draft，不會建立元件或 device。
 
 ## 工作副本與調參

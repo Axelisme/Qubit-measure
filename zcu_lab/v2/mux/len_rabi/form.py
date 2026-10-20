@@ -1,5 +1,7 @@
 """Capture-owned native mux Form; the picker never selects participants."""
 
+from dataclasses import replace
+
 from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
@@ -21,6 +23,8 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
     tones: list[FormNode] = []
     for name in names:
         drive, stop = len_rabi_initial_values(ctx.parameters, qubit=name)
+        # Core requires const/flat_top and replaces each total duration.
+        drive = replace(drive, set={**drive.set, "waveform.length": Hidden(0.0)})
         tones.append(
             {
                 "name": name,

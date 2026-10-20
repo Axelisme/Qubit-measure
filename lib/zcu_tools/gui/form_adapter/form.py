@@ -45,7 +45,8 @@ class Form[C: ConfigBase]:
 
     core_cfg is the validated result type; tree keys follow its nested field
     names. Unspecified fields derive shape and defaults from core declarations.
-    Hidden requires a core default; unknown keys fail with ValueError at creation.
+    Hidden(value) omits input and supplies a core-validated literal at conversion.
+    Hidden() requires a core default; unknown keys fail with ValueError at creation.
     model is a generated FormModel class, used only through the public form API.
     default_input resolves names once against the supplied captured FormEnv;
     hosts use the same env until Reset. The host calls bind_templates with its

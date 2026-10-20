@@ -22,7 +22,8 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
                 "flux_pulse": Template(
                     "flux_pulse",
                     bindings={"qubit": "$qubit"},
-                    set={"waveform.length": 0.1},
+                    # Run supplies gain; length remains a waveform-shape baseline.
+                    set={"gain": Hidden(0.0), "waveform.length": 0.1},
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")

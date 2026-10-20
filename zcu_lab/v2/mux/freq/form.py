@@ -24,7 +24,8 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
             "drive": Template(
                 "qub_probe",
                 bindings={"qubit": name},
-                set={"gain": 0.1, "waveform.length": 1.0},
+                # Run supplies this independent frequency scan.
+                set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
             ),
             "sweep": Range.around(f"{name}.freq", f"1.5 * {name}.kappa", expts=301),
         }

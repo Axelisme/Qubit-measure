@@ -79,6 +79,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                     "readout",
                     bindings={"resonator": "$resonator"},
                     set={
+                        # Run supplies the linear sweep or homophasal frequency grid.
+                        "freq": Hidden(0.0),
                         "gain": 0.05,
                         "ro_length": initial_ro_length(),
                     },
