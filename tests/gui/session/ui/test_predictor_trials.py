@@ -1,5 +1,6 @@
 """Independent dialog trial parameters never alter a component or source file."""
 
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -21,6 +22,79 @@ from zcu_tools.simulate.transmon import TransmonParams
 
 import tests.gui._component_fakes as components
 from tests.gui._predictor_fakes import FailingPredictorService
+from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
+
+
+@pytest.mark.parametrize(
+    "trial, name",
+    [
+        (FluxoniumParams(5.0, 1.0, None, 0.0, 1.0, 0.0), "EL"),
+        (TransmonParams(20.0, 1.0, None, 0.0, 1.0, 0.0), "d"),
+    ],
+    ids=["fluxonium", "transmon"],
+)
+def test_blank_parameters_can_be_completed_cleared_and_corrected(
+    qapp, tmp_path: Path, trial, name
+) -> None:
+    dialog = PredictorDialog(PredictorControlFacet(PredictorService()), params=trial)
+    evidence = (
+        Path(os.environ.get("PREDICTOR_BLANK_EVIDENCE", str(tmp_path))) / trial.model
+    )
+    field_name = f"predictor_input_{name}"
+    try:
+        dialog.show()
+        qapp.processEvents()
+        ui = ComponentDriver(dialog)
+        ui.screenshot(evidence / "01-missing.png")
+        field = ui.observe(object_name=field_name)
+        assert field.visible and field.enabled and field.text == ""
+        assert (
+            f"Missing parameters: {name}"
+            in ui.observe(object_name="predictor_status").text
+        )
+
+        ui.enter_text(object_name=field_name, value="0.1", commit=False)
+        qt_until(
+            lambda: any(axis.visible_curves > 0 for axis in ui.plots().axes),
+            label="completed predictor curves",
+        )
+        ui.screenshot(evidence / "02-complete.png")
+        assert (
+            "Missing parameters" not in ui.observe(object_name="predictor_status").text
+        )
+
+        ui.enter_text(object_name=field_name, value="", commit=False)
+        ui.click(object_name="predictor_input_half")
+        ui.screenshot(evidence / "03-cleared.png")
+        assert ui.observe(object_name=field_name).text == ""
+        assert (
+            f"Missing parameters: {name}"
+            in ui.observe(object_name="predictor_status").text
+        )
+        assert all(axis.visible_curves == 0 for axis in ui.plots().axes)
+
+        for index, invalid in enumerate(("oops", "1e", "nan", "inf"), start=4):
+            ui.enter_text(object_name=field_name, value=invalid, commit=False)
+            ui.screenshot(evidence / f"{index:02}-invalid-{invalid}.png")
+            field = ui.observe(object_name=field_name)
+            assert field.text == invalid
+            assert name in field.tooltip and "finite number" in field.tooltip
+            assert name in ui.observe(object_name="predictor_status").text
+            assert not ui.observe("Calibrate").enabled
+            assert all(axis.visible_curves == 0 for axis in ui.plots().axes)
+
+        ui.enter_text(object_name=field_name, value="0.1", commit=False)
+        qt_until(
+            lambda: any(axis.visible_curves > 0 for axis in ui.plots().axes),
+            label="corrected predictor curves",
+        )
+        ui.screenshot(evidence / "08-corrected.png")
+        assert "finite number" not in ui.observe(object_name=field_name).tooltip
+        ui.click("Close")
+    finally:
+        dialog.close()
+        dialog.deleteLater()
 
 
 def test_dialog_logs_unexpected_value_error_with_traceback(qapp, caplog) -> None:
