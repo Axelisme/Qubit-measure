@@ -37,6 +37,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.widgets import error_colour, mixed_colour
 from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -57,6 +58,7 @@ class _Session:
     bus: BaseEventBus
     entry: ResultEntry | None = None
     dialogs: list[InspectDialog] = field(default_factory=list)
+    owner: ContextService | None = None
 
 
 def _service(bus: BaseEventBus, rows: tuple[AliasRow, ...] = ()) -> ContextService:
@@ -110,7 +112,7 @@ def entry_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service.install_entry(entry)
     service.use_point(PointUseRequest("working"))
     service.set_alias_rows((AliasRow("qubit", "Q1"),))
-    session = _Session(ContextControlFacet(context=service), bus, entry)
+    session = _Session(ContextControlFacet(context=service), bus, entry, owner=service)
     try:
         yield session
     finally:
@@ -257,6 +259,70 @@ def test_apply_without_point_shows_actionable_error(qapp: QApplication, tmp_path
         assert ui.observe(object_name="inspect.aliases.apply").enabled
     finally:
         _close_all(session, qapp)
+
+
+def test_clean_alias_draft_follows_selected_point(entry_session) -> None:
+    entry = entry_session.entry
+    assert entry is not None
+    entry.new_point("other")
+    entry.save_aliases(EntryAliases(aliases={"other_alias": "R2"}), point="other")
+    page = _aliases_page(_open(entry_session))
+    entry_session.control.use_point(PointUseRequest("other"))
+    assert _shown_rows(_table(page)) == [("other_alias", "R2")]
+
+
+@pytest.mark.parametrize("switch", ["point", "entry"])
+def test_dirty_alias_draft_rejects_different_target_without_writing(
+    entry_session, tmp_path: Path, switch: str,
+) -> None:
+    entry = entry_session.entry
+    assert entry is not None
+    control = entry_session.control
+    control.apply_alias_rows(control.get_alias_rows())
+    source_rows = entry.load_aliases(point="working")
+    if switch == "entry":
+        destination = ResultEntry.create(
+            "different", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+        )
+        label = "working"
+    else:
+        destination = entry
+        label = "other"
+    destination.new_point(label)
+    destination.save_aliases(EntryAliases(aliases={"destination": "R2"}), point=label)
+    dialog = _open(entry_session)
+    page = _aliases_page(dialog)
+    _cell(_table(page), 0, 1).setText("DraftOnly")
+    if switch == "entry":
+        owner = entry_session.owner
+        assert owner is not None
+        owner.install_entry(destination)
+    control.use_point(PointUseRequest(label))
+    ui = ComponentDriver(dialog)
+    ui.click(object_name="inspect.aliases.apply")
+    assert ui.observe(object_name="inspect.aliases.error").text
+    assert _shown_rows(_table(page)) == [("qubit", "DraftOnly")]
+    assert entry.load_aliases(point="working") == source_rows
+    assert destination.load_aliases(point=label).aliases == {"destination": "R2"}
+
+
+def test_alias_revert_loads_current_target_then_apply_saves_there(entry_session) -> None:
+    entry = entry_session.entry
+    assert entry is not None
+    entry.new_point("other")
+    entry.save_aliases(EntryAliases(aliases={"destination": "R2"}), point="other")
+    dialog = _open(entry_session)
+    page = _aliases_page(dialog)
+    _cell(_table(page), 0, 1).setText("DraftOnly")
+    entry_session.control.use_point(PointUseRequest("other"))
+    ui = ComponentDriver(dialog)
+    ui.click(object_name="inspect.aliases.revert")
+    assert _shown_rows(_table(page)) == [("destination", "R2")]
+    _cell(_table(page), 0, 1).setText("Confirmed")
+    ui.click(object_name="inspect.aliases.apply")
+    assert ui.observe(object_name="inspect.aliases.error").text == ""
+    assert entry.load_aliases(point="other").aliases == {"destination": "Confirmed"}
+    assert entry.load_aliases(point="working").aliases == {}
 
 
 def test_aliases_page_shows_the_installed_ordered_rows(memory_session) -> None:
