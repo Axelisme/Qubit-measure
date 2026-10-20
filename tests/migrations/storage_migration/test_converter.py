@@ -14,7 +14,7 @@ from zcu_tools.datafile import (
     JsonObject,
     load_run_data,
 )
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.views import FieldView
 
 from migrations.storage_migration import (
@@ -978,7 +978,7 @@ def test_wrapped_channel_creates_a_complete_optional_container(
     assert decision.new_path == "C1.channel.ch"
 
 
-def test_module_candidates_keep_destinations_and_declared_reference_priority(
+def test_pending_module_candidates_keep_destinations_without_slot(
     request_data: MigrationRequest,
     mapping: MigrationMapping,
 ) -> None:
@@ -1014,9 +1014,7 @@ def test_module_candidates_keep_destinations_and_declared_reference_priority(
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     ).use_point("context")
-    module = point.C1.module
-    assert isinstance(module, FieldView)
-    assert module.chosen == "C1.pulses.first_choice"
+    assert document_value(snapshot(point), "C1.module") == {}
     destinations = {
         item.old_key: item.new_path
         for item in report.key_mappings

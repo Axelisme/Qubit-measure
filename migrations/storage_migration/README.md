@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-20，CSV 未知欄位保全與具名欄位報告
+**Last updated:** 2026-10-20，CSV 未知欄位保全、具名欄位報告與已發布 Spec 的 slots
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
@@ -29,7 +29,7 @@
 - `backup.py` 擁有鏡像位置、完整複製、清單驗證與清理。Manifest 綁定兩份清單的 SHA256 及來源完整 hashes。每次 resume 只驗證本次鏡像，不重做備份，也不要求其他 chip/qubit 的內容固定。已搬移或已清理的來源不必存在。未完成的備份不授權遷移。首次備份之後、entry 建立之前若中斷，須人工核對本次鏡像與 records 才可重新開始。工具不認領既有目錄，也不刪共用根或其他備份。舊每-entry 備份不提供相容讀取或自動搬移。
 - Parameters 與 data 都完成、無未完成 publication、無 `point files` 暫待項且無 failure 後才清理。本次舊 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/` 會刪除。永久 pending 可留下，但報告位置改指向備份。原樣保存的 workflow 與其他未支援檔不是正常 runtime 資料；已轉換的 JSONL samples 與 figures 使用各自的新位置。
 - 清理前重驗備份與完整來源清單。來源新增、變更或非工具搬移造成的缺檔會拒絕清理。先持久化 `cleaning`，再逐檔核對 hash、刪檔並移除空目錄。中斷後 resume 只收尾清理，允許已刪的備份檔缺席，不重跑轉換。不承諾並行 writer 或掉電交易；來源有其他 writer 時不得執行。Dry-run 只規劃，連備份目錄與清單都不建立。
-- Parameters 將根層與 child point 的 module／waveform 轉成 `cfg_model` 的正式 Spec。根庫透過 `ResultEntry.module_library()` 提交到 entry 的 `module_cfg.yaml`，slots 寫 setup。Point 庫透過 `module_library(label)` 提交，slots 寫 point。Mapping 明示來源 family 與 canonical key，typed reference remap 由 `cfg_model` 擁有。新 point 的預設 library 繼承規則不變。
+- Parameters 將根層與 child point 的 module／waveform 轉成 `cfg_model` 的正式 Spec。根庫透過 `ResultEntry.module_library()` 提交到 entry 的 `module_cfg.yaml`，slots 寫 setup。Point 庫透過 `module_library(label)` 提交，slots 寫 point。Mapping 明示來源 family 與 canonical key，typed reference remap 由 `cfg_model` 擁有。Slots 依 mapping 次序選第一個成功發布的 Spec，失敗候選仍保留 located pending。沒有成功 module Spec 的合法空庫不建立引用。新 point 複製 setup YAML，但不複製 setup library。未完成的 parameters 遷移會清除 point 中無法由該 point 自己的 library 解析的繼承 slots。有效引用保持原值，成功的 child module 再依 mapping 覆寫。完成後 resume 不改使用者編輯。
 - `qub_ch` 只在同檔沒有 `qub_0_1_ch` 時映射 `Q.wiring.ch`。Pi 脈衝 scalar 找不到成功轉換的對應 module 時，按原 key 保存到 `component.ext`。已轉換的 params 不再複製成 entry 層 `params.json`；原文仍完整留在外部備份。
 - Component 的 global 磁通組包含 `cur_A`、`flx_half/period/int`、`flux_bias`，單位寫 `general.ext.flux_unit`。來源順序是同檔 `flux_unit`、根 meta_info 同 key、params 根 `flux_unit`、operator assumption。JPA 組只採 `jpa_flux_unit`，依同檔、根 meta_info、獨立 `assume_jpa_flux_unit` 順序。JPA 假設只接受 A/V，未提供就保持 pending，不借 qubit params 或 global 假設。CLI 這批資料明填 `--assume-flux-unit mA --assume-jpa-flux-unit V`，報告分別標「假設單位」。報告寫實際來源檔。根 meta_info 與 params 同層明示單位衝突時，整組 pending，不用假設解衝突。
 - Point 自己明示的單位優先。單位改變時，移除未被 point 覆寫的同組 setup 繼承數值及其 metadata。Nullable typed 值設 null，ext 值從 mapping 移除，metadata 依 owner 契約清為空。候選值先過 owner 驗證，再與新單位同筆 edit 提交。其他組不變。`local_flux_unit` 只照抄到 `Q.flux_unit`，不作任何數值證據或清除依據。Owner 不接受來源單位時，該組 pending，不換算。
