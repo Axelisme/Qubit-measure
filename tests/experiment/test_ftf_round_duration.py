@@ -13,6 +13,8 @@ from zcu_tools.resources.ftf import parse_ftf
 from tests.program.v2.simulation.support import raw_of
 from tests.resources._ftf_data import ftf_document
 
+pytestmark = pytest.mark.sim
+
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(

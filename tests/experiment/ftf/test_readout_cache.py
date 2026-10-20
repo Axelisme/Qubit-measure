@@ -14,6 +14,8 @@ from tests.experiment._ftf_templates import (
     snapshot,
 )
 
+pytestmark = pytest.mark.sim
+
 
 def test_acquires_share_solver_and_exact_sums_but_not_sampling(monkeypatch):
     schur = scipy.linalg.schur

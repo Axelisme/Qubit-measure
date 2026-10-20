@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-20，跨平台 GUI cache 隔離與 experiment device 測試邊界
+**Last updated:** 2026-10-20，evolution／adc／ftf 模擬引擎選集與跨平台 GUI cache 隔離
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -68,20 +68,35 @@ import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warnin
 若 integration test 允許某個 fit fallback warning，使用 test-local `filterwarnings` marker
 標註該測試的預期退化。
 
-pytest 預設排除 `slow`。ticket 內只跑受影響選集，不跑 slow，最多使用兩個 worker：
+pytest 預設使用 `-m "not slow and not sim"`，排除慢測試與模擬測試。
+ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` 時，才用
+`-m sim` 或包含 sim 的受影響選集跑模擬測試。`-m` 會取代預設過濾，
+若仍要排除慢測試，明寫 `-m "sim and not slow"`。
+
+少數 targeted tests 直接用 `-n 0`。跨多檔的 pytest 經共用重工作佇列，最多使用兩個 worker：
 
 ```bash
-uv run --directory <worktree> --no-sync -- pytest <affected-paths> -n 2
+<repo>/.agent_state/resource-coordination/heavy-slot.sh 900 \
+  uv run --directory <worktree> --no-sync -- pytest <affected-paths> -n 2
 ```
 
-task 進 land review 前才跑整套驗證。CLI 的 `-m ""` 取代預設 marker 過濾，包含 slow 與非 slow。
-完整測試固定使用四個 worker。重檢查經過全機資源限制，同 task 用 lock 串行：
+task 進 land review 前才跑全樹驗證。依變更範圍選擇 marker expression，兩種都包含 slow：
+
+- 未改 `lib/zcu_tools/simulate/`，用 `-m "not sim"`。
+- 改到 `lib/zcu_tools/simulate/`，用 `-m ""`，包含所有測試。
 
 ```bash
-flock <task-scratch>/heavy-task.lock <repo>/.agent_state/tools/heavy.sh \
+<repo>/.agent_state/resource-coordination/heavy-slot.sh 3000 \
   uv run --directory <worktree> --no-sync -- \
-  pytest -n 4 --dist=worksteal -m "" --durations=25
+  pytest -n 2 --dist=worksteal -m "not sim" --durations=25
+# 若改到 lib/zcu_tools/simulate/，將上面的 -m "not sim" 換成 -m ""。
 ```
+
+`tests/simulate/conftest.py` 在 collection 時為該目錄全部案例加上 `sim`，
+避免新測試檔漏標。其他目錄以 coverage per-test context 判定，只標記實際驅動
+`lib/zcu_tools/simulate/evolution/`、`adc/` 或 `ftf/` 模擬引擎函式本體的測試。
+只 import 型別或常數、呼叫 predictor 或其他物理模型 helper 不算。
+module 內超過半數案例符合門檻時用 `pytestmark`，否則逐 test function 標記。
 
 `-m slow` 只驗證 slow 選集，不是整套驗證。`requires_loopback` 等能力 marker 只宣告資源需求，
 不用來跳過慢測試。slow 門檻依整套實測決定，數據與理由記在 task receipt。

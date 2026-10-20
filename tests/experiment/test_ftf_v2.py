@@ -12,6 +12,8 @@ from zcu_tools.resources.ftf import parse_ftf
 
 from tests.resources._ftf_data import ftf_document
 
+pytestmark = pytest.mark.sim
+
 
 def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
     document = ftf_document()

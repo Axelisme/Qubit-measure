@@ -1,6 +1,7 @@
 """Receiver PSD conversion and public rounded ADC noise, independent of truth."""
 
 import numpy as np
+import pytest
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
     PointTimeline,
@@ -14,6 +15,8 @@ from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import single_point_template
 from tests.resources._ftf_data import ftf_document
+
+pytestmark = pytest.mark.sim
 
 
 def ftf_document_readout() -> dict[str, object]:
