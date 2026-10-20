@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from zcu_tools.datafile import JsonObject, json_values_equal
+from zcu_tools.datafile import JsonObject, json_values_equal, validate_run_id
 
 from .errors import MigrationInputError
 from .models import LegacyRunEvidence, MigrationRequest, MigrationRunEvidenceDocument
@@ -35,8 +35,12 @@ def load_run_evidence(source: Path) -> MigrationRunEvidenceDocument:
     Return typed entries and the full detached raw document, including unknown
     root/nested fields. Reject missing/wrong types, duplicate relative sources,
     absolute/'..'/empty paths, invalid lowercase SHA256 or non-UTC acquisition
-    times with MigrationInputError identifying source and field. Never infer
-    experiment, point, completion or acquisition time from paths or file dates.
+    times with MigrationInputError identifying source and field. Missing/null
+    started_at and run_id are allowed; malformed supplied values still fail.
+    Supplied run_id must match the native owner's identity format. Missing completion is
+    unknown and missing finished_at is None. Without a proven start, migration
+    writes native None/unknown/None, retaining this document's original evidence.
+    Never infer experiment, point, completion or acquisition time from paths or file dates.
     Missing cfg or missing/null/empty cfg_type projects cfg=None, retaining the
     unresolved raw JSON for the converter to report pending, never a fallback.
     Actual source containment (including symlinks), hash/metadata agreement and
@@ -162,10 +166,19 @@ def _validate_entry(entry: LegacyRunEvidence, index: int) -> None:
         raise ValueError(f"{location}.source_hash: expected lowercase SHA256")
     if not entry.experiment:
         raise ValueError(f"{location}.experiment: expected a declared nonempty tag")
-    started = parse_utc_time(entry.started_at, f"{location}.started_at")
+    if entry.run_id is not None:
+        try:
+            validate_run_id(entry.run_id)
+        except ValueError as exc:
+            raise ValueError(f"{location}.run_id: {exc}") from exc
+    started = (
+        None
+        if entry.started_at is None
+        else parse_utc_time(entry.started_at, f"{location}.started_at")
+    )
     if entry.finished_at is not None:
         finished = parse_utc_time(entry.finished_at, f"{location}.finished_at")
-        if finished < started:
+        if started is not None and finished < started:
             raise ValueError(f"{location}.finished_at: precedes started_at")
 
 
@@ -198,7 +211,9 @@ def validate_run_evidence(
     """Validate and merge caller evidence against the session's stored document.
 
     Reject typed/raw disagreement and changed planned entries, including unknown
-    fields, with MigrationInputError. Unplanned entries may supplement the returned
+    fields, with MigrationInputError. A durable run assignment already fixes the
+    evidence, even before its first native publication is planned. Raw preservation
+    fixes source bytes, not external run evidence. Unplanned entries may supplement the returned
     document. Return stored evidence when incoming evidence is omitted, or None
     when neither exists. Do not access legacy sources, change the session or write
     checkpoints. Cleanup-only resume uses this validation without adopting new
@@ -239,11 +254,11 @@ def validate_run_evidence(
                 ),
                 None,
             )
+            source = session.manifest.report.source.database_path / entry.source
             planned = any(
-                item.source
-                == (session.manifest.report.source.database_path / entry.source)
+                item.source == source and item.operation in ("native", "move_labber")
                 for item in session.manifest.files
-            )
+            ) or any(item.source == source for item in session.manifest.runs)
             if old_index is not None:
                 if planned and not json_values_equal(
                     old_entries[old_index], new_entries[index]

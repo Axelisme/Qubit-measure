@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 
 from migrations.storage_migration import (
     MigrationInputError,
@@ -19,6 +19,7 @@ from migrations.storage_migration import (
     migrate_storage,
 )
 from tests.migrations.storage_migration.fakes import (
+    assert_difference,
     manifest_path,
     noop_validation,
     validate_cfg,
@@ -46,7 +47,7 @@ def _entry(request: MigrationRequest) -> ResultEntry:
 
 
 def _backup_result(request: MigrationRequest) -> Path:
-    return request.result_root.parent.parent / f"{request.name}-backup" / "result"
+    return request.result_root.parent.parent / "repo-backup/result/chip/qubit"
 
 
 def _image(request: MigrationRequest, label: str, contents: bytes = b"figure") -> Path:
@@ -105,16 +106,41 @@ def test_exps_child_becomes_complete_point_with_independent_meta_and_library(
         encoding="utf-8",
     )
     original = {path: path.read_bytes() for path in child.iterdir()}
-    report = _convert(request, exps_mapping)
+    mapping = replace(
+        exps_mapping,
+        module_rules=(
+            *exps_mapping.module_rules,
+            ModuleRule(
+                old_name="expression",
+                target_path="C1.waveforms.expression",
+                reference_path=None,
+                reason="Known waveform missing a concrete length",
+                kind="waveform",
+            ),
+        ),
+    )
+    report = _convert(request, mapping)
     entry = _entry(request)
     assert entry.list_points() == ["070716_0.500", "direct"]
     point = entry.use_point("070716_0.500")
     assert point.C1.frequency == (12.5 if metadata == "values" else 3.0)
     assert entry.setup.C1.frequency == 3.0
     assert entry.use_point("direct").C1.frequency == 4.0
-    snapshot = entry.module_library("070716_0.500").snapshot()
-    assert snapshot.waveform_keys() == ("C1.waveforms.constant",)
-    assert snapshot.get_waveform("C1.waveforms.constant").length == 0.125
+    library_view = entry.module_library("070716_0.500").snapshot()
+    assert library_view.waveform_keys() == ("C1.waveforms.constant",)
+    assert library_view.get_waveform("C1.waveforms.constant").length == 0.125
+    assert document_value(snapshot(point), "general.ext.legacy_module_cfg") == {
+        "waveforms": {"expression": {"style": "const", "length": "=md.length"}}
+    }
+    assert any(
+        item.old_file == library
+        and item.action == "preserved"
+        and item.source_keys == ("waveforms", "expression")
+        and item.destination_keys
+        == ("general", "ext", "legacy_module_cfg", "waveforms", "expression")
+        and item.new_file == entry.result_path / "points/070716_0.500/point.yaml"
+        for item in report.key_mappings
+    )
     assert any(
         item.source == library and item.location == "waveforms.expression"
         for item in report.pending
@@ -124,6 +150,38 @@ def test_exps_child_becomes_complete_point_with_independent_meta_and_library(
         assert any(item.location == "unknown" for item in report.pending)
     assert {path: path.read_bytes() for path in child.iterdir()} == original
     assert report.failures == ()
+
+
+def test_entry_figures_and_workflow_files_keep_their_corresponding_paths(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    source = request_data.result_root / "chip/qubit"
+    files = {
+        "image/fit.png": b"root figure",
+        "overview/image/fit.png": b"nested figure",
+        "autofluxdep_runs/run/image/fit.png": b"workflow figure",
+    }
+    for relative, content in files.items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    dry = _convert(replace(request_data, dry_run=True), mapping)
+    assert not (request_data.results_root / request_data.name).exists()
+    report = _convert(request_data, mapping)
+    entry = _entry(request_data)
+    assert (entry.result_path / "figures/image/fit.png").is_file()
+    assert (
+        entry.result_path / "figures/overview/image/fit.png"
+    ).read_bytes() == b"nested figure"
+    workflow = entry.result_path / "autofluxdep_runs/run/image/fit.png"
+    assert workflow.read_bytes() == b"workflow figure"
+    assert dry.failures == ()
+    assert not any(
+        item.location == "association" and item.source == source / "image/fit.png"
+        for item in report.pending
+    )
+    _convert(replace(request_data, resume=True), mapping)
+    assert (entry.result_path / "figures/image/fit.png").read_bytes() == b"root figure"
 
 
 def test_exps_child_without_parameter_files_still_gets_point(
@@ -162,12 +220,12 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     assert copies[0].source_hash == copies[0].destination_hash
     assert copies[0].source_hash == hashlib.sha256(b"point figure bytes").hexdigest()
     assert not any(item.source == figure for item in report.pending)
-    archive = entry.database_path / "migration-preserved/result"
-    assert not (archive / "exps/070716_0.500/image/fit.png").exists()
     retained_outside = backup / "image/root.png"
-    assert (archive / "image/root.png").read_bytes() == retained_outside.read_bytes()
+    assert (
+        entry.result_path / "figures/image/root.png"
+    ).read_bytes() == retained_outside.read_bytes()
     assert retained_outside.read_bytes() == b"unassociated root image"
-    assert any(
+    assert not any(
         item.source == retained_outside and item.location == "association"
         for item in report.pending
     )
@@ -179,8 +237,11 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     assert states[0].operation == "copy"
     assert states[0].destination == target
     entry.use_point("070716_0.500").C1.frequency = 99.0
-    resumed = _convert(replace(request, part="all", resume=True), mapping)
-    assert resumed.preserved_files == report.preserved_files
+    assert_difference(
+        lambda: _convert(replace(request, part="all", resume=True), mapping),
+        request,
+        [entry.result_path / "points/070716_0.500/point.yaml"],
+    )
     assert _entry(request).use_point("070716_0.500").C1.frequency == 99.0
     assert target.read_bytes() == retained_figure.read_bytes()
     assert not (request.result_root / "chip/qubit").exists()

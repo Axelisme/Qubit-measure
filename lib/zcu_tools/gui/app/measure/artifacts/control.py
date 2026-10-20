@@ -2,53 +2,58 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
+from zcu_tools.datafile import read_run_metadata
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.resources.entry import AcquiredPayload, SavedPayload
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.services.guard import GuardService
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.resources.entry import RecordsLedger
 
     from .save import SaveService
 
 
 @dataclass(frozen=True)
 class SavedRunInfo:
-    """One opened-entry ledger run, without inspecting its data file.
+    """One existing native file in the opened entry, not proof it can be loaded.
 
-    run_id is the opaque acquisition identity. point is its label or None;
-    experiment is the recorded spec tag. recorded_at is the first acquired
-    event time, or first saved event time for saved-only runs, never started_at.
-    data_path is the latest successful data_h5 output, or None if none exists;
-    it is historical evidence and need not still exist on disk.
+    data_path is its exact path. run_id, point, experiment, started_at,
+    finished_at and completion come from RunMetadata/RunSnapshot. Times are
+    historical UTC ISO strings, or None when unknown. completion is historical
+    progress, including unknown, not a save status. metadata_error is None on a
+    successful metadata read. Otherwise it contains the decoding/I/O diagnostic,
+    run_id is the parent directory name, experiment is empty, and unavailable
+    point/times/completion are None. No values are inferred from file timestamps
+    or ledger events. A successful metadata read does not validate data arrays.
     """
 
     run_id: str
     point: str | None
     experiment: str
-    recorded_at: str
-    data_path: Path | None
+    started_at: str | None
+    data_path: Path
+    finished_at: str | None = None
+    completion: Literal["complete", "partial", "stopped", "unknown"] | None = None
+    metadata_error: str | None = None
 
 
 class SaveControlPort(Protocol):
     """Existing app-facing Save surface shared by GUI and remote adapters."""
 
     def list_saved_runs(self, *, point: str | None = None) -> tuple[SavedRunInfo, ...]:
-        """Return opened-entry runs in first-event order, optionally at one point.
+        """List opened-entry runs/*/data.h5 files in directory-name order.
 
-        None lists all points. Acquired metadata wins over saved-only metadata;
-        later failed/non-native saves do not erase a successful native path.
-        No opened entry raises FailedPreconditionError(no_entry). Ledger and
-        saved attachment schema/I/O errors propagate, including missing records.
-        Reads do not inspect HDF5, stat outputs, create folders or append events.
+        None lists all points; a point label filters by the native snapshot.
+        Metadata I/O/format failures remain rows with metadata_error and a
+        selectable path. Read only metadata, not arrays or ledger events. No
+        opened entry raises FailedPreconditionError(no_entry). Missing runs
+        directories yield no rows. This query never creates folders or writes events.
         """
         ...
 
@@ -93,29 +98,23 @@ class SaveControlPort(Protocol):
         ...
 
 
-def _saved_run_info(
-    ledger: RecordsLedger, event_id: str, payload: SavedPayload, recorded_at: str
-) -> SavedRunInfo:
-    record = ledger.get(event_id).record
-    if record is None:
-        raise ValueError(f"Saved event {event_id} has no record")
-    point = record.get("point")
-    experiment = record.get("experiment")
-    if "point" not in record or (point is not None and not isinstance(point, str)):
-        raise ValueError(
-            f"Saved event {event_id} record point must be a string or None"
+def _saved_run_info(path: Path) -> SavedRunInfo:
+    try:
+        metadata = read_run_metadata(path)
+    except (OSError, ValueError) as error:
+        # Isolate a single unreadable file so selection still reaches Load errors.
+        return SavedRunInfo(
+            path.parent.name, None, "", None, path, metadata_error=str(error)
         )
-    if not isinstance(experiment, str):
-        raise ValueError(f"Saved event {event_id} record experiment must be a string")
-    data_path = next(
-        (
-            Path(output.path)
-            for output in reversed(payload.outputs)
-            if output.format == "data_h5" and output.status == "saved"
-        ),
-        None,
+    return SavedRunInfo(
+        run_id=metadata.run_id,
+        point=metadata.snapshot.point,
+        experiment=metadata.experiment,
+        started_at=metadata.started_at,
+        finished_at=metadata.finished_at,
+        completion=metadata.completion,
+        data_path=path,
     )
-    return SavedRunInfo(payload.run_id, point, experiment, recorded_at, data_path)
 
 
 class SaveControlFacet:
@@ -136,37 +135,13 @@ class SaveControlFacet:
         self._context = context
 
     def list_saved_runs(self, *, point: str | None = None) -> tuple[SavedRunInfo, ...]:
-        """Read the ledger under SaveControlPort.list_saved_runs's contract."""
+        """Read native file metadata under SaveControlPort.list_saved_runs's contract."""
         entry = self._context.get_entry_info()
         if entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        ledger = self._context.entry_ledger(entry.entry_id)
-        runs: dict[str, SavedRunInfo] = {}
-        acquired: set[str] = set()
-        for event in ledger.events():
-            payload = event.payload
-            if isinstance(payload, AcquiredPayload):
-                if payload.run_id in acquired:
-                    continue
-                previous = runs.get(payload.run_id)
-                runs[payload.run_id] = SavedRunInfo(
-                    run_id=payload.run_id,
-                    point=payload.point,
-                    experiment=payload.experiment,
-                    recorded_at=event.at,
-                    data_path=previous.data_path if previous is not None else None,
-                )
-                acquired.add(payload.run_id)
-            elif isinstance(payload, SavedPayload):
-                saved = _saved_run_info(ledger, event.id, payload, event.at)
-                previous = runs.get(payload.run_id)
-                if previous is None:
-                    runs[payload.run_id] = saved
-                elif saved.data_path is not None:
-                    runs[payload.run_id] = replace(previous, data_path=saved.data_path)
-        return tuple(
-            run for run in runs.values() if point is None or run.point == point
-        )
+        paths = sorted((entry.database_path / "runs").glob("*/data.h5"))
+        runs = (_saved_run_info(path) for path in paths if path.is_file())
+        return tuple(run for run in runs if point is None or run.point == point)
 
     def has_tab(self, tab_id: str) -> bool:
         """Return whether tab_id is a current State resource."""

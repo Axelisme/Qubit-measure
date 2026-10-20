@@ -29,6 +29,8 @@ from PyQt6.QtWidgets import (
     QStyle,
     QStyleOptionButton,
     QTabBar,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
@@ -109,6 +111,15 @@ class ListRowObservation:
     text: str
     tooltip: str
     selected: bool
+
+
+@dataclass(frozen=True)
+class TableRowObservation:
+    """Visible table row captions, hover help and selection in column order."""
+
+    columns: tuple[str, ...]  # Fully clipped cells have empty captions.
+    tooltips: tuple[str, ...]  # Hover help for the corresponding visible cells.
+    selected: bool  # Whether this row contains a selected item.
 
 
 @dataclass(frozen=True)
@@ -341,6 +352,68 @@ class ComponentDriver:
         assert viewport is not None
         mouse_click(viewport, listing.visualItemRect(item).center())
 
+    def table_rows(self, *, object_name: str) -> tuple[TableRowObservation, ...]:
+        """Observe rows intersecting the named QTableWidget viewport."""
+        table = self._find(None, object_name)
+        if not isinstance(table, QTableWidget):
+            raise TypeError(f"{object_name!r} is not a QTableWidget")
+        if not self._on_screen(table):
+            return ()
+        viewport = table.viewport()
+        assert viewport is not None
+        rows = []
+        for row in range(table.rowCount()):
+            items = [table.item(row, col) for col in range(table.columnCount())]
+            visible = [
+                item is not None
+                and viewport.visibleRegion().intersects(table.visualItemRect(item))
+                for item in items
+            ]
+            if any(visible):
+                rows.append(
+                    TableRowObservation(
+                        columns=tuple(
+                            item.text() if item is not None and shown else ""
+                            for item, shown in zip(items, visible, strict=True)
+                        ),
+                        tooltips=tuple(
+                            item.toolTip() if item is not None and shown else ""
+                            for item, shown in zip(items, visible, strict=True)
+                        ),
+                        selected=any(
+                            item is not None and item.isSelected() for item in items
+                        ),
+                    )
+                )
+        return tuple(rows)
+
+    def select_table_row(self, text: str, *, object_name: str) -> None:
+        """Click the unique fully visible table cell with this exact caption.
+
+        Disabled, hidden, clipped and modal-blocked tables cannot be clicked.
+        The target must already be in the viewport; this does not auto-scroll.
+        """
+        table = self._find(None, object_name)
+        if not isinstance(table, QTableWidget):
+            raise TypeError(f"{object_name!r} is not a QTableWidget")
+        if not self._can_interact(table):
+            return
+        viewport = table.viewport()
+        assert viewport is not None
+        items: list[QTableWidgetItem] = []
+        for row in range(table.rowCount()):
+            for column in range(table.columnCount()):
+                item = table.item(row, column)
+                if (
+                    item is not None
+                    and item.text() == text
+                    and viewport.visibleRegion().contains(table.visualItemRect(item))
+                ):
+                    items.append(item)
+        item = _unique(text, items, [item.text() for item in items])
+        mouse_click(viewport, table.visualItemRect(item).center())
+        QApplication.processEvents()
+
     def visible(self) -> VisibleObservation:
         """Snapshot all visible widgets for completion predicates with changing captions."""
         return VisibleObservation(
@@ -442,6 +515,68 @@ class ComponentDriver:
                 return
             mouse_click(viewport, target)
             key_click(tree, Qt.Key.Key_Right)
+        QApplication.processEvents()
+
+    def edit_tree_value(
+        self, path: tuple[str, ...], *, object_name: str, value: str
+    ) -> None:
+        """Edit a visible tree row's Value cell using double-click and Enter.
+
+        path contains exact visible root-to-row captions, not model keys.
+        object_name selects one QTreeWidget whose second column is Value.
+        value is the text to type into its QLineEdit delegate. Missing or
+        ambiguous trees/visible paths/editors raise LookupError; a non-tree
+        target raises TypeError. The delegate must expose a QLineEdit.
+        Disabled, hidden, clipped,
+        modal-blocked or noneditable cells are no-ops. Ancestors must already
+        be expanded; this method never scrolls or opens hidden rows.
+        """
+        tree = self._find(None, object_name)
+        if not isinstance(tree, QTreeWidget):
+            raise TypeError(f"{object_name!r} is not a QTreeWidget")
+        if not self._can_interact(tree):
+            return
+        item = _unique(
+            repr(path),
+            [i for i, captions in self._visible_tree_items(tree) if captions == path],
+            [repr(captions) for _, captions in self._visible_tree_items(tree)],
+        )
+        if not item.flags() & Qt.ItemFlag.ItemIsEditable:
+            return
+        rect = tree.visualItemRect(item)
+        viewport = tree.viewport()
+        assert viewport is not None
+        target = QPoint(
+            tree.columnViewportPosition(1) + tree.columnWidth(1) // 2,
+            rect.center().y(),
+        )
+        if tree.isColumnHidden(1) or not viewport.visibleRegion().contains(target):
+            return
+        mouse_click(viewport, target)
+        for kind, buttons in (
+            (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
+            (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+        ):
+            QApplication.sendEvent(
+                viewport,
+                QMouseEvent(
+                    kind,
+                    QPointF(target),
+                    QPointF(viewport.mapToGlobal(target)),
+                    Qt.MouseButton.LeftButton,
+                    buttons,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
+        QApplication.processEvents()
+        editors = [e for e in tree.findChildren(QLineEdit) if self._on_screen(e)]
+        editor = _unique(
+            "tree Value editor", editors, [e.objectName() for e in editors]
+        )
+        if self._can_interact(editor):
+            key_click(editor, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+            type_text(editor, value)
+            key_click(editor, Qt.Key.Key_Return)
         QApplication.processEvents()
 
     def click(self, text: str | None = None, *, object_name: str | None = None) -> None:

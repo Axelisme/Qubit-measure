@@ -40,6 +40,7 @@ from .module import (
     TwoPulseResetCfg,
     TwoPulseResetSpec,
 )
+from .partition import SpecPartition, partition_module_spec, partition_waveform_spec
 from .references import remap_module_references, remap_waveform_references
 from .spec_types import (
     concrete_spec_types,
@@ -91,6 +92,9 @@ __all__ = [
     "WaveformCfgFactory",
     "module_spec_from_raw",
     "waveform_spec_from_raw",
+    "SpecPartition",
+    "partition_module_spec",
+    "partition_waveform_spec",
     "remap_module_references",
     "remap_waveform_references",
     "AbsModuleCfg",
