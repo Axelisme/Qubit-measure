@@ -16,7 +16,7 @@ from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
 # Explicit legacy mappings preserve working units and fixed roots. Changes to rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.16", "qubit/transmon": "1.17"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.18", "qubit/transmon": "1.19"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),
@@ -89,6 +89,10 @@ _MODULE_KEY_PATHS = (
         "Pulse length belongs to the x90 waveform",
     ),
 )
+
+# Only these aliases have a documented corresponding formal destination.
+# Removal still requires a successful same-context source write with equal value.
+_ALIAS_TARGETS = {"readout_f": "R1.freq", "flx_bias": "Q1.ext.flux_bias"}
 
 _REMOVED = (
     ("readout_f", "Use resonator.freq instead of the removed readout frequency alias"),
@@ -181,7 +185,12 @@ def build_mapping(
             for key, path, reason in _MODULE_KEY_PATHS
         )
         + tuple(
-            KeyRule(old_key=key, target_path=None, action="remove", reason=reason)
+            KeyRule(
+                old_key=key,
+                target_path=_ALIAS_TARGETS.get(key),
+                action="remove",
+                reason=reason,
+            )
             for key, reason in _REMOVED
         )
     )

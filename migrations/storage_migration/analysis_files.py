@@ -90,7 +90,7 @@ def _row(
 def _source_rows(
     session: MigrationSession,
     source: Path,
-    key: str,
+    key: str | None,
     target: Path,
     timestamp: JsonValue,
 ) -> tuple[JsonObject, list[KeyMappingItem]]:
@@ -101,21 +101,23 @@ def _source_rows(
         if backup is not None
         else source
     )
+    timestamp_keys = (key, "timestamp") if key is not None else ("timestamp",)
+    timestamp_key = ".".join(timestamp_keys)
     reason = (
         None
         if created_at is not None
         else (
-            f"No proven timezone-aware ISO 8601 timestamp; original at {original}#{key}.timestamp"
+            f"No proven timezone-aware ISO 8601 timestamp; original at {original}#{timestamp_key}"
         )
     )
     return {"run_id": None, "created_at": created_at}, [
         _row(
             source,
-            f"{key}.timestamp",
+            timestamp_key,
             target,
             "source.created_at",
             reason,
-            source_keys=(key, "timestamp"),
+            source_keys=timestamp_keys,
         )
     ]
 
@@ -139,7 +141,10 @@ def convert_analysis_files(
     The caller retains only unconverted values in ext, not a second full copy.
     Timestamp provenance uses only proven_created_at evidence;
     run_id stays null. Transition-only input creates a dispersive file with no
-    invented g/bare_rf. Dry-run validates/reports without writes. An unfinished
+    invented g/bare_rf. Earlier root allows supplies the annotations unchanged
+    when fluxdep_fit.plot_transitions is absent; its timestamp comes from the root.
+    No transition names or formulas are reinterpreted. Dry-run validates/reports
+    without writes. An unfinished
     resume accepts equal owner-loaded files unchanged and rejects conflicts;
     the parameters checkpoint prevents rewriting completed user-edited files.
     I/O errors propagate. This function does not edit source data or ext.
@@ -166,8 +171,20 @@ def _convert_dispersive(
 ) -> list[KeyMappingItem]:
     rows: list[KeyMappingItem] = []
     fit = values.get("fluxdep_fit")
-    transitions = fit.get("plot_transitions") if isinstance(fit, dict) else None
-    if "dispersive" in values or (isinstance(fit, dict) and "plot_transitions" in fit):
+    transition_keys = (
+        ("fluxdep_fit", "plot_transitions")
+        if isinstance(fit, dict) and "plot_transitions" in fit
+        else ("allows",)
+        if "allows" in values
+        else None
+    )
+    transitions = (
+        fit["plot_transitions"]
+        if isinstance(fit, dict)
+        and transition_keys == ("fluxdep_fit", "plot_transitions")
+        else values.get("allows")
+    )
+    if "dispersive" in values or transition_keys is not None:
         raw = values.get("dispersive", {})
         if not isinstance(raw, dict):
             rows.append(
@@ -183,10 +200,22 @@ def _convert_dispersive(
             params: JsonObject = {
                 key: raw[key] for key in ("g", "bare_rf") if key in raw
             }
-            if isinstance(fit, dict) and "plot_transitions" in fit:
+            if transition_keys is not None:
                 params["plot_transitions"] = transitions
-            provenance_key = "dispersive" if "dispersive" in values else "fluxdep_fit"
-            provenance_raw = raw if provenance_key == "dispersive" else fit
+            provenance_key = (
+                "dispersive"
+                if "dispersive" in values
+                else "fluxdep_fit"
+                if transition_keys == ("fluxdep_fit", "plot_transitions")
+                else None
+            )
+            provenance_raw = (
+                raw
+                if provenance_key == "dispersive"
+                else fit
+                if provenance_key == "fluxdep_fit"
+                else values
+            )
             timestamp = (
                 provenance_raw.get("timestamp")
                 if isinstance(provenance_raw, dict)
@@ -243,14 +272,14 @@ def _convert_dispersive(
                                     source_keys=("dispersive", key),
                                 )
                             )
-                if isinstance(fit, dict) and "plot_transitions" in fit:
+                if transition_keys is not None:
                     rows.append(
                         _row(
                             source,
-                            "fluxdep_fit.plot_transitions",
+                            ".".join(transition_keys),
                             target,
                             "params.plot_transitions",
-                            source_keys=("fluxdep_fit", "plot_transitions"),
+                            source_keys=transition_keys,
                         )
                     )
     return rows

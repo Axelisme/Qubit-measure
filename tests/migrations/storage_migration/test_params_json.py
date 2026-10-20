@@ -57,6 +57,7 @@ class AnalysisQubit(ComponentSchema):
 
     model_config = ConfigDict(extra="forbid")
     EJ: float | None = None
+    freq: float | None = None
     ext: YamlMap = Field(default_factory=dict)
     wiring: dict[str, int] = Field(default_factory=dict)
     module: dict[str, str] = Field(default_factory=dict)
@@ -70,15 +71,21 @@ class AnalysisQubit(ComponentSchema):
 @pytest.fixture(scope="module", autouse=True)
 def analysis_kind() -> Generator[None]:
     before = registry_state()
-    component_registry.register("qubit/migration_analysis", AnalysisQubit)
-    component_registry.register("amplifier/migration_analysis", AnalysisQubit)
-    component_registry.register("qubit/migration_no_ext", ComponentSchema)
+    models = {
+        "qubit/migration_analysis": AnalysisQubit,
+        "resonator/migration_analysis": AnalysisQubit,
+        "amplifier/migration_analysis": AnalysisQubit,
+        "qubit/migration_no_ext": ComponentSchema,
+    }
+    registered: list[str] = []
     try:
+        for kind, model in models.items():
+            component_registry.register(kind, model)
+            registered.append(kind)
         yield
     finally:
-        component_registry.unregister("qubit/migration_analysis")
-        component_registry.unregister("amplifier/migration_analysis")
-        component_registry.unregister("qubit/migration_no_ext")
+        for kind in reversed(registered):
+            component_registry.unregister(kind)
         assert registry_state() == before
 
 
@@ -172,6 +179,294 @@ def predictor_params(request: MigrationRequest) -> JsonObject:
     return TypeAdapter(JsonObject).validate_python(read_predictor(request)["params"])
 
 
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("unit", [None, "mA"])
+def test_historical_top_level_fit_projects_exact_source_leaves(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    dry_run: bool,
+    unit: str | None,
+) -> None:
+    request = replace(request_data, dry_run=dry_run, assume_flux_unit=unit)
+    values: JsonObject = {
+        "params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8, "custom.energy": [3, None]},
+        "half flux": 0.25,
+        "period": 1.5,
+        "name": "historical author",
+        "project": {"name": "old project"},
+        "schema_version": "legacy",
+        "timestamp": "unproven local time",
+    }
+    source = write_params(request, values)
+    before = {
+        p: p.read_bytes() for p in request.result_root.parent.rglob("*") if p.is_file()
+    }
+    report = migrate(request, analysis_mapping)
+    converted = {
+        row.source_keys: row.new_path
+        for row in report.key_mappings
+        if row.old_file == source and row.action == "value"
+    }
+    assert converted.get(("params", "EJ")) == "params.EJ"
+    assert converted.get(("params", "EC")) == "params.EC"
+    assert converted.get(("params", "EL")) == "params.EL"
+    assert converted.get(("half flux",)) == "params.flux_half"
+    assert converted.get(("period",)) == "params.flux_period"
+    assert any(item.location == "timestamp" for item in report.pending)
+    assert any(item.location == "flux_unit" for item in report.pending) == (
+        unit is None
+    )
+    preserved = {
+        row.source_keys: row.destination_keys
+        for row in report.key_mappings
+        if row.action == "preserved"
+    }
+    assert preserved[("params", "custom.energy")] == (
+        "Qlegacy",
+        "ext",
+        "legacy_params",
+        "params",
+        "custom.energy",
+    )
+    if dry_run:
+        assert {
+            p: p.read_bytes()
+            for p in request.result_root.parent.rglob("*")
+            if p.is_file()
+        } == before
+        assert not backup_path(request).exists()
+        return
+    predictor = load_migrated_predictor(request)
+    assert predictor == PredictorFile(
+        model="fluxonium",
+        params=FluxoniumParams(
+            EJ=6.27, EC=1.41, EL=0.8, flux_half=0.25, flux_period=1.5, flux_bias=0.0
+        ),
+        flux_unit=unit,
+        source=PredictorSource(None, None),
+    )
+    assert document_value(
+        snapshot(open_entry(request).setup), "Qlegacy.ext.legacy_params"
+    ) == {
+        "params": {"custom.energy": [3, None]},
+        "name": "historical author",
+        "project": {"name": "old project"},
+        "schema_version": "legacy",
+        "timestamp": "unproven local time",
+    }
+    migrate(replace(request, resume=True), analysis_mapping)
+    assert load_migrated_predictor(request) == predictor
+
+
+@pytest.mark.parametrize("energy_key", ["EJ", "EL"])
+def test_fluxonium_identifying_parameter_allows_unknown_siblings(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    energy_key: str,
+) -> None:
+    legacy_fit["params"] = {
+        energy_key: 0.8,
+        "custom.energy": {"note": "untouched"},
+        "EC": True,
+    }
+    source = write_params(request_data, {"fluxdep_fit": legacy_fit, "flux_unit": "mA"})
+    report = migrate(request_data, analysis_mapping)
+    predictor = (
+        request_data.results_root / request_data.name / "predictors/Qlegacy.json"
+    )
+    assert predictor.is_file(), "an extra key must not block supported fluxonium data"
+    assert load_predictor_file(predictor).params == FluxoniumParams.from_mapping(
+        {energy_key: 0.8, "flux_half": 0.2, "flux_period": 1.0, "flux_bias": 0.0}
+    )
+    assert document_value(
+        snapshot(open_entry(request_data).setup),
+        "Qlegacy.ext.legacy_params.fluxdep_fit",
+    ) == {
+        "params": {"custom.energy": {"note": "untouched"}, "EC": True},
+        "flux_int": -0.3,
+    }
+    assert any(item.location == "fluxdep_fit.params.EC" for item in report.pending)
+    assert not any(item.location == "fluxdep_fit.params" for item in report.pending)
+    assert any(
+        row.old_file == source
+        and row.action == "preserved"
+        and row.source_keys == ("fluxdep_fit", "params", "custom.energy", "note")
+        for row in report.key_mappings
+    )
+
+
+@pytest.mark.parametrize(
+    "allows",
+    [
+        {},
+        {
+            "r_f": 5.2,
+            "sample_f": 9.7,
+            "transitions": [[0, 1]],
+            "mirror": [[1, 2]],
+            "author.note": "unchanged",
+        },
+    ],
+)
+def test_historical_allows_are_owner_annotations_without_reinterpretation(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    allows: JsonObject,
+) -> None:
+    source = write_params(
+        request_data,
+        {
+            "allows": allows,
+            "timestamp": "2020-07-07T16:30:00+08:00",
+            "name": "old author",
+        },
+    )
+    report = migrate(request_data, analysis_mapping)
+    entry = open_entry(request_data)
+    target = entry.dispersive_path / "Qlegacy.json"
+    assert target.is_file(), "historical allows must reach the dispersive owner"
+    dispersive = load_dispersive_file(target)
+    assert dispersive.params.plot_transitions.model_dump(exclude_unset=True) == allows
+    assert dispersive.params.g is None
+    assert dispersive.params.bare_rf is None
+    assert dispersive.source.run_id is None
+    assert dispersive.source.created_at == "2020-07-07T16:30:00+08:00"
+    assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
+        "name": "old author"
+    }
+    assert any(
+        row.old_file == source
+        and row.action == "value"
+        and row.source_keys == ("allows",)
+        and row.new_path == "params.plot_transitions"
+        for row in report.key_mappings
+    )
+
+
+@pytest.mark.parametrize("equal", [True, False])
+def test_newer_fit_wins_and_top_level_values_are_compared_by_source(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    equal: bool,
+) -> None:
+    values: JsonObject = {
+        "flux_unit": "mA",
+        "fluxdep_fit": legacy_fit,
+        "params": {
+            "EJ": 6.27 if equal else 8.2,
+            "EC": 1.41,
+            "EL": 0.8,
+            "author": "keep",
+        },
+        "half flux": 0.2 if equal else 0.7,
+        "period": 1.0,
+    }
+    source = write_params(request_data, values)
+    report = migrate(request_data, analysis_mapping)
+    assert load_migrated_predictor(request_data).params == FluxoniumParams(
+        EJ=6.27, EC=1.41, EL=0.8, flux_half=0.2, flux_period=1.0, flux_bias=0.0
+    )
+    assert document_value(
+        snapshot(open_entry(request_data).setup), "Qlegacy.ext.legacy_params"
+    ) == {
+        "fluxdep_fit": {"flux_int": -0.3},
+        "params": {"author": "keep", **({} if equal else {"EJ": 8.2})},
+        **({} if equal else {"half flux": 0.7}),
+    }
+    compared = [
+        row
+        for row in report.key_mappings
+        if row.old_file == source and row.source_keys == ("params", "EJ")
+    ]
+    assert len(compared) == 1
+    assert compared[0].action == ("remove" if equal else "preserved")
+    assert compared[0].compared_source_keys == ("fluxdep_fit", "params", "EJ")
+    assert "fluxdep_fit" in compared[0].reason
+    saved = read_manifest(manifest_path(request_data)).report
+    assert [
+        row for row in saved.key_mappings if row.source_keys == ("params", "EJ")
+    ] == compared
+
+
+def test_newer_transition_annotations_preserve_only_different_historical_leaves(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+) -> None:
+    source = write_params(
+        request_data,
+        {
+            "allows": {
+                "r_f": 5.2,
+                "sample_f": 9.7,
+                "transitions": [[0, 1]],
+                "mirror": [[1, 2]],
+                "nested": {"equal": [], "different": "old"},
+                "old.only": "preserve",
+            },
+            "fluxdep_fit": {
+                "plot_transitions": {
+                    "r_f": 5.2,
+                    "sample_f": 8.1,
+                    "transitions": [[0, 1]],
+                    "mirror": [[2, 3]],
+                    "nested": {"equal": [], "different": "new"},
+                }
+            },
+        },
+    )
+    report = migrate(request_data, analysis_mapping)
+    entry = open_entry(request_data)
+    assert load_dispersive_file(
+        entry.dispersive_path / "Qlegacy.json"
+    ).params.plot_transitions.model_dump(exclude_unset=True) == {
+        "r_f": 5.2,
+        "sample_f": 8.1,
+        "transitions": [[0, 1]],
+        "mirror": [[2, 3]],
+        "nested": {"equal": [], "different": "new"},
+    }
+    assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
+        "allows": {
+            "sample_f": 9.7,
+            "mirror": [[1, 2]],
+            "nested": {"different": "old"},
+            "old.only": "preserve",
+        }
+    }
+    comparisons = {
+        row.source_keys: row
+        for row in report.key_mappings
+        if row.old_file == source and row.compared_source_keys is not None
+    }
+    assert comparisons.get(("allows", "old.only")) is not None
+    assert comparisons[("allows", "old.only")].action == "preserved"
+    assert comparisons[("allows", "old.only")].compared_source_keys == (
+        "fluxdep_fit",
+        "plot_transitions",
+        "old.only",
+    )
+    assert comparisons[("allows", "r_f")].action == "remove"
+    assert comparisons[("allows", "nested", "equal")].action == "remove"
+    different = comparisons[("allows", "nested", "different")]
+    assert different.action == "preserved"
+    assert different.compared_source_keys == (
+        "fluxdep_fit",
+        "plot_transitions",
+        "nested",
+        "different",
+    )
+    assert different.destination_keys == (
+        "Qlegacy",
+        "ext",
+        "legacy_params",
+        "allows",
+        "nested",
+        "different",
+    )
+
+
 @pytest.fixture
 def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
     concrete = build_mapping(
@@ -181,10 +476,318 @@ def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
         concrete,
         components={
             "Q1": {"kind": "qubit/migration_analysis"},
+            "R1": {"kind": "resonator/migration_analysis"},
             "J1": {"kind": "amplifier/migration_analysis"},
         },
         roles={"qubit": "Q1"},
     )
+
+
+@pytest.mark.parametrize("context", ["", "exps/bias"])
+def test_unknown_meta_has_literal_preservation_rows_and_survives_resume(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    context: str,
+) -> None:
+    values: JsonObject = {
+        "scalar": 42,
+        "nested.with.dot": {"child": [1, None, {"x": True}]},
+        "list": ["raw", 3],
+        "null": None,
+        "legacy_meta_info": {"source": "meta"},
+        "legacy_module_cfg": ["source", "module"],
+    }
+    source = write_meta(request_data, context, values)
+    root = request_data.result_root.parent
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
+    assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+    report = migrate(request_data, metadata_mapping)
+    entry = open_entry(request_data)
+    view = entry.use_point("bias") if context else entry.setup
+    target = entry.result_path / ("points/bias/point.yaml" if context else "setup.yaml")
+    assert not [item for item in report.pending if item.source == source]
+    ext = document_value(snapshot(view), "general.ext")
+    assert ext == {
+        "scalar": 42,
+        "nested.with.dot": {"child": [1, None, {"x": True}]},
+        "list": ["raw", 3],
+        "null": None,
+        "legacy_meta_info": {
+            "legacy_meta_info": {"source": "meta"},
+            "legacy_module_cfg": ["source", "module"],
+        },
+    }
+    rows = [row for row in report.key_mappings if row.old_file == source]
+    assert len(rows) == len(values)
+    for row in rows:
+        assert row.action == "preserved"
+        assert row.source_keys == (row.old_key,)
+        assert row.new_file == target
+        assert row.new_path is None
+        assert row.destination_keys == (
+            ("general", "ext", "legacy_meta_info", row.old_key)
+            if row.old_key in ("legacy_meta_info", "legacy_module_cfg")
+            else ("general", "ext", row.old_key)
+        )
+    assert dry.key_mappings == report.key_mappings
+    with view.edit() as draft:
+        draft.set("general.description", "edited after migration")
+    edited = target.read_bytes()
+    resumed = migrate(replace(request_data, resume=True), metadata_mapping)
+    assert resumed.key_mappings == report.key_mappings
+    assert target.read_bytes() == edited
+
+
+@pytest.mark.parametrize(
+    ("values", "params"),
+    [
+        ({"flx_half": 0.2, "best_jpa_flux": 0.3}, {}),
+        ({"flux_unit": "V", "flx_half": 0.2}, {"flux_unit": "A"}),
+        ({"flux_unit": "unknown", "flx_half": 0.2}, {}),
+        ({"flux_unit": "A", "flx_half": "wrong type"}, {}),
+        ({"jpa_flux_unit": "mA", "best_jpa_flux": 0.3}, {}),
+        ({"jpa_flux_unit": None, "best_jpa_flux": 0.3}, {}),
+    ],
+)
+def test_blocked_flux_preserves_actual_source_without_activating_units(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    values: JsonObject,
+    params: JsonObject,
+) -> None:
+    if params:
+        write_params(request_data, params)
+    source = write_meta(request_data, "", {**values, "qub_ch": 4})
+    dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
+    report = migrate(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
+    assert document_value(setup, "general.ext") == {"legacy_meta_info": values}
+    assert document_value(setup, "Q1.wiring.ch") == 4
+    view = open_entry(request_data).setup
+    assert getattr(view.Q1, "flux_half", None) is None
+    assert getattr(view.J1, "flux_unit", None) is None
+    assert getattr(view.J1, "flux", None) is None
+    pending = [item for item in report.pending if item.source == source]
+    assert set(values) <= {item.location for item in pending}
+    assert all("legacy_meta_info" in item.reason for item in pending)
+    for key in values:
+        row = next(
+            row
+            for row in report.key_mappings
+            if row.old_file == source and row.old_key == key
+        )
+        assert row.action == "preserved"
+        assert row.new_path is None
+        assert row.source_keys == (key,)
+        assert row.destination_keys == ("general", "ext", "legacy_meta_info", key)
+    assert dry.key_mappings == report.key_mappings
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_qubit_channel_alias_is_deduplicated_only_against_selected_wiring(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping, same: bool
+) -> None:
+    source = write_meta(request_data, "", {"qub_ch": 2 if same else 4, "qub_0_1_ch": 2})
+    report = migrate(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
+    assert document_value(setup, "Q1.wiring.ch") == 2
+    assert document_value(setup, "general.ext") == (
+        {} if same else {"legacy_meta_info": {"qub_ch": 4}}
+    )
+    row = next(
+        row
+        for row in report.key_mappings
+        if row.old_file == source and row.old_key == "qub_ch"
+    )
+    assert row.source_keys == ("qub_ch",)
+    assert row.action == ("remove" if same else "preserved")
+    if same:
+        assert row.new_file == open_entry(request_data).result_path / "setup.yaml"
+        assert row.new_path == "Q1.wiring.ch"
+        assert "same" in row.reason.lower()
+    else:
+        assert row.destination_keys == ("general", "ext", "legacy_meta_info", "qub_ch")
+
+
+@pytest.mark.parametrize("canonical", [None, 1.0, 2.0])
+def test_removed_meta_keys_preserve_unmatched_values_and_report_proven_duplicates(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    canonical: float | None,
+) -> None:
+    removed: JsonObject = {
+        "readout_f": 1.0,
+        "flx_bias": 1.0,
+        "mA_c": 1.0,
+        "mA_e": 1.0,
+        "resetf1_w": 1.0,
+        "cur_jpa_A": 1.0,
+        "fake_peak": {"value": 1.0},
+        "log_scale": True,
+    }
+    values: JsonObject = {**removed, "flx_half": 1.0, "flux_unit": "V"}
+    if canonical is not None:
+        values.update({"r_f": canonical, "flux_bias": canonical})
+    source = write_meta(request_data, "", values)
+    report = migrate(request_data, metadata_mapping)
+    expected = dict(removed)
+    if canonical == 1.0:
+        expected.pop("readout_f")
+        expected.pop("flx_bias")
+    assert document_value(snapshot(open_entry(request_data).setup), "general.ext") == {
+        "flux_unit": "V",
+        "legacy_meta_info": expected,
+    }
+    rows = {row.old_key: row for row in report.key_mappings if row.old_file == source}
+    for key in removed:
+        row = rows[key]
+        assert row.source_keys == (key,)
+        if canonical == 1.0 and key in ("readout_f", "flx_bias"):
+            assert row.action == "remove"
+            assert (
+                row.new_path
+                == {"readout_f": "R1.freq", "flx_bias": "Q1.ext.flux_bias"}[key]
+            )
+            assert row.new_file == open_entry(request_data).result_path / "setup.yaml"
+            assert "same" in row.reason.lower()
+        else:
+            assert row.action == "preserved"
+            assert row.destination_keys == ("general", "ext", "legacy_meta_info", key)
+    assert not [item for item in report.pending if item.source == source]
+
+
+def test_removed_alias_does_not_deduplicate_against_inherited_formal_value(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    write_meta(request_data, "", {"r_f": 1.0, "flux_unit": "V", "flux_bias": 1.0})
+    write_meta(request_data, "exps/bias", {"readout_f": 1.0, "flx_bias": 1.0})
+    migrate(request_data, metadata_mapping)
+    point = snapshot(open_entry(request_data).use_point("bias"))
+    assert document_value(point, "general.ext") == {
+        "flux_unit": "V",
+        "legacy_meta_info": {"readout_f": 1.0, "flx_bias": 1.0},
+    }
+
+
+@pytest.mark.parametrize("raw_value", [0.4, 0.9])
+@pytest.mark.parametrize("context", ["", "exps/bias"])
+def test_unknown_meta_collision_keeps_formal_value_and_reports_exact_destination(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    raw_value: float,
+    context: str,
+) -> None:
+    source = write_meta(
+        request_data,
+        context,
+        {"cur_A": 0.4, "flux_unit": "V", "flux_value": raw_value},
+    )
+    dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
+    report = migrate(request_data, metadata_mapping)
+    entry = open_entry(request_data)
+    view = entry.use_point("bias") if context else entry.setup
+    target = entry.result_path / ("points/bias/point.yaml" if context else "setup.yaml")
+    assert document_value(snapshot(view), "general.ext.flux_value") == 0.4
+    row = next(
+        row
+        for row in report.key_mappings
+        if row.old_file == source and row.old_key == "flux_value"
+    )
+    assert row.source_keys == ("flux_value",)
+    assert row.new_file == target
+    if raw_value == 0.4:
+        assert row.action == "remove"
+        assert row.new_path == "general.ext.flux_value"
+        assert "same" in row.reason.lower()
+    else:
+        assert document_value(snapshot(view), "general.ext.legacy_meta_info") == {
+            "flux_value": 0.9
+        }
+        assert row.action == "preserved"
+        assert row.new_path is None
+        assert row.destination_keys == (
+            "general",
+            "ext",
+            "legacy_meta_info",
+            "flux_value",
+        )
+    assert not [item for item in report.pending if item.source == source]
+    assert dry.key_mappings == report.key_mappings
+
+
+def test_unknown_expression_collision_preserves_pending_and_formal_value(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    source = write_meta(
+        request_data,
+        "",
+        {"cur_A": 0.4, "flux_unit": "V", "flux_value": "=md.other"},
+    )
+    report = migrate(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
+    assert document_value(setup, "general.ext.flux_value") == 0.4
+    assert document_value(setup, "general.ext.legacy_meta_info") == {
+        "flux_value": "=md.other"
+    }
+    row = next(
+        row
+        for row in report.key_mappings
+        if row.old_file == source and row.old_key == "flux_value"
+    )
+    assert row.action == "preserved"
+    assert row.source_keys == ("flux_value",)
+    assert row.destination_keys == ("general", "ext", "legacy_meta_info", "flux_value")
+    assert row.new_path is None
+    assert any(
+        item.source == source
+        and item.location == "flux_value"
+        and "expression" in item.reason
+        for item in report.pending
+    )
+
+
+@pytest.mark.parametrize("raw_value", [0.4, 0.9])
+def test_point_unknown_collision_protects_only_successful_setup_projection(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    raw_value: float,
+) -> None:
+    write_meta(request_data, "", {"cur_A": 0.4, "flux_unit": "V", "arbitrary": 0.4})
+    source = write_meta(
+        request_data, "exps/bias", {"flux_value": raw_value, "arbitrary": raw_value}
+    )
+    dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
+    report = migrate(request_data, metadata_mapping)
+    entry = open_entry(request_data)
+    setup = snapshot(entry.setup)
+    point = snapshot(entry.use_point("bias"))
+    assert document_value(setup, "general.ext.flux_value") == 0.4
+    assert document_value(point, "general.ext.flux_value") == 0.4
+    assert document_value(point, "general.ext.arbitrary") == raw_value
+    rows = {row.old_key: row for row in report.key_mappings if row.old_file == source}
+    assert rows["arbitrary"].action == "preserved"
+    assert rows["arbitrary"].destination_keys == ("general", "ext", "arbitrary")
+    row = rows["flux_value"]
+    assert row.source_keys == ("flux_value",)
+    assert row.new_file == entry.result_path / "points/bias/point.yaml"
+    if raw_value == 0.4:
+        assert row.action == "remove"
+        assert row.new_path == "general.ext.flux_value"
+        assert "inherited" in row.reason.lower()
+    else:
+        assert document_value(point, "general.ext.legacy_meta_info") == {
+            "flux_value": 0.9
+        }
+        assert row.action == "preserved"
+        assert row.destination_keys == (
+            "general",
+            "ext",
+            "legacy_meta_info",
+            "flux_value",
+        )
+    assert not [item for item in report.pending if item.source == source]
+    assert dry.key_mappings == report.key_mappings
 
 
 def test_missing_units_drive_alias_and_module_scalars_remain_observable(
@@ -377,7 +980,9 @@ def test_conflicting_entry_units_block_values_instead_of_using_assumption(
     source = write_meta(request, "", {"flux_unit": "V", "flx_half": 0.2})
     report = migrate(request, metadata_mapping)
     setup = snapshot(open_entry(request).setup)
-    assert document_value(setup, "general.ext") == {}
+    assert document_value(setup, "general.ext") == {
+        "legacy_meta_info": {"flux_unit": "V", "flx_half": 0.2}
+    }
     assert any(
         item.source == source
         and item.location == "flx_half"
@@ -408,6 +1013,7 @@ def test_jpa_never_borrows_global_assumption(
     assert document_value(snapshot(open_entry(request).setup), "general.ext") == {
         "flux_unit": "A",
         "flux_value": 0.4,
+        "legacy_meta_info": {"best_jpa_flux": 0.2},
     }
 
 
@@ -1516,19 +2122,24 @@ def test_undefined_explicit_model_contract_remains_located_pending(
     assert dispersive.params.plot_transitions.model_extra == {"0.1": [1, 2]}
 
 
-def test_undefined_transmon_parameter_shape_stays_pending(
+def test_undefined_transmon_parameter_shape_is_preserved_as_unsupported(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
 ) -> None:
     fit: JsonObject = {"params": {"EJmax": 12.0, "EC": 0.3, "d": 0.2}}
     source = write_params(request_data, {"fluxdep_fit": fit})
     report = migrate(request_data, analysis_mapping)
+    assert not any(item.source == source for item in report.pending)
     assert any(
-        item.source == source
-        and item.location == "fluxdep_fit.params"
-        and "legacy" in item.reason.lower()
-        for item in report.pending
+        row.old_file == source
+        and row.action == "preserved"
+        and row.source_keys == ("fluxdep_fit", "params", "EJmax")
+        and "unsupported model" in row.reason.lower()
+        for row in report.key_mappings
     )
+    assert not (
+        request_data.results_root / request_data.name / "predictors/Qlegacy.json"
+    ).exists()
     assert (
         document_value(
             snapshot(open_entry(request_data).setup),

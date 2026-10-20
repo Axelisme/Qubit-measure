@@ -273,6 +273,10 @@ class MigrationSession:
             if operation == "move_labber"
             else "samples"
             if operation == "samples"
+            else "spectrums"
+            if operation == "spectrums"
+            else "spectrums_legacy"
+            if operation == "spectrums_legacy"
             else "copy",
             source=source,
             destination=destination,
@@ -334,13 +338,21 @@ class MigrationSession:
     ) -> MigrationFileState:
         """Recover or publish one owned exact destination and return durable state.
 
-        operation is copy/move_labber/native/samples. build writes converted temp bytes;
+        operation is copy/move_labber/native/samples/spectrums/spectrums_legacy.
+        build writes converted or residual temp bytes;
         None copies source bytes. Verify hashes at every publication/removal
         window. A move only removes source after published destination verification.
         Conflicts raise MigrationInputError/FileExistsError; execution failures
         persist diagnostic/recovery state and propagate. dry_run only plans.
         """
-        if operation not in ("copy", "move_labber", "native", "samples"):
+        if operation not in (
+            "copy",
+            "move_labber",
+            "native",
+            "samples",
+            "spectrums",
+            "spectrums_legacy",
+        ):
             raise ValueError(f"Invalid publication operation {operation!r}")
         state = self.state(source, operation)
         if state is None:
@@ -381,7 +393,7 @@ class MigrationSession:
         report = self.manifest.report
         status = (
             "converted"
-            if state.operation in ("native", "samples")
+            if state.operation in ("native", "samples", "spectrums")
             else "moved"
             if state.operation == "move_labber"
             else "preserved"
