@@ -200,6 +200,58 @@ def test_unknown_csv_fields_keep_raw_values_in_plan_and_public_readback(
     assert source.read_bytes() == original
 
 
+def test_unknown_csv_collisions_use_lossless_nested_fields_and_literal_report_keys(
+    tmp_path: Path, entry: ResultEntry
+) -> None:
+    source = tmp_path / "collision.csv"
+    source.write_text(
+        "dev_value,dev_unit,T1 (us),Tcomment,t1_us,tcomment,run_id,point,source,at,"
+        "legacy_fields,extra.with.dot\n"
+        "0.1,V,50,known, 001 ,raw text,original id,old point,old source,old time,"
+        "original container,literal\n",
+        encoding="utf-8",
+    )
+    original = source.read_bytes()
+    plan = sample_csv.plan_sample_csv([source])
+    assert len(plan.rows) == 1
+    assert plan.pending == ()
+    report = sample_csv.convert_sample_csv(
+        [source], entry=entry, component="Q1", point="new point"
+    )
+    assert report.converted_rows == 1
+    assert report.pending_rows == ()
+    row = entry.samples("Q1").latest("legacy-collision-1")
+    assert row is not None
+    assert row["run_id"] == "legacy-collision-1"
+    assert row["point"] == "new point"
+    assert row["source"] == "manual"
+    assert row["at"] != "old time"
+    assert row["t1_us"] == 50
+    assert row["tcomment"] == "known"
+    assert row["legacy_fields"] == {
+        "t1_us": " 001 ",
+        "tcomment": "raw text",
+        "run_id": "original id",
+        "point": "old point",
+        "source": "old source",
+        "at": "old time",
+        "legacy_fields": "original container",
+    }
+    assert row["extra.with.dot"] == "literal"
+    assert [item.destination_keys for item in report.preserved_fields] == [
+        ("legacy_fields", "t1_us"),
+        ("legacy_fields", "tcomment"),
+        ("legacy_fields", "run_id"),
+        ("legacy_fields", "point"),
+        ("legacy_fields", "source"),
+        ("legacy_fields", "at"),
+        ("legacy_fields", "legacy_fields"),
+        ("extra.with.dot",),
+    ]
+    assert report.preserved_fields == plan.preserved_fields
+    assert source.read_bytes() == original
+
+
 @pytest.mark.parametrize("second_name", ["old.csv", "old.txt"])
 def test_duplicate_stems_fail_before_writing_any_input(
     tmp_path: Path, entry: ResultEntry, second_name: str
