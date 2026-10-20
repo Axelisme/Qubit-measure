@@ -1,4 +1,4 @@
-"""SetupControlFacet public entry/point and connection routing contracts."""
+"""Independent Setup/Soc control facets: public routing and outcome contracts."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from zcu_tools.gui.session.services.project_settings import (
     ProjectSettingsService,
     SetupPreferences,
 )
-from zcu_tools.gui.session.setup_control import SetupControlFacet
+from zcu_tools.gui.session.setup_control import SetupControlFacet, SocControlFacet
 from zcu_tools.gui.session.types import SocCfgHandle
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
@@ -117,7 +117,9 @@ class RecordingDevice(DeviceControlFacet):
         return "V"
 
 
-def _facet() -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnection]:
+def _facet() -> tuple[
+    SetupControlFacet, SocControlFacet, CallLog, BaseEventBus, RecordingConnection
+]:
     log, bus = CallLog(), BaseEventBus()
     connection = RecordingConnection(log)
     return (
@@ -125,8 +127,10 @@ def _facet() -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnect
             bus=bus,
             settings=RecordingSettings(log),
             context=RecordingContext(log),
-            connection=connection,
             device=RecordingDevice(log),
+        ),
+        SocControlFacet(
+            bus=bus, settings=RecordingSettings(log), connection=connection
         ),
         log,
         bus,
@@ -135,15 +139,13 @@ def _facet() -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnect
 
 
 def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None:
-    facet, log, bus, _connection = _facet()
+    facet, _soc, log, bus, _connection = _facet()
     request = EntryRequest("chip")
     point = PointCreateRequest("new", "", CommandOrigin("gui"), clone_from="base")
     saved = SavedPoint(entry_id="entry", point="base")
     info = EntryInfo(
         "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
     )
-    conn_req = ConnectionPreferences(ip="127.0.0.1", port=8887)
-    connect_req = ConnectRemoteRequest(ip="192.0.2.1", port=8888)
     cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
         (
             "get_setup_preferences",
@@ -193,29 +195,30 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
             (WorkingPointInfo("base", ""),),
             call("context", "list_points", refresh=False),
         ),
-        (
-            "start_connect",
-            lambda: facet.start_connect(connect_req),
-            7,
-            call("connection", "start_connect", connect_req),
-        ),
-        (
-            "remember_connection",
-            lambda: facet.remember_connection(conn_req),
-            None,
-            call("settings", "remember_connection", conn_req),
-        ),
-        (
-            "get_soccfg",
-            facet.get_soccfg,
-            _connection.cfg,
-            call("connection", "get_soccfg"),
-        ),
     )
     assert facet.get_bus() is bus
     for name, action, expected, _call in cases:
         assert action() == expected, name
     assert log.calls == [expected_call for *_, expected_call in cases]
+
+
+def test_soc_control_forwards_connection_contract() -> None:
+    _setup, facet, log, bus, connection = _facet()
+    prefs = ConnectionPreferences(ip="127.0.0.1", port=8887)
+    request = ConnectRemoteRequest(ip="192.0.2.1", port=8888)
+    assert facet.get_bus() is bus
+    assert facet.get_setup_preferences() == SetupPreferences(
+        entry_name="chip", ip="10.0.0.2", port=7000
+    )
+    assert facet.start_connect(request) == 7
+    assert facet.remember_connection(prefs) is None
+    assert facet.get_soccfg() is connection.cfg
+    assert log.calls == [
+        call("settings", "get_setup_preferences"),
+        call("connection", "start_connect", request),
+        call("settings", "remember_connection", prefs),
+        call("connection", "get_soccfg"),
+    ]
 
 
 def test_setup_control_project_applied_hook_receives_resolved_project(
@@ -239,10 +242,10 @@ def test_setup_control_project_applied_hook_receives_resolved_project(
         fixture.stop()
 
 
-def test_setup_control_rebinds_connection_outcome_subscription() -> None:
+def test_soc_control_rebinds_connection_outcome_subscription() -> None:
     from zcu_tools.gui.session.events import ConnectionFinishedPayload
 
-    facet, _log, bus, _connection = _facet()
+    _setup, facet, _log, bus, _connection = _facet()
     first: list[str] = []
     second: list[str] = []
     facet.bind_connection_outcome(
