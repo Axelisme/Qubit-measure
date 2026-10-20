@@ -166,9 +166,8 @@ def test_library_only_import_keeps_evidence_after_source_entry_moves(
     assert isinstance(imported.payload, ImportPayload)
     assert imported.payload.source_event_json == original.event_json
     assert imported.payload.source_record == original.event.record
-    results, database = entry_roots
+    results, _database = entry_roots
     (results / "other").rename(results / "moved-other")
-    (database / "other").rename(database / "moved-other")
     stored = DocumentStore(
         entry.result_path / "points/library-only/module_cfg.yaml",
         ModuleLibraryDocument,
@@ -414,7 +413,6 @@ def test_nested_import_remains_locally_resolvable_after_source_entries_move(
     assert ledger_path.read_text() == raw + "\n"
     for name in ("other", "entry"):
         (results / name).rename(results / f"moved-{name}")
-        (database / name).rename(database / f"moved-{name}")
     reopened = ResultEntry.open("third", result_root=results, database_root=database)
     point = reopened.use_point("final")
     assert point.Q1.rate == 5300.0
@@ -464,27 +462,75 @@ def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     assert foreign.entry_id != entry.entry_id
 
 
-@pytest.mark.parametrize("different_root", ["results", "database"])
-def test_foreign_view_with_other_roots_is_rejected_without_publishing(
+def test_foreign_view_with_other_result_root_is_rejected_without_publishing(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
     tmp_path: Path,
-    different_root: str,
 ) -> None:
     results, database = entry_roots
     foreign = ResultEntry.create(
         "elsewhere",
-        result_root=tmp_path / "other-results"
-        if different_root == "results"
-        else results,
-        database_root=tmp_path / "other-db"
-        if different_root == "database"
-        else database,
+        result_root=tmp_path / "other-results",
+        database_root=database,
     )
     point = foreign.new_point("source")
     with pytest.raises(ValueError, match="root"):
         entry.new_point("failed", clone_from=point)
     assert not (results / "entry/points/failed").exists()
+    assert entry.ledger.events() == ()
+
+
+@pytest.mark.parametrize("same_entry", [True, False])
+@pytest.mark.parametrize("constructor_bound", [True, False])
+def test_clone_accepts_point_identity_with_different_database_root(
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    tmp_path: Path,
+    same_entry: bool,
+    constructor_bound: bool,
+) -> None:
+    results, _database = entry_roots
+    source_entry = (
+        entry
+        if same_entry
+        else ResultEntry.create(
+            "other", result_root=results, database_root=tmp_path / "source-output"
+        )
+    )
+    source_entry.setup.add_component("Q1", kind="fake/drive/a", rate=5300.0)
+    source_entry.new_point("source")
+    other_output = tmp_path / "different-output"
+    if constructor_bound:
+        source = source_entry.result_path / "points/source/point.yaml"
+        view = PointView(
+            DocumentStore(
+                source,
+                PointDocument,
+                format=PARAMETER_FORMAT,
+                supported_version=PARAMETER_VERSION,
+            ),
+            source,
+            entry_id=source_entry.entry_id,
+            result_root=results,
+            database_root=other_output,
+        )
+    else:
+        (other_output / source_entry.result_path.name).mkdir(parents=True)
+        view = ResultEntry.open(
+            source_entry.result_path.name,
+            result_root=results,
+            database_root=other_output,
+        ).use_point("source")
+
+    try:
+        cloned = entry.new_point("copy", clone_from=view)
+    except ValueError as error:
+        pytest.fail(f"Database root is not a Point clone identity boundary: {error}")
+
+    assert cloned.Q1.rate == 5300.0
+    assert entry.use_point("copy").Q1.rate == 5300.0
+    cloned.Q1.rate = 5400.0
+    assert source_entry.use_point("source").Q1.rate == 5300.0
     assert entry.ledger.events() == ()
 
 

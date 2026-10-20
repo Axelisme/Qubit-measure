@@ -145,7 +145,7 @@ def test_capture_rejects_roles_from_another_owner_without_saving(
             copytree(entry.result_path, result_root / "entry")
         else:
             database_root = tmp_path / "other-Database"
-            copytree(entry.database_path, database_root / "entry")
+            (database_root / "entry").mkdir(parents=True)
         other_entry = ResultEntry.open(
             "entry", result_root=result_root, database_root=database_root
         )
