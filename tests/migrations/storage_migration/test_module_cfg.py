@@ -126,6 +126,270 @@ def _manifest(request: MigrationRequest) -> MigrationManifest:
     )
 
 
+def _historical_pulse() -> YamlMap:
+    return {
+        "type": "pulse",
+        "ch": 2,
+        "nqz": 2,
+        "freq": 456.75,
+        "gain": 0.125,
+        "mixer_freq": 100.5,
+        "desc": "Drive description",
+        "waveform": {
+            "style": "flat_top",
+            "length": 0.25,
+            "raise_waveform": {"style": "cosine", "length": 0.02},
+        },
+    }
+
+
+@pytest.fixture
+def historical_mapping(mapping: MigrationMapping) -> MigrationMapping:
+    return replace(
+        mapping,
+        module_rules=tuple(
+            ModuleRule(
+                old_name=name,
+                target_path=f"C1.{group}.{name}",
+                reference_path=f"C1.module.{name}" if group != "waveforms" else None,
+                reason="Historical reader shape",
+                kind="waveform" if group == "waveforms" else "module",
+            )
+            for group, names in (
+                ("pulses", ("pi_amp", "pi2_amp", "pi_len", "pi2_len")),
+                ("readout", ("readout_dpm", "readout_rf")),
+                ("reset", ("reset_bath", "reset_bath_e")),
+                ("waveforms", ("mist_waveform", "qub_cos", "qub_flat", "ro_waveform")),
+            )
+            for name in names
+        ),
+    )
+
+
+def _historical_library() -> YamlMap:
+    modules: YamlMap = {
+        name: _historical_pulse() for name in ("pi_amp", "pi2_amp", "pi_len", "pi2_len")
+    }
+    for name in ("readout_dpm", "readout_rf"):
+        modules[name] = {
+            "type": "base",
+            "desc": "Readout description",
+            "pulse_cfg": _historical_pulse(),
+            "ro_cfg": {"ro_ch": 1, "ro_length": 0.9, "trig_offset": 0.625},
+        }
+    for name, phase in (("reset_bath", -103.0), ("reset_bath_e", 77.0)):
+        modules[name] = {
+            "type": "bath",
+            "desc": "Bath description",
+            "cavity_tone_cfg": _historical_pulse(),
+            "qubit_tone_cfg": _historical_pulse(),
+            "pi2_cfg": {**_historical_pulse(), "phase": phase},
+        }
+    return {
+        "modules": modules,
+        "waveforms": {
+            "mist_waveform": {"style": "const", "length": 1.0},
+            "qub_cos": {"style": "cosine", "length": 2.0},
+            "qub_flat": {
+                "style": "flat_top",
+                "length": 2.0,
+                "raise_waveform": {"style": "cosine", "length": 0.02},
+            },
+            "ro_waveform": {
+                "style": "flat_top",
+                "length": 5.0,
+                "raise_waveform": {"style": "cosine", "length": 0.1},
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize("label", ["", "exps/context"])
+def test_historical_library_reconstructs_eight_modules_and_four_waveforms(
+    request_data: MigrationRequest,
+    historical_mapping: MigrationMapping,
+    label: str,
+) -> None:
+    request = replace(request_data, part="parameters")
+    source = _library(write_meta(request, label, {}), _historical_library())
+    planned = _convert(replace(request, dry_run=True), historical_mapping)
+    assert not request.results_root.exists()
+    assert not (request.database_root / request.name).exists()
+    report = _convert(request, historical_mapping)
+    entry = _entry(request)
+    point = "context" if label else None
+    library = entry.module_library(point).snapshot()
+    assert len(library.module_keys()) == 8
+    assert len(library.waveform_keys()) == 4
+    pulse = library.module_spec("C1.pulses.pi_amp")
+    assert pulse == PulseSpec(**_historical_pulse())
+    assert library.value("C1.pulses.pi_amp.phase") == 0.0
+    assert library.value("C1.pulses.pi_amp.pre_delay") == 0.0
+    assert library.value("C1.pulses.pi_amp.post_delay") == 0.0
+    for name in ("readout_dpm", "readout_rf"):
+        readout = library.entry_value(f"C1.readout.{name}", kind="module")
+        assert readout == {
+            "type": "readout/pulse",
+            "desc": "Readout description",
+            "gen_ch": 2,
+            "nqz": 2,
+            "freq": 456.75,
+            "gain": 0.125,
+            "mixer_freq": 100.5,
+            "phase": 0.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+            "waveform": {
+                "style": "flat_top",
+                "length": 0.25,
+                "raise_waveform": {"style": "cosine", "length": 0.02},
+            },
+            "ro_ch": 1,
+            "ro_length": 0.9,
+            "trig_offset": 0.625,
+        }
+        assert library.get_module(f"C1.readout.{name}").type == "readout/pulse"
+    for name, phase in (("reset_bath", -103.0), ("reset_bath_e", 77.0)):
+        bath = library.module_spec(f"C1.reset.{name}")
+        assert bath.type == "reset/bath"
+        assert library.value(f"C1.reset.{name}.desc") == "Bath description"
+        for child in ("cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg"):
+            assert library.value(f"C1.reset.{name}.{child}.desc") == "Drive description"
+            assert library.value(f"C1.reset.{name}.{child}.mixer_freq") == 100.5
+        assert library.value(f"C1.reset.{name}.pi2_cfg.phase") == phase
+        assert library.get_module(f"C1.reset.{name}").type == "reset/bath"
+    assert library.get_waveform("C1.waveforms.mist_waveform").length == 1.0
+    assert library.get_waveform("C1.waveforms.qub_cos").length == 2.0
+    assert library.get_waveform("C1.waveforms.qub_flat").length == 2.0
+    assert library.get_waveform("C1.waveforms.ro_waveform").length == 5.0
+    view = entry.setup if point is None else entry.use_point(point)
+    assert document_value(snapshot(view), "C1.module") == {
+        rule.old_name: rule.target_path
+        for rule in historical_mapping.module_rules
+        if rule.kind == "module"
+    }
+    assert not any(item.source == source for item in report.pending)
+    assert planned.pending == report.pending
+    assert report.failures == ()
+
+
+@pytest.mark.parametrize("label", ["", "exps/context"])
+def test_module_unknown_content_is_visible_without_duplicate_converted_leaves(
+    request_data: MigrationRequest,
+    library_mapping: MigrationMapping,
+    label: str,
+) -> None:
+    request = replace(request_data, part="parameters")
+    pulse = {
+        **_pulse("same"),
+        "desc": "Formal description",
+        "mixer_freq": 80.0,
+        "name": "legacy drive",
+        "extra.with.dot": {"expr": "=unknown.value"},
+        "waveform": {
+            "style": "flat_top",
+            "length": 0.3,
+            "note": [],
+            "raise_waveform": {"style": "cosine", "length": 0.02, "old.key": None},
+        },
+    }
+    source = _library(
+        write_meta(request, label, {}),
+        {
+            "modules": {"same": pulse, "unknown.entry": {"type": "future", "value": 8}},
+            "waveforms": {"same": {"style": "const", "length": 0.1, "note": "keep"}},
+            "unknown.section": {"original": [1, None, "=not.evaluated"]},
+        },
+    )
+    planned = _convert(replace(request, dry_run=True), library_mapping)
+    assert not request.results_root.exists()
+    report = _convert(request, library_mapping)
+    entry = _entry(request)
+    point = "context" if label else None
+    library = entry.module_library(point).snapshot()
+    assert library.module_keys() == ("C1.pulses.pi",)
+    assert library.value("C1.pulses.pi.desc") == "Formal description"
+    assert library.value("C1.pulses.pi.mixer_freq") == 80.0
+    assert library.get_module("C1.pulses.pi").type == "pulse"
+    view = entry.setup if point is None else entry.use_point(point)
+    assert document_value(snapshot(view), "general.ext.legacy_module_cfg") == {
+        "modules": {
+            "same": {
+                "name": "legacy drive",
+                "extra.with.dot": {"expr": "=unknown.value"},
+                "waveform": {"note": [], "raise_waveform": {"old.key": None}},
+            },
+            "unknown.entry": {"type": "future", "value": 8},
+        },
+        "waveforms": {"same": {"note": "keep"}},
+        "unknown.section": {"original": [1, None, "=not.evaluated"]},
+    }
+    rows = [
+        item
+        for item in report.key_mappings
+        if item.old_file == source and item.action == "preserved"
+    ]
+    assert rows
+    assert all(item.new_path is None for item in rows)
+    assert all(
+        item.new_file
+        == entry.result_path / ("points/context/point.yaml" if point else "setup.yaml")
+        for item in rows
+    )
+    assert any(
+        item.source_keys == ("modules", "same", "extra.with.dot")
+        and item.destination_keys
+        == ("general", "ext", "legacy_module_cfg", "modules", "same", "extra.with.dot")
+        for item in rows
+    )
+    assert report.pending == planned.pending == ()
+    assert report.failures == ()
+    with view.edit() as draft:
+        draft.set("general.ext.legacy_module_cfg", {"user": "edited"})
+    resumed = _convert(replace(request, resume=True), library_mapping)
+    assert resumed.key_mappings == report.key_mappings
+    edited = _entry(request)
+    edited_view = edited.setup if point is None else edited.use_point(point)
+    assert document_value(snapshot(edited_view), "general.ext.legacy_module_cfg") == {
+        "user": "edited"
+    }
+
+
+def test_supported_module_missing_required_evidence_is_pending_and_preserved(
+    request_data: MigrationRequest,
+    library_mapping: MigrationMapping,
+) -> None:
+    request = replace(request_data, part="parameters")
+    pulse = _pulse("same")
+    del pulse["gain"]
+    source = _library(
+        write_meta(request, "", {}),
+        {
+            "modules": {"same": pulse},
+            "waveforms": {"same": {"style": "const", "length": 0.1}},
+        },
+    )
+    report = _convert(request, library_mapping)
+    entry = _entry(request)
+    assert document_value(snapshot(entry.setup), "general.ext.legacy_module_cfg") == {
+        "modules": {"same": pulse}
+    }
+    assert entry.module_library().snapshot().module_keys() == ()
+    assert document_value(snapshot(entry.setup), "C1.module") == {}
+    assert any(
+        item.source == source
+        and item.location == "modules.same"
+        and "gain" in item.reason
+        for item in report.pending
+    )
+    assert any(
+        item.old_file == source
+        and item.action == "preserved"
+        and item.source_keys == ("modules", "same")
+        for item in report.key_mappings
+    )
+
+
 def test_parameters_publish_canonical_specs_references_units_and_manual_sources(
     request_data: MigrationRequest,
     library_mapping: MigrationMapping,
