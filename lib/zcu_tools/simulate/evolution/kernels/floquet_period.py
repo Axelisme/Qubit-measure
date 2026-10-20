@@ -370,7 +370,7 @@ def _build(
             (h0, x, y, frequency),
             np.eye(size, dtype=complex).ravel(),
             period,
-            Tolerances(tolerance, tolerance * 0.01, period / 4),
+            Tolerances(tolerance, tolerance * 0.01, period / 4, np.inf, 0),
         )
         coefficients = coefficients.reshape(-1, 8, size, size)
     generator, decay = secular_operators(model)

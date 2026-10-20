@@ -15,13 +15,7 @@ from zcu_tools.resources.document_store import (
     LockTimeoutError,
 )
 
-from tests.resources._document_store_fakes import StrictDocument
-
-
-class SyntheticDocument(BaseModel):
-    format: str
-    format_version: str
-    values: dict[str, float]
+from tests.resources._document_store_fakes import StrictDocument, SyntheticDocument
 
 
 class ExtensionDocument(SyntheticDocument):

@@ -36,7 +36,7 @@ from zcu_tools.cfg_model import (
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
 from ..document_store import DocumentChange, DocumentValue
-from ..entry.provenance import Provenance, ProvenanceData, validate_source
+from ..entry.provenance import Provenance, ProvenanceData, validate_sources
 
 MODULE_LIBRARY_FORMAT = "zcu.module-library"
 MODULE_LIBRARY_VERSION = FormatVersion(2, 0)
@@ -531,12 +531,16 @@ def _validate_document(
         for waveform in library.waveforms.values():
             waveform_spec_from_raw(waveform)
     snapshot = LibrarySnapshot(document)
-    for path, record in document.provenance.items():
+    for path in document.provenance:
         root, kind, suffix = _path_root(path)
         value: YamlValue = snapshot.entry_value(root, kind=kind)
         if not has_persistent_source_suffix(value, suffix):
             raise ValueError(f"Source path is not a persistent Spec leaf: {path!r}")
-        validate_source(record.to_provenance(), ledger, entry_id)
+    validate_sources(
+        (record.to_provenance() for record in document.provenance.values()),
+        ledger,
+        entry_id,
+    )
 
 
 class LibraryEdit:

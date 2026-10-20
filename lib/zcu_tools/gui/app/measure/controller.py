@@ -93,7 +93,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
     from .artifacts import SaveControlPort
@@ -407,6 +407,7 @@ class Controller(SessionControllerMixin):
         self._ctx_svc = services.context
         self._context_control = services.context_control
         self._setup_control = services.setup_control
+        self._soc_control = services.soc_control
         self._tab_forms = services.tab_forms
         self._tab_svc = services.tab
         self._tab_control = services.tab_control
@@ -595,6 +596,11 @@ class Controller(SessionControllerMixin):
     @property
     def setup_control(self) -> SetupControlPort:
         return self._setup_control
+
+    @property
+    def soc_control(self) -> SocControlPort:
+        """Return the session's owner-thread SoC dialog command/query facet."""
+        return self._soc_control
 
     @property
     def cfg_resources(self) -> TabFormResources:

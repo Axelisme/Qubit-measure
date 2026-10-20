@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
 
     from ..writeback import WritebackControlPort
     from .operation_control import OperationControlPort
@@ -91,6 +91,11 @@ class AppServices:
     exclusion) so operation_id / await / cancel are uniform (ADR-0066).
     A single OperationRunner (the kind-agnostic lifecycle mechanism, ADR-0066)
     is shared by run / analyze / post-analyze / device-setup operations.
+
+    soc_control is the non-null session control facet for the shared SoC dialog.
+    Use it on the GUI owner thread for connection commands, cached preferences,
+    configuration reads and outcome subscriptions. Unlike soc_connection, the
+    owning connection service, this facet exposes only the dialog's narrow port.
     """
 
     startup: StartupService
@@ -112,6 +117,7 @@ class AppServices:
     context: ContextService
     context_control: ContextControlPort
     setup_control: SetupControlPort
+    soc_control: SocControlPort
     tab: TabService
     tab_forms: TabFormResources
     tab_control: TabControlPort
@@ -332,6 +338,7 @@ def build_app_services(  # noqa: PLR0913
         context=context,
         context_control=session.context_control,
         setup_control=session.setup_control,
+        soc_control=session.soc_control,
         tab=tab,
         tab_forms=tab_forms,
         tab_control=tab_control,

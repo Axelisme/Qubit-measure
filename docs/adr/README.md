@@ -20,7 +20,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## GUI Service Architecture
 
 - [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：driver 記錄兩項活動狀態、DeviceManager 具名快照、GUI 定時讀取與標記、單 driver 單名稱及 closing driver 登記拒絕，以及獨立於 acquisition snapshot 的 run 後 cache 讀回。
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session 與腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組與 explicit plotting；PredictorParameterEditor／PredictorCurveTabs 與 ExperimentFigureArea 的具體控件 owner。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control facets、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組與 explicit plotting；PredictorParameterEditor／PredictorCurveTabs 與 ExperimentFigureArea 的具體控件 owner。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher／runtime／composition、可信 startup(ctx) 的 default／custom／clean 選擇、背景執行、on_close 與預設腳本的 session 保存責任。
 
 ## Cfg / Value Model
@@ -60,7 +60,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Analysis / Simulation / Waveform
 
-- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。依賴方向沿用 C8、C9、C12。
+- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。Program 擁有 RawShots 介面，環境生成完整 raw，core 保持純資料。依賴方向沿用 C8、C9、C12、C19。
 - [0077 — Numerical candidates、plan ownership 與 checked replay](0077-numerical-plans-and-replay.md)：superseded。實驗 planner 與 checked plan replay 已移除，現行分工由 [[0078]] 接替；正文保留歷史設計。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。

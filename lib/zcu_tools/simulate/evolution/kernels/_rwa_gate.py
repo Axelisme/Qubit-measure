@@ -345,7 +345,7 @@ def _single_unitaries(context, duration_ns):
             interval,
             np.eye(size, dtype=np.complex128).ravel(),
             end - start,
-            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS),
+            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS, np.inf, 0),
             1.0,
         )
         endpoint = state.reshape(size, size)
@@ -376,7 +376,7 @@ def _adaptive_unitaries(context, duration_ns, segments):
             interval,
             np.eye(size, dtype=np.complex128).ravel(),
             end - start,
-            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS),
+            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS, np.inf, 0),
             1.0,
         )
         endpoint = state.reshape(size, size)
@@ -439,7 +439,7 @@ def _multi_unitaries(context, duration_ns, segments):
             interval,
             np.eye(size, dtype=np.complex128).ravel(),
             end - start,
-            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS),
+            Tolerances(_RTOL, _ATOL, _MAX_STEP_NS, np.inf, 0),
             1.0,
         )
         endpoint = state.reshape(size, size)

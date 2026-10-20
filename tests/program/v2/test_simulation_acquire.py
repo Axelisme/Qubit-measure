@@ -64,6 +64,77 @@ def test_explicit_zero_noise_preserves_shapes_and_raw():
     np.testing.assert_array_equal(dec[0], 0)
 
 
+@pytest.mark.parametrize("edge_counting", [False, True])
+def test_integrated_normalization_round_buffers_and_delayed_raw(edge_counting):
+    from zcu_tools.core.simulation import (
+        ChannelStatistics,
+        RoundStatistics,
+        SamplingIdentity,
+    )
+    from zcu_tools.program.v2.simulation import IntegratedRound
+
+    from tests.program.v2.simulation.support import FixedRawShots
+
+    env = environment(std_adc=0, seed=13, n_gens=2, n_readouts=2)
+    for ch in (0, 1):
+        env.soccfg["readouts"][ch]["iq_offset"] = 0.125 * (ch + 1)
+    prog = program(env, reps=3, rounds=3, channels=(1, 0), samples=7)
+    for ro in prog.ro_chs.values():
+        ro["edge_counting"] = edge_counting
+    sums = np.array([[13.0, -29.0]])
+
+    def source(request):
+        statistics = RoundStatistics(
+            np.array([3], dtype=np.int64),
+            tuple(
+                ChannelStatistics(
+                    ch, sums * (ch + 1), np.zeros((1, 1, 2)), np.zeros((2, 2))
+                )
+                for ch in (0, 1)
+            ),
+            SamplingIdentity(13, (request.acquire.sequence, request.index, 1)),
+        )
+        return IntegratedRound(
+            statistics, FixedRawShots({ch: sums * (ch + 1) / 3 for ch in (0, 1)})
+        )
+
+    env.soc.binding.execute = source
+    hooks = []
+    try:
+        for remove_offset in (True, False, True):
+            hooks.clear()
+            actual = prog.acquire(
+                env.soc,
+                progress=False,
+                remove_offset=remove_offset,
+                round_hook=lambda count, data, stop: hooks.append((count, data)),
+            )
+            expected = []
+            for ch in (1, 0):
+                avg = sums * (ch + 1) / 3
+                if not edge_counting:
+                    avg /= 7
+                    if remove_offset:
+                        avg -= 0.125 * (ch + 1)
+                expected.append(avg)
+            rounds = prog.get_rounds()
+            assert rounds is not None and len(rounds) == 3
+            for completed in rounds:
+                for got, wanted in zip(completed, expected, strict=True):
+                    assert got.tobytes() == wanted.tobytes()
+            # QICK summarizes by a NumPy mean over the completed rounds.
+            for got, wanted in zip(actual, expected, strict=True):
+                reference = np.stack([wanted] * 3).mean(axis=0)
+                assert got.tobytes() == reference.tobytes()
+            assert [count for count, _ in hooks] == [1, 2, 3]
+            raw = raw_of(prog)
+            assert all(value.shape == (3, 1, 2) for value in raw)
+            for first, second in zip(raw, raw_of(prog), strict=True):
+                assert first.tobytes() == second.tobytes()
+    finally:
+        env.devices.close_all_devices()
+
+
 def test_gaussian_sum_scaling_and_reproducible_independent_acquires():
     # 12000 independent quadratures: mean/std bounds exceed six sampling SEs.
     env = environment(std_adc=20, seed=41)
@@ -171,6 +242,10 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
             "synthetic-v1", "retained-model-v1", (("bias", value),)
         )
 
+    from zcu_tools.program.v2.simulation import IntegratedRound
+
+    from tests.program.v2.simulation.support import FixedRawShots
+
     def source(request):
         seen.append(request)
         bias = request.snapshot.values[0][1]
@@ -183,10 +258,13 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
             channels.append(
                 ChannelStatistics(ch, sums, sums[:, None, :], np.zeros((2, 2)))
             )
-        return RoundStatistics(
+        statistics = RoundStatistics(
             np.array([1], dtype=np.int64),
             tuple(channels),
             SamplingIdentity(12, (request.index,)),
+        )
+        return IntegratedRound(
+            statistics, FixedRawShots({ch.channel: ch.sums for ch in channels})
         )
 
     def hook(count, data, stop):

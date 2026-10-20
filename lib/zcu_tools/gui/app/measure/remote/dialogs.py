@@ -23,6 +23,7 @@ class DialogName(str, Enum):
     """Wire-stable identifiers for remotely controllable dialogs."""
 
     SETUP = "setup"
+    SOC = "soc"
     DEVICE = "device"
     PREDICTOR = "predictor"
     INSPECT = "inspect"

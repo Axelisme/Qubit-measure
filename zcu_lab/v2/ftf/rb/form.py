@@ -31,7 +31,7 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
             "modules": {
                 "x90_f1": Slot("$f1.module.x90", copy=True),
                 "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": Slot("$mux.module.readout", copy=True),
+                "readout": Slot("$mux.module.readout"),
             },
             "drive": {
                 "f1": Slot("$coupler.module.cz_f1", copy=True),

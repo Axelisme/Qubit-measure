@@ -124,7 +124,9 @@ class PredictorDialog(QDialog):
     device optionally supplies cached/live device values. parameter_provider
     supplies fixed ParameterContext captures for optional frequency expressions.
     Predictor files come from the current entry through predictor control.
-    params optionally prefills complete or partial local inputs.
+    params optionally prefills complete or partial local inputs. Blank fields are
+    unknown (None); nonnumeric or nonfinite text reports a named field error and
+    blocks computation. Loading null leaves the field blank and editable.
     Unresolved frequency paths disable calibration without substituting a value.
     persistent_on_close hides instead of finishing, retaining the plotted model.
     """
@@ -159,14 +161,15 @@ class PredictorDialog(QDialog):
         # Modified only by _add_transition / _delete_transition / _on_remove_selected.
         self._tracked: list[tuple[int, int]] = list(_DEFAULT_TRANSITIONS)
 
-        # Root layout: left controls | right tab widget.
+        # Root layout: left curve tabs | right controls column, so Close sits at
+        # the dialog's right edge like the other dialogs.
         root_layout = QHBoxLayout(self)
 
-        # ── Left: controls column ─────────────────────────────────────────
-        left_widget = QWidget()
-        left_widget.setMinimumWidth(480)
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        # ── Right: controls column ────────────────────────────────────────
+        controls_widget = QWidget()
+        controls_widget.setMinimumWidth(480)
+        controls_layout = QVBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
 
         self._parameter_editor = PredictorParameterEditor(
             predictor,
@@ -174,19 +177,19 @@ class PredictorDialog(QDialog):
             on_replaced=self._on_parameters_replaced,
             on_status=lambda message, error: self._set_status(message, error=error),
         )
-        left_layout.addWidget(self._parameter_editor)
+        controls_layout.addWidget(self._parameter_editor)
 
-        left_layout.addWidget(self._build_transition_group(), stretch=1)
+        controls_layout.addWidget(self._build_transition_group(), stretch=1)
 
-        left_layout.addWidget(self._build_calibration_group())
+        controls_layout.addWidget(self._build_calibration_group())
 
         # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
         make_label_selectable(self._status_label)
         self._status_label.setObjectName("predictor_status")
-        left_layout.addWidget(self._status_label)
+        controls_layout.addWidget(self._status_label)
 
-        left_layout.addLayout(self._build_transition_actions())
+        controls_layout.addLayout(self._build_transition_actions())
 
         self._curve_tabs = PredictorCurveTabs(
             predictor,
@@ -199,8 +202,8 @@ class PredictorDialog(QDialog):
             ),
         )
 
-        root_layout.addWidget(left_widget, stretch=0)
         root_layout.addWidget(self._curve_tabs, stretch=1)
+        root_layout.addWidget(controls_widget, stretch=0)
 
         self._initialize_trial(params)
 
@@ -375,7 +378,8 @@ class PredictorDialog(QDialog):
     def parameters(self) -> ModelParams:
         """Return the selected model's local trial: GHz energies and native affine inputs.
 
-        Unchecked fields return None. No source/session read or write occurs.
+        Blank fields return None. Nonnumeric or nonfinite text raises a named
+        PredictorInputError. No source/session read or write occurs.
         Invalid physical values are rejected only when queried.
         """
         return self._parameter_editor.parameters()
@@ -383,8 +387,8 @@ class PredictorDialog(QDialog):
     def set_parameters(self, params: ModelParams) -> None:
         """Replace the detached trial and select its model, retaining invalid physics.
 
-        Every finite float is retained exactly, including subnormals. None unchecks
-        the field; users check and edit it to complete the model.
+        Every finite float is retained exactly, including subnormals. None clears
+        the field; users enter a value to complete the model.
         Computation validates physics later. If enabled, only user cache is saved.
         """
         self._parameter_editor.set_parameters(params)
@@ -438,6 +442,11 @@ class PredictorDialog(QDialog):
     def _save_parameters(self) -> None:
         if self._caretaker is not None:
             try:
+                self.parameters()
+            except PredictorInputError:
+                # Invalid drafts stay editable; keep the last serializable cache.
+                return
+            try:
                 self._caretaker.flush()
             except PersistenceError as exc:
                 self._set_status(str(exc), error=True)
@@ -450,12 +459,19 @@ class PredictorDialog(QDialog):
         self._save_parameters()
 
     def _on_parameters_changed(self) -> None:
-        """Clear stale results and save a user edit before scheduling curve refresh."""
+        """Clear stale results and save a valid user edit before scheduling refresh."""
+        self._parameter_timer.stop()
         self._clear_predictor_display()
         self._sync_calibration_button()
-        missing = self.parameters().missing()
+        try:
+            missing = self.parameters().missing()
+        except PredictorInputError as exc:
+            self._set_status(str(exc), error=True)
+            return
         if missing:
             self._set_status("Missing parameters: " + ", ".join(missing), error=True)
+        else:
+            self._set_status("")
         self._save_parameters()
         self._parameter_timer.start()
 

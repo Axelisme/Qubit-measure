@@ -54,6 +54,8 @@ def t2ramsey(  # noqa: PLR0913
     phase-shifted pi/2 pulse and read out. Save raw IQ and fit the decay to
     estimate Ramsey T2; fringe fitting also estimates detuning. Ask before
     applying the proposed calibration; skipping writes nothing.
+    Analysis keeps the GUI parameters, which fit a free fringe phase by default.
+    Turn off Fit phase offset in the tab to use a fixed phase instead.
 
     session is supplied by the recipe driver. target selects the qubit alias
     without changing GUI focus; omission uses focus. reuse_tab_id resets an idle

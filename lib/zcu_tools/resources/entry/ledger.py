@@ -138,20 +138,34 @@ class RecordsLedger:
         path; malformed attachment JSON raises ValueError with that path. Imports
         query only the outer record, not the historical source_record.
         """
+        return self.get_many((event_id,))[0]
+
+    def get_many(self, event_ids: tuple[str, ...]) -> tuple[LedgerEntry, ...]:
+        """Read requested events and attachments with one locked ledger parse.
+
+        Return entries in input order, including repeated IDs. Each unique ID
+        and attachment is checked once per call, without a persistent cache.
+        The first missing ID raises KeyError; earlier attachment failures
+        propagate just as in get(). Unrequested attachments are not read.
+        Empty input returns () without accessing the ledger.
+        """
+        if not event_ids:
+            return ()
         with self._locked():
-            entries = self._read()
-            for item in entries:
-                if item.event.id == event_id:
-                    record = None
-                    if item.event.record is not None:
-                        path = self._records / f"{event_id}.json"
-                        try:
-                            content = path.read_text(encoding="utf-8")
-                            record = _JSON_OBJECT.validate_json(content)
-                        except ValueError as exc:
-                            raise ValueError(f"{path}: invalid record: {exc}") from exc
-                    return LedgerEntry(item.event, record, item.event_json)
-        raise KeyError(event_id)
+            entries = {item.event.id: item for item in self._read()}
+            found: dict[str, LedgerEntry] = {}
+            for event_id in dict.fromkeys(event_ids):
+                item = entries[event_id]
+                record = None
+                if item.event.record is not None:
+                    path = self._records / f"{event_id}.json"
+                    try:
+                        content = path.read_text(encoding="utf-8")
+                        record = _JSON_OBJECT.validate_json(content)
+                    except ValueError as exc:
+                        raise ValueError(f"{path}: invalid record: {exc}") from exc
+                found[event_id] = LedgerEntry(item.event, record, item.event_json)
+            return tuple(found[event_id] for event_id in event_ids)
 
     def _read(self) -> tuple[LedgerEntry, ...]:
         try:

@@ -1,5 +1,7 @@
 # CZ common-amplitude calibration
 
+Readout references `$mux.module.readout` when present, preserving the library's complete tones and scalar settings. Without a slot, fill every required readout field in the blank mux template.
+
 Scan a common scale on two calibrated charge-line gains. Use the first complete
 joint return cycle to propose two ordinary CZ pulses. FIT creates proposals;
 it never writes the library.

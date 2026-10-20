@@ -15,13 +15,14 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.widgets import secondary_colour, set_foreground
+from zcu_tools.gui.widgets import error_colour, secondary_colour, set_foreground
 from zcu_tools.gui.widgets.form.value_widgets import (
     connect_committed_value_widget,
     make_value_widget,
     read_value_widget,
     write_value_widget,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from ..adapter.analyze_params import reconstruct_params, resolve_field_info
 
@@ -37,7 +38,17 @@ class _FieldBinding:
 
 
 class AnalyzeFormWidget(QWidget):
+    """Edit dataclass parameters without publishing invalid input.
+
+    ``params_changed`` carries a valid dataclass instance on committed edits.
+    ``validity_changed`` carries a bool on every committed edit, including invalid
+    input, so hosts can refresh action gates without reusing the last valid params.
+    Hydration does not emit either signal. Invalid text stays editable and its
+    reason appears below the fields and in the affected control's tooltip.
+    """
+
     params_changed: Signal = Signal(object)
+    validity_changed: Signal = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -60,6 +71,12 @@ class AnalyzeFormWidget(QWidget):
         self._form.setSpacing(4)
         self._form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
         layout.addLayout(self._form)
+        self._error_hint = QLabel()
+        self._error_hint.setObjectName("analysisParameterError")
+        self._error_hint.setWordWrap(True)
+        make_label_selectable(self._error_hint)
+        self._error_hint.hide()
+        layout.addWidget(self._error_hint)
         self._empty_hint = QLabel("This analysis has no parameters.")
         self._empty_hint.setObjectName("analysisNoParameters")
         set_foreground(self._empty_hint, secondary_colour(self))
@@ -116,6 +133,10 @@ class AnalyzeFormWidget(QWidget):
                 decimals=binding.decimals,
                 optional=binding.optional,
             )
+            if binding.optional and isinstance(widget, QLineEdit):
+                # Qt validators suppress editingFinished for partial text such as
+                # '-'. The form parser must receive it to show errors on commit.
+                widget.setValidator(None)
             self._form.addRow(binding.label + ":", widget)
             self._widgets[binding.name] = widget
             self._connect_widget(widget)
@@ -130,23 +151,43 @@ class AnalyzeFormWidget(QWidget):
         self._widgets.clear()
         self._bindings = ()
         self._params_cls = None
+        self._error_hint.clear()
+        self._error_hint.hide()
         # Without a parameter contract the form makes no claim about parameters.
         self._empty_hint.setVisible(False)
 
     def read_params(self) -> object:
-        """Read widgets and return a typed dataclass instance."""
+        """Parse current text, refresh errors, and return a dataclass instance.
+
+        Only blank optional text means None. Nonblank unparseable text is retained
+        and raises ValueError with a field-labelled reason; no params are returned.
+        An unpopulated form raises RuntimeError. Reading emits neither signal.
+        """
         if self._params_cls is None:
             raise RuntimeError("Analyze form has not been populated")
 
         raw: dict[str, Any] = {}
+        errors: list[str] = []
         for binding in self._bindings:
             widget = self._widgets[binding.name]
-            raw[binding.name] = self._read_widget_value(
-                widget,
-                binding.bare_type,
-                binding.choices,
-                optional=binding.optional,
-            )
+            error = ""
+            try:
+                raw[binding.name] = self._read_widget_value(
+                    widget,
+                    binding.bare_type,
+                    binding.choices,
+                    optional=binding.optional,
+                )
+            except (ValueError, TypeError):
+                error = f"{binding.label}: Enter a valid {binding.bare_type.__name__} number."
+                errors.append(error)
+            widget.setToolTip(error)
+        message = "\n".join(errors)
+        self._error_hint.setText(message)
+        set_foreground(self._error_hint, error_colour(self))
+        self._error_hint.setVisible(bool(errors))
+        if errors:
+            raise ValueError(message)
         return reconstruct_params(self._params_cls, raw)
 
     def populate_values(self, instance: object) -> None:
@@ -166,8 +207,10 @@ class AnalyzeFormWidget(QWidget):
                 write_value_widget(widget, value)
         finally:
             self._hydrating = False
+        self.read_params()
 
     def is_valid(self) -> bool:
+        """Return whether the current fields parse, refreshing visible errors."""
         if self._params_cls is None:
             return False
         try:
@@ -178,6 +221,11 @@ class AnalyzeFormWidget(QWidget):
         return True
 
     def has_params(self) -> bool:
+        """Return whether a dataclass form is built, independently of validity.
+
+        Invalid edits keep the form populated. False means no parameter contract
+        has been installed, not that the current text failed to parse.
+        """
         return self._params_cls is not None
 
     def _connect_widget(self, widget: QWidget) -> None:
@@ -186,7 +234,13 @@ class AnalyzeFormWidget(QWidget):
     def _emit_params_changed(self, *_: object) -> None:
         if self._hydrating:
             return
-        self.params_changed.emit(self.read_params())
+        try:
+            params = self.read_params()
+        except ValueError:
+            self.validity_changed.emit(False)
+            return
+        self.params_changed.emit(params)
+        self.validity_changed.emit(True)
 
     def _read_widget_value(
         self,
@@ -203,13 +257,8 @@ class AnalyzeFormWidget(QWidget):
                     return choice
             raise RuntimeError(f"Unknown analyze param choice: {current!r}")
         if optional and isinstance(widget, QLineEdit):
-            # Empty (the "(none)" state) or a partial/invalid entry reads as None;
-            # mirrors read_scalar_widget for the cfg form's optional scalars.
             txt = widget.text().strip()
             if txt == "":
                 return None
-            try:
-                return bare_type(txt)
-            except (ValueError, TypeError):
-                return None
+            return bare_type(txt)
         return read_value_widget(widget, bare_type, fallback=None)

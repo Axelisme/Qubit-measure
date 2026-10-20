@@ -25,7 +25,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
-                "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=301)
+                "freq": Range.around("$qubit.freq", "20 * $qubit.kappa", expts=301)
             },
             "relax_delay": 1.0,
             "reps": 1000,

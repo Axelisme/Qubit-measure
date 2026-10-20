@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Generator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -46,7 +47,7 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui._user_input import key_click
+from tests.gui._user_input import ComponentDriver, key_click
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 
 PULSE = "Q1.pulses.pi"
@@ -207,29 +208,49 @@ def _library(session: _Session):
     return session.entry.module_library("point").snapshot()
 
 
-def test_entry_edit_is_unsaved_until_revert_or_apply(session: _Session) -> None:
+def test_entry_edit_is_unsaved_until_revert_or_apply(
+    session: _Session, tmp_path: Path
+) -> None:
     presenter = RecordingDialogPresenter()
     dialog = _open(session, presenter)
     _select(dialog, PULSE)
     assert _child(dialog, QLineEdit, "inspect.entry.name").text() == PULSE
     assert _status(dialog) == "Saved"
-    gain = _child(dialog, QLineEdit, "form.input.gain")
     apply = _child(dialog, QPushButton, "inspect.entry.apply")
     revert = _child(dialog, QPushButton, "inspect.entry.revert")
     assert not apply.isEnabled()
+    dialog.activateWindow()
+    _child(dialog, QLineEdit, "form.input.gain").setFocus()
+    QApplication.processEvents()
 
-    commit_text(gain, "0.5")
+    driver = ComponentDriver(dialog)
+
+    def capture(step: str) -> None:
+        driver.screenshot(tmp_path / f"{step}.png")
+        (tmp_path / f"{step}.json").write_text(
+            json.dumps(asdict(driver.visible()), indent=2), encoding="utf-8"
+        )
+
+    capture("01-saved")
+    driver.enter_text(value="0.5", object_name="form.input.gain", commit=False)
+    driver.press_key(Qt.Key.Key_Tab, object_name="form.input.gain")
+    capture("02-unsaved")
     assert _status(dialog) == "Unsaved"
     assert apply.isEnabled() and revert.isEnabled()
-    revert.click()
+    driver.click(object_name="inspect.entry.revert")
+    capture("03-reverted")
     assert _status(dialog) == "Saved"
     assert float(_child(dialog, QLineEdit, "form.input.gain").text()) == 0.25
     assert _library(session).module_spec(PULSE) == PulseSpec(
         ch=0, nqz=1, freq=100.0, gain=0.25, waveform=WAVEFORM
     )
 
-    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.5")
-    _child(dialog, QPushButton, "inspect.entry.apply").click()
+    driver.press_key(Qt.Key.Key_Backtab, object_name="form.input.gain")
+    driver.enter_text(value="0.5", object_name="form.input.gain", commit=False)
+    driver.press_key(Qt.Key.Key_Tab, object_name="form.input.gain")
+    capture("04-reedited")
+    driver.click(object_name="inspect.entry.apply")
+    capture("05-applied")
     written = _library(session).module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert written.gain == 0.5

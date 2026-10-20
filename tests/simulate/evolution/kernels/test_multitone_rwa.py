@@ -6,6 +6,7 @@ from threading import Event
 
 import numpy as np
 import pytest
+from scipy.linalg import expm
 from zcu_tools.simulate.evolution import (
     DriveTrack,
     Engine,
@@ -21,6 +22,89 @@ from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, KernelContract
+
+
+@pytest.mark.parametrize("duration", [1000.0, 2000.0])
+@pytest.mark.parametrize("coherent", [False, True], ids=["thermal", "cross-block"])
+def test_disconnected_drive_blocks_keep_full_bath_and_coherences(duration, coherent):
+    """Resonant circular drives give an independent constant-generator oracle.
+
+    Drive components {0,1} and {2,3} do not couple, but their populations
+    exchange through the bath. Nonzero cross-component coherences must also
+    survive. Neither component-local bath maps nor dropping cross blocks works.
+    """
+    energies = np.array([0.0, 0.3, 1.0, 1.7])
+    drives = []
+    h = np.zeros((4, 4), dtype=np.complex128)
+    for port, (i, j) in enumerate(((0, 1), (2, 3))):
+        x = np.zeros_like(h)
+        y = np.zeros_like(h)
+        x[i, j] = x[j, i] = 0.002
+        y[i, j], y[j, i] = 0.002j, -0.002j
+        drives.append(SecularDrive(str(port), x, y))
+        h[i, j] = h[j, i] = 0.0002
+    rates = np.array(
+        [
+            [0, 0.0002, 0.0003, 0],
+            [0.0001, 0, 0, 0.0004],
+            [0.00005, 0, 0, 0.0001],
+            [0, 0.00002, 0.00003, 0],
+        ]
+    )
+    gamma = 0.00001 * (np.ones((4, 4)) - np.eye(4))
+    model = SecularModel(
+        (0,),
+        "disconnected-drives-full-bath",
+        energies,
+        np.eye(4, dtype=np.complex128),
+        tuple(drives),
+        rates,
+        gamma,
+    )
+    initial = np.diag(np.array([0.55, 0.25, 0.15, 0.05])).astype(np.complex128)
+    if coherent:
+        vector = np.array([1, 1j, -1, 1j], dtype=np.complex128) / 2
+        initial = 0.7 * initial + 0.3 * np.outer(vector, vector.conj())
+    outgoing = rates.sum(axis=0)
+    decay = (outgoing[:, None] + outgoing[None, :]) / 2 + gamma
+    generator = np.empty((16, 16), dtype=np.complex128)
+    for column in range(16):
+        basis = np.zeros((4, 4), dtype=np.complex128)
+        basis.flat[column] = 1
+        derivative = -2j * np.pi * (h @ basis - basis @ h) - decay * basis
+        derivative[np.diag_indices(4)] += rates @ np.diag(basis)
+        generator[:, column] = derivative.ravel()
+    expected = (expm(duration * generator) @ initial.ravel()).reshape(4, 4)
+    phases = np.exp(-2j * np.pi * energies * duration)
+    expected *= phases[:, None] * phases[None, :].conj()
+    batch = TimelineBatch(
+        np.array([0]),
+        tuple(
+            DriveTrack(
+                str(port),
+                np.array([0.0]),
+                np.array([duration]),
+                np.array([frequency]),
+                np.array([0.0]),
+                np.array([0.1]),
+                (EnvelopeSpec("constant"),),
+                np.array([0]),
+                np.array([True]),
+            )
+            for port, frequency in enumerate((0.3, 0.7))
+        ),
+        FluxSchedule(np.array([0, 1]), np.array([0.0]), np.array([[0]])),
+        np.array([duration]),
+    )
+    with (
+        closing(
+            ModelSource(initial, lambda level: replace(model, level=level))
+        ) as source,
+        closing(Engine(1, 1000000)) as engine,
+    ):
+        result = engine.evolve(source, (batch,), cancel=Event())
+    assert result.paths.segments_by_kernel == {"multitone_rwa": 1}
+    np.testing.assert_allclose(result.densities[0], expected, atol=1e-9, rtol=0)
 
 
 def model_source() -> ModelSource:

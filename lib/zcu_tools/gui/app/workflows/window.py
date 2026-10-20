@@ -42,6 +42,7 @@ from zcu_tools.gui.app.workflows.remote import (
     WorkflowRemoteControlAdapter,
 )
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.app.workflows.session_dialogs import WorkflowSessionDialogs
 from zcu_tools.gui.app.workflows.session_strip import WorkflowSessionStrip
 from zcu_tools.gui.app.workflows.tuning_panel import WorkflowTuningPanel
 from zcu_tools.gui.catalog_loader import CatalogReloadError
@@ -61,7 +62,6 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
-from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
 from zcu_tools.plotting.plots import Plots
@@ -91,7 +91,10 @@ class WorkflowWindow[C](QWidget):
     tuning_panel presents its unique run binding in the Tunables tab; a status
     bar names the run above the diagnostics line (WorkflowRunView). Shared
     SessionServices owns runner/progress, hardware, exclusion and workers;
-    parent permits embedding.
+    parent permits embedding. setup_dialog/soc_dialog are retained shared dialogs.
+    open_setup/open_soc run on the GUI owner thread and show them non-modally.
+    Reopening prefills cached inputs without submitting, opening an entry or
+    connecting hardware. Form captures stay unchanged.
     RPC calls these same controls. Start uses cached native info; every env.run
     captures live drivers in the worker. Pause retains plan/plots/input capture;
     Resume keeps the same operation, without recapture or a second Engine owner.
@@ -172,6 +175,7 @@ class WorkflowWindow[C](QWidget):
             (self._controls.resume, self._resume_clicked),
             (self._controls.stop, self._stop_clicked),
             (self._controls.setup, self.open_setup),
+            (self._controls.soc, self.open_soc),
             (self._controls.devices, self.open_devices),
             (self._controls.inspect, self.open_inspect),
             (self._controls.prepare, self._use_source_clicked),
@@ -181,23 +185,21 @@ class WorkflowWindow[C](QWidget):
         self._run_view = WorkflowRunView(
             self._controls, self.controller, self._forms, self
         )
-        self._sync_run_locked_controls()
         self._figure_views = WorkflowFigureViews(self._figure_area)
-        self.setup_dialog = SetupDialog(self._services.setup_control, self)
-        self.setup_dialog.finished.connect(self._session.refresh)
-
-    setup_dialog: SetupDialog
+        self._session_dialogs = WorkflowSessionDialogs(
+            services, self._session.refresh, self
+        )
+        self.setup_dialog = self._session_dialogs.setup_dialog
+        self.soc_dialog = self._session_dialogs.soc_dialog
+        self._sync_run_locked_controls()
 
     def open_setup(self) -> None:
-        """Show the same retained shared Setup non-modally on the GUI owner.
+        """Show Setup; closing refreshes session chips, leaving form drafts unchanged."""
+        self._session_dialogs.open_setup()
 
-        Reopening refreshes the dialog's cached inputs, not form captures. No
-        entry is opened or hardware connected by showing. Closing Setup refreshes
-        the session chips without replacing form drafts.
-        """
-        self.setup_dialog.show()
-        self.setup_dialog.raise_()
-        self.setup_dialog.activateWindow()
+    def open_soc(self) -> None:
+        """Show the SoC connection/configuration dialog."""
+        self._session_dialogs.open_soc()
 
     def open_devices(self) -> None:
         """Open the shared Device dialog window-modally on the GUI owner.
@@ -265,10 +267,9 @@ class WorkflowWindow[C](QWidget):
         From Start until terminal delivery (pending, running, pausing, paused,
         stopping) the host rejects Prepare forms and Reload source, so both are
         disabled. The hardware gate rejects device changes; the host also locks
-        source edits through Inspect. Open Device, Inspect and ARB dialogs are
-        read-only. Reload also needs a loader and no restart-required reload
-        failure. Setup, Inspect and Devices stay enabled: Setup changes the
-        session, not the run's capture.
+        source edits through shared dialogs. Setup, SoC, Device, Inspect and ARB
+        dialogs are read-only, with their open buttons still enabled. Reload also
+        needs a loader and no restart-required reload failure.
         """
         locked = self._run_view.start_locked
         error = self._catalog_error
@@ -277,6 +278,7 @@ class WorkflowWindow[C](QWidget):
         self._controls.reload.setEnabled(
             not locked and self._loader is not None and not restart_required
         )
+        self._session_dialogs.set_read_only(read_only=locked)
         for key in ("devices", "inspect", "arb"):
             dialog = self._dialogs.get(key)
             if isinstance(dialog, (DeviceDialog, InspectDialog, ArbWaveformDialog)):
@@ -979,7 +981,7 @@ class WorkflowWindow[C](QWidget):
                 return
         if not self._shutdown_on_close(a0):
             return
-        self.setup_dialog.close()
+        self._session_dialogs.close()
         for key in ("devices", "arb"):
             dialog = self._dialogs.get(key)
             if dialog is not None:

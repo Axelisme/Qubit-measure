@@ -336,6 +336,7 @@ def test_main_window_named_dialog_facade_delegates_to_registry(
 
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.get_bus.return_value = EventBus()
+    ctrl.get_running_tab_id.return_value = None
     registry = MagicMock()
     registry.visible_names.return_value = [DialogName.PREDICTOR]
     registry.take_screenshot.return_value = b"png"

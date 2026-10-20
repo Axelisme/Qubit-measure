@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-18，microwave receiver IQ, delay and mismatch
+**Last updated:** 2026-10-20，mux raw／trace 共用完整 CTMC 路徑
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -61,19 +61,28 @@ carrier tiles, retaining per-carrier numerical guards.
 
 `ADC.sample_windows` shares one initial-state draw across several per-execution
 windows, while receiver noise remains independent across windows.
-`ADC.sample` computes these conditional means once and draws one initial joint
-state per shot, then adds independent per-sample receiver noise. It does not draw
-jump times or solve an ODE per shot. The result includes float64 traces and their
-exact discrete sums from one realization. Offset is added once per sample.
+`ADC.sample` draws an initial joint state and a continuous-time
+Markov path from the directional rates per shot. Each jump changes the cavity
+generator without resetting its field. Vacuum fields are prepared once for all
+states, including shaped envelopes; only homogeneous cavity memory is propagated
+per jump. All incident carriers superpose on that path. Grids in
+`sample_windows` share it through ringdown and gaps. Batched `sample_traces`
+requires physical readout batches and shares each shot's path across ADCs.
+Receiver noise remains independent per sample and window. The result includes float64 traces and their exact discrete
+sums from one realization. Offset is added once per sample. Conditional responses
+and integrated round statistics remain deterministic first moments.
 A zero or singular positive-semidefinite 2x2 I/Q noise covariance is valid.
 `SamplingIdentity`, imported from `zcu_tools.core.simulation`, selects a local
 PCG64 stream without changing global RNG state. The ADC and deferred integrated
 raw generation share this identity format.
 
 Environment code owns unit conversion from QICK us/MHz/degrees to ns/GHz/radians
-and composes evolution, explicit populations and ADC. Program adapters still own
-channel order, QICK buffer shapes, nearest-even int64 conversion and acquisition
-normalization. [`evolution`](evolution/README.md) uses the segment engine's fast
+and composes evolution, explicit populations and ADC. ADC and white_noise own
+complete integrated raw through structurally typed sources. `simulate.rounding`
+owns shared numeric nearest-even int64 conversion and shot-axis layout. Program
+owns the RawShots protocol, channel declaration order and acquisition normalization.
+Core statistics remain pure data. Deferred raw does no work during mean draws;
+its full CTMC paths use a separate stream and are not shifted to direct totals. [`evolution`](evolution/README.md) uses the segment engine's fast
 algorithms by default and retains prepared data in memory. It does not read or
 write an offline U-table library or persistent density records. Private replay
 recomputes from archived inputs under matching numeric and RNG versions.

@@ -906,12 +906,30 @@ class ExpTabWidget(QWidget):
         self.reset_btn.setEnabled(idle)
         self.refresh_btn.setEnabled(idle)
 
-        # Capability is already enforced by conditional construction; no tab visibility toggling.
-        # Branch inner controls only for present panes.
+        self._update_analysis_actions(state, idle=idle)
+        # The center renders the shared draft and State-owned artifact status.
+        if snapshot.save is None:
+            raise RuntimeError(
+                f"render snapshot for tab {self.tab_id!r} has no save pane"
+            )
+        self._save_center.set_comment_text(snapshot.save.comment)
+        self._save_center.update_interaction(snapshot, writable=writable)
 
+    def _update_analysis_actions(
+        self, state: TabInteractionState, *, idle: bool
+    ) -> None:
+        """Project analysis and writeback gates for the constructed panes.
+
+        idle means the tab is writable and neither running nor analyzing.
+        Form validity gates Analyze only when parameters are populated;
+        readiness and context retain their existing action-specific gates.
+        """
         if self._has_analysis:
             self.analyze_btn.setEnabled(
-                idle and state.has_context and state.has_run_result
+                idle
+                and state.has_context
+                and state.has_run_result
+                and (not self.analyze_form.has_params() or self.analyze_form.is_valid())
             )
             self.analyze_form.setEnabled(idle)
             self.writeback_widget.setEnabled(
@@ -920,11 +938,16 @@ class ExpTabWidget(QWidget):
             self.writeback_widget.setToolTip(
                 "" if state.has_context else "Select or create a working point first"
             )
-        # Post pane controls (only if present)
         if self._has_post:
             post_enabled = idle and state.has_analyze_result
             self.post_analyze_form.setEnabled(post_enabled)
-            self.post_analyze_btn.setEnabled(post_enabled)
+            self.post_analyze_btn.setEnabled(
+                post_enabled
+                and (
+                    not self.post_analyze_form.has_params()
+                    or self.post_analyze_form.is_valid()
+                )
+            )
             self._post_gate_label.setVisible(not state.has_analyze_result)
             self.post_writeback_widget.setEnabled(
                 idle and state.has_context and state.has_post_analyze_result
@@ -932,13 +955,6 @@ class ExpTabWidget(QWidget):
             self.post_writeback_widget.setToolTip(
                 "" if state.has_context else "Select or create a working point first"
             )
-        # The center renders the shared draft and State-owned artifact status.
-        if snapshot.save is None:
-            raise RuntimeError(
-                f"render snapshot for tab {self.tab_id!r} has no save pane"
-            )
-        self._save_center.set_comment_text(snapshot.save.comment)
-        self._save_center.update_interaction(snapshot, writable=writable)
 
     def _update_run_admission(
         self,
@@ -981,12 +997,18 @@ class ExpTabWidget(QWidget):
         self._actions = actions
 
         if self._has_analysis:
+            self.analyze_form.validity_changed.connect(
+                lambda _valid: actions.refresh_interaction(tab_id)
+            )
             self.analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_analyze_param_instance(
                     tab_id, instance
                 )
             )
         if self._has_post:
+            self.post_analyze_form.validity_changed.connect(
+                lambda _valid: actions.refresh_interaction(tab_id)
+            )
             self.post_analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
                     tab_id, instance

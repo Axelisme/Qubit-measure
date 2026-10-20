@@ -2,7 +2,7 @@
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-20，predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
+**Last updated:** 2026-10-20，獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
 
 ## 問題與決策
 
@@ -15,6 +15,8 @@ GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner �
 `gui.session` 供 measure 和 autofluxdep 共用 context、SoC、device、操作機制與 dialog 所需的窄 control facets。兩個 app 各自組裝 `SessionServices`，注入背景執行與 operation gate；app 決定自己的 RUN policy、workflow 和呈現。
 
 `SessionServices.runner` 與 `SessionServices.progress` 保留 build 輸入的同一 instances。同 session 的 Measure Run、Analyze、PostAnalyze 與 operation control 從 bundle 取用，不另傳一份 infrastructure。Composition root 仍建立並注入基礎物件，operation policy、exclusion 和 owner-thread delivery 不變。Session 不反向 import 具體 app。
+
+SoC dialog 透過獨立 `SocControlPort` 提供連線與 soccfg 瀏覽，Setup 透過 `SetupControlPort` 管理 entry 與 working points；使用者於 2026-10-20 裁定：「我規劃將soc連線與顯示的邏輯從setup dialog獨立出來，成為獨立的dialog並有獨立入口按鈕，新setup dialog的working points移到原本soc區域的右側。」
 
 Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 entry、選取 point、讀取記住的 Session Preference、連線），不知道 app 正在啟動、還原或關閉；control port 也不提供啟動專用的版本。Session Preference 只回答下次輸入預填什麼，不證明 entry 已開啟或儀器已連線。Fluxdep、dispersive 並未因此取得完整的 measurement session。
 

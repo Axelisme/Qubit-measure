@@ -29,7 +29,6 @@ def make_form(ctx: FormContext) -> Form[ZigZagCfg]:
             "initial_delay": Hidden(),
             "n_times": 10,
             "repeat_on": "X180_pulse",
-            "reset_phase_cycle": False,
             "reps": 1000,
             "rounds": 100,
         },

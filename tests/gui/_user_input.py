@@ -45,6 +45,7 @@ from ._observations import ScrollObservation as ScrollObservation
 from ._observations import StatusObservation as StatusObservation
 from ._observations import TableRowObservation as TableRowObservation
 from ._observations import TabObservation as TabObservation
+from ._observations import TextInputObservation as TextInputObservation
 from ._observations import TreeRowObservation as TreeRowObservation
 from ._observations import VisibleObservation as VisibleObservation
 from ._observations import WidgetObservation as WidgetObservation
@@ -797,6 +798,22 @@ class ComponentDriver:
             key_click(popup, Qt.Key.Key_Escape)
         chooser.click("&Open")
 
+    def text_input(self, *, object_name: str) -> TextInputObservation:
+        """Observe a named line edit; hidden controls expose no text or hints.
+
+        Raise TypeError for a control that is not a QLineEdit.
+        """
+        widget = self._find(None, object_name, editable=True)
+        if not isinstance(widget, QLineEdit):
+            raise TypeError("Expected a line edit")
+        visible = self._on_screen(widget)
+        return TextInputObservation(
+            text=widget.text() if visible else "",
+            focused=visible and widget.hasFocus(),
+            read_only=widget.isReadOnly(),
+            description=widget.accessibleDescription() if visible else "",
+        )
+
     def enter_text(
         self,
         text: str | None = None,
@@ -810,9 +827,40 @@ class ComponentDriver:
         if self._can_interact(widget):
             mouse_click(widget, widget.rect().center())
             key_click(widget, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
-            type_text(widget, value)
+            if value == "":
+                key_click(widget, Qt.Key.Key_Backspace)
+            else:
+                type_text(widget, value)
             if commit:
                 key_click(widget, Qt.Key.Key_Return)
+        QApplication.processEvents()
+
+    def press_key(
+        self,
+        key: Qt.Key,
+        text: str | None = None,
+        *,
+        object_name: str | None = None,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ) -> None:
+        """Send a real key with modifiers without assigning keyboard focus.
+
+        With no selector, use the window's actual Qt focus, or the window when
+        no child has focus. Otherwise, supply either text (a visible field label
+        or caption) or object_name (an existing Qt objectName) to target a control.
+        Tab uses Qt's normal focus traversal. Hidden, disabled and fully clipped
+        targets are not driven. Process pending Qt events after the key.
+
+        Raise ValueError if both selectors are supplied, or LookupError if a
+        selector does not identify exactly one control.
+        """
+        widget = (
+            self._window.focusWidget() or self._window
+            if text is None and object_name is None
+            else self._field_control(text, object_name)
+        )
+        if self._can_interact(widget):
+            key_click(widget, key, modifiers)
         QApplication.processEvents()
 
     def select_combo(self, value: str, *, object_name: str) -> None:

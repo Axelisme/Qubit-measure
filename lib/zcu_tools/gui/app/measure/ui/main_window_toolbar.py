@@ -78,6 +78,7 @@ class MainWindowToolbar:
         self._layout.addWidget(self._retry_tabs_btn)
         self._layout.addStretch()
         self._add_dialog_button("Setup…", DialogName.SETUP)
+        self._add_dialog_button("SoC…", DialogName.SOC)
         self._add_dialog_button("Devices…", DialogName.DEVICE)
         self._add_dialog_button("Predictor…", DialogName.PREDICTOR)
         self._add_dialog_button("Inspect…", DialogName.INSPECT)

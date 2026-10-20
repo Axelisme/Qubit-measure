@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
 import pytest
 from matplotlib.figure import Figure
@@ -23,6 +25,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     ParameterWriteback,
+    ParamMeta,
 )
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.services import create_persistence_caretaker
@@ -33,6 +36,7 @@ from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     PaneParams,
@@ -644,6 +648,52 @@ def _tab(window: MainWindow, tab_id: str) -> ExpTabWidget:
     return next(
         tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == tab_id
     )
+
+
+@dataclass
+class _OptionalFitParams:
+    delay: Annotated[float | None, ParamMeta(label="Delay")] = None
+
+
+def test_optional_invalid_input_disables_fit_and_shows_recoverable_error(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str], tmp_path: Path
+) -> None:
+    """UI evidence reads only named visible driver state, not domain state."""
+    _session, ctrl, window, tab_id = live_ui
+    tab = _tab(window, tab_id)
+    tab.populate_analyze_params(_OptionalFitParams())
+    tab.update_interaction_state(ctrl.get_tab_snapshot(tab_id))
+    window.resize(1200, 850)
+    window.show()
+    driver = ComponentDriver(window)
+    driver.select_tab("Analysis")
+    driver.screenshot(tmp_path / "01-blank.png")
+    assert driver.observe("Analyze").enabled
+
+    driver.enter_text("Delay:", "-")
+    driver.screenshot(tmp_path / "02-invalid.png")
+    assert driver.observe("-").text == "-"
+    assert not driver.observe("Analyze").enabled
+    assert "Delay" in driver.observe("-").tooltip
+    assert any(
+        "Delay" in item.text and "number" in item.text
+        for item in driver.visible().widgets
+        if item.kind == "QLabel"
+    )
+
+    driver.enter_text("Delay:", "2.5")
+    driver.screenshot(tmp_path / "03-valid.png")
+    assert driver.observe("Analyze").enabled
+    assert driver.observe("2.5").tooltip == ""
+    assert not any("number" in item.text for item in driver.visible().widgets)
+
+    driver.enter_text("Delay:", "")
+    driver.screenshot(tmp_path / "04-blank-again.png")
+    fields = [item for item in driver.visible().widgets if item.kind == "QLineEdit"]
+    assert len(fields) == 1
+    assert fields[0].text == ""
+    assert driver.observe("Analyze").enabled
+    assert not any("number" in item.text for item in driver.visible().widgets)
 
 
 def test_result_focus_and_panel_width_are_owned_by_tab(

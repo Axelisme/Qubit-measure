@@ -29,7 +29,7 @@ from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
-from zcu_tools.gui.session.setup_control import SetupControlFacet
+from zcu_tools.gui.session.setup_control import SetupControlFacet, SocControlFacet
 from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.progress import ProgressService
-    from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
     from zcu_tools.gui.session.state import SessionState
 
 
@@ -68,7 +68,8 @@ class SessionServices:
         context_control: Narrow parameter and alias command/query facade.
         device: Device lifecycle commands and cached device queries.
         device_control: Narrow device command/query/progress/event facade.
-        setup_control: Entry/point setup and independent SoC command facade.
+        setup_control: Entry/point setup command and cached query facade.
+        soc_control: Independent SoC command, preference and event facade.
         settings: Entry opening/creation and remembered setup preferences.
         values: Read-only lookup of the session value-source registry.
         value_sources: Binder publishing cached owner-specific value sources.
@@ -90,6 +91,7 @@ class SessionServices:
     device: DeviceService
     device_control: DeviceControlPort
     setup_control: SetupControlPort
+    soc_control: SocControlPort
     settings: ProjectSettingsService
     values: ValueLookup
     value_sources: ValueSourceBinder
@@ -166,9 +168,9 @@ def build_session_services(  # noqa: PLR0913
         bus=bus,
         settings=settings,
         context=context_control,
-        connection=soc_connection,
         device=device_control,
     )
+    soc_control = SocControlFacet(bus=bus, settings=settings, connection=soc_connection)
     return SessionServices(
         runner=operations.runner,
         progress=progress,
@@ -181,6 +183,7 @@ def build_session_services(  # noqa: PLR0913
         device=device,
         device_control=device_control,
         setup_control=setup_control,
+        soc_control=soc_control,
         settings=settings,
         values=value_registry,
         value_sources=value_sources,

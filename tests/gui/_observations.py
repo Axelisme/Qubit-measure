@@ -25,6 +25,16 @@ class WidgetObservation:
 
 
 @dataclass(frozen=True)
+class TextInputObservation:
+    """Visible line-edit text, focus, editing policy and accessible description."""
+
+    text: str  # Rendered input, empty when hidden.
+    focused: bool  # Visible input currently owns keyboard focus.
+    read_only: bool  # Qt read-only policy; copying remains possible.
+    description: str  # Accessible description of the visible input and hints.
+
+
+@dataclass(frozen=True)
 class TreeRowObservation:
     """One on-screen tree row; fully clipped/hidden cells have empty captions.
 

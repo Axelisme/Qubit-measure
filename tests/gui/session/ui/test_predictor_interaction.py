@@ -88,7 +88,7 @@ def _has_curve(driver: ComponentDriver, ylabel: str) -> bool:
     )
 
 
-def test_predictor_model_tabs_and_known_fields(predictor_ui, tmp_path: Path) -> None:
+def test_predictor_model_tabs_and_nullable_fields(predictor_ui, tmp_path: Path) -> None:
     driver = predictor_ui
     for index, (tab, ylabel) in enumerate(
         (
@@ -118,30 +118,30 @@ def test_predictor_model_tabs_and_known_fields(predictor_ui, tmp_path: Path) -> 
     assert driver.tabs("|n|").current == "|n|"
     _capture(driver, tmp_path, "05-fluxonium-matrix-restored")
 
-    driver.click("EJ")
+    driver.enter_text(object_name="predictor_input_EJ", value="", commit=False)
     qt_until(
         lambda: "EJ" in driver.observe(object_name="predictor_status").text,
         label="missing energy",
     )
-    assert driver.observe("EJ").checked is False
+    assert driver.observe(object_name="predictor_input_EJ").text == ""
     assert not _has_curve(driver, "|<i|n|j>|")
     _capture(driver, tmp_path, "06-missing-energy")
-    driver.click("EJ")
+    driver.enter_text(object_name="predictor_input_EJ", value="4.0", commit=False)
     qt_until(lambda: _has_curve(driver, "|<i|n|j>|"), label="energy recovered")
-    assert driver.observe("EJ").checked is True
+    assert driver.observe(object_name="predictor_input_EJ").text == "4.0"
     _capture(driver, tmp_path, "07-energy-recovered")
 
 
 @pytest.mark.parametrize("predictor_ui", [True], indirect=True)
 def test_predictor_live_controls_stay_locked(predictor_ui, tmp_path: Path) -> None:
     driver = predictor_ui
-    assert not driver.observe("EJ").enabled
+    assert not driver.observe(object_name="predictor_input_EJ").enabled
     assert not driver.observe("Refresh files").enabled
     assert not driver.observe("Load").enabled
     assert not driver.observe("Add").enabled
-    driver.click("EJ")
+    driver.enter_text(object_name="predictor_input_EJ", value="", commit=False)
     driver.choose_option("Model:", "SQUID transmon")
-    assert driver.observe("EJ").checked is True
+    assert driver.observe(object_name="predictor_input_EJ").text == "4.0"
     driver.select_tab("|phi|")
     qt_until(lambda: _has_curve(driver, "|<i|phi|j>|"), label="live matrix viewing")
     assert driver.tabs("|phi|").current == "|phi|"
