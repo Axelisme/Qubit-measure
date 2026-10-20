@@ -866,6 +866,33 @@ def test_template_input_propagates_unavailable_captured_source(
         form.template_input(Template("pulse"), creation_templates, env)
 
 
+def test_empty_mux_tones_accept_typed_whole_list_input() -> None:
+    form = form_adapter.module_form(MuxReadoutSpec)
+    env = FormEnv()
+    state = FormState(form.default_input(env))
+    description = state.describe(("tones",), env)
+    assert description.target is not None
+    assert description.target.kind == "sequence"
+    assert description.target.can_expand is False
+    assert description.children == ()
+    state.write(
+        {
+            ("gen_ch",): 0, ("nqz",): 1, ("mixer_freq",): 6000.0,
+            ("length",): 2.0, ("ro_length",): 1.5,
+            ("tones",): [{"freq": 6020.0, "gain": 0.1, "ro_ch": 7, "label": "R1"}],
+        },
+        env,
+    )
+    spec = result_spec(form, state, env)
+    assert [(tone.freq, tone.label, tone.ro_ch) for tone in spec.tones] == [
+        (6020.0, "R1", 7),
+    ]
+    state.write({("tones",): [{"freq": 6020.0, "gain": 2.0, "ro_ch": 7}]}, env)
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("tones", 0, "gain") in errors.messages
+
+
 def test_mux_module_form_edits_tone_labels_as_a_whole_json_leaf() -> None:
     form = form_adapter.module_form(MuxReadoutSpec)
     env = FormEnv()

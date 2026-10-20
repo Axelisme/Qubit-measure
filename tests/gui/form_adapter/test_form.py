@@ -38,6 +38,35 @@ class ScalarCfg(ConfigBase):
     text: str = "ordinary"
 
 
+def test_field_order_is_local_partial_and_preserves_nested_order() -> None:
+    env = FormEnv()
+    tree = {"sweep": {"freq": nodes.Range.between(1.0, 2.0, expts=3)}}
+    default = form_adapter.Form(ScalarCfg, tree)
+    try:
+        ordered = form_adapter.Form(
+            ScalarCfg, tree, field_order=("amount", "sweep")
+        )
+    except TypeError as error:
+        pytest.fail(f"A form must accept local field ordering: {error}")
+    state = FormState(ordered.default_input(env))
+    assert [child.path for child in state.describe((), env).children] == [
+        ("amount",), ("sweep",), ("count",), ("hidden",), ("optional",), ("text",)
+    ]
+    assert [child.path for child in state.describe(("sweep",), env).children] == [
+        ("sweep", "freq"),
+    ]
+    original = FormState(default.default_input(env))
+    assert [child.path for child in original.describe((), env).children] == [
+        ("sweep",), ("count",), ("amount",), ("hidden",), ("optional",), ("text",)
+    ]
+    assert ordered.to_cfg(require_result(state, env), env) == default.to_cfg(
+        require_result(original, env), env
+    )
+    for invalid in (("missing",), ("amount", "amount")):
+        with pytest.raises(ValueError, match="field_order"):
+            form_adapter.Form(ScalarCfg, tree, field_order=invalid)
+
+
 class DefaultedCfg(ConfigBase):
     """Static defaults belong to core unless a form authors an expression."""
 
