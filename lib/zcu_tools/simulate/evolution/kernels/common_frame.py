@@ -541,7 +541,7 @@ def _propagate_row(frame, args, control, rho):
         coherences = np.stack([np.exp(-decay * dt / 2) for dt in dts])
         for coherence in coherences:
             np.fill_diagonal(coherence, 1.0)
-        rho, _, _, _ = adaptive(
+        rho = adaptive(
             dynamics,
             (float(start), float(interval), interval_steps, duration),
             rho,

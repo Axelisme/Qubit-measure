@@ -329,7 +329,7 @@ def adaptive(dynamics, control, rho, bath):
 
     control is (start_ns, interval_ns, fixed_steps, row_duration_ns). bath holds
     exact half-step maps for base/2 through 32*base, where base <= 8 ns.
-    Returns density, accepted/rejected macro histograms and fixed fallback steps.
+    Returns the propagated density.
     After two consecutive minimum-step failures the remaining interval uses the
     fixed runner. No fallback update is claimed to meet the local allowance.
     """
@@ -337,8 +337,7 @@ def adaptive(dynamics, control, rho, bath):
     populations, coherences = bath
     base = duration / steps
     remaining, elapsed, index = steps, start, 2
-    accepted, rejected = np.zeros(7, np.int64), np.zeros(7, np.int64)
-    minimum_failures, fallback_steps = 0, 0
+    minimum_failures = 0
     while remaining > 0:
         units = 2 ** (index - 1)
         while units > remaining:
@@ -356,20 +355,17 @@ def adaptive(dynamics, control, rho, bath):
         allowance = _DENSITY_ALLOWANCE * dt / row_duration
         if error <= allowance:
             rho = fine
-            accepted[index] += 1
             minimum_failures = 0
             remaining -= units
             elapsed += dt
             if error < allowance / 8 and index < 6:
                 index += 1
         else:
-            rejected[index] += 1
             if index > 1:
                 index -= 1
                 continue
             minimum_failures += 1
             rho = coarse
-            fallback_steps += 1
             remaining -= 1
             elapsed += dt
             if minimum_failures == 2 and remaining > 0:
@@ -379,6 +375,5 @@ def adaptive(dynamics, control, rho, bath):
                     rho,
                     (populations[1], coherences[1]),
                 )
-                fallback_steps += remaining
                 remaining = 0
-    return rho, accepted, rejected, fallback_steps
+    return rho
