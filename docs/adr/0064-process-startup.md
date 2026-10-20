@@ -38,7 +38,9 @@ Framework 只保存 `measure_layout_v1.json` 的視窗尺寸與左面板寬度�
 
 預設 `zcu_lab/startup.py` 擁有 user cache 根目錄下的 `measure-session.json`。它依序嘗試上次 SoC、各 device、entry／point，只有 entry／point 成功後才重開 tabs 並還原 input。Device 連線失敗時嘗試 remember 為未連線列。每項失敗記 log 並繼續，最後狀態列顯示一行摘要；略過的 tab 不會在稍後選來源時自動重試。腳本以 `on_close` 讀取當時 live state 並保存自己的檔案，不保存硬體設定或量測結果。
 
-Alias 屬 entry。開 entry 載入 `aliases.yaml`，Inspect Apply 寫回。預設腳本不另存、不恢復 alias，也不建立第二份 alias 權威。Component 佔位符的 defaults 由 session 擁有的空 registry 提供，腳本透過 `ctx.placeholders` 登錄與讀取。預設腳本在同一份 session 紀錄保存這些 defaults，啟動時先恢復佔位符，再開來源與 tabs。沒有紀錄就保持空，不預登任何名稱。Form 使用固定 defaults capture，見 [[0073]]。
+Alias 屬 entry。開 entry 載入 `aliases.yaml`，Inspect Apply 寫回。預設腳本不另存、不恢復 alias，也不建立第二份 alias 權威。模板佔位符只由呼叫端在 `Template.bindings` 明填，session 與 startup 不提供預設值，也不保存或恢復模板綁定，見 [[0073]]。
+
+使用者於 2026-10-20 裁定：「你搞錯了吧，模板/alias是不同的東西，後者才是startup填的」。
 
 使用者於 2026-10-20 說明：「框架提供restore session的功能太強勢了，等於是哪些要存哪些不要的認知，與我目前精簡框架與解偶的方向不合」。對 alias 裁定：「A，那腳本就不回復alias了」。同日明定：「那--clean的行為應該就是連預設腳本都不執行」「clean與script都給就抱錯」。
 

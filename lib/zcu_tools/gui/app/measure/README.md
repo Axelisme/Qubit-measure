@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-20，adapter 宣告 Sample 座標來源、預設腳本所有權、opaque tab input 與關閉順序
+**Last updated:** 2026-10-20，明填模板 bindings、adapter 宣告 Sample 座標來源與預設腳本所有權
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -96,10 +96,8 @@ entry/point, then tabs with input only when entry/point opened successfully.
 Each failure is logged; failed devices are remembered when possible, and skipped
 tabs are not retried after later source selection. Its on-close callback captures
 then-current state. Aliases are not in that cache: opening the entry loads its
-`aliases.yaml`, and Inspect Apply remains the save path. The script also saves
-then-current placeholder defaults through `ctx.placeholders` and restores them
-before sources and tabs. No saved record means an empty registry; the framework
-never supplies component names. Form captures detach defaults at Open/Reset.
+`aliases.yaml`, and Inspect Apply remains the save path. Templates use only caller-authored `Template.bindings`.
+The session and startup script do not supply or persist template defaults.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.

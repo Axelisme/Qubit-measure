@@ -145,7 +145,6 @@ class InspectDialog(QDialog):
         open_arb_waveforms: Callable[[], None],
         dialog_presenter: DialogPresenter,
         alias_presets: AliasPresets | None,
-        placeholder_defaults: Callable[[], Mapping[str, str]] = dict,
         parent: QWidget | None = None,
     ) -> None:
         """Build the dialog, subscribe to session facts and show the current context.
@@ -158,15 +157,12 @@ class InspectDialog(QDialog):
         opens the host's ARB waveform dialog. dialog_presenter shows every
         question and failure of this dialog. alias_presets is the composition's
         named alias catalog offered by the Aliases page's Load preset; None
-        means no catalog and leaves Load preset disabled. placeholder_defaults
-        reads session template defaults when New captures a form; omitted means
-        no defaults. Existing captures are not updated.
+        means no catalog and leaves Load preset disabled.
         """
         super().__init__(parent)
         self._ctrl = ctrl
         self._bus = bus
         self._templates = templates
-        self._placeholder_defaults = placeholder_defaults
         self._arb_waveforms = arb_waveforms
         self._open_arb_waveforms = open_arb_waveforms
         self._presenter = dialog_presenter
@@ -612,7 +608,6 @@ class InspectDialog(QDialog):
             self._ctrl,
             self._templates,
             arb_waveforms=self._arb_waveforms,
-            placeholder_defaults=self._placeholder_defaults,
             dialog_presenter=self._presenter,
             parent=self,
         )

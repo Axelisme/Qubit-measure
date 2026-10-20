@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from zcu_tools.gui.app.measure.services.tab_input import TabInput
 from zcu_tools.gui.app.measure.startup_context import StartupContext
 
@@ -46,7 +46,6 @@ class _Session(BaseModel):
     entry: str | None = None
     point: str | None = None
     tabs: tuple[_Tab, ...] = ()
-    placeholders: dict[str, str] = Field(default_factory=dict)
 
 
 def _save(ctx: StartupContext, path: Path) -> None:
@@ -59,7 +58,6 @@ def _save(ctx: StartupContext, path: Path) -> None:
             _Device(name=row.name, type_name=row.type_name, address=row.address)
             for row in ctx.devices.current()
         ),
-        placeholders=ctx.placeholders.current(),
         entry=selection.entry.name if selection.entry is not None else None,
         point=selection.point_label,
         tabs=tuple(
@@ -169,10 +167,6 @@ def startup(ctx: StartupContext) -> None:
         logger.exception("Startup could not read session cache %s", path)
         restore.finish()
         return
-    for name, binding in saved.placeholders.items():
-        restore.attempt(
-            f"placeholder {name}", partial(ctx.placeholders.register, name, binding)
-        )
     soc = saved.soc
     if soc is not None:
         restore.attempt("SoC", partial(ctx.soc.connect, soc.address, soc.port))
