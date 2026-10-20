@@ -142,15 +142,19 @@ def remap_counts(
     return mapped
 
 
-def changed_python_files(root: Path, base: str) -> tuple[str, ...]:
-    """Return candidate-touched Python files under the checked roots."""
+def _checked_python_paths(paths: Iterable[str]) -> tuple[str, ...]:
     return tuple(
         sorted(
             name
-            for name in changed_paths(root, base)
+            for name in paths
             if name.endswith(".py") and name.split("/")[0] in _support.CHECKED_ROOTS
         )
     )
+
+
+def changed_python_files(root: Path, base: str) -> tuple[str, ...]:
+    """Return candidate-touched Python files under the checked roots."""
+    return _checked_python_paths(changed_paths(root, base))
 
 
 def extract_base_tree(root: Path, base: str, destination: Path) -> None:
@@ -550,6 +554,10 @@ def _configuration_changes(
     ]
 
 
+# tolerated(radon): Keep changed/full Pyright, cache hits/misses, other detectors
+# and configuration review in one temporary comparison lifetime so orchestration
+# and error cleanup stay visible. Context/options wrappers or passing unstructured
+# receipts would only move the remaining branches, not simplify them.
 def run(
     root: Path,
     base: str | None,
@@ -584,13 +592,7 @@ def run(
     """
     resolved = resolve_base(root, base)
     touched = changed_paths(root, resolved)
-    files = tuple(
-        sorted(
-            name
-            for name in touched
-            if name.endswith(".py") and name.split("/")[0] in _support.CHECKED_ROOTS
-        )
-    )
+    files = _checked_python_paths(touched)
     renames = renamed_paths(root, resolved)
     old_by_new = {new: old for old, new in renames.items()}
     base_files = tuple(sorted({old_by_new.get(name, name) for name in files}))
