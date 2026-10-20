@@ -104,7 +104,7 @@ class MixedEngine(Engine):
 def test_mux_ftf_channels_share_physical_shots_and_initial_mixture(mode, jumping):
     config = configuration()
     config = replace(
-        config, receivers=tuple(replace(r, gain=1e7) for r in config.receivers)
+        config, receivers=tuple(replace(r, gain=1e12) for r in config.receivers)
     )
     numeric = settings()
     # A hot, lossy synthetic bath makes repeated paths observable in a short
