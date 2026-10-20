@@ -57,6 +57,80 @@ def soc_app(
             release.set()
 
 
+@pytest.mark.parametrize(
+    ("opening", "action", "run_editable"),
+    [
+        ("Setup…", "New entry…", False),
+        ("SoC…", "Connect", False),
+        ("Devices…", "Add Device", True),
+        ("Inspect…", "New", True),
+        ("Arb Waveforms…", "Save", True),
+    ],
+)
+def test_run_only_locks_setup_soc_and_preserves_remote_control_policy(
+    soc_app: tuple[LaunchedMeasureApp, Event, Event],
+    tmp_path: Path,
+    opening: str,
+    action: str,
+    run_editable: bool,
+) -> None:
+    app, entered, release = soc_app
+    ui = ComponentDriver(app.window)
+    shots = Path(os.environ.get("SOC_UI_EVIDENCE", str(tmp_path))) / opening.rstrip("…")
+    ui.click("Close")
+    ui.click("Inspect…" if opening == "Arb Waveforms…" else opening)
+    if opening == "Inspect…":
+        ui.select_tab("Modules")
+    if opening == "Arb Waveforms…":
+        ui.click("Arb Waveforms…")
+    ui.screenshot(shots / "01-editable.png")
+    assert ui.observe(action).enabled
+    ui.click("Run")
+    qt_until(entered.is_set, label="synthetic run entered")
+    ui.screenshot(shots / "02-running.png")
+    assert ui.observe(action).enabled is run_editable
+
+    # A remote owner is an external collaborator, not a shortcut for local UI commands.
+    authority = app.controller.control_identity
+    authority.connect("scenario", "agent", "owner")
+    ui.screenshot(shots / "03-remote.png")
+    assert not ui.observe(action).enabled
+    authority.release("scenario")
+    ui.screenshot(shots / "04-local-running.png")
+    assert ui.observe(action).enabled is run_editable
+
+    ui.click("Close")
+    if opening == "Arb Waveforms…":
+        ui.click("Close")
+    # Opening a Run-locked window must not replace the registry's Local authority.
+    ui.click("SoC…")
+    assert not ui.observe("Connect").enabled
+    ui.screenshot(shots / "05-running-soc.png")
+    ui.click("Close")
+    ui.click("Inspect…" if opening == "Arb Waveforms…" else opening)
+    if opening == "Inspect…":
+        ui.select_tab("Modules")
+    if opening == "Arb Waveforms…":
+        ui.click("Arb Waveforms…")
+    ui.screenshot(shots / "06-reopened-running.png")
+    assert ui.observe(action).enabled is run_editable
+    authority.acquire("scenario")
+    release.set()
+    qt_until(
+        lambda: any(w.text == "Run" for w in ui.visible().widgets),
+        label="synthetic run delivered",
+    )
+    ui.screenshot(shots / "07-finished-remote.png")
+    assert not ui.observe(action).enabled
+    # Local return after terminal delivery restores edits, never before authority returns.
+    ui.click(object_name="control_indicator")
+    ui.screenshot(shots / "08-finished-local.png")
+    assert ui.observe(action).enabled
+    ui.click("Close")
+    if opening == "Arb Waveforms…":
+        ui.click("Close")
+
+
 def test_toolbar_soc_reopens_and_both_dialogs_follow_run_lock(
     soc_app: tuple[LaunchedMeasureApp, Event, Event], tmp_path: Path
 ) -> None:
