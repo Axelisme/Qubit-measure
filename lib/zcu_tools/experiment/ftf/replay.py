@@ -9,7 +9,7 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.simulation_replay import read_replay
 from zcu_tools.simulate.evolution import SEGMENT_NUMERIC_VERSION
 
-BACKEND_VERSION = "ftf-segment-v10"
+BACKEND_VERSION = "ftf-segment-v11"
 
 
 def replay_versions() -> tuple[tuple[str, str], ...]:

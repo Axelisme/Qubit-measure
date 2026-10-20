@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-20, shared mux paths and physical decimated inputs
+**Last updated:** 2026-10-20, physical acquisition, retained raw and replay v11
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -278,6 +278,10 @@ does not scale noise. Integrated acquisition returns `IntegratedRound` with pure
 `RoundStatistics` and an ADC-owned RawShots source. Counts remain shared across
 all ADCs/reads, with separate direct totals. ADC retains noiseless model/pulse/grid
 inputs for delayed raw; no shot paths or noisy outputs enter prepare caches.
+The raw source retains its round's physical inputs and sampling identity after
+later rounds, prepare-cache eviction and `FTFSource.close()`. A program getter
+uses that source without capturing devices or rerunning evolution/readout
+preparation. It cannot switch to another program's more recent round.
 The same physical inputs feed ADC's required batch-based trace interface in
 decimated mode. Both modes share each shot's full CTMC path across carriers,
 ADCs and windows. Decimated acquisition returns `RoundSignals`,
@@ -299,11 +303,14 @@ memory. They need only agree with direct means in expectation, not realization.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v10`, which identifies closed-form sampled-envelope
-readout and tiled flat integrated sums, retaining common-origin phase conversion.
-Archives from `ftf-segment-v9` and earlier backends fail explicitly because
-readout floating-point results change. Evolution's numeric version and RNG
-sampling contract are unchanged.
+The backend is `ftf-segment-v11`. Integrated raw and decimated traces resolve
+continuous CTMC jump times and cavity memory, with one physical path per shot
+shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v10`
+and earlier backends fail explicitly because their raw sampling is incompatible.
+Direct means retain conditional moments, their numeric values and their existing
+RNG stream. Raw getters do not advance that stream or shift shots to match a
+finite-shot direct mean. Each acquisition route reproduces itself for equal
+seed, inputs and recorded versions. Evolution's numeric version is unchanged.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.
