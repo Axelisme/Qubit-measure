@@ -13,14 +13,14 @@ from zcu_tools.gui.app.measure.state import DeviceState, DeviceStatus, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
+from zcu_tools.gui.session.device_models import ConnectDeviceRequest
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.ports import DeviceMemoryInfo
-from zcu_tools.gui.session.services.device import (
-    ConnectDeviceRequest,
-    DeviceProtocol,
-    DeviceService,
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
 )
+from zcu_tools.gui.session.ports import DeviceMemoryInfo, DeviceProtocol
+from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui._completion_helpers import (
@@ -64,10 +64,12 @@ def _make_svc(
     service = DeviceService(
         bus,
         state or State(MagicMock()),
-        gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: fake,
         device_registry=registry,
     )

@@ -559,10 +559,7 @@ class VectorInterpreter:
                 self._prog.soccfg,
                 gen_word,
                 kind="gen",
-                gen_ch=cfg.gen_ch,
-                ro_ch=cfg.ro_ch,
-                mixer_freq=cfg.mixer_freq,
-                nqz=cfg.nqz,
+                cfg=cfg,
                 paired_ro_words=ro_word,
             )
         if ro_word is not None:
@@ -573,10 +570,7 @@ class VectorInterpreter:
                     self._prog.soccfg,
                     ro_word,
                     kind="ro",
-                    gen_ch=cfg.gen_ch,
-                    ro_ch=cfg.ro_ch,
-                    mixer_freq=cfg.mixer_freq,
-                    nqz=cfg.nqz,
+                    cfg=cfg,
                     reference_freq_mhz=gen,
                 )
             )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import queue
 import threading
 from collections.abc import Callable
-from typing import TypeVar, cast
+from typing import TypeVar
 
 _T = TypeVar("_T")
 
@@ -35,22 +35,23 @@ class ManualOwnerScheduler:
             raise RuntimeError("OwnerScheduler.call cannot run on the owner thread")
 
         done = threading.Event()
-        holder: dict[str, object] = {}
+        results: list[_T] = []
+        errors: list[BaseException] = []
 
         def invoke() -> None:
             try:
-                holder["result"] = callback()
-            except BaseException as exc:  # propagate the exact callback failure
-                holder["error"] = exc
+                results.append(callback())
+            # tolerated: Return every callback failure, including interrupts, to the waiting caller.
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
             finally:
                 done.set()
 
         self.post(invoke)
         done.wait()
-        error = holder.get("error")
-        if isinstance(error, BaseException):
-            raise error
-        return cast(_T, holder["result"])
+        if errors:
+            raise errors[0]
+        return results[0]
 
     def pump_once(self, *, block: bool = False, timeout: float | None = None) -> bool:
         """Execute one queued callback on the owner thread; return whether one ran."""

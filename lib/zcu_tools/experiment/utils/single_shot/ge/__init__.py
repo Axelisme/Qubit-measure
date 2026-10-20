@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.plotting.plots import Plots
 
-from .base import GE_FitResult, GENumericalError, fidelity_func
+from .base import GE_FitResult, GEFitOptions, GENumericalError, fidelity_func
 from .center import fit_ge_by_center
 from .manual import fit_ge_manual
 from .pca import fit_ge_by_pca
@@ -92,8 +92,8 @@ def singleshot_ge_analysis(
     backend: Literal["center", "pca"] = "pca",
     *,
     plots: Plots,
+    options: GEFitOptions | None = None,
     figure_name: str = "fit",
-    **kwargs,
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     """
     Analyze ground and excited state signals to determine classification parameters.
@@ -115,6 +115,8 @@ def singleshot_ge_analysis(
     figure_name : str, default="fit"
         Unique diagnostic figure name within plots. Empty or conflicting names
         raise from Plots. Naming does not change fitting or quality results.
+    options : GEFitOptions, optional
+        Paired-histogram fit and display controls; omitted uses the owner defaults.
 
     Returns
     -------
@@ -132,13 +134,17 @@ def singleshot_ge_analysis(
     """
     if angle is not None:
         return fit_ge_manual(
-            signals, angle, plots=plots, figure_name=figure_name, **kwargs
+            signals, angle, plots=plots, figure_name=figure_name, options=options
         )
 
     if backend == "center":
-        return fit_ge_by_center(signals, plots=plots, figure_name=figure_name, **kwargs)
+        return fit_ge_by_center(
+            signals, plots=plots, figure_name=figure_name, options=options
+        )
     if backend == "pca":
-        return fit_ge_by_pca(signals, plots=plots, figure_name=figure_name, **kwargs)
+        return fit_ge_by_pca(
+            signals, plots=plots, figure_name=figure_name, options=options
+        )
 
     raise ValueError(f"Unknown backend: {backend}")
 
@@ -146,6 +152,7 @@ def singleshot_ge_analysis(
 __all__ = [
     # base
     "GE_FitResult",
+    "GEFitOptions",
     "GENumericalError",
     "fidelity_func",
     # center

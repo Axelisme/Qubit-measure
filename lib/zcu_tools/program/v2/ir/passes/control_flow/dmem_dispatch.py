@@ -48,7 +48,14 @@ structural ``MetaInst``: a dmem jump table is lowered code, not a structure.
 from __future__ import annotations
 
 from ...hw_semantics import needs_big_jump
-from ...instructions import DmemReadInst, JumpInst, RegWriteInst, TestInst
+from ...instructions import (
+    JumpInst,
+    RegWriteInst,
+    TestInst,
+)
+from ...io_instructions import (
+    DmemReadInst,
+)
 from ...labels import LabelRef
 from ...node import BasicBlockNode, BlockNode, IRDispatch, IRNode
 from ...operands import AluExpr, AluOp, DmemAddr, Immediate, Register, SrcKeyword

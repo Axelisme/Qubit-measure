@@ -161,7 +161,8 @@ def test_move_line_rejects_invalid_action(
 ) -> None:
     committed = FluxPickState(flux_half=0.0, flux_int=2.0)
     with pytest.raises(ValueError, match=message):
-        move_line(committed, role, position, min_distance=min_distance)  # type: ignore[arg-type]
+        # tolerated: Exercise invalid role validation without changing the parameterized inputs.
+        move_line(committed, role, position, min_distance=min_distance)  # pyright: ignore[reportArgumentType]
     assert (committed.flux_half, committed.flux_int) == (0.0, 2.0)
 
 

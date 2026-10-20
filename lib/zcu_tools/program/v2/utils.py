@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Literal, Protocol, TypeGuard
+from typing import TYPE_CHECKING, Literal, Protocol, TypeGuard
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,6 +11,9 @@ from qick import QickConfig
 from qick.asm_v2 import QickParam, QickSweep1D
 
 from .sweep import SweepCfg
+
+if TYPE_CHECKING:
+    from .modules.readout import PulseReadoutCfg
 
 logger = logging.getLogger(__name__)
 
@@ -159,13 +162,10 @@ def readout_freq_from_word(
     word: int,
     *,
     kind: FrequencyWordKind,
-    gen_ch: int,
-    ro_ch: int,
-    mixer_freq: float | None,
-    nqz: Literal[1, 2],
+    cfg: PulseReadoutCfg,
     reference_freq_mhz: float | None = None,
 ) -> float:
-    """Decode one final hardware frequency word to a semantic MHz value.
+    """Decode one final hardware frequency word using a readout cfg, in MHz.
 
     Generator words identify the semantic frequency directly. Readout words only
     identify an ADC-DDS alias, so ``reference_freq_mhz`` is required to unwrap the
@@ -183,10 +183,7 @@ def readout_freq_from_word(
             soccfg,
             np.asarray([word], dtype=np.int64),
             kind=kind,
-            gen_ch=gen_ch,
-            ro_ch=ro_ch,
-            mixer_freq=mixer_freq,
-            nqz=nqz,
+            cfg=cfg,
             reference_freq_mhz=reference,
         )[0]
     )
@@ -197,14 +194,11 @@ def readout_freqs_from_words(
     words: NDArray[np.int64],
     *,
     kind: FrequencyWordKind,
-    gen_ch: int,
-    ro_ch: int,
-    mixer_freq: float | None,
-    nqz: Literal[1, 2],
+    cfg: PulseReadoutCfg,
     reference_freq_mhz: NDArray[np.float64] | None = None,
     paired_ro_words: NDArray[np.int64] | None = None,
 ) -> NDArray[np.float64]:
-    """Decode final hardware words into MHz, preserving the input array shape.
+    """Decode final hardware words using a readout cfg, preserving array shape.
 
     Generator words resolve absolute frequencies. Readout words require a
     same-shaped MHz reference to select the nearest ADC-DDS alias. With kind=gen,
@@ -212,6 +206,10 @@ def readout_freqs_from_words(
     inconsistent pairs raise ValueError. Mixer and sign conventions are shared
     with the scalar and iterable APIs.
     """
+    gen_ch = cfg.gen_ch
+    ro_ch = cfg.ro_ch
+    mixer_freq = cfg.mixer_freq
+    nqz = cfg.nqz
     rounded_mixer = _rounded_mixer_freq(
         soccfg,
         gen_ch=gen_ch,
@@ -271,22 +269,16 @@ def readout_freq_from_words(
     gen_word: int,
     ro_word: int,
     *,
-    gen_ch: int,
-    ro_ch: int,
-    mixer_freq: float | None,
-    nqz: Literal[1, 2],
+    cfg: PulseReadoutCfg,
 ) -> float:
-    """Decode a generator word and validate its paired readout word bit-exactly."""
+    """Decode with a readout cfg and validate the paired ADC word bit-exactly."""
 
     return float(
         readout_freqs_from_words(
             soccfg,
             np.asarray([gen_word], dtype=np.int64),
             kind="gen",
-            gen_ch=gen_ch,
-            ro_ch=ro_ch,
-            mixer_freq=mixer_freq,
-            nqz=nqz,
+            cfg=cfg,
             paired_ro_words=np.asarray([ro_word], dtype=np.int64),
         )[0]
     )

@@ -10,21 +10,23 @@ from zcu_tools.device.yoko import YOKOGS200Info
 
 def test_fake_device_info_rejects_bool_value() -> None:
     with pytest.raises(ValidationError, match="real numeric scalar"):
-        FakeDeviceInfo(address="none", value=cast(Any, True))
+        FakeDeviceInfo(address="none", value=True)
 
 
 def test_fake_device_info_rejects_string_value() -> None:
     with pytest.raises(ValidationError, match="real numeric scalar"):
+        # tolerated(cast): Test string rejection at the float-typed constructor boundary.
         FakeDeviceInfo(address="none", value=cast(Any, "1.23"))
 
 
 def test_yoko_info_rejects_bool_value() -> None:
     with pytest.raises(ValidationError, match="real numeric scalar"):
-        YOKOGS200Info(address="GPIB::1", mode="voltage", value=cast(Any, True))
+        YOKOGS200Info(address="GPIB::1", mode="voltage", value=True)
 
 
 def test_yoko_info_rejects_string_value() -> None:
     with pytest.raises(ValidationError, match="real numeric scalar"):
+        # tolerated(cast): Test string rejection at the float-typed constructor boundary.
         YOKOGS200Info(address="GPIB::1", mode="voltage", value=cast(Any, "1.23"))
 
 

@@ -4,7 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Optional, Union
 
-from qick.asm_v2 import AsmV2, ConfigReadout, QickParam
+from qick.asm_v2 import AsmV2, ConfigReadout, QickParam, QickProgramV2
 
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
@@ -15,7 +15,7 @@ from .wmem import ConfigReadoutFromRegs, PulseFromLengthReg, PulseFromRegs
 from .write_reg import WriteRegOp
 
 
-class AdditionalMacroMixin(AsmV2):
+class AdditionalMacroMixin(QickProgramV2):
     def __init__(self, *args, **kwargs):
         self._delay_disabled = False
         self._temp_regs: list[str] = []
@@ -31,7 +31,7 @@ class AdditionalMacroMixin(AsmV2):
         # forgotten the name, causing _get_reg() lookups to fail.
         self._temp_regs = []
         self._reg_num_stack = []
-        super()._make_asm()  # type: ignore[misc]
+        super()._make_asm()
 
     def write_reg_op(
         self, dst: str, lhs: str, op: str, rhs: int | str | None = None
@@ -69,12 +69,15 @@ class AdditionalMacroMixin(AsmV2):
     def delay_auto(
         self,
         t: float | QickParam = 0.0,
-        gens=True,
-        ros=True,
+        # tolerated: QickProgramV2.delay_auto accepts generator-end selection positionally.
+        gens=True,  # noqa: FBT002
+        # tolerated: QickProgramV2.delay_auto accepts readout-end selection positionally.
+        ros=True,  # noqa: FBT002
         tag: str | None = None,
     ):
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
+        # tolerated: QICK infers t as int from its default; the timing macro accepts float and QickParam microseconds.
         return super().delay_auto(t, gens, ros, tag)  # pyright: ignore[reportArgumentType]
 
     def delay(self, t: float | QickParam, tag: str | None = None):
@@ -107,7 +110,7 @@ class AdditionalMacroMixin(AsmV2):
             # (extra dummy entry); the +1/+2 stride assumed below would land
             # on the wrong entry, so reject explicitly rather than corrupt
             # the pulse silently.
-            gen_type = self.soccfg["gens"][ch].get("type")  # type: ignore[attr-defined]
+            gen_type = self.soccfg["gens"][ch].get("type")
             if gen_type in ("axis_sg_int4_v1", "axis_sg_int4_v2"):
                 raise NotImplementedError(
                     f"pulse_by_reg(flat_top_pulse=True) is not supported on "
@@ -212,9 +215,10 @@ class AdditionalMacroMixin(AsmV2):
         """Insert a meta macro that emits a meta instruction for the IR builder.
 
         info maps string keys to arbitrary metadata values passed to MetaMacro.
-        regs maps info keys to register names resolved via prog._get_reg() at
-        translate time.  Use this when the register is known only by a logical
-        name (e.g. a loop name) rather than a bare ASM address.
+        regs maps info keys to register names resolved by the compiler at
+        translate time. Use it for logical names (e.g. a loop name), ASM
+        addresses or QICK aliases; resolved addresses overwrite matching info
+        keys without mutating the inputs.
         """
         self.append_macro(MetaMacro(type=type, name=name, info=info, regs=regs))
 
@@ -241,7 +245,7 @@ class AdditionalMacroMixin(AsmV2):
         # counters, swept-time registers and user add_reg() calls. Without this
         # check, a deeply nested acquire_temp_reg would surface as an opaque
         # QICK add_reg() error instead of pointing at the real cause.
-        dreg_qty = int(self.tproccfg.get("dreg_qty", 32))  # type: ignore[attr-defined]
+        dreg_qty = int(self.tproccfg.get("dreg_qty", 32))
         if total > dreg_qty:
             raise RuntimeError(
                 f"acquire_temp_reg: requested {total} nested temp registers "
@@ -251,7 +255,7 @@ class AdditionalMacroMixin(AsmV2):
 
         while len(self._temp_regs) < total:
             reg_name = f"temp_reg_{len(self._temp_regs)}"
-            self.add_reg(reg_name)  # pyright: ignore[reportAttributeAccessIssue]
+            self.add_reg(reg_name)
             self._temp_regs.append(reg_name)
 
         self._reg_num_stack.append(total)
@@ -270,12 +274,16 @@ class AdditionalMacroMixin(AsmV2):
     def wait_auto(
         self,
         t: float | QickParam = 0,
-        gens: bool = False,
-        ros: bool = True,
+        # tolerated: QickProgramV2.wait_auto accepts generator-end selection positionally.
+        gens: bool = False,  # noqa: FBT001, FBT002
+        # tolerated: QickProgramV2.wait_auto accepts readout-end selection positionally.
+        ros: bool = True,  # noqa: FBT001, FBT002
         tag: str | None = None,
-        no_warn: bool = False,
+        # tolerated: QickProgramV2.wait_auto accepts swept-wait warning control positionally.
+        no_warn: bool = False,  # noqa: FBT001, FBT002
     ) -> None:
         self.meta_macro("DISABLE_OPT_START", "")
+        # tolerated: QICK infers t as int from its default; the timing macro accepts float and QickParam microseconds.
         super().wait_auto(t=t, gens=gens, ros=ros, tag=tag, no_warn=no_warn)  # pyright: ignore[reportArgumentType]
         self.meta_macro("DISABLE_OPT_END", "")
 

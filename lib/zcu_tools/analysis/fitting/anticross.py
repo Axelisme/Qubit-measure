@@ -8,7 +8,8 @@ from tqdm.auto import tqdm
 from .base import encode_params, quadratic_fit, quadratic_fit_wo_a, retrieve_params
 
 
-def get_predict_ys(
+# tolerated: fit_hyperbolic/fit_anticross2d unpack conic coefficients in public scalar order.
+def get_predict_ys(  # noqa: PLR0913
     xs: NDArray[np.float64], a: float, b: float, c: float, d: float, e: float, f: float
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     # 對每個 xs 求兩個 y，分別對應 ys1, ys2, 其中 ys1 > ys2

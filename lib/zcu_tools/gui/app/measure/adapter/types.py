@@ -110,7 +110,8 @@ class AnalyzeResultBase:
         import dataclasses
 
         result: dict[str, object] = {}
-        for f in dataclasses.fields(self):  # type: ignore[arg-type]
+        # tolerated: Result subclasses are dataclasses; this mixin reflects their declared fields.
+        for f in dataclasses.fields(self):  # pyright: ignore[reportArgumentType]
             val = getattr(self, f.name)
             if _is_json_safe(val):
                 result[f.name] = val

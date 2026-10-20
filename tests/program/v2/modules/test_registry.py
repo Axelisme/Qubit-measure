@@ -4,7 +4,7 @@ from zcu_tools.program.v2.modules.registry import PulseRegistry
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
-def _make_cfg(freq=5000.0, phase=0.0, gain=0.5, ch=0, length=0.1):
+def _make_cfg(freq: float | QickParam = 5000.0, phase=0.0, gain=0.5, ch=0, length=0.1):
     return PulseCfg(
         waveform=ConstWaveformCfg(length=length),
         ch=ch,
@@ -38,8 +38,8 @@ def test_register_different_freq_is_new():
 
 def test_calc_name_stable_with_qickparam():
     reg = PulseRegistry()
-    cfg1 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))  # pyright: ignore[reportArgumentType]
-    cfg2 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))  # pyright: ignore[reportArgumentType]
+    cfg1 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))
+    cfg2 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))
     assert reg.calc_name(cfg1) == reg.calc_name(cfg2)
 
 

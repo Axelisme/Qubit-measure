@@ -207,7 +207,8 @@ class FakeScalarProgram:
     def acquire(
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
     ) -> np.ndarray:
-        raw = np.array(float(getattr(self.cfg_model, "value")))
+        # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
+        raw = np.array(float(getattr(self.cfg_model, "value")))  # noqa: B009
         round_hook(1, raw, cancel_flag)
         return raw
 
@@ -237,7 +238,8 @@ class FakeCachedProgram:
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
     ) -> np.ndarray:
         self.acquire_count += 1
-        raw = np.array(float(getattr(self.cfg_model, "value")))
+        # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
+        raw = np.array(float(getattr(self.cfg_model, "value")))  # noqa: B009
         round_hook(1, raw, cancel_flag)
         return raw
 
@@ -357,7 +359,8 @@ class ConstructorFailingProgram:
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:
-        if getattr(cfg, "value") == 1.0:
+        # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
+        if getattr(cfg, "value") == 1.0:  # noqa: B009
             raise RuntimeError("build failure")
         self.cfg_model = cfg
         self.modules = modules
@@ -366,7 +369,8 @@ class ConstructorFailingProgram:
     def acquire(
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
     ) -> np.ndarray:
-        raw = np.array([float(getattr(self.cfg_model, "value"))])
+        # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
+        raw = np.array([float(getattr(self.cfg_model, "value"))])  # noqa: B009
         round_hook(1, raw, cancel_flag)
         return raw
 

@@ -64,7 +64,7 @@ def install_mathtext_lock() -> None:
             return original(self, *args, **kwargs)
 
     setattr(locked_parse, _INSTALLED_FLAG, True)
-    mathtext.MathTextParser.parse = locked_parse  # type: ignore[method-assign]
+    mathtext.MathTextParser.parse = locked_parse
 
 
 def prewarm_mathtext() -> None:

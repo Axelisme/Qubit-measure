@@ -16,20 +16,20 @@ from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.device_models import (
+    ActiveDeviceOperation,
+    ConnectDeviceRequest,
+    DeviceEntry,
+    DeviceSnapshot,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
 from zcu_tools.gui.session.ports import OperationKind
-from zcu_tools.gui.session.services.device import (
-    ActiveDeviceOperation,
-    ConnectDeviceRequest,
-    DeviceEntry,
-    DeviceSnapshot,
-    DeviceStatus,
-    DisconnectDeviceRequest,
-    SetupDeviceRequest,
-)
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.plotting.plots import Plots
 
 from tests.gui._qt_waits import qt_until
@@ -326,7 +326,7 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
 def test_device_active_operations_enumerate_with_kind(fx):
     # Phase C: active_operations lists EVERY in-flight op, each tagged with its
     # kind + device_name so the agent knows which device and which operation.
-    fx.service.device_control.get_active_device_operations = MagicMock(  # type: ignore[method-assign]
+    fx.service.device_control.get_active_device_operations = MagicMock(
         return_value=(
             ActiveDeviceOperation(
                 device_name="bias",
@@ -390,10 +390,10 @@ def test_operation_progress_device_setup_bars(fx):
 
     m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
     m.set_n(3)
-    fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+    fx.ctrl.get_operation_progress = MagicMock(
         side_effect=AssertionError("operation.progress must use operation_control")
     )
-    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(
         return_value=((1, m),)
     )
     sock = open_client(fx.service.port)
@@ -415,7 +415,7 @@ def test_operation_progress_device_setup_bars(fx):
 
 
 def test_operation_progress_idle_returns_empty(fx):
-    fx.service.operation_control.get_operation_progress = MagicMock(return_value=())  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(return_value=())
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "operation.progress", {"operation_id": 7})
@@ -473,7 +473,7 @@ def test_operation_progress_serializes_live_bars(fx):
     m1.set_n(23)
     m2 = ProgressBarModel(label="Reps", total=500, start_time=t)
     m2.set_n(5)
-    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(
         return_value=((1, m1), (2, m2))
     )
     sock = open_client(fx.service.port)
@@ -498,7 +498,7 @@ def test_operation_progress_unknown_total_has_null_percent(fx):
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="working", total=None, start_time=time.monotonic())
-    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(
         return_value=((1, m),)
     )
     sock = open_client(fx.service.port)
@@ -551,7 +551,7 @@ def test_device_setup_rejects_wrong_info_model_type(fx):
 
 
 def test_device_setup_spec_lists_settable_fields_with_current(fx):
-    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = MagicMock(
         return_value=FakeDeviceInfo(address="none", value=2.5)
     )
     sock = open_client(fx.service.port)
@@ -589,7 +589,7 @@ def test_device_setup_spec_exposes_literal_choices(fx):
 
 
 def test_device_setup_spec_requires_live_info(fx):
-    fx.service.device_control.get_device_info = MagicMock(return_value=None)  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = MagicMock(return_value=None)
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "device.setup_spec", {"name": "ghost"})
@@ -603,7 +603,7 @@ def test_device_setup_spec_uses_device_control_facet(fx):
     ctrl_get = MagicMock(side_effect=AssertionError("broad controller used"))
     fx.ctrl.get_device_info = ctrl_get
     facet_get = MagicMock(return_value=FakeDeviceInfo(address="none", value=2.5))
-    fx.service.device_control.get_device_info = facet_get  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = facet_get
 
     sock = open_client(fx.service.port)
     try:
@@ -910,8 +910,8 @@ def test_soc_connect_remote_missing_ip_rejected(fx):
 def test_soc_connect_remote_returns_summary_directly(fx):
     # soc.connect is synchronous: the handler calls Controller.connect_sync then
     # reads back the SoC summary via get_soc_info — no operation_id / handle.
-    fx.ctrl.connect_sync = MagicMock()  # type: ignore[method-assign]
-    fx.ctrl.get_soc_info = MagicMock(  # type: ignore[method-assign]
+    fx.ctrl.connect_sync = MagicMock()
+    fx.ctrl.get_soc_info = MagicMock(
         return_value={
             "description": "QICK remote board",
             "cfg": {},

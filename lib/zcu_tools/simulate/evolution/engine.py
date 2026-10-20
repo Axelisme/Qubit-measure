@@ -551,12 +551,7 @@ class Engine:
         from .kernel import KernelContext
 
         with self._lock, native_limit.acquire():
-            if self._closed:
-                raise RuntimeError("engine is closed")
-            if not np.isfinite(budget) or budget <= 0:
-                raise ValueError("budget must be finite and positive")
-            if cancel.is_set():
-                raise Cancelled()
+            self._check_evolve_ready(budget, cancel)
             if not batches or not any(len(batch.points) for batch in batches):
                 size = source.initial_density.shape[0]
                 return EvolutionResult(
@@ -640,6 +635,19 @@ class Engine:
                 self._memo.add(key, result)
             self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
+
+    def _check_evolve_ready(self, budget: float, cancel: Event) -> None:
+        """Check evolve preconditions without side effects under caller-held resources.
+
+        The caller holds the engine lock and native limit; this acquires neither.
+        Raise for a closed engine, invalid budget, then cancellation, in that order.
+        """
+        if self._closed:
+            raise RuntimeError("engine is closed")
+        if not np.isfinite(budget) or budget <= 0:
+            raise ValueError("budget must be finite and positive")
+        if cancel.is_set():
+            raise Cancelled()
 
     def _cached_result(
         self, key: bytes, cancel: Event, *, telemetry: bool

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
-from zcu_tools.utils.process import smooth_signal1d
+from zcu_tools.utils.process import SmoothingOptions, smooth_signal1d
 
 
 def _require_spectrum(
@@ -35,7 +35,9 @@ def max_dispersion_freq_index(
         np.abs(signals[:, 1:] - signals[:, :-1]) / ((freqs[1:] - freqs[:-1])[None])
     )
     rel_grad = abs_grad / np.clip(np.abs(signals[:, 1:] + signals[:, :-1]), 1e-12, None)
-    rel_grad = smooth_signal1d(rel_grad, method="wavelet", sigma=1.0, axis=1)
+    rel_grad = smooth_signal1d(
+        rel_grad, options=SmoothingOptions(method="wavelet", sigma=1.0), axis=1
+    )
     return min(int(np.argmax(np.mean(rel_grad, axis=0))) + 1, len(freqs) - 1)
 
 
@@ -51,7 +53,8 @@ def smoothed_slice(
 
     real_slice = np.abs(signals)[:, freq_idx]
     smoothed = smooth_signal1d(
-        np.max(real_slice) - real_slice, method="wavelet", sigma=1.0
+        np.max(real_slice) - real_slice,
+        options=SmoothingOptions(method="wavelet", sigma=1.0),
     )
     std = np.std(smoothed)
     if std == 0.0:

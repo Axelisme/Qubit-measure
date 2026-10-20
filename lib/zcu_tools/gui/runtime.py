@@ -12,10 +12,13 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypeVar
 
 from zcu_tools.gui.logging_setup import setup_gui_logging
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+
+if TYPE_CHECKING:
+    from qtpy.QtWidgets import QApplication
 
 
 @dataclass(frozen=True)
@@ -50,16 +53,6 @@ class ControlAdapter(Protocol):
     def start(self) -> int: ...
 
     def stop(self) -> None: ...
-
-
-class SignalLike(Protocol):
-    def connect(self, callback: object) -> None: ...
-
-
-class GuiApplication(Protocol):
-    aboutToQuit: SignalLike
-
-    def exec(self) -> int: ...
 
 
 @dataclass
@@ -204,7 +197,7 @@ def _start_control_adapter(
     return True
 
 
-def _initialize_rendering(app: GuiApplication) -> None:
+def _initialize_rendering(app: QApplication) -> None:
     from zcu_tools.gui.plotting import (
         ensure_host,
         install_mathtext_lock,
@@ -218,7 +211,7 @@ def _initialize_rendering(app: GuiApplication) -> None:
     prewarm_mathtext()
 
 
-def _get_or_create_qapplication() -> GuiApplication:
+def _get_or_create_qapplication() -> QApplication:
     from qtpy.QtWidgets import QApplication
 
     from zcu_tools.gui.widgets.selectable_text import install_selectable_message_boxes
@@ -230,7 +223,7 @@ def _get_or_create_qapplication() -> GuiApplication:
         raise RuntimeError("existing Qt application is not a QApplication")
     # Process-wide Qt behavior shared by every launcher that runs on this runtime.
     install_selectable_message_boxes(app)
-    return cast(GuiApplication, app)
+    return app
 
 
 __all__ = [
@@ -240,8 +233,6 @@ __all__ = [
     "GuiRuntimeBehavior",
     "GuiRuntimeSpec",
     "GuiWindow",
-    "GuiApplication",
-    "SignalLike",
     "build_control_options",
     "launch_gui_runtime",
     "run_gui_runtime",

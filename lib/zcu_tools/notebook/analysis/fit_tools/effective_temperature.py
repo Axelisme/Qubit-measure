@@ -210,6 +210,8 @@ def plot_thermal_chain_psd(
     if ax is None:
         fig, ax = plt.subplots(figsize=(9.0, 6.0))
     else:
+        # tolerated(cast): Axes.figure includes SubFigure; retain the same owner and
+        # the existing Figure-only tight_layout call without an earlier runtime check.
         fig = cast(Figure, ax.figure)
 
     raw_source_labels = [
@@ -291,6 +293,8 @@ def plot_effective_temperature_vs_frequency(
     if ax is None:
         fig, ax = plt.subplots(figsize=(8.0, 5.0))
     else:
+        # tolerated(cast): Axes.figure includes SubFigure; retain the same owner and
+        # the existing Figure-only tight_layout call without an earlier runtime check.
         fig = cast(Figure, ax.figure)
 
     ax.plot(
@@ -371,7 +375,8 @@ def _validate_stages(
 ) -> tuple[ThermalAttenuatorStage, ...]:
     normalized: list[ThermalAttenuatorStage] = []
     for index, stage in enumerate(stages):
-        if not isinstance(stage.name, str) or stage.name == "":
+        # tolerated: Untyped notebook callers still need non-string names rejected here.
+        if not isinstance(stage.name, str) or stage.name == "":  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ValueError(f"stages[{index}].name must be a non-empty string")
         Temp_K = _validate_positive_scalar(f"stages[{index}].Temp_K", stage.Temp_K)
         attenuation_db = float(stage.attenuation_db)

@@ -27,7 +27,8 @@ def test_scan_returns_partial_when_program_build_fails():
 
     with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         for value, step in sched.scan("value", [0.0, 1.0, 2.0]):
-            setattr(step.cfg, "value", value)
+            # tolerated: FlowCfg stores value as an undeclared Pydantic extra.
+            setattr(step.cfg, "value", value)  # noqa: B010
             step.prog_builder(
                 "soc",
                 "soccfg",
@@ -53,7 +54,8 @@ def test_schedule_scan_targets_buffer_step_without_mutating_env():
         for value, step in sched.scan("value", [10.0, 20.0, 30.0]):
             assert step.value == value
             assert isinstance(step.index, int)
-            setattr(step.cfg, "value", value)
+            # tolerated: FlowCfg stores value as an undeclared Pydantic extra.
+            setattr(step.cfg, "value", value)  # noqa: B010
             step.prog_builder(
                 "soc",
                 "soccfg",
@@ -75,7 +77,8 @@ def test_schedule_repeat_targets_step_buffer_without_mutating_env():
             assert step.index == index
             assert step.value == index
             assert step.path == (index,)
-            setattr(step.cfg, "value", index)
+            # tolerated: FlowCfg stores value as an undeclared Pydantic extra.
+            setattr(step.cfg, "value", index)  # noqa: B010
             step.prog_builder(
                 "soc",
                 "soccfg",
@@ -104,7 +107,8 @@ def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
         for repeat_index, repeat_step in sched.repeat("round", 2):
             for length_value, step in repeat_step.scan("length", [10.0, 20.0, 30.0]):
                 assert step.path == (repeat_index, step.index)
-                setattr(step.cfg, "value", repeat_index * 100.0 + length_value)
+                # tolerated: FlowCfg stores value as an undeclared Pydantic extra.
+                setattr(step.cfg, "value", repeat_index * 100.0 + length_value)  # noqa: B010
                 step.prog_builder(
                     "soc",
                     "soccfg",
@@ -143,23 +147,25 @@ def test_schedule_batch_runs_children_with_isolated_cfgs():
     def child_a(step):
         order.append("a")
         assert step.path == ("a",)
-        setattr(step.cfg, "marker", "mutated")
-        return getattr(step.cfg, "marker")
+        step.cfg.marker = "mutated"
+        return step.cfg.marker
 
     def child_b(step):
         order.append("b")
         assert step.path == ("b",)
-        return getattr(step.cfg, "marker")
+        return step.cfg.marker
 
     init_cfg = _cfg(marker="base")
     with Schedule(init_cfg, stop=StopSignal()) as sched:
         results = sched.batch({"a": child_a, "b": child_b})
-        assert getattr(sched.cfg, "marker") == "base"
+        # tolerated: FlowCfg stores marker as an undeclared Pydantic extra.
+        assert getattr(sched.cfg, "marker") == "base"  # noqa: B009
 
     assert order == ["a", "b"]
     assert results is not None
     assert results == {"a": "mutated", "b": "base"}
-    assert getattr(init_cfg, "marker") == "base"
+    # tolerated: FlowCfg stores marker as an undeclared Pydantic extra.
+    assert getattr(init_cfg, "marker") == "base"  # noqa: B009
 
 
 def test_schedule_batch_returns_partial_on_child_exception_without_retry():
@@ -195,7 +201,7 @@ def test_schedule_batch_string_key_default_program_target_marks_failed_outcome()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
     def child(step):
-        setattr(step.cfg, "value", 1.0)
+        step.cfg.value = 1.0
         step.prog_builder(
             "soc",
             "soccfg",
@@ -219,7 +225,7 @@ def test_schedule_batch_string_key_uses_child_local_default_buffer():
     def child(step):
         signals_step = step.child("signals")
         signals_step.buffer((1,), dtype=np.float64)
-        setattr(signals_step.cfg, "value", 6.0)
+        signals_step.cfg.value = 6.0
         signals_step.prog_builder(
             "soc",
             "soccfg",

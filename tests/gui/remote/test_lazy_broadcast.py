@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import socket
 import threading
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from queue import Queue
-from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -33,12 +32,13 @@ def endpoint():
     def register(link: ClientLink) -> socket.socket:
         sock = socket.socket()
         sockets.append(sock)
-        with value._clients_lock:
-            value._clients[sock] = link
+        # tolerated: Synthetic registry setup uses the endpoint's own synchronization.
+        with value._clients_lock:  # pyright: ignore[reportPrivateUsage]
+            # tolerated: Existing queue/backpressure cases need synthetic recipients without a live writer.
+            value._clients[sock] = link  # pyright: ignore[reportPrivateUsage]
         return sock
 
-    value.register_test_link = register  # type: ignore[attr-defined]
-    yield value
+    yield value, register
     for sock in sockets:
         sock.close()
 
@@ -56,11 +56,6 @@ def _matches(link: ClientLink) -> bool:
     return "subscribed" in subscriptions
 
 
-def _register(endpoint: NdjsonRpcEndpoint, link: ClientLink) -> socket.socket:
-    register = cast(Callable[[ClientLink], socket.socket], endpoint.register_test_link)  # type: ignore[attr-defined]
-    return register(link)
-
-
 def _queued(link: ClientLink) -> list[bytes]:
     result: list[bytes] = []
     while not link.outbound.empty():
@@ -70,9 +65,10 @@ def _queued(link: ClientLink) -> list[bytes]:
 
 @pytest.mark.parametrize("registered", [False, True])
 def test_zero_matching_recipient_does_not_build(endpoint, registered: bool) -> None:
+    endpoint, register = endpoint
     calls = 0
     if registered:
-        _register(endpoint, _link("other"))
+        register(_link("other"))
 
     def factory() -> bytes:
         nonlocal calls
@@ -85,9 +81,10 @@ def test_zero_matching_recipient_does_not_build(endpoint, registered: bool) -> N
 
 
 def test_closing_match_does_not_build(endpoint) -> None:
+    endpoint, register = endpoint
     link = _link("closing", subscribed=True)
     link.closing = True
-    _register(endpoint, link)
+    register(link)
     factory = MagicMock(return_value=b"event\n")
 
     endpoint.broadcast_lazy(factory, _matches)
@@ -97,11 +94,12 @@ def test_closing_match_does_not_build(endpoint) -> None:
 
 
 def test_multiple_matches_build_once_and_preserve_order(endpoint) -> None:
+    endpoint, register = endpoint
     first = _link("first", subscribed=True)
     other = _link("other")
     second = _link("second", subscribed=True)
     for link in (first, other, second):
-        _register(endpoint, link)
+        register(link)
     calls = 0
     delivered: list[str] = []
 
@@ -126,8 +124,9 @@ def test_multiple_matches_build_once_and_preserve_order(endpoint) -> None:
 def test_none_factory_result_enqueues_nothing_and_has_no_delivery_hook(
     endpoint,
 ) -> None:
+    endpoint, register = endpoint
     link = _link("match", subscribed=True)
-    _register(endpoint, link)
+    register(link)
     delivered = MagicMock()
 
     endpoint.broadcast_lazy(lambda: None, _matches, on_delivered=delivered)
@@ -279,8 +278,9 @@ def test_subscribe_after_selection_does_not_receive_old_event() -> None:
 
 
 def test_delivery_linearizes_before_later_unsubscribe_reply(endpoint) -> None:
+    endpoint, register = endpoint
     link = _link("match", subscribed=True)
-    _register(endpoint, link)
+    register(link)
 
     endpoint.broadcast_lazy(lambda: b"push\n", _matches)
 
@@ -299,10 +299,11 @@ def test_delivery_linearizes_before_later_unsubscribe_reply(endpoint) -> None:
 
 
 def test_full_slow_queue_does_not_block_healthy_client(endpoint) -> None:
+    endpoint, register = endpoint
     slow = _link("slow", subscribed=True)
     healthy = _link("healthy", subscribed=True)
-    _register(endpoint, slow)
-    _register(endpoint, healthy)
+    register(slow)
+    register(healthy)
     for _ in range(slow.outbound.maxsize):
         slow.outbound.put_nowait(b"old\n")
 
@@ -313,10 +314,11 @@ def test_full_slow_queue_does_not_block_healthy_client(endpoint) -> None:
 
 
 def test_lazy_broadcast_preserves_per_client_event_order(endpoint) -> None:
+    endpoint, register = endpoint
     first = _link("first", subscribed=True)
     second = _link("second", subscribed=True)
-    _register(endpoint, first)
-    _register(endpoint, second)
+    register(first)
+    register(second)
 
     endpoint.broadcast_lazy(lambda: b"a\n", _matches)
     endpoint.broadcast_lazy(lambda: b"b\n", _matches)

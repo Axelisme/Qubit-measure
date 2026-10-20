@@ -1,3 +1,9 @@
+# tolerated(file-size): MainWindowToolbar, MainDialogRegistry,
+# MainWindowEventCoordinator and ExpTabWidget own toolbar, dialogs, events and tabs.
+# This window root coordinates tab mounting, window commands, diagnostic/screenshot
+# projections, control watches and close/drain. Moving these callbacks into wrappers
+# or mixins would split one view lifecycle without giving a separate set of widgets
+# and local state its own owner.
 """MainWindow — the top-level View for the v2_gui framework.
 
 Implements ViewProtocol; all state lives in Controller/State, never here.
@@ -10,7 +16,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from qtpy.QtCore import Qt, QTimer
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
@@ -44,6 +50,7 @@ from zcu_tools.gui.widgets import (
     warning_colour,
 )
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.dialog_presenter import DestructiveConfirmation
 from zcu_tools.gui.widgets.file_dialog import nearest_existing
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
@@ -737,7 +744,8 @@ class MainWindow(QMainWindow):
             message += f"\n\nDiscard {preview.skipped_count} previously skipped tab configurations from RAM?"
         self._reload_prompt_open = True
 
-        def on_decision(confirmed: bool) -> None:
+        # tolerated: Reload presenter invokes Callable[[bool], None] positionally.
+        def on_decision(confirmed: bool) -> None:  # noqa: FBT001
             self._reload_prompt_open = False
             if not confirmed or self._shutdown_requested or self._closing:
                 return
@@ -749,11 +757,13 @@ class MainWindow(QMainWindow):
 
         self._dialog_presenter.destructive_confirm(
             self,
-            "Reload experiments",
-            message,
-            action_text="Discard Results and Reload",
+            DestructiveConfirmation(
+                title="Reload experiments",
+                message=message,
+                action_text="Discard Results and Reload",
+                default=False,
+            ),
             on_decision=on_decision,
-            default=False,
         )
 
     def retry_skipped_experiment_tabs(self) -> None:
@@ -817,7 +827,8 @@ class MainWindow(QMainWindow):
 
         self._pending_tab_closes.add(tab_id)
 
-        def _on_decision(confirmed: bool) -> None:
+        # tolerated: Tab-close presenter invokes Callable[[bool], None] positionally.
+        def _on_decision(confirmed: bool) -> None:  # noqa: FBT001
             self._pending_tab_closes.discard(tab_id)
             if not confirmed or self._shutdown_requested or self._closing:
                 return
@@ -827,11 +838,13 @@ class MainWindow(QMainWindow):
 
         self._dialog_presenter.destructive_confirm(
             self,
-            "Unsaved measurement data",
-            "Measurement data in this tab has not been saved. Discard unsaved data and close tab?",
-            action_text="Discard and Close",
+            DestructiveConfirmation(
+                title="Unsaved measurement data",
+                message="Measurement data in this tab has not been saved. Discard unsaved data and close tab?",
+                action_text="Discard and Close",
+                default=False,
+            ),
             on_decision=_on_decision,
-            default=False,
         )
 
     def _on_tab_moved(self, from_index: int, to_index: int) -> None:
@@ -1227,7 +1240,8 @@ class MainWindow(QMainWindow):
         self._close_prompt_open = True
         self._post_shutdown_prompt_open = True
 
-        def _on_decision(confirmed: bool) -> None:
+        # tolerated: Final-unsaved callback implements positional Callable[[bool], None].
+        def _on_decision(confirmed: bool) -> None:  # noqa: FBT001
             self._close_prompt_open = False
             self._post_shutdown_prompt_open = False
             if self._programmatic_shutdown_requested or self._closing:
@@ -1240,12 +1254,14 @@ class MainWindow(QMainWindow):
 
         self._dialog_presenter.destructive_confirm(
             self,
-            "Unsaved measurement data",
-            "An operation completed with unsaved measurement data while the app "
-            "was closing. Discard unsaved data and close?",
-            action_text="Discard and Close",
+            DestructiveConfirmation(
+                title="Unsaved measurement data",
+                message="An operation completed with unsaved measurement data while the app "
+                "was closing. Discard unsaved data and close?",
+                action_text="Discard and Close",
+                default=False,
+            ),
             on_decision=_on_decision,
-            default=False,
         )
 
     def _present_app_close_confirmation(
@@ -1253,7 +1269,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         self._close_prompt_open = True
 
-        def _on_decision(confirmed: bool) -> None:
+        # tolerated: Both app-close presenters call Callable[[bool], None] positionally.
+        def _on_decision(confirmed: bool) -> None:  # noqa: FBT001
             if not confirmed or self._shutdown_requested or self._closing:
                 self._close_prompt_open = False
                 return
@@ -1275,22 +1292,26 @@ class MainWindow(QMainWindow):
         if has_unsaved and active > 0:
             self._dialog_presenter.destructive_confirm(
                 self,
-                "Unsaved data and operations in progress",
-                f"There is unsaved measurement data and {active} operation(s) "
-                "in progress. Discard unsaved data, cancel active operation(s), "
-                "and close?",
-                action_text="Discard and Close",
+                DestructiveConfirmation(
+                    title="Unsaved data and operations in progress",
+                    message=f"There is unsaved measurement data and {active} operation(s) "
+                    "in progress. Discard unsaved data, cancel active operation(s), "
+                    "and close?",
+                    action_text="Discard and Close",
+                    default=False,
+                ),
                 on_decision=_on_decision,
-                default=False,
             )
         elif has_unsaved:
             self._dialog_presenter.destructive_confirm(
                 self,
-                "Unsaved measurement data",
-                "There is unsaved measurement data. Discard unsaved data and close?",
-                action_text="Discard and Close",
+                DestructiveConfirmation(
+                    title="Unsaved measurement data",
+                    message="There is unsaved measurement data. Discard unsaved data and close?",
+                    action_text="Discard and Close",
+                    default=False,
+                ),
                 on_decision=_on_decision,
-                default=False,
             )
         else:
             self._dialog_presenter.confirm_async(
@@ -1321,11 +1342,13 @@ class MainWindow(QMainWindow):
 
         self._dialog_presenter.destructive_confirm(
             self,
-            "背景工作仍在執行",
-            "背景工作仍在執行。再等一下會重試收尾；強制關閉可能讓晚到的 callback "
-            "觸及已釋放的視窗，並不代表儀器已斷線或 RF 已關閉。",
-            action_text="強制關閉",
-            cancel_text="再等一下",
+            DestructiveConfirmation(
+                title="背景工作仍在執行",
+                message="背景工作仍在執行。再等一下會重試收尾；強制關閉可能讓晚到的 callback "
+                "觸及已釋放的視窗，並不代表儀器已斷線或 RF 已關閉。",
+                action_text="強制關閉",
+                cancel_text="再等一下",
+            ),
             on_decision=lambda force: self._on_drain_decision(force=force),
         )
 

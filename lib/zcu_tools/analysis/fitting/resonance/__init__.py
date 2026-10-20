@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .base import (
+    align_uniform_edelay_aliases,
     calc_phase,
     find_edelay_branch,
     fit_circle_params,
@@ -21,8 +22,17 @@ from .transmission import TransmissionModel
 
 
 def get_proper_model(
-    freqs: NDArray[np.float64], signals: NDArray[np.complex128]
+    # tolerated: Public fitting facade accepts freqs positionally and by keyword.
+    freqs: NDArray[np.float64],  # noqa: ARG001
+    signals: NDArray[np.complex128],
 ) -> HangerModel | TransmissionModel:
+    """Choose a resonance model from signal magnitudes and endpoint background.
+
+    ``freqs`` is accepted but does not participate in classification. Return a
+    hanger model when the peak above the mean endpoint magnitude is less than
+    three times the dip below it; otherwise return a transmission model.
+    Empty ``signals`` raises ``IndexError``.
+    """
     background = 0.5 * (np.abs(signals[0]) + np.abs(signals[-1]))
     magnitudes = np.abs(signals)
 

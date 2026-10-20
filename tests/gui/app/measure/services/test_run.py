@@ -344,17 +344,18 @@ def test_run_finished_emits_outcome_finished():
 
 @pytest.mark.parametrize("cancel_requested", [False, True])
 def test_result_commit_failure_settles_run_as_failed(
-    monkeypatch, cancel_requested: bool
+    monkeypatch, caplog, cancel_requested: bool
 ) -> None:
     state, tab_id, adapter = make_state()
     svc, _gate, bg, handles = make_run_service(state)
     plots = make_plots()
     plots.subplots("trace")
     token = svc.start_run(make_inputs(state, tab_id, adapter), plots=plots)
+    failure = RuntimeError("commit refused")
     monkeypatch.setattr(
         state,
         "update_tab_result",
-        MagicMock(side_effect=RuntimeError("commit refused")),
+        MagicMock(side_effect=failure),
     )
     if cancel_requested:
         assert svc.cancel_run()
@@ -367,6 +368,10 @@ def test_result_commit_failure_settles_run_as_failed(
     assert svc.active_token is None
     assert not state.is_tab_running(tab_id)
     assert state.get_tab(tab_id).run.result is None
+    assert any(
+        record.exc_info is not None and record.exc_info[1] is failure
+        for record in caplog.records
+    )
 
 
 def test_run_failed_emits_outcome_failed_with_message():

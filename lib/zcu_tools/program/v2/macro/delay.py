@@ -22,6 +22,7 @@ class DelayRegAuto(TimedMacro):
         auto_rounded = self.convert_time(prog, auto_t, "auto_t")
         prog.decrement_timestamps(auto_rounded)
 
+    # tolerated: QICK Macro.expand is inferred as None, but translate iterates the returned macro list.
     def expand(self, prog):  # pyright: ignore[reportIncompatibleMethodOverride]
         insts = []
         auto_t_reg = self.t_regs["auto_t"]

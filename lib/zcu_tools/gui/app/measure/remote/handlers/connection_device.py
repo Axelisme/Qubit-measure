@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
-from zcu_tools.gui.session.services.connection import (
-    ConnectRemoteRequest,
-)
-from zcu_tools.gui.session.services.device import (
+from zcu_tools.gui.session.device_models import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
+)
+from zcu_tools.gui.session.services.connection import (
+    ConnectRemoteRequest,
 )
 
 if TYPE_CHECKING:
@@ -159,7 +159,8 @@ def _field_type_and_choices(annotation: object) -> tuple[str, list[object] | Non
         if len(non_none) == 1:
             return _field_type_and_choices(non_none[0])
     _SCALAR = {float: "float", int: "int", str: "str", bool: "bool"}
-    return _SCALAR.get(annotation, "str"), None  # type: ignore[arg-type]
+    # tolerated: Device annotations may be arbitrary objects; unknown scalar types keep the string fallback.
+    return _SCALAR.get(annotation, "str"), None  # pyright: ignore[reportArgumentType, reportCallIssue]
 
 
 def _device_fields(info: BaseDeviceInfo) -> list[dict[str, object]]:

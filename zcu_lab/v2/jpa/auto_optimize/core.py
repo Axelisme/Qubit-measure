@@ -433,7 +433,8 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
     def analyze(
         self,
         source: RunRecord[JPAOptCfg, JPAOptimizeResult],
-        options: None,  # noqa: ARG002 - uniform synchronous analysis interface
+        # tolerated: SynchronousExperiment requires the options keyword even without analysis options.
+        options: None,  # noqa: ARG002
         *,
         plots: Plots,
     ) -> JPAOptimizeAnalysis:

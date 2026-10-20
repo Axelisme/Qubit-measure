@@ -143,7 +143,8 @@ class FluxDepInteraction(Generic[CfgT, ResultT]):
         except BaseException as error:
             try:
                 self._retire_preview()
-            except BaseException as cleanup_error:  # noqa: BLE001 - retain both operation failures
+            # tolerated: Retain start and preview cleanup failures, including interrupts.
+            except BaseException as cleanup_error:  # noqa: BLE001
                 raise BaseExceptionGroup(
                     "Flux interaction start and cleanup failed", [error, cleanup_error]
                 ) from None
@@ -188,7 +189,8 @@ class FluxDepInteraction(Generic[CfgT, ResultT]):
         except BaseException as error:
             try:
                 self._retire_preview()
-            except BaseException as cleanup_error:  # noqa: BLE001 - retain both operation failures
+            # tolerated: Retain analysis and preview cleanup failures, including interrupts.
+            except BaseException as cleanup_error:  # noqa: BLE001
                 raise BaseExceptionGroup(
                     "Flux analysis and preview cleanup failed", [error, cleanup_error]
                 ) from None
@@ -206,12 +208,14 @@ class FluxDepInteraction(Generic[CfgT, ResultT]):
             for cleanup in (lambda: plots.finish(present=False), plots.release):
                 try:
                     cleanup()
-                except BaseException as cleanup_error:  # noqa: BLE001 - continue operation cleanup
+                # tolerated: Attempt every plot cleanup and collect failures in order.
+                except BaseException as cleanup_error:  # noqa: BLE001
                     cleanup_errors.append(cleanup_error)
             if not self.is_finished:
                 try:
                     self._retire_preview()
-                except BaseException as cleanup_error:  # noqa: BLE001 - retain the preview failure
+                # tolerated: Retain preview cleanup failure after producer and plot errors.
+                except BaseException as cleanup_error:  # noqa: BLE001
                     cleanup_errors.append(cleanup_error)
             if cleanup_errors:
                 raise BaseExceptionGroup(

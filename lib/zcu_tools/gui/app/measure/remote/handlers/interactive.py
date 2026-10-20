@@ -86,7 +86,9 @@ def h_tab_interact(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Dispatch on the owner loop with best-effort, last-commit-wins semantics."""
+    # tolerated(cast): tab.interact ParamSpec requires a string; Mapping values remain object.
     tab_id = cast(str, params["tab_id"])
+    # tolerated(cast): ParamSpec validates BOOLEAN with default True; Mapping erases that type.
     include_figure = cast(bool, params.get("include_figure", True))
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):

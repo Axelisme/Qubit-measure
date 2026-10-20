@@ -254,13 +254,7 @@ class Form[C: ConfigBase]:
             if not isinstance(raw, dict):
                 raise FormPathError(item.path, "Expected an authored model element")
             name = names[item.index] if names is not None else item.name
-            messages = {
-                key: text
-                for key, text in (
-                    preview.errors.messages.items() if preview.errors else ()
-                )
-                if key[: len(item.path)] == item.path or item.path[: len(key)] == key
-            }
+            errors = _logical.errors_for_path(preview.errors, item.path)
             elements.append(
                 ElementObservation(
                     item.index,
@@ -277,7 +271,7 @@ class Form[C: ConfigBase]:
                         for key, value in preview.values.items()
                         if key[: len(item.path)] == item.path
                     },
-                    FormErrors(messages) if messages else None,
+                    errors,
                     tuple(
                         self.read_logical_field(input, (*item.path, *field), env)
                         for field in fields

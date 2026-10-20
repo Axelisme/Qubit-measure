@@ -18,6 +18,7 @@ def test_plot1d_segment_rejects_complex_signals() -> None:
         signals = np.array([1.0 + 2.0j, 3.0 + 4.0j], dtype=np.complex128)
 
         with pytest.raises(ValueError, match="complex"):
+            # tolerated(cast): pass complex data past the float64 API to test rejection.
             segment.update(ax, xs, cast(Any, signals))
     finally:
         plt.close(fig)

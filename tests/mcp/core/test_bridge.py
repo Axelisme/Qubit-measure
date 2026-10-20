@@ -42,16 +42,6 @@ def _config(tmp_path: Path) -> MCPBridgeConfig:
     )
 
 
-class _FakeProc:
-    """Minimal subprocess.Popen stand-in: only ``poll`` is exercised here."""
-
-    def __init__(self, *, alive: bool) -> None:
-        self._alive = alive
-
-    def poll(self) -> int | None:
-        return None if self._alive else 0
-
-
 class _SilentTransport:
     """Transport fake that records requests but never delivers replies."""
 
@@ -170,16 +160,21 @@ def test_launched_gui_false_when_attached_only(tmp_path: Path) -> None:
     assert bridge.launched_gui is False
 
 
-def test_launched_gui_true_when_we_launched_a_live_proc(tmp_path: Path) -> None:
-    bridge = McpBridge(_config(tmp_path))
-    bridge._proc = _FakeProc(alive=True)  # type: ignore[assignment]
+def test_launched_gui_true_when_we_launched_a_live_proc(
+    launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock], tmp_path: Path
+) -> None:
+    bridge, _, _, _ = launch_bridge
+    bridge.launch(tmp_path, 18765, "credential", auto_connect=False)
     assert bridge.launched_gui is True
 
 
-def test_launched_gui_false_when_our_proc_exited(tmp_path: Path) -> None:
+def test_launched_gui_false_when_our_proc_exited(
+    launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock], tmp_path: Path
+) -> None:
     # We launched it but it already exited -> nothing live to stop.
-    bridge = McpBridge(_config(tmp_path))
-    bridge._proc = _FakeProc(alive=False)  # type: ignore[assignment]
+    bridge, child, _, _ = launch_bridge
+    bridge.launch(tmp_path, 18765, "credential", auto_connect=False)
+    child.proc.poll.return_value = 0
     assert bridge.launched_gui is False
 
 

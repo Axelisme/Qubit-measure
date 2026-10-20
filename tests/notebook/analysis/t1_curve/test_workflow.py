@@ -14,7 +14,9 @@ from zcu_tools.notebook.analysis.t1_curve import (
     T1FitParams,
     T1FitResult,
     T1FluxCalibration,
+    T1MechanismOptions,
     T1PreparedData,
+    analyze_t1_mechanism_limit,
     build_t1_channel_curves,
     calibrate_t1_flux,
     load_t1_curve_context,
@@ -24,7 +26,11 @@ from zcu_tools.notebook.analysis.t1_curve import (
     prepare_t1_curve_data,
     subtract_relaxation_limit,
 )
-from zcu_tools.resources.sample_table import SampleTableV2Error
+from zcu_tools.resources.sample_table import (
+    SampleFluxFrame,
+    SampleTableV2Error,
+    resolve_sample_flux,
+)
 
 
 def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
@@ -177,6 +183,69 @@ def test_make_t1_fit_init_can_select_partial_mechanisms() -> None:
     assert mechanisms_to_fixed_params(("capacitive", "Temp")) == ("Q_cap", "Temp")
 
 
+@pytest.mark.parametrize("mechanism", ["capacitive", "quasiparticle", "inductive"])
+def test_mechanism_options_match_wrapper_probe_results(
+    mechanism: workflow.MechanismName,
+) -> None:
+    data = _synthetic_prepared_data()
+    wrapper = {
+        "capacitive": workflow.analyze_t1_capacitive_limit,
+        "quasiparticle": workflow.analyze_t1_quasiparticle_limit,
+        "inductive": workflow.analyze_t1_inductive_limit,
+    }[mechanism]
+    options = T1MechanismOptions(
+        Temp=0.035,
+        omega_range=(2.5, 4.5),
+        Temp_bounds=(None, 0.12),
+        fit_constant=False,
+        statistic="max",
+        parameter_init=0.002,
+    )
+
+    generic = analyze_t1_mechanism_limit(data, mechanism=mechanism, options=options)
+    wrapped = wrapper(
+        data,
+        Temp=0.035,
+        omega_range=(2.5, 4.5),
+        Temp_bounds=(None, 0.12),
+        fit_constant=False,
+        statistic="max",
+        parameter_init=0.002,
+    )
+
+    assert wrapped.mechanism == mechanism
+    assert wrapped.temperature == 0.035
+    assert wrapped.parameter_init == 0.002
+    assert not wrapped.fit_constant
+    np.testing.assert_array_equal(wrapped.fit_omegas, [3.0, 4.0])
+    np.testing.assert_allclose(wrapped.q_values, generic.q_values)
+    np.testing.assert_allclose(wrapped.q_errors, generic.q_errors)
+    np.testing.assert_allclose(wrapped.fit_q_values, generic.fit_q_values)
+    pd.testing.assert_frame_equal(wrapped.pointwise_table, generic.pointwise_table)
+    pd.testing.assert_frame_equal(wrapped.summary_table, generic.summary_table)
+    summary = wrapped.summary_table.set_index("metric")["value"]
+    assert summary["Temp bounds"] == "default..120.00 mK"
+
+
+@pytest.mark.parametrize("mechanism", ["capacitive", "quasiparticle", "inductive"])
+def test_mechanism_options_use_statistic_and_reject_empty_window(
+    mechanism: workflow.MechanismName,
+) -> None:
+    data = _synthetic_prepared_data()
+    options = T1MechanismOptions(Temp=0.06, statistic="max", fit_constant=False)
+
+    probe = analyze_t1_mechanism_limit(data, mechanism=mechanism, options=options)
+
+    q_max = float(np.max(probe.fit_q_values))
+    expected = 1.0 / q_max if mechanism == "quasiparticle" else q_max
+    assert probe.parameter_init == pytest.approx(expected)
+    np.testing.assert_array_equal(probe.fit_omegas, data.fit.omegas)
+    with pytest.raises(ValueError, match=f"No finite positive {mechanism} Q values"):
+        analyze_t1_mechanism_limit(
+            data, mechanism=mechanism, options=replace(options, omega_range=(8.0, 9.0))
+        )
+
+
 def test_subtract_relaxation_limit_uses_rate_domain() -> None:
     observed_T1s = np.array([40_000.0, 50_000.0], dtype=np.float64)
     observed_T1errs = np.array([500.0, np.nan], dtype=np.float64)
@@ -294,13 +363,13 @@ def test_build_t1_channel_curves_uses_uniform_flux_grid() -> None:
 
 def _synthetic_calibration(samples: pd.DataFrame) -> T1FluxCalibration:
     context = _synthetic_context(samples)
-    resolution = workflow.resolve_sample_flux(
-        samples, fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0)
+    resolution = resolve_sample_flux(
+        samples, fallback_frame=SampleFluxFrame("A", 0.5, 1.0)
     )
     return T1FluxCalibration(
         context=context,
         resolution=resolution,
-        fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0),
+        fallback_frame=SampleFluxFrame("A", 0.5, 1.0),
         t1_df=samples,
         freq_rows=samples,
         summary_table=pd.DataFrame(),

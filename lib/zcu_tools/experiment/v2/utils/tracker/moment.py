@@ -67,8 +67,8 @@ class MomentTracker(TrackerProtocol):
     ``m`` is samples per update, last dim is (I, Q). State shapes:
         n:     int (shared over leading dims; all channels get same count)
         mean:  (..., 2)
-        M2:    (..., 2, 2)
-        M3:    (..., 2, 2, 2)
+        _m2:   (..., 2, 2)
+        _m3:   (..., 2, 2, 2)
     """
 
     BATCH_SIZE = 256
@@ -76,8 +76,8 @@ class MomentTracker(TrackerProtocol):
     def __init__(self) -> None:
         self.n = 0
         self._mean: NDArray[np.float64] | None = None
-        self.M2: NDArray[np.float64] | None = None
-        self.M3: NDArray[np.float64] | None = None
+        self._m2: NDArray[np.float64] | None = None
+        self._m3: NDArray[np.float64] | None = None
         self._leading_shape: tuple[int, ...] = ()
 
     def _chunk_moments(self, points: NDArray[np.float64]) -> _CentralMoments:
@@ -111,14 +111,14 @@ class MomentTracker(TrackerProtocol):
             if self.n == 0:
                 self.n = n_b
                 self._mean = mean_b.astype(np.float64, copy=True)
-                self.M2 = M2_b.astype(np.float64, copy=True)
-                self.M3 = M3_b.astype(np.float64, copy=True)
+                self._m2 = M2_b.astype(np.float64, copy=True)
+                self._m3 = M3_b.astype(np.float64, copy=True)
             else:
                 assert self._mean is not None
-                assert self.M2 is not None
-                assert self.M3 is not None
-                self.n, self._mean, self.M2, self.M3 = _merge_moments3(
-                    _CentralMoments(self.n, self._mean, self.M2, self.M3),
+                assert self._m2 is not None
+                assert self._m3 is not None
+                self.n, self._mean, self._m2, self._m3 = _merge_moments3(
+                    _CentralMoments(self.n, self._mean, self._m2, self._m3),
                     batch,
                 )
 
@@ -130,17 +130,17 @@ class MomentTracker(TrackerProtocol):
 
     @property
     def covariance(self) -> NDArray[np.float64]:
-        if self.M2 is None:
+        if self._m2 is None:
             raise ValueError("Covariance is not available yet")
         if self.n <= 1:
-            return self.M2
-        return self.M2 / (self.n - 1)
+            return self._m2
+        return self._m2 / (self.n - 1)
 
     @property
     def third_moment(self) -> NDArray[np.float64]:
         """Population third central moment ``E[(x-μ)⊗(x-μ)⊗(x-μ)]`` (``= M3 / n``)."""
-        if self.M3 is None:
+        if self._m3 is None:
             raise ValueError("Third moment is not available yet")
         if self.n < 1:
-            return np.full_like(self.M3, np.nan)
-        return self.M3 / self.n
+            return np.full_like(self._m3, np.nan)
+        return self._m3 / self.n

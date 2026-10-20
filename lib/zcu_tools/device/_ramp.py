@@ -2,26 +2,42 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 
 from zcu_tools.progress_bar import make_pbar
 
 
-def ramp_linear(
+@dataclass(frozen=True)
+class RampProgress:
+    """Display one ramp without changing its physical stepping.
+
+    enabled controls visibility; desc and optional unit label the bar. scale
+    converts physical distance to displayed distance; decimals rounds that value
+    (default scale 1 and six decimals).
+    """
+
+    enabled: bool
+    desc: str
+    unit: str | None = None
+    scale: float = 1.0
+    decimals: int = 6
+
+
+# tolerated: Stepping endpoints, writer, stop token and start-point policy remain independent.
+def ramp_linear(  # noqa: PLR0913
     *,
     start: float,
     target: float,
     step: float,
     apply_value: Callable[[float], None],
-    progress: bool,
-    desc: str,
-    unit: str | None = None,
-    progress_scale: float = 1.0,
-    progress_decimals: int = 6,
+    progress: RampProgress,
     stop_event: threading.Event | None = None,
     include_start: bool = False,
 ) -> None:
+    progress_decimals = progress.decimals
+    progress_scale = progress.scale
     if step <= 0:
         raise ValueError(f"ramp step must be positive, got {step}")
     if progress_decimals < 0:
@@ -36,12 +52,12 @@ def ramp_linear(
 
     pbar_kwargs: dict[str, object] = {
         "total": total,
-        "desc": desc,
+        "desc": progress.desc,
         "leave": False,
-        "disable": not progress,
+        "disable": not progress.enabled,
     }
-    if unit is not None:
-        pbar_kwargs["unit"] = unit
+    if progress.unit is not None:
+        pbar_kwargs["unit"] = progress.unit
 
     pbar = make_pbar(**pbar_kwargs)
     steps = max(1, round(distance / step))

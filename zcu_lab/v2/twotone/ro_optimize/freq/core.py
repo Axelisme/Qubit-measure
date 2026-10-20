@@ -36,7 +36,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
+from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
 
 
 @dataclass(frozen=True)
@@ -185,11 +185,13 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
         snrs = smooth_signal1d(
             snrs,
-            method=options.smooth_method,
-            sigma=options.smooth,
+            options=SmoothingOptions(
+                method=options.smooth_method,
+                sigma=options.smooth,
+                wavelet=options.wavelet,
+                wavelet_level=options.wavelet_level,
+            ),
             axis=0,
-            wavelet=options.wavelet,
-            wavelet_level=options.wavelet_level,
         )
 
         max_id = np.argmax(snrs)

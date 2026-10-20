@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.writeback import (
     ParameterWriteback,
     WritebackControlFacet,
     WritebackEdit,
+    WritebackPane,
     WritebackService,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -108,8 +109,11 @@ def _facet() -> tuple[
     bus = BaseEventBus()
     return (
         WritebackControlFacet(
+            # tolerated(cast): RecordingState logs tab and busy reads without the full State owner.
             state=cast(Any, state),
+            # tolerated(cast): RecordingGuard records admission calls without a full GuardService.
             guard=cast(Any, RecordingGuard(log)),
+            # tolerated(cast): RecordingWriteback records draft calls without a full WritebackService.
             writeback=cast(Any, writeback),
             resource_versions=lambda: versions,
             bus=bus,
@@ -135,20 +139,19 @@ def test_has_tab_reads_state() -> None:
     [("analysis", "analysis_draft"), ("post_analysis", "post_draft")],
 )
 def test_pane_writeback_reads_edits_and_applies_its_own_draft(
-    pane: str, draft_attr: str
+    pane: WritebackPane, draft_attr: str
 ) -> None:
     facet, log, _state, writeback, _versions, bus = _facet()
     draft = getattr(writeback, draft_attr)
     events: list[TabInteractionChangedPayload] = []
     bus.subscribe(TabInteractionChangedPayload, events.append)
 
-    assert facet.get_writeback_item_form_for_pane(
-        "tab-1", cast(Any, pane), "param-1"
-    ) == {"draft": draft, "session_id": "param-1"}
-    facet.set_writeback_item_for_pane(
-        "tab-1", cast(Any, pane), "param-1", selected=False
-    )
-    assert facet.apply_writeback_for_pane("tab-1", cast(Any, pane)) == {
+    assert facet.get_writeback_item_form_for_pane("tab-1", pane, "param-1") == {
+        "draft": draft,
+        "session_id": "param-1",
+    }
+    facet.set_writeback_item_for_pane("tab-1", pane, "param-1", selected=False)
+    assert facet.apply_writeback_for_pane("tab-1", pane) == {
         "applied_ids": ["pane-item"],
         "written": {},
     }
@@ -186,7 +189,7 @@ def test_applied_projection_reads_the_pane_owned_draft() -> None:
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
-def test_pane_writeback_requires_an_existing_draft(pane: str) -> None:
+def test_pane_writeback_requires_an_existing_draft(pane: WritebackPane) -> None:
     facet, _log, state, writeback, _versions, _bus = _facet()
     draft_attr = "analysis_draft" if pane == "analysis" else "post_draft"
     setattr(writeback, draft_attr, None)
@@ -195,15 +198,17 @@ def test_pane_writeback_requires_an_existing_draft(pane: str) -> None:
     ).writeback_draft = None
 
     with pytest.raises(FailedPreconditionError, match="No .*writeback draft"):
-        facet.apply_writeback_for_pane("tab-1", cast(Any, pane))
+        facet.apply_writeback_for_pane("tab-1", pane)
 
 
 def test_pane_writeback_rejects_unknown_pane() -> None:
     facet, _log, _state, _writeback, _versions, _bus = _facet()
 
     with pytest.raises(InvalidInputError, match="unknown writeback pane"):
+        # tolerated(cast): Invalid save pane exercises Apply rejection outside WritebackPane.
         facet.apply_writeback_for_pane("tab-1", cast(Any, "save"))
     with pytest.raises(InvalidInputError, match="unknown writeback pane"):
+        # tolerated(cast): Invalid save pane exercises applied-state rejection outside WritebackPane.
         facet.get_writeback_applied_for_pane("tab-1", cast(Any, "save"))
 
 

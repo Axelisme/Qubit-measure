@@ -13,7 +13,8 @@ def _span(lo: float, hi: float, name: str) -> float:
     return span
 
 
-def points_in_normalized_brush(
+# tolerated: Stroke/notebook callers use this public x/y/width/bounds keyword API.
+def points_in_normalized_brush(  # noqa: PLR0913
     xs: NDArray[np.float64],
     ys: NDArray[np.float64],
     *,
@@ -39,7 +40,8 @@ def points_in_normalized_brush(
     return x_d**2 + y_d**2 <= width**2
 
 
-def toggle_near_mask(
+# tolerated: Stroke/notebook callers use positional grid/center/radius plus select.
+def toggle_near_mask(  # noqa: PLR0913
     dev_values: NDArray[np.float64],
     freqs: NDArray[np.float64],
     mask: NDArray[np.bool_],

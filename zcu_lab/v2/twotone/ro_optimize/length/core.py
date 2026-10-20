@@ -35,7 +35,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
+from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
 
 
 @dataclass(frozen=True)
@@ -194,11 +194,13 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
 
         snrs = smooth_signal1d(
             snrs,
-            method=options.smooth_method,
-            sigma=options.smooth,
+            options=SmoothingOptions(
+                method=options.smooth_method,
+                sigma=options.smooth,
+                wavelet=options.wavelet,
+                wavelet_level=options.wavelet_level,
+            ),
             axis=0,
-            wavelet=options.wavelet,
-            wavelet_level=options.wavelet_level,
         )
 
         if options.t0 is None or options.t0 == 0.0:

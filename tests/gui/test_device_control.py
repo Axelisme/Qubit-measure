@@ -8,14 +8,7 @@ from typing import Any, cast
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.device_control import DeviceControlFacet
-from zcu_tools.gui.session.events import (
-    DeviceChangedPayload,
-    DeviceSetupFinishedPayload,
-    DeviceSetupStartedPayload,
-)
-from zcu_tools.gui.session.pbar_host import ProgressBarModel
-from zcu_tools.gui.session.ports import OperationKind
-from zcu_tools.gui.session.services.device import (
+from zcu_tools.gui.session.device_models import (
     ActiveDeviceOperation,
     ConnectDeviceRequest,
     DeviceEntry,
@@ -23,6 +16,13 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.events import (
+    DeviceChangedPayload,
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
+)
+from zcu_tools.gui.session.pbar_host import ProgressBarModel
+from zcu_tools.gui.session.ports import OperationKind
 from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._control_fakes import CallLog, RecordedCall, call
@@ -135,8 +135,10 @@ def _facet() -> tuple[
     return (
         DeviceControlFacet(
             bus=bus,
+            # DeviceService needs state/operation owners and a device registry.
+            # tolerated(cast): Isolate forwarding logs/results from service mechanisms.
             device=cast(Any, device),
-            progress=cast(Any, progress),
+            progress=progress,
         ),
         log,
         device,

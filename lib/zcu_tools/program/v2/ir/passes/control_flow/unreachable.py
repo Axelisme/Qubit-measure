@@ -77,12 +77,12 @@ class UnreachableEliminationPass(AbsChunkListPass):
             if dead_mode:
                 if isinstance(chunk, MetaInst):
                     result.append(chunk)
-                elif isinstance(chunk, BasicBlockNode) and chunk.labels:
+                elif chunk.labels:
                     result.append(chunk)
                     dead_mode = (
                         chunk.branch is not None and chunk.branch.if_cond is None
                     )
-                elif isinstance(chunk, BasicBlockNode) and chunk.disable_opt:
+                elif chunk.disable_opt:
                     result.append(chunk)
                 else:
                     changed = True

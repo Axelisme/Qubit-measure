@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
@@ -249,9 +250,7 @@ def test_set_fit_params_emits_fit_changed(tmp_path):
     seen = _record(ctrl, FitChangedPayload)
     ctrl.set_fit_params(
         _fit_db_file(tmp_path),
-        (0.1, 50.0),
-        (0.01, 10.0),
-        (0.01, 10.0),
+        ParamBounds(EJ=(0.1, 50.0), EC=(0.01, 10.0), EL=(0.01, 10.0)),
         TransitionDict({"transitions": [(0, 1)]}),
         0.0,
         0.0,
@@ -268,9 +267,7 @@ def test_compute_search_does_not_emit_or_record(tmp_path):
     _seed_aligned_points(ctrl)
     ctrl.set_fit_params(
         _fit_db_file(tmp_path),
-        (0.1, 50.0),
-        (0.01, 10.0),
-        (0.01, 10.0),
+        ParamBounds(EJ=(0.1, 50.0), EC=(0.01, 10.0), EL=(0.01, 10.0)),
         TransitionDict({"transitions": [(0, 1), (0, 2)]}),
         0.0,
         0.0,
@@ -295,9 +292,7 @@ def test_search_database_records_and_emits(tmp_path):
     _seed_aligned_points(ctrl)
     ctrl.set_fit_params(
         _fit_db_file(tmp_path),
-        (0.1, 50.0),
-        (0.01, 10.0),
-        (0.01, 10.0),
+        ParamBounds(EJ=(0.1, 50.0), EC=(0.01, 10.0), EL=(0.01, 10.0)),
         TransitionDict({"transitions": [(0, 1), (0, 2)]}),
         0.0,
         0.0,

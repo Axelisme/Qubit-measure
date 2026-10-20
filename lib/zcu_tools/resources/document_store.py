@@ -448,7 +448,9 @@ class DocumentStore[T: BaseModel]:
     state after unlock and cannot roll back a completed write.
     """
 
-    def __init__(  # noqa: PLR0913 -- The accepted Interface fixes these arguments.
+    # tolerated: Public kwargs/defaults independently select schema/version,
+    # validation/read-cleanup and sidecar lock policies.
+    def __init__(  # noqa: PLR0913
         self,
         path: Path,
         model: type[T],
@@ -654,6 +656,7 @@ class DocumentStore[T: BaseModel]:
             raw = yaml.load(original.decode("utf-8"))
         # Validate the recursive shape without discarding ruamel's round-trip nodes.
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
+        # tolerated(cast): Strict validation cannot narrow raw; its return drops round-trip nodes.
         document = cast(YamlMap, raw)
         if original != self._parsed_bytes:
             # Retain raw nodes, never cleanup or external validation outcomes.

@@ -17,6 +17,7 @@ from typing import Literal, overload
 
 import numpy as np
 from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.remote.dispatch import METHOD_REGISTRY
@@ -64,7 +65,7 @@ def _call(
     """Validate params against the spec (as the service does) then dispatch."""
     spec = METHOD_REGISTRY[method]
     params = validate_params(spec.params, raw_params) if spec.params else raw_params
-    return dict(spec.handler(adapter, params))  # type: ignore[arg-type]
+    return dict(spec.handler(adapter, params))
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +220,7 @@ def test_fit_result_reports_inputs_and_result(search_database_hdf5):
     adapter = _adapter()
     adapter.ctrl.set_fit_params(
         search_database_hdf5,
-        (1.0, 12.0),
-        (0.5, 3.0),
-        (0.1, 2.0),
+        ParamBounds(EJ=(1.0, 12.0), EC=(0.5, 3.0), EL=(0.1, 2.0)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,

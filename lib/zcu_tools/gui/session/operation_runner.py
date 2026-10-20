@@ -42,10 +42,32 @@ __all__ = [
     "NO_RESULT",
     "BgResult",
     "ExclusionRequest",
+    "OperationInfrastructure",
     "OperationRunner",
     "OperationSpec",
     "SettleFn",
 ]
+
+
+@dataclass(frozen=True)
+class OperationInfrastructure:
+    """App-composed operation owners shared by session construction and devices.
+
+    Fields:
+        gate: Injected exclusion port used for device admission and busy queries.
+        background: Executor for off-owner work and owner-thread terminal delivery.
+        runner: Lifecycle mechanism composed with these same gate, background and
+            handles instances. Per-operation policy still selects required facets.
+        handles: Handle/cancellation owner used by the runner and device commands.
+
+    This record only forwards existing owners; it creates no infrastructure and
+    does not require other operation clients to acquire a hardware lease.
+    """
+
+    gate: ExclusionGate
+    background: BackgroundExecutor
+    runner: OperationRunner
+    handles: OperationHandles
 
 
 @dataclass(frozen=True)

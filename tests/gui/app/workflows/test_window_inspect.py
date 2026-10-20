@@ -20,6 +20,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.cfg_model import ConstWaveformCfg, TemplateDef
 from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -214,9 +215,11 @@ def test_composition_supplies_templates_presets_and_the_shared_arb_dialog(
     }
     presets = {"default": (), "probe": (AliasRow("probe", "Q1"),)}
     app = WorkflowsGuiBehavior(
-        registrations=[small_registration()],
-        templates=templates,
-        alias_presets=presets,
+        composition=WorkflowComposition(
+            registrations=[small_registration()],
+            templates=templates,
+            alias_presets=presets,
+        ),
         project_root=str(tmp_path),
         cache_dir=tmp_path / "cache",
         clean=True,

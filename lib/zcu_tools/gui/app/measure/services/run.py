@@ -83,7 +83,8 @@ class RunService:
     policy (cancel-partial interpretation, State writes, facts) stays here.
     """
 
-    def __init__(  # noqa: PLR0913 - explicit operation owners and borrowed driver source
+    # tolerated: Independent lifecycle owners and driver callbacks have no shared domain bundle.
+    def __init__(  # noqa: PLR0913
         self,
         state: State,
         runner: OperationRunner,
@@ -180,7 +181,8 @@ class RunService:
                 metadata=op.metadata,
                 parameters=op.parameters,
             )
-        except Exception as error:  # noqa: BLE001 - settle host/State failures on the owner loop
+        except Exception as error:
+            logger.exception("Run result publication failed: tab_id=%r", op.tab_id)
             self._run_failed(op, error, settle)
             return False
         self._view_plots[op.tab_id] = op.plots

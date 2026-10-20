@@ -50,7 +50,7 @@ class _RequiredParams:
 def test_fit_requires_analyze() -> None:
     with pytest.raises(TypeError, match="analysis=FIT.*analyze"):
 
-        class _BadAdapter(_MinimalNoAnalysisAdapter):
+        class _(_MinimalNoAnalysisAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.FIT
             )
@@ -59,7 +59,7 @@ def test_fit_requires_analyze() -> None:
 def test_fit_forbids_interactive_plugin() -> None:
     with pytest.raises(TypeError, match="analysis=FIT.*make_interactive_plugin"):
 
-        class _BadAdapter(_FitNoParamsAdapter):
+        class _(_FitNoParamsAdapter):
             def make_interactive_plugin(self, req: Any, *, plots: Plots) -> Any:
                 return object()
 
@@ -69,7 +69,7 @@ def test_fit_requires_analyze_params_hook_when_params_need_values() -> None:
     # validation must require an explicit get_analyze_params override.
     with pytest.raises(TypeError, match="params _RequiredParams.*get_analyze_params"):
 
-        class _BadAdapter(BaseAdapter[Any, Any, NoAnalysisResult, _RequiredParams]):
+        class _(BaseAdapter[Any, Any, NoAnalysisResult, _RequiredParams]):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.FIT
             )
@@ -94,7 +94,8 @@ def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> 
             return NoAnalysisResult()
 
     assert _OkAdapter.analyze_params_cls() is _RealParams
-    params = _OkAdapter().get_analyze_params(object(), object())  # type: ignore[arg-type]
+    # tolerated: Minimal contexts exercise the default params hook, which does not inspect either context.
+    params = _OkAdapter().get_analyze_params(object(), object())  # pyright: ignore[reportArgumentType]
     assert isinstance(params, _RealParams)
     assert params.flag is False
 
@@ -108,7 +109,7 @@ def test_interactive_requires_plugin_and_frontend() -> None:
         TypeError, match="analysis=INTERACTIVE.*make_interactive_plugin"
     ):
 
-        class _BadAdapter(_MinimalNoAnalysisAdapter):
+        class _(_MinimalNoAnalysisAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.INTERACTIVE
             )
@@ -117,7 +118,7 @@ def test_interactive_requires_plugin_and_frontend() -> None:
 def test_interactive_forbids_analyze() -> None:
     with pytest.raises(TypeError, match="analysis=INTERACTIVE.*analyze"):
 
-        class _BadAdapter(_MinimalNoAnalysisAdapter):
+        class _(_MinimalNoAnalysisAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.INTERACTIVE
             )
@@ -145,7 +146,7 @@ def test_interactive_forbids_analyze() -> None:
 def test_none_forbids_analyze() -> None:
     with pytest.raises(TypeError, match="analysis=NONE.*analyze"):
 
-        class _BadAdapter(_MinimalNoAnalysisAdapter):
+        class _(_MinimalNoAnalysisAdapter):
             def analyze(self, req: Any, *, plots: Plots) -> NoAnalysisResult:
                 del req
                 return NoAnalysisResult()
@@ -154,7 +155,7 @@ def test_none_forbids_analyze() -> None:
 def test_none_forbids_interactive_plugin() -> None:
     with pytest.raises(TypeError, match="analysis=NONE.*make_interactive_plugin"):
 
-        class _BadAdapter(_MinimalNoAnalysisAdapter):
+        class _(_MinimalNoAnalysisAdapter):
             def make_interactive_plugin(self, req: Any, *, plots: Plots) -> Any:
                 return object()
 
@@ -164,7 +165,7 @@ def test_interactive_requires_frontend() -> None:
         TypeError, match="analysis=INTERACTIVE.*make_interactive_frontend"
     ):
 
-        class _BadAdapter(_MinimalNoAnalysisAdapter):  # type: ignore[reportUnusedClass]
+        class _(_MinimalNoAnalysisAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.INTERACTIVE
             )
@@ -176,7 +177,7 @@ def test_interactive_requires_frontend() -> None:
 def test_none_forbids_get_analyze_params() -> None:
     with pytest.raises(TypeError, match="analysis=NONE.*get_analyze_params"):
 
-        class _BadAdapter(_MinimalNoAnalysisAdapter):
+        class _(_MinimalNoAnalysisAdapter):
             def get_analyze_params(self, result: Any, ctx: Any) -> NoAnalyzeParams:
                 del result, ctx
                 return NoAnalyzeParams()
@@ -185,7 +186,7 @@ def test_none_forbids_get_analyze_params() -> None:
 def test_post_analysis_requires_fit() -> None:
     with pytest.raises(TypeError, match="post_analysis=True.*analysis=NONE"):
 
-        class _BadAdapter(_MinimalNoAnalysisAdapter):
+        class _(_MinimalNoAnalysisAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.NONE,
                 post_analysis=True,
@@ -195,7 +196,7 @@ def test_post_analysis_requires_fit() -> None:
 def test_post_analysis_requires_get_post_analyze_params() -> None:
     with pytest.raises(TypeError, match="post_analysis=True.*get_post_analyze_params"):
 
-        class _BadAdapter(_FitNoParamsAdapter):
+        class _(_FitNoParamsAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.FIT,
                 post_analysis=True,
@@ -209,7 +210,7 @@ def test_post_analysis_requires_get_post_analyze_params() -> None:
 def test_post_analysis_requires_post_analyze() -> None:
     with pytest.raises(TypeError, match="post_analysis=True.*post_analyze"):
 
-        class _BadAdapter(_FitNoParamsAdapter):
+        class _(_FitNoParamsAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.FIT,
                 post_analysis=True,
@@ -225,7 +226,7 @@ def test_post_analysis_requires_post_analyze() -> None:
 def test_post_analysis_false_forbids_get_post_analyze_params() -> None:
     with pytest.raises(TypeError, match="post_analysis=False.*get_post_analyze_params"):
 
-        class _BadAdapter(_FitNoParamsAdapter):
+        class _(_FitNoParamsAdapter):
             def get_post_analyze_params(
                 self, analyze_result: Any, ctx: Any
             ) -> NoAnalyzeParams:
@@ -236,7 +237,7 @@ def test_post_analysis_false_forbids_get_post_analyze_params() -> None:
 def test_post_analysis_false_forbids_post_analyze() -> None:
     with pytest.raises(TypeError, match="post_analysis=False.*post_analyze"):
 
-        class _BadAdapter(_FitNoParamsAdapter):
+        class _(_FitNoParamsAdapter):
             def post_analyze(self, req: Any, *, plots: Plots) -> PostAnalyzeResultBase:
                 del req
                 return PostAnalyzeResultBase()
@@ -256,7 +257,7 @@ def test_intermediate_base_implementation_counts_as_implemented() -> None:
 def test_intermediate_base_forbidden_implementation_is_detected() -> None:
     with pytest.raises(TypeError, match="analysis=NONE.*analyze"):
 
-        class _BadAdapter(_FitNoParamsAdapter):
+        class _(_FitNoParamsAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.NONE
             )

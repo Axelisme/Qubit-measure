@@ -30,7 +30,20 @@ def test_name_from_type(type_, name) -> None:
 
 def test_name_from_type_rejects_unsupported_type() -> None:
     with pytest.raises(AssertionError, match="Unsupported type"):
-        name_from_type(bytes)  # type: ignore[arg-type]
+        # tolerated: bytes is deliberately outside the supported scalar types to verify rejection.
+        name_from_type(bytes)  # pyright: ignore[reportArgumentType]
+
+
+def test_value_key_rejects_type_that_only_compares_equal_to_scalar() -> None:
+    class IntEqualMeta(type):
+        def __eq__(cls, other: object) -> bool:
+            return other is int
+
+    class NotScalar(metaclass=IntEqualMeta):
+        pass
+
+    with pytest.raises(ValueTypeError, match="only int, float, str, and bool"):
+        ValueKey("source.invalid", NotScalar)
 
 
 def test_register_get_and_describe_value_source() -> None:
@@ -75,6 +88,7 @@ def test_missing_unavailable_type_and_provider_errors_are_distinct() -> None:
     registry = ValueRegistry()
     registry.register(
         ValueKey("source.float", float),
+        # tolerated(cast): Inject str into a float provider to test runtime validation.
         lambda: cast(float, "bad"),
         owner="source",
     )
@@ -104,6 +118,23 @@ def test_bool_is_not_accepted_as_numeric_value() -> None:
     with pytest.raises(ValueTypeError):
         registry.get_as("source.int", int)
     with pytest.raises(ValueTypeError):
+        registry.get_as("source.float", float)
+
+
+def test_float_lookup_rejects_subclass_with_scalar_type_equality() -> None:
+    class ScalarEqualMeta(type):
+        def __eq__(cls, other: object) -> bool:
+            return other is int
+
+    class NotExactFloat(float, metaclass=ScalarEqualMeta):
+        pass
+
+    registry = ValueRegistry()
+    registry.register(
+        ValueKey("source.float", float), lambda: NotExactFloat(1.5), owner="source"
+    )
+
+    with pytest.raises(ValueTypeError, match="did not return a float"):
         registry.get_as("source.float", float)
 
 
@@ -165,6 +196,25 @@ def test_owner_unregister_and_registration_close_are_scoped() -> None:
     registry.unregister_owner("owner")
     with pytest.raises(MissingValue):
         registry.get_as("source.value", float)
+
+
+def test_registration_close_preserves_other_keys_and_new_generation() -> None:
+    registry = ValueRegistry()
+    old = registry.register(ValueKey("source.value", int), lambda: 1, owner="owner")
+    registry.register(ValueKey("source.other", int), lambda: 2, owner="owner")
+
+    old.close()
+
+    with pytest.raises(MissingValue):
+        registry.get_as("source.value", int)
+    assert registry.get_as("source.other", int) == 2
+
+    registry.register(ValueKey("source.value", int), lambda: 3, owner="owner")
+    old.close()
+    old.close()
+
+    assert registry.get_as("source.value", int) == 3
+    assert registry.get_as("source.other", int) == 2
 
 
 def test_value_ref_resolve() -> None:

@@ -49,9 +49,11 @@ def test_streaming_writer_commits_one_2d_row_and_leaves_nan_rows(tmp_path):
     assert loaded.metadata.comment == "streaming"
 
     with h5py.File(path + ".hdf5", "r") as handle:
+        # tolerated(cast): h5py allows arrays/Empty; writer stores grouped v1 as int.
         grouped_version = cast(
             SupportsInt, handle.attrs["zcu_tools.grouped_dataset_version"]
         )
+        # tolerated(cast): h5py allows arrays/Empty; writer stores streaming v1 as int.
         streaming_version = cast(
             SupportsInt, handle.attrs["zcu_tools.streaming_grouped_dataset_version"]
         )

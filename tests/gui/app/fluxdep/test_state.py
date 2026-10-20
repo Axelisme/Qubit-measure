@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.state import (
@@ -481,9 +482,7 @@ def test_set_fit_params_bumps_and_clears_result():
     before = st.version.get(FIT_VERSION_KEY)
     st.set_fit_params(
         "db.h5",
-        (2.0, 7.0),
-        (0.5, 1.5),
-        (0.2, 0.8),
+        ParamBounds(EJ=(2.0, 7.0), EC=(0.5, 1.5), EL=(0.2, 0.8)),
         TransitionDict({"transitions": [(0, 1)]}),
         5.5,
         9.0,

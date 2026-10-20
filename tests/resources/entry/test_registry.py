@@ -31,6 +31,7 @@ class NestedPairSchema(ComponentSchema):
 
 def test_registration_rejects_non_component_models_without_reserving_the_kind() -> None:
     registry = ComponentRegistry()
+    # tolerated(cast): Test UnrelatedSchema rejection through the typed registry.
     invalid_model = cast(type[ComponentSchema], UnrelatedSchema)
 
     with pytest.raises(TypeError, match="ComponentSchema"):

@@ -9,6 +9,7 @@ import pytest
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel
 from zcu_tools.experiment.workflows import InvalidRunState
 from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.catalog_loader import CatalogReloadError
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
@@ -331,10 +332,12 @@ def test_app_injects_bounded_loader_and_reloads_without_rebuilding_session(
 ) -> None:
     source = ReloadSource(tmp_path)
     app = WorkflowsGuiBehavior(
-        templates={},
-        registrations=source.build().attachments,
-        alias_presets={"default": ALIAS_PRESET},
-        loader=source.loader,
+        composition=WorkflowComposition(
+            templates={},
+            registrations=source.build().attachments,
+            alias_presets={"default": ALIAS_PRESET},
+            loader=source.loader,
+        ),
         clean=True,
         cache_dir=tmp_path,
     )

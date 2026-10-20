@@ -507,7 +507,8 @@ def test_catalog_and_operation_snapshots_cannot_modify_session_state(
     handles = session.operation_handles
     assert handle in handles.values()
     with pytest.raises(TypeError):
-        handles["replacement"] = handle  # type: ignore[index]
+        # tolerated: Attempt mutation to verify the returned handle mapping is read-only.
+        handles["replacement"] = handle  # pyright: ignore[reportIndexIssue]
     assert "replacement" not in session.debug_operations()["handles"]
 
 

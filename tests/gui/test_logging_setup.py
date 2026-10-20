@@ -9,6 +9,7 @@ records propagate to the file, plus the per-session file creation and retention.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,15 @@ _WATCHED = (
     "zcu_tools.experiment.v2_gui",
     "zcu_tools.program.v2",
 )
+
+
+@pytest.fixture(autouse=True, name="_restore_logger_levels")
+def fixture_restore_logger_levels() -> Iterator[None]:
+    """Restore process-global levels as well as the handlers detached by each test."""
+    levels_before = {name: logging.getLogger(name).level for name in _WATCHED}
+    yield
+    for name, level in levels_before.items():
+        logging.getLogger(name).setLevel(level)
 
 
 def test_session_log_path_is_under_logs_group_app(tmp_path: Path) -> None:
@@ -222,10 +232,10 @@ def test_purge_tolerates_unlink_oserror(
 
     real_unlink = Path.unlink
 
-    def fake_unlink(self: Path, *args: object, **kwargs: object) -> None:
+    def fake_unlink(self: Path, missing_ok: bool = False) -> None:
         if self == locked:
             raise PermissionError(32, "in use by another process")
-        real_unlink(self, *args, **kwargs)  # type: ignore[arg-type]
+        real_unlink(self, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", fake_unlink)
 

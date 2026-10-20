@@ -2,7 +2,7 @@
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-20，獨立 SoC dialog 與窄 control facets
+**Last updated:** 2026-10-20，獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
 
 ## 問題與決策
 
@@ -86,6 +86,19 @@ Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 device
 使用者於 2026-10-20 裁定：「框架內支援的fluxonium/transmon是理論上的兩種qubit，有自己定義的參數，與用戶定義的component解偶」。
 檔案交接採用原話：「我認為還有一個最簡單的，不轉。讓fluxdep的工具寫preditor要用的格式檔，而不是component的欄位。」
 對 entry 層檔案、格式與 dialog 方案，使用者回答：「1先entry吧。2可以。3可以。」
+
+2026-10-19，使用者裁決：「採 B，只限 PredictorDialog。依 repo 規則，新 class 有理由：它們各自隱藏真實的控件與局部 state 協調（參數編輯、曲線互動），不是轉接層。照你列的硬邊界（PredictorControlPort／ModelParams／物理 owner 不變、public 行為與文字版面不變、無 Protocol/factory/mixin、callers/tests 同票）。外觀不得改變；ComponentDriver 情境＋逐步 PNG 你親看即可，不需交使用者。」
+
+`PredictorParameterEditor` 持有 model 選擇、nullable 參數與已知欄位控件，以及顯式 file 預填。`PredictorCurveTabs` 持有三張 canvas、toolbars、matrix capability 與跨圖 marker／highlight／xlim 協調。兩者是 dialog-owned 的具體 child QWidget，不取得整個 dialog，也不跨 owner 存取私有狀態。
+Dialog 保留 cache、device 訂閱、calibration、tracked table 與生命週期。子元件沿用原 predictor queries 與物理參數型別。Programmatic 預填以同步 callback 保留立即刷新、保存與例外傳遞；不以 Qt signal 隔離取代同步呼叫。這個責任劃分只適用 PredictorDialog。
+
+## Experiment figure area
+
+Measure 的 `ExpTabWidget` 持有具體 child QWidget `ExperimentFigureArea`。Child 集中 Run、Analysis 與 Post 的 canvas hosts、兩個具名圖 selectors 與 cache、interactive presentation、Data gallery 和右側頁切換。它隱藏切圖時的 signal blocking、具名 collection identity、前景預覽刷新及 canvas cleanup 次序。清除 canvas 不銷毀 caller 保留的 Figure。
+
+Root 保留左側表單與 ledger、動作、訂閱、progress、splitter 寬度與 State 投影。既有 ledger 與其 builders 留在同一 ui package。Root 的公開 figure/container 方法委派給 child。Data gallery 經 typed callback 呼叫 root 當時的公開 figure-reader，保留覆寫語意及逐 pane 失敗隔離。Data 啟用先刷新、再切頁、最後 reflow。Child 不取得整個 tab、Controller 或 State，root 不保留搬走控件的 aliases，也不跨 owner 讀 private state。Controller、State、TabActions、capabilities、Save、Writeback 與 Progress 的責任不變。這是同一 Qt frontend 內的持有關係，不新增跨 package 架構邊界。
+
+`ExperimentFigureArea` 是具體控件 owner，不引入 Protocol、factory、mixin、registry 或額外轉接層。原公開行為、同步例外、外觀與時序保持不變。Run、Analyze、Load、admission 與持久化規則仍由既有 owner 負責。MainWindow close-flow 不變。這個分工不改依賴、設定或跨 package 邊界。
 
 ## Adapter capability 與事件
 

@@ -76,6 +76,7 @@ def h_tab_get_analyze_result(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # tolerated(cast): optional_integer admits int or None; Mapping erases its type.
     operation_id = cast(int | None, params.get("operation_id"))
     if operation_id is not None:
         control.require_analysis_operation(tab_id, "analysis", operation_id)
@@ -123,6 +124,7 @@ def h_tab_analyze(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # tolerated(cast): optional_integer admits int or None; Mapping erases its type.
     run_operation_id = cast(int | None, params.get("run_operation_id"))
     if run_operation_id is not None:
         control.require_run_operation(tab_id, run_operation_id)
@@ -142,7 +144,8 @@ def h_tab_analyze(
     ap = None if snap.analysis is None else snap.analysis.params
     if ap is None:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
-    raw_updates = cast(dict[str, object], params["updates"])  # ParamSpec validated
+    # tolerated(cast): default_object admits a JSON dict or {}; Mapping erases its type.
+    raw_updates = cast(dict[str, object], params["updates"])
     if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
         raise RemoteError(
             ErrorCode.INTERNAL, "analyze_params is not a dataclass instance"
@@ -185,6 +188,7 @@ def h_tab_get_post_analyze_result(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # tolerated(cast): optional_integer admits int or None; Mapping erases its type.
     operation_id = cast(int | None, params.get("operation_id"))
     if operation_id is not None:
         control.require_analysis_operation(tab_id, "post_analysis", operation_id)
@@ -232,7 +236,9 @@ def h_tab_post_analyze(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # tolerated(cast): optional_integer admits int or None; Mapping erases its type.
     source_operation_id = cast(int | None, params.get("operation_id"))
+    # tolerated(cast): optional_integer admits int or None; Mapping erases its type.
     run_operation_id = cast(int | None, params.get("run_operation_id"))
     if source_operation_id is not None:
         control.require_analysis_operation(tab_id, "analysis", source_operation_id)
@@ -255,7 +261,8 @@ def h_tab_post_analyze(
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED, "no post-analysis params available"
         )
-    raw_updates = cast(dict[str, object], params["updates"])  # ParamSpec validated
+    # tolerated(cast): default_object admits a JSON dict or {}; Mapping erases its type.
+    raw_updates = cast(dict[str, object], params["updates"])
     if not dataclasses.is_dataclass(pp) or isinstance(pp, type):
         raise RemoteError(
             ErrorCode.INTERNAL, "post_analyze_params is not a dataclass instance"

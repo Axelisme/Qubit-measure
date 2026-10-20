@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-20，evolution／adc／ftf 模擬引擎選集與跨平台 GUI cache 隔離
+**Last updated:** 2026-10-20，DeviceManager registry/setup 與 close 測試歸位、sim 模擬引擎選集、跨平台 GUI cache 隔離與 experiment device 測試邊界
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -294,6 +294,10 @@ GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guar
 registry dict、`get_info` 不被其它 device 的 setup ramp 阻塞、整批 name validation
 fast-fail、以及 `setup_devices(..., cancel_signal=...)` 的顯式協作取消語意。取消測試使用真 `FakeDevice`，不註冊 MagicMock driver。
 
+`tests/device/test_manager_close.py` 覆蓋 registry-owned disconnect：關閉權的並發排他、
+成功後的 registry 清理、失敗與重試，以及 close 期間的 registry 變更。
+兩個 owner 共用 `tests/device/conftest.py` 的 function-scope `manager` fixture，每案建立新 manager，不自動 close。
+
 ### Offline acquisition transports
 
 Compile-only cases use `make_mock_soccfg(n_gens, n_readouts)`. Simulation acquisition
@@ -464,7 +468,7 @@ _make_prog(modules=[b], sweep=[("sel", 2)])
 ### IR pass 測試
 
 - `tests/program/v2/ir/test_ir_builder.py` 覆蓋 `__META__` parsing、branch case identity、loop section parsing，以及 jump label reference 不被誤判成 label definition。
-- `tests/program/v2/ir/test_ir_passes_optimization.py` 等 `ir/test_ir_passes_*.py` 涵蓋結構與 label validation、label DCE、branch case normalize、constant loop unroll、hoist/peephole/timing pass。新增案例從 pipeline 結果驗證 IR 行為。
+- `tests/program/v2/ir/test_ir_passes_optimization.py` 擁有 pipeline 協作與預設 pipeline 整合；dataflow、loop 與 control-flow pass 契約各歸同目錄具名 pass 測試，`clone_renamed` 歸 node 測試。新增案例從公開 pass 或 pipeline 結果驗證 IR 行為。
 - `PeepholePass` 應保留 `NOP`；驗證輸出時分辨 `NOP` 與可清除的 `IR_` internal annotations。
 - `ConstantLoopUnrollPass` 測試使用顯式 `IRLoop.trip_count`，不要用 QICK 實際 loop asm shape 當作 unroll 偵測依據。
 

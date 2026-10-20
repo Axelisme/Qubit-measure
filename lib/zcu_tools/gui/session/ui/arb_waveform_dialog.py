@@ -704,7 +704,8 @@ class ArbWaveformDialog(QDialog):
         # Save try: service renders the recipe once and persists it.
         try:
             self._assets.set_formula(data_key, recipe, overwrite=exists)
-        except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
+        # tolerated: Isolate provider/render/I/O failures; keep the draft unsaved.
+        except Exception as exc:  # noqa: BLE001
             self._dialog_presenter.critical(self, "Save failed", str(exc))
             return
         self._current_data_key = data_key
@@ -714,7 +715,8 @@ class ArbWaveformDialog(QDialog):
         # Reload try (separate): reload failure is distinct from save failure.
         try:
             data = self._assets.load_data(data_key)
-        except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
+        # tolerated: Keep the saved asset/revision on provider reload failure.
+        except Exception as exc:  # noqa: BLE001
             self._dialog_presenter.critical(self, "Reload failed", str(exc))
             self.refresh()
             self._select_data_key(data_key)
@@ -758,7 +760,8 @@ class ArbWaveformDialog(QDialog):
             return
         try:
             self._assets.rename(old_key, new_key)
-        except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
+        # tolerated: Isolate provider/I/O failures before changing draft or selection.
+        except Exception as exc:  # noqa: BLE001
             self._dialog_presenter.critical(self, "Rename failed", str(exc))
             return
         self._current_data_key = new_key
@@ -779,7 +782,8 @@ class ArbWaveformDialog(QDialog):
             return
         try:
             self._assets.delete(data_key)
-        except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
+        # tolerated: Isolate provider/I/O failures before clearing the selected draft.
+        except Exception as exc:  # noqa: BLE001
             self._dialog_presenter.critical(self, "Delete failed", str(exc))
             return
         self._current_data_key = None

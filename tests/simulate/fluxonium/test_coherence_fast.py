@@ -92,7 +92,7 @@ def test_fast_accepts_bare_string_channels():
     # noise_channels items may be bare strings (no options dict), like scqubits.
     params = (4.0, 1.0, 0.5)
     channels = ["t1_capacitive"]
-    ref = calculate_eff_t1_vs_flux(_FLUXS, channels, _TEMP, params)  # type: ignore[arg-type]
+    ref = calculate_eff_t1_vs_flux(_FLUXS, channels, _TEMP, params)
     fast = calculate_eff_t1_vs_flux_fast(params, _FLUXS, channels, _TEMP)
     np.testing.assert_allclose(fast, ref, rtol=1e-9)
 

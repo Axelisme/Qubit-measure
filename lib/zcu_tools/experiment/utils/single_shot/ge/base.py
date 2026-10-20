@@ -108,11 +108,17 @@ def hist(
     ng = ng / np.sum(ng)
     ne = ne / np.sum(ne)
     if ax is not None:
-        plt_params = dict(
-            x=0.5 * (bins[1:] + bins[:-1]), bins=bins, range=xlims, alpha=0.5
-        )
-        ax.hist(color="b", weights=ng, label="g", **plt_params)  # pyright: ignore[reportArgumentType]
-        ax.hist(color="r", weights=ne, label="e", **plt_params)  # pyright: ignore[reportArgumentType]
+        xs = 0.5 * (bins[1:] + bins[:-1])
+        for weights, color, label in ((ng, "b", "g"), (ne, "r", "e")):
+            ax.hist(
+                xs,
+                bins=bins.tolist(),
+                range=xlims,
+                alpha=0.5,
+                color=color,
+                weights=weights,
+                label=label,
+            )
         ax.set_ylabel("Counts", fontsize=14)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")
@@ -175,6 +181,26 @@ class GE_FitResult(TypedDict, closed=True):
     fit_quality: dict[str, FitQuality]
 
 
+@dataclass(frozen=True)
+class GEFitOptions:
+    """Shared paired-histogram fit and display controls.
+
+    numbins defaults to NumPy's automatic histogram bins. length_ratio,
+    init_p0_g, init_p0_e and avg_p optionally fix the joint model's readout/T1
+    ratio, preparation populations and average population; None fits each value.
+    logscale defaults to linear PDF axes. align_t1 defaults to sharing the joint
+    readout/T1 ratio in the two population refinements.
+    """
+
+    numbins: int | str = "auto"
+    length_ratio: float | None = None
+    init_p0_g: float | None = None
+    init_p0_e: float | None = None
+    avg_p: float | None = None
+    logscale: bool = False
+    align_t1: bool = True
+
+
 def fitting_ge_and_plot(
     signals: NDArray[np.complex128],
     classify_func: Callable[
@@ -186,14 +212,8 @@ def fitting_ge_and_plot(
         ],
         dict[str, Any],
     ],
-    numbins: int | str = "auto",
-    length_ratio: float | None = None,
-    init_p0_g: float | None = None,
-    init_p0_e: float | None = None,
-    avg_p: float | None = None,
     *,
-    logscale: bool = False,
-    align_t1: bool = True,
+    options: GEFitOptions | None = None,
     plots: Plots,
     figure_name: str = "fit",
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
@@ -208,6 +228,7 @@ def fitting_ge_and_plot(
     GENumericalError with the original cause. Plotting is outside that boundary;
     its errors propagate unchanged. The input must have paired rows (2,N).
     """
+    options = GEFitOptions() if options is None else options
     (Ig, Ie), (Qg, Qe) = signals.real, signals.imag
 
     try:
@@ -216,10 +237,9 @@ def fitting_ge_and_plot(
         theta = (theta + np.pi / 2) % np.pi - np.pi / 2
 
         # Rotate the IQ data
-        Ig, Qg = rotate(Ig, Qg, theta)
-        Ie, Qe = rotate(Ie, Qe, theta)
+        (Ig, Qg), (Ie, Qe) = rotate(Ig, Qg, theta), rotate(Ie, Qe, theta)
 
-        g_pdfs, e_pdfs, bins = hist(Ig, Ie, numbins)
+        g_pdfs, e_pdfs, bins = hist(Ig, Ie, options.numbins)
 
         xs = 0.5 * (bins[:-1] + bins[1:])
 
@@ -227,7 +247,15 @@ def fitting_ge_and_plot(
             xs,
             g_pdfs,
             e_pdfs,
-            fixedparams=[None, None, None, init_p0_g, init_p0_e, avg_p, length_ratio],
+            fixedparams=[
+                None,
+                None,
+                None,
+                options.init_p0_g,
+                options.init_p0_e,
+                options.avg_p,
+                options.length_ratio,
+            ],
         )
         sg, se, s, joint_p0_gg, joint_p0_ge, p_avg, length_ratio = ge_params
         (p0_gg, p0_ge, l_ratio_g), ground_covariance = fit_singleshot_p0(
@@ -236,7 +264,7 @@ def fitting_ge_and_plot(
             joint_p0_gg,
             joint_p0_ge,
             ge_params=ge_params,
-            fit_length_ratio=not align_t1,
+            fit_length_ratio=not options.align_t1,
         )
         (p0_eg, p0_ee, l_ratio_e), excited_covariance = fit_singleshot_p0(
             xs,
@@ -244,7 +272,7 @@ def fitting_ge_and_plot(
             joint_p0_ge,
             joint_p0_gg,
             ge_params=ge_params,
-            fit_length_ratio=not align_t1,
+            fit_length_ratio=not options.align_t1,
         )
         populations = np.array([[p0_gg, p0_ge], [p0_eg, p0_ee]])
         if (
@@ -308,9 +336,10 @@ def fitting_ge_and_plot(
         raise GENumericalError(str(exc)) from exc
 
     fig, raw_axes = plots.subplots(figure_name, nrows=2, ncols=2, figsize=(8, 8))
+    # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
     axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
     scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
-    hist(Ig, Ie, numbins, axs[1][0])
+    hist(Ig, Ie, options.numbins, axs[1][0])
     axs[0][1].hist(xs, bins=bins.tolist(), weights=g_pdfs, color="b", alpha=0.5)
     axs[1][1].hist(xs, bins=bins.tolist(), weights=e_pdfs, color="r", alpha=0.5)
 
@@ -356,9 +385,9 @@ def fitting_ge_and_plot(
         r"${F}_{ge}: $" + f"{fid:.1%} / {1e2 * ideal_fid:.3g}%", fontsize=14
     )
 
-    _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=logscale)
+    _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
 
-    if align_t1:
+    if options.align_t1:
         fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
     else:
         fig.suptitle(f"Readout length = {l_ratio_g:.1f} / {l_ratio_e:.1f} " + r"$T_1$")

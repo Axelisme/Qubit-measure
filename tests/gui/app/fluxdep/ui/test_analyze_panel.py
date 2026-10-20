@@ -74,9 +74,7 @@ def test_published_fit_inputs_reach_search_and_show(
     try:
         ctrl.set_fit_params(
             search_database_hdf5,
-            (3.0, 12.0),
-            (0.3, 1.5),
-            (0.2, 1.2),
+            ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2)),
             TransitionDict({"transitions": [(0, 1)]}),
             *frequencies,
         )
@@ -114,9 +112,7 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     _unlock_search(ctrl)  # Show also needs an unlocked Search
     ctrl.set_fit_params(
         search_database_hdf5,
-        (3.0, 12.0),
-        (0.3, 1.5),
-        (0.2, 1.2),
+        ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
@@ -214,9 +210,7 @@ def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
     ctrl.set_selection(np.ones(4, dtype=np.bool_))
     ctrl.set_fit_params(
         search_database_hdf5,
-        (3.0, 12.0),
-        (0.3, 1.5),
-        (0.2, 1.2),
+        ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
@@ -270,9 +264,7 @@ def _set_joint_fit_inputs(ctrl: Controller, search_db: str) -> ParamBounds:
     bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
     ctrl.set_fit_params(
         search_db,
-        bounds.EJ,
-        bounds.EC,
-        bounds.EL,
+        bounds,
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
@@ -513,9 +505,7 @@ def _publish_bounds(ctrl: Controller, search_db: str, values: tuple[float, ...])
     ej_lo, ej_hi, ec_lo, ec_hi, el_lo, el_hi = values
     ctrl.set_fit_params(
         search_db,
-        (ej_lo, ej_hi),
-        (ec_lo, ec_hi),
-        (el_lo, el_hi),
+        ParamBounds(EJ=(ej_lo, ej_hi), EC=(ec_lo, ec_hi), EL=(el_lo, el_hi)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
@@ -539,9 +529,7 @@ def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_
         assert preset.currentText() == name
     ctrl.set_fit_params(
         search_database_hdf5,
-        (2.5, 15.0),
-        (0.2, 2.0),
-        (0.1, 2.0),
+        ParamBounds(EJ=(2.5, 15.0), EC=(0.2, 2.0), EL=(0.1, 2.0)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
@@ -856,9 +844,7 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
     ctrl.set_selection(np.ones(3, dtype=np.bool_))  # a published Filter unlocks Search
     ctrl.set_fit_params(
         _ranked_database(tmp_path),
-        (0.1, 10.0),
-        (0.1, 10.0),
-        (0.1, 10.0),
+        ParamBounds(EJ=(0.1, 10.0), EC=(0.1, 10.0), EL=(0.1, 10.0)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
@@ -916,9 +902,7 @@ def test_show_toolbar_box_zooms_the_view_and_home_restores_the_drawing(
     _publish_filter(ctrl)
     ctrl.set_fit_params(
         search_database_hdf5,
-        (3.0, 12.0),
-        (0.3, 1.5),
-        (0.2, 1.2),
+        ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,

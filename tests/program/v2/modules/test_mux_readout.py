@@ -71,6 +71,7 @@ def test_real_compile_and_acquire_all_tones(channels):
     assert prog.playbacks == [dict(ch=0, name="mux", t=cfg.pre_delay)]
     soc = AcquisitionSoc(soccfg.get_cfg())
     raw = prog.acquire(soc, progress=False)
+    assert raw is not None
     iq = module.collect_iq(prog, raw)
     np.testing.assert_allclose(
         iq, np.tile([[ch + 1, -ch - 1] for ch in channels], (3, 1, 1))

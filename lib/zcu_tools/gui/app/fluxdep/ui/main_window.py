@@ -83,7 +83,11 @@ from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
-from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
+from zcu_tools.gui.widgets.dialog_presenter import (
+    DestructiveConfirmation,
+    DialogPresenter,
+    QtDialogPresenter,
+)
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 logger = logging.getLogger(__name__)
@@ -636,10 +640,12 @@ class MainWindow(QMainWindow):
         other = "sample" if stage == "align" else "align"
         self._dialogs.destructive_confirm(
             self,
-            f"Discard the {other} draft?",
-            f"{name} has an unfinished {other} draft. "
-            f"Opening {stage} discards it; the published spectrum stays as it is.",
-            action_text=f"Discard and {stage}",
+            DestructiveConfirmation(
+                title=f"Discard the {other} draft?",
+                message=f"{name} has an unfinished {other} draft. "
+                f"Opening {stage} discards it; the published spectrum stays as it is.",
+                action_text=f"Discard and {stage}",
+            ),
             on_decision=lambda confirmed: self._on_discard_decision(
                 name, stage, draft.context_id, confirmed=confirmed
             ),
@@ -938,10 +944,8 @@ class MainWindow(QMainWindow):
         self._bus_subs.unsubscribe_all()
         if isinstance(self._current_editor, LinePickerWidget):
             self._current_editor.teardown()
-        if self._current_editor is not None and hasattr(
-            self._current_editor, "quiesce"
-        ):
-            self._current_editor.quiesce()  # type: ignore[union-attr]
+        if isinstance(self._current_editor, FindPointsWidget):
+            self._current_editor.quiesce()
         if self._analyze_panel is not None:
             self._analyze_panel.quiesce()
             self._analyze_panel.dispose()

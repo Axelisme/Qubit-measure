@@ -9,17 +9,19 @@ from ..instructions import (
     ComInst,
     CustomPeripheralInst,
     DivInst,
-    DmemReadInst,
-    DmemWriteInst,
-    DportReadInst,
     FlagInst,
     NetInst,
     NopInst,
-    PortWriteInst,
     RegWriteInst,
     TimeInst,
-    TrigInst,
     WaitInst,
+)
+from ..io_instructions import (
+    DmemReadInst,
+    DmemWriteInst,
+    DportReadInst,
+    PortWriteInst,
+    TrigInst,
     WmemWriteInst,
 )
 from ..node import BasicBlockNode
@@ -69,6 +71,7 @@ class BlockChunkPass(AbsChunkPass, ABC):
     def process(
         self,
         chunks: ChunkList,
+        # tolerated: AbsChunkPass.process requires ctx; block transforms are local.
         ctx: PipeLineContext,  # noqa: ARG002
     ) -> tuple[ChunkList, bool]:
         changed = False

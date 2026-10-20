@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QDialog, QWidget
 
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.expected_error import FailedPreconditionError

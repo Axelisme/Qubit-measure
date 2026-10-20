@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Generic, Protocol, TypeAlias, TypeVar, cast
 
 from zcu_tools.gui.expected_error import ExpectedError, ExpectedErrorCategory
@@ -150,25 +151,27 @@ class _Entry(Generic[T]):
 class Registration:
     """Idempotent handle for one provider registration."""
 
-    def __init__(
-        self,
-        registry: ValueRegistry,
-        *,
-        key: str,
-        owner: str,
-        token: object,
-    ) -> None:
-        self._registry = registry
-        self._key = key
-        self._owner = owner
-        self._token = token
+    def __init__(self, release: Callable[[], None]) -> None:
+        """Store a zero-argument action that releases one registration.
+
+        ``release`` must return None and perform the registration's cleanup when
+        called. Construction stores it without invoking it; errors from the
+        action propagate from ``close``.
+        """
+        self._release = release
         self._closed = False
 
     def close(self) -> None:
+        """Invoke the release action at most once; subsequent calls do nothing.
+
+        Mark the handle closed before invoking the action, including for
+        reentrant calls. Action errors propagate and leave the handle closed,
+        so a failed release is not retried.
+        """
         if self._closed:
             return
         self._closed = True
-        self._registry._unregister_key(self._key, self._owner, self._token)
+        self._release()
 
 
 class EmptyValueLookup:
@@ -203,6 +206,22 @@ class ValueRegistry(ValueLookup):
         owner: str,
         description: str = "",
     ) -> Registration:
+        """Register a lazy scalar provider and return its closeable handle.
+
+        ``key`` identifies the path and supported scalar type. ``provider`` is a
+        synchronous, read-only, zero-argument callable returning that type; it
+        must not perform hardware I/O. ``owner`` is a non-blank lifecycle group
+        name and ``description`` is optional metadata. Registration does not
+        evaluate the provider; lookup validates its result and reports failures.
+
+        Closing the returned handle removes only this key's registration, not
+        other keys for the owner or a later registration at the same key.
+
+        Raises:
+            ValueError: The key path or owner is empty or blank.
+            ValueTypeError: The key uses an unsupported scalar type.
+            DuplicateValueKey: The key path is already registered.
+        """
         spec = ValueProviderSpec(
             key=key,
             provider=provider,
@@ -216,7 +235,7 @@ class ValueRegistry(ValueLookup):
             )
         self._install_entry(entry)
         return Registration(
-            self, key=entry.key.path, owner=entry.owner, token=entry.token
+            partial(self._unregister_key, entry.key.path, entry.owner, entry.token)
         )
 
     def unregister_owner(self, owner: str) -> None:
@@ -299,10 +318,7 @@ class ValueRegistry(ValueLookup):
             )
         if entry.key.type_ is not requested.type_:
             registered_type = entry.key.type_
-            requested_type = cast(
-                ScalarType,
-                _ensure_supported_type(requested.path, requested.type_),
-            )
+            requested_type = _ensure_supported_type(requested.path, requested.type_)
             raise ValueTypeError(
                 requested.path,
                 f"Value source {requested.path!r} has type "
@@ -320,6 +336,7 @@ class ValueRegistry(ValueLookup):
         return _coerce_value(entry.key.path, value, requested.type_)
 
     def _entry_from_spec(self, spec: ValueProviderSpec[T]) -> _Entry[ScalarValue]:
+        # tolerated(cast): Validated scalar keys cross the invariant _Entry[T] registry boundary.
         return cast(
             _Entry[ScalarValue],
             _Entry(
@@ -383,8 +400,13 @@ def _validate_owner(owner: str) -> None:
         raise ValueError("Value source owner must be a non-empty string")
 
 
-def _ensure_supported_type(key: str, type_: type[T]) -> type[T]:
-    if type_ not in (int, float, str, bool):
+def _ensure_supported_type(key: str, type_: type[T]) -> ScalarType:
+    if (
+        type_ is not int
+        and type_ is not float
+        and type_ is not str
+        and type_ is not bool
+    ):
         raise ValueTypeError(
             key,
             f"Value source {key!r} uses unsupported type {type_.__name__!r}; "
@@ -398,18 +420,22 @@ def _coerce_value(key: str, value: object, type_: type[T]) -> T:
     if type_ is bool:
         if type(value) is not bool:
             raise ValueTypeError(key, f"Value source {key!r} did not return a bool")
+        # tolerated(cast): Exact bool validation cannot narrow the unconstrained requested T.
         return cast(T, value)
     if type_ is int:
         if type(value) is not int:
             raise ValueTypeError(key, f"Value source {key!r} did not return an int")
+        # tolerated(cast): Exact int validation cannot narrow the unconstrained requested T.
         return cast(T, value)
     if type_ is float:
-        if type(value) in (int, float):
-            return cast(T, float(cast(int | float, value)))
+        if type(value) is int or type(value) is float:
+            # tolerated(cast): Native float conversion cannot narrow the unconstrained requested T.
+            return cast(T, float(value))
         raise ValueTypeError(key, f"Value source {key!r} did not return a float")
     if type_ is str:
         if type(value) is not str:
             raise ValueTypeError(key, f"Value source {key!r} did not return a str")
+        # tolerated(cast): Exact str validation cannot narrow the unconstrained requested T.
         return cast(T, value)
     raise AssertionError(f"Unsupported type {type_!r}")
 

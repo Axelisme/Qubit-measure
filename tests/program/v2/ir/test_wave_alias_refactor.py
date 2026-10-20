@@ -2,8 +2,10 @@ import pytest
 
 from lib.zcu_tools.program.v2.ir.instructions import (
     BaseInst,
-    PortWriteInst,
     RegWriteInst,
+)
+from lib.zcu_tools.program.v2.ir.io_instructions import (
+    PortWriteInst,
 )
 from lib.zcu_tools.program.v2.ir.node import BasicBlockNode
 from lib.zcu_tools.program.v2.ir.operands import (

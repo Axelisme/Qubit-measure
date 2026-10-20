@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from zcu_tools.mcp.measure.analysis_execution import AnalysisWriteback
-from zcu_tools.mcp.measure.recipe import (
+from zcu_tools.mcp.measure.recipe_contracts import (
     AnalysisStage,
     RecipeWritebackPreview,
     WritebackItemReceipt,

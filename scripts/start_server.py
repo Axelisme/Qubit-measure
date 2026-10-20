@@ -25,6 +25,7 @@ args = parser.parse_args()
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# tolerated: Parse argv and bootstrap the repo root before importing the board server.
 from zcu_tools.qick_remote.pyro import start_nameserver, start_server  # noqa: E402
 
 ns_t = threading.Thread(

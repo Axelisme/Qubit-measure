@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from threading import get_ident
 from typing import TYPE_CHECKING, Literal
 
@@ -45,7 +45,7 @@ from zcu_tools.gui.app.workflows.runtime import SessionDevices
 from zcu_tools.gui.app.workflows.session_dialogs import WorkflowSessionDialogs
 from zcu_tools.gui.app.workflows.session_strip import WorkflowSessionStrip
 from zcu_tools.gui.app.workflows.tuning_panel import WorkflowTuningPanel
-from zcu_tools.gui.catalog_loader import CatalogReloadError, SourceCatalogLoader
+from zcu_tools.gui.catalog_loader import CatalogReloadError
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import (
@@ -55,7 +55,6 @@ from zcu_tools.gui.form import (
     FormWritePath,
 )
 from zcu_tools.gui.remote.control_service import ControlOptions
-from zcu_tools.gui.session.alias_presets import AliasPresets
 from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
@@ -70,15 +69,14 @@ from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import new_run_id
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
-from .attachment import Attachment
 from .catalog import WorkflowCatalog
+from .composition import WorkflowComposition
 from .figures import WorkflowFigureViews
 from .forms import WorkflowDraft, WorkflowForms
 from .input_restore_message import WorkflowInputRestoreMessage
 from .run_view import WorkflowRunView
 
 if TYPE_CHECKING:
-    from zcu_tools.cfg_model import TemplateDef
     from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
 
 
@@ -108,10 +106,7 @@ class WorkflowWindow[C](QWidget):
         services: SessionServices,
         owner: OwnerScheduler,
         *,
-        registrations: Sequence[Attachment[C]],
-        templates: Mapping[str, TemplateDef],
-        alias_presets: AliasPresets | None,
-        loader: SourceCatalogLoader[WorkflowCatalog[C]] | None = None,
+        composition: WorkflowComposition[C],
         on_close: Callable[[], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -119,7 +114,8 @@ class WorkflowWindow[C](QWidget):
 
         state belongs to services; owner marshals plot commands. parent=None is
         top-level; otherwise embedded. EMPTY builds partial source-free drafts.
-        registrations is nonempty, ordered and has unique declaration names;
+        composition supplies registrations, templates, alias_presets and loader.
+        Its registrations are nonempty, ordered and have unique declaration names;
         its first item is the default. Invalid catalogs raise ValueError.
         The event bus comes from services. templates supplies the
         persistent module/waveform catalog shared Inspect offers under New; an
@@ -135,14 +131,14 @@ class WorkflowWindow[C](QWidget):
         Callback errors reject close, display diagnostics and retain retry resources.
         """
         super().__init__(parent)
-        current = WorkflowCatalog(tuple(registrations))
-        self._loader = loader
+        current = WorkflowCatalog(tuple(composition.registrations))
+        self._loader = composition.loader
         self._thread = get_ident()
         self._catalog_error: CatalogReloadError | None = None
         self._state = state
         self._services = services
-        self._templates = templates
-        self._alias_presets = alias_presets
+        self._templates = composition.templates
+        self._alias_presets = composition.alias_presets
         self._dialog_presenter = QtDialogPresenter()
         self._runner = services.runner
         self._owner = owner

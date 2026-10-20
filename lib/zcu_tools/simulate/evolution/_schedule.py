@@ -166,28 +166,11 @@ class Schedule:
                 bindings.append(self._bind_hit(entry, payload, key_positions))
                 key_set.difference_update(payload.keys)
                 available.difference_update(payload.keys)
-            shared_keys = {key.tobytes() for key in entry.keys[shared]}
-            for preparation in self.dispatch.preparations.get(entry.kernel.name, ()):
-                payload = PreparedPayload(
-                    preparation.prepared,
-                    tuple(key.tobytes() for key in preparation.keys),
-                    array_bytes=preparation.nbytes,
-                )
-                reusable = available.intersection(payload.keys)
-                if not reusable:
-                    continue
-                eligible = np.array(
-                    [key.tobytes() in reusable for key in entry.keys], dtype=bool
-                )
-                bindings.append(
-                    _bind(entry, payload, eligible[entry.inverse], self.dispatch)
-                )
-                if shared_keys.intersection(payload.keys):
-                    self.resident.retain_shared(namespace, payload)
-                else:
-                    local_products.append((namespace, payload))
-                key_set.difference_update(payload.keys)
-                available.difference_update(payload.keys)
+            guard_bindings, guard_local_products = self._reuse_guard_preparations(
+                entry, namespace, available, key_set
+            )
+            bindings.extend(guard_bindings)
+            local_products.extend(guard_local_products)
             missing = np.array(
                 [i for i, key in enumerate(entry.keys) if key.tobytes() in key_set],
                 dtype=np.int64,
@@ -215,6 +198,46 @@ class Schedule:
             self.resident.offer(namespace, payload)
         self.retain_rejected(self.dispatch)
         return self.bind_inputs(bindings)
+
+    def _reuse_guard_preparations(
+        self,
+        entry: _Entries,
+        namespace: tuple[str, str, float],
+        available: set[bytes],
+        key_set: set[bytes],
+    ) -> tuple[list[_Binding], list[tuple[tuple[str, str, float], PreparedPayload]]]:
+        """Bind reusable caller guard products and retain shared payloads.
+
+        available and key_set are caller-owned remaining keys and remaining
+        shared keys. Remove covered keys from both sets in place. Return ordered
+        bindings and local products to offer after all shared prepare jobs finish.
+        """
+        bindings: list[_Binding] = []
+        local_products: list[tuple[tuple[str, str, float], PreparedPayload]] = []
+        shared = entry.shared
+        shared_keys = {key.tobytes() for key in entry.keys[shared]}
+        for preparation in self.dispatch.preparations.get(entry.kernel.name, ()):
+            payload = PreparedPayload(
+                preparation.prepared,
+                tuple(key.tobytes() for key in preparation.keys),
+                array_bytes=preparation.nbytes,
+            )
+            reusable = available.intersection(payload.keys)
+            if not reusable:
+                continue
+            eligible = np.array(
+                [key.tobytes() in reusable for key in entry.keys], dtype=bool
+            )
+            bindings.append(
+                _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+            )
+            if shared_keys.intersection(payload.keys):
+                self.resident.retain_shared(namespace, payload)
+            else:
+                local_products.append((namespace, payload))
+            key_set.difference_update(payload.keys)
+            available.difference_update(payload.keys)
+        return bindings, local_products
 
     def _bind_hit(
         self, entry: _Entries, payload: PreparedPayload, key_positions: dict[bytes, int]

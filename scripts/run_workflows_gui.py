@@ -77,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
     from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+    from zcu_tools.gui.app.workflows.composition import WorkflowComposition
     from zcu_tools.gui.runtime import launch_gui_runtime
     from zcu_tools.resources.entry import component_registry
 
@@ -90,10 +91,12 @@ def main(argv: list[str] | None = None) -> int:
         WorkflowsGuiBehavior,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
         extra_logging_namespaces=("zcu_lab",),
-        registrations=build_registry(),
-        templates=TEMPLATES,
-        loader=build_source_loader(),
-        alias_presets=load_alias_presets(),
+        composition=WorkflowComposition(
+            registrations=build_registry(),
+            templates=TEMPLATES,
+            loader=build_source_loader(),
+            alias_presets=load_alias_presets(),
+        ),
         project_root=str(PROJECT_ROOT),
         clean=args.clean,
     )

@@ -126,7 +126,9 @@ def h_tab_get_figure(
         )
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # tolerated(cast): ParamSpec validates optional INTEGER; Mapping retains object values.
     operation_id = cast(int | None, params.get("operation_id"))
+    # tolerated(cast): ParamSpec validates optional INTEGER; Mapping retains object values.
     run_operation_id = cast(int | None, params.get("run_operation_id"))
     if operation_id is not None and run_operation_id is not None:
         raise RemoteError(

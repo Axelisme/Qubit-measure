@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-18，fixed mux profile 與 frontend lowering
+**Last updated:** 2026-10-20，readout configuration for frequency word decoding；fixed mux profile 與 frontend lowering
 
 ## Testing & Type Checking Conventions
 
@@ -66,6 +66,13 @@ The IR is divided into three layers to decouple high-level program structure fro
 - **`IRLinker.link()`**: Takes a flattened instruction stream, assigns physical addresses (`P_ADDR`) to each instruction based on `addr_inc`, and resolves label addresses. **Note: `ADDR_INC` is used only during linking and is NOT emitted in the final dictionary to maintain QICK compatibility.**
 - **`IRLinker.unlink()`**: Reconstructs the logical instruction stream (including label markers and meta structural markers) from QICK's flattened `prog_list`.
 
+## Frequency word decoding
+
+The scalar, paired and array decoders in `utils` take `cfg=PulseReadoutCfg`.
+They borrow its generator/ADC channels, mixer frequency and Nyquist zone directly;
+they do not change the cfg or use its waveform, gain or readout-window settings.
+Encoding with `readout_freq_words` still takes those four explicit settings.
+
 ## Architecture
 
 - `IRCompileMixin.optimize_asm()` runs the default IR pipeline (`make_default_pipeline`); the concrete pass set lives in `ir/passes/` and is documented in `ir/README.md`.
@@ -95,7 +102,7 @@ lands after the shot timing and before the loop test/jump, matching native
 
 ### `MetaMacro.regs` — Register Name Resolution
 
-`MetaMacro` accepts an optional `regs: dict[str, str]` field.  Each entry maps an `info` key to a logical register name (e.g. a QICK loop name like `"reset_sel"`).  At `translate()` time, each name is resolved to its hardware ASM address via `prog._get_reg()` and written into `resolved_info` before `_add_meta()` is called.
+`MetaMacro` accepts an optional `regs: dict[str, str]` field. Each entry maps an `info` key to a logical register name (e.g. a QICK loop name like `"reset_sel"`), an ASM address or a QICK alias. At `translate()` time, the macro passes its declaration to `IRCompileMixin.record_meta()`. The compiler copies `info`, resolves the register references through QICK and records the metadata at the current instruction address without emitting ASM. Resolved addresses overwrite matching `info` keys without mutating the inputs. Resolution errors propagate without recording a marker.
 
 **Design constraint:** `MetaMacro.translate()` does not go through QICK's normal macro `expand()` path, so loop names stored in `info` are never resolved automatically.  Any caller that passes a loop name (or other logical register alias) as a register reference in `info` must use `regs` to trigger resolution — otherwise the IR layer receives an unrecognisable string and the assembler raises `Source Data not Recognized`.
 

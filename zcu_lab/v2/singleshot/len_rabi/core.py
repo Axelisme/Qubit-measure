@@ -30,7 +30,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.plotting.singleshot_rabi import plot_rabi_joint
+from zcu_tools.plotting.singleshot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
@@ -252,9 +252,11 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             result.lengths,
             result.signals,
             fit,
-            ro_length_us,
-            sweep="length",
+            RabiJointPlotOptions(
+                ro_length_us=ro_length_us,
+                sweep="length",
+                figsize=config.figsize,
+            ),
             plots=plots,
-            figsize=config.figsize,
         )
         return fit

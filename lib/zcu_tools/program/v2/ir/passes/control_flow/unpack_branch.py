@@ -51,7 +51,7 @@ from ...node import (
     IRBranch,
     IRDispatch,
     IRNode,
-    _collect_subtree_names,
+    collect_subtree_names,
 )
 from ...operands import Register, SrcKeyword
 from ...pipeline import AbsIRTreePass, PipeLineContext
@@ -113,7 +113,7 @@ class UnpackIRBranchPass(AbsIRTreePass):
         allocated = ctx.allocated_names
         if not allocated:
             for case in node.cases:
-                labels, structs = _collect_subtree_names(case)
+                labels, structs = collect_subtree_names(case)
                 allocated |= labels | structs
             allocated.add(node.name)
 

@@ -140,6 +140,7 @@ def t1_delay_axis(
         normalized_points[-1] = 1.0
         for index in range(1, count - 1):
             target = index * total_arc_length / (count - 1)
+            # tolerated(cast): brentq types a root/result tuple with full_output=False.
             normalized_points[index] = cast(
                 float,
                 brentq(

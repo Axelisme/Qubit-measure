@@ -91,7 +91,8 @@ def build_readonly_server(
         # never crashes the exit path, but log it so the leak is observable.
         try:
             bridge.stop(timeout_kill=True)
-        except Exception:
+        # tolerated: Transport teardown can fail arbitrarily; exit cleanup must log, not raise.
+        except Exception:  # noqa: BLE001
             logger.debug("read-only bridge stop on exit failed", exc_info=True)
 
     def main() -> None:

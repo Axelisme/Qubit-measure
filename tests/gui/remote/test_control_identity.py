@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from qtpy.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
-from zcu_tools.gui.remote.control_service import RemoteControlServiceBase
+from zcu_tools.gui.remote.control_service import RemoteAppSpec, RemoteControlServiceBase
 from zcu_tools.gui.remote.method_spec import MethodSpec, build_method_registry
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink, ControlOptions
 from zcu_tools.gui.remote.wire import Request
@@ -310,26 +310,28 @@ def test_accepted_operation_survives_transfer_and_disconnect_new_holder_cancels(
     service = RemoteControlServiceBase(
         SimpleNamespace(bus=BaseEventBus()),
         ControlOptions(port=0),
-        owner_scheduler=ImmediateOwnerScheduler(),
-        wire_version=1,
-        gui_version=1,
-        server_name="ControlOperationTest",
-        method_registry=build_method_registry(
-            {
-                "operation.start": start,
-                "operation.cancel": cancel,
-                "operation.await": wait,
-            },
-            {
-                "operation.start": MethodSpec(1, "Start accepted operation"),
-                "operation.cancel": MethodSpec(1, "Cancel accepted operation"),
-                "operation.await": MethodSpec(
-                    1, "Wait", readonly=True, off_main_thread=True
-                ),
-            },
+        app=RemoteAppSpec(
+            wire_version=1,
+            gui_version=1,
+            server_name="ControlOperationTest",
+            method_registry=build_method_registry(
+                {
+                    "operation.start": start,
+                    "operation.cancel": cancel,
+                    "operation.await": wait,
+                },
+                {
+                    "operation.start": MethodSpec(1, "Start accepted operation"),
+                    "operation.cancel": MethodSpec(1, "Cancel accepted operation"),
+                    "operation.await": MethodSpec(
+                        1, "Wait", readonly=True, off_main_thread=True
+                    ),
+                },
+            ),
+            event_serializers={},
+            wire_event_name=str,
         ),
-        event_serializers={},
-        wire_event_name=str,
+        owner_scheduler=ImmediateOwnerScheduler(),
         control_identity=h.ctrl.control_identity,
     )
     a, b, reader = [ClientLink("operation", token_required=False) for _ in range(3)]

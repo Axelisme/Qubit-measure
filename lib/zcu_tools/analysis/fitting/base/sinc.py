@@ -39,6 +39,7 @@ def fitsinc(
         gamma = (xdata[-1] - xdata[0]) / 10
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma])
+    # tolerated(cast): Baseline/slope/peak/width guesses fill unset slots and preserve supplied values; mutation cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
     # 參數邊界

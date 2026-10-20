@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, replace
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.writeback import (
@@ -24,7 +24,7 @@ from ..form_observation import entry_invalid_to_remote, form_writes, observe_ent
 from ._common import follow_tab
 from ._wire_values import coerce_wire_value, context_wire_value
 
-_VALID_WRITEBACK_SUBTABS = frozenset({"analysis", "post_analysis"})
+_VALID_WRITEBACK_SUBTABS: Final = ("analysis", "post_analysis")
 
 
 def _destination_context(adapter: RemoteControlAdapter) -> dict[str, object]:
@@ -95,10 +95,11 @@ def h_tab_writeback_preview(
         )
     if not adapter.writeback_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # tolerated(cast): ParamSpec validates optional INTEGER; Mapping retains object values.
     operation_id = cast(int | None, params.get("operation_id"))
     if operation_id is not None:
         adapter.run_analyze_control.require_analysis_operation(
-            tab_id, cast(Literal["analysis", "post_analysis"], subtab_id), operation_id
+            tab_id, subtab_id, operation_id
         )
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
     if snap.capabilities is None:

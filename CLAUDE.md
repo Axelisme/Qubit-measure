@@ -53,7 +53,12 @@ MEASUREMENT 只套用本節與語言規則。以下規則屬於 DEVELOPMENT。
 - **局部性（Locality of Behaviour）。** 一個函式的行為，看函式本身，加上它呼叫的黑箱的簽名與文件就知道。檢查：理解某個函式需要打開另一個函式的實作時，調整邊界、命名或介面文件。
 - **無聊程式碼（boring code）。** 用一眼就懂的寫法。sentinel 物件、互相遞迴、只用到一半的回傳值這類需要另外解釋的寫法，換成無聊的寫法；確實需要時，在原地加一行理由。檢查：diff 中每處這類寫法都已換掉，或旁邊有理由。
 - **Fast Fail。** 契約外的輸入在進入點 raise，不以預設值、空資料或 `None` 掩蓋。只有能恢復、轉譯或隔離失敗的地方才 catch。檢查：每個 `except` 都做其中一件事。
-- **強型別。** 模組邊界用具名型別（dataclass、pydantic model、TypedDict）傳遞資料，不用無結構的 `dict` 或 `Any`。不新增 `cast`、`# type: ignore` 或 Pyright suppression。檢查：diff 中沒有新增的 suppression；無法避免時在交付中列出位置與理由。
+- **強型別。** 模組邊界用具名型別（dataclass、pydantic model、TypedDict）傳遞資料，不用無結構的 `dict` 或 `Any`。新程式碼不新增 `cast` 或 suppression，不放寬型別配合錯誤。
+  已明確授權清洗的既有未處置診斷，先逐位置嘗試修除，確定保留後才用指定實際 rule 的 suppression。既有 suppression 按種類抽樣試清，展開條件見 [程式碼品質](docs/code-quality.md#既有容忍項先嘗試修除理由留在原地)。
+  Ruff 用 `# noqa: PLR0913  # tolerated: <reason>`，Pyright 用 `# pyright: ignore[reportPrivateUsage]  # tolerated: <reason>`。Suppression 留在診斷行，理由寫同行，放不下時放正上方的 `# tolerated: <reason>`。禁止無 rule 的 noqa、type ignore 或 pyright ignore。
+  既有 `cast` 與設定項也先嘗試清除。保留時分別用 `# tolerated(cast): <reason>` 與 `# tolerated(config): <reason>`，放原行行尾或正上方。保留設定值不變，不新增 `cast`，不新增或放寬設定。
+  File-size／radon／capability 保留項用 `# tolerated(<metric>): <reason>`，放相關行或檔案開頭。理由只寫原地，不交容忍名冊。
+  檢查：每個既有容忍項有嘗試證據、指定標記與具體理由；例外只適用已授權清洗的既有項目，新程式碼沒有新增 `cast` 或 suppression。
 
 細節與審查裁決見 [程式碼品質](docs/code-quality.md)。
 

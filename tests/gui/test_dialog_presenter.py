@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QMessageBox,
     QWidget,
 )
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
-from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
+from zcu_tools.gui.widgets.dialog_presenter import (
+    DestructiveConfirmation,
+    QtDialogPresenter,
+)
 
 
 def test_destructive_confirm_opens_non_blocking_message_box(qapp, monkeypatch):
@@ -21,11 +24,13 @@ def test_destructive_confirm_opens_non_blocking_message_box(qapp, monkeypatch):
 
     presenter.destructive_confirm(
         parent,
-        "Run still stopping",
-        "Force close?",
-        action_text="Force Close",
+        DestructiveConfirmation(
+            title="Run still stopping",
+            message="Force close?",
+            action_text="Force Close",
+            default=False,
+        ),
         on_decision=decisions.append,
-        default=False,
     )
     QApplication.processEvents()
 

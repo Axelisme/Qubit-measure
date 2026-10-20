@@ -165,6 +165,7 @@ class ModularProgramV2(MyProgramV2):
         self._dmem_buffer.extend(values)
         return offset
 
+    # tolerated: QICK infers None from its empty base implementation; compile_datamem documents ndarray or None.
     def compile_datamem(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
     ) -> NDArray[np.int32] | None:

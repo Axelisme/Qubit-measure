@@ -90,7 +90,8 @@ def _solve_f01_candidate_flux(
             xtol=1e-5,
             maxiter=100,
         )
-    except Exception as exc:
+    # tolerated: Solver/model callback failures must reject only this row and warn.
+    except Exception as exc:  # noqa: BLE001
         warnings.warn(
             f"f01 flux solve failed; no candidate is produced for this row: {exc}",
             RuntimeWarning,

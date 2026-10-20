@@ -16,9 +16,9 @@ from qtpy.QtWidgets import (
     QTabWidget,
 )
 from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.gui.session.device_models import DeviceEntry
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
-from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField

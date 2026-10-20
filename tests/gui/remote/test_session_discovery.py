@@ -17,6 +17,11 @@ from pathlib import Path
 import pytest
 from zcu_tools.gui.remote import session_discovery as sd
 
+# tolerated(capability): Real listeners and TCP connections verify session-port
+# liveness and stale-session cleanup after close. A recording socket would replace
+# the external seam under test.
+pytestmark = pytest.mark.requires_loopback
+
 
 @pytest.fixture
 def session_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

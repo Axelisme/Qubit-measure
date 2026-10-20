@@ -103,7 +103,8 @@ def equivalent_n_th_from_t2(
     return float(gamma_phi / gamma_per_photon)
 
 
-def fit_t2_noise_params(
+# tolerated: Documented fit API preserves positional arrays and error/weight/solver keywords.
+def fit_t2_noise_params(  # noqa: PLR0913
     T1s: NDArray[np.float64],
     T2s: NDArray[np.float64],
     domega_dflux: NDArray[np.float64],
@@ -336,7 +337,8 @@ def _model_t2_noise(
     return _T2Model(gamma_flux, gamma_photon, gamma_model, model_T2s)
 
 
-def _validate_data(
+# tolerated: One T2 fit caller supplies raw arrays and policies; _T2FitData is validated output.
+def _validate_data(  # noqa: PLR0913
     T1s: NDArray[np.float64],
     T2s: NDArray[np.float64],
     domega_dflux: NDArray[np.float64],
@@ -609,7 +611,8 @@ def _estimate_stderr(
         log_stderr = np.sqrt(np.maximum(np.diag(cov_log), 0.0))
         for name, value in zip(free_names, log_stderr, strict=True):
             stderr_values[name] = fit_values[name] * float(value)
-    except Exception:
+    # tolerated: Covariance backend/conversion failures keep the fit with infinite free stderr.
+    except Exception:  # noqa: BLE001
         for name in free_names:
             stderr_values[name] = np.inf
 

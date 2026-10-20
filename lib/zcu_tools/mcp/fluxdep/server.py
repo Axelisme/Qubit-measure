@@ -25,10 +25,15 @@ _BOOTSTRAP["bootstrap_standalone_server"](
     ),
 )
 
+# tolerated: Wire version imports must follow lib setup and qtpy preflight.
 from zcu_tools.gui.app.fluxdep.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
+
+# tolerated: Bridge imports must follow standalone lib setup and qtpy preflight.
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
+
+# tolerated: Control assembly needs standalone lib setup and qtpy preflight first.
 from zcu_tools.mcp.fluxdep.assembly import build_fluxdep_server  # noqa: E402
 
 MCP_VERSION = 6  # native command domains and Filter parameter differences

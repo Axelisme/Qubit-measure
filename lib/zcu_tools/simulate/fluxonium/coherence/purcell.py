@@ -31,11 +31,12 @@ if TYPE_CHECKING:
 # -----------------------------
 
 
-def purcell(
+# tolerated: One sweep callback swaps state groups; bath/subsystems stay explicit.
+def purcell(  # noqa: PLR0913
     Egn: NDArray[np.float64],
-    Vec_gn: NDArray[np.complex128],
+    Vec_gn: NDArray[np.object_],
     Een: NDArray[np.float64],
-    Vec_en: NDArray[np.complex128],
+    Vec_en: NDArray[np.object_],
     Vec_n: NDArray[np.complex128],
     bare_rf: float,
     kappa: float,
@@ -67,6 +68,7 @@ def purcell(
     Missing dressed labels (NaN energies) contribute no rate.
     """
 
+    from qutip import Qobj
     from scqubits.utils.spectrum_utils import identity_wrap
 
     beta_h = sc.h / (sc.k * Temp) * 1e9 if Temp != 0 else np.inf
@@ -100,9 +102,10 @@ def purcell(
     ad_1n0n = np.zeros((len(ns), len(ns)), dtype=complex)
     for ng in ns:
         for ne in ns:
-            ad_1n0n[ng, ne] = Vec_gn[ng].dag() * ad_op * Vec_en[ne]  # type: ignore[attr-defined]
-            # Vec_gn entries are QuTiP Qobj (not plain ndarray); .dag() is valid
-            # at runtime but scqubits/qutip lack typed stubs.
+            final_state, initial_state = Vec_gn[ng], Vec_en[ne]
+            assert isinstance(final_state, Qobj)
+            assert isinstance(initial_state, Qobj)
+            ad_1n0n[ng, ne] = final_state.dag() @ ad_op @ initial_state
 
     purcell_up = np.nansum(
         P_res_ns[None, :] * kappa_rate * n_ths * np.abs(ad_1n0n) ** 2
@@ -121,8 +124,10 @@ def purcell(
     a_1n0n = np.zeros((len(ns), len(ns)), dtype=complex)
     for ng in ns:
         for ne in ns:
-            a_1n0n[ng, ne] = Vec_gn[ng].dag() * a_op * Vec_en[ne]  # type: ignore[attr-defined]
-            # Vec_gn entries are QuTiP Qobj; .dag() is valid at runtime.
+            final_state, initial_state = Vec_gn[ng], Vec_en[ne]
+            assert isinstance(final_state, Qobj)
+            assert isinstance(initial_state, Qobj)
+            a_1n0n[ng, ne] = final_state.dag() @ a_op @ initial_state
 
     # The spontaneous +1 belongs only to downward dressed-energy channels.
     downward_population = np.where(down_mask, n_ths + 1, 0.0)
@@ -134,7 +139,8 @@ def purcell(
     return np.asarray(np.inf if escape_rate == 0 else 1 / escape_rate, dtype=np.float64)
 
 
-def calculate_purcell_t1_vs_flux(
+# tolerated: Cached notebook caller varies linewidth, coupling and Temp separately.
+def calculate_purcell_t1_vs_flux(  # noqa: PLR0913
     fluxs: NDArray[np.float64],
     bare_rf: float,
     kappa: float,
@@ -207,7 +213,7 @@ def calculate_purcell_t1_vs_flux(
 
             def get_esys(
                 state: int,
-            ) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
+            ) -> tuple[NDArray[np.float64], NDArray[np.object_]]:
                 idxs = [
                     paramsweep.dressed_index((state, n), paramindex_tuple) for n in ns
                 ]

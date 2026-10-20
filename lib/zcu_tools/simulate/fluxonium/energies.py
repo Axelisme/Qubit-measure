@@ -9,15 +9,30 @@ if TYPE_CHECKING:
     from scqubits.core.storage import SpectrumData
 
 
-def _fold_unique_fluxs(
+def fold_unique_fluxs(
     fluxs: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.intp], NDArray[np.intp]]:
-    """Fold fluxs into [0, 0.5] and deduplicate (the spectrum is periodic+even).
+    """Return a folded unique flux grid and indices restoring input order.
 
-    Returns the sorted unique folded fluxs plus the index arrays needed to map a
-    per-unique-flux result back to the original flux order:
-    ``(unique_sorted_fluxs, sort_idxs, uni_idxs)`` where the caller writes
-    ``out[sort_idxs] = computed`` then ``out = out[uni_idxs]``.
+    ``fluxs`` is a one-dimensional float64 ndarray of normalized flux Phi/Phi_0,
+    with shape ``(n,)``. The input is not mutated. Fluxes are reduced modulo 1,
+    mirrored into [0, 0.5] using the periodic, even spectrum, then deduplicated
+    and sorted using NumPy floating-point comparisons without a tolerance.
+
+    Returns ``(unique_sorted_fluxs, sort_idxs, uni_idxs)`` for ``u`` unique fluxes:
+
+    - ``unique_sorted_fluxs``: float64 ndarray, shape ``(u,)``, in ascending order.
+    - ``sort_idxs``: intp ndarray, shape ``(u,)``, mapping sorted grid positions
+      to the unique grid positions used by ``uni_idxs``.
+    - ``uni_idxs``: intp ndarray, shape ``(n,)``, mapping each original input
+      position to its folded unique grid position.
+
+    For results ``computed`` aligned with ``unique_sorted_fluxs`` on axis 0,
+    allocate ``out = np.empty_like(computed)``, assign ``out[sort_idxs] = computed``,
+    then use ``out[uni_idxs]`` to restore input order, including duplicates.
+    The restored shape is ``(n, *computed.shape[1:])``.
+
+    No input coercion or validation is added; NumPy errors propagate unchanged.
     """
     folded = fluxs % 1.0
     folded = np.where(folded < 0.5, folded, 1.0 - folded)
@@ -78,7 +93,7 @@ def calculate_energy_vs_flux(
         energies = np.asarray(spectrum_data.energy_table, dtype=np.float64)
         return spectrum_data, energies  # reuse a precomputed spectrum, skip work
 
-    folded_fluxs, sort_idxs, uni_idxs = _fold_unique_fluxs(fluxs)
+    folded_fluxs, sort_idxs, uni_idxs = fold_unique_fluxs(fluxs)
 
     fluxonium = Fluxonium(*params, flux=0.0, cutoff=cutoff, truncated_dim=evals_count)
     dim = fluxonium.hilbertdim()

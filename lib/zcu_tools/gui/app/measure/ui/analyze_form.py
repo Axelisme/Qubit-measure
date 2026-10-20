@@ -4,7 +4,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, get_type_hints
 
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+# tolerated: QtPy exports the selected binding Signal dynamically.
+from qtpy.QtCore import Signal  # pyright: ignore[reportPrivateImportUsage]
 from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -23,7 +24,7 @@ from zcu_tools.gui.widgets.form.value_widgets import (
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
-from ..adapter.analyze_params import _resolve_field_info, reconstruct_params
+from ..adapter.analyze_params import reconstruct_params, resolve_field_info
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ class AnalyzeFormWidget(QWidget):
         hints = get_type_hints(self._params_cls, include_extras=True)
         bindings: list[_FieldBinding] = []
         for field in dataclasses.fields(params_instance):
-            bare_type, choices, label, decimals, optional = _resolve_field_info(
+            bare_type, choices, label, decimals, optional = resolve_field_info(
                 field, hints
             )
             bindings.append(
@@ -214,7 +215,8 @@ class AnalyzeFormWidget(QWidget):
             return False
         try:
             self.read_params()
-        except Exception:
+        # tolerated: User dataclass constructors may raise any error; project it as an invalid form.
+        except Exception:  # noqa: BLE001
             return False
         return True
 

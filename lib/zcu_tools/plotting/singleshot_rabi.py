@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -132,30 +133,41 @@ def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
     ax.set_ylabel("True state")
 
 
+@dataclass(frozen=True)
+class RabiJointPlotOptions:
+    """Caller-owned display settings for a joint Rabi chart.
+
+    ro_length_us is the readout duration in microseconds, or None to omit the
+    effective-T1 annotation. Nonpositive/nonfinite values also omit it.
+    sweep selects pulse-length (microseconds) or gain coordinates and labels.
+    figsize is the base (width, height) in inches; the chart scales height by 1.6.
+    """
+
+    ro_length_us: float | None
+    sweep: Literal["length", "gain"]
+    figsize: tuple[float, float]
+
+
 def plot_rabi_joint(
     xs: NDArray[np.float64],
     signals: NDArray[np.complex128],
     fit: RabiJointFitResult,
-    ro_length_us: float | None,
+    options: RabiJointPlotOptions,
     *,
-    sweep: Literal["length", "gain"],
     plots: Plots,
-    figsize: tuple[float, float],
 ) -> None:
     """Adopt a joint Rabi population/histogram/confusion chart as plots["fit"].
 
     xs is the sweep axis matching fit populations; signals is raw complex IQ
-    (sweep, shot). fit is the numerical RabiJointFitResult. ro_length_us is the
-    readout duration in microseconds, or None to omit effective-T1 annotation.
-    Nonpositive/nonfinite duration or length ratio also omits that annotation.
-    sweep selects length (microseconds) or gain coordinates/labels. figsize
-    is the caller's base (width, height) in inches; the chart uses 1.6 times
-    that height. plots owns the adopted figure, not this function. Invalid fit
+    (sweep, shot). fit is the numerical RabiJointFitResult. options supplies
+    readout duration, sweep coordinates and base figure size; a nonpositive or
+    nonfinite fit length ratio also omits the effective-T1 annotation.
+    plots owns the adopted figure, not this function. Invalid fit
     states retain measured counts and show invalid-fit annotations. Shape,
     classification, figure-name conflicts and Matplotlib failures propagate.
     No cfg, program or experiment defaults are read."""
-    omega_unit = "rad/μs" if sweep == "length" else "rad/gain"
-    width, height = figsize
+    omega_unit = "rad/μs" if options.sweep == "length" else "rad/gain"
+    width, height = options.figsize
     fig = Figure(figsize=(width, height * 1.6), layout="constrained")
     plots.adopt("fit", fig)
     grid = fig.add_gridspec(
@@ -194,13 +206,17 @@ def plot_rabi_joint(
         )
     else:
         ax.set_title("Rabi joint fit invalid")
-    ax.set_xlabel("Pulse length (μs)" if sweep == "length" else "Pulse gain (a.u.)")
+    ax.set_xlabel(
+        "Pulse length (μs)" if options.sweep == "length" else "Pulse gain (a.u.)"
+    )
     ax.set_ylabel("Population")
     ax.set_ylim(0.0, 1.0)
     ax.legend(loc=4)
     ax.grid(True)
     effective_t1_us = (
-        _effective_t1_us(ro_length_us, fit.length_ratio) if fit.backend.valid else None
+        _effective_t1_us(options.ro_length_us, fit.length_ratio)
+        if fit.backend.valid
+        else None
     )
     classified_distribution = None
     if fit.backend.valid:

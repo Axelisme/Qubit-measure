@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
@@ -181,13 +181,9 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     cfg: TabFormResource
 
     # Canonical pane-owned resources.
-    run: RunPaneState[T_Result] = field(
-        default_factory=lambda: cast(RunPaneState[T_Result], RunPaneState())
-    )
+    run: RunPaneState[T_Result] = field(default_factory=lambda: RunPaneState())
     analysis: AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams] = field(
-        default_factory=lambda: cast(
-            AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams], AnalysisPaneState()
-        )
+        default_factory=lambda: AnalysisPaneState()
     )
     post_analysis: PostAnalysisPaneState[Any, Any] = field(
         default_factory=PostAnalysisPaneState

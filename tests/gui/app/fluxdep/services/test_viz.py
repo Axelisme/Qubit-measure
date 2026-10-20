@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import matplotlib
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 
 matplotlib.use("Agg")
 
@@ -55,9 +56,7 @@ def test_published_filter_overlays_complete_high_order_kernel_frequencies():
     state.put_spectrum(_entry())
     state.set_fit_params(
         "",
-        (2, 15),
-        (0.2, 2),
-        (0.1, 2),
+        ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
         {"transitions": [(0, 16)], "mirror20": [(0, 1)]},
         None,
         20.0,

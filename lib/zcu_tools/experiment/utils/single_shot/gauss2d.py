@@ -77,6 +77,7 @@ def fit_gauss_2d(
     # 填充實際擬合的組件參數
     means = gmm.means_
     weights = gmm.weights_
+    # tolerated(cast): Spherical fit sets covariances_; sklearn also types None.
     covariances = cast(NDArray[np.float64], gmm.covariances_)
     covariances = np.clip(covariances, 1e-9, None)  # 防止 sqrt(負數) 或 sigma=0
 

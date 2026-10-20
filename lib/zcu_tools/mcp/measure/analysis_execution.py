@@ -299,7 +299,8 @@ class AnalysisExecution:
                 result = GuiCancel("not_needed")
             else:
                 raise GuiRpcError("invalid cancel reply", reason="incompatible_wire")
-        except Exception as exc:  # noqa: BLE001 - cancellation retains partial intent
+        # tolerated: Any RPC failure must retain cancel intent and notify callers with CancelError.
+        except Exception as exc:  # noqa: BLE001
             if isinstance(exc, GuiRpcError) and exc.reason == "not_cancellable":
                 result = GuiCancel("not_cancellable")
             else:
@@ -521,7 +522,8 @@ class AnalysisExecution:
             self._finish()
         except _RpcFailure as failure:
             self._fail(failure.cause, failure.phase)
-        except Exception as exc:  # noqa: BLE001 - worker boundary must publish every failure
+        # tolerated: Any worker failure must publish partial facts and a terminal snapshot.
+        except Exception as exc:  # noqa: BLE001
             self._fail(exc)
 
     def _finish(self, **changes: Any) -> None:
