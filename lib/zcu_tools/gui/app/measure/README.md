@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-20，adapter 宣告 Sample 座標來源、預設腳本所有權、opaque tab input 與關閉順序
+**Last updated:** 2026-10-20，明填模板 bindings、point-local aliases 與預設腳本所有權
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -95,11 +95,10 @@ The [default lab script](../../../../../zcu_lab/startup.py) owns
 entry/point, then tabs with input only when entry/point opened successfully.
 Each failure is logged; failed devices are remembered when possible, and skipped
 tabs are not retried after later source selection. Its on-close callback captures
-then-current state. Aliases are not in that cache: opening the entry loads its
-`aliases.yaml`, and Inspect Apply remains the save path. The script also saves
-then-current placeholder defaults through `ctx.placeholders` and restores them
-before sources and tabs. No saved record means an empty registry; the framework
-never supplies component names. Form captures detach defaults at Open/Reset.
+then-current state. Aliases are not in that cache. Selecting a point loads its
+`points/<label>/aliases.yaml`; Inspect Apply saves that point's table.
+Templates use only caller-authored `Template.bindings`.
+The session and startup script do not supply or persist template defaults.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.
@@ -108,7 +107,7 @@ receives their catalogs by injection and never imports the user package.
 
 `Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
 and captures parameters, library and cached device infos on Open, Refresh and Reset. Preview, result and Run use that capture until the next explicit source action. Refresh preserves all authored data and explicit selections, including expression drafts and previously resolved direct defaults. Reset recaptures sources and computes fresh defaults. Capture and factory failures preserve the previous form.
-Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Entry aliases remain owned by the entry's `aliases.yaml` and Inspect Apply.
+Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Setup and each point own independent alias files. Open/Refresh/Reset capture the selected point's table. Inspect Apply, RPC and startup Apply save only that point; without a selected point they fail with no_context. Missing files are empty, without setup or preset fallback. Inspect alias drafts capture entry/point identity. Clean drafts follow selection; dirty drafts reject Apply to another target until Revert loads the current point.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.
 

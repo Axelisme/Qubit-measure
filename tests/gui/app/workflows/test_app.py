@@ -33,6 +33,7 @@ from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.runtime import GuiAssembly
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -112,9 +113,10 @@ def test_named_presets_reach_workflows_composition_without_overwriting_saved_row
     entry = ResultEntry.create(
         "sample", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
+    entry.new_point("first")
     if saved is not None:
         entry.save_aliases(
-            EntryAliases(aliases={row.alias: row.value for row in saved})
+            EntryAliases(aliases={row.alias: row.value for row in saved}), point="first"
         )
     try:
         behavior = WorkflowsGuiBehavior(
@@ -133,9 +135,9 @@ def test_named_presets_reach_workflows_composition_without_overwriting_saved_row
         context = behavior.services.context
         assert context.get_alias_rows() == presets["default"]
         context.install_entry(entry)
-        assert context.get_alias_rows() == (
-            presets["default"] if saved is None else saved
-        )
+        assert context.get_alias_rows() == ()
+        context.use_point(PointUseRequest("first"))
+        assert context.get_alias_rows() == (() if saved is None else saved)
         # Edits to the installed table do not edit caller preset definitions.
         context.set_alias_rows((AliasRow("replacement", "R2"),))
         assert behavior.alias_presets == presets

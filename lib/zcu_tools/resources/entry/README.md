@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-20，Sample writeback 入口統一正規化 numpy 數值
+**Last updated:** 2026-10-20，setup／point alias 獨立讀寫、GUI 固定 capture 與 Sample writeback numpy 正規化
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -8,11 +8,15 @@
 
 `predictors_path` 是 Result 條目下 `predictors/` 的唯讀路徑。讀取 property 不建立目錄，也不列檔或驗證內容。`resources.predictor_file` 擁有其中 predictor JSON 的格式與讀寫。
 
-## 條目 alias 表
+## Setup 與 point alias 表
 
-`ResultEntry.load_aliases` 與 `save_aliases` 使用具名 `EntryAliases`，保存 entry 的 authored 有序表。`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。空 mapping 是明確空表，只有檔案不存在才回 `None`。格式、結構與非字串值錯誤直接回報，不退回 preset。
+Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<entry>/points/<label>/aliases.yaml`，與 `point.yaml`、`module_cfg.yaml` 並列。各表獨立，既有 point 缺檔不複製 setup，也不回退到 setup。
 
-Resources 只保存與驗證資料表示。Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。這不是 point、setup、ledger 或 memento，也不提供跨檔交易、multiwriter merge 或掉電恢復。
+`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 setup；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，不寫檔。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Point 的 `point.yaml` 與 `module_cfg.yaml` 必須存在，否則讀寫都報 FileNotFoundError。Alias I/O 不解析或修改這兩份參數文件。
+
+`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。格式、結構、非字串值與 I/O 錯誤直接回報，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
+
+`new_point` 從 setup 建立時，有 alias 檔才逐 byte 複製；clone 則只複製來源 point 的 alias 檔，適用同 entry label、跨 entry 路徑與 PointView。來源缺檔就保持缺檔，不讀目的 setup 的 alias。之後改 setup、來源或目的表都不影響其他表。
 
 ## 可攜 entry 範本
 
@@ -106,14 +110,15 @@ List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。
 
 ## 角色與失敗
 
-以下是 Notebook `PointView.resolve` 的角色契約。GUI 使用 ContextService 的
-同一張元件／device alias 表，Dialog Apply 才保存 entry，普通 set 只改 memory。
-公開 `read_context` 不要求 GUI consumer roles 或 kind 檢查。Tab 不固定角色或環境，
-Run 記錄當次固定 names。Notebook 不讀 aliases.yaml，MCP temporary overrides 不寫它。
+GUI 透過 ContextService 讀取目前 point 的元件／device 共用 alias 表。
+Dialog Apply 只保存目前 point 的表，普通 set 只改 memory。
+公開 `read_context` 不要求 GUI consumer roles 或 kind 檢查。Tab 在 Open／Reset
+捕捉目前 point 與 alias 表，Run 使用固定 capture。GUI 不自動初始化 point alias，
+也不使用 Notebook 的 focus／via 推論。Notebook 不讀 aliases.yaml，MCP temporary overrides 不寫它。
 
 `PointView.resolve` 只使用 bound point 的快照。Sequence 取 role registry 的 RoleSpec，Mapping 可覆寫 kind pattern 與 via。未傳角色表時使用 caller 設定的有序 shorthand，沒有設定就報錯。
 
-解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色；RoleRegistry.default_focus 集中選取符合 focus kind patterns 的唯一候選，Notebook roles resolver 與 GUI primary alias 的首次初始化共用唯一候選判定，但 GUI 不使用這套 focus／via 推論角色。
+解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色。Notebook roles resolver 使用 RoleRegistry.default_focus 選取符合 focus kind patterns 的唯一候選。
 
 Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指名 RoleResolutionError。省略 explicit key 才允許自動推論。自動推論缺引用或多個候選時省略該角色；via 的來源角色未綁時也省略衍生角色。未知角色、多餘 explicit、明確指定不存在的元件、實際 dangling 引用或 kind 不符仍以 RoleResolutionError 回報。RoleView 保留同次宣告，讀取已宣告未綁角色（包括 hasattr）時指名 RoleResolutionError；未知 attribute 仍為 AttributeError。RoleResolutionError 是 ValueError，工具不能把未綁角色視為不存在的 attribute。它的訊息指名角色與原因，只在有要求 kind 或使用焦點時列出它們；raise 端有更合適的措辭時（例如 session alias 表）以 message 提供完整訊息，`reason` 仍是可比對的短分類。RoleView 固定解析當下的名稱映射與 owning point 來源，元件值仍跟隨 PointView，回傳映射不可修改。來源由 PointView.resolve 捕捉；存檔 caller 只交給 capture_point_storage 驗證，不比較 callback 或讀 private binding。
 

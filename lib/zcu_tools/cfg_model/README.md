@@ -1,12 +1,12 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-20，持久 Spec family 型別判定、LogPoints 正值政策與 Form 唯讀宣告
+**Last updated:** 2026-10-20，明填模板 bindings、持久 Spec family 型別判定與 Form 唯讀宣告
 
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
 
-`PlaceholderRegistry` 由 session 組裝建立，初始為空。`Template.bindings` 提供任意具名替換，覆蓋 registry defaults。
-`TemplateDef` 建構只驗語法，展開時才要求 binding。Registry 不解析 alias、不讀寫檔案，也不保存 process 全域狀態。
+`Template.bindings` 提供任意具名替換，是模板佔位符唯一的綁定來源。
+`TemplateDef` 建構只驗語法，展開時缺 binding 就報 `ValueError`。展開保留 escaped braces，不解析 alias、不讀寫檔案。
 
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。
 - `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description、group、readonly 與 element_label，不改 cfg 驗證或序列化的值。group 是 MCP schema 可用的前端中立分類名稱 hint。前端用 `get_field_meta` 讀取，並決定實際的 widget、排版與折疊行為。`readonly=True` 由上層 Form core 強制執行，同值寫入通過，不同值拒絕；element_label 提供 picker label。

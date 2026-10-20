@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，腳本與 entry 保存分界、儀器 adapters、shared user cache、entry-scoped arb 與 predictor 資產
+**Last updated:** 2026-10-20，明填模板 bindings、point-local aliases 與腳本保存分界
 
 # gui/session/ — 量測 session core
 
@@ -13,9 +13,8 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 
 `ContextService.apply_writeback` 是底層 accept 入口，先驗 captured SavedPoint 的 entry、point label、存在性與文件，再綁定資源交共用 executor。Executor 先 append accepted event，再沿項目順序呼叫 setters。Parameter／library setter 要求目前已有選取的 point，sample-only 不要求 selection，直接追加 entry JSONL 並記 captured point label。直接呼叫底層入口時，未選 point 的 parameter／library 項目可在 append 後失敗；成功前綴與 accepted event 保留，首錯停止，不 rollback 或 retry。Application 的 `GuardService.check_writeback` 才在未選工作點時以 no_context 提前拒絕，提示先選或建立工作點。同 entry 現選 B 只允許開始命令，不把 captured SavedPoint(E, A) 改成 B；跨 entry 在 append 前拒絕。入口不寫記憶體、不自動建點。成功前綴依每項實際提交發布。樣本 preview／receipt 經 sample owner 讀 entry JSONL，不維護另一份樣本或延後 flush。
 
-`SessionServices.placeholders` 是 session 專屬的 `PlaceholderRegistry`，初始為空。
-Host 在建立 FormEnv 或 Library 新表單時取 detached defaults，既有 capture 不跟隨登錄變化。
-Measure 的 startup facet 提供登錄與讀取；session 不保存或恢復這些 defaults，腳本自行決定。
+模板綁定由呼叫端在 `Template.bindings` 明填。Session 與 startup 不提供模板預設值。
+Library 新建沿用這個契約，缺 binding 在展開時報 `ValueError`。
 
 ## Context、session environment 與 Run snapshot
 
@@ -23,10 +22,10 @@ Measure 的 startup facet 提供登錄與讀取；session 不保存或恢復這�
 - **ParameterContext** 是隔離的 point/library/storage 投影，`SavedPoint` 標識來源。`bind_aliases` 固定當次有序 rows。GUI callers 使用空 declarations，Notebook 保留自己的 role kind 契約。裸 `$alias` 回傳解析後的名稱字串。`$alias.path` 只沿這份表解析，bare concrete paths 使用獨立 namespace。名稱不參與數值算術或插值。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，也包含自訂 alias。空列略過。Device 名稱不必在 `point.components` 或裝置表中。歷史 fixed names 不重新展開 alias；元件欄位的有效性仍由其讀取 owner 檢查。
 - **Module slot 錯誤** 由 `parameters.ModuleSlotError(AttributeError)` 區分 unset／dangling slot 與 source 故障。`ParameterContext.library_key` 與沿 slot 的 leaf lookup 保留 slot 路徑和原因。`has_library_key(path)` 對固定來源查詢 root 或 slot 是否存在，不 materialize；缺 root、unset／dangling slot 或缺／未綁 alias 回 False，語法、其他 alias 錯誤與來源故障仍 raise。Form factory 的 `ctx.has(ref)` 共用這個 owner 查詢。Expression 只轉譯這個明確型別為 `ExpressionError`。Tab 保留 Invalid cfg 並停用 Run，ordinary `AttributeError` 與其他 source 故障仍向外傳遞。
 - **Alias 瀏覽投影** 使用 `ParameterContext.resolved_aliases()`，回傳有序 `ResolvedAliasRow(alias, value, resolved, error)`。它保留 authored softlinks，對固定 point 使用既有 resolver，不沿用 consumer kind 限制。只有單列 `RoleResolutionError` 變成 resolved=None 與 error；source/readability 失敗仍拒絕整個讀取，不從 live 表或檔案補值。
-- 全域 alias 表由 `ContextService` 持有。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列。元件與 device 使用同一張表，GUI 不做 kind 或裝置可用性檢查。Notebook 的顯式元件 consumer 仍可要求 kind。
+- 目前 point 的 alias 表由 `ContextService` 持有。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列。元件與 device 使用同一張表，GUI 不做 kind 或裝置可用性檢查。Notebook 的顯式元件 consumer 仍可要求 kind。
   解析失敗的 `RoleResolutionError` 訊息以 `$alias` 指名：未定義時請使用者在 Aliases 新增，未綁定時請使用者綁定，link 鏈停在空列時指名該列。Link 欄位缺失、目標不是名稱與 kind 不符也各自說明原因。`reason` 維持 `Unknown alias`、`Alias is not bound` 等短分類，供 caller 比對；只有訊息文字給使用者看。Expression 的裸 `$alias` 讀取直接沿用這段訊息，不再加前綴。
-  `set_alias_rows` 只改 memory。Inspect Aliases 頁的 Apply 呼叫 `apply_alias_rows`，有 opened entry 時由 resources 原子保存 `aliases.yaml`，未開 entry 時只改 memory。Service 先驗整表，再保存檔案，成功後才安裝 memory 並發布 fact。Storage 失敗保留舊表、舊檔與頁面 draft，顯錯後可 retry。關閉 Inspect 時未存 draft 走 Save／Discard／Cancel；Discard 不撤已 Apply 的表。
-  Caller 以 `AliasPresets` 提供名稱到有序表的資料。兩 app 的 composition 保留完整 catalog，只將 default rows 交 `build_session_services(alias_rows=...)` 與 ContextService。`alias_presets` 省略或 None 建立空表，顯式 mapping 必須含 default，default 的空 tuple 合法。Session 不宣告領域 preset，也不從裝置或 cache 填列。每次開 entry 有檔就載入該表，空表與空列不自填。無檔就重設 caller preset，該 entry 第一份非空 point snapshot 以 registry 的唯一候選填 primary 空列。切 point 不重讀檔或換表。明確提交表後不再初始化，直到下次開 entry。格式、結構與 alias 語法錯誤保原 binding，不退回 preset。
+  `set_alias_rows` 只改 memory，不要求 point。Inspect Apply、RPC 與 startup 的 `apply_alias_rows` 要求目前已有 point，否則以 `FailedPreconditionError(no_context)` 拒絕。Service 先驗整表，再由 resources 原子保存 `<entry>/points/<label>/aliases.yaml`，成功後才安裝 memory 並發布 fact。它不寫 setup alias。Storage 失敗保留舊表、舊檔與頁面 draft，顯錯後可 retry。關閉 Inspect 時未存 draft 走 Save／Discard／Cancel；Discard 不撤已 Apply 的表。
+  Caller 以 `AliasPresets` 提供名稱到有序表的資料。兩 app 的 composition 保留完整 catalog，只將 default rows 交 `build_session_services(alias_rows=...)` 與 ContextService，作為尚未開 entry 的 memory 初值。`alias_presets` 省略或 None 建立空表，顯式 mapping 必須含 default，default 的空 tuple 合法。開 entry 或 clear 清空 alias；每次選取或建立 point 都載入該 point 的表。缺檔、空表與空列不自填，也不回退 setup 或 preset。格式、結構與 alias 語法錯誤保原 binding 與表。Preset 仍可由 Inspect 明確載入 draft 再 Apply。
   公開 `read_context(aliases=None)` 每次固定 point/library/storage 與全表，GUI 不要求 consumer declarations 或 kind 檢查。`aliases={"qubit": "Q2"}` 只覆寫該次 capture 的具名列，保留 dependent authored links，不改全域 rows、版本或 selection。EMPTY 沿 `no_context` 失敗，缺或未綁定的 `$alias` 在讀取時指名報錯。
   歷史 `read_target(target, roles=...)` 使用已固定的 names，不展開目前全表。GUI adapter 不宣告角色，Tab、Run 與 Load 直接使用 alias-aware capture。App 的 EMPTY 無 override 讀取回 None，保留 context-free 與 deferred 路徑。非空 overrides 仍拒絕 no_context。省略 overrides、None 與 {} 等價。Notebook 的 role resolver 與 via 保留原契約。
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC 與 cached value sources 保持各自 owner。
@@ -46,7 +45,7 @@ JSON／UTF-8 或 codec 格式錯誤時，caretaker 以 defaults 開啟，透過
 `RestoreOutcome.load_error` 交給 host 顯示。載入不改寫或備份原檔，正常保存時機不變。
 Provider 和其他 restore 故障仍傳播。Measure 的 framework caretaker 只保存 `measure_layout_v1.json` 的視窗尺寸與左面板寬度，不保存、還原或遷移 SoC、devices、entry／point、tabs／input。Session preferences 是目前程序的 Setup 預填值，不負責 domain session 檔案。Workspace 快照與 FormInput reload 只在 RAM 中重建，不是持久 session schema，見 ADR-0063、ADR-0064、ADR-0079。
 
-Measure 的預設 zcu_lab 腳本自行保存 user cache，依序嘗試連線 SoC、devices，再開 entry／point 與帶 input 的 tabs。失敗的 device 可 remember 為未連線列；略過的 tabs 不延後等待來源。Alias 仍屬 entry 的 `aliases.yaml`，開 entry 載入、Inspect Apply 保存，預設腳本不另存或恢復。Session 只提供 live read/build 能力，不選擇保存領域或讀取腳本檔案。腳本選擇與背景 runner 屬 [measure app](../app/measure/README.md)。
+Measure 的預設 zcu_lab 腳本自行保存 user cache，依序嘗試連線 SoC、devices，再開 entry／point 與帶 input 的 tabs。失敗的 device 可 remember 為未連線列；略過的 tabs 不延後等待來源。Setup 與 point 各有自己的 `aliases.yaml`。選 point 載入其表，Inspect Apply 保存目前 point，預設腳本不另存或恢復。Session 只提供 live read/build 能力，不選擇保存領域或讀取腳本檔案。腳本選擇與背景 runner 屬 [measure app](../app/measure/README.md)。
 
 ```
 session/
@@ -62,7 +61,7 @@ session/
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不提供參數容器讀取
 ├── predictor_control.py — Read-only explicit-parameter queries and entry predictor file selection for dialog and remote callers
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
-├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。Alias 表可在未開 entry 時編輯；set 只改 memory，Apply 才保存 opened entry。
+├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。Alias 表可在未選 point 時編輯；set 只改 memory，Apply 要求並保存目前 point。
 ├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責
 ├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：entry-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
 ├── setup_control.py    — SetupControlPort + SetupControlFacet：entry open/new、point use/new、cached setup preferences 與獨立 SoC commands；直接公開既有 devices facet 供 cached label 建議，不依賴 app Controller
@@ -98,7 +97,7 @@ session/
     ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；專屬 panel 由 device adapter 建立並按需保留；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. Calibration displays actual MHz and clamped from the shared model result; it changes only dialog bias/cache, never a component. No Apply or session model. Device values and frequency expressions remain optional inputs.
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
-    ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口、DialogPresenter 與具名 alias preset catalog（None 表示無 catalog），沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，開啟時讀一次已安裝的表，關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
+    ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口、DialogPresenter 與具名 alias preset catalog（None 表示無 catalog），沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，draft 固定來源 entry／point。Clean 時隨切換換表，dirty 時保留；跨 target Apply 拒絕且不改兩端檔案，提示以 Revert 或重開載入目前 point。相同 label 的不同 entry 也是不同 target。同 target Apply 正常保存。關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
     ├── new_entry_dialog.py — NewEntryDialog：Inspect 的 New。每次選範本讀一次 capture，以 new_library_entry 建新 State 與 FormEditor，欄位、折疊與捲動回範本初始；只保留使用者打過的 Name，未打時建議 default_name 並在同 family 內加 _2、_3 去重。Create 經 apply_library_change put，被拒時經 presenter 報錯並留在對話框
     └── arb_waveform_dialog.py — ArbWaveformDialog：arb 資產管理對話框，只收 ArbWaveformPort。Measure 經具名 `arb_waveform` dialog 開，workflows 直接開同一類別
 ```

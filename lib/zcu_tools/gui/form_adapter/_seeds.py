@@ -22,7 +22,7 @@ from ._types import members, type_tag
 
 
 def slot_key(slot: Slot, env: FormEnv) -> str | None:
-    path = expand_path(slot.path, defaults=env.placeholders)
+    path = expand_path(slot.path)
     if env.library is None:
         return None
     if not path.startswith("$") and path in env.library.module_keys():
@@ -342,13 +342,11 @@ def template_input(
             f"Template {template.id!r} has incompatible module {definition.module.__name__}"
         )
     model = compatible[0]
-    # Binding-independent validation runs before a host has captured defaults.
+    # Catalog binding validates structure before input expansion.
     seeds = (
         dict(definition.seeds)
         if env is None
-        else definition.expanded_seeds(
-            bindings=template.bindings, defaults=env.placeholders
-        )
+        else definition.expanded_seeds(bindings=template.bindings)
     )
     seeds.update(template.set)
     data: dict[str, JsonValue] = {}

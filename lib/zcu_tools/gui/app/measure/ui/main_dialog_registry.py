@@ -129,7 +129,6 @@ class MainDialogRegistry:
                 self._ctrl.context_control,
                 self._ctrl.get_bus(),
                 templates=self._templates(),
-                placeholder_defaults=self._ctrl.placeholder_defaults,
                 arb_waveforms=self._ctrl.arb_waveforms,
                 # The named entry keeps the ARB dialog visible to screenshots.
                 # Read current host writability, not the opening-time snapshot.

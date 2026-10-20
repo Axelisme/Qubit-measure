@@ -1,6 +1,4 @@
-"""Placeholder defaults are fixed host captures, not process-global policy."""
-
-from dataclasses import replace
+"""Template bindings expand at the public Spec and core Form seams."""
 
 import pytest
 from zcu_tools import cfg_model
@@ -40,14 +38,13 @@ def frequency(cfg: cfg_model.ConfigBase | FormErrors) -> float:
 
 
 @pytest.mark.parametrize("nested", [False, True], ids=["spec", "core"])
-def test_template_bindings_override_defaults_and_keep_fixed_capture(
+def test_template_expands_explicit_bindings(
     nested: bool,
 ) -> None:
-    registry = cfg_model.PlaceholderRegistry()
-    registry.register("drive", "100")
-    registry.register("sensor", "20")
-    env = FormEnv(placeholders=registry.current())
-    template = cfg_model.Template("synthetic", bindings={"drive": "300"})
+    env = FormEnv()
+    template = cfg_model.Template(
+        "synthetic", bindings={"drive": "300", "sensor": "20"}
+    )
     catalog = {"synthetic": pulse_template()}
     form: Form[SyntheticCore] | Form[cfg_model.PulseSpec]
     if nested:
@@ -58,17 +55,10 @@ def test_template_bindings_override_defaults_and_keep_fixed_capture(
         form = Form(cfg_model.PulseSpec, {})
         initial = form.template_input(template, catalog, env)
 
-    registry.register("sensor", "50")
     old_value = FormState(initial.model.default_input(env)).result(env)
     assert not isinstance(old_value, FormErrors), old_value
     old_cfg = form.to_cfg(old_value, env)
     assert frequency(old_cfg) == 320
-
-    new_env = replace(env, placeholders=registry.current())
-    new_value = FormState(initial.model.default_input(new_env)).result(new_env)
-    assert not isinstance(new_value, FormErrors), new_value
-    new_cfg = form.to_cfg(new_value, new_env)
-    assert frequency(new_cfg) == 350
 
 
 def test_template_binding_is_required_only_when_building_input() -> None:

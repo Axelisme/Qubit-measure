@@ -12,7 +12,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from zcu_tools.cfg_model import PlaceholderRegistry
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.app.measure.events.startup import STARTUP_ORIGIN
@@ -247,8 +246,9 @@ class StartupSetup:
     def open_entry(self, name: str) -> EntryInfo:
         """Open an existing entry by single-segment name; do not select a point.
 
-        Owner validates name and loads entry aliases. I/O/binding failures
-        propagate and preserve the old binding. Safe from worker/owner callback.
+        Owner validates name and clears alias rows until a point is selected.
+        I/O/binding failures propagate and preserve the old binding.
+        Safe from worker/owner callback.
         """
         return self.calls.call(lambda: self.control.open_entry(EntryRequest(name)))
 
@@ -271,7 +271,7 @@ class StartupParameters:
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Replace ordered authored aliases in memory, without saving aliases.yaml.
 
-        Invalid rows propagate without changing the old table. Entry-owned
+        Invalid rows propagate without changing the old table. Point-local
         disk aliases remain governed by Inspect Apply. Worker/owner safe.
         """
         self.calls.call(lambda: self.control.set_alias_rows(rows))
@@ -279,8 +279,9 @@ class StartupParameters:
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Validate and persist ordered authored rows, then publish them in memory.
 
-        Save aliases.yaml in the opened entry; without an entry only change
-        memory. Unlike set_alias_rows, this commits entry-owned aliases. Invalid
+        Save the selected point's aliases.yaml, then install memory. Without a
+        selected point raise FailedPreconditionError(no_context) before I/O.
+        Unlike set_alias_rows, this commits point-local aliases. Invalid
         rows and storage errors propagate, preserving the prior table/file.
         The context owner manages validation and atomic file replacement.
         Synchronous from a worker or owner callback.
@@ -331,41 +332,12 @@ class StartupTabs:
 
 
 @dataclass(frozen=True)
-class StartupPlaceholders:
-    """Owner-safe placeholder defaults for trusted scripts, without save policy.
-
-    calls dispatches to the session owner; registry is that session's initially
-    empty mutable registry. Forms borrow detached snapshots, never this facet.
-    """
-
-    calls: OwnerCalls
-    registry: PlaceholderRegistry
-
-    def register(self, name: str, default_binding: str) -> None:
-        """Set or replace a named default; worker and on-close owner safe.
-
-        name is a plain identifier and default_binding is nonblank authored
-        replacement text. Invalid input raises ValueError without mutation.
-        No aliases are resolved, existing Form captures changed or files saved.
-        """
-        self.calls.call(lambda: self.registry.register(name, default_binding))
-
-    def current(self) -> dict[str, str]:
-        """Read detached name-to-default bindings on-owner, without I/O.
-
-        Initially empty. Safe from a worker or on-close owner callback. Scripts
-        choose whether and where to save this snapshot; framework saves nothing.
-        """
-        return self.calls.call(self.registry.current)
-
-
-@dataclass(frozen=True)
 class StartupContext:
     """Capabilities passed to trusted startup(ctx), without persistent session state.
 
     soc installs caller-owned boards. devices transfers successfully registered
     drivers to GUI ownership. setup creates or selects entry/point. context edits
-    aliases/components. placeholders registers and reads template defaults.
+    aliases/components.
     tabs creates tabs from ready sources and reads authored
     inputs. calls selects the session owner. register_close records callbacks in
     the runner; report_progress publishes progress and report_summary sets final
@@ -380,7 +352,6 @@ class StartupContext:
     devices: StartupDevices
     setup: StartupSetup
     context: StartupParameters
-    placeholders: StartupPlaceholders
     tabs: StartupTabs
     calls: OwnerCalls
     register_close: Callable[[Callable[[], None]], None]

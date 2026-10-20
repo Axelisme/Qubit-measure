@@ -26,10 +26,11 @@ def h_context_aliases_set(
     """Apply complete ordered authored rows through the context owner.
 
     Each row has exactly string alias/value fields. The owner validates the
-    whole table, saves an opened entry atomically, then installs/publishes it.
-    Without an entry this is memory-only. Input/storage failures preserve the
-    previous table. Return installed authored rows without resolving them;
-    success does not imply resolvability. No dialog, point or ledger effects.
+    whole table, saves the selected point's aliases.yaml atomically, then
+    installs/publishes it. No selected point raises no_context before I/O.
+    Input/storage failures preserve the previous table. Return installed
+    authored rows without resolving them; success does not imply resolvability.
+    No dialog, selection, other point-container or ledger effects.
     """
     raw = params["rows"]
     if not isinstance(raw, list):

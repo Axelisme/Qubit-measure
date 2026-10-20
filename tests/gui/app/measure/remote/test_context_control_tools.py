@@ -57,6 +57,15 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
         {"alias": "control", "value": "$driver.sense"},
         {"alias": "empty", "value": ""},
     ]
+    if selection != "point":
+        original = control.get_alias_rows()
+        error = rpc_error(application, "context.aliases_set", {"rows": rows})
+        assert (error["code"], error["reason"]) == (
+            ErrorCode.PRECONDITION_FAILED,
+            "no_context",
+        )
+        assert control.get_alias_rows() == original
+        return
     assert application.result("context.aliases_set", {"rows": rows}) == {"rows": rows}
     assert control.get_alias_rows() == (
         AliasRow("driver", "missing"),
@@ -65,8 +74,7 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
     )
     if info is not None:
         entry = entry_resource(info)
-        stored = entry.load_aliases()
-        assert stored is not None
+        stored = entry.load_aliases(point="base")
         assert list(stored.aliases.items()) == [
             ("driver", "missing"),
             ("control", "$driver.sense"),
@@ -82,8 +90,7 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
     assert application.result("context.aliases_set", {"rows": []}) == {"rows": []}
     assert control.get_alias_rows() == ()
     if info is not None:
-        stored = entry_resource(info).load_aliases()
-        assert stored is not None
+        stored = entry_resource(info).load_aliases(point="base")
         assert stored.aliases == {}
 
 
@@ -105,12 +112,15 @@ def test_alias_apply_rejects_entire_payload_and_preserves_persisted_table(
     info = application.open_entry()
     control = application.controller.context_control
     original = (AliasRow("driver", "original"),)
+    application.result("point.new", {"label": "base"})
     control.apply_alias_rows(original)
-    old_file = (info.result_path / "aliases.yaml").read_bytes()
+    old_file = (info.result_path / "points" / "base" / "aliases.yaml").read_bytes()
     error = rpc_error(application, "context.aliases_set", {"rows": rows})
     assert error["code"] == ErrorCode.INVALID_PARAMS
     assert control.get_alias_rows() == original
-    assert (info.result_path / "aliases.yaml").read_bytes() == old_file
+    assert (
+        info.result_path / "points" / "base" / "aliases.yaml"
+    ).read_bytes() == old_file
     assert entry_resource(info).ledger.events() == ()
 
 
@@ -120,13 +130,48 @@ def test_alias_apply_storage_failure_does_not_install_candidate(
     info = application.open_entry()
     control = application.controller.context_control
     original = (AliasRow("driver", "original"),)
+    application.result("point.new", {"label": "base"})
     control.set_alias_rows(original)
     # A directory destination forces the real entry's atomic replacement to fail.
-    (info.result_path / "aliases.yaml").mkdir()
+    (info.result_path / "points" / "base" / "aliases.yaml").mkdir()
     error = rpc_error(application, "context.aliases_set", {"rows": []})
     assert error["code"] == ErrorCode.CONTROLLER_ERROR
     assert control.get_alias_rows() == original
-    assert (info.result_path / "aliases.yaml").is_dir()
+    assert (info.result_path / "points" / "base" / "aliases.yaml").is_dir()
+
+
+def test_open_and_reset_capture_selected_point_aliases(
+    application: PointApplication,
+) -> None:
+    info = application.open_entry()
+    control = application.controller.context_control
+    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    control.add_component("Q2", "fake/drive/a", {"rate": 20.0}, setup=True)
+    application.result("point.new", {"label": "first"})
+    application.result(
+        "context.aliases_set", {"rows": [{"alias": "driver", "value": "Q1"}]}
+    )
+    application.result("point.new", {"label": "second"})
+    application.result(
+        "context.aliases_set", {"rows": [{"alias": "driver", "value": "Q2"}]}
+    )
+    application.result("point.use", {"label": "first"})
+    tab = application.controller.new_tab("pointed")
+    query = {"tab_id": tab, "paths": ["$driver.rate"], "module_refs": []}
+    assert application.result("tab.parameter_read", query)["values"] == {
+        "$driver.rate": 10.0
+    }
+    application.result("point.use", {"label": "second"})
+    assert application.result("tab.parameter_read", query)["values"] == {
+        "$driver.rate": 10.0
+    }
+    application.result("tab.reset_cfg", {"tab_id": tab})
+    assert application.result("tab.parameter_read", query)["values"] == {
+        "$driver.rate": 20.0
+    }
+    entry = entry_resource(info)
+    assert entry.load_aliases(point="first").aliases == {"driver": "Q1"}
+    assert entry.load_aliases(point="second").aliases == {"driver": "Q2"}
 
 
 def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
