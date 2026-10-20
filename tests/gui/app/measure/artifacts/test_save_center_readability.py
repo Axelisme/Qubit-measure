@@ -302,7 +302,7 @@ def test_save_all_disables_until_analysis_is_run_again(
     driver.select_tab("Data")
     driver.screenshot(images / "09-reanalysis-unsaved.png")
     assert driver.observe("Save All").enabled
-    assert any(w.text == "NOT SAVED" for w in driver.visible().widgets)
+    assert any(w.text == "○ NOT SAVED" for w in driver.visible().widgets)
     saves = [w for w in driver.visible().widgets if w.text == "Save"]
     assert len(saves) == 2 and all(w.enabled for w in saves)
 
