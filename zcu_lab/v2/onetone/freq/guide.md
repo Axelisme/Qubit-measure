@@ -12,7 +12,11 @@ Starts with a fresh inline pulse readout and a const waveform. It does not adopt
 
 ## Typical writeback
 
-Proposes fitted values to resonator.freq, resonator.kappa, and resonator.ext.theta0 through the captured role binding. With a pulse-readout run snapshot, it also proposes resonator.readout.readout_rf from that template, changing only pulse/readout frequency while preserving gain, lengths, channels, and trigger timing. The compound resonator.ext.edelay proposal keeps delay and route together; it requires an identifiable absolute branch or a trusted prior/manual seed.
+Proposes fitted values to resonator.freq, resonator.kappa, and resonator.ext.theta0 through the captured role binding. With a pulse-readout run snapshot, it also proposes resonator.readout.readout_rf from that template, changing only pulse/readout frequency while preserving gain, lengths, channels, and trigger timing.
+
+With a parameter capture, a ParameterWriteback row for `$qubit.module.readout` follows the module proposal. Its value is the same capture's resolved `$resonator.readout.readout_rf` root. Apply the module and slot rows to select that library readout for downstream experiments. Without a capture, the scalar and module proposals remain available.
+
+The compound resonator.ext.edelay proposal keeps delay and route together; it requires an identifiable absolute branch or a trusted prior/manual seed.
 
 ## MCP recipe
 

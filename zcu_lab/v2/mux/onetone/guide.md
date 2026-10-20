@@ -39,10 +39,12 @@ K 張圖使用 `fit_i` 命名，i 是原始 tone 序號。例如 `[2,0]` 產生 
 
 ## Writeback
 
-成功 FIT 提出一個完整 readout/mux module，只換成功 active tone 的 freq。Inactive 或失敗 tone 保留原值，全部失敗時不提 module。固定 target 是 `$mux.readout.readout_rf`，不跟隨來源 slot；Apply 缺少該 library key 時建立它，不改 `module.readout` slot。描述列出 active tone 的頻率變化或失敗。
+成功 FIT 提出一個完整 readout/mux module，只換成功 active tone 的 freq。Inactive 或失敗 tone 保留原值，全部失敗時不提 module。固定 target 是 `$mux.readout.readout_rf`。描述列出 active tone 的頻率變化或失敗。
+
+有 Run／Load capture 時，下一列 ParameterWriteback 提案寫到 `$mux.module.readout`，值是同份 capture 解析的 module root。Apply 模組列與 slot 列後，library 保存擬合後的 readout，slot 指向該 root。下次開表單沿 slot 讀取該 library 模組。
 
 Adapter 只從 Run／Load capture 讀取 `$mux.resonators`。Resonators 長度必須等於完整 readout 的 N，不是 active 數 K。成功 tone i 透過 resonators[i] 各提一列 freq、kappa、ext.theta0，可以逐列取消。Delay 沿單 tone 政策，使用 seed 或非等距 grid 時才提 route-qualified ext.edelay。Inactive 和失敗 tone 不提單一參數。
 
-沒有 qubits 的 bring-up 不以 resonators 長度限制 Run。Resonators 長度不符時，summary 顯示實際數量和完整 N，只保留有效 fit 的 module proposal。Alias 未綁或來源故障仍會報錯，不改成長度不符，也不讀目前表單補綁定。Resonators 可以重複；若所選 proposals 有重複 destination，Apply 會在寫入前拒絕，可取消其中一列再套用。
+沒有 qubits 的 bring-up 不以 resonators 長度限制 Run。Resonators 長度不符時，summary 顯示實際數量和完整 N，保留有效 fit 的 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar。Alias 未綁或來源故障仍會報錯，不改成長度不符，也不讀目前表單補綁定。Resonators 可以重複；若所選 proposals 有重複 destination，Apply 會在寫入前拒絕，可取消其中一列再套用。
 
 Run 的 capture 固定解析 module alias 與 resonator 資料，其後修改全域 aliases 不影響這次提案。同 entry 的 Load 使用檔案 history 的 point／roles 讀取目前持久值，不承諾未保存的歷史 revision。無分析 capture 的 Load 可純計算並列 module proposal，但不能非空 Apply，也不另造 group snapshot。

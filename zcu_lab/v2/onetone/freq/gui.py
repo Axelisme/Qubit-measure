@@ -224,6 +224,14 @@ class OneToneFreqAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[OneToneFreqRunResult, OneToneFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose scalars and a readout from the saved pulse-readout cfg.
+
+        A captured parameter context adds a following readout slot row pointing
+        to the resolved module root. Missing cfg skips the module and slot;
+        persistable delay requires a finite fitted delay and its saved route.
+        Missing capture retains scalars and any module. Alias and source
+        failures propagate.
+        """
         result = req.analyze_result
         theta0 = result.params.get("theta0")
         if isinstance(theta0, bool) or not isinstance(theta0, Real):
@@ -268,13 +276,22 @@ class OneToneFreqAdapter(
                     },
                 )
             )
-        items.extend(
-            pulse_readout_module_writeback_items(
-                req.run_result.cfg,
-                target="$resonator.readout.readout_rf",
-                desc="Readout at fitted resonator frequency",
-                field_updates=(("freq", float(result.freq)),),
-                role_id="readout",
-            )
+        module_items = pulse_readout_module_writeback_items(
+            req.run_result.cfg,
+            target="$resonator.readout.readout_rf",
+            desc="Readout at fitted resonator frequency",
+            field_updates=(("freq", float(result.freq)),),
+            role_id="readout",
         )
+        items.extend(module_items)
+        if module_items and req.ctx.parameters is not None:
+            items.append(
+                ParameterWriteback(
+                    target_name="$qubit.module.readout",
+                    description="Select fitted readout for downstream experiments",
+                    proposed_value=req.ctx.parameters.resolve_path(
+                        "$resonator.readout.readout_rf"
+                    ),
+                )
+            )
         return items

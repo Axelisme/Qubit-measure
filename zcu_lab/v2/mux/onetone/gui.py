@@ -318,8 +318,10 @@ class MuxOnetoneAdapter(
         """Propose fitted frequencies without changing inactive or failed tones.
 
         req supplies the saved run and its analysis. Return a full readout module
-        for $mux.readout.readout_rf and separate resonator calibration rows when
-        bindings are available. All-failed fits return no proposals; missing or
+        for $mux.readout.readout_rf, a following readout slot row when capture
+        is available, and separate resonator calibration rows when bindings are
+        available. The slot points to the captured module root; alias and source
+        failures propagate. All-failed fits return no proposals; missing or
         inconsistent saved cfg raises. Proposals do not write until Apply.
         """
         # 1. Only successful fits can propose changes.
@@ -359,6 +361,17 @@ class MuxOnetoneAdapter(
                 role_id="readout",
             )
         ]
+
+        if req.ctx.parameters is not None:
+            items.append(
+                ParameterWriteback(
+                    target_name="$mux.module.readout",
+                    description="Select fitted mux readout for downstream experiments",
+                    proposed_value=req.ctx.parameters.resolve_path(
+                        "$mux.readout.readout_rf"
+                    ),
+                )
+            )
 
         # 3. Map scalar calibrations by original tone index to captured resonators.
         if answer.resonators is not None:
