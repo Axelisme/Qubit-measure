@@ -17,7 +17,14 @@ pytestmark = pytest.mark.sim
 
 
 @pytest.mark.parametrize(
-    "backend", ["ftf-direct-v1", "ftf-direct-v2", "ftf-segment-v6", "ftf-segment-v7"]
+    "backend",
+    [
+        "ftf-direct-v1",
+        "ftf-direct-v2",
+        "ftf-segment-v6",
+        "ftf-segment-v7",
+        "ftf-segment-v10",
+    ],
 )
 def test_replay_rejects_archive_from_obsolete_numeric_backend(
     tmp_path: Path,
