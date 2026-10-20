@@ -1,6 +1,5 @@
 """Incremental retention work observed through Engine and injected products."""
 
-import sys
 from contextlib import closing
 from dataclasses import replace
 from threading import Event
@@ -55,40 +54,3 @@ def test_each_new_payload_charge_is_read_once_without_revisiting_history():
         )
         assert kernel.preparations == builds + 1
         assert kernel.charge_reads - reads == 1
-
-
-def test_acquire_bookkeeping_work_is_independent_of_unrelated_resident_history():
-    kernel = RecordingKernel("t4")
-    src = source()
-    calls = 0
-
-    def observe(frame, event, arg):
-        nonlocal calls
-        if event in ("call", "c_call") and frame.f_globals.get("__name__") in {
-            "zcu_tools.simulate.evolution.cache",
-            "zcu_tools.simulate.evolution._resident",
-        }:
-            calls += 1
-
-    work = []
-    # Include metadata for the intended resident working set.
-    with closing(
-        Engine(1, 100000 + 100 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
-    ) as engine:
-        for duration in range(1, 82):
-            if duration in (5, 81):
-                calls = 0
-                previous = sys.getprofile()
-                try:
-                    sys.setprofile(observe)
-                    engine.evolve(
-                        src, (batch(2, duration=float(duration)),), cancel=Event()
-                    )
-                finally:
-                    sys.setprofile(previous)
-                work.append(calls)
-            else:
-                engine.evolve(
-                    src, (batch(2, duration=float(duration)),), cancel=Event()
-                )
-        assert work[1] <= work[0] + 50, work

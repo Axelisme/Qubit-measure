@@ -138,6 +138,7 @@ class RWATopology:
 
 @njit(nogil=True, cache=True)
 def _component_labels(adjacency):
+    # Numba nopython avoids scipy sparse conversion for these small dense graphs.
     # Minimum-vertex traversal matches scipy's undirected component ordering.
     size = len(adjacency)
     labels = np.full(size, -1, dtype=np.int64)

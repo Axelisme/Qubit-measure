@@ -245,6 +245,24 @@ class PathDiagnostics:
             else {},
         )
 
+    def warn_exceeded(self, *, stacklevel: int = 2) -> None:
+        """Warn once for all report-only accuracy exceedances, if any.
+
+        Counts and results remain unchanged. stacklevel selects the warning's
+        caller location using the standard warnings.warn convention.
+        """
+        exceeded = self.exceeded_by_kernel
+        if exceeded:
+            details = ", ".join(
+                f"{name}: {count}" for name, count in sorted(exceeded.items())
+            )
+            warnings.warn(
+                f"segment accuracy check exceeded in {sum(exceeded.values())} segments "
+                f"({details}); results use the uncorrected approximation",
+                RuntimeWarning,
+                stacklevel=stacklevel,
+            )
+
     def __post_init__(self) -> None:
         object.__setattr__(self, "routing", MappingProxyType(dict(self.routing)))
         if not np.isfinite(self.max_trace_error) or self.max_trace_error < 0:
@@ -490,7 +508,7 @@ class Engine:
                 )
             if cancel.is_set():
                 raise Cancelled()
-            _warn_exceeded(result)
+            result.paths.warn_exceeded(stacklevel=3)
             if key is not None:
                 self._memo.add(key, result)
             return result
@@ -503,7 +521,7 @@ class Engine:
         if cached is not None:
             if cancel.is_set():
                 raise Cancelled()
-            _warn_exceeded(cached)
+            cached.paths.warn_exceeded(stacklevel=3)
         return cached
 
     def close(self) -> None:
@@ -513,17 +531,3 @@ class Engine:
                 self._closed = True
                 self._cache.clear()
                 self._memo.clear()
-
-
-def _warn_exceeded(result: EvolutionResult) -> None:
-    exceeded = result.paths.exceeded_by_kernel
-    if exceeded:
-        details = ", ".join(
-            f"{name}: {count}" for name, count in sorted(exceeded.items())
-        )
-        warnings.warn(
-            f"segment accuracy check exceeded in {sum(exceeded.values())} segments "
-            f"({details}); results use the uncorrected approximation",
-            RuntimeWarning,
-            stacklevel=3,
-        )

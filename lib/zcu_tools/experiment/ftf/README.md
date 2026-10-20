@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-20, source-scoped immutable envelope fingerprints, noiseless preparation and ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts, sampled and constant multitone startup admission, restored single-tone gate signatures, per-round pacing and local routing telemetry with frontend/build/admission breakdowns
+**Last updated:** 2026-10-20, route-aware preparation hits and shared accuracy warnings
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -163,11 +163,16 @@ Its key reads full current C1 content, layout, mode, reps and readout values,
 including absolute phase origins. Physical settings/snapshot/numeric changes,
 engine replacement, failed preparation and close clear the preparations. It never
 retains request seeds, acquire sequences, noisy IQ or round results. Hits update
-numeric-use identity and repeat report-only accuracy warnings. Each cached entry
-also retains its complete single-tone gate inventory increment. A hit replays
-that increment into the current model source so later cost decisions do not
-depend on preparation residency. The hit itself returns the saved result and
-routing diagnostics; equal consecutive software rounds remain one preparation. The public
+numeric-use identity and repeat report-only accuracy warnings through evolution's
+`PathDiagnostics.warn_exceeded()`. Entries record whether their solve increments
+source-cumulative routing usage. Such hits call `Engine.evolve` again so its
+route-aware memo counts the current inventory and resolves the current route.
+They reuse ADC channels, refresh populations and paths, and reuse the integrated
+sampler only when populations are unchanged. Content keys exclude cumulative
+counts, so growing usage does not force a cache miss. History-sensitive hits
+still pay for template conversion and route planning. Other hits return the
+saved preparation without evolving. Equal consecutive
+software rounds remain one preparation. The public
 `source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
 Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
 counts Python containers/keys and whole ndarray allocations, including bases of

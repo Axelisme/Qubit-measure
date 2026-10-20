@@ -27,9 +27,16 @@ from ._common_frame import (
 from ._secular import secular_operators
 
 # These are calibrated indicators, not rigorous trace-distance certificates.
-COMMON_FRAME_POLICY = ("common-frame-sw2-v1", 0.03, 0.01, 8.0, 0.08, 2.0)
 _COHERENT_LIMIT, _BATH_LIMIT = 0.03, 0.01
 _MAX_STEP_NS, _PHASE_CYCLES, _MIN_STEP_NS = 8.0, 0.08, 2.0
+COMMON_FRAME_POLICY = (
+    "common-frame-sw2-v1",
+    _COHERENT_LIMIT,
+    _BATH_LIMIT,
+    _MAX_STEP_NS,
+    _PHASE_CYCLES,
+    _MIN_STEP_NS,
+)
 
 
 def coefficient_keys(

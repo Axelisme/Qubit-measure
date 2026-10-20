@@ -1,6 +1,5 @@
 """FTF round snapshots, persistent engine ownership and compact readout sampling."""
 
-import warnings
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import prod
@@ -75,7 +74,7 @@ class _Prepared:
     channels: tuple[ChannelReadout, ...]
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
-    gate_inventory: tuple[tuple[bytes, int], ...]
+    history_sensitive: bool
 
 
 class FTFAcquire:
@@ -175,35 +174,32 @@ class FTFAcquire:
     def _reuse_or_prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
         owner = self._source
         # This check must precede every lookup, including equal-content requests.
-        facts = owner.model_facts(snapshot)
+        owner.model_facts(snapshot)
         key = preparation_key(
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
         prepared = owner.preparation_cache.get(key)
-        if prepared is None:
-            prepared = self._prepare(snapshot, index)
+        if prepared is None or prepared.history_sensitive:
+            # Cumulative routing belongs to Engine, including its route-aware memo.
+            # Equal readout content can still reuse channels and sampling plans.
+            prepared = self._prepare(snapshot, index, previous=prepared)
             owner.preparation_cache.put(key, prepared)
         else:
             if owner.telemetry is not None:
                 self.routing.append(prepared.paths.for_reuse(telemetry=True))
-            facts.source.record_gate_usage(dict(prepared.gate_inventory))
             owner.evaluations = (
                 FTFNumericUse(self.request.sequence, index, prepared.paths),
             )
-            exceeded = prepared.paths.exceeded_by_kernel
-            if exceeded:
-                summary = ", ".join(
-                    f"{name}: {count}" for name, count in sorted(exceeded.items())
-                )
-                warnings.warn(
-                    f"segment accuracy check exceeded in {sum(exceeded.values())} segments "
-                    f"({summary}); results use the uncorrected approximation",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
+            prepared.paths.warn_exceeded()
         return prepared
 
-    def _prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
+    def _prepare(
+        self,
+        snapshot: EnvironmentSnapshot,
+        index: int,
+        *,
+        previous: _Prepared | None = None,
+    ) -> _Prepared:
         acquire = self.request
         owner = self._source
         facts = owner.model_facts(snapshot)
@@ -244,55 +240,54 @@ class FTFAcquire:
                 ),
             )
             raise
-        channels = []
-        for channel_index, first in enumerate(plans[0].readouts):
-            conditionals = []
-            traces = []
-            content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
-            offset = 0
-            for plan in plans:
-                readout = plan.readouts[channel_index].batch
-                conditional = owner.readout_cache.responses(
-                    replace(readout, include_traces=acquire.mode == "decimated"),
-                    rtol=owner.settings.numerics.solver.rtol,
-                    atol=owner.settings.numerics.solver.atol,
+        channels = [] if previous is None else list(previous.channels)
+        if previous is None:
+            for channel_index, first in enumerate(plans[0].readouts):
+                conditionals = []
+                traces = []
+                content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
+                offset = 0
+                for plan in plans:
+                    readout = plan.readouts[channel_index].batch
+                    conditional = owner.readout_cache.responses(
+                        replace(readout, include_traces=acquire.mode == "decimated"),
+                        rtol=owner.settings.numerics.solver.rtol,
+                        atol=owner.settings.numerics.solver.atol,
+                    )
+                    conditionals.append(conditional)
+                    if conditional.traces is not None:
+                        traces.append(conditional.traces)
+                    content_index[plan.batch.points] = offset + readout.content_index
+                    offset += len(conditional.sums)
+                conditional = ConditionalSums(
+                    np.concatenate([item.sums for item in conditionals]),
+                    conditionals[0].sample_counts,
+                    np.concatenate(traces) if traces else None,
                 )
-                conditionals.append(conditional)
-                if conditional.traces is not None:
-                    traces.append(conditional.traces)
-                content_index[plan.batch.points] = offset + readout.content_index
-                offset += len(conditional.sums)
-            conditional = ConditionalSums(
-                np.concatenate([item.sums for item in conditionals]),
-                conditionals[0].sample_counts,
-                np.concatenate(traces) if traces else None,
-            )
-            channels.append(
-                ChannelReadout(
-                    first.channel,
-                    conditional,
-                    content_index.reshape(acquire.point_dims),
-                    first.batch.model.receiver,
+                channels.append(
+                    ChannelReadout(
+                        first.channel,
+                        conditional,
+                        content_index.reshape(acquire.point_dims),
+                        first.batch.model.receiver,
+                    )
                 )
-            )
         probabilities = probabilities.reshape((*acquire.point_dims, state_count))
         probabilities.setflags(write=False)
-        sampler = (
-            PreparedStatistics(probabilities, tuple(channels), reps=acquire.reps)
-            if acquire.mode == "integrated"
-            else None
-        )
-        inventory = tuple(
-            (key, count - before.get(key, 0))
-            for key, count in facts.source.gate_usage.items()
-            if count > before.get(key, 0)
-        )
+        if previous is not None and np.array_equal(probabilities, previous.populations):
+            sampler = previous.sampler
+        else:
+            sampler = (
+                PreparedStatistics(probabilities, tuple(channels), reps=acquire.reps)
+                if acquire.mode == "integrated"
+                else None
+            )
         return _Prepared(
             probabilities,
             tuple(channels),
             evolved.paths.for_reuse(telemetry=False),
             sampler,
-            inventory,
+            facts.source.gate_usage != before,
         )
 
 
@@ -314,6 +309,8 @@ class FTFSource:
     preparation_cache owns at most 4 MiB of read-only probabilities, conditionals,
     content mappings, path diagnostics and deterministic integrated samplers.
     Exact current C1 content, layout, mode, reps and readout values select entries.
+    History-sensitive hits still evolve through Engine's route-aware memo and
+    refresh populations/paths; channels and unchanged sampling plans are reused.
     Physical/numeric generation and engine replacement clear them before lookup.
     Its public max_bytes may be adjusted between calls; zero disables residency.
     Cumulative builds/hits and resident_bytes report reuse, never noisy results
