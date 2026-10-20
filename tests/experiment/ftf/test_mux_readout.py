@@ -7,7 +7,7 @@ import pytest
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import ftf as ftf_module
 from zcu_tools.program.v2.simulation import IntegratedRound
-from zcu_tools.simulate.adc import ConditionalReadout, ConditionalSums
+from zcu_tools.simulate.adc import ADC
 from zcu_tools.simulate.evolution import Engine, EvolutionResult, PathDiagnostics
 
 from tests.experiment._ftf_templates import request, settings, snapshot, template
@@ -100,39 +100,72 @@ class MixedEngine(Engine):
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
-def test_mux_ftf_channels_decode_to_the_same_joint_state_per_shot(mode, monkeypatch):
-    def distinguishable_response(self, batch):
-        # Each receiver encodes the joint state differently. A per-channel
-        # sampling loop would produce mismatched decoded states.
-        code = 10 if batch.model.receiver.gain == 1000 else 100
-        samples = len(batch.grids[0][0].times_ns)
-        traces = np.zeros((len(batch.pulses), 1, 2, samples, 2))
-        traces[:, :, 0, :, 0] = code
-        traces[:, :, 1, :, 0] = 2 * code
-        return ConditionalSums(
-            traces.sum(axis=-2),
-            np.array([samples], dtype=np.int64),
-            traces if batch.include_traces else None,
-        )
-
-    monkeypatch.setattr(ConditionalReadout, "responses", distinguishable_response)
-    source = ftf_module.FTFSource(
-        settings(), DeviceManager(), engine=MixedEngine(), readout=configuration()
+@pytest.mark.parametrize("jumping", [False, True])
+def test_mux_ftf_channels_share_physical_shots_and_initial_mixture(mode, jumping):
+    config = configuration()
+    config = replace(
+        config, receivers=tuple(replace(r, gain=1e7) for r in config.receivers)
     )
-    acquire = replace(request(mode), reps=128, templates=(mux_template(),))
+    numeric = settings()
+    # A hot, lossy synthetic bath makes repeated paths observable in a short
+    # readout. The low-loss case independently protects the initial mixture.
+    chip = numeric.chip
+    if jumping:
+        chip = chip.model_copy(
+            update={
+                "temperature_k": 1.0,
+                "f1": chip.f1.model_copy(update={"q_cap": 10.0}),
+                "f2": chip.f2.model_copy(update={"q_cap": 10.0}),
+            }
+        )
+    else:
+        chip = chip.model_copy(
+            update={
+                "coupler": chip.coupler.model_copy(update={"q_cap": 1e30}),
+            }
+        )
+    numeric = numeric.model_copy(update={"chip": chip})
+    content = mux_template()
+    window = content.readouts[0]
+    content = replace(content, readouts=(window, replace(window, channel=1)))
+    source = ftf_module.FTFSource(
+        numeric, DeviceManager(), engine=MixedEngine(), readout=config
+    )
+    acquire = replace(request(mode), reps=128, templates=(content,))
     try:
         result = source.open_acquire(acquire).sample_round(snapshot(), 0)
         if isinstance(result, IntegratedRound):
             raw = result.raw.materialize(acquire.reps, acquire.avg_level)
             channel_order = tuple(ch.channel for ch in result.statistics.channels)
-            first = raw[4].reshape(-1, 2)[:, 0] / 40
-            second = raw[1].reshape(-1, 2)[:, 0] / 300
+            first, second = raw[4], raw[1]
         else:
             channel_order = tuple(ch.channel for ch in result.channels)
-            first = result.channels[0].iq[:, 0, 0, 0] / 10
-            second = result.channels[1].iq[:, 0, 0, 0] / 100
+            first, second = (ch.iq for ch in result.channels)
         assert channel_order == (4, 1)
-        assert set(first) == {1, 2}, "the test must exercise both joint states"
         np.testing.assert_array_equal(first, second)
+        plan = ftf_module.plan_template(numeric, snapshot(), content, readout=config)
+        batch = plan.readouts[0].batch
+        if jumping:
+            # A fixed conditional centre or shared initial states alone cannot
+            # produce this many distinct shots at the same point.
+            point_shots = first[:, 0] if mode == "integrated" else first[::2]
+            assert np.unique(point_shots.reshape(128, -1), axis=0).shape[0] > 10
+        else:
+            model = replace(batch.model, rates_per_ns=np.zeros((2, 2)))
+            expected = ADC(model).responses(replace(batch, include_traces=True))
+            if mode == "integrated":
+                centres = np.rint(expected.sums[0, 0])
+                observed = first[:, 0, 0]
+            else:
+                assert expected.traces is not None
+                centres = expected.traces[0, 0]
+                observed = first[::2, 0]
+            distance = np.max(
+                np.abs(observed[:, None] - centres[None]),
+                axis=tuple(range(2, observed.ndim + 1)),
+            )
+            nearest = distance.argmin(axis=1)
+            assert set(nearest) == {0, 1}
+            assert 0.25 < (nearest == 0).mean() < 0.55
     finally:
         source.close()
