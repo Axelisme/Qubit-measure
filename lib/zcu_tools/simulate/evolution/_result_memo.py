@@ -75,6 +75,15 @@ def input_key(
     for batch in batches:
         digest.array(batch.points)
         digest.array(batch.end_ns)
+        for times in batch.segment_boundaries:
+            digest.array(np.asarray(times, dtype=np.float64))
+        digest.text("segment shifts")
+        for shifts in batch.segment_shifts:
+            digest.text(str(len(shifts)))
+            for shift in shifts:
+                digest.text(float(shift.start_ns).hex())
+                digest.text(float(shift.end_ns).hex())
+                digest.text(shift.content.decode())
         digest.array(batch.flux.offsets)
         digest.array(batch.flux.start_ns)
         digest.array(batch.flux.level)

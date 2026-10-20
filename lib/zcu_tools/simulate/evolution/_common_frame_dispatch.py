@@ -55,7 +55,7 @@ def _constant_rwa_price(table: SegmentTable, row: int, context: KernelContext) -
     """
     retained = multitone_retention(table, row, context)
     assert retained.dimension is not None
-    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    model = table.model(context.source, row)
     frequencies = table.tone_frequency_ghz[row, :2]
     bandwidth = max(
         (
@@ -89,7 +89,7 @@ def _prices(
     constant = table.constant_envelopes(rows)
     grouped: dict[bytes, list[tuple[float, float, float]]] = defaultdict(list)
     for row, key, fixed in zip(rows, keys, constant, strict=True):
-        model = source.model(tuple(int(v) for v in table.level[row]))
+        model = table.model(source, row)
         size = len(model.energies_ghz) / 3
         duration = float(table.duration_ns[row])
         original = 0.001 + 0.000040 * duration
@@ -155,7 +155,7 @@ def _cheap_rwa(
     admitted = rwa.guard(table, rows, context)
     for index in np.flatnonzero(admitted):
         retained = multitone_retention(table, int(rows[index]), context)
-        model = context.source.model(tuple(int(v) for v in table.level[rows[index]]))
+        model = table.model(context.source, int(rows[index]))
         cheap[index] = (
             retained.dimension is not None
             and retained.dimension <= max(9, 2 * len(model.energies_ghz))
@@ -204,7 +204,7 @@ def preferred(
             selected[indices] = False
             continue
         representative = int(rows[indices[0]])
-        model = context.source.model(tuple(int(v) for v in table.level[representative]))
+        model = table.model(context.source, representative)
         ports = tuple(int(v) for v in table.tone_port[representative, :2])
         if not common_frame_cost_viable(
             model, ports, table.tone_frequency_ghz[representative, :2]

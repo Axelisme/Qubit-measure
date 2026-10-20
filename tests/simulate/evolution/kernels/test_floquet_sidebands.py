@@ -207,6 +207,7 @@ def test_multiple_probe_bins_preserve_row_admission(
         start_ns=np.repeat(table.start_ns, 3, axis=0),
         duration_ns=np.repeat(table.duration_ns, 3, axis=0),
         level=np.repeat(table.level, 3, axis=0),
+        shift_content=np.repeat(table.shift_content, 3, axis=0),
         tones=np.repeat(table.tones, 3, axis=0),
         tone_port=np.repeat(table.tone_port, 3, axis=0),
         tone_frequency_ghz=np.column_stack(

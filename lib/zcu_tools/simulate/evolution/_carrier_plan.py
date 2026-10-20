@@ -102,7 +102,7 @@ def _coordinates(
     bounds = np.abs(table.tone_amplitude[rows, 0]) * peaks[table.tone_envelope[rows, 0]]
     counts = subdivisions(table, rows, source, work_plan)
     for row, bound, count in zip(rows, bounds, counts, strict=True):
-        model = source.model(tuple(int(v) for v in table.level[row]))
+        model = table.model(source, row)
         # Match band_keys' zero-gain DC identity, including ineligible candidates.
         frequency = float(table.tone_frequency_ghz[row, 0]) if bound > 0 else 0.0
         yield (

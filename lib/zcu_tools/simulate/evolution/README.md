@@ -16,7 +16,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
 | Engine model source | `ModelSource`, `SecularModel`, `SecularDrive` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
-| Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec` |
+| Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
 | Control description | `ControlPulse`, `ControlSequence`, `Envelope`, `PhaseEvent`, `quantize_ns` |
 | Fixed-coordinate model records | `NumericModel`, `DriveSource` |
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
@@ -32,6 +32,16 @@ Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
 directional rates and pure dephasing in each quantized flux level's energy
 basis. The model builder owns physical applicability. Records own read-only
 array copies and reject invalid shapes or numeric invariants.
+
+`TimelineBatch.segment_boundaries` adds point-aligned absolute ns boundaries.
+`segment_spans(batch)` is a pure query of the same final partition used by
+`evolve`, including active microwave plateaus and flux events. Callers can
+average external energy shifts and dephasing over these spans, then attach
+point-aligned `SegmentShift` values through `segment_shifts`. Each supplied span
+must match one queried span exactly; missing spans have zero shift. Shifts do
+not add boundaries, rotate bases or change physical `FluxLevel` values. Model,
+prepare, result and gate-usage identities include shift content. Without shifts,
+the original model source, initial state and reuse semantics remain unchanged.
 
 `EvolutionResult` contains densities at readout start in the DC eigenbasis.
 The environment explicitly converts them to populations, then calls ADC's

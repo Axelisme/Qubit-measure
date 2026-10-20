@@ -111,7 +111,7 @@ def _build(
 ) -> _Block:
     if retention is None:
         raise ValueError("constant RWA requires a single fixed-flux constant carrier")
-    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    model = table.model(context.source, row)
     port, frequency = (
         int(table.tone_port[row, 0]),
         float(table.tone_frequency_ghz[row, 0]),
@@ -284,7 +284,7 @@ class SingleToneRWAKernel:
         for index, row in enumerate(rows):
             if not accepted[index]:
                 continue
-            model = context.source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(context.source, row)
             port = int(table.tone_port[row, 0])
             frequency = float(table.tone_frequency_ghz[row, 0])
             retention = retentions.rows[row]
@@ -316,7 +316,7 @@ class SingleToneRWAKernel:
         keys = np.empty(len(rows), dtype="V32")
         retentions = constant_retentions(table, context)
         for index, row in enumerate(rows):
-            model = context.source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(context.source, row)
             retention = retentions.rows[row]
             identity = (
                 _POLICY,

@@ -137,7 +137,7 @@ def _cold_key_cost(
     table: SegmentTable, row: int, key: bytes, context: KernelContext, subdivisions: int
 ) -> GateCost:
     """Estimate cold gate build/play and Sambe variable playback for one key."""
-    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    model = table.model(context.source, row)
     scale = (len(model.energies_ghz) / 16) ** 3
     duration = float(table.duration_ns[row])
     frequency = abs(float(table.tone_frequency_ghz[row, 0]))

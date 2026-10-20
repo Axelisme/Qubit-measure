@@ -51,7 +51,7 @@ def populate_multitone_inventory(
             if any(retained.edges):
                 expanded.append(int(row))
             elif retained.dimension is not None:
-                model = source.model(tuple(int(v) for v in table.level[row]))
+                model = table.model(source, row)
                 if retained.dimension <= max(9, 2 * len(model.energies_ghz)):
                     cheap.append(int(row))
         rows = np.array(expanded, dtype=np.int64)
@@ -59,7 +59,7 @@ def populate_multitone_inventory(
         keys = []
         inventory: dict[bytes, int] = {}
         for row, key in zip(rows, physics, strict=True):
-            model = source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(source, row)
             identity = sha256(
                 b"multitone-cold" + model.identity.encode() + key.tobytes()
             ).digest()
@@ -145,7 +145,7 @@ def multitone_cost(
 
 
 def _price_row(table: SegmentTable, row: int, context: KernelContext) -> MultitoneCost:
-    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    model = table.model(context.source, row)
     retained = multitone_retention(table, row, context)
     assert retained.dimension is not None
     size = len(model.energies_ghz)

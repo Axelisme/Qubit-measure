@@ -351,12 +351,14 @@ def band_keys(
         len(rows),
         dtype=[
             ("level", "i8", (table.level.shape[1],)),
+            ("shift", "S64"),
             ("port", "i8"),
             ("frequency", "f8"),
             ("band", "i8"),
         ],
     )
     keys["level"] = table.level[rows]
+    keys["shift"] = table.shift_content[rows]
     keys["port"] = table.tone_port[rows, 0]
     keys["frequency"] = np.where(maximum > 0, table.tone_frequency_ghz[rows, 0], 0)
     keys["band"] = band
@@ -395,6 +397,7 @@ def advance_tail(
         start_ns=np.zeros(len(active)),
         duration_ns=durations[selected],
         level=table.level[active],
+        shift_content=table.shift_content[active],
         tones=table.tones[active],
         tone_port=table.tone_port[active],
         tone_frequency_ghz=table.tone_frequency_ghz[active],

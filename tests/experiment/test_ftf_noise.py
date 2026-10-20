@@ -153,7 +153,7 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
             gain=0.0,
             waveform=ConstWaveformCfg(length=0.04),
             ro_length=0.06,
-            trig_offset=-0.01,
+            trig_offset=0.01,
         )
         program = ModularProgramV2(
             env.soccfg, ProgramV2Cfg(reps=256), modules=[readout.build("ro")]

@@ -816,7 +816,7 @@ class FloquetPeriodKernel:
             frequency = float(table.tone_frequency_ghz[row, 0])
             if envelope.kind != "constant" or abs(frequency) < _MIN_FREQUENCY_GHZ:
                 continue
-            model = source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(source, row)
             estimate = table.duration_ns[row] * split_rate(
                 model,
                 int(table.tone_port[row, 0]),
@@ -836,12 +836,14 @@ class FloquetPeriodKernel:
             len(rows),
             dtype=[
                 ("level", "<i8", table.level.shape[1]),
+                ("shift", "S64"),
                 ("port", "<i8"),
                 ("frequency", "<f8"),
                 ("gain", "<f8"),
             ],
         )
         keys["level"] = table.level[rows]
+        keys["shift"] = table.shift_content[rows]
         if len(rows):
             if np.any(table.tones[rows] != 1):
                 raise ValueError("Floquet period keys require one tone")
@@ -877,7 +879,9 @@ class FloquetPeriodKernel:
             raise ValueError("Floquet period representatives must pass guard")
         entries = []
         for key in keys:
-            model = source.model(tuple(int(v) for v in key["level"]))
+            model = source.shifted_model(
+                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+            )
             port, frequency, gain = (
                 int(key["port"]),
                 float(key["frequency"]),

@@ -840,10 +840,7 @@ class DysonKernel:
                 "Dyson requires aligned representative rows and positive budget"
             )
         return _Prepared(
-            tuple(
-                _prepare_model(source.model(tuple(int(v) for v in table.level[row])))
-                for row in rows
-            )
+            tuple(_prepare_model(table.model(source, row)) for row in rows)
         )
 
     def admit_prepared(
