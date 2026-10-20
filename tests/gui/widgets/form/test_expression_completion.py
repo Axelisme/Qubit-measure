@@ -182,37 +182,44 @@ def test_expression_completion_preserves_surrounding_text_and_focus(
 
 
 @pytest.mark.parametrize(
-    "host,prefix,completed,suffix",
+    "host,prefix,completed,suffix,tail",
     [
-        pytest.param("量子位", "$量", "$量子位", "子位", id="cjk-alias"),
-        pytest.param("量子位", "$量子位.fre", "$量子位.freq", "q", id="cjk-field"),
+        pytest.param("量子位", "$量", "$量子位", "子位", "", id="cjk-alias"),
+        pytest.param("量子位", "$量子位.fre", "$量子位.freq", "q", "", id="cjk-field"),
         pytest.param(
-            "q\u0301ubit", "$q\u0301", "$q\u0301ubit", "ubit", id="combining-alias"
+            "q\u0301ubit", "$q\u0301", "$q\u0301ubit", "ubit", "", id="combining-alias"
         ),
         pytest.param(
             "q\u0301ubit",
             "$q\u0301ubit.fre",
             "$q\u0301ubit.freq",
             "q",
+            "",
             id="combining-field",
+        ),
+        pytest.param("𐐀ubit", "$𐐀", "$𐐀ubit", "ubit", " + 5", id="nonbmp-alias"),
+        pytest.param(
+            "𐐀ubit", "$𐐀ubit.fre", "$𐐀ubit.freq", "q", " + 5", id="nonbmp-field"
         ),
     ],
     indirect=["host"],
 )
 def test_unicode_alias_and_field_completion(
-    host: Host, tmp_path: Path, prefix: str, completed: str, suffix: str
+    host: Host, tmp_path: Path, prefix: str, completed: str, suffix: str, tail: str
 ) -> None:
     driver = ComponentDriver(host)
-    driver.enter_text(value=prefix, object_name=INPUT, commit=False)
+    driver.enter_text(value=prefix + tail, object_name=INPUT, commit=False)
+    for _ in tail:
+        key(driver, Qt.Key.Key_Left)
     shot(driver, tmp_path, "01-unicode-ghost")
     observed = driver.text_input(object_name=INPUT)
-    assert observed.text == prefix
+    assert observed.text == prefix + tail
     assert observed.description == (
         f"Completion: {suffix}. Tab accepts; repeated Tab cycles; Esc dismisses."
     )
     key(driver, Qt.Key.Key_Tab)
     shot(driver, tmp_path, "02-unicode-accepted")
-    assert driver.text_input(object_name=INPUT).text == completed
+    assert driver.text_input(object_name=INPUT).text == completed + tail
     assert driver.text_input(object_name=INPUT).focused
 
 
