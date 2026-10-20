@@ -1,4 +1,4 @@
-"""Creation and identity of a result entry across two explicit roots."""
+"""Result-owned entry identity with a separate Database output location."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from zcu_tools.resources.sample_table import JsonlSampleTable
 from . import _point_origin
 from ._path_segments import validate_path_segment
 from .aliases import EntryAliases, load_entry_aliases, save_entry_aliases
-from .errors import DestinationExistsError, RenameRecoveryError
+from .errors import DestinationExistsError
 from .ledger import RecordsLedger
 from .ledger_models import (
     AnalyzedPayload,
@@ -76,33 +76,17 @@ def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -
     return path
 
 
-def rename_entry(
-    old: str, new: str, *, result_root: str | Path, database_root: str | Path
-) -> None:
+def rename_entry(old: str, new: str, *, result_root: str | Path) -> None:
+    """Rename only result_root/old to result_root/new without rewriting contents.
+
+    Names must be safe single path segments within result_root. An existing
+    destination, including a symlink, raises DestinationExistsError before moving.
+    Filesystem errors propagate; Database outputs are not inspected or moved.
+    Existing handles remain bound to their original paths; reopen using new.
+    """
     result_old = _entry_path(result_root, old)
-    database_old = _entry_path(database_root, old)
     result_new = _entry_path(result_root, new, new_destination=True)
-    database_new = _entry_path(database_root, new, new_destination=True)
-    ResultEntry.open(old, result_root=result_root, database_root=database_root)
     result_old.rename(result_new)
-    try:
-        database_old.rename(database_new)
-    except OSError as cause:
-        try:
-            if result_old.exists() or result_old.is_symlink():
-                raise FileExistsError(
-                    errno.EEXIST, os.strerror(errno.EEXIST), str(result_old)
-                )
-            result_new.rename(result_old)
-        except OSError as recovery_cause:
-            raise RenameRecoveryError(
-                moved_result=result_new,
-                pending_database=database_new,
-                recovery_destination=result_old,
-                cause=cause,
-                recovery_cause=recovery_cause,
-            ) from cause
-        raise
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -397,7 +381,6 @@ class ResultEntry:
             identity = _point_origin.clone_source(
                 clone_from,
                 result_root=result_root,
-                database_root=database_root,
             )
             source = identity.source.parent
             name = source.parent.parent.name
@@ -621,11 +604,12 @@ class ResultEntry:
         database_root: str | Path,
         identity: EntryIdentity | None = None,
     ) -> ResultEntry:
-        """Create a complete new entry under two explicit roots.
+        """Create a new Result entry and bind a Database output location.
 
         name is a safe single path segment. identity fixes the setup UUID and UTC
-        creation time, or None generates both now. Neither mode adopts existing
-        destinations: collisions raise DestinationExistsError before writes.
+        creation time, or None generates both now. An existing Result destination
+        raises DestinationExistsError before writes. Database is neither inspected
+        nor created; its configured path is database_root/name, for later Save.
         Schema/I/O failures propagate and remove only directories created by this
         call, retaining caller roots. No cross-file/power-loss guarantee is made.
         """
@@ -634,12 +618,9 @@ class ResultEntry:
                 entry_id=uuid4(), created_at=datetime.now(timezone.utc)
             )
         result_path = _entry_path(result_root, name, new_destination=True)
-        database_path = _entry_path(database_root, name, new_destination=True)
-        created: list[Path] = []
+        database_path = Path(database_root) / name
+        result_path.mkdir(parents=True)
         try:
-            for destination in (result_path, database_path):
-                destination.mkdir(parents=True)
-                created.append(destination)
             (result_path / "records").mkdir()
             (result_path / "points").mkdir()
             document = {
@@ -659,20 +640,25 @@ class ResultEntry:
             _create_empty_library(result_path / "module_cfg.yaml")
             return cls(result_path, database_path)
         except BaseException:
-            # These entry directories belong to this call, not to the caller's roots.
-            for directory in reversed(created):
-                shutil.rmtree(directory)
+            # mkdir succeeded, so this call owns the new Result directory.
+            shutil.rmtree(result_path)
             raise
 
     @classmethod
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> ResultEntry:
+        """Open a complete Result entry and bind database_root/name for Save.
+
+        name must be a safe single path segment. The Result entry, points and
+        records directories must exist; setup must validate its format and UUID.
+        Missing paths and invalid documents propagate their filesystem/schema
+        errors. Database is not inspected or created, regardless of its state.
+        """
         result_path = _entry_path(result_root, name)
-        database_path = _entry_path(database_root, name)
+        database_path = Path(database_root) / name
         for directory in (
             result_path,
-            database_path,
             result_path / "points",
             result_path / "records",
         ):

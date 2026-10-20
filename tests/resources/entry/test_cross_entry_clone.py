@@ -166,7 +166,7 @@ def test_library_only_import_keeps_evidence_after_source_entry_moves(
     assert isinstance(imported.payload, ImportPayload)
     assert imported.payload.source_event_json == original.event_json
     assert imported.payload.source_record == original.event.record
-    results, database = entry_roots
+    results, _database = entry_roots
     (results / "other").rename(results / "moved-other")
     stored = DocumentStore(
         entry.result_path / "points/library-only/module_cfg.yaml",

@@ -386,6 +386,7 @@ def test_save_rpc_reports_partial_and_initial_all_failed_identity(
     tmp_path: Path, qapp: QApplication, block_native: bool, method: str
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
+        session.entry.database_path.mkdir(parents=True, exist_ok=True)
         (session.entry.database_path / "Labber").write_text("blocked")
         if block_native:
             (
