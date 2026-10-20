@@ -254,7 +254,14 @@ def hamiltonian(time, channels, args):
 @njit(cache=True, nogil=True)
 def unitary(h, duration):
     energies, vectors = np.linalg.eigh(h)
-    return (vectors * np.exp(-2j * np.pi * duration * energies)) @ vectors.conj().T
+    adjoint = vectors.conj().T
+    # Scale LAPACK's contiguous columns in place instead of broadcasting into a
+    # new matrix. Save the unscaled adjoint before modifying the eigenvectors.
+    for j in range(len(energies)):
+        phase = np.exp(-2j * np.pi * duration * energies[j])
+        for i in range(len(energies)):
+            vectors[i, j] *= phase
+    return vectors @ adjoint
 
 
 @njit(cache=True, nogil=True)
