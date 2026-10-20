@@ -446,13 +446,20 @@ class Engine:
         """Evolve all batches to readout, forwarding per-segment budget to kernels.
 
         source: this round's model cache and initial DC density. batches: all
-        template batches for the acquire. reuse_key optionally registers a
-        caller-owned exact-content digest for reuse(); it must cover every input
-        the caller retains, and is scoped to this Engine and source instance.
-        Only immutable inventory/pricing facts are retained, in a separate LRU
-        capped at min(4 MiB, cache_bytes); eviction causes a normal fresh evolve.
-        budget: positive absolute population
-        and low-four error allowance. cancel: event checked between chunks;
+        template batches for the acquire. reuse_key: optional bytes digest of
+        every input used by a caller-retained result, including any downstream
+        inputs not present in batches. None skips registration for reuse(). A
+        successful nonempty evolve registers inventory/pricing facts under this
+        key, scoped to this Engine, source instance and budget. The caller must
+        invalidate its retained result on any content, source, budget or Engine
+        change; evolve does not verify the caller's digest. Registration does not
+        change the numerical solve or its result. Facts use a separate LRU capped
+        at min(4 MiB, cache_bytes). Empty work, disabled residency or oversized
+        facts may leave no entry. A later reuse() returns False after eviction or
+        a route change; the caller must then evolve the full acquire again.
+        budget: finite positive absolute population and low-four error allowance;
+        otherwise raises ValueError. A closed engine raises RuntimeError.
+        cancel: event checked between chunks;
         when set, raises Cancelled, without returning partial results.
         telemetry enables per-family calling-thread CPU and routing accounting
         without I/O; False avoids CPU clock reads and returns empty routing.
