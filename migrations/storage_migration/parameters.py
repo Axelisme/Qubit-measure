@@ -18,6 +18,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.schema import SetupDocument
 
 from ._flux_units import apply_flux_groups, resolve_flux_units
+from ._meta_info import preserve_meta_field
 from ._module_cfg import convert_module_cfg
 from .errors import MigrationInputError
 from .evidence import has_legacy_expression
@@ -132,6 +133,119 @@ def _map_module_scalar(
     )
 
 
+def _preserve_parameter(
+    session: MigrationSession,
+    view: EditView,
+    row: KeyMappingItem,
+    value: JsonValue,
+    *,
+    legacy: bool,
+) -> None:
+    keys = preserve_meta_field(view, row.old_key, value, legacy=legacy)
+    reason = f"Source preserved at literal keys {keys!r}"
+    if row.action == "pending":
+        reason = f"{row.reason}; {reason}"
+        record_pending(session, row.old_file, row.old_key, row.reason)
+    else:
+        clear_pending(session, row.old_file, row.old_key)
+    record_key_mapping(
+        session,
+        replace(
+            row, new_path=None, action="preserved", reason=reason, destination_keys=keys
+        ),
+    )
+
+
+def _same_converted_value(
+    view: EditView, path: str | None, value: JsonValue, accepted: set[str]
+) -> bool:
+    if path is None or path not in accepted:
+        return False
+    try:
+        converted = document_value(snapshot(view), path)
+    except AttributeError:
+        # A point's explicit unit change can clear an inherited formal ext value.
+        return False
+    # JSON booleans are not numeric aliases, even though Python equates True and 1.
+    return isinstance(value, bool) == isinstance(converted, bool) and value == converted
+
+
+def _map_superseded_parameter(
+    session: MigrationSession,
+    view: EditView,
+    row: KeyMappingItem,
+    value: JsonValue,
+    accepted: set[str],
+) -> None:
+    if _same_converted_value(view, row.new_path, value, accepted):
+        clear_pending(session, row.old_file, row.old_key)
+        record_key_mapping(
+            session,
+            replace(
+                row,
+                action="remove",
+                reason=(
+                    f"Same value as successfully converted {row.new_path}; "
+                    f"{row.reason}; duplicate omitted"
+                ),
+            ),
+        )
+    else:
+        _preserve_parameter(session, view, row, value, legacy=True)
+
+
+def _map_unknown_parameter(
+    session: MigrationSession,
+    view: EditView,
+    row: KeyMappingItem,
+    value: JsonValue,
+    accepted: set[str],
+    inherited: set[str],
+) -> None:
+    # Compare literal ext segments, not dotted source names or unrelated values.
+    prefix = ["general", "ext", row.old_key]
+    current = any(path.split(".")[:3] == prefix for path in accepted)
+    collision = current or any(path.split(".")[:3] == prefix for path in inherited)
+    expression = has_legacy_expression(value)
+    row = replace(
+        row,
+        action="pending" if expression else "preserved",
+        reason="Legacy expression preserved without evaluation"
+        if expression
+        else row.reason,
+    )
+    if collision and not expression:
+        path = ".".join(prefix)
+        reason = (
+            "Colliding formal destination in this context"
+            if current
+            else "Inherited formal destination from setup"
+        )
+        _map_superseded_parameter(
+            session,
+            view,
+            replace(row, action="remove", new_path=path, reason=reason),
+            value,
+            {path},
+        )
+    else:
+        _preserve_parameter(session, view, row, value, legacy=collision)
+
+
+def _inherited_ext_paths(session: MigrationSession, source: Path) -> set[str]:
+    root_source = session.manifest.report.source.result_path / "meta_info.json"
+    if source == root_source:
+        return set()
+    return {
+        row.new_path
+        for row in session.manifest.report.key_mappings
+        if row.old_file == root_source
+        and row.action == "value"
+        and row.new_path is not None
+        and row.new_path.startswith("general.ext.")
+    }
+
+
 def _map_parameters(
     session: MigrationSession,
     source: Path,
@@ -140,13 +254,27 @@ def _map_parameters(
     mapping: MigrationMapping,
     view: EditView,
 ) -> None:
-    ext: YamlMap = {}
     units = resolve_flux_units(session, source, values, mapping)
-    values = units.values
     consumed = apply_flux_groups(session, source, target, view, mapping, units)
+    rules = {rule.old_key: rule for rule in mapping.rules}
+    accepted = {
+        row.new_path
+        for row in session.manifest.report.key_mappings
+        if row.old_file == source
+        and row.old_key in consumed
+        and row.action == "value"
+        and row.new_path is not None
+    }
+    inherited = _inherited_ext_paths(session, source)
+    superseded = {rule.old_key for rule in mapping.rules if rule.action == "remove"}
+    if "qub_0_1_ch" in values:
+        superseded.add("qub_ch")
     stderr_keys = {rule.old_key for rule in mapping.rules if rule.action == "stderr"}
-    # Values precede uncertainties even if JSON key order is reversed.
-    for key in sorted(set(values) - consumed, key=lambda key: key in stderr_keys):
+    # Formal values precede uncertainties and aliases, independent of source order.
+    for key in sorted(
+        set(values) - consumed,
+        key=lambda key: (key in superseded, key not in rules, key in stderr_keys, key),
+    ):
         value = values[key]
         rule = next((item for item in mapping.rules if item.old_key == key), None)
         action = rule.action if rule is not None else "pending"
@@ -154,12 +282,24 @@ def _map_parameters(
         reason = (
             rule.reason if rule is not None else "Unmapped key preserved in general.ext"
         )
-        if key == "qub_ch" and "qub_0_1_ch" in values:
-            action, path, reason = (
-                "remove",
-                None,
-                "qub_0_1_ch takes precedence over qub_ch",
-            )
+        row = KeyMappingItem(
+            old_file=source,
+            old_key=key,
+            new_file=target,
+            new_path=path,
+            action=action,
+            reason=reason,
+            source_keys=(key,),
+        )
+        if key in superseded:
+            if key == "qub_ch":
+                selected = rules.get("qub_0_1_ch")
+                row = replace(row, new_path=selected.target_path if selected else None)
+            _map_superseded_parameter(session, view, row, value, accepted)
+            continue
+        if rule is None:
+            _map_unknown_parameter(session, view, row, value, accepted, inherited)
+            continue
         if has_legacy_expression(value):
             action, path, reason = (
                 "pending",
@@ -171,16 +311,29 @@ def _map_parameters(
                 session, source, rule, mapping, view, value
             )
         elif action == "pending":
-            ext[key] = _YAML_VALUE.validate_python(value, strict=True)
-            record_pending(session, source, key, reason)
-        elif action in ("value", "stderr") and rule is not None:
+            _preserve_parameter(
+                session,
+                view,
+                replace(row, action=action, reason=reason),
+                value,
+                legacy=False,
+            )
+            continue
+        elif action in ("value", "stderr"):
             unresolved = _accept_parameter(view, rule, value, values, mapping)
             if unresolved is None:
                 clear_pending(session, source, key)
+                if action == "value" and path is not None:
+                    accepted.add(path)
             else:
-                action = "pending"
-                reason = unresolved
-                record_pending(session, source, key, reason)
+                _preserve_parameter(
+                    session,
+                    view,
+                    replace(row, action="pending", reason=unresolved),
+                    value,
+                    legacy=True,
+                )
+                continue
         new_file = (
             target.parent / "module_cfg.yaml"
             if action == "module"
@@ -195,7 +348,7 @@ def _map_parameters(
                 old_key=key,
                 new_file=new_file,
                 new_path=f"{path}.{rule.wrap_key}"
-                if path is not None and rule is not None and rule.wrap_key is not None
+                if path is not None and rule.wrap_key is not None
                 else path
                 if path is not None
                 else "general.ext"
@@ -203,13 +356,8 @@ def _map_parameters(
                 else None,
                 action=action,
                 reason=reason,
+                source_keys=(key,),
             ),
-        )
-
-    if ext:
-        current = document_value(snapshot(view), "general.ext")
-        view.set(
-            "general.ext", {**(current if isinstance(current, dict) else {}), **ext}
         )
 
 
@@ -293,12 +441,18 @@ def _convert_context(
         )
         if not is_setup:
             _retain_point_slots(entry, label, mapping)
+    dry_context = (
+        (dry_setup if is_setup else EditView(snapshot(dry_setup)))
+        if dry_setup is not None
+        else None
+    )
     convert_module_cfg(
         session,
         entry=entry,
         label=None if is_setup else label,
         source=candidate / "module_cfg.yaml",
         mapping=mapping,
+        dry_view=dry_context,
     )
     if source.is_file():
         session.baseline(source)
@@ -306,9 +460,8 @@ def _convert_context(
         if view is not None:
             with view.edit() as draft:
                 _map_parameters(session, source, target, values, mapping, draft)
-        elif dry_setup is not None:
-            draft = dry_setup if is_setup else EditView(snapshot(dry_setup))
-            _map_parameters(session, source, target, values, mapping, draft)
+        elif dry_context is not None:
+            _map_parameters(session, source, target, values, mapping, dry_context)
         else:
             raise MigrationInputError(
                 "Context mapping requires an entry or dry-run draft"

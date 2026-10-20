@@ -155,7 +155,11 @@ def test_two_complete_points_keep_working_units_and_sources(
     assert isinstance(unknown, FieldView)
     assert unknown["legacy"] == 1
     assert a.general.ext["expression"] == "${md.old_frequency}"
-    assert {item.location for item in report.pending} == {"unknown", "expression"}
+    assert {item.location for item in report.pending} == {"expression"}
+    unknown_row = next(row for row in report.key_mappings if row.old_key == "unknown")
+    assert unknown_row.action == "preserved"
+    assert unknown_row.old_file == source_a
+    assert unknown_row.destination_keys == ("general", "ext", "unknown")
     assert (source_a.read_bytes(), source_b.read_bytes()) == before
     entry.setup.C1.frequency = 77.0
     assert entry.use_point("context_a").C1.frequency == 12.5
@@ -978,7 +982,7 @@ def test_wrapped_channel_creates_a_complete_optional_container(
     assert decision.new_path == "C1.channel.ch"
 
 
-def test_pending_module_candidates_keep_destinations_without_slot(
+def test_unsupported_module_candidates_preserve_source_without_slot(
     request_data: MigrationRequest,
     mapping: MigrationMapping,
 ) -> None:
@@ -994,6 +998,7 @@ def test_pending_module_candidates_keep_destinations_without_slot(
         "future_root: {keep: true}\n",
         encoding="utf-8",
     )
+    original = library.read_bytes()
     rules = tuple(
         ModuleRule(
             old_name=name,
@@ -1015,25 +1020,35 @@ def test_pending_module_candidates_keep_destinations_without_slot(
         database_root=request_data.database_root,
     ).use_point("context")
     assert document_value(snapshot(point), "C1.module") == {}
-    destinations = {
-        item.old_key: item.new_path
-        for item in report.key_mappings
-        if item.old_file == library and item.library_kind == "module"
+    assert document_value(snapshot(point), "general.ext.legacy_module_cfg") == {
+        "modules": {
+            "second_choice": {"type": "synthetic", "value": 2},
+            "third_choice": {"type": "synthetic", "value": 3},
+            "first_choice": {"type": "synthetic", "value": 1},
+            "unknown_module": {"type": "unknown"},
+        },
+        "waveforms": {"pulse": {"style": "const", "length": 1}},
+        "future_root": {"keep": True},
     }
-    assert destinations == {
-        "first_choice": "C1.pulses.first_choice",
-        "second_choice": "C1.pulses.second_choice",
-        "third_choice": "C1.pulses.third_choice",
-        "unknown_module": None,
-    }
-    pending = {
-        item.location: item.reason for item in report.pending if item.source == library
-    }
-    assert set(pending) == {
-        "modules.first_choice",
-        "modules.second_choice",
-        "modules.third_choice",
-        "modules.unknown_module",
-        "waveforms.pulse",
-        "future_root",
-    }
+    for keys in (
+        ("modules", "first_choice"),
+        ("modules", "second_choice"),
+        ("modules", "third_choice"),
+        ("modules", "unknown_module"),
+        ("waveforms", "pulse"),
+        ("future_root",),
+    ):
+        assert any(
+            item.old_file == library
+            and item.action == "preserved"
+            and item.source_keys == keys
+            and item.destination_keys == ("general", "ext", "legacy_module_cfg", *keys)
+            and item.new_file
+            == request_data.results_root
+            / request_data.name
+            / "points/context/point.yaml"
+            and item.new_path is None
+            for item in report.key_mappings
+        )
+    assert not any(item.source == library for item in report.pending)
+    assert library.read_bytes() == original

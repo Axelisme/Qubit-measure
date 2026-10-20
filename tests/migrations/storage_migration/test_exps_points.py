@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 
 from migrations.storage_migration import (
     MigrationInputError,
@@ -105,16 +105,41 @@ def test_exps_child_becomes_complete_point_with_independent_meta_and_library(
         encoding="utf-8",
     )
     original = {path: path.read_bytes() for path in child.iterdir()}
-    report = _convert(request, exps_mapping)
+    mapping = replace(
+        exps_mapping,
+        module_rules=(
+            *exps_mapping.module_rules,
+            ModuleRule(
+                old_name="expression",
+                target_path="C1.waveforms.expression",
+                reference_path=None,
+                reason="Known waveform missing a concrete length",
+                kind="waveform",
+            ),
+        ),
+    )
+    report = _convert(request, mapping)
     entry = _entry(request)
     assert entry.list_points() == ["070716_0.500", "direct"]
     point = entry.use_point("070716_0.500")
     assert point.C1.frequency == (12.5 if metadata == "values" else 3.0)
     assert entry.setup.C1.frequency == 3.0
     assert entry.use_point("direct").C1.frequency == 4.0
-    snapshot = entry.module_library("070716_0.500").snapshot()
-    assert snapshot.waveform_keys() == ("C1.waveforms.constant",)
-    assert snapshot.get_waveform("C1.waveforms.constant").length == 0.125
+    library_view = entry.module_library("070716_0.500").snapshot()
+    assert library_view.waveform_keys() == ("C1.waveforms.constant",)
+    assert library_view.get_waveform("C1.waveforms.constant").length == 0.125
+    assert document_value(snapshot(point), "general.ext.legacy_module_cfg") == {
+        "waveforms": {"expression": {"style": "const", "length": "=md.length"}}
+    }
+    assert any(
+        item.old_file == library
+        and item.action == "preserved"
+        and item.source_keys == ("waveforms", "expression")
+        and item.destination_keys
+        == ("general", "ext", "legacy_module_cfg", "waveforms", "expression")
+        and item.new_file == entry.result_path / "points/070716_0.500/point.yaml"
+        for item in report.key_mappings
+    )
     assert any(
         item.source == library and item.location == "waveforms.expression"
         for item in report.pending
