@@ -204,9 +204,10 @@ def test_unknown_meta_has_literal_preservation_rows_and_survives_resume(
         "legacy_module_cfg": ["source", "module"],
     }
     source = write_meta(request_data, context, values)
-    before = {p: p.read_bytes() for p in request_data.repo_root.rglob("*") if p.is_file()}
+    root = request_data.result_root.parent
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
     dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
-    assert {p: p.read_bytes() for p in request_data.repo_root.rglob("*") if p.is_file()} == before
+    assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
     report = migrate(request_data, metadata_mapping)
     entry = open_entry(request_data)
     view = entry.use_point("bias") if context else entry.setup
@@ -269,14 +270,19 @@ def test_blocked_flux_preserves_actual_source_without_activating_units(
     setup = snapshot(open_entry(request_data).setup)
     assert document_value(setup, "general.ext") == {"legacy_meta_info": values}
     assert document_value(setup, "Q1.wiring.ch") == 4
-    assert document_value(setup, "Q1.flux_half") is None
-    assert document_value(setup, "J1.flux_unit") is None
-    assert document_value(setup, "J1.flux") is None
+    view = open_entry(request_data).setup
+    assert getattr(view.Q1, "flux_half", None) is None
+    assert getattr(view.J1, "flux_unit", None) is None
+    assert getattr(view.J1, "flux", None) is None
     pending = [item for item in report.pending if item.source == source]
     assert set(values) <= {item.location for item in pending}
     assert all("legacy_meta_info" in item.reason for item in pending)
     for key in values:
-        row = next(row for row in report.key_mappings if row.old_file == source and row.old_key == key)
+        row = next(
+            row
+            for row in report.key_mappings
+            if row.old_file == source and row.old_key == key
+        )
         assert row.action == "preserved"
         assert row.new_path is None
         assert row.source_keys == (key,)
@@ -295,7 +301,11 @@ def test_qubit_channel_alias_is_deduplicated_only_against_selected_wiring(
     assert document_value(setup, "general.ext") == (
         {} if same else {"legacy_meta_info": {"qub_ch": 4}}
     )
-    row = next(row for row in report.key_mappings if row.old_file == source and row.old_key == "qub_ch")
+    row = next(
+        row
+        for row in report.key_mappings
+        if row.old_file == source and row.old_key == "qub_ch"
+    )
     assert row.source_keys == ("qub_ch",)
     assert row.action == ("remove" if same else "preserved")
     if same:
@@ -341,7 +351,10 @@ def test_removed_meta_keys_preserve_unmatched_values_and_report_proven_duplicate
         assert row.source_keys == (key,)
         if canonical == 1.0 and key in ("readout_f", "flx_bias"):
             assert row.action == "remove"
-            assert row.new_path == {"readout_f": "R1.freq", "flx_bias": "Q1.ext.flux_bias"}[key]
+            assert (
+                row.new_path
+                == {"readout_f": "R1.freq", "flx_bias": "Q1.ext.flux_bias"}[key]
+            )
             assert row.new_file == open_entry(request_data).result_path / "setup.yaml"
             assert "same" in row.reason.lower()
         else:
@@ -361,6 +374,46 @@ def test_removed_alias_does_not_deduplicate_against_inherited_formal_value(
         "flux_unit": "V",
         "legacy_meta_info": {"readout_f": 1.0, "flx_bias": 1.0},
     }
+
+
+@pytest.mark.parametrize("raw_value", [0.4, 0.9])
+@pytest.mark.parametrize("context", ["", "exps/bias"])
+def test_unknown_meta_collision_keeps_formal_value_and_reports_exact_destination(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    raw_value: float,
+    context: str,
+) -> None:
+    source = write_meta(
+        request_data,
+        context,
+        {"cur_A": 0.4, "flux_unit": "V", "flux_value": raw_value},
+    )
+    dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
+    report = migrate(request_data, metadata_mapping)
+    entry = open_entry(request_data)
+    view = entry.use_point("bias") if context else entry.setup
+    target = entry.result_path / ("points/bias/point.yaml" if context else "setup.yaml")
+    assert document_value(snapshot(view), "general.ext.flux_value") == 0.4
+    row = next(
+        row for row in report.key_mappings
+        if row.old_file == source and row.old_key == "flux_value"
+    )
+    assert row.source_keys == ("flux_value",)
+    assert row.new_file == target
+    if raw_value == 0.4:
+        assert row.action == "remove"
+        assert row.new_path == "general.ext.flux_value"
+        assert "same" in row.reason.lower()
+    else:
+        assert document_value(snapshot(view), "general.ext.legacy_meta_info") == {
+            "flux_value": 0.9
+        }
+        assert row.action == "preserved"
+        assert row.new_path is None
+        assert row.destination_keys == ("general", "ext", "legacy_meta_info", "flux_value")
+    assert not [item for item in report.pending if item.source == source]
+    assert dry.key_mappings == report.key_mappings
 
 
 def test_missing_units_drive_alias_and_module_scalars_remain_observable(
@@ -553,7 +606,9 @@ def test_conflicting_entry_units_block_values_instead_of_using_assumption(
     source = write_meta(request, "", {"flux_unit": "V", "flx_half": 0.2})
     report = migrate(request, metadata_mapping)
     setup = snapshot(open_entry(request).setup)
-    assert document_value(setup, "general.ext") == {}
+    assert document_value(setup, "general.ext") == {
+        "legacy_meta_info": {"flux_unit": "V", "flx_half": 0.2}
+    }
     assert any(
         item.source == source
         and item.location == "flx_half"
@@ -584,6 +639,7 @@ def test_jpa_never_borrows_global_assumption(
     assert document_value(snapshot(open_entry(request).setup), "general.ext") == {
         "flux_unit": "A",
         "flux_value": 0.4,
+        "legacy_meta_info": {"best_jpa_flux": 0.2},
     }
 
 

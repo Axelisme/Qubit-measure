@@ -155,7 +155,11 @@ def test_two_complete_points_keep_working_units_and_sources(
     assert isinstance(unknown, FieldView)
     assert unknown["legacy"] == 1
     assert a.general.ext["expression"] == "${md.old_frequency}"
-    assert {item.location for item in report.pending} == {"unknown", "expression"}
+    assert {item.location for item in report.pending} == {"expression"}
+    unknown_row = next(row for row in report.key_mappings if row.old_key == "unknown")
+    assert unknown_row.action == "preserved"
+    assert unknown_row.old_file == source_a
+    assert unknown_row.destination_keys == ("general", "ext", "unknown")
     assert (source_a.read_bytes(), source_b.read_bytes()) == before
     entry.setup.C1.frequency = 77.0
     assert entry.use_point("context_a").C1.frequency == 12.5
