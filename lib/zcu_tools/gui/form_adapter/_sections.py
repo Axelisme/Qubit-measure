@@ -419,23 +419,7 @@ class Section:
         if get_origin(info.annotation) is list:
             element_type = get_args(info.annotation)[0]
             if isinstance(element_type, type) and issubclass(element_type, ConfigBase):
-                child = Section(element_type, {}, (*self.path, name))
-                self.lists[name] = child
-                if node is not None:
-                    if not isinstance(node, list) or any(
-                        not isinstance(item, Mapping) for item in node
-                    ):
-                        raise TypeError(
-                            f"{(*self.path, name)!r}: expected a list of element trees"
-                        )
-                    for index, item in enumerate(node):
-                        _check_position_seed(item, (*self.path, name, index))
-                    self.element_seeds[name] = tuple(
-                        Section(element_type, item, (*self.path, name))
-                        for item in node
-                        if isinstance(item, Mapping)
-                    )
-                return list[child.model]
+                return self._model_list_annotation(name, element_type, node)
         child_core = _section_type(info.annotation)
         if child_core is None:
             return info.annotation
@@ -447,6 +431,39 @@ class Section:
             if type(None) in _members(info.annotation)
             else child.model
         )
+
+    def _model_list_annotation(
+        self, name: str, element_type: type[ConfigBase], node: FormNode
+    ) -> object:
+        """Build the runtime list annotation for the native model field ``name``.
+
+        ``element_type`` is the ConfigBase subclass shared by all elements.
+        ``node`` is None or a list of per-position mapping trees. Register the
+        shared child in ``self.lists`` before validating position trees, then
+        register their Sections in ``self.element_seeds`` when node is supplied.
+        Position values never change the shared element declaration.
+
+        Return list[child.model] as a runtime annotation. Reject malformed trees
+        with TypeError and declaration-changing position seeds with ValueError;
+        indexed rejection paths and child Section errors propagate unchanged.
+        """
+        child = Section(element_type, {}, (*self.path, name))
+        self.lists[name] = child
+        if node is not None:
+            if not isinstance(node, list) or any(
+                not isinstance(item, Mapping) for item in node
+            ):
+                raise TypeError(
+                    f"{(*self.path, name)!r}: expected a list of element trees"
+                )
+            for index, item in enumerate(node):
+                _check_position_seed(item, (*self.path, name, index))
+            self.element_seeds[name] = tuple(
+                Section(element_type, item, (*self.path, name))
+                for item in node
+                if isinstance(item, Mapping)
+            )
+        return list[child.model]
 
     def _sweep_defaults(self) -> dict[str, JsonValue]:
         """Select Range + Expts for fresh, otherwise unauthored sweep fields."""
