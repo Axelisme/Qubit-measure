@@ -21,6 +21,8 @@ from zcu_tools.resources.entry import ArtifactKey, Output, ResultEntry, SaveLayo
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     AnalysisSavingAdapter,
@@ -252,6 +254,57 @@ def test_native_save_completion_uses_summary(saving_view) -> None:
         )
     )
     assert window.get_view_snapshot()["status"] == message
+
+
+def test_save_all_disables_until_analysis_is_run_again(
+    saving_view, tmp_path: Path
+) -> None:
+    _, _, window, _, _ = saving_view
+    driver = ComponentDriver(window)
+    images = tmp_path / "save-availability"
+    driver.select_tab("Data")
+    driver.screenshot(images / "01-unsaved-data.png")
+    assert driver.observe("Save All").enabled
+    assert driver.observe("Save").enabled
+
+    driver.click("Save All")
+    driver.screenshot(images / "02-all-saved.png")
+    assert "Saved 2 files" in driver.status().message
+    assert not driver.observe("Save All").enabled
+    assert not driver.observe("Save").enabled
+
+    driver.select_tab("Analysis")
+    driver.screenshot(images / "03-analysis.png")
+    driver.click("Analyze")
+    qt_until(lambda: driver.observe("Analyze").enabled, label="analysis finished")
+    driver.screenshot(images / "04-analysis-finished.png")
+    driver.select_tab("Data")
+    qt_until(
+        lambda: any(w.text == "Analysis results" for w in driver.visible().widgets),
+        label="analysis artifact displayed",
+    )
+    driver.screenshot(images / "05-unsaved-analysis.png")
+    assert driver.observe("Save All").enabled
+    saves = [w for w in driver.visible().widgets if w.text == "Save"]
+    assert len(saves) == 2 and all(w.enabled for w in saves)
+
+    driver.click("Save All")
+    driver.screenshot(images / "06-analysis-saved.png")
+    assert not driver.observe("Save All").enabled
+    saves = [w for w in driver.visible().widgets if w.text == "Save"]
+    assert len(saves) == 2 and all(not w.enabled for w in saves)
+
+    driver.select_tab("Analysis")
+    driver.screenshot(images / "07-analysis-again.png")
+    driver.click("Analyze")
+    qt_until(lambda: driver.observe("Analyze").enabled, label="reanalysis finished")
+    driver.screenshot(images / "08-reanalysis-finished.png")
+    driver.select_tab("Data")
+    driver.screenshot(images / "09-reanalysis-unsaved.png")
+    assert driver.observe("Save All").enabled
+    assert any(w.text == "NOT SAVED" for w in driver.visible().widgets)
+    saves = [w for w in driver.visible().widgets if w.text == "Save"]
+    assert len(saves) == 2 and all(w.enabled for w in saves)
 
 
 def test_hint_tracks_declared_support_not_current_outputs(saving_view) -> None:
