@@ -63,6 +63,7 @@ from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.gui.session.ui.soc_dialog import SocDialog
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
 from zcu_tools.plotting.plots import Plots
@@ -176,6 +177,7 @@ class WorkflowWindow[C](QWidget):
             (self._controls.resume, self._resume_clicked),
             (self._controls.stop, self._stop_clicked),
             (self._controls.setup, self.open_setup),
+            (self._controls.soc, self.open_soc),
             (self._controls.devices, self.open_devices),
             (self._controls.inspect, self.open_inspect),
             (self._controls.prepare, self._use_source_clicked),
@@ -185,12 +187,14 @@ class WorkflowWindow[C](QWidget):
         self._run_view = WorkflowRunView(
             self._controls, self.controller, self._forms, self
         )
-        self._sync_run_locked_controls()
         self._figure_views = WorkflowFigureViews(self._figure_area)
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
         self.setup_dialog.finished.connect(self._session.refresh)
+        self.soc_dialog = SocDialog(self._services.soc_control, self)
+        self._sync_run_locked_controls()
 
     setup_dialog: SetupDialog
+    soc_dialog: SocDialog
 
     def open_setup(self) -> None:
         """Show the same retained shared Setup non-modally on the GUI owner.
@@ -202,6 +206,17 @@ class WorkflowWindow[C](QWidget):
         self.setup_dialog.show()
         self.setup_dialog.raise_()
         self.setup_dialog.activateWindow()
+
+    def open_soc(self) -> None:
+        """Show the retained non-modal SoC connection/configuration dialog.
+
+        Reopening prefills cached connection inputs. The host keeps submissions
+        read-only while a run holds the session; configuration browsing and
+        Close remain available.
+        """
+        self.soc_dialog.show()
+        self.soc_dialog.raise_()
+        self.soc_dialog.activateWindow()
 
     def open_devices(self) -> None:
         """Open the shared Device dialog window-modally on the GUI owner.
@@ -269,10 +284,9 @@ class WorkflowWindow[C](QWidget):
         From Start until terminal delivery (pending, running, pausing, paused,
         stopping) the host rejects Prepare forms and Reload source, so both are
         disabled. The hardware gate rejects device changes; the host also locks
-        source edits through Inspect. Open Device, Inspect and ARB dialogs are
-        read-only. Reload also needs a loader and no restart-required reload
-        failure. Setup, Inspect and Devices stay enabled: Setup changes the
-        session, not the run's capture.
+        source edits through shared dialogs. Setup, SoC, Device, Inspect and ARB
+        dialogs are read-only, with their open buttons still enabled. Reload also
+        needs a loader and no restart-required reload failure.
         """
         locked = self._run_view.start_locked
         error = self._catalog_error
@@ -281,6 +295,8 @@ class WorkflowWindow[C](QWidget):
         self._controls.reload.setEnabled(
             not locked and self._loader is not None and not restart_required
         )
+        self.setup_dialog.set_read_only(read_only=locked)
+        self.soc_dialog.set_read_only(read_only=locked)
         for key in ("devices", "inspect", "arb"):
             dialog = self._dialogs.get(key)
             if isinstance(dialog, (DeviceDialog, InspectDialog, ArbWaveformDialog)):
@@ -984,6 +1000,7 @@ class WorkflowWindow[C](QWidget):
         if not self._shutdown_on_close(a0):
             return
         self.setup_dialog.close()
+        self.soc_dialog.close()
         for key in ("devices", "arb"):
             dialog = self._dialogs.get(key)
             if dialog is not None:

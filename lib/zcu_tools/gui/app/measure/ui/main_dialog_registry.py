@@ -42,7 +42,7 @@ class MainDialogRegistry:
     """Retain the named dialogs exposed through ``MainWindow``.
 
     Named windows are non-modal. The host pushes writability to new and retained
-    Setup, Inspect, Device and ARB windows; dialogs never observe authority.
+    Setup, SoC, Inspect, Device and ARB windows; dialogs never observe authority.
     """
 
     def __init__(
@@ -97,6 +97,12 @@ class MainDialogRegistry:
                 self._ctrl.setup_control,
                 parent=self._parent,
             )
+            dialog.set_read_only(read_only=not writable)
+            return dialog
+        if name is DialogName.SOC:
+            from zcu_tools.gui.session.ui.soc_dialog import SocDialog
+
+            dialog = SocDialog(self._ctrl.soc_control, parent=self._parent)
             dialog.set_read_only(read_only=not writable)
             return dialog
         if name is DialogName.DEVICE:
@@ -159,12 +165,20 @@ class MainDialogRegistry:
         from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
         from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
         from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+        from zcu_tools.gui.session.ui.soc_dialog import SocDialog
 
         self._writable = writable
         for name in tuple(self._dialog_names):
             dialog = self._dialog(name)
             if isinstance(
-                dialog, (SetupDialog, DeviceDialog, InspectDialog, ArbWaveformDialog)
+                dialog,
+                (
+                    SetupDialog,
+                    SocDialog,
+                    DeviceDialog,
+                    InspectDialog,
+                    ArbWaveformDialog,
+                ),
             ):
                 dialog.set_read_only(read_only=not writable)
 

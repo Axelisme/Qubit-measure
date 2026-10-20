@@ -1,11 +1,11 @@
-**Last updated:** 2026-10-20，Inspect general/ext、entry 資產與 point-local aliases
+**Last updated:** 2026-10-20，獨立 SoC dialog 與 Setup 版面
 
 # gui/session/ — 量測 session core
 
 `value_lookup.name_from_type()`是`int`/`float`/`str`/`bool` scalar type name的公開唯一owner；
 app保留帶領域context的錯誤文字與unsupported-target轉譯。
 
-measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。
+measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/soc/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。
 
 `ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟或建立 entry 只發布 metadata 和 point list，不自選 point。此時 readiness=EMPTY、parameters=None，但 entry metadata、point list 與 setup source binding 仍可讀。未開 entry 時 metadata 與 source binding 才是 None，point list 為空。SoC、device 與獨立 predictor 保留各自能力。明確選取或建立 point 後才發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
 
@@ -64,7 +64,7 @@ session/
 ├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。Alias 表可在未選 point 時編輯；set 只改 memory，Apply 要求並保存目前 point。
 ├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責
 ├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：entry-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
-├── setup_control.py    — SetupControlPort + SetupControlFacet：entry open/new、point use/new、cached setup preferences 與獨立 SoC commands；直接公開既有 devices facet 供 cached label 建議，不依賴 app Controller
+├── setup_control.py    — SetupControlPort／SetupControlFacet 擁有 entry open/new、point use/new 與 cached setup preferences，公開 devices facet 供 cached label 建議。SocControlPort／SocControlFacet 獨立提供連線、connection preferences、完成通知與 soccfg 查詢
 ├── controller_mixin.py — SessionControllerMixin：measure 的 session forwards；shared dialog 使用窄 control facet，entry open/new 直接交 SetupControlPort，不經 project identity 或 app Controller
 ├── expression.py       — simpleeval 共用求值引擎，封裝函式／算子白名單、AST／數值大小限制及固定 ParameterContext 查詢。裸 `$alias` 求值為名稱 str，不接受字串算術或插值。數值 `evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs，常數 pi/e；math 函式不自動轉 cmath。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。
 ├── value_lookup.py     — read-only value source lookup（`ValueLookup`/`ValueRegistry`/owner-scoped replace/unregister/`ValueRef` resolve-once helpers）；純 session leaf，provider 來源由 service binder 負責，使用端只見 lookup
@@ -93,7 +93,8 @@ session/
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件；高頻 render 只對變更過的 maximum/format/value 寫入 LightweightProgressBar；可注入 profiling callback 拆量 derive / value writes）
     ├── alias_panel.py — AliasPanel：Inspect 的 Aliases 頁。編輯有序 authored rows，透過 ContextControlPort 原子提交；唯讀解析欄投影已安裝的表。Load preset 選單列出 host 傳入的具名 preset，選一份整張取代草稿、不合併、不提交，Apply 才保存；None 表示無 catalog，選單停用。唯讀時同樣停用。只回報 Unsaved，不自己詢問
     ├── component_tree.py — ComponentTreeWidget：Field／Value／Unit／Metadata 四欄樹，Metadata 以單行 flow YAML 與多行 tooltip 顯示 caller 的 opaque mapping，不解讀 key；依 `component_field_specs` 列出全部欄位（未設定顯示 `(unset)`），Value 就地編輯；父欄位未設定時寫入最淺一層未設定祖先的巢狀 mapping。寫入走 owner，UI 不直接寫文件
-    ├── setup_dialog.py — Result entry、Working points 與 Connection 的 shared dialog。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。Clone from 的 `(empty)` 表示新 point 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體
+    ├── soc_dialog.py — SocDialog 以 SocControlPort 提供 IP、Port、Connect、連線狀態與 soccfg 瀏覽。每次顯示預填 connection preferences，SocChanged 更新連線狀態
+    ├── setup_dialog.py — SetupDialog 左欄為 Result entry 與 New working point，右欄為 Working points 清單。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。Clone from 的 `(empty)` 表示新 point 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體
     ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；專屬 panel 由 device adapter 建立並按需保留；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. Calibration displays actual MHz and clamped from the shared model result; it changes only dialog bias/cache, never a component. No Apply or session model. Device values and frequency expressions remain optional inputs.
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
@@ -102,7 +103,7 @@ session/
     └── arb_waveform_dialog.py — ArbWaveformDialog：arb 資產管理對話框，只收 ArbWaveformPort。Measure 經具名 `arb_waveform` dialog 開，workflows 直接開同一類別
 ```
 
-共用 Setup、Inspect、Devices 與 ARB 對話框由宿主呼叫 `set_read_only` 決定是否可編輯，不讀控制權或 run 狀態。Setup 唯讀時保留 point 選取、description、paths、查詢刷新與 Close，停用 entry／point 提交及 Connect。連線完成與事件刷新不會解除宿主的唯讀狀態。ARB 唯讀時停用編輯與 Save，保留鎖前草稿；asset 選取、Refresh、預覽與 Close 照常可用。解鎖後 Save 仍受驗證結果限制。Inspect 唯讀時「Arb Waveforms…」入口仍可按，ARB 依宿主規則以唯讀開啟。
+共用 Setup、SoC、Inspect、Devices 與 ARB 對話框由宿主呼叫 `set_read_only` 決定是否可編輯。Setup 唯讀時保留 point 選取、description、paths、查詢刷新與 Close，停用 entry／point 提交。SoC 唯讀時停用 IP、Port 與 Connect，保留 soccfg 瀏覽與 Close。宿主持有唯讀狀態，連線完成與事件刷新後仍維持鎖定。ARB 唯讀時停用編輯與 Save，保留鎖前草稿；asset 選取、Refresh、預覽與 Close 照常可用。解鎖後 Save 仍受驗證結果限制。Inspect 唯讀時「Arb Waveforms…」入口仍可按，ARB 依宿主規則以唯讀開啟。
 
 `SoCConnectionService.install_soc(soc, soccfg)` 可在 owner thread 替換 board/config，
 `uninstall_soc()` 發布空 pair。兩者走 SOC_CONNECT gate，Run 或 connect 中拒絕。
@@ -188,7 +189,7 @@ from these markers. The selected-device value poller keeps its independent lifet
   `ExclusionGate`、`BackgroundExecutor`、`ProgressHub` ports。
   `BackgroundExecutor` 只宣告 `submit`，`quiesce` 留在 concrete adapter。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure `RUN`）用 wire 字串比較，故兩 enum 同一 gate。共享硬體互斥規則住在 `RunBlocksHardwareGate`，app-local gate 只保留 RUN kind 與 import boundary。
-- **app 繼承/實作**：measure `State(SessionState)`；Controller 暴露 `setup_control: SetupControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。
+- **app 繼承/實作**：measure `State(SessionState)`；Controller 暴露 `setup_control: SetupControlPort` / `soc_control: SocControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。
 - **Inspect 元件樹**：`ComponentTreeWidget` 透過 context facet 讀取 point／setup 文件並提交元件與參數命令。獨立的 general/ext 分支顯示所選文件的擴充欄位與巢狀 mapping，不把 general 當成 component。可定址欄位沿用 Value 就地編輯與唯讀限制。`ContextService` 擁有驗證與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或 alias 表。共用 Inspect 的 Modules 以 library entry 表單編輯；子項 library key 保持 key，Apply 以一個 replace 寫 Name 與 Spec，被拒時保留 draft。Library structure change 使用開啟表單時的固定 capture，透過 ContextService 提交；Delete 先固定 capture 再確認。
 - **Entry binding**：GUI Setup 和 remote entry.new/open 使用同一個 ProjectSettingsService。EntryInfo 提供 UUID、任意目錄名稱與 result／database 絕對路徑。Open 只開既有 entry，New 明確建立。成功發布 entry metadata，不自選 point、不碰硬體。失敗保留舊 binding；New 已建資源而安裝失敗時保留 entry，以 Open 恢復，不重試 New
 - **Entry 與 point**：ResultEntry 擁有 entry roots、setup 與 points。ProjectSettingsService 只負責明確 open/new 與 preferences，ContextService 安裝 binding。Point 操作作用在目前 opened entry，不從 chip／qubit／resonator 推導身分
