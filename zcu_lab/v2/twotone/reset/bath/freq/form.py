@@ -19,9 +19,12 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
                     "bath_reset",
                     bindings={"qubit": "$qubit", "resonator": "$resonator"},
                     set={
+                        # Run replaces these scan coordinates; other reset inputs remain.
+                        "cavity_tone_cfg.freq": Hidden(0.0),
+                        "cavity_tone_cfg.gain": Hidden(0.0),
                         "pi2_cfg": Slot(
                             "$qubit.module.x90", copy=True, set={"phase": 90.0}
-                        )
+                        ),
                     },
                 ),
                 "readout": Slot("$qubit.module.readout")

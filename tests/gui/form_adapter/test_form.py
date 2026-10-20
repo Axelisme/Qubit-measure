@@ -186,6 +186,64 @@ def test_sweep_decimals_decorate_only_float_endpoints(authored: bool) -> None:
     assert fields["n"].decimals is None and fields["n"].title == "Expts"
 
 
+class ScanPulseCfg(ConfigBase):
+    """Run replaces frequency; gain remains an operator-owned required input."""
+
+    freq: float = Field(ge=0, allow_inf_nan=False)
+    gain: float
+
+
+class ScanCfg(ConfigBase):
+    """A synthetic nested cfg keeps hidden supply separate from user input."""
+
+    pulse: ScanPulseCfg
+    optional: float | None = 3.0
+
+
+def test_hidden_value_supplies_required_nested_cfg_without_user_input() -> None:
+    env = FormEnv()
+    form = form_adapter.Form(ScanCfg, {"pulse": {"freq": nodes.Hidden(0.0)}})
+    state = FormState(form.default_input(env))
+
+    assert [field.path for field in state.describe(("pulse",), env).children] == [
+        ("pulse", "gain")
+    ]
+    result = state.result(env)
+    assert isinstance(result, FormErrors)
+    assert result.messages == {("pulse", "gain"): "Field required"}
+
+    state.write({("pulse", "gain"): 0.25}, env)
+    assert form.to_cfg(require_result(state, env), env) == ScanCfg(
+        pulse=ScanPulseCfg(freq=0.0, gain=0.25)
+    )
+
+
+@pytest.mark.parametrize("value", [-1.0, float("nan"), "not a frequency"])
+def test_hidden_value_still_obeys_core_validation(value: float | str) -> None:
+    env = FormEnv()
+    form = form_adapter.Form(
+        ScanCfg, {"pulse": {"freq": nodes.Hidden(value), "gain": 0.25}}
+    )
+    result = form.to_cfg(require_result(FormState(form.default_input(env)), env), env)
+    assert isinstance(result, FormErrors)
+    assert ("pulse", "freq") in result.messages
+
+
+def test_hidden_explicit_none_overrides_core_default() -> None:
+    env = FormEnv()
+    form = form_adapter.Form(
+        ScanCfg,
+        {
+            "pulse": {"freq": nodes.Hidden(0.0), "gain": 0.25},
+            "optional": nodes.Hidden(None),
+        },
+    )
+    state = FormState(form.default_input(env))
+    assert form.to_cfg(require_result(state, env), env) == ScanCfg(
+        pulse=ScanPulseCfg(freq=0.0, gain=0.25), optional=None
+    )
+
+
 class DeviceCfg(ConfigBase):
     """Core device names remain independent of aliases and sessions."""
 

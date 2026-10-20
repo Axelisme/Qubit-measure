@@ -16,9 +16,12 @@ def make_form(ctx: FormContext) -> Form[TwotoneCfg]:
                 "flux_pulse": Template(
                     "flux_pulse",
                     bindings={"qubit": "$qubit"},
-                    set={"waveform.length": 1.0},
+                    # Run supplies flux gain, independent of probe frequency.
+                    set={"gain": Hidden(0.0), "waveform.length": 1.0},
                 ),
-                "qub_pulse": Template("qub_probe", bindings={"qubit": "$qubit"}),
+                "qub_pulse": Template(
+                    "qub_probe", bindings={"qubit": "$qubit"}, set={"freq": Hidden(0.0)}
+                ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),

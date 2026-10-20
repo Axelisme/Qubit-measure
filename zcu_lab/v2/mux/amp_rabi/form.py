@@ -1,5 +1,7 @@
 """Capture-owned native mux Form; the picker never selects participants."""
 
+from dataclasses import replace
+
 from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
@@ -18,14 +20,18 @@ def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
     apply to every branch. No native conversion or device access occurs.
     """
     names = captured_mux_names(ctx)
-    tones: list[FormNode] = [
-        {
-            "name": name,
-            "drive": amp_rabi_initial_pulse(ctx.parameters, qubit=name),
-            "sweep": Range.between(-0.3, 1.0, expts=51),
-        }
-        for name in names
-    ]
+    tones: list[FormNode] = []
+    for name in names:
+        drive = amp_rabi_initial_pulse(ctx.parameters, qubit=name)
+        # Run supplies each gain; retain independent shape admission.
+        drive = replace(drive, set={**drive.set, "gain": Hidden(0.0)})
+        tones.append(
+            {
+                "name": name,
+                "drive": drive,
+                "sweep": Range.between(-0.3, 1.0, expts=51),
+            }
+        )
     return Form(
         MuxAmpRabiCfg,
         tree={
