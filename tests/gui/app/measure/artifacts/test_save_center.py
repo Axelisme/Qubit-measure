@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.artifacts import (
     ArtifactDeclaration,
     ArtifactSaveCenter,
     ArtifactTracker,
+    SaveStatus,
 )
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
@@ -417,8 +418,12 @@ def test_output_failure_colour_follows_window_palette(
     )
 
 
-def test_whole_artifact_commands_include_json_only_and_saved_items(
-    qapp: QApplication, tmp_path: Path
+@pytest.mark.parametrize(
+    "changed_status",
+    [SaveStatus.NOT_SAVED, SaveStatus.PARTIALLY_SAVED, SaveStatus.UNSAVED_CHANGES],
+)
+def test_save_commands_disable_when_all_saved_and_reenable_for_any_unsaved_artifact(
+    qapp: QApplication, tmp_path: Path, changed_status: SaveStatus
 ) -> None:
     tracker, current = snapshot(tmp_path)
     tracker.apply_report(
@@ -444,18 +449,57 @@ def test_whole_artifact_commands_include_json_only_and_saved_items(
     try:
         center.update_interaction(current)
         assert not center.has_unsaved_data()
-        assert center.save_all_button.isEnabled()
+        assert not center.save_all_button.isEnabled()
         buttons = [
             button
             for button in center.findChildren(QPushButton)
             if button.text() == "Save"
         ]
         assert len(buttons) == 3
+        assert all(not button.isEnabled() for button in buttons)
+        for button in buttons:
+            button.click()
+        center.save_all_button.click()
+        assert selected == []
+        assert all_requests == []
+
+        analysis_section = current.artifacts[1]
+        changed = replace(
+            current,
+            artifacts=(
+                current.artifacts[0],
+                replace(
+                    analysis_section,
+                    artifacts=(
+                        replace(analysis_section.artifacts[0], status=changed_status),
+                    ),
+                ),
+                current.artifacts[2],
+            ),
+        )
+        center.update_interaction(changed)
+        assert center.save_all_button.isEnabled()
+        assert all(button.isEnabled() for button in buttons)
         for button in buttons:
             button.click()
         center.save_all_button.click()
         assert selected == list(_REFS)
         assert all_requests == [True]
+        assert changed.interaction is not None
+        for interaction in (
+            replace(changed.interaction, is_running=True),
+            replace(changed.interaction, is_analyzing=True),
+            replace(changed.interaction, has_active_context=False),
+        ):
+            center.update_interaction(replace(changed, interaction=interaction))
+            assert not center.save_all_button.isEnabled()
+            assert all(not button.isEnabled() for button in buttons)
+        center.update_interaction(changed, writable=False)
+        assert not center.save_all_button.isEnabled()
+        assert all(not button.isEnabled() for button in buttons)
+        center.update_interaction(current)
+        assert not center.save_all_button.isEnabled()
+        assert all(not button.isEnabled() for button in buttons)
         center.update_interaction(replace(current, artifacts=()))
         qapp.processEvents()
         assert not center.save_all_button.isEnabled()
