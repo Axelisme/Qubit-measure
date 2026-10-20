@@ -1,6 +1,7 @@
 """Single synchronous simulation entry ahead of the original acquisition mixins."""
 
-from inspect import signature
+from collections.abc import Callable
+from inspect import Signature, signature
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -15,6 +16,10 @@ from .soc import SimulationSoc
 
 if TYPE_CHECKING:
     from ..modular import ModularProgramV2
+
+
+# One unbound callable and its metadata, never an acquiring program instance.
+_acquire_signature: tuple[Callable[..., object], Signature] | None = None
 
 
 class SimulationAcquireMixin(ImproveAcquireMixin):
@@ -33,7 +38,13 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             return super()._acquire_configured(soc, *args, **kwargs)
         # Bind against QICK so its positional API and invalid-argument errors
         # remain intact; processing modifiers have already populated extra_args.
-        bound = signature(AcquireMixin.acquire).bind(self, soc, *args, **kwargs)
+        global _acquire_signature
+        acquire = AcquireMixin.acquire
+        cached = _acquire_signature
+        if cached is None or cached[0] is not acquire:
+            cached = (acquire, signature(acquire))
+            _acquire_signature = cached
+        bound = cached[1].bind(self, soc, *args, **kwargs)
         options = dict(bound.arguments)
         del options["self"], options["soc"]
         return self._acquire_integrated(soc, **options)
@@ -66,9 +77,12 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         self._simulation_raw = None
         self.rounds_buf = []
         self.stats = []
-        self._program().config_all(
-            soc, load_envelopes=options.get("load_envelopes", True), load_mem=False
-        )
+        program = self._program()
+        # QICK compiles before loading envelopes. Simulation consumes the same
+        # compiled buffers directly and has no DAC/weight transport to upload.
+        program.config_all(soc, load_envelopes=False, load_mem=False)
+        if options.get("load_envelopes", True):
+            self._validate_simulation_uploads()
         self.rounds_pbar = make_pbar(
             total=rounds, disable=not options.get("progress", True), leave=False
         )
@@ -82,6 +96,21 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             return result
         finally:
             self._close_rounds_pbar()
+
+    def _validate_simulation_uploads(self) -> None:
+        program = self._program()
+        for envelopes in program.envelopes:
+            contents = envelopes["envs"]
+            if not isinstance(contents, dict):
+                raise ValueError("compiled generator envelope table is missing")
+            for pulse in contents.values():
+                if pulse["data"].dtype != np.int16:
+                    raise AssertionError("envelope data must have dtype int16")
+        for channel, config in program.ro_chs.items():
+            if program.soccfg["readouts"][channel]["has_weights"]:
+                weights = config["weights"]
+                if weights is not None and weights.dtype != np.int16:
+                    raise AssertionError("readout weights must have dtype int16")
 
     def prepare_round(self) -> None:
         """Prepare simulated integrated rounds without QICK's raw-buffer clearing.

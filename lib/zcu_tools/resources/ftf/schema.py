@@ -6,6 +6,7 @@ and nonfinite numbers fail at this boundary; no expressions or QICK dicts.
 """
 
 from collections.abc import Mapping
+from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Generic, Literal, Self, TypeVar
 
@@ -402,15 +403,32 @@ class Truncation(Values):
         return self
 
 
+class TelemetrySettings(Values):
+    """Local routing logging policy, separate from numerical accuracy.
+
+    enabled: write one acquire summary, default True. directory: optional output
+    path; None uses project-root .sim_telemetry. Relative paths resolve against
+    the working directory when the environment is built. No I/O occurs here.
+    """
+
+    enabled: bool = True
+    directory: Path | None = None
+
+
 class Numerics(Values):
     """truncation: basis sizes; solver: accuracy; seed: nonnegative root RNG seed.
 
     Omitted/None seed generates once at environment startup, not once per round.
+    min_round_duration_s: finite nonnegative wall-time floor per successful binding
+    round, in seconds. Default 0.2 gives live plotting time; zero disables pacing.
+    telemetry: local acquire-summary policy; omitted settings enable logging.
     """
 
     truncation: Truncation
     solver: Solver
     seed: Index | None = None
+    min_round_duration_s: Nonnegative = 0.2
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
 
 
 class FTFSettings(Values):
@@ -435,6 +453,26 @@ class FTFSettings(Values):
     )
     readout: Readout
     numerics: Numerics
+
+    def with_telemetry(self, *, enabled: bool, directory: Path | None = None) -> Self:
+        """Return a detached settings copy with an explicit local logging policy.
+
+        enabled=False disables all routing timers and I/O for profiles/benchmarks.
+        directory optionally overrides the output path; None preserves the current
+        directory. Does not mutate this settings value, perform I/O or change
+        numerical accuracy, round pacing or RNG settings.
+        """
+        telemetry = TelemetrySettings(
+            enabled=enabled,
+            directory=self.numerics.telemetry.directory
+            if directory is None
+            else directory,
+        )
+        return self.model_copy(
+            update={
+                "numerics": self.numerics.model_copy(update={"telemetry": telemetry})
+            }
+        )
 
     @field_validator("version", mode="before")
     @classmethod

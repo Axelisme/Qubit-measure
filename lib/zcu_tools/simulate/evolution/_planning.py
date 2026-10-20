@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
+from numba import njit
 from numpy.typing import NDArray
 
 from .engine import DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
@@ -13,13 +14,13 @@ from .secular import FluxWaveform, ModelSource
 
 @dataclass(frozen=True)
 class Geometry:
-    """Segmented acquire supplied to the legacy provider and engine scheduler.
+    """Segmented acquire supplied to dispatch and the engine scheduler.
 
     table contains global rows and optional engine-computed prefix certificates.
     points maps timeline indices to unique caller point IDs.
-    flux_drive is a bool vector per global row, True for continuous flux motion.
+    flux_drive marks driven rows with continuous motion or quantized flux changes.
     prefix_paths maps computed prefix IDs to diagnostics adopted by timelines.
-    segment(source, batches) constructs geometry without evolving a density.
+    plan(source, batches) constructs geometry without evolving a density.
     """
 
     table: SegmentTable
@@ -57,7 +58,11 @@ def _events(timeline, time):
     return result
 
 
-def _plateaus(envelope: EnvelopeSpec, duration: float):
+type _Plateaus = tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+type _PlateauCache = dict[tuple[str, float], _Plateaus]
+
+
+def _plateaus(envelope: EnvelopeSpec, duration: float) -> _Plateaus:
     """Return maximal equal-sample runs, including final-sample hold."""
     times = np.r_[envelope.sample_ns, max(duration, envelope.sample_ns[-1])]
     same = np.r_[envelope.samples[1:] == envelope.samples[:-1], True]
@@ -95,7 +100,7 @@ class _TrackGeometry:
     plateaus: tuple[tuple[_Support, complex], ...]
 
 
-def _track_geometry(track: DriveTrack) -> _TrackGeometry:
+def _track_geometry(track: DriveTrack, plateau_cache: _PlateauCache) -> _TrackGeometry:
     active = track.active & (track.duration_ns > 0) & (track.amplitude != 0)
     pulse = _Support(active, track.start_ns, track.start_ns + track.duration_ns)
     plateaus = []
@@ -103,9 +108,12 @@ def _track_geometry(track: DriveTrack) -> _TrackGeometry:
         selected = active & (track.envelope_index == index)
         if envelope.kind != "sampled" or not selected.any():
             continue
-        starts, ends, values = _plateaus(
-            envelope, float(track.duration_ns[selected].max())
-        )
+        maximum = float(track.duration_ns[selected].max())
+        # Final-sample hold makes run lengths depend on playback duration too.
+        key = (envelope.identity, maximum)
+        if key not in plateau_cache:
+            plateau_cache[key] = _plateaus(envelope, maximum)
+        starts, ends, values = plateau_cache[key]
         for a, b, value in zip(starts, ends, values, strict=True):
             clipped_end = np.minimum(b, track.duration_ns)
             support = _Support(
@@ -142,44 +150,117 @@ def _boundaries(batch: TimelineBatch, tracks: Sequence[_TrackGeometry]):
     return merged[:-1][valid], merged[1:]["time"][valid], flux_point
 
 
+def _active_level_ports(
+    source: ModelSource, level: NDArray[np.int64], active: NDArray[np.bool_]
+) -> tuple[NDArray[np.int64], list[dict[str, int]]]:
+    """Index each driven row's level and its model-local port names once."""
+    level_index = np.full(len(level), -1, dtype=np.int64)
+    ports = []
+    if active.any():
+        levels, level_index[active] = np.unique(
+            level[active], axis=0, return_inverse=True
+        )
+        for lev in levels:
+            model = source.model(tuple(int(v) for v in lev))
+            ports.append(
+                {drive.name: index for index, drive in enumerate(model.drives)}
+            )
+    return level_index, ports
+
+
+@njit(cache=True)
+def _support_rows(active, support_start, support_end, row_offsets, start, end):
+    """Index half-open support in sorted per-point rows, retaining whole rows.
+
+    Pulse/plateau endpoints already split the table. Binary searches avoid a
+    full row-array scan for every historical pulse. Empty point spans and
+    support beyond readout contribute no rows.
+    """
+    first = np.zeros(len(active), dtype=np.int64)
+    last = np.zeros(len(active), dtype=np.int64)
+    count = 0
+    for point in range(len(active)):
+        if not active[point]:
+            continue
+        base, stop = row_offsets[point], row_offsets[point + 1]
+        times = start[base:stop]
+        a = base + np.searchsorted(times, support_start[point])
+        b = base + np.searchsorted(times, support_end[point])
+        if b > a and end[b - 1] > support_end[point]:
+            b -= 1
+        first[point], last[point] = a, b
+        count += b - a
+    chosen = np.empty(count, dtype=np.int64)
+    offset = 0
+    for point in range(len(active)):
+        for row in range(first[point], last[point]):
+            chosen[offset] = row
+            offset += 1
+    return chosen
+
+
 def _tone_columns(batch, tracks, table, source, flux_point):
-    """Populate per-slot columns, fold plateau phase, and detect flux overlap."""
+    """Write only playing tones, in track order, folding phase and flux flags."""
     point, start, end, level = table
-    width, rows = len(batch.tracks), len(point)
-    playing = np.zeros((rows, width), dtype=bool)
+    rows = len(point)
+    row_offsets = np.r_[0, np.cumsum(np.bincount(point, minlength=len(batch.points)))]
+    track_rows = tuple(
+        _support_rows(
+            geometry.pulse.active,
+            geometry.pulse.start,
+            geometry.pulse.end,
+            row_offsets,
+            start,
+            end,
+        )
+        for geometry in tracks
+    )
+    counts = np.zeros(rows, dtype=np.int64)
+    for chosen in track_rows:
+        counts[chosen] += 1
+    width = int(counts.max(initial=0))
     port = np.full((rows, width), -1, dtype=np.int64)
     frequency, amplitude, theta, offset = (np.zeros((rows, width)) for _ in range(4))
     env_index = np.full((rows, width), -1, dtype=np.int64)
-    envelopes: list[EnvelopeSpec] = [EnvelopeSpec("constant")]
+    used = np.zeros(rows, dtype=np.int64)
+    envelopes = [EnvelopeSpec("constant")]
     flux_drive = np.zeros(rows, dtype=bool)
-    # Lattice events also route varying drives when continuous samples are absent.
     change = np.ones(len(flux_point), dtype=bool)
     change[1:] = (flux_point[1:] == flux_point[:-1]) & np.any(
         batch.flux.level[1:] != batch.flux.level[:-1], axis=1
     )
     change[batch.flux.offsets[:-1]] = False
-    for slot, (track, geometry) in enumerate(zip(batch.tracks, tracks, strict=True)):
-        local = start - track.start_ns[point]
-        active = geometry.pulse.contains(point, start, end)
-        playing[:, slot] = active
-        frequency[:, slot] = track.frequency_ghz[point]
-        amplitude[:, slot] = track.amplitude[point]
-        theta[:, slot] = 2 * np.pi * frequency[:, slot] * start + track.phase_rad[point]
-        offset[:, slot] = np.maximum(local, 0)
+    level_index, ports = _active_level_ports(source, level, counts > 0)
+    for track, geometry, chosen in zip(batch.tracks, tracks, track_rows, strict=True):
+        if not len(chosen):
+            continue
+        slot = used[chosen]
+        used[chosen] += 1
+        frequency[chosen, slot] = track.frequency_ghz[point[chosen]]
+        amplitude[chosen, slot] = track.amplitude[point[chosen]]
+        theta[chosen, slot] = (
+            2 * np.pi * frequency[chosen, slot] * start[chosen]
+            + track.phase_rad[point[chosen]]
+        )
+        offset[chosen, slot] = np.maximum(
+            start[chosen] - track.start_ns[point[chosen]], 0
+        )
         base = len(envelopes)
         envelopes.extend(track.envelopes)
-        env_index[active, slot] = base + track.envelope_index[point[active]]
+        env_index[chosen, slot] = base + track.envelope_index[point[chosen]]
         for support, value in geometry.plateaus:
-            flat = active & support.contains(point, start, end)
-            env_index[flat, slot] = 0
-            amplitude[flat, slot] *= abs(value)
-            theta[flat, slot] += np.angle(value)
-            offset[flat, slot] = 0
-        for lev in np.unique(level[active], axis=0):
-            mask = active & np.all(level == lev, axis=1)
-            model = source.model(tuple(int(v) for v in lev))
-            names = [drive.name for drive in model.drives]
-            port[mask, slot] = names.index(track.port)
+            flat = support.contains(point[chosen], start[chosen], end[chosen])
+            rr, cc = chosen[flat], slot[flat]
+            env_index[rr, cc] = 0
+            amplitude[rr, cc] *= abs(value)
+            theta[rr, cc] += np.angle(value)
+            offset[rr, cc] = 0
+        for index, lookup in enumerate(ports):
+            same = level_index[chosen] == index
+            if same.any():
+                if track.port not in lookup:
+                    raise ValueError(f"{track.port!r} is not in list")
+                port[chosen[same], slot[same]] = lookup[track.port]
         changed_points = np.zeros(len(batch.points), dtype=bool)
         times = batch.flux.start_ns
         inside = (
@@ -189,18 +270,13 @@ def _tone_columns(batch, tracks, table, source, flux_point):
             & (times < batch.end_ns[flux_point])
         )
         np.logical_or.at(changed_points, flux_point, inside)
-        flux_drive |= active & changed_points[point]
-    # Pack active slots to the left; padding has finite ignored values.
-    order = np.argsort(~playing, axis=1, kind="stable")
-    packed = (
-        np.take_along_axis(port, order, axis=1),
-        np.take_along_axis(frequency, order, axis=1),
-        np.take_along_axis(amplitude, order, axis=1),
-        np.take_along_axis(theta, order, axis=1),
-        np.take_along_axis(env_index, order, axis=1),
-        np.take_along_axis(offset, order, axis=1),
+        flux_drive[chosen] |= changed_points[point[chosen]]
+    return (
+        counts,
+        (port, frequency, amplitude, theta, env_index, offset),
+        tuple(envelopes),
+        flux_drive,
     )
-    return playing.sum(axis=1).astype(np.int64), packed, tuple(envelopes), flux_drive
 
 
 def _waveform_varies(batch: TimelineBatch, point, start, end):
@@ -231,8 +307,10 @@ def _waveform_varies(batch: TimelineBatch, point, start, end):
     return count[last] > count[first]
 
 
-def _batch_geometry(batch: TimelineBatch, source: ModelSource) -> Geometry:
-    tracks = tuple(_track_geometry(track) for track in batch.tracks)
+def _batch_geometry(
+    batch: TimelineBatch, source: ModelSource, plateau_cache: _PlateauCache
+) -> Geometry:
+    tracks = tuple(_track_geometry(track, plateau_cache) for track in batch.tracks)
     events, end, flux_point = _boundaries(batch, tracks)
     point, start = events["timeline"], events["time"]
     duration = end - start
@@ -264,7 +342,8 @@ def _batch_geometry(batch: TimelineBatch, source: ModelSource) -> Geometry:
 
 def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
     """Segment templates with array event sorting; assign global timeline indices."""
-    geometries = [_batch_geometry(batch, source) for batch in batches]
+    plateau_cache: _PlateauCache = {}
+    geometries = [_batch_geometry(batch, source, plateau_cache) for batch in batches]
     points = np.concatenate([g.points for g in geometries])
     if len(np.unique(points)) != len(points):
         raise ValueError("point indices must be unique across batches")
@@ -284,9 +363,16 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
         )
     }
     envelopes: list[EnvelopeSpec] = []
+    envelope_ids: dict[str, int] = {}
     timeline_base = 0
     for geometry in geometries:
         table = geometry.table
+        remap = np.empty(len(table.envelopes), dtype=np.int64)
+        for index, envelope in enumerate(table.envelopes):
+            if envelope.identity not in envelope_ids:
+                envelope_ids[envelope.identity] = len(envelopes)
+                envelopes.append(envelope)
+            remap[index] = envelope_ids[envelope.identity]
         for name in columns:
             column = getattr(table, name)
             if name == "timeline":
@@ -294,13 +380,12 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
             if name.startswith("tone_"):
                 pad = -1 if name in ("tone_port", "tone_envelope") else 0
                 if name == "tone_envelope":
-                    column = np.where(column >= 0, column + len(envelopes), -1)
+                    column = np.where(column >= 0, remap[np.maximum(column, 0)], -1)
                 column = np.pad(
                     column, ((0, 0), (0, width - column.shape[1])), constant_values=pad
                 )
             columns[name].append(column)
         timeline_base += len(geometry.points)
-        envelopes.extend(table.envelopes)
     waveform = _combine_waveforms(batches)
     combined = SegmentTable(
         timeline=np.concatenate(columns["timeline"]),

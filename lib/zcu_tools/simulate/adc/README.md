@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-19, bounded physical solver and exact response ownership
+**Last updated:** 2026-10-19, immutable integrated sampling plans and bounded response ownership
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -129,3 +129,12 @@ then add independent receiver noise. The integrated sampler also accounts for
 nearest-even shot rounding variance. These are conditional moments, not random
 jump trajectories. QICK buffer layout and acquisition averaging belong to the
 program adapter.
+
+`PreparedStatistics(populations, channels, reps=...)` validates and owns immutable
+integrated sampling inputs. It expands conditional means and factors each ADC's
+noise covariance once. `draw(seed=..., acquire_sequence=..., round_index=...)`
+validates a fresh identity, draws the same joint multinomial and ADC-ordered
+Gaussian arrays as `round_statistics`, and retains no noisy results or identities.
+The public `round_statistics` still validates arbitrary inputs by building a plan
+for that call. FTF retains plans with noiseless preparations; no RNG draws or
+deferred raw materialization move into preparation.

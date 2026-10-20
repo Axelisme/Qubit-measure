@@ -17,10 +17,200 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     SecularModel,
 )
+from zcu_tools.simulate.evolution.cache import RESIDENT_METADATA_BYTES
 from zcu_tools.simulate.evolution.kernel import ApplyContext, GuardResult, KernelContext
 
 from ._engine import Payload, RecordingKernel, batch, run, source, track
 from .contract.kernel_suite import synthetic_model
+
+
+def test_geometry_preserves_track_order_mux_plateaus_and_flux_levels():
+    from zcu_tools.simulate.evolution.kernels import REGISTRY
+
+    base = synthetic_model()
+    model = replace(base, drives=(base.drives[0], replace(base.drives[0], name="mux")))
+    src = ModelSource(
+        source().initial_density, lambda level: replace(model, level=level)
+    )
+    env = EnvelopeSpec(
+        "sampled", np.array([0, 1j, 1j, 0], complex), np.array([0.0, 2.0, 12.0, 14.0])
+    )
+    pulse = replace(track(1, env, duration=20), frequency_ghz=np.array([-0.1]))
+    mux = replace(
+        track(1, EnvelopeSpec("constant"), start=4, duration=12),
+        port="mux",
+        phase_rad=np.array([0.7]),
+    )
+    silent = replace(track(1, env, start=1, duration=22), amplitude=np.zeros(1))
+    timeline = replace(
+        batch(1, duration=24),
+        tracks=(pulse, silent, mux),
+        flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 8.0]), np.array([[0], [1]])),
+    )
+    kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
+    result = run(Engine(1, 0, kernels=kernels), src, (timeline,))
+    observations = {
+        float(table.start_ns[row]): (table, int(row), kernel.name)
+        for kernel in kernels
+        for table, rows, _ in kernel.calls
+        for row in rows
+    }
+    assert sorted(observations) == [0.0, 2.0, 4.0, 8.0, 12.0, 16.0, 20.0]
+    for start, (table, row, family) in observations.items():
+        count = (start < 20) + (4 <= start < 16)
+        assert table.tones[row] == count
+        assert table.level[row].tolist() == [int(start >= 8)]
+        assert family == ("flux_dop853" if count else "t4")
+        if count:
+            assert table.tone_port[row, :count].tolist() == (
+                [0, 1] if count == 2 else [0]
+            )
+            flat = 2 <= start < 12
+            assert table.envelopes[table.tone_envelope[row, 0]].kind == (
+                "constant" if flat else "sampled"
+            )
+            assert table.tone_envelope_offset_ns[row, 0] == (0 if flat else start)
+            assert table.tone_theta_rad[row, 0] == (
+                2 * np.pi * -0.1 * start + (np.pi / 2 if flat else 0)
+            )
+            if count == 2:
+                assert table.tone_envelope_offset_ns[row, 1] == start - 4
+                assert table.tone_theta_rad[row, 1] == 2 * np.pi * 0.1 * start + 0.7
+    np.testing.assert_array_equal(result.densities[0], src.initial_density)
+
+
+@pytest.mark.parametrize(
+    ("times", "values"),
+    [
+        ([0.0, 10.0, 30.0, 240.0], [0.0, 1j, 1j, 0.3j]),
+        ([0.0, 12.0, 32.0, 240.0], [0.0, 1j, 1j, 0.3j]),
+        ([0.0, 10.0, 30.0, 240.0], [0.0, 1j, 1j, 0.4j]),
+    ],
+)
+def test_equal_waveform_copies_keep_physical_rows_across_batches(times, values):
+    from zcu_tools.simulate.evolution.kernels import REGISTRY
+
+    base = synthetic_model()
+    drives = (base.drives[0], replace(base.drives[0], name="mux"))
+
+    def model(level):
+        return replace(
+            base, level=level, drives=drives if level == (0,) else drives[::-1]
+        )
+
+    src = ModelSource(source().initial_density, model)
+    batches = []
+    for point, duration in enumerate((254.0, 256.0, 254.0, 256.0)):
+        # Equal content is deliberately reconstructed as a distinct record.
+        env = EnvelopeSpec("sampled", np.array(values), np.array(times))
+        batches.append(
+            replace(
+                batch(1, duration=duration),
+                points=np.array([point]),
+                flux=FluxSchedule(
+                    np.array([0, 2]),
+                    np.array([0.0, 100.0]),
+                    np.array([[0], [1]]),
+                ),
+                tracks=(
+                    replace(
+                        track(1, env, duration=duration),
+                        phase_rad=np.array([point * 0.13]),
+                    ),
+                    replace(
+                        track(1, env, duration=duration),
+                        port="absent",
+                        active=np.array([False]),
+                    ),
+                    replace(
+                        track(1, EnvelopeSpec("constant"), start=4, duration=238),
+                        port="mux",
+                    ),
+                ),
+            )
+        )
+    kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
+    result = run(Engine(1, 0, kernels=kernels), src, tuple(batches))
+    observations = {
+        (int(table.timeline[row]), float(table.start_ns[row])): (table, int(row))
+        for kernel in kernels
+        for table, rows, _ in kernel.calls
+        for row in rows
+    }
+    for point, duration in enumerate((254.0, 256.0, 254.0, 256.0)):
+        boundaries = [0.0, 4.0, times[1], times[2], 100.0, 240.0, 242.0, duration]
+        assert (
+            sorted(start for p, start in observations if p == point) == boundaries[:-1]
+        )
+        for start, end in zip(boundaries[:-1], boundaries[1:], strict=True):
+            table, row = observations[point, start]
+            assert table.duration_ns[row] == end - start
+            count = 1 + (4 <= start < 242)
+            level = int(start >= 100)
+            assert table.level[row].tolist() == [level]
+            assert table.tones[row] == count
+            assert (
+                table.tone_port[row, :count].tolist()
+                == ([0, 1] if not level else [1, 0])[:count]
+            )
+            physical = table.envelopes[table.tone_envelope[row, 0]]
+            flat = times[1] <= start < times[2] or start >= 240
+            assert physical.kind == ("constant" if flat else "sampled")
+            if flat:
+                value = values[-1] if start >= 240 else 1j
+                assert table.tone_amplitude[row, 0] == abs(value)
+                assert table.tone_envelope_offset_ns[row, 0] == 0
+                assert table.tone_theta_rad[
+                    row, 0
+                ] == 2 * np.pi * 0.1 * start + point * 0.13 + np.angle(value)
+            else:
+                np.testing.assert_array_equal(physical.samples, values)
+                np.testing.assert_array_equal(physical.sample_ns, times)
+                assert table.tone_envelope_offset_ns[row, 0] == start
+    np.testing.assert_array_equal(result.points, np.arange(4))
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], 4, axis=0)
+    )
+
+
+def test_waveform_time_and_complex_samples_remain_distinct_in_one_acquire():
+    envelopes = (
+        EnvelopeSpec("sampled", np.array([0.2, 1j]), np.array([0.0, 2.0])),
+        EnvelopeSpec("sampled", np.array([0.2, 1j]), np.array([0.0, 3.0])),
+        EnvelopeSpec("sampled", np.array([0.2, -1j]), np.array([0.0, 2.0])),
+    )
+    timelines = tuple(
+        replace(
+            batch(1),
+            points=np.array([point]),
+            tracks=(track(1, env),),
+        )
+        for point, env in enumerate(envelopes)
+    )
+    direct = RecordingKernel("dop853")
+    src = source()
+    result = run(Engine(1, 0, kernels=(direct,)), src, timelines)
+    for table, rows, _ in direct.calls:
+        for row in rows:
+            expected = envelopes[table.timeline[row]]
+            physical = table.envelopes[table.tone_envelope[row, 0]]
+            np.testing.assert_array_equal(physical.samples, expected.samples)
+            np.testing.assert_array_equal(physical.sample_ns, expected.sample_ns)
+    np.testing.assert_array_equal(
+        result.densities, np.repeat(src.initial_density[None], 3, axis=0)
+    )
+
+
+def test_active_unknown_port_raises_value_error():
+    timeline = replace(
+        batch(1),
+        tracks=(replace(track(1, EnvelopeSpec("constant")), port="absent"),),
+    )
+    with (
+        closing(Engine(1, 0, kernels=(RecordingKernel("t6"),))) as engine,
+        pytest.raises(ValueError, match="absent"),
+    ):
+        engine.evolve(source(), (timeline,), cancel=Event())
 
 
 class TimelineKernel(RecordingKernel):
@@ -226,11 +416,13 @@ def test_plateau_support_uses_absolute_events(
     np.testing.assert_allclose(offsets, [0.0, plateau_end])
 
 
-@pytest.mark.parametrize("expected", ["dyson", "floquet_period", "t6"])
+@pytest.mark.parametrize(
+    "expected", ["dyson", "single_tone_rwa", "floquet_period", "t6"]
+)
 def test_constant_decision_order_and_sequence_middle(expected):
     from zcu_tools.simulate.evolution.kernels import REGISTRY
 
-    order = ["dyson", "floquet_period", "t6"]
+    order = ["dyson", "single_tone_rwa", "floquet_period", "t6"]
     kernels = tuple(
         RecordingKernel(
             kernel.name,
@@ -257,6 +449,10 @@ def test_constant_decision_order_and_sequence_middle(expected):
 def test_sideband_selective_constant_tone_uses_periodic_propagation(
     frequency, expected
 ):
+    from zcu_tools.simulate.evolution.kernels import REGISTRY
+
+    # Isolate periodic propagation from the constant single-tone RWA route.
+    kernels = tuple(k for k in REGISTRY if k.name != "single_tone_rwa")
     upper = np.diag([0.5, 0.35], 1).astype(complex)
     model = synthetic_model(3)
     model = replace(
@@ -280,7 +476,7 @@ def test_sideband_selective_constant_tone_uses_periodic_propagation(
         phase_rad=np.array([0.37]),
     )
     result = run(
-        Engine(1, 100000),
+        Engine(1, 100000, kernels=kernels),
         src,
         (replace(batch(1, duration=30.0), tracks=(pulse,)),),
     )
@@ -335,7 +531,8 @@ def test_missing_kernel_names_segment_and_flux_overlap():
 
 def test_shared_cache_namespace_budget_eviction_and_singletons():
     k = RecordingKernel("t4")
-    engine = Engine(1, 16, kernels=(k,))
+    # Include metadata for the intended resident working set.
+    engine = Engine(1, 16 + RESIDENT_METADATA_BYTES, kernels=(k,))
     src = source()
     try:
         for duration in [3.0, 3.0, 4.0, 3.0]:
@@ -363,7 +560,10 @@ def test_shared_cache_namespace_budget_eviction_and_singletons():
 def test_singleton_residents_reuse_payloads_across_evolves(workers):
     kernel = TimelineKernel("t4")
     src = source()
-    with closing(Engine(workers, 128, kernels=(kernel,))) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(
+        Engine(workers, 128 + 8 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
+    ) as engine:
         first = engine.evolve(src, (batch(8),), cancel=Event())
         assert kernel.preparations == 8
         second = engine.evolve(src, (batch(8),), cancel=Event())
@@ -380,10 +580,13 @@ def test_oversize_local_payload_does_not_evict_fitting_singleton():
 
     kernel = SizedKernel("t4")
     src = source()
-    with closing(Engine(1, 16, kernels=(kernel,))) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(Engine(1, 16 + RESIDENT_METADATA_BYTES, kernels=(kernel,))) as engine:
         engine.evolve(src, (batch(1),), cancel=Event())
-        for _ in range(2):
-            engine.evolve(src, (batch(1, duration=4),), cancel=Event())
+        for point in range(2):
+            # Distinct points avoid result memo after including retention metadata.
+            timeline = replace(batch(1, duration=4), points=np.array([point]))
+            engine.evolve(src, (timeline,), cancel=Event())
         engine.evolve(src, (batch(1),), cancel=Event())
         assert kernel.preparations == 3, (
             "oversize products must stream without eviction"
@@ -395,7 +598,12 @@ def test_singleton_stream_preserves_current_shared_hit_and_fills_only_spare_byte
     src = source()
     shared = batch(2)
     stream = replace(batch(3), points=np.arange(2, 5), end_ns=np.array([4.0, 5.0, 6.0]))
-    with closing(Engine(1, 32, kernels=(kernel,), chunks_per_worker=1)) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(
+        Engine(
+            1, 32 + 2 * RESIDENT_METADATA_BYTES, kernels=(kernel,), chunks_per_worker=1
+        )
+    ) as engine:
         engine.evolve(src, (shared,), cancel=Event())
         engine.evolve(src, (shared, stream), cancel=Event())
         assert kernel.preparations == 4
@@ -412,7 +620,8 @@ def test_new_source_singleton_replaces_previous_source_resident():
         src.initial_density,
         lambda level: replace(src.model(level), identity="next-flux"),
     )
-    with closing(Engine(1, 16, kernels=(kernel,))) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(Engine(1, 16 + RESIDENT_METADATA_BYTES, kernels=(kernel,))) as engine:
         for current in (src, src, other, other, src):
             engine.evolve(current, (batch(1),), cancel=Event())
         assert kernel.preparations == 3, "old flux residents must yield to new ones"
@@ -1312,7 +1521,12 @@ def test_complete_inventory_releases_stale_on_offer_before_next_build(changed_mo
         if changed_model
         else src
     )
-    with closing(Engine(1, 32, kernels=(kernel,), chunks_per_worker=2)) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(
+        Engine(
+            1, 32 + 2 * RESIDENT_METADATA_BYTES, kernels=(kernel,), chunks_per_worker=2
+        )
+    ) as engine:
         seed = replace(batch(4), end_ns=np.array([3.0, 3.0, 7.0, 7.0]))
         engine.evolve(src, (seed,), cancel=Event())
         assert kernel.live_bytes == 32
@@ -1329,7 +1543,10 @@ def test_complete_inventory_releases_stale_on_offer_before_next_build(changed_mo
 def test_inventory_keeps_unused_residents_when_new_products_fit():
     kernel = InventoryKernel()
     src = source()
-    with closing(Engine(1, 64, kernels=(kernel,))) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(
+        Engine(1, 64 + 4 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
+    ) as engine:
         engine.evolve(src, (batch(2),), cancel=Event())
         unused = kernel.payloads[0]
         engine.evolve(src, (batch(2, duration=4),), cancel=Event())
@@ -1342,7 +1559,10 @@ def test_inventory_keeps_unused_residents_when_new_products_fit():
 def test_inventory_protects_whole_borrowed_batches_and_bounds_pending():
     kernel = InventoryKernel()
     src = source()
-    with closing(Engine(1, 48, kernels=(kernel,), chunks_per_worker=2)) as engine:
+    # Keep one whole three-key batch, including its metadata, protected.
+    with closing(
+        Engine(1, 48 + RESIDENT_METADATA_BYTES, kernels=(kernel,), chunks_per_worker=2)
+    ) as engine:
         # One indivisible allocation owns both keys, even when only 3 ns is used.
         seed = replace(batch(6), end_ns=np.array([3.0, 3.0, 7.0, 7.0, 8.0, 8.0]))
         engine.evolve(src, (seed,), cancel=Event())
@@ -1359,7 +1579,15 @@ def test_inventory_protects_whole_borrowed_batches_and_bounds_pending():
 def test_prefix_pending_shares_capacity_with_future_suffix_hits():
     idle, driven = InventoryKernel(), InventoryKernel("dyson")
     src = source()
-    with closing(Engine(1, 32, kernels=(idle, driven), chunks_per_worker=1)) as engine:
+    # Include metadata for two separately retained products.
+    with closing(
+        Engine(
+            1,
+            32 + 2 * RESIDENT_METADATA_BYTES,
+            kernels=(idle, driven),
+            chunks_per_worker=1,
+        )
+    ) as engine:
         # This hit belongs to the later suffix, not the representative prefix.
         engine.evolve(src, (batch(2),), cancel=Event())
         suffix = idle.payloads[0]

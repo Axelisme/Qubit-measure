@@ -1,6 +1,6 @@
 """Secular models and quantized flux in ns/GHz, independent of model builders."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from threading import Lock
 from typing import Literal
@@ -241,6 +241,8 @@ class ModelSource:
         self._build = build
         self._expansion = expansion
         self._models: dict[FluxLevel, SecularModel] = {}
+        self._gate_usage: dict[bytes, int] = {}
+        self._gate_contents: dict[bytes, set[bytes]] = {}
         self._lock = Lock()
 
     @property
@@ -258,6 +260,69 @@ class ModelSource:
             if level not in self._models:
                 self._models[level] = self._build(level)
             return self._models[level]
+
+    @property
+    def gate_usage(self) -> dict[bytes, int]:
+        """Snapshot of distinct acquire content's complete row inventories.
+
+        Each content contributes its canonical gate/multitone row multiplicities
+        once, including rejected and nonresident keys. Identical repeats need no
+        numerical playback, so counting them would overprice the Sambe/RWA
+        alternative and select unnecessary gate builds. Counts and content
+        identities persist across cache eviction/Engine replacement until close.
+        """
+        with self._lock:
+            return self._gate_usage.copy()
+
+    def projected_gate_usage(
+        self, inventory: Mapping[bytes, int], *, content: bytes
+    ) -> dict[bytes, int]:
+        """Return totals after a hypothetical acquire, without changing history.
+
+        Only the supplied physics keys are visited. Calls sharing this source
+        serialize projection and the following record/evolve operation.
+        """
+        with self._lock:
+            seen = self._gate_contents.get(content, set())
+            return {
+                key: self._gate_usage.get(key, 0) + (0 if key in seen else count)
+                for key, count in inventory.items()
+            }
+
+    def record_gate_usage(
+        self, inventory: Mapping[bytes, int], *, content: bytes
+    ) -> dict[bytes, int]:
+        """Count distinct acquire content's complete row inventories.
+
+        content is evolution's complete numerical-input digest, independent of
+        cache state. Each namespaced physics key contributes its nonnegative row
+        multiplicity only on its first appearance in that content. Repeated
+        contents return the current totals without incrementing them, whether
+        preparation/result caches hit, are cleared, evict or are disabled.
+        History is source-owned and unbounded, like the cumulative key counters;
+        close releases both. Invalid counts raise ValueError before mutation.
+        Callers serialize acquires sharing a source, even across Engines.
+        """
+        if any(count < 0 for count in inventory.values()):
+            raise ValueError("gate usage counts must be nonnegative")
+        with self._lock:
+            seen = self._gate_contents.setdefault(content, set())
+            for key, count in inventory.items():
+                if key not in seen:
+                    self._gate_usage[key] = self._gate_usage.get(key, 0) + count
+                    seen.add(key)
+            return {key: self._gate_usage[key] for key in inventory}
+
+    def close(self) -> None:
+        """Release model caches and cumulative usage; idempotent, reusable.
+
+        Immutable builder/initial inputs remain valid. A later evolve starts a
+        new usage history. Call only after all work sharing this source drains.
+        """
+        with self._lock:
+            self._models.clear()
+            self._gate_usage.clear()
+            self._gate_contents.clear()
 
     def flux_expansion(self) -> FluxExpansion:
         """Return the exact supplied expansion, or raise ValueError if absent."""

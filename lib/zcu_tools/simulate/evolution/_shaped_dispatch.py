@@ -6,12 +6,14 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from ._carrier_plan import plan_ramp_families
 from .kernel import Kernel, KernelContext, SegmentTable
-from .kernels._rwa_gate import canonical_key
-from .kernels._workload_facts import envelope_bounds
+from .kernels._rwa_gate import canonical_keys, gate_segments
+from .kernels._workload_facts import envelope_bounds, fixed_flux
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.multitone_rwa import retained_edges
 from .kernels.period_table import PeriodTableKernel
+from .kernels.single_tone_gate import SingleToneGateKernel
 from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
 
@@ -67,17 +69,15 @@ def preference(
     return np.argsort(np.column_stack((gate_work, period_work, direct)), axis=1)
 
 
-_SINGLE_GATE_PLAN = FactKey(("single-tone-gate-cold-cost-v1",), tuple)
-
-
 @dataclass(frozen=True)
 class SingleGateChoice:
-    """Cold costs in relative CPU seconds for one physical carrier/shape domain.
+    """Lowest estimated cold plan for one physical Sambe spectral family.
 
-    keys: canonical gate keys in this domain from the complete acquire.
-    uses: total rows, including all phases and absolute starts.
-    gate_seconds/sambe_seconds: summed builds, playback and guard/key work.
-    preferred: gate estimate has at least 20 percent cold cost headroom.
+    keys: canonical keys selected for covariant gates; other rows retain Sambe.
+    uses: source-cumulative row count for this family's current keys.
+    gate_seconds: total mixed-plan build, playback and guard/key CPU estimate.
+    sambe_seconds: all-Sambe cold CPU estimate for the same complete inventory.
+    preferred: at least one canonical key uses a gate in the cheaper plan.
     """
 
     keys: tuple[bytes, ...]
@@ -87,126 +87,184 @@ class SingleGateChoice:
     preferred: bool
 
 
-def populate_single_gate_plan(
-    table: SegmentTable, source: ModelSource, plan: WorkPlan
-) -> tuple[SingleGateChoice, ...]:
-    """Fix single-tone gate vs Sambe costs from the entire acquire inventory.
+@dataclass(frozen=True)
+class GateCost:
+    """Immutable geometry/guard pricing for one key, independent of usage."""
 
-    Estimates use joint dimension, actual duration, gain*retained-drive strength,
-    sampled shape motion, carrier periods and fractional-tail type. Each gate
-    key pays a cold four-U build; a Sambe carrier/shape domain pays one spectral
-    build. No numerical admission, experiment identity or cache warmth is read.
-    Prefix and worker subsets borrow these decisions without recounting reuse.
+    key: bytes
+    scale: float
+    build: float
+    play: float
+    sambe: float
+
+    def price(self, count: int) -> tuple[float, float]:
+        return self.scale * (
+            self.build + count * self.play
+        ), self.scale * count * self.sambe
+
+
+@dataclass(frozen=True)
+class GateFamilyCost:
+    """Complete spectral family's key costs and shared Sambe construction."""
+
+    shared: float
+    costs: tuple[GateCost, ...]
+
+    def choose(self, usage: Mapping[bytes, int]) -> SingleGateChoice:
+        costs = [(cost.key, *cost.price(usage[cost.key])) for cost in self.costs]
+        all_sambe = self.shared + sum(sambe for _, _, sambe in costs)
+        selected = {key for key, gate, sambe in costs if gate < sambe}
+        mixed = sum(min(gate, sambe) for _, gate, sambe in costs)
+        if any(gate >= sambe for _, gate, sambe in costs):
+            mixed += self.shared
+        all_gate = sum(gate for _, gate, _ in costs)
+        if all_gate < mixed:
+            mixed = all_gate
+            selected = {key for key, _, _ in costs}
+        if mixed >= all_sambe:
+            mixed = all_sambe
+            selected = set()
+        return SingleGateChoice(
+            tuple(sorted(selected)),
+            sum(usage[cost.key] for cost in self.costs),
+            float(mixed),
+            float(all_sambe),
+            bool(selected),
+        )
+
+
+def _cold_key_cost(
+    table: SegmentTable, row: int, key: bytes, context: KernelContext, subdivisions: int
+) -> GateCost:
+    """Estimate cold gate build/play and Sambe variable playback for one key."""
+    model = context.source.model(tuple(int(v) for v in table.level[row]))
+    scale = (len(model.energies_ghz) / 16) ** 3
+    duration = float(table.duration_ns[row])
+    frequency = abs(float(table.tone_frequency_ghz[row, 0]))
+    env_index = table.tone_envelope[row, 0]
+    env = table.envelopes[env_index]
+    peak = envelope_bounds(table, context.work_plan).peaks[env_index]
+    motion = 0.0
+    if len(env.samples) > 1 and peak > 0:
+        motion = float(
+            np.max(np.abs(np.diff(env.samples) / np.diff(env.sample_ns))) / peak
+        )
+    retained = retained_edges(
+        model, int(table.tone_port[row, 0]), float(table.tone_frequency_ghz[row, 0])
+    )
+    strength = (
+        abs(table.tone_amplitude[row, 0]) * peak * 2 * np.linalg.norm(retained, 2)
+    )
+    kernel = SingleToneGateKernel()
+    with context.work_plan.routing.measure(kernel.name, "prepare"):
+        admitted = kernel.guard(table, np.array([row], dtype=np.int64), context)[0]
+    build, play = np.inf, 0.0
+    if admitted:
+        segments = gate_segments(table, row, context)
+        build = 0.10 * duration / 256 * (
+            1 + 4 * motion + 0.1 * 2 * np.pi * duration * strength
+        ) + 0.001 * (segments - 4)
+        play = 0.0000075 * segments + 0.00008
+    steps = duration * frequency * subdivisions
+    whole_steps = np.floor(steps + 1e-10)
+    tail = (
+        duration - whole_steps / (frequency * subdivisions) if frequency else duration
+    )
+    # Smooth real Sambe uses four amplitude coefficients, seven Fourier modes
+    # and two Newton polar iterations. Phase contraction is paid per row and
+    # subdivision; Clenshaw, polar and D-U-D are paid per subperiod.
+    phase = 0.0000002 * 4 * 7 * subdivisions
+    subperiod = 0.0000005 * 4 + 0.000004 * 2 + 0.00001
+    fractional = 0.0009 * tail if frequency >= 1 else (0.00010 if tail > 1e-10 else 0)
+    sambe = phase + whole_steps * subperiod + fractional + 0.00002
+    return GateCost(key, scale, float(build), float(play), float(sambe))
+
+
+def populate_single_gate_plan(
+    table: SegmentTable, source: ModelSource, plan: WorkPlan, budget: float = 1e-3
+) -> tuple[SingleGateChoice, ...]:
+    """Choose cold plans using source-cumulative complete-acquire key usage.
+
+    Each canonical gate key pays its own numerically admitted build plus n-step
+    playback. The alternative pays actual Sambe subdivisions, four-coefficient/
+    seven-mode phase contraction, two polar iterations, D-U-D and fractional
+    tails. Peak gain and subdivision count partition shared Sambe construction,
+    not an entire carrier/shape domain. Within each family, compare all Sambe,
+    individually profitable gates plus residual Sambe, and all gates (which can
+    avoid the shared spectral build). Unsupported keys never pay a gate build.
+
+    Calibration at 16 levels: four-key compiled Gaussian prepares measured
+    0.241/0.316 CPU-s (integer/half); retain the conservative 0.10 CPU-s per
+    256 ns key before shape/drive multipliers. Each extra restart costs 0.001 s.
+    Four-U playback measured 0.0592/1445 = 41 us/row; allow 30 us plus 80 us for
+    guard/key work. Sambe's three-subdivision, four-coefficient, seven-mode,
+    two-polar half-flux workload measured 4.6533 s/1445 rows. Charge 20 us per
+    subperiod, 0.2 us per phase coefficient/mode and 0.008 s per spectral build.
+    Fractional tails cost 0.9 ms/ns above 1 GHz or 0.1 ms for a spectral tail.
+    Cubic dimension scaling applies to both alternatives. These are conservative
+    relative CPU estimates, not numerical certificates or resident-cache prices.
+    Source usage includes each distinct acquire content's complete row inventory
+    once. Identical content repeats have zero numerical playback and contribute
+    no extra amortization. Counts survive eviction; no future acquire or cache
+    warmth is consulted. Prefix/worker subsets borrow the fixed decision.
     """
 
     def build() -> tuple[SingleGateChoice, ...]:
-        rows = np.flatnonzero(
-            (table.tones == 1)
-            & ~table.constant_envelopes(np.arange(len(table.timeline)))
-        )
-        if not len(rows):
+        inventory, families = single_gate_costs(table, source, plan, budget)
+        if not inventory:
             return ()
-        domains: dict[
-            tuple[str, tuple[int, ...], int, float, str],
-            dict[bytes, tuple[int, int]],
-        ] = {}
-        for row in rows:
-            model = source.model(tuple(int(v) for v in table.level[row]))
-            env = table.envelopes[table.tone_envelope[row, 0]]
-            domain = (
-                model.identity,
-                model.level,
-                int(table.tone_port[row, 0]),
-                float(table.tone_frequency_ghz[row, 0]),
-                env.identity,
-            )
-            key = canonical_key(table, int(row), source)
-            group = domains.setdefault(domain, {})
-            representative, count = group.get(key, (int(row), 0))
-            group[key] = (representative, count + 1)
-        choices = []
-        bounds = envelope_bounds(table, plan)
-        for group in domains.values():
-            gate, sambe, uses = 0.0, 0.0, 0
-            scale = 1.0
-            for row, count in group.values():
-                model = source.model(tuple(int(v) for v in table.level[row]))
-                scale = (len(model.energies_ghz) / 16) ** 3
-                duration = float(table.duration_ns[row])
-                frequency = abs(float(table.tone_frequency_ghz[row, 0]))
-                env_index = table.tone_envelope[row, 0]
-                env = table.envelopes[env_index]
-                # Smooth real Gaussian calibration: ~0.20--0.28 CPU-s/key at
-                # 16 levels and 254--256 ns. Shape and drive enter explicitly;
-                # this is a cost model, not an RWA admission certificate.
-                peak = bounds.peaks[env_index]
-                motion = 0.0
-                if len(env.samples) > 1 and peak > 0:
-                    motion = float(
-                        np.max(np.abs(np.diff(env.samples) / np.diff(env.sample_ns)))
-                        / peak
-                    )
-                retained = retained_edges(
-                    model,
-                    int(table.tone_port[row, 0]),
-                    float(table.tone_frequency_ghz[row, 0]),
-                )
-                strength = (
-                    abs(table.tone_amplitude[row, 0])
-                    * peak
-                    * 2
-                    * np.linalg.norm(retained, 2)
-                )
-                build = (
-                    0.22
-                    * duration
-                    / 256
-                    * (1 + 4 * motion + 0.1 * 2 * np.pi * duration * strength)
-                )
-                # Gate: four joint matrix actions plus phase and row guard/key.
-                gate += scale * (build + count * (0.00003 + 0.00008))
-                cycles = duration * frequency
-                tail = (
-                    duration - np.floor(cycles + 1e-10) / frequency
-                    if frequency
-                    else duration
-                )
-                # High carriers use ODE fractional tails; below 1 GHz Sambe
-                # uses spectral tails and more expensive subperiod playback.
-                playback = (0.00000075 if frequency >= 1 else 0.000008) * cycles
-                fractional = 0.0009 * tail if frequency >= 1 else 0.00010
-                sambe += scale * count * (playback + fractional + 0.00002)
-                uses += count
-            sambe += scale * 0.008  # shared carrier/shape spectral construction
-            choices.append(
-                SingleGateChoice(
-                    tuple(sorted(group)),
-                    uses,
-                    float(gate),
-                    float(sambe),
-                    bool(gate <= 0.8 * sambe),
-                )
-            )
-        return tuple(choices)
+        usage = source.record_gate_usage(dict(inventory), content=plan.content_key)
+        return tuple(family.choose(usage) for family in families)
 
-    return plan.fact(_SINGLE_GATE_PLAN, build)
+    return plan.fact(FactKey(("single-tone-gate-mixed-cold-v3", budget), tuple), build)
+
+
+def single_gate_costs(
+    table: SegmentTable, source: ModelSource, plan: WorkPlan, budget: float
+) -> tuple[tuple[tuple[bytes, int], ...], tuple[GateFamilyCost, ...]]:
+    """Publish immutable pricing and inventory once, without counting usage."""
+
+    def build() -> tuple[tuple[tuple[bytes, int], ...], tuple[GateFamilyCost, ...]]:
+        context = KernelContext(source, budget, plan)
+        families = plan.ramp_families or plan_ramp_families(table, source, plan)
+        if not families:
+            return (), ()
+        canonical = canonical_keys(table, context)
+        inventory: dict[bytes, int] = {}
+        costs = []
+        for family in families:
+            group: dict[tuple[bytes, bool], int] = {}
+            for row in family.rows:
+                key = canonical[row]
+                inventory[key] = inventory.get(key, 0) + 1
+                group.setdefault((key, fixed_flux(table, row)), row)
+            scale = (len(source.model(family.level).energies_ghz) / 16) ** 3
+            costs.append(
+                GateFamilyCost(
+                    scale * 0.008,
+                    tuple(
+                        _cold_key_cost(table, row, key, context, family.subdivisions)
+                        for (key, _fixed), row in group.items()
+                    ),
+                )
+            )
+        return tuple(inventory.items()), tuple(costs)
+
+    return plan.fact(FactKey(("single-tone-gate-costs", budget), tuple), build)
 
 
 def single_gate_preferred(
     table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
 ) -> NDArray[np.bool_]:
-    """Borrow complete-acquire cold choices for current rows before guards."""
+    """Borrow complete-acquire mixed cold choices before row-local guards."""
     preferred = {
         key
         for choice in populate_single_gate_plan(
-            table, context.source, context.work_plan
+            table, context.source, context.work_plan, context.budget
         )
-        if choice.preferred
         for key in choice.keys
     }
     if not preferred:
         return np.zeros(len(rows), dtype=bool)
-    return np.array(
-        [canonical_key(table, int(row), context.source) in preferred for row in rows],
-        dtype=bool,
-    )
+    canonical = canonical_keys(table, context)
+    return np.array([canonical[row] in preferred for row in rows], dtype=bool)

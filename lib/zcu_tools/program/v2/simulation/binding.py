@@ -1,6 +1,11 @@
 """Environment-owned snapshot/execution collaborators and per-call admission."""
 
+import logging
+import math
+import time
+import warnings
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from threading import Lock
 from uuid import uuid4
@@ -14,6 +19,8 @@ from zcu_tools.core.simulation import (
     RoundSignals,
     RoundStatistics,
 )
+
+from ._envelope_pool import EnvelopePool
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,21 @@ class SimulationProvenance:
     rng_version: str
 
 
+@dataclass(frozen=True)
+class SimulationCallbacks:
+    """Optional acquire lifecycle observers, owned by the environment.
+
+    wait_ready: no-argument startup wait after admission, before request creation;
+        errors release admission and propagate. on_end: completed-acquire observer
+        receiving all captured rounds and elapsed admitted wall seconds, including
+        failed rounds/pacing. Its exceptions warn once, without masking execution
+        errors. Both default None and must not reenter acquisition.
+    """
+
+    wait_ready: Callable[[], object] | None = None
+    on_end: Callable[[tuple[RoundRequest, ...], float], None] | None = None
+
+
 class SimulationBinding:
     """One environment's numeric source; snapshots are captured at execution time.
 
@@ -61,6 +83,8 @@ class SimulationBinding:
             "PCG64/SeedSequence-v2/numpy-<version>".
         provenance: SimulationProvenance for this binding. Only its identifier
             is intended for public Run metadata.
+        envelope_pool: Byte-bounded immutable DAC envelope pool shared across
+            this binding's acquisitions. It retains no mutable program buffers.
         last_request: Most recently installed AcquireRequest, or None before any
             request is installed. A failure before installation may leave the
             preceding request here. It is not cleared by begin or end.
@@ -80,7 +104,8 @@ class SimulationBinding:
         *,
         backend_version: str,
         seed: int | None = None,
-        wait_ready: Callable[[], object] | None = None,
+        callbacks: SimulationCallbacks | None = None,
+        min_round_duration_s: float = 0.0,
     ) -> None:
         """Bind synchronous environment callbacks and choose the root seed once.
 
@@ -91,11 +116,24 @@ class SimulationBinding:
         resources; neither callback should perform QICK averaging or rounding.
         backend_version is an author-defined private implementation version
         string. seed is a nonnegative built-in int, or None for fresh entropy.
-        wait_ready optionally waits for environment startup after admission and
+        callbacks.wait_ready optionally waits for environment startup after admission and
         before consuming sequence or constructing requests. Its result is ignored;
         errors release admission and propagate. It must not reenter acquisition.
 
-        Raises ValueError for a boolean, non-int or negative seed, and TypeError
+        min_round_duration_s is finite, nonnegative wall time in seconds. Each
+        successful sample_round includes snapshot/execution time and waits only
+        for the remainder. Zero (default) disables pacing and clock reads.
+        Failures propagate without waiting. Waiting is synchronous, not cancellable.
+
+        callbacks.on_end optionally observes one completed admitted acquire, including
+        failed/partial calls. It receives all captured rounds (possibly empty)
+        and elapsed monotonic seconds since begin, including pacing. It runs
+        before releasing admission and must not reenter. Exceptions emit at most
+        one warning and never mask an acquisition error, even under -W error.
+        callbacks=None supplies no lifecycle hooks. on_end=None avoids
+        acquire-level clock reads and completion notifications.
+
+        Raises ValueError for an invalid duration or boolean/non-int/negative seed, and TypeError
         if NumPy returns non-integer entropy. Callback execution is deferred to
         sample_round; this constructor does not validate their returned records.
         """
@@ -103,7 +141,15 @@ class SimulationBinding:
             isinstance(seed, bool) or type(seed) is not int or seed < 0
         ):
             raise ValueError("seed must be a nonnegative integer or None")
-        self._wait_ready = wait_ready
+        if not math.isfinite(min_round_duration_s) or min_round_duration_s < 0:
+            raise ValueError("min_round_duration_s must be finite and nonnegative")
+        hooks = SimulationCallbacks() if callbacks is None else callbacks
+        self._on_end = hooks.on_end
+        self._observer_warned = False
+        self._acquire_started = 0.0
+        self._min_round_duration_s = min_round_duration_s
+        self.envelope_pool = EnvelopePool()
+        self._wait_ready = hooks.wait_ready
         self.capture_snapshot = capture_snapshot
         self.execute = execute
         entropy = np.random.SeedSequence(seed).entropy
@@ -140,6 +186,8 @@ class SimulationBinding:
         sequence = self._sequence
         self._sequence += 1
         self.rounds = ()
+        if self._on_end is not None:
+            self._acquire_started = time.monotonic()
         return sequence
 
     def end(self) -> None:
@@ -148,8 +196,26 @@ class SimulationBinding:
         The caller must invoke this once in its finally block, after round work
         ends. No replay inputs or callback resources are cleared. Returns None;
         releasing an unlocked admission lock raises RuntimeError.
+        The optional on_end observer runs once, including after failed rounds;
+        observer exceptions cannot mask acquisition failures or leak admission.
         """
-        self._admission.release()
+        try:
+            if self._on_end is not None:
+                self._on_end(self.rounds, time.monotonic() - self._acquire_started)
+        except Exception as error:
+            if not self._observer_warned:
+                self._observer_warned = True
+                logging.getLogger(__name__).exception(
+                    "simulation acquire observer failed"
+                )
+                with suppress(Warning):
+                    warnings.warn(
+                        f"simulation acquire observer failed: {error}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+        finally:
+            self._admission.release()
 
     def sample_round(
         self, request: AcquireRequest, index: int
@@ -167,13 +233,21 @@ class SimulationBinding:
         Callback exceptions propagate. Snapshot failure appends nothing; execute
         failure leaves the captured input in rounds. A mode/result mismatch
         raises ValueError. It does not normalize, average, round signals or
-        update last_request.
+        update last_request. Successful calls wait until min_round_duration_s
+        has elapsed since entry, including snapshot and execute. Slow rounds do
+        not wait; zero disables pacing. Failures never add a delay.
         """
+        started = time.monotonic() if self._min_round_duration_s > 0 else 0.0
         round_request = RoundRequest(request, self.capture_snapshot(), index)
         self.rounds += (round_request,)
         result = self.execute(round_request)
-        if request.mode == "integrated" and isinstance(result, RoundStatistics):
-            return result
-        if request.mode == "decimated" and isinstance(result, RoundSignals):
-            return result
-        raise ValueError(f"backend result does not match {request.mode} mode")
+        if not (
+            (request.mode == "integrated" and isinstance(result, RoundStatistics))
+            or (request.mode == "decimated" and isinstance(result, RoundSignals))
+        ):
+            raise ValueError(f"backend result does not match {request.mode} mode")
+        if self._min_round_duration_s > 0:
+            remaining = self._min_round_duration_s - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(remaining)
+        return result

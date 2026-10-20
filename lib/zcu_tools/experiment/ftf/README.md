@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-19, source-scoped ADC solver reuse, unified resident/pending budget, startup numeric preparation, closed-form flat mux decimated readout, sampled readout, integrated carrier tiles and shared model facts
+**Last updated:** 2026-10-20, route-aware preparation hits and shared accuracy warnings
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -11,6 +11,68 @@ builder failure closes its resources and preserves both startup and close errors
 The executable example is `zcu_lab/simulation_envs/FTF/environment.py` with adjacent
 `ftf.yaml`, a working copy of the tracked `default.yaml`. The Notebook walkthrough is `notebook_md/single_qubit.md`.
 欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
+
+## Round pacing
+
+`numerics.min_round_duration_s` in the FTF YAML sets a finite, nonnegative
+minimum duration for each successful binding round in both acquisition modes.
+Omitting it uses **0.2 seconds**. The binding includes snapshot capture and numeric
+execution, then sleeps only for the remaining time before returning. Slow rounds
+and failures do not add a wait. Startup preparation, program construction and
+round hooks are outside this floor. Waiting is synchronous and not interruptible
+by Stop; the next ordinary acquisition checkpoint observes Stop. No GUI field or
+frontend awareness is needed. This does not replace final plot-buffer flushing.
+
+For profiling or benchmarking, call `ftf(path_or_settings, min_round_duration_s=0)`.
+This public override disables waiting and clock reads without changing numeric
+settings, RNG streams, density, readout or routes. Alternatively set
+`numerics.min_round_duration_s: 0` in the caller-owned YAML. With the default
+`min_round_duration_s=None`, the builder uses the YAML value. Wait for startup
+preparation with `env.wait_ready()` before starting a benchmark timer too.
+
+## Routing telemetry
+
+`numerics.telemetry.enabled` defaults to **True**. Each admitted acquire writes
+one JSON line, including all software rounds and partial work after a failure.
+`numerics.telemetry.directory` defaults to `null`, selecting
+`<project root>/.sim_telemetry/routing-YYYYMMDD.jsonl`. Dates and timestamps use
+UTC. Relative explicit directories resolve at environment startup. The GUI and
+experiment acquisition calls need no changes.
+
+Use `ftf(settings.with_telemetry(enabled=False), min_round_duration_s=0)` for
+profiles and benchmarks. The public settings method returns a copy, disabling
+routing timers and all telemetry I/O without changing the original settings.
+No directory is created. `settings.with_telemetry(enabled=True, directory=Path(...))`
+selects another directory; omitted directory preserves the current setting.
+The YAML form is `numerics: {telemetry: {enabled: false}}`. Routing and
+density/readout results are unchanged bitwise.
+
+Each line contains `timestamp`, `points` (request grid, excluding shots),
+`rounds` (captured attempts), `wall_s` (admitted acquire time including pacing,
+excluding telemetry I/O), `frontend_cpu_s` (geometry and WorkPlan calling-thread
+CPU), `estimated_cost_unit` and `families`. Failed calls
+before a captured request have zero points and empty families. Family values are
+`rows`, `prepare_cpu_s`, `apply_cpu_s`, `actual_cpu_s`, `cache_hits`,
+`rejected_rows`, `prepare_builds`, `admission_rows`, `estimated_cost` and nullable
+`estimated_cpu_s`; common-frame instruments builds and admission evaluations,
+while other families currently leave those two counters zero; see the
+[evolution report contract](../../simulate/evolution/README.md#routing-telemetry).
+Rows and hits sum across rounds. Noiseless reuse contributes logical rows and
+cache hits but zero kernel CPU, rejections and estimated work. Actual CPU excludes
+ADC, sampling and routing bookkeeping; wall includes those operations.
+Numeric templates contain no program/experiment identifier, so `experiment` is
+omitted rather than guessed from controls or caller frames.
+
+The writer caps its `routing-*.jsonl` files at **50 MiB**. Before each append it
+deletes oldest files by modification time, breaking ties by filename, until the
+line fits. Today's file can be removed and recreated. Unrelated files remain.
+A filesystem or serialization failure emits at most one warning per environment
+and never aborts acquire, even with warnings configured as errors. Local files
+are gitignored. `tools/analyze_routing_telemetry.py <directory or files...>` reports
+family usage shares, rejection counts, CPU per relative cost unit, and weighted
+`(actual - estimated) / estimated` error where CPU estimates exist.
+
+## Numeric source
 
 `FTFSource.snapshot` reads live DC values before each round. It checks units and
 limits without restoring startup values. Source identities survive session
@@ -30,7 +92,7 @@ process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.
 Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
-`FTFSource.close()` clears preparations and the engine cache. Dropping the
+`FTFSource.close()` clears preparations, model-source cumulative gate usage and the engine cache. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
 The source retains at most one snapshot's `FTFModelFacts` across acquires.
 The exact key includes full settings, the entire snapshot and backend/numeric
@@ -78,10 +140,15 @@ around an immediately invoked blocking acquire necessarily includes its wait.
 No frontend timer or status display is installed by this backend API.
 
 The coverage manifest in `warmup.py` covers shaped carrier families (>9 carriers),
-shaped direct integration, covariant single-tone and simultaneous gate playback,
-Dyson gain batches, dense Floquet periods, t4 and ADC
-integrated/decimated/mux responses. It does not promise every possible signature
-or kernel. New routes require updating the representative inputs and checking
+shaped direct integration, covariant single-tone (including restored-mask
+coefficients) and simultaneous gate playback,
+Dyson gain batches, constant-tone block RWA, sampled and dual-constant multitone
+RWA, dense Floquet periods, t4, ADC integrated/decimated/mux responses and compact
+statistics validation for writable and readonly borrowed arrays.
+Multitone inputs exercise immutable model data and owned mutable Fourier/mask
+working arrays, so admission coverage follows array signatures as well as routes.
+It does not promise every possible signature or kernel. New routes require
+updating the representative inputs and checking
 real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 
 ## Acquisition and numeric composition
@@ -89,9 +156,48 @@ real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's density and
 conditional response when the snapshot is equal. Every round draws a new stream.
-Opening another acquire invalidates the old session and drops its densities and
-assembled channel arrays. Bounded ADC solvers and exact contents remain source-owned.
-The binding serializes calls; direct author callers must do the same.
+Opening another acquire invalidates the old session and drops its references.
+A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
+content mappings, path diagnostics and integrated sampling plans across acquires.
+Its key reads full current C1 content, layout, mode, reps and readout values,
+including absolute phase origins. Physical settings/snapshot/numeric changes,
+engine replacement, failed preparation and close clear the preparations. It never
+retains request seeds, acquire sequences, noisy IQ or round results. Hits update
+numeric-use identity and repeat report-only accuracy warnings through evolution's
+`PathDiagnostics.warn_exceeded()`. Hits ask `Engine.reuse` to resolve the current
+selection from immutable inventory and pricing facts. FTF neither inspects
+cumulative source counters nor infers history sensitivity from count increments. An unchanged
+selection returns the saved preparation without template conversion, geometry,
+WorkPlan construction, numerical preparation, population conversion or cache put.
+A changed selection or evicted routing facts calls `Engine.evolve` and refreshes
+populations and paths while retaining ADC channels. Content keys exclude
+cumulative counts, so growing usage does not force a preparation-cache miss.
+Evolution counts each distinct acquire content's complete row inventory once;
+identical repeats do not invent additional numerical playback to amortize a gate.
+Other hits return the saved preparation without evolving. Equal consecutive
+software rounds remain one preparation. The public
+`source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
+Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
+counts Python containers/keys and whole ndarray allocations, including bases of
+views. Active/caller references are separate from resident budgets. Bounded ADC
+solvers and exact contents also remain source-owned. A separate source-owned
+32 MiB `envelope_encoder` retains a domain-separated SHA256 fingerprint for each
+resident immutable `PulseEnvelope`. The full binary content (types, dtypes,
+shapes, sample times and complex values) is hashed once on a miss. Each outer key
+occurrence hashes only a domain tag and the 32-byte fingerprint. Equal content
+produces equal keys with or without an encoder; identities only select resident
+reuse. These keys stay in process-local caches, not replay or disk. The budget
+includes the full retained envelope, numeric objects, fingerprints and Python
+containers. It reports cumulative `builds`/`hits` and `resident_bytes`;
+`max_bytes` is adjustable between calls and zero disables
+residency. The capacity covers the full 101-length Gaussian host-scan working set,
+not just a short scan. Borrowed request arrays are reread on every key lookup.
+Generation changes still invalidate preparations; immutable fingerprints contain
+no generation data. Eviction or disabled residency recomputes the complete
+fingerprint without changing keys. Source close releases the fingerprints and
+envelopes too. Every round still captures a live snapshot and samples the
+original stream. The binding serializes calls;
+direct author callers must do the same.
 
 `plan_template` accepts optional matching `FTFModelFacts` for shared physical
 inputs; standalone calls build their own facts. `FTFSource.model_facts` supplies
