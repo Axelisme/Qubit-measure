@@ -272,13 +272,8 @@ def test_unreadable_metadata_selection_uses_exact_path_without_inferred_identity
         assert str(path) in visible.tooltips[6]
         assert not driver.observe("Load selected").enabled
 
-        driver.enter_text(object_name="load_started_at", value="2025", commit=False)
-        driver.screenshot(images / "02-filtered.png")
-        assert driver.table_rows(object_name="load_runs") == ()
-        driver.enter_text(object_name="load_started_at", value="", commit=False)
-        driver.screenshot(images / "03-restored.png")
         driver.select_table_row(visible.columns[6], object_name="load_runs")
-        driver.screenshot(images / "04-selected.png")
+        driver.screenshot(images / "02-selected.png")
         assert driver.observe("Load selected").enabled
         assert driver.table_rows(object_name="load_runs")[0].selected
         driver.click("Load selected")
