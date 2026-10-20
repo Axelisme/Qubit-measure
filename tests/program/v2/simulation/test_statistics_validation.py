@@ -334,6 +334,28 @@ def test_copier_preserves_finite_then_conditional_then_range_error_order(
     assert str(caught.value) == error
 
 
+def test_copier_checks_each_new_request_layout():
+    request, record = numeric_round()
+    copier = StatisticsCopier()
+    reversed_request = replace(request, readouts=tuple(reversed(request.readouts)))
+    more_reps = replace(request, reps=8, loop_dims=(2, 8))
+    for active, borrowed in (
+        (request, record),
+        (reversed_request, record),
+        (more_reps, replace(record, state_counts=record.state_counts * 2)),
+        (request, record),
+    ):
+        copied = copier.copy(active, borrowed)
+        by_channel = {ch.channel: ch for ch in borrowed.channels}
+        expected = replace(
+            borrowed,
+            channels=tuple(by_channel[w.channel] for w in active.readouts),
+        )
+        assert_detached(copied, expected)
+    with pytest.raises(ValueError, match="point layout/reps"):
+        copier.copy(more_reps, record)
+
+
 def test_copier_handles_readonly_strided_borrowed_arrays():
     request, record = numeric_round()
     counts = record.state_counts[:, ::-1]

@@ -91,6 +91,30 @@ class _StatisticsContent:
     covariance_bytes: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class _StatisticsLayout:
+    """Fixed request correspondence; backend shapes and values remain unchecked."""
+
+    request: AcquireRequest
+    point_dims: tuple[int, ...]
+    compiled_reps: bool
+    channel_ids: frozenset[int]
+    channel_shapes: tuple[tuple[int, tuple[int, ...]], ...]
+
+    @classmethod
+    def from_request(cls, request: AcquireRequest) -> "_StatisticsLayout":
+        point_dims = tuple(
+            n for axis, n in enumerate(request.loop_dims) if axis != request.avg_level
+        )
+        return cls(
+            request,
+            point_dims,
+            0 < request.reps <= np.iinfo(np.int64).max,
+            frozenset(w.channel for w in request.readouts),
+            tuple((w.channel, (*point_dims, w.reads, 2)) for w in request.readouts),
+        )
+
+
 class StatisticsCopier:
     """Validate and detach compact rounds with a bounded, instance-local LRU.
 
@@ -108,6 +132,7 @@ class StatisticsCopier:
         self._budget_bytes = budget_bytes
         self._resident_bytes = 0
         self._certificates: OrderedDict[_StatisticsContent, int] = OrderedDict()
+        self._layout: _StatisticsLayout | None = None
 
     def copy(self, request: AcquireRequest, result: RoundStatistics) -> RoundStatistics:
         """Validate request correspondence and detach every borrowed result array.
@@ -116,11 +141,12 @@ class StatisticsCopier:
         invalid covariance or per-shot means outside int64. No raw shots are drawn.
         Neither the input arrays nor previously returned copies are retained.
         """
-        point_dims = tuple(
-            n for axis, n in enumerate(request.loop_dims) if axis != request.avg_level
-        )
+        layout = self._layout
+        if layout is None or layout.request is not request:
+            layout = self._layout = _StatisticsLayout.from_request(request)
+        point_dims = layout.point_dims
         counts = result.state_counts
-        compiled_reps = 0 < request.reps <= np.iinfo(np.int64).max
+        compiled_reps = layout.compiled_reps
         if (
             counts.ndim != len(point_dims) + 1
             or counts.shape[:-1] != point_dims
@@ -136,22 +162,22 @@ class StatisticsCopier:
                 "backend state_counts do not match request point layout/reps"
             )
         by_channel = {ch.channel: ch for ch in result.channels}
-        if len(by_channel) != len(result.channels) or set(by_channel) != {
-            w.channel for w in request.readouts
-        }:
+        if (
+            len(by_channel) != len(result.channels)
+            or by_channel.keys() != layout.channel_ids
+        ):
             raise ValueError("backend ADC channels do not match request")
         channels = []
-        for window in request.readouts:
-            ch = by_channel[window.channel]
-            shape = (*point_dims, window.reads, 2)
-            conditional_shape = (*point_dims, window.reads, counts.shape[-1], 2)
+        for channel, shape in layout.channel_shapes:
+            ch = by_channel[channel]
+            conditional_shape = (*shape[:-1], counts.shape[-1], 2)
             if (
                 ch.sums.shape != shape
                 or ch.conditional_sums.shape != conditional_shape
                 or ch.shot_covariance.shape != (2, 2)
             ):
                 raise ValueError(
-                    f"invalid ADC {window.channel} statistics shape or finite values"
+                    f"invalid ADC {channel} statistics shape or finite values"
                 )
             # Exceptional reps/dtypes keep NumPy's original arithmetic semantics.
             compiled_sums = compiled_reps and ch.sums.dtype == np.float64
@@ -162,7 +188,7 @@ class StatisticsCopier:
             )
             if not finite:
                 raise ValueError(
-                    f"invalid ADC {window.channel} statistics shape or finite values"
+                    f"invalid ADC {channel} statistics shape or finite values"
                 )
             self._validate_conditional_statistics(ch)
             # Static errors precede dynamic range errors, even on a cache miss.
