@@ -13,8 +13,10 @@ from migrations.storage_migration import (
     MigrationInputError,
     MigrationMapping,
     MigrationRequest,
+    MigrationSource,
     migrate_storage,
 )
+from migrations.storage_migration.backup import create_backup
 from tests.migrations.storage_migration.fakes import noop_validation, validate_cfg
 
 pytestmark = pytest.mark.usefixtures("registry_guard")
@@ -123,7 +125,7 @@ def test_existing_source_destination_blocks_all_migration_writes(
     destination.mkdir(parents=True)
     sentinel = destination / "keep.bin"
     sentinel.write_bytes(b"previous backup")
-    with pytest.raises(FileExistsError):
+    with pytest.raises(MigrationInputError, match="keep.bin"):
         migrate(request_data, mapping)
     assert sentinel.read_bytes() == b"previous backup"
     assert sorted(destination.iterdir()) == [sentinel]
@@ -398,3 +400,127 @@ def test_custom_source_roots_keep_logical_mirrors(
         assert mirror.is_dir(), "custom roots use the same logical mirror paths"
         assert (mirror / "source.bin").read_bytes() == root.name.encode()
         assert (mirror / "empty").is_dir()
+
+
+@pytest.fixture
+def backup_source(request_data: MigrationRequest) -> MigrationSource:
+    """Two synthetic source roots, including a file and an empty directory."""
+    source = MigrationSource(
+        result_path=request_data.result_root / "chip/qubit",
+        database_path=request_data.database_root / "chip/qubit",
+    )
+    (source.result_path / "original.bin").write_bytes(b"original")
+    (source.result_path / "empty").mkdir()
+    (source.database_path / "database.bin").write_bytes(b"database")
+    return source
+
+
+def test_identical_complete_backup_is_adopted_without_rewriting(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    backup_source: MigrationSource,
+) -> None:
+    path = backup_path(request_data)
+    create_backup(path, backup_source, dry_run=False)
+    before = {
+        item: (item.read_bytes(), item.stat().st_mtime_ns)
+        for item in path.rglob("*")
+        if item.is_file()
+    }
+    try:
+        migrate(request_data, mapping)
+    except FileExistsError as exc:
+        pytest.fail(f"identical verified backup must be adopted: {exc}")
+    assert all(
+        (item.read_bytes(), item.stat().st_mtime_ns) == state
+        for item, state in before.items()
+    )
+    assert not backup_source.result_path.exists()
+    assert not backup_source.database_path.exists()
+
+
+@pytest.mark.parametrize("with_inventory", [False, True])
+def test_partial_backup_fills_only_missing_files_and_directories(
+    request_data: MigrationRequest,
+    backup_source: MigrationSource,
+    with_inventory: bool,
+) -> None:
+    path = backup_path(request_data)
+    if with_inventory:
+        create_backup(path, backup_source, dry_run=False)
+        (path / "Database/chip/qubit/database.bin").unlink()
+        (path / "result/chip/qubit/empty").rmdir()
+    else:
+        mirror = path / "result/chip/qubit"
+        mirror.mkdir(parents=True)
+        (mirror / "original.bin").write_bytes(b"original")
+    kept = path / "result/chip/qubit/original.bin"
+    before = kept.stat().st_mtime_ns
+    try:
+        backup = create_backup(path, backup_source, dry_run=False)
+    except FileExistsError as exc:
+        pytest.fail(f"partial matching backup must be completed: {exc}")
+    assert backup is not None
+    assert kept.stat().st_mtime_ns == before
+    assert (path / "Database/chip/qubit/database.bin").read_bytes() == b"database"
+    assert (path / "result/chip/qubit/empty").is_dir()
+    assert set(backup.inventory_hashes) == {"result", "Database"}
+    assert backup_source.result_path.exists()
+
+
+@pytest.mark.parametrize("conflict", ["bytes", "extra", "directory", "inventory"])
+def test_backup_conflict_is_located_and_preflight_prevents_partial_writes(
+    request_data: MigrationRequest,
+    backup_source: MigrationSource,
+    conflict: str,
+) -> None:
+    path = backup_path(request_data)
+    create_backup(path, backup_source, dry_run=False)
+    missing = path / "Database/chip/qubit/database.bin"
+    missing.unlink()
+    target = path / "result/chip/qubit/original.bin"
+    if conflict == "bytes":
+        target.write_bytes(b"different")
+    elif conflict == "extra":
+        target = target.with_name("extra.bin")
+        target.write_bytes(b"extra")
+    elif conflict == "directory":
+        target.unlink()
+        target.mkdir()
+    else:
+        target = path / "migration-records/chip/qubit/result.sha256"
+        raw = json.loads(target.read_text())
+        raw["hashes"]["result/chip/qubit/original.bin"] = "0" * 64
+        target.write_text(json.dumps(raw))
+    before = {
+        item: item.read_bytes() for item in path.rglob("*") if item.is_file()
+    }
+    with pytest.raises(Exception) as caught:
+        create_backup(path, backup_source, dry_run=False)
+    assert isinstance(caught.value, MigrationInputError), "must report a data conflict"
+    assert caught.value.differences, "conflicts expose typed located comparisons"
+    difference = caught.value.differences[0]
+    assert difference.destination == target
+    assert difference.expected != difference.actual
+    assert str(target) in str(caught.value)
+    assert not missing.exists(), "all existing items are checked before filling gaps"
+    assert {item: item.read_bytes() for item in path.rglob("*") if item.is_file()} == before
+
+
+def test_partial_backup_dry_run_validates_without_filling_gaps(
+    request_data: MigrationRequest,
+    backup_source: MigrationSource,
+) -> None:
+    path = backup_path(request_data)
+    mirror = path / "result/chip/qubit"
+    mirror.mkdir(parents=True)
+    kept = mirror / "original.bin"
+    kept.write_bytes(b"original")
+    try:
+        result = create_backup(path, backup_source, dry_run=True)
+    except FileExistsError as exc:
+        pytest.fail(f"dry-run must validate matching partial backup: {exc}")
+    assert result is None
+    assert sorted(path.rglob("*.bin")) == [kept]
+    assert not (path / "Database").exists()
+    assert not (path / "migration-records").exists()
