@@ -20,9 +20,12 @@ Successful builder return transfers cleanup to the host. Read the
 [acquisition environment contract](../program/v2/simulation/README.md) before
 writing a builder or numeric source. Public Run metadata contains only the
 optional opaque `simulation_id`; private replay inputs remain on the binding.
-WhiteNoise returns compact `RoundStatistics` for integrated acquisition and keeps
-per-execution `RoundSignals` for decimated traces. Raw integrated shots are drawn
-only when processing or a getter needs them, using a separate retained identity.
+WhiteNoise numeric code lives in `simulate.white_noise`. This composition root
+wraps its statistics and complete raw source in program's `IntegratedRound`.
+Decimated acquisition keeps per-execution `RoundSignals`. ADC and white_noise
+structurally satisfy program's `RawShots` without importing program. Processing
+or a getter requests shots from a separate retained identity. Direct means keep
+their existing moment calculation and RNG stream.
 
 [`ftf`](ftf/README.md) composes a named YAML sample, fixed V/A memory devices,
 fixed-coordinate joint circuits, explicit evolution/population conversion and the

@@ -3,25 +3,23 @@
 import importlib.util
 import sys
 from dataclasses import dataclass, field
-from math import prod
 from pathlib import Path
 from uuid import uuid4
 
-import numpy as np
 from qick import QickConfig
 
 from zcu_tools.core.simulation import (
-    ChannelSignals,
-    ChannelStatistics,
-    EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
-    RoundStatistics,
-    SamplingIdentity,
 )
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
+from zcu_tools.program.v2.simulation import (
+    IntegratedRound,
+    SimulationBinding,
+    SimulationSoc,
+)
+from zcu_tools.simulate.white_noise import WhiteNoise
 
 from .warmup import EnvironmentWarmup, WarmupStatus
 
@@ -94,76 +92,6 @@ class SimulationEnvironment:
         )
 
 
-@dataclass(frozen=True)
-class WhiteNoise:
-    """Independent zero-mean I/Q Gaussian, std_adc in per-sample ADC units."""
-
-    std_adc: float = 1.0
-
-    def __post_init__(self) -> None:
-        if not np.isfinite(self.std_adc) or self.std_adc < 0:
-            raise ValueError("std_adc must be finite and nonnegative")
-
-    def snapshot(self) -> EnvironmentSnapshot:
-        return EnvironmentSnapshot("white_noise-v1", f"std_adc={self.std_adc!r}")
-
-    def execute(self, request: RoundRequest) -> RoundStatistics | RoundSignals:
-        """Draw compact integrated totals or per-execution decimated ADC samples.
-
-        Integrated totals include receiver and rounding variance. Zero noise
-        remains exactly zero. Deferred shots use a separate reproducible stream.
-        """
-        if request.acquire.mode == "integrated":
-            return self._integrated_statistics(request)
-        acquire = request.acquire
-        rng = np.random.Generator(
-            np.random.PCG64(
-                np.random.SeedSequence(
-                    [acquire.root_seed, acquire.sequence, request.index]
-                )
-            )
-        )
-        channels = []
-        for window in acquire.readouts:
-            shape = (prod(acquire.loop_dims), window.reads, window.samples, 2)
-            channels.append(
-                ChannelSignals(window.channel, rng.normal(0, self.std_adc, shape))
-            )
-        return RoundSignals(tuple(channels))
-
-    def _integrated_statistics(self, request: RoundRequest) -> RoundStatistics:
-        acquire = request.acquire
-        point_dims = tuple(
-            n for axis, n in enumerate(acquire.loop_dims) if axis != acquire.avg_level
-        )
-        rng = np.random.Generator(
-            np.random.PCG64(
-                np.random.SeedSequence(
-                    [acquire.root_seed, acquire.sequence, request.index, 0]
-                )
-            )
-        )
-        channels = []
-        for window in acquire.readouts:
-            variance = self.std_adc**2 * window.samples
-            # Zero-noise environments promise exact zero, without rounding noise.
-            total_variance = acquire.reps * (variance + 1 / 12) if self.std_adc else 0
-            shape = (*point_dims, window.reads, 2)
-            channels.append(
-                ChannelStatistics(
-                    window.channel,
-                    rng.normal(0, np.sqrt(total_variance), shape),
-                    np.zeros((*point_dims, window.reads, 1, 2)),
-                    np.eye(2) * variance,
-                )
-            )
-        return RoundStatistics(
-            np.full((*point_dims, 1), acquire.reps, dtype=np.int64),
-            tuple(channels),
-            SamplingIdentity(acquire.root_seed, (acquire.sequence, request.index, 1)),
-        )
-
-
 def white_noise(
     *,
     std_adc: float = 1.0,
@@ -180,8 +108,16 @@ def white_noise(
     """
     source = WhiteNoise(std_adc)
     soccfg = make_mock_soccfg(n_gens, n_readouts)
+
+    def execute(request: RoundRequest) -> IntegratedRound | RoundSignals:
+        result = source.execute(request)
+        if isinstance(result, RoundSignals):
+            return result
+        statistics, raw = result
+        return IntegratedRound(statistics, raw)
+
     binding = SimulationBinding(
-        source.snapshot, source.execute, backend_version="white_noise-v2", seed=seed
+        source.snapshot, execute, backend_version="white_noise-v2", seed=seed
     )
     wiring = tuple((ch, ch) for ch in range(n_readouts)) if routes is None else routes
     soc = SimulationSoc(soccfg, binding, routes=wiring)

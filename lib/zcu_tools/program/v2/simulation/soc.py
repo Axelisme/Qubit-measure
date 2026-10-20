@@ -5,10 +5,11 @@ from math import prod
 import numpy as np
 from qick import QickConfig
 
-from zcu_tools.core.simulation import AcquireRequest, RoundSignals, RoundStatistics
+from zcu_tools.core.simulation import AcquireRequest, RoundSignals
 
 from .binding import SimulationBinding
-from .signals import StatisticsCopier, pack_signals
+from .result import IntegratedRound
+from .signals import StatisticsCopier, materialize_shots, pack_signals
 
 
 class SimulationSoc(QickConfig):
@@ -40,9 +41,9 @@ class SimulationSoc(QickConfig):
         self._accumulated = {}
         self._decimated = {}
         self._poll_done = False
-        self._statistics: RoundStatistics | None = None
+        self._statistics: IntegratedRound | None = None
         self._statistics_copier = StatisticsCopier()
-        self._raw_layout = (1, 0)
+        self._raw_request: AcquireRequest | None = None
 
     def install_request(self, request: AcquireRequest) -> None:
         """Admit detached controls only when every used channel is wired.
@@ -72,7 +73,7 @@ class SimulationSoc(QickConfig):
     def release_request(self) -> None:
         self._request = None
 
-    def run_round(self) -> RoundStatistics | RoundSignals:
+    def run_round(self) -> IntegratedRound | RoundSignals:
         """Execute the next installed round and detach/validate its numeric result.
 
         Statistics remain compact until an accumulated getter is used. Signals
@@ -83,12 +84,16 @@ class SimulationSoc(QickConfig):
             raise RuntimeError("simulation has no active acquisition request")
         result = self.binding.sample_round(self._request, self._round_index)
         self._statistics = None
-        if isinstance(result, RoundStatistics):
-            result = self._statistics_copier.copy(self._request, result)
+        if isinstance(result, IntegratedRound):
+            result = IntegratedRound(
+                self._statistics_copier.copy(self._request, result.statistics),
+                result.raw,
+            )
             self._statistics = result
-            self._raw_layout = (self._request.reps, self._request.avg_level)
+            self._raw_request = self._request
             self._accumulated, self._decimated = {}, {}
         else:
+            self._raw_request = None
             self._accumulated, self._decimated = pack_signals(self._request, result)
         self._round_index += 1
         return result
@@ -135,10 +140,12 @@ class SimulationSoc(QickConfig):
 
     def _materialize_accumulated(self) -> None:
         if self._statistics is not None and not self._accumulated:
+            if self._raw_request is None:
+                raise RuntimeError("raw transport requires a retained round request")
             self._accumulated = {
                 ch: raw.reshape(-1, 2)
-                for ch, raw in self._statistics.materialize_raw(
-                    *self._raw_layout
+                for ch, raw in materialize_shots(
+                    self._raw_request, self._statistics.raw
                 ).items()
             }
 
