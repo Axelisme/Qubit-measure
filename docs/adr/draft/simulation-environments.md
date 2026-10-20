@@ -40,7 +40,7 @@ YAML 不是通用 environment DSL。Launcher／runtime 不辨識 FTF 欄位，�
 
 `SimulationEnvironment` 包含已綁定的 soc、匹配的 soccfg、已註冊具名裝置的 devices: DeviceManager，以及不含模型真值的公開 description。Builder 成功回傳後，caller 負責安排清理。Notebook 直接使用並清理 manager；GUI 腳本則經公開 facets 安裝 SoC 並逐一 register 已建 drivers，不把 environment manager 注入 session。GUI 只接管成功 register 的 driver，SoC 仍由 caller 擁有，不假設通用 close 方法。
 
-FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry 與 setup components。接著建立第一個 `initial` point，以 `ctx.context.apply_alias_rows` 初始化該 point 的 aliases。最後組裝環境、install SoC、register devices 及開 tab。它不依賴 `create_entry` CLI。建 entry／component 與 alias Apply 都走既有資源 owner，不由腳本自行寫 entry 檔案。
+FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry 與 setup components。接著建立第一個 `initial` point，以 `ctx.context.apply_alias_rows` 初始化該 point 的 aliases。最後組裝環境、install SoC、register devices，GUI 即可從 New Tab 開實驗。它不依賴 `create_entry` CLI。建 entry／component 與 alias Apply 都走既有資源 owner，不由腳本自行寫 entry 檔案。
 
 FTF startup 呼叫 `ftf(Path(__file__).with_name("ftf.yaml"), workers=1, warmup=False)`，設定按 script 位置定位，不在啟動時做數值 warmup 或 acquire。Notebook 明示工作副本 YAML 路徑，以 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True` 保留兩核並啟動背景預編譯。指定檔缺失或無效直接報錯，不 fallback。公開 `ftf()` 預設只用一個 worker 且不預編譯，兩個 caller 各自明示成本政策。
 
@@ -282,7 +282,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 ## 交付狀態與限制
 
-- Program 提供具名環境 binding、Module timeline 與 request／signal 契約。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers 並開 tab。GUI 不載入 environment，也不持有模擬啟動模式。模擬的 raw compile hooks 明確拒絕。
+- Program 提供具名環境 binding、Module timeline 與 request／signal 契約。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers，留給使用者從 New Tab 開實驗。GUI 不載入 environment，也不持有模擬啟動模式。模擬的 raw compile hooks 明確拒絕。
 - Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播；重播用相同數值與 RNG 版本重算，不引用已保存的 density。
 - Evolution 提供預設快速分段算法及記憶體 prepare 快取。離線 U 表、Intel OpenCL、持久 exact records 及建庫入口已刪除。快取預算不是 process RAM 上限。
 - 舊 TLS、隱式白雜訊及雙模式 mock API 已移除，Notebook 使用新環境。沒有相容層。參數化 make_mock_soccfg 仍支援離線編譯。

@@ -1,4 +1,4 @@
-"""Open or create the FTF demo entry and install offline resources in a measure GUI."""
+"""Open or create the FTF entry and install offline resources in a measure GUI."""
 
 from pathlib import Path
 
@@ -12,6 +12,8 @@ from zcu_tools.resources.entry import DestinationExistsError, load_entry_templat
 
 def startup(ctx: StartupContext) -> None:
     """Select ftf-demo/initial, seeding it from the template on first use.
+
+    The GUI is then ready for the user to open experiment tabs.
 
     ctx is the GUI's typed startup capability, called on its background worker
     after lab components/adapters are registered. Use the GUI's data project
@@ -61,8 +63,6 @@ def startup(ctx: StartupContext) -> None:
     for name, driver in environment.devices.get_all_devices().items():
         ctx.devices.register(name, driver)
         transferred.add(name)
-    ctx.progress("Opening FTF frequency tab")
-    ctx.tabs.new_tab("onetone/freq")
 
 
 def _seed_entry(ctx: StartupContext) -> None:

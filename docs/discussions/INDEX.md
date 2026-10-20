@@ -30,6 +30,10 @@
 - 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 ADR draft `measure-form-derivation`。
 - 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：選項清單由生成器產生、核心通用、widget 只照清單畫；換分支不繼承舊值；ref 轉 inline 用選項指令；key-or-inline 統一成有 tag 的形狀；決策見 Pydantic 表單 ADR draft。
 
+## 模組邊界
+
+- 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：具體 alias、儀器與模型的認知放 zcu_lab；模板綁定只由呼叫端明填，alias 是 setup／point 各自的檔案；predictor 讀自己的格式檔；框架內建支援能力用內聚子模組而非注入；session 清掉 chip／qubit 假設，分析工具改 entry＋component。
+
 ## 測試與驗證
 
 - 2026-10-16 [Agent 自行做 UI e2e：元件驅動情境](2026-10-16-agent-ui-e2e.md)：行為由 agent 用只經使用者可碰元件操作、只讀使用者可見狀態的情境驗證，使用者走查只判品味；框架情境進 `tests/`，實驗走查腳本留 task scratch。
