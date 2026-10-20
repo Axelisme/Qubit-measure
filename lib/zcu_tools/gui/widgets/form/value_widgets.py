@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any, cast
 
+from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QEvent, QObject, Qt, QTimer
 from qtpy.QtGui import QDoubleValidator, QFocusEvent, QIntValidator, QKeyEvent
 from qtpy.QtWidgets import (
@@ -153,6 +154,9 @@ class _TextCommit(QObject):
     it. Signal-blocked focus loss (fold/retirement) never commits.
     """
 
+    # Relay through Qt so native value-taking and no-argument slots both work.
+    _numeric_committed = pyqtSignal(object)
+
     def __init__(
         self,
         widget: QLineEdit | QSpinBox | TrimDoubleSpinBox,
@@ -177,6 +181,7 @@ class _TextCommit(QObject):
         if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
             text.installEventFilter(self)
             widget.setKeyboardTracking(False)
+            self._numeric_committed.connect(callback)
             widget.valueChanged.connect(self._numeric_changed)
 
     def _cancel(self) -> None:
@@ -217,13 +222,16 @@ class _TextCommit(QObject):
             finally:
                 self._interpreting = False
         self._last_text = self._text.text()
-        self._callback()
+        if isinstance(self._widget, (QSpinBox, TrimDoubleSpinBox)):
+            self._numeric_committed.emit(self._widget.value())
+        else:
+            self._callback()
 
     def _numeric_changed(self, value: int | float) -> None:
         if not self._interpreting:
             self._cancel()
             self._last_text = self._text.text()
-            self._callback(value)
+            self._numeric_committed.emit(value)
 
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
         """Cancel invalid lifetimes and commit ordinary focus/Enter immediately."""
@@ -255,12 +263,13 @@ def connect_committed_value_widget(
 ) -> None:
     """Commit user text after 500 ms idle, Enter or ordinary focus loss.
 
-    Text commits call callback with no arguments. New input restarts the idle
-    interval; explicit commits consume it. Programmatic text changes do not
+    Line-edit commits call callback with no arguments. New input restarts the
+    idle interval; explicit commits consume it. Programmatic text changes do not
     schedule commits. Hidden, reparented, disabled or read-only controls cancel
     pending expiry without discarding text. The widget owns the connection.
-    Spinbox text uses the same policy; stepping, checkboxes and dropdowns keep
-    immediate native value-change callbacks (including their signal arguments).
+    Spinbox text uses the same policy. Spinboxes deliver their numeric value
+    through Qt, preserving its adaptation for no-argument callbacks. Stepping,
+    checkboxes and dropdowns keep immediate value-change callbacks.
     """
     if isinstance(widget, QLineEdit):
         _TextCommit(widget, widget, callback)
