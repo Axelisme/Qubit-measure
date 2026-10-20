@@ -123,9 +123,11 @@ Notebook 使用 `CfgEnv(ml, device_manager)` 借用固定 library snapshot 與 c
 
 CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 point、library 或 registry 管理權。底層 `assemble_experiment_cfg` 接顯式 validation context，不讀硬體。Run 不重新組裝 cfg、不重連、不補裝置。需要新的參數或 library 資訊時，caller 明確讀取來源、重建 CfgEnv，再次呼叫 make_cfg。Driver mapping 不是資源 lease，也不凍結 driver 狀態。Notebook 初始化 cell 重跑就重建，不探查 namespace 或自動重用，舊連線仍由使用者明確關閉。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
 
-模擬環境由啟動時明確選用的 Python `build_environment()` 組裝，回傳已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。GUI 與 Notebook 共用此 bundle；一般 soc_changed 不建立 device，不保留動態切換入口。成功回傳時清理責任交給宿主，部分清理失敗保留資源與原錯誤，不假裝 ready。
+模擬 builder 回傳具名 `SimulationEnvironment`，包含已綁定 soc、匹配 soccfg、同一 DeviceManager 與公開描述。一般可信 Python loader 仍支援零參數 `build_environment()`；FTF startup 與 Notebook 直接呼叫公開 `experiment.ftf.ftf(...)`。
 
-FTF 共用 production environment entry 在組裝完成後啟動背景數值預編譯。`experiment.ftf` 擁有代表性數值工作與 process-wide single-flight；`SimulationEnvironment` 暴露進度、future 與 ready 等待。直接呼叫 `ftf()` 預設不預編譯，production entry 明確傳 `warmup=True`，作者可用 `warmup=False` 關閉。背景工作不接觸正式 devices、RNG stream 或 resident Engine。Program binding 只知道通用 ready callback，在 acquire admission 後、消耗 sequence 前等待。失敗由 environment 回報並退回 on-demand 編譯。外部計時 owner 先等 ready 再開始計時；GUI 狀態顯示由前端接線，不由數值層更新。依賴沿用 C8、C9、C10、C12，沒有新增反向依賴。
+GUI 不載入 environment，由選定的 startup 腳本經一般 facets 安裝 SoC 並逐一 register drivers。一般 soc_changed 不建立 device，不保留動態切換入口。成功回傳後由 caller 安排清理；只有 register 成功的 driver 才交給 GUI 關閉，失敗與未交付資源由腳本清理。資源交接與 `on_close` 時序見 [[0064]]。部分清理失敗保留資源與原錯誤，不假裝 ready。
+
+FTF Notebook 範例在組裝時明確傳 `warmup=True`，worker 數保留兩顆 host CPUs，至少使用一個。GUI startup 明確傳 `workers=1, warmup=False`，不在啟動時預編譯。`experiment.ftf` 擁有代表性數值工作與 process-wide single-flight；`SimulationEnvironment` 暴露進度、future 與 ready 等待。直接呼叫 `ftf()` 預設 `workers=1, warmup=False`。背景工作不接觸正式 devices、RNG stream 或 resident Engine。Program binding 只知道通用 ready callback，在 acquire admission 後、消耗 sequence 前等待。失敗由 environment 回報並退回 on-demand 編譯。外部計時 owner 先等 ready 再開始計時；GUI 狀態顯示由前端接線，不由數值層更新。依賴沿用 C8、C9、C10、C12，沒有新增反向依賴。
 
 FTF 的 YAML 由 resources 驗證；experiment.ftf 擁有接線、裝置與逐 round snapshot，simulate 只收數值並提供 joint model、evolution、population conversion 與 ADC。初值只在 startup 套用，每 round 讀當下 device 值；讀取失敗不降級。正常 metadata 只保留 I/Q 與公開 provenance，不含模型真值。舊 TLS 執行機制不留相容層。依賴由 .importlinter C8、C9、C10、C12 約束；完整物理限制與 readout 起點凍結近似見 [模擬環境契約](draft/simulation-environments.md)。
 
@@ -190,6 +192,6 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 - [Notebook](../../lib/zcu_tools/notebook/README.md) 說明 NotebookAdapter、GEPostAnalyzer 與 FluxDepAnalyzer。同步分析可省略 source，獨立互動工具仍接明確來源；Done／Cancel 與晚到成果保留各自來源。
 - [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md) 說明原生 Figure 與 Qt presentation 的不同生命週期。Plots.finish 完成最後刷新，Plots.release 只釋放呈現。NamedFigures 保留完成後的原生圖。
 - Measure 的 ArtifactKey 以 stage 與圖名識別成果。`measure.artifacts` 擁有 ArtifactTracker 與 SaveService，捕捉本次保存來源與目的地。Save All 包含已保存成果，個別失敗不撤銷先前成功項。共用 `experiment.artifacts` 服務 GUI 與 Notebook，固定項目集中隱藏格式選擇、編碼與失敗隔離。Workflow 的單檔保存仍用共用 prepared writer，不強制改走 entry Save All。
-- [Session](../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager owner 與 Use Simulate Env coordinator。一般 SoC 連線不建立 FakeDevice，coordinator 先完成真實裝置斷線，再發布已綁定來源的 mock 環境。
+- [Session](../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager 與一般 SoC／device 操作。模擬資源由可信 startup 腳本經一般 facets 交付，不由 session coordinator 載入。一般 SoC 連線不建立 FakeDevice。選定腳本、`on_close` 與 driver 關閉責任見 [[0064]]。
 
 Standalone [liveplot](../../lib/zcu_tools/plotting/liveplot/README.md) 保留自己的 backend 與 close 契約，不等同於 Plots host。

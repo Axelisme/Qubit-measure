@@ -60,7 +60,7 @@
 
 `zcu_lab.components` 是 package。共用欄位型別、通用 wiring 與基礎元件放在 `base.py`；qubit 共用定義與參數轉換放在 `qubit.py`。Fluxonium、transmon、resonator、JPA 與 mux 各自擁有一個子模組。Package 入口保留明確的 `register_all()` 與公開匯出，不作 import-time 註冊。
 
-GUI／Notebook 共用的範例環境、FTF YAML 與相鄰離線建庫入口放在 `zcu_lab/simulation_envs/`，不放在 Notebook 文件目錄。框架仍以 caller 傳入的路徑載入可信 Python，不自動探索這個目錄；C14 與 C16 繼續禁止框架反向 import 使用者定義。
+GUI／Notebook 共用的模擬參數檔與 startup 範例放在 `zcu_lab/simulation_envs/`，不放在 Notebook 文件目錄。FTF 沒有離線建庫入口。GUI 以 caller 選定的路徑執行可信 startup 腳本，不自動探索這個目錄；Notebook 可直接呼叫公開 `experiment.ftf.ftf(...)`。C14 與 C16 繼續禁止框架反向 import 使用者定義。
 
 2026-10-16，使用者要求：「比如components我希望除了基礎原件，其他的都是獨立的子模塊檔。」對上述拆分與環境搬移確認：「可以移到zcu_lab/simulation_envs/中嗎？2同意」。
 
