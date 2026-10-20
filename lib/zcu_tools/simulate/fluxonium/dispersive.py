@@ -305,9 +305,9 @@ def calculate_dispersive_vs_flux_fast(  # noqa: PLR0913
     arrays (rf_0, rf_1, ...) in GHz, one value per input flux — same shape/units as
     ``calculate_dispersive_vs_flux``.
     """
-    from .energies import _fold_unique_fluxs
+    from .energies import fold_unique_fluxs
 
-    folded, sort_idxs, uni_idxs = _fold_unique_fluxs(fluxs)
+    folded, sort_idxs, uni_idxs = fold_unique_fluxs(fluxs)
 
     # Flux-independent fluxonium pieces — built once per (params, cutoff, dim) and
     # memoised (the expensive cos/sin matrix functions would otherwise dominate the
