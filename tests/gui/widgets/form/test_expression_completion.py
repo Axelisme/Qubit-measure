@@ -270,12 +270,16 @@ def test_only_editable_expressions_offer_one_level_and_device_names(
         driver.enter_text(value=text, object_name=INPUT, commit=False)
         shot(driver, tmp_path, f"03-no-candidate-{index}")
         assert driver.text_input(object_name=INPUT).description == ""
+    driver.press_key(Qt.Key.Key_Tab)
+    assert driver.text_input(object_name="form.input.direct").focused
     driver.enter_text(value="$qu", object_name="form.input.direct", commit=False)
     shot(driver, tmp_path, "04-direct")
     assert driver.text_input(object_name="form.input.direct").description == ""
     driver.click(object_name="form.input.locked")
     shot(driver, tmp_path, "05-declared-readonly")
     assert driver.text_input(object_name="form.input.locked").description == ""
+    driver.press_key(Qt.Key.Key_Tab, modifiers=Qt.KeyboardModifier.ShiftModifier)
+    assert driver.text_input(object_name=INPUT).focused
     driver.enter_text(value="$qu", object_name=INPUT, commit=False)
     shot(driver, tmp_path, "06-editable")
     assert "Completion: bit." in driver.text_input(object_name=INPUT).description
