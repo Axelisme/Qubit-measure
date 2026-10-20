@@ -25,12 +25,12 @@ def cavity():
     )
     pulse = ReadoutPulse(0, 25, 0.3j, 6.2, 0.4)
     drive_type = getattr(ftf, "CavityDrive", None)
-    assert callable(drive_type), "FTF must expose cavity photons, pulls and driven dephasing"
     return joint, resonators, pulse, drive_type
 
 
 def test_cavity_response_uses_joint_pulls_and_coherent_shared_line_fields(cavity):
     joint, resonators, pulse, drive_type = cavity
+    assert callable(drive_type), "FTF must expose cavity photons, pulls and driven dephasing"
     drive = drive_type(joint, resonators, (pulse,))
     times = np.array([0., 4., 25., 40.])
     response = drive.response(times)
@@ -63,6 +63,7 @@ def test_cavity_response_uses_joint_pulls_and_coherent_shared_line_fields(cavity
 
 def test_cavity_segment_average_retains_ringdown_and_integrates_rates(cavity):
     joint, resonators, pulse, drive_type = cavity
+    assert callable(drive_type), "FTF must expose cavity photons, pulls and driven dephasing"
     drive = drive_type(joint, resonators, (pulse,))
     # A dense independent quadrature checks a segment spanning switch-off.
     times = np.linspace(10., 40., 3001)
