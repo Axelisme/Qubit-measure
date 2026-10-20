@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-20，program-owned RawShots 與環境完整 raw 生成
+**Last updated:** 2026-10-20，program-owned RawShots 與環境完整 raw 生成；acquire-local request layout and normalization metadata；SoC-owned statistics validation certificates, optional round pacing and acquire completion observer；board 自述身分與 caller-owned 啟動
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -197,6 +197,8 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   exact bytes, not borrowed array identity. Counts, layout and noisy totals are
   checked each round, and every returned array is detached even on a certificate
   hit. Certificates live with the SoC and do not cross the core/backend boundary.
+  Fixed request layouts and integrated normalization metadata are prepared once
+  per acquire; this never freezes snapshots or certifies later backend values.
   Without threshold, classification or trackers, it divides
   totals by reps and readout length, removes QICK offsets and moves reads first,
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
