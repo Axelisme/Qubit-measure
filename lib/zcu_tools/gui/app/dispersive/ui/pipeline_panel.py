@@ -135,6 +135,22 @@ class PipelinePanelWidget(QWidget):
         self._build_ui()
         self._sync_enabled()
 
+    def quiesce_background_work(self, timeout_ms: int = 5000) -> bool:
+        """Pump the Qt owner loop until panel workers and deliveries drain.
+
+        Call only on the GUI owner thread. timeout_ms is one total deadline in
+        milliseconds for all workers and their tracked terminal deliveries.
+        Negative values raise ValueError; zero only checks current completion.
+        Return True when workers and deliveries have finished. Timeout returns
+        False without discarding live workers or queued deliveries; retain the
+        panel and retry if completion is required before releasing it.
+
+        Workers may synchronously call the owner while draining. The nested
+        event loop permits normal Qt reentrancy and does not close admission,
+        cancel work, or establish hardware safety. Repeated drains are allowed.
+        """
+        return self._runner.quiesce(timeout_ms=timeout_ms)
+
     # --- construction ----------------------------------------------------
 
     def _build_ui(self) -> None:
