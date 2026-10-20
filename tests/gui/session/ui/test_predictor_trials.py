@@ -38,7 +38,9 @@ def test_blank_parameters_can_be_completed_cleared_and_corrected(
     qapp, tmp_path: Path, trial, name
 ) -> None:
     dialog = PredictorDialog(PredictorControlFacet(PredictorService()), params=trial)
-    evidence = Path(os.environ.get("PREDICTOR_BLANK_EVIDENCE", str(tmp_path))) / trial.model
+    evidence = (
+        Path(os.environ.get("PREDICTOR_BLANK_EVIDENCE", str(tmp_path))) / trial.model
+    )
     field_name = f"predictor_input_{name}"
     try:
         dialog.show()
@@ -47,7 +49,10 @@ def test_blank_parameters_can_be_completed_cleared_and_corrected(
         ui.screenshot(evidence / "01-missing.png")
         field = ui.observe(object_name=field_name)
         assert field.visible and field.enabled and field.text == ""
-        assert f"Missing parameters: {name}" in ui.observe(object_name="predictor_status").text
+        assert (
+            f"Missing parameters: {name}"
+            in ui.observe(object_name="predictor_status").text
+        )
 
         ui.enter_text(object_name=field_name, value="0.1", commit=False)
         qt_until(
@@ -55,13 +60,18 @@ def test_blank_parameters_can_be_completed_cleared_and_corrected(
             label="completed predictor curves",
         )
         ui.screenshot(evidence / "02-complete.png")
-        assert "Missing parameters" not in ui.observe(object_name="predictor_status").text
+        assert (
+            "Missing parameters" not in ui.observe(object_name="predictor_status").text
+        )
 
         ui.enter_text(object_name=field_name, value="", commit=False)
         ui.click(object_name="predictor_input_half")
         ui.screenshot(evidence / "03-cleared.png")
         assert ui.observe(object_name=field_name).text == ""
-        assert f"Missing parameters: {name}" in ui.observe(object_name="predictor_status").text
+        assert (
+            f"Missing parameters: {name}"
+            in ui.observe(object_name="predictor_status").text
+        )
         assert all(axis.visible_curves == 0 for axis in ui.plots().axes)
 
         for index, invalid in enumerate(("oops", "1e", "nan", "inf"), start=4):
