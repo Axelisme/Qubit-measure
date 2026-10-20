@@ -98,6 +98,9 @@ Bath reset phase 仍可編輯。這個入口不擴充 nested readonly，不複�
 
 使用者於 2026-10-20 裁定：「應該有更簡單的做法，比如就隨便填一個合法值，或是給adapter生成時說明哪些路徑不重要。」
 同日補充：「不只是onetone/freq有這個問題」。各實驗依自己的 Run 覆寫路徑宣告 Hidden，不靠欄位同名推定。
+逐 tone list 的位置 Template／Slot 必須宣告相同 Hidden 路徑，才套用共享元素 model。
+路徑不一致時明確報錯。共享的只有隱藏路徑，各位置的值與來源獨立，不新增作者 API。
+普通位置 tree 直接放 Hidden 仍受 [[0079]] 的共同元素宣告限制。
 
 缺 Slot 來源時，optional 欄位停用且有效，required 欄位留空且 Invalid。
 沒有 Slot fallback 或 init 模式。需要選來源時，make_form 明寫 if／else。

@@ -58,7 +58,7 @@ def declaration_seed(seed: TemplateSeed) -> JsonValue:
     Actual input uses scalar_seed instead, so this marker never becomes input.
     """
     value = scalar_seed(seed)
-    return {"hidden": value} if isinstance(seed, Hidden) else value
+    return {"hidden": True, "value": value} if isinstance(seed, Hidden) else value
 
 
 def set_path(data: dict[str, JsonValue], path: str, value: JsonValue) -> None:

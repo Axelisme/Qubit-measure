@@ -551,6 +551,44 @@ class Section:
                 }
         return result
 
+    def _module_hidden_paths(self) -> dict[tuple[str, ...], frozenset[str]]:
+        """Collect only module visibility declarations, without values or sources."""
+        paths: dict[tuple[str, ...], frozenset[str]] = {
+            (name,): frozenset(
+                path
+                for path, seed in field.node.set.items()
+                if isinstance(seed, Hidden)
+            )
+            if field.node is not None
+            else frozenset()
+            for name, field in self.modules.items()
+        }
+        for name, child in self.children.items():
+            paths.update(
+                {
+                    (name, *path): hidden
+                    for path, hidden in child._module_hidden_paths().items()
+                }
+            )
+        return paths
+
+    def _share_hidden_paths(self, positions: tuple["Section", ...]) -> None:
+        """Install a homogeneous list policy; position defaults remain independent."""
+        if not positions:
+            return
+        common = positions[0]._module_hidden_paths()
+        for index, position in enumerate(positions[1:], start=1):
+            if position._module_hidden_paths() != common:
+                raise ValueError(
+                    f"{self.path!r}: Hidden paths must match at every list position; "
+                    f"positions 0 and {index} differ"
+                )
+        for path, hidden in common.items():
+            section = self
+            for name in path[:-1]:
+                section = section.children[name]
+            section.modules[path[-1]].shared_hidden_paths = hidden
+
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
         """Validate and bind a detached catalog recursively, then rebuild model.
 
@@ -564,6 +602,8 @@ class Section:
                 raise ValueError(
                     f"Adapter {adapter!r}, {'.'.join(field.path)}: {exc}"
                 ) from exc
+        for name, child in self.lists.items():
+            child._share_hidden_paths(self.element_seeds.get(name, ()))
         for child in (*self.children.values(), *self.lists.values()):
             child.bind_templates(catalog, adapter)
         for seeds in self.element_seeds.values():
