@@ -10,9 +10,8 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter
 
 # qtpy.QtGui.QAction resolves to NoReturn for pyright; PyQt6 is the binding.
 from PyQt6.QtGui import QAction
-from qtpy.QtCore import QEvent, QObject, QPoint, QSignalBlocker, Qt
+from qtpy.QtCore import QEvent, QObject, QPoint, Qt
 from qtpy.QtGui import (
-    QFocusEvent,
     QKeyEvent,
     QPalette,
 )
@@ -41,6 +40,7 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import trimmed_decimals
 
 from ._fold import FoldTitle, foldable_rows
+from ._text_input import TextInput as _TextInput
 from ._view import FieldView
 
 _JSON = TypeAdapter(JsonValue, config=ConfigDict(allow_inf_nan=False))
@@ -231,23 +231,6 @@ def _tight_label(text: str, parent: QWidget) -> QLabel:
     return label
 
 
-class _TextInput(QLineEdit):
-    """Emit one commit on normal focus loss, including after a folded draft.
-
-    Qt clears its edited flag even when folding blocks editingFinished. The
-    widget still owns the unchanged text; normal focus loss must retry it.
-    Fold/retirement signal blockers suppress this notification too. Popup
-    focus is temporary, so opening the text menu does not commit.
-    """
-
-    def focusOutEvent(self, a0: QFocusEvent | None) -> None:
-        """Let Qt update focus styling, then notify the row once."""
-        with QSignalBlocker(self):
-            super().focusOutEvent(a0)
-        if a0 is not None and a0.reason() != Qt.FocusReason.PopupFocusReason:
-            self.editingFinished.emit()
-
-
 @dataclass(frozen=True)
 class RowActions:
     """Explicit row operations, separate from parsed value input."""
@@ -368,6 +351,15 @@ class FieldRow:
         hint = _MODE_HINT if self.mode is not None else ""
         self._tooltip = "\n".join(filter(None, (field.description, hint)))
         self.set_error("")
+
+    def set_completion_candidates(self, candidates: tuple[str, ...]) -> None:
+        """Pass captured $alias and one-level field names to this row's text input.
+
+        candidates is sorted, case-sensitive and detached from source services.
+        Non-text rows ignore it; Direct and read-only text never offer hints.
+        """
+        if isinstance(self.input, _TextInput):
+            self.input.set_completion_candidates(candidates)
 
     def connect_fold(self, callback: Callable[[], None]) -> None:
         """Call callback after a user fold, if this row has a fold title.
@@ -707,6 +699,8 @@ class FieldRow:
         if self.mode is None or self.input is None:
             return
         self.mode.setChecked(expression)
+        if isinstance(self.input, _TextInput):
+            self.input.set_expression_mode(expression=expression)
         self._restyle_input()
 
     def _input_changed(self) -> None:
@@ -860,6 +854,8 @@ class FieldRow:
         if isinstance(widget, QLineEdit):
             # A fixed one-value Literal stays read-only text either way.
             widget.setReadOnly(field.fixed or not editable)
+            if isinstance(widget, _TextInput):
+                widget.set_expression_mode(expression=expression)
             text = local.text if local else _input_text(field)
             # Avoid resetting cursor/selection on unchanged publications.
             if widget.text() != text and not _shows_raw(field, widget.text()):

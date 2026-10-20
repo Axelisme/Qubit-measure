@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
+from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
 
@@ -17,6 +19,9 @@ from qtpy.QtWidgets import (
     QPushButton,
     QScrollArea,
     QTableWidget,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
@@ -28,6 +33,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.writeback import (
     ParameterWriteback,
+    SampleWriteback,
     WritebackItem,
     WritebackValues,
 )
@@ -35,6 +41,7 @@ from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._components import ResonatorSchema, WiringSchema
 from tests.gui.app.measure._synthetic import PairAdapter, SampleParams, SampleRun
@@ -570,6 +577,117 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
         widget.close()
         widget.deleteLater()
         qapp.processEvents()
+
+
+@pytest.fixture(
+    params=[("analysis", 620, False), ("post_analysis", 360, True)],
+    ids=["analysis-wide-unapplied", "post-analysis-narrow-applied"],
+)
+def sample_row(
+    qapp: QApplication, tmp_path: Path, request: pytest.FixtureRequest
+) -> Generator[tuple[ComponentDriver, str]]:
+    pane, width, applied = request.param
+    item = SampleWriteback(
+        "Q1",
+        "Captured sample",
+        proposed_value={
+            "freq_mhz": 1250.0,
+            "dev_value": 0.00125,
+            "dev_unit": "A",
+            "run_id": "run-20261020-1234567890123456789012345678901234567890",
+            "fit": {"accepted": True},
+        },
+    )
+    item.session_id = "sample-1"
+    ctrl = MagicMock()
+    applied_states = {item.session_id: applied}
+    ctrl.get_writeback_applied_for_pane.return_value = applied_states
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied_states
+    host = QTabWidget()
+    host.addTab(QWidget(), "Overview")
+    page = QWidget()
+    layout = QVBoxLayout(page)
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    widget.populate(
+        [item],
+        {
+            item.session_id: WritebackValues(
+                actual_path="Q1",
+                current={"freq_mhz": 1100.0},
+                proposed=item.proposed_value,
+                unit=None,
+            )
+        },
+    )
+    layout.addWidget(widget)
+    paste = QLineEdit()
+    paste.setObjectName("copiedSample")
+    layout.addWidget(QLabel("Paste copied sample JSON here"))
+    layout.addWidget(paste)
+    host.addTab(page, "Writeback")
+    host.resize(width, 600)
+    host.show()
+    driver = ComponentDriver(host)
+    try:
+        driver.screenshot(tmp_path / "01-overview.png")
+        driver.select_tab("Writeback")
+        driver.screenshot(tmp_path / "02-sample-row.png")
+        yield driver, "Q1 · sample" if applied else "Q1 · sample*"
+    finally:
+        host.close()
+        host.deleteLater()
+        qapp.processEvents()
+
+
+def test_sample_row_names_component_and_preserves_applied_marker(sample_row) -> None:
+    driver, target = sample_row
+    checks = [w for w in driver.visible().widgets if w.kind == "QCheckBox"]
+    assert [w.text for w in checks] == [target]
+
+
+def test_sample_row_current_is_entry_sample(sample_row) -> None:
+    driver, _ = sample_row
+    current = driver.observe(object_name="writebackCurrent")
+    assert current.text == current.tooltip == "entry sample"
+
+
+def test_sample_proposal_lists_every_field_in_label_and_tooltip(sample_row) -> None:
+    driver, _ = sample_row
+    proposed = driver.observe(object_name="writebackProposed")
+    expected = {
+        "freq_mhz=1250.0",
+        "dev_value=0.00125 A",
+        "dev_unit=A",
+        "run_id=run-20261020-1234567890123456789012345678901234567890",
+        'fit={"accepted": true}',
+    }
+    assert set(proposed.text.splitlines()) == expected
+    assert set(proposed.tooltip.splitlines()) == expected
+    assert proposed.fully_visible
+
+
+def test_sample_copy_pastes_complete_json_without_edit_dialog(
+    sample_row, tmp_path: Path
+) -> None:
+    driver, _ = sample_row
+    actions = [w.text for w in driver.visible().widgets if w.kind == "QPushButton"]
+    assert "Copy" in actions and "Edit" not in actions
+    driver.click("Copy")
+    driver.screenshot(tmp_path / "03-copy.png")
+    driver.invoke_context_action(
+        object_name="copiedSample",
+        action="&Paste\tCtrl+V",
+        evidence=tmp_path / "04-paste-menu.png",
+    )
+    driver.screenshot(tmp_path / "05-pasted-json.png")
+    assert json.loads(driver.observe(object_name="copiedSample").text) == {
+        "freq_mhz": 1250.0,
+        "dev_value": 0.00125,
+        "dev_unit": "A",
+        "run_id": "run-20261020-1234567890123456789012345678901234567890",
+        "fit": {"accepted": True},
+    }
+    assert driver.dialogs() == ()
 
 
 def test_nonempty_preview_requires_each_service_fact(qapp) -> None:

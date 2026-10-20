@@ -89,6 +89,16 @@ class WidgetObservation:
 
 
 @dataclass(frozen=True)
+class TextInputObservation:
+    """Visible line-edit text, focus, editing policy and accessible description."""
+
+    text: str  # Rendered input, empty when hidden.
+    focused: bool  # Visible input currently owns keyboard focus.
+    read_only: bool  # Qt read-only policy; copying remains possible.
+    description: str  # Accessible description of the visible input and hints.
+
+
+@dataclass(frozen=True)
 class TreeRowObservation:
     """One on-screen tree row; fully clipped/hidden cells have empty captions.
 
@@ -884,6 +894,22 @@ class ComponentDriver:
             key_click(popup, Qt.Key.Key_Escape)
         chooser.click("&Open")
 
+    def text_input(self, *, object_name: str) -> TextInputObservation:
+        """Observe a named line edit; hidden controls expose no text or hints.
+
+        Raise TypeError for a control that is not a QLineEdit.
+        """
+        widget = self._find(None, object_name, editable=True)
+        if not isinstance(widget, QLineEdit):
+            raise TypeError("Expected a line edit")
+        visible = self._on_screen(widget)
+        return TextInputObservation(
+            text=widget.text() if visible else "",
+            focused=visible and widget.hasFocus(),
+            read_only=widget.isReadOnly(),
+            description=widget.accessibleDescription() if visible else "",
+        )
+
     def enter_text(
         self,
         text: str | None = None,
@@ -913,12 +939,22 @@ class ComponentDriver:
         object_name: str | None = None,
         modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
     ) -> None:
-        """Press a key on an interactive control found by label, caption or name.
+        """Send a real key with modifiers without assigning keyboard focus.
 
-        This sends a keyboard event without forcing focus. Tab uses Qt's normal
-        focus traversal. Hidden, disabled and clipped controls are not driven.
+        With no selector, use the window's actual Qt focus, or the window when
+        no child has focus. Otherwise, supply either text (a visible field label
+        or caption) or object_name (an existing Qt objectName) to target a control.
+        Tab uses Qt's normal focus traversal. Hidden, disabled and fully clipped
+        targets are not driven. Process pending Qt events after the key.
+
+        Raise ValueError if both selectors are supplied, or LookupError if a
+        selector does not identify exactly one control.
         """
-        widget = self._field_control(text, object_name)
+        widget = (
+            self._window.focusWidget() or self._window
+            if text is None and object_name is None
+            else self._field_control(text, object_name)
+        )
         if self._can_interact(widget):
             key_click(widget, key, modifiers)
         QApplication.processEvents()

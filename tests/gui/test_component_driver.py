@@ -93,6 +93,15 @@ def test_label_input_enter_commits_and_tab_click_changes_visible_page(surface) -
         driver.select_tab("Unknown")
 
 
+def test_enter_empty_text_clears_a_filled_field(surface, tmp_path: Path) -> None:
+    driver = _user_input.ComponentDriver(surface)
+    driver.screenshot(tmp_path / "before-clear.png")
+    driver.enter_text("Sample name:", "")
+    driver.screenshot(tmp_path / "after-clear.png")
+    assert driver.observe(object_name="sample_name").text == ""
+    assert driver.status().text == "Committed: "
+
+
 def test_disabled_and_hidden_actions_leave_visible_status_unchanged(
     surface, tmp_path: Path
 ) -> None:

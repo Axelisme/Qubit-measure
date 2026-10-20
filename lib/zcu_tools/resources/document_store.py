@@ -187,22 +187,27 @@ def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -
 
 
 def _projection(value: object) -> YamlValue:
-    """Serialize actual model output with presence and concrete subclass fields."""
+    """Serialize model output, then validate the complete YAML tree once."""
+    return TypeAdapter(YamlValue).validate_python(_serialized_tree(value))
+
+
+def _serialized_tree(value: object) -> object:
+    """Keep presence, subclass fields and future extras without subtree validation."""
     if isinstance(value, _Missing):
         raise TypeError("Missing values cannot be serialized to YAML")
     if isinstance(value, BaseModel):
-        serialized = _projection(
+        serialized = _serialized_tree(
             value.model_dump(exclude_unset=True, serialize_as_any=True)
         )
         return _preserve_future_extras(serialized, value)
     if isinstance(value, Mapping):
-        value = {key: _projection(child) for key, child in value.items()}
-    elif isinstance(value, (list, tuple)):
-        value = [_projection(child) for child in value]
-    return TypeAdapter(YamlValue).validate_python(value)
+        return {key: _serialized_tree(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_serialized_tree(child) for child in value]
+    return value
 
 
-def _supplement_model_extras(serialized: YamlValue, model: BaseModel) -> None:
+def _supplement_model_extras(serialized: object, model: BaseModel) -> None:
     """Add only temporary extras; reject non-mapping output and occupied keys."""
     extras = model.model_extra or {}
     if model.model_config.get("extra") == "allow" or not extras:
@@ -218,10 +223,10 @@ def _supplement_model_extras(serialized: YamlValue, model: BaseModel) -> None:
             f"{sorted(collisions)}"
         )
     for name, child in extras.items():
-        serialized[name] = _projection(child)
+        serialized[name] = _serialized_tree(child)
 
 
-def _preserve_future_extras(serialized: YamlValue, validated: object) -> YamlValue:
+def _preserve_future_extras(serialized: object, validated: object) -> object:
     """Walk original positions, supplementing only remaining temporary extras.
 
     Forbid/ignore model_dump omits validation-override extras. Declared values
@@ -503,6 +508,8 @@ class DocumentStore[T: BaseModel]:
         self._observers: dict[int, Callable[[DocumentChange], None]] = {}
         self._next_subscription_id = 0
         self._deferred_until_unlock: list[DocumentChange] = []
+        self._parsed_bytes: bytes | None = None
+        self._parsed_document: YamlMap | None = None
         if read_cleanup is None:
             self._document, _, self._snapshot = self._read()
         else:
@@ -638,13 +645,20 @@ class DocumentStore[T: BaseModel]:
         No lock is acquired here. Edit/refresh callers own their lock scope;
         initial construction may run while a different owner already holds it.
         """
-        yaml = YAML(typ="rt")
-        yaml.preserve_quotes = True
         original = self._path.read_bytes()
-        raw = yaml.load(original.decode("utf-8"))
+        if original == self._parsed_bytes and self._parsed_document is not None:
+            raw = deepcopy(self._parsed_document)
+        else:
+            yaml = YAML(typ="rt")
+            yaml.preserve_quotes = True
+            raw = yaml.load(original.decode("utf-8"))
         # Validate the recursive shape without discarding ruamel's round-trip nodes.
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
         document = cast(YamlMap, raw)
+        if original != self._parsed_bytes:
+            # Retain raw nodes, never cleanup or external validation outcomes.
+            self._parsed_document = deepcopy(document)
+            self._parsed_bytes = original
         removed: tuple[str, ...] = ()
         if self._read_cleanup is not None:
             version = validate_header(
