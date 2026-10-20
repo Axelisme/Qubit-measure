@@ -269,7 +269,7 @@ def test_save_all_disables_until_analysis_is_run_again(
 
     driver.click("Save All")
     driver.screenshot(images / "02-all-saved.png")
-    assert "Saved 2 files" in driver.status().message
+    assert "Saved 2 files" in driver.status().text
     assert not driver.observe("Save All").enabled
     assert not driver.observe("Save").enabled
 
