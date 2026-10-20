@@ -21,6 +21,7 @@ from zcu_tools.resources.entry import ComponentSchema
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from tests.gui._user_input import ComponentDriver
+from tests.gui.widgets.form._clock import Clock
 
 INPUT = "form.input.amount"
 
@@ -129,8 +130,8 @@ class Host(QWidget):
 
 
 @pytest.fixture
-def host(qapp: QApplication) -> Iterator[Host]:
-    window = Host(capture())
+def host(qapp: QApplication, request: pytest.FixtureRequest) -> Iterator[Host]:
+    window = Host(capture(request.param if hasattr(request, "param") else "qubit"))
     window.show()
     window.activateWindow()
     qapp.processEvents()
@@ -174,10 +175,79 @@ def test_expression_completion_preserves_surrounding_text_and_focus(
     shot(driver, tmp_path, "02-middle-accepted")
     assert driver.text_input(object_name=INPUT).text == "0.8 * $qubit.freq + 5"
     assert driver.text_input(object_name=INPUT).focused
-    assert host.state.input.data["amount"] == {"expr": "1"}
+    assert driver.observe(object_name="form.value.amount").text == "= 1"
     key(driver, Qt.Key.Key_Return)
     shot(driver, tmp_path, "03-committed")
-    assert host.state.input.data["amount"] == {"expr": "0.8 * $qubit.freq + 5"}
+    assert driver.observe(object_name="form.value.amount").text == "= 8.2"
+
+
+@pytest.mark.parametrize(
+    "host,prefix,completed,suffix",
+    [
+        pytest.param("量子位", "$量", "$量子位", "子位", id="cjk-alias"),
+        pytest.param("量子位", "$量子位.fre", "$量子位.freq", "q", id="cjk-field"),
+        pytest.param(
+            "q\u0301ubit", "$q\u0301", "$q\u0301ubit", "ubit", id="combining-alias"
+        ),
+        pytest.param(
+            "q\u0301ubit",
+            "$q\u0301ubit.fre",
+            "$q\u0301ubit.freq",
+            "q",
+            id="combining-field",
+        ),
+    ],
+    indirect=["host"],
+)
+def test_unicode_alias_and_field_completion(
+    host: Host, tmp_path: Path, prefix: str, completed: str, suffix: str
+) -> None:
+    driver = ComponentDriver(host)
+    driver.enter_text(value=prefix, object_name=INPUT, commit=False)
+    shot(driver, tmp_path, "01-unicode-ghost")
+    observed = driver.text_input(object_name=INPUT)
+    assert observed.text == prefix
+    assert observed.description == (
+        f"Completion: {suffix}. Tab accepts; repeated Tab cycles; Esc dismisses."
+    )
+    key(driver, Qt.Key.Key_Tab)
+    shot(driver, tmp_path, "02-unicode-accepted")
+    assert driver.text_input(object_name=INPUT).text == completed
+    assert driver.text_input(object_name=INPUT).focused
+
+
+def test_tab_cycle_survives_idle_timeout_without_submitting(
+    clock: Clock, host: Host, tmp_path: Path
+) -> None:
+    driver = ComponentDriver(host)
+    driver.enter_text(value="$qu", object_name=INPUT, commit=False)
+    shot(driver, tmp_path, "01-pending-idle")
+    key(driver, Qt.Key.Key_Tab)
+    shot(driver, tmp_path, "02-tab-accepted")
+    assert driver.text_input(object_name=INPUT).text == "$qubit"
+    assert driver.observe(object_name="form.value.amount").text == "= 1"
+    clock.advance(500)
+    shot(driver, tmp_path, "03-after-idle")
+    key(driver, Qt.Key.Key_Tab)
+    shot(driver, tmp_path, "04-cycle-after-idle")
+    assert (
+        driver.text_input(object_name=INPUT).text,
+        driver.observe(object_name="form.value.amount").text,
+    ) == ("$qubit1", "= 1")
+    assert driver.text_input(object_name=INPUT).focused
+    key(driver, Qt.Key.Key_Tab)
+    shot(driver, tmp_path, "05-wrapped")
+    assert driver.text_input(object_name=INPUT).text == "$qubit"
+    # A new ordinary edit must restore the regular idle-commit policy.
+    driver.enter_text(value="$qubit.fre", object_name=INPUT, commit=False)
+    key(driver, Qt.Key.Key_Tab)
+    clock.advance(500)
+    shot(driver, tmp_path, "06-field-not-submitted")
+    assert driver.observe(object_name="form.value.amount").text == "= 1"
+    driver.enter_text(value="$qubit.freq + 1", object_name=INPUT, commit=False)
+    clock.advance(500)
+    shot(driver, tmp_path, "07-new-edit-idle-committed")
+    assert driver.observe(object_name="form.value.amount").text == "= 5"
 
 
 def test_hint_requires_whitespace_or_end_after_cursor(
