@@ -27,10 +27,17 @@ class ObservedEngine(Engine):
         super().__init__(1, 1_000_000)
         self.sources: list[weakref.ReferenceType[ModelSource]] = []
 
-    def evolve(self, source, batches, *, budget=1e-3, cancel, telemetry=False):
+    def evolve(
+        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
+    ):
         self.sources.append(weakref.ref(source))
         return super().evolve(
-            source, batches, budget=budget, cancel=cancel, telemetry=telemetry
+            source,
+            batches,
+            budget=budget,
+            cancel=cancel,
+            telemetry=telemetry,
+            reuse_key=reuse_key,
         )
 
 

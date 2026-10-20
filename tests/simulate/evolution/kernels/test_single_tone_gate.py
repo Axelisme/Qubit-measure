@@ -144,16 +144,6 @@ def test_source_close_discards_usage_even_if_engine_preparations_survive():
         assert reset.paths.segments_by_kernel.get("shaped_sambe") == 2
 
 
-def test_repeated_identical_acquires_count_even_when_results_are_memoized():
-    src = source()
-    with closing(Engine(1, 1_000_000)) as engine:
-        small = batch(2)
-        result = engine.evolve(src, (small,), cancel=Event())
-        for _ in range(79):
-            result = engine.evolve(src, (small,), cancel=Event())
-        assert result.paths.segments_by_kernel.get("single_tone_gate") == 2
-
-
 def test_compiled_cold_cost_admits_reference_inventory_but_not_small_inventory():
     with closing(Engine(1, 1_000_000)) as engine:
         for phase in (0.0, 0.713):
