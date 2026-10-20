@@ -31,13 +31,21 @@ def test_cavity_rates_cover_final_evolution_spans_including_ringdown() -> None:
     base = template(tones=1)
     terminal = base.events[-1]
     earlier = replace(
-        terminal, start_us=np.zeros(2), duration_us=np.full(2, 0.002),
+        terminal,
+        start_us=np.zeros(2),
+        duration_us=np.full(2, 0.002),
         gain=np.array([0.3, 0.5]),
     )
     driven = replace(base, events=(earlier, *base.events))
     plan = ftf.plan_template(settings(), snapshot(), driven)
     spans = segment_spans(plan.batch)
-    assert tuple(tuple((s.start_ns, s.end_ns) for s in point) for point in plan.batch.segment_shifts) == spans
+    assert (
+        tuple(
+            tuple((s.start_ns, s.end_ns) for s in point)
+            for point in plan.batch.segment_shifts
+        )
+        == spans
+    )
     # The last segment starts after switch-off but retains the emitted field.
     for point, pulses in enumerate(plan.cavity_drives):
         assert pulses[0].end_ns == 2
