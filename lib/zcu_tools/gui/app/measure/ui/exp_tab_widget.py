@@ -1,5 +1,10 @@
 """Per-experiment tab widget for the measure-gui main window - capability driven."""
 
+# tolerated(file-size): Figure presentation lives in ExperimentFigureArea, and
+# ledger builders live in experiment_ledger. This owner keeps left forms,
+# splitter width, source subscriptions, action admission and attach/detach
+# together; another split would scatter coordination of the same tab lifecycle.
+
 from __future__ import annotations
 
 import logging
