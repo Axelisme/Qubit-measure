@@ -60,11 +60,14 @@ def test_preparation_hits_preserve_source_usage_for_later_acquires():
             draw(source, replace(acquire, sequence=8))
             assert source.preparation_cache.hits == (0 if clear else 1)
             histories.append(dict(numeric.gate_usage))
-            assert histories[-1] == {key: 2 * count for key, count in first.items()}
+            assert histories[-1] == first
             later_drive = replace(drive, phase_deg=drive.phase_deg + 17.0)
             later = replace(base, events=(later_drive, readout))
             draw(source, replace(acquire, templates=(later,), sequence=9))
             routes.append(source.evaluations[0].paths.segments_by_kernel)
+            assert numeric.gate_usage == {
+                key: 2 * count for key, count in first.items()
+            }
             source.close()
             assert not numeric.gate_usage
         finally:
@@ -73,7 +76,8 @@ def test_preparation_hits_preserve_source_usage_for_later_acquires():
     assert routes[0] == routes[1]
 
 
-def test_cached_small_acquire_reselects_route_after_source_usage_grows():
+@pytest.mark.parametrize("rebuild", [False, True])
+def test_cached_small_acquire_reselects_route_after_source_usage_grows(rebuild):
     import numpy as np
     from zcu_tools.core.simulation import PulseEnvelope
 
@@ -115,6 +119,9 @@ def test_cached_small_acquire_reselects_route_after_source_usage_grows():
             assert (
                 source.evaluations[0].paths.segments_by_kernel.get("shaped_sambe") == 2
             )
+            if rebuild:
+                source.preparation_cache.clear()
+                draw(source, replace(small, sequence=8))
             draw(source, large)
             if clear:
                 source.preparation_cache.clear()
@@ -131,7 +138,7 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put():
     from zcu_tools.core.simulation import PulseEnvelope
     from zcu_tools.experiment.ftf.preparation import PreparationCache
 
-    class CountingPreparations(PreparationCache):
+    class CountingPreparations[T](PreparationCache[T]):
         def __init__(self):
             super().__init__()
             self.puts = 0
@@ -175,7 +182,7 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put():
         first_paths = source.evaluations[0].paths
         draw(source, replace(acquire, sequence=8))
         assert source.evaluations[0].paths == first_paths
-        assert numeric.gate_usage == {k: 2 * n for k, n in first_usage.items()}
+        assert numeric.gate_usage == first_usage
         assert cache.hits == 1
         assert cache.puts == 1, (
             "unchanged results must retain their population preparation"
