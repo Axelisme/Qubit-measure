@@ -124,11 +124,34 @@ def coefficients(energies, full, frequencies) -> Channels:
     )
 
 
+def _remainder_inner_channels(ops, generators, signed):
+    """Build local inner commutators without changing their arithmetic.
+
+    The outer generator is absent here, so each matrix serves every outer
+    signed channel. Scratch owns 16 * (q**2 + q**3) * M**2 bytes and dies with
+    remainder_channels; neither array survives this build.
+    """
+    count, size = len(generators), generators.shape[1]
+    third = np.empty((count, count, size, size), dtype=np.complex128)
+    fourth = np.empty((count, count, count, size, size), dtype=np.complex128)
+    for c in range(count):
+        v = ops[c] / 2 + (signed[c] - ops[c]) / 3
+        for b in range(count):
+            third[b, c] = generators[b] @ v - v @ generators[b]
+        for d in range(count):
+            v = ops[d] / 6 + (signed[d] - ops[d]) / 8
+            inner = generators[c] @ v - v @ generators[c]
+            for b in range(count):
+                fourth[b, c, d] = generators[b] @ inner - inner @ generators[b]
+    return third, fourth
+
+
 def remainder_channels(channels, labels, groups, powers):
     """Aggregate absolute ordered SW remainders by equal signed monomials.
 
     Absolute values precede aggregation, preserving the ordered-channel bound.
-    Only one matrix per commutator is transient, never a dense q**4 tensor.
+    Build-local inner commutators are reused across outer signed channels.
+    There is no dense q**4 tensor or cross-build/carrier scratch retention.
     groups maps base-five exponent encodings to packed monomial indices.
     """
     energies, ops, generators, signed = (
@@ -139,6 +162,7 @@ def remainder_channels(channels, labels, groups, powers):
     )
     size, count = len(energies), len(generators)
     result = np.zeros((np.max(groups) + 1, size, size))
+    third, fourth = _remainder_inner_channels(ops, generators, signed)
     for a in range(count):
         for b in range(count):
             v = (ops[b] + signed[b]) / 2
@@ -150,15 +174,12 @@ def remainder_channels(channels, labels, groups, powers):
                     if labels[i] - labels[j] + sign != 0:
                         result[k, i, j] += abs(term[i, j])
             for c in range(count):
-                v = ops[c] / 2 + (signed[c] - ops[c]) / 3
-                inner = generators[b] @ v - v @ generators[b]
+                inner = third[b, c]
                 term = generators[a] @ inner - inner @ generators[a]
                 k = groups[powers[a] + powers[b] + powers[c]]
                 result[k] += np.abs(term)
                 for d in range(count):
-                    v = ops[d] / 6 + (signed[d] - ops[d]) / 8
-                    inner = generators[c] @ v - v @ generators[c]
-                    inner = generators[b] @ inner - inner @ generators[b]
+                    inner = fourth[b, c, d]
                     term = generators[a] @ inner - inner @ generators[a]
                     k = groups[powers[a] + powers[b] + powers[c] + powers[d]]
                     result[k] += np.abs(term)
