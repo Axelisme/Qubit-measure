@@ -5,9 +5,11 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
+from ruamel.yaml import YAML
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     PulseCfg,
@@ -406,6 +408,22 @@ def test_manual_replacement_clears_previous_sources_and_clone_marker() -> None:
     assert replacement.value("Q1.pulses.pi.waveform.length") == 0.05
 
 
+def test_source_acceptance_reads_ledger_once_for_all_provenance_leaves(
+    files: tuple[Path, Path],
+) -> None:
+    source = local_source(files)
+    write_document(files, document())
+    library = open_library(files)
+    with library.edit() as draft:
+        with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
+            draft.accept_source("Q1.pulses.pi", provenance=source)
+        assert draft.snapshot().meta("Q1.pulses.pi.gain") == source
+
+    ledger_reads = [call for call in opened.call_args_list if call.args[0] == files[1]]
+    assert len(ledger_reads) == 1
+    assert library.snapshot().meta("Q1.pulses.pi.freq") == source
+
+
 def test_source_acceptance_round_trips_local_evidence_without_changing_value(
     files: tuple[Path, Path],
 ) -> None:
@@ -456,6 +474,35 @@ def test_open_validates_nonmanual_source_and_attachment(
     (files[1].parent / f"{EVENT_ID}.json").unlink()
     with pytest.raises(FileNotFoundError):
         open_library(files)
+
+
+@pytest.mark.parametrize("action", ["refresh", "edit"])
+def test_unchanged_library_bytes_recheck_attachments_without_reparsing_yaml(
+    files: tuple[Path, Path], action: str
+) -> None:
+    local_source(files)
+    value = document()
+    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData(
+        source=EVENT_ID, kind="rabi", run_id=None, at=AT, stderr=0.01
+    )
+    write_document(files, value)
+    library = open_library(files)
+    (files[1].parent / f"{EVENT_ID}.json").unlink()
+
+    def reload_library() -> None:
+        if action == "refresh":
+            library.refresh()
+        else:
+            with library.edit():
+                pass
+
+    with (
+        patch.object(YAML, "load", autospec=True, side_effect=YAML.load) as load,
+        pytest.raises(FileNotFoundError),
+    ):
+        reload_library()
+    assert load.call_count == 0
+    assert library.snapshot().meta("Q1.pulses.pi.gain") is not None
 
 
 def test_rename_preserves_complete_metadata_and_segment_boundaries() -> None:

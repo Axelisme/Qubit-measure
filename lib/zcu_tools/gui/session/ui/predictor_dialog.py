@@ -9,16 +9,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
-from qtpy.QtGui import QCloseEvent, QShowEvent  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent, QPalette, QShowEvent
 from qtpy.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -47,7 +48,7 @@ from zcu_tools.gui.session.ui.predictor_cache import (
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets import error_colour, set_foreground, success_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
-from zcu_tools.gui.widgets.spinbox import FiniteFloatSpinBox, TrimDoubleSpinBox
+from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
 from zcu_tools.simulate.predictor import (
@@ -136,7 +137,9 @@ class PredictorDialog(QDialog):
     device optionally supplies cached/live device values. parameter_provider
     supplies fixed ParameterContext captures for optional frequency expressions.
     Predictor files come from the current entry through predictor control.
-    params optionally prefills complete or partial local inputs.
+    params optionally prefills complete or partial local inputs. Blank fields are
+    unknown (None); nonnumeric or nonfinite text reports a named field error and
+    blocks computation. Loading null leaves the field blank and editable.
     Unresolved frequency paths disable calibration without substituting a value.
     persistent_on_close hides instead of finishing, retaining the plotted model.
     """
@@ -161,7 +164,7 @@ class PredictorDialog(QDialog):
         self._live_mode = False
         self._suppress_state_changed = False
         self._updating_parameters = False
-        self._known_fields: dict[FiniteFloatSpinBox, QCheckBox] = {}
+        self._parameter_fields: dict[QLineEdit, str] = {}
         self._caretaker: SingleFileCaretaker[PredictorSnapshot, None] | None = None
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
@@ -230,42 +233,44 @@ class PredictorDialog(QDialog):
 
         self._add_model_sources(model_form)
 
-        # Energies in GHz; flux anchors and bias in device-value units. Wide
-        # ranges + many decimals allow exploration. The params classes own physics
-        # validation; unchecked fields remain unknown rather than zero-filled.
-        self._ej_spin = self._make_param_spin(_DEFAULT_EJ)
-        self._ec_spin = self._make_param_spin(_DEFAULT_EC)
-        self._el_spin = self._make_param_spin(_DEFAULT_EL)
+        # Energies use GHz; flux anchors and bias use device-value units. Plain
+        # text preserves finite float precision and blank unknowns. The params
+        # classes own physical validation.
+        self._ej_field = self._make_param_field(_DEFAULT_EJ)
+        self._ec_field = self._make_param_field(_DEFAULT_EC)
+        self._el_field = self._make_param_field(_DEFAULT_EL)
         self._fluxonium_energies_label = QLabel("Energies:")
         self._fluxonium_energies_row = self._make_param_row(
-            ("EJ", self._ej_spin),
-            ("EC", self._ec_spin),
-            ("EL", self._el_spin),
+            ("EJ", self._ej_field),
+            ("EC", self._ec_field),
+            ("EL", self._el_field),
         )
+        self._ec_field.setObjectName("predictor_input_fluxonium_EC")
         model_form.addRow(self._fluxonium_energies_label, self._fluxonium_energies_row)
         # SQUID transmon: EJmax/EC in GHz, d is the dimensionless asymmetry.
-        self._ejmax_spin = self._make_param_spin(_DEFAULT_EJMAX)
-        self._transmon_ec_spin = self._make_param_spin(_DEFAULT_TRANSMON_EC)
-        self._asymmetry_spin = self._make_param_spin(_DEFAULT_ASYMMETRY)
+        self._ejmax_field = self._make_param_field(_DEFAULT_EJMAX)
+        self._transmon_ec_field = self._make_param_field(_DEFAULT_TRANSMON_EC)
+        self._asymmetry_field = self._make_param_field(_DEFAULT_ASYMMETRY)
         self._transmon_energies_label = QLabel("Energies:")
         self._transmon_energies_row = self._make_param_row(
-            ("EJmax", self._ejmax_spin),
-            ("EC", self._transmon_ec_spin),
-            ("d", self._asymmetry_spin),
+            ("EJmax", self._ejmax_field),
+            ("EC", self._transmon_ec_field),
+            ("d", self._asymmetry_field),
         )
+        self._transmon_ec_field.setObjectName("predictor_input_transmon_EC")
         model_form.addRow(self._transmon_energies_label, self._transmon_energies_row)
         self._model_combo.currentIndexChanged.connect(self._sync_model_rows)
         self._sync_model_rows()
-        self._flux_half_spin = self._make_param_spin(_DEFAULT_FLUX_HALF)
-        self._flux_period_spin = self._make_param_spin(_DEFAULT_FLUX_PERIOD)
+        self._flux_half_field = self._make_param_field(_DEFAULT_FLUX_HALF)
+        self._flux_period_field = self._make_param_field(_DEFAULT_FLUX_PERIOD)
         # flux_bias lives here (was in the old "Load predictor" group).
-        self._flux_bias_spin = self._make_param_spin(_DEFAULT_FLUX_BIAS)
+        self._flux_bias_field = self._make_param_field(_DEFAULT_FLUX_BIAS)
         model_form.addRow(
             "Flux:",
             self._make_param_row(
-                ("half", self._flux_half_spin),
-                ("period", self._flux_period_spin),
-                ("bias", self._flux_bias_spin),
+                ("half", self._flux_half_field),
+                ("period", self._flux_period_field),
+                ("bias", self._flux_bias_field),
             ),
         )
 
@@ -492,9 +497,8 @@ class PredictorDialog(QDialog):
         self._parameter_timer.timeout.connect(self._refresh_curves)
         self._refresh_files()
         self._model_combo.currentIndexChanged.connect(self._on_parameters_changed)
-        for spin, known in self._known_fields.items():
-            spin.valueChanged.connect(self._on_parameters_changed)
-            known.toggled.connect(self._on_parameters_changed)
+        for field in self._parameter_fields:
+            field.textChanged.connect(self._on_parameters_changed)
 
         if params is not None:
             self.set_parameters(params)
@@ -506,33 +510,34 @@ class PredictorDialog(QDialog):
     def parameters(self) -> ModelParams:
         """Return the selected model's local trial: GHz energies and native affine inputs.
 
-        Unchecked fields return None. No source/session read or write occurs.
+        Blank fields return None. Nonnumeric or nonfinite text raises a named
+        PredictorInputError. No source/session read or write occurs.
         Invalid physical values are rejected only when queried.
         """
         affine = (
-            self._parameter_value(self._flux_half_spin),
-            self._parameter_value(self._flux_period_spin),
-            self._parameter_value(self._flux_bias_spin),
+            self._parameter_value(self._flux_half_field),
+            self._parameter_value(self._flux_period_field),
+            self._parameter_value(self._flux_bias_field),
         )
         if self._model_combo.currentData() == "transmon":
             return TransmonParams(
-                self._parameter_value(self._ejmax_spin),
-                self._parameter_value(self._transmon_ec_spin),
-                self._parameter_value(self._asymmetry_spin),
+                self._parameter_value(self._ejmax_field),
+                self._parameter_value(self._transmon_ec_field),
+                self._parameter_value(self._asymmetry_field),
                 *affine,
             )
         return FluxoniumParams(
-            self._parameter_value(self._ej_spin),
-            self._parameter_value(self._ec_spin),
-            self._parameter_value(self._el_spin),
+            self._parameter_value(self._ej_field),
+            self._parameter_value(self._ec_field),
+            self._parameter_value(self._el_field),
             *affine,
         )
 
     def set_parameters(self, params: ModelParams) -> None:
         """Replace the detached trial and select its model, retaining invalid physics.
 
-        Every finite float is retained exactly, including subnormals. None unchecks
-        the field; users check and edit it to complete the model.
+        Every finite float is retained exactly, including subnormals. None clears
+        the field; users enter a value to complete the model.
         Computation validates physics later. If enabled, only user cache is saved.
         """
         self._updating_parameters = True
@@ -540,28 +545,24 @@ class PredictorDialog(QDialog):
             self._model_combo.setCurrentIndex(self._model_combo.findData(params.model))
             if isinstance(params, TransmonParams):
                 energies = (
-                    (self._ejmax_spin, params.EJmax),
-                    (self._transmon_ec_spin, params.EC),
-                    (self._asymmetry_spin, params.d),
+                    (self._ejmax_field, params.EJmax),
+                    (self._transmon_ec_field, params.EC),
+                    (self._asymmetry_field, params.d),
                 )
             else:
                 energies = (
-                    (self._ej_spin, params.EJ),
-                    (self._ec_spin, params.EC),
-                    (self._el_spin, params.EL),
+                    (self._ej_field, params.EJ),
+                    (self._ec_field, params.EC),
+                    (self._el_field, params.EL),
                 )
-            for spin, value in (
+            for field, value in (
                 *energies,
-                (self._flux_half_spin, params.flux_half),
-                (self._flux_period_spin, params.flux_period),
-                (self._flux_bias_spin, params.flux_bias),
+                (self._flux_half_field, params.flux_half),
+                (self._flux_period_field, params.flux_period),
+                (self._flux_bias_field, params.flux_bias),
             ):
-                self._known_fields[spin].setChecked(value is not None)
-                spin.setEnabled(value is not None and not self._live_mode)
-                if value is not None:
-                    spin.setValue(value)
-                else:
-                    spin.clear()
+                field.setEnabled(not self._live_mode)
+                field.setText("" if value is None else repr(value))
         finally:
             self._updating_parameters = False
         self._parameter_timer.stop()
@@ -630,11 +631,34 @@ class PredictorDialog(QDialog):
         """Restore a validated cache snapshot into editable local fields only."""
         self.set_parameters(state.params)
 
-    def _parameter_value(self, spin: FiniteFloatSpinBox) -> float | None:
-        return spin.value() if self._known_fields[spin].isChecked() else None
+    def _parameter_value(self, field: QLineEdit) -> float | None:
+        field.setToolTip("Leave blank for unknown.")
+        set_foreground(field, self.palette().color(QPalette.ColorRole.Text))
+        text = field.text().strip()
+        if not text:
+            return None
+        name = self._parameter_fields[field]
+        try:
+            value = float(text)
+        except ValueError as exc:
+            message = f"{name}: enter a finite number or leave blank."
+            field.setToolTip(message)
+            set_foreground(field, error_colour(field))
+            raise PredictorInputError(message) from exc
+        if not isfinite(value):
+            message = f"{name}: enter a finite number or leave blank."
+            field.setToolTip(message)
+            set_foreground(field, error_colour(field))
+            raise PredictorInputError(message)
+        return value
 
     def _save_parameters(self) -> None:
         if self._caretaker is not None:
+            try:
+                self.parameters()
+            except PredictorInputError:
+                # Invalid drafts stay editable; keep the last serializable cache.
+                return
             try:
                 self._caretaker.flush()
             except PersistenceError as exc:
@@ -643,13 +667,18 @@ class PredictorDialog(QDialog):
     def _on_parameters_changed(self, *_args: object) -> None:
         if self._updating_parameters:
             return
-        for spin, known in self._known_fields.items():
-            spin.setEnabled(known.isChecked() and not self._live_mode)
+        self._parameter_timer.stop()
         self._clear_predictor_display()
         self._sync_calibration_button()
-        missing = self.parameters().missing()
+        try:
+            missing = self.parameters().missing()
+        except PredictorInputError as exc:
+            self._set_status(str(exc), error=True)
+            return
         if missing:
             self._set_status("Missing parameters: " + ", ".join(missing), error=True)
+        else:
+            self._set_status("")
         self._save_parameters()
         self._parameter_timer.start()
 
@@ -811,15 +840,15 @@ class PredictorDialog(QDialog):
     def _sync_live_mode_controls(self) -> None:
         enabled = not self._live_mode
         for widget in (
-            self._ej_spin,
-            self._ec_spin,
-            self._el_spin,
-            self._ejmax_spin,
-            self._transmon_ec_spin,
-            self._asymmetry_spin,
-            self._flux_half_spin,
-            self._flux_period_spin,
-            self._flux_bias_spin,
+            self._ej_field,
+            self._ec_field,
+            self._el_field,
+            self._ejmax_field,
+            self._transmon_ec_field,
+            self._asymmetry_field,
+            self._flux_half_field,
+            self._flux_period_field,
+            self._flux_bias_field,
             self._predict_value_spin,
             self._add_from_spin,
             self._add_to_spin,
@@ -828,9 +857,6 @@ class PredictorDialog(QDialog):
             self._calibration_freq_field,
         ):
             widget.setEnabled(enabled)
-        for spin, known in self._known_fields.items():
-            known.setEnabled(enabled)
-            spin.setEnabled(enabled and known.isChecked())
         self._model_combo.setEnabled(enabled)
         self._file_combo.setEnabled(enabled and self.selected_file() is not None)
         self._file_refresh_btn.setEnabled(enabled)
@@ -849,29 +875,29 @@ class PredictorDialog(QDialog):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_param_spin(default: float = 0.0) -> FiniteFloatSpinBox:
-        """Preserve every finite model float; physical validation belongs to the model."""
-        spin = FiniteFloatSpinBox()
-        spin.setValue(default)
-        return spin
+    def _make_param_field(default: float = 0.0) -> QLineEdit:
+        """Preserve finite float text and allow blank or invalid drafts."""
+        return QLineEdit(repr(default))
 
-    def _make_param_row(self, *pairs: tuple[str, FiniteFloatSpinBox]) -> QWidget:
+    def _make_param_row(self, *pairs: tuple[str, QLineEdit]) -> QWidget:
         holder = QWidget()
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
-        for label, spin in pairs:
-            editor = spin.lineEdit()
-            if editor is not None:
-                editor.setObjectName(f"predictor_input_{label}")
-            known = QCheckBox(label)
-            known.setToolTip(
-                "Checked: known input. Uncheck for unknown; check to enter a value."
-            )
-            known.setChecked(True)
-            self._known_fields[spin] = known
-            row.addWidget(known)
-            row.addWidget(spin, stretch=1)
+        for label, field in pairs:
+            field.setObjectName(f"predictor_input_{label}")
+            name = {
+                "half": "flux_half",
+                "period": "flux_period",
+                "bias": "flux_bias",
+            }.get(label, label)
+            self._parameter_fields[field] = name
+            field.setPlaceholderText("unknown")
+            field.setToolTip("Leave blank for unknown.")
+            caption = QLabel(label)
+            caption.setBuddy(field)
+            row.addWidget(caption)
+            row.addWidget(field, stretch=1)
         return holder
 
     @staticmethod
@@ -1200,7 +1226,7 @@ class PredictorDialog(QDialog):
         logger.info("PredictorDialog: calibrated flux bias %r", req)
 
     def _display_calibration(self, result: CalibrationResult) -> None:
-        self._flux_bias_spin.setValue(result.flux_bias)
+        self._flux_bias_field.setText(repr(result.flux_bias))
         self._set_status(
             f"Calibrated flux_bias={result.flux_bias:.6g}; "
             f"{result.frequency_mhz:.6g} MHz; clamped={str(result.clamped).lower()}",
