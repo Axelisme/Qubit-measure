@@ -19,6 +19,7 @@ from zcu_tools.resources.t1_curve_file import (
     save_t1_curve_file,
 )
 
+from .backup import backup_source_path
 from .errors import MigrationInputError
 from .models import KeyMappingItem
 from .state import MigrationSession
@@ -89,9 +90,7 @@ def _source_rows(
     created_at = proven_created_at(timestamp)
     backup = session.manifest.report.backup_path
     original = (
-        backup
-        / "result"
-        / source.relative_to(session.manifest.report.source.result_path)
+        backup_source_path(backup, session.manifest.report.source, source)
         if backup is not None
         else source
     )

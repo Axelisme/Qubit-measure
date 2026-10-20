@@ -15,6 +15,7 @@ from typing import Literal
 import pytest
 from pydantic import ConfigDict, Field, JsonValue, TypeAdapter
 from zcu_tools.datafile import JsonObject
+from zcu_tools.resources.dispersive_file import load_dispersive_file
 from zcu_tools.resources.document_store import YamlMap
 from zcu_tools.resources.entry import (
     ComponentSchema,
@@ -28,6 +29,7 @@ from zcu_tools.resources.predictor_file import (
     PredictorSource,
     load_predictor_file,
 )
+from zcu_tools.resources.t1_curve_file import load_t1_curve_file
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from migrations.storage_mapping import build_mapping
@@ -692,6 +694,99 @@ def test_analysis_files_publish_typed_unknowns_and_keep_original_sections(
     doc = snapshot(entry.setup)
     for key, value in analysis_sections.items():
         assert document_value(doc, f"Qlegacy.ext.legacy_params.{key}") == value
+
+
+@pytest.mark.parametrize(
+    ("section", "kind", "content"),
+    [
+        ("dispersive", "dispersive", {"g": None, "timestamp": "unproven"}),
+        ("t1_curve_fit", "t1_curve", {"params": {"Q_cap": None}, "timestamp": None}),
+        (
+            "fluxdep_fit",
+            "dispersive",
+            {"plot_transitions": {"r_f": 5.2}, "timestamp": "2020-07-07T16:30:00"},
+        ),
+    ],
+)
+def test_analysis_timestamp_locators_survive_source_cleanup_and_resume(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    section: str,
+    kind: str,
+    content: JsonObject,
+) -> None:
+    legacy_fit["timestamp"] = "unproven"
+    values: JsonObject = {"flux_unit": "A", "fluxdep_fit": legacy_fit}
+    if section == "fluxdep_fit":
+        legacy_fit.update(content)
+    else:
+        values[section] = content
+    source = write_params(request_data, values)
+    original = source.read_bytes()
+    destination = request_data.results_root / request_data.name
+
+    dry = migrate_storage(
+        replace(request_data, dry_run=True),
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    assert source.read_bytes() == original
+    assert not destination.exists()
+    assert not backup_path(request_data).exists()
+
+    report = migrate_storage(
+        request_data,
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    backup_source = backup_path(request_data) / "result/chip/qubit/params.json"
+    assert backup_source.read_bytes() == original
+    assert TypeAdapter(JsonObject).validate_json(backup_source.read_text()) == values
+    assert not source.parent.exists()
+    assert not (request_data.database_root / "chip/qubit").exists()
+    file = destination / kind / "Qlegacy.json"
+    loaded = (
+        load_dispersive_file(file) if kind == "dispersive" else load_t1_curve_file(file)
+    )
+    assert loaded.source.created_at is None
+    assert load_migrated_predictor(request_data).source.created_at is None
+    locations = {f"{section}.timestamp", "fluxdep_fit.timestamp"}
+    rows = [
+        row
+        for row in report.key_mappings
+        if row.old_key in locations and row.action == "pending"
+    ]
+    assert any(
+        row.new_file == file and row.old_key == f"{section}.timestamp" for row in rows
+    )
+    for row in rows:
+        assert row.old_file == source
+        assert f"{backup_source}#{row.old_key}" in row.reason
+    pending = [item for item in report.pending if item.location in locations]
+    assert pending
+    for item in pending:
+        assert item.source == backup_source
+        assert f"{backup_source}#{item.location}" in item.reason
+    dry_pending = [item for item in dry.pending if item.location in locations]
+    assert [(item.location, item.reason) for item in dry_pending] == [
+        (item.location, item.reason) for item in pending
+    ]
+    assert all(item.source == source for item in dry_pending)
+
+    published = file.read_bytes()
+    resumed = migrate_storage(
+        replace(request_data, resume=True),
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    assert resumed.backup_path == report.backup_path == backup_path(request_data)
+    assert resumed.pending == report.pending
+    assert file.read_bytes() == published
+    assert backup_source.read_bytes() == original
 
 
 def test_transition_only_fit_publishes_dispersive_without_inventing_fit_values(
