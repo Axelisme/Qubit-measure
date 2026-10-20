@@ -115,6 +115,28 @@ def test_single_jump_preserves_cavity_memory_and_exponential_survival() -> None:
     assert_allclose(trace, expected(float(fit.x)), atol=2e-7)
 
 
+def test_coupled_state_independent_cavities_allow_unobserved_jumps() -> None:
+    # Reciprocal cavities at coalescent modes are physical inputs, not a
+    # diagonalizable-generator assumption. Sparse samples leave gaps with jumps.
+    rates = np.array([[0, 0.025, 0.008], [0.007, 0, 0.03], [0.001, 0.006, 0]])
+    detuning = 0.04 / (2 * np.pi)
+    coupled = replace(
+        model(rates),
+        frequencies_ghz=np.tile([6 - detuning, 6 + detuning], (3, 1)),
+        kappa_internal_per_ns=np.array([0.02, 0.02]),
+        kappa_external_per_ns=np.array([0.08, 0.08]),
+    )
+    adc = ADC(coupled)
+    population = PopulationInput(coupled.state_labels, np.array([0.2, 0.3, 0.5]))
+    pulse = ReadoutPulse(0, 90, 1.0, 6.0)
+    grid = SampleGrid(np.array([-5.0, 0, 80]), 6.0)
+    result = adc.sample(population, (pulse,), grid, SamplingIdentity(8), shots=32)
+    expected = adc.response((pulse,), grid).traces[0]
+    assert_allclose(
+        result.traces, np.broadcast_to(expected, result.traces.shape), atol=2e-8
+    )
+
+
 def test_shaped_paths_share_windows_delay_mismatch_and_seed() -> None:
     base = model(np.array([[0, 0.025, 0], [0, 0, 0.04], [0, 0, 0]]))
     receiver = Receiver(gain=1.7, phase_rad=0.3, offset=np.array([0.2, -0.4]))
