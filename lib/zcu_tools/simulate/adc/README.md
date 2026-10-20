@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-19, immutable integrated sampling plans and bounded response ownership
+**Last updated:** 2026-10-20, single-carrier trace jump paths
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -124,11 +124,18 @@ ill-conditioned driven blocks retain the full matrix-exponential propagation.
 The field routes do not assume diagonalizable rate matrices. No route changes
 the evolution populations.
 Its lossless numeric cache key includes delay and both mismatch phases.
-Round samplers share an initial-state draw across channels and windows,
-then add independent receiver noise. The integrated sampler also accounts for
-nearest-even shot rounding variance. These are conditional moments, not random
-jump trajectories. QICK buffer layout and acquisition averaging belong to the
-program adapter.
+Single-pulse `ADC.sample` and `sample_windows` draw continuous-time Markov paths
+using the directional rates. The initial population origin remains pulse start.
+The path continues through ringdown to the latest emitted sample, including gaps
+between windows. Jumps retain both resonators' fields and reciprocal shared-line
+damping. Vacuum baselines support flat, piecewise-linear and opaque envelopes;
+no ODE is solved per shot. Delay, mismatch and receiver calibration follow the
+same conventions as conditional responses. Windows share one path per shot and
+add independent receiver noise. Zero rates retain deterministic conditional
+traces. Multi-pulse and integrated round samplers still draw initial states and
+use conditional moments, not jump trajectories. The integrated sampler also
+accounts for nearest-even shot rounding variance. QICK buffer layout and
+acquisition averaging belong to the program adapter.
 
 `PreparedStatistics(populations, channels, reps=...)` validates and owns immutable
 integrated sampling inputs. It expands conditional means and factors each ADC's
