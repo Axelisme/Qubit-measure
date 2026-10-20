@@ -243,6 +243,15 @@ def _module_converters(
     return {(name,): field.converter(env) for name, field in fields.items()}
 
 
+def _core_field_names(core: type[BaseModel], field_order: tuple[str, ...]) -> list[str]:
+    """Keep core order, defer program base fields, then promote field_order stably."""
+    program_fields = ProgramV2Cfg.model_fields if issubclass(core, ProgramV2Cfg) else {}
+    names = [name for name in core.model_fields if name not in program_fields] + [
+        name for name in core.model_fields if name in program_fields
+    ]
+    return [*field_order, *(name for name in names if name not in field_order)]
+
+
 class Section:
     """Generate a recursive input section from a native model and authored tree.
 
@@ -280,14 +289,7 @@ class Section:
         self.modules: dict[str, ModuleField] = {}
         namespace: dict[str, object] = {"__module__": "zcu_tools.gui.form_adapter.form"}
         annotations: dict[str, object] = {}
-        program_fields = (
-            ProgramV2Cfg.model_fields if issubclass(core, ProgramV2Cfg) else {}
-        )
-        names = [name for name in core.model_fields if name not in program_fields] + [
-            name for name in core.model_fields if name in program_fields
-        ]
-        names = [*field_order, *(name for name in names if name not in field_order)]
-        for name in names:
+        for name in _core_field_names(core, field_order):
             info = core.model_fields[name]
             node = tree.get(name)
             if isinstance(node, Hidden):
