@@ -898,11 +898,19 @@ class ComponentDriver:
         self,
         key: Qt.Key,
         *,
-        object_name: str,
+        object_name: str | None = None,
         modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
     ) -> None:
-        """Send one real key to a usable named widget without moving focus."""
-        widget = self._find(None, object_name)
+        """Send a real key to a named control or the window's current focus.
+
+        Without object_name, use actual Qt keyboard focus, or the window when
+        no child has focus. Never assign focus or bypass availability guards.
+        """
+        widget = (
+            self._find(None, object_name)
+            if object_name is not None
+            else self._window.focusWidget() or self._window
+        )
         if self._can_interact(widget):
             key_click(widget, key, modifiers)
         QApplication.processEvents()

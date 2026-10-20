@@ -180,6 +180,24 @@ def test_expression_completion_preserves_surrounding_text_and_focus(
     assert host.state.input.data["amount"] == {"expr": "0.8 * $qubit.freq + 5"}
 
 
+def test_token_middle_and_selection_hide_the_ghost(host: Host, tmp_path: Path) -> None:
+    driver = ComponentDriver(host)
+    driver.enter_text(value="$qubit.fre", object_name=INPUT, commit=False)
+    shot(driver, tmp_path, "01-token-end")
+    assert "Completion: q." in driver.text_input(object_name=INPUT).description
+    key(driver, Qt.Key.Key_Left)
+    shot(driver, tmp_path, "02-token-middle")
+    assert driver.text_input(object_name=INPUT).description == ""
+    key(driver, Qt.Key.Key_Right)
+    shot(driver, tmp_path, "03-token-end-again")
+    assert "Completion: q." in driver.text_input(object_name=INPUT).description
+    driver.press_key(
+        Qt.Key.Key_A, object_name=INPUT, modifiers=Qt.KeyboardModifier.ControlModifier
+    )
+    shot(driver, tmp_path, "04-selected")
+    assert driver.text_input(object_name=INPUT).description == ""
+
+
 def test_alias_tab_cycles_and_escape_dismisses_until_new_input(
     host: Host, tmp_path: Path
 ) -> None:
@@ -204,6 +222,9 @@ def test_alias_tab_cycles_and_escape_dismisses_until_new_input(
     shot(driver, tmp_path, "06-normal-tab")
     assert driver.text_input(object_name=INPUT).text == "$qu"
     assert not driver.text_input(object_name=INPUT).focused
+    driver.press_key(Qt.Key.Key_Tab, modifiers=Qt.KeyboardModifier.ShiftModifier)
+    shot(driver, tmp_path, "06-back-to-expression")
+    assert driver.text_input(object_name=INPUT).focused
     driver.enter_text(value="$qubit.fre", object_name=INPUT, commit=False)
     shot(driver, tmp_path, "07-new-input")
     assert "Completion: q." in driver.text_input(object_name=INPUT).description
@@ -268,6 +289,12 @@ def test_candidates_are_captured_once_and_refresh_and_reset_replace_them(
     driver.click("Reset")
     shot(driver, tmp_path, "05-reset-defaults")
     assert driver.text_input(object_name=INPUT).text == "1.0"
+    for step in range(8):
+        if driver.text_input(object_name=INPUT).focused:
+            break
+        driver.press_key(Qt.Key.Key_Tab)
+        shot(driver, tmp_path, f"05-reset-tab-{step}")
+    assert driver.text_input(object_name=INPUT).focused
     driver.invoke_context_action(
         object_name=INPUT,
         action="Expression",
