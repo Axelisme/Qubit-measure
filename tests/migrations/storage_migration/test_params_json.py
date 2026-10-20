@@ -71,15 +71,21 @@ class AnalysisQubit(ComponentSchema):
 @pytest.fixture(scope="module", autouse=True)
 def analysis_kind() -> Generator[None]:
     before = registry_state()
-    component_registry.register("qubit/migration_analysis", AnalysisQubit)
-    component_registry.register("amplifier/migration_analysis", AnalysisQubit)
-    component_registry.register("qubit/migration_no_ext", ComponentSchema)
+    models = {
+        "qubit/migration_analysis": AnalysisQubit,
+        "resonator/migration_analysis": AnalysisQubit,
+        "amplifier/migration_analysis": AnalysisQubit,
+        "qubit/migration_no_ext": ComponentSchema,
+    }
+    registered: list[str] = []
     try:
+        for kind, model in models.items():
+            component_registry.register(kind, model)
+            registered.append(kind)
         yield
     finally:
-        component_registry.unregister("qubit/migration_analysis")
-        component_registry.unregister("amplifier/migration_analysis")
-        component_registry.unregister("qubit/migration_no_ext")
+        for kind in reversed(registered):
+            component_registry.unregister(kind)
         assert registry_state() == before
 
 
@@ -182,7 +188,7 @@ def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
         concrete,
         components={
             "Q1": {"kind": "qubit/migration_analysis"},
-            "R1": {"kind": "qubit/migration_analysis"},
+            "R1": {"kind": "resonator/migration_analysis"},
             "J1": {"kind": "amplifier/migration_analysis"},
         },
         roles={"qubit": "Q1"},
