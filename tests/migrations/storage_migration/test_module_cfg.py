@@ -390,6 +390,82 @@ def test_supported_module_missing_required_evidence_is_pending_and_preserved(
     )
 
 
+def test_missing_discriminator_requires_complete_historical_pulse_shape(
+    request_data: MigrationRequest,
+    historical_mapping: MigrationMapping,
+) -> None:
+    request = replace(request_data, part="parameters")
+    pulse = _historical_pulse()
+    del pulse["type"]
+    source = _library(
+        write_meta(request, "", {}),
+        {
+            "modules": {"pi_amp": pulse, "pi2_amp": {"waveform": "unknown"}},
+            "waveforms": {},
+        },
+    )
+    report = _convert(request, historical_mapping)
+    entry = _entry(request)
+    assert entry.module_library().snapshot().module_keys() == ("C1.pulses.pi_amp",)
+    assert (
+        entry.module_library().snapshot().module_spec("C1.pulses.pi_amp").type
+        == "pulse"
+    )
+    assert document_value(snapshot(entry.setup), "general.ext.legacy_module_cfg") == {
+        "modules": {"pi2_amp": {"waveform": "unknown"}}
+    }
+    assert not any(item.source == source for item in report.pending)
+
+
+@pytest.mark.parametrize("ro_frequency", [456.75, 123.0])
+def test_base_readout_frequency_agreement_controls_publication(
+    request_data: MigrationRequest,
+    historical_mapping: MigrationMapping,
+    ro_frequency: float,
+) -> None:
+    request = replace(request_data, part="parameters")
+    readout = {
+        "type": "base",
+        "pulse_cfg": _historical_pulse(),
+        "ro_cfg": {
+            "ro_ch": 1,
+            "ro_length": 0.9,
+            "trig_offset": 0.625,
+            "ro_freq": ro_frequency,
+        },
+    }
+    source = _library(
+        write_meta(request, "", {}),
+        {
+            "modules": {"readout_dpm": readout},
+            "waveforms": {},
+        },
+    )
+    report = _convert(request, historical_mapping)
+    entry = _entry(request)
+    expected_keys = ("C1.readout.readout_dpm",) if ro_frequency == 456.75 else ()
+    assert entry.module_library().snapshot().module_keys() == expected_keys
+    raw = document_value(snapshot(entry.setup), "general.ext")
+    if ro_frequency == 456.75:
+        assert raw == {
+            "legacy_module_cfg": {
+                "modules": {
+                    "readout_dpm": {
+                        "pulse_cfg": {"desc": "Drive description", "type": "pulse"}
+                    }
+                }
+            }
+        }
+        assert not any(item.source == source for item in report.pending)
+    else:
+        assert raw == {"legacy_module_cfg": {"modules": {"readout_dpm": readout}}}
+        assert any(
+            item.source == source and "456.75" in item.reason and "123.0" in item.reason
+            for item in report.pending
+        )
+        assert document_value(snapshot(entry.setup), "C1.module") == {}
+
+
 def test_parameters_publish_canonical_specs_references_units_and_manual_sources(
     request_data: MigrationRequest,
     library_mapping: MigrationMapping,
