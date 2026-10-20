@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-20, IntegratedRound and ADC-owned deferred raw sources
+**Last updated:** 2026-10-20, shared mux paths and physical decimated inputs
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -277,7 +277,10 @@ Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
 does not scale noise. Integrated acquisition returns `IntegratedRound` with pure
 `RoundStatistics` and an ADC-owned RawShots source. Counts remain shared across
 all ADCs/reads, with separate direct totals. ADC retains noiseless model/pulse/grid
-inputs for delayed raw; no shot paths or noisy outputs enter prepare caches. Decimated acquisition returns `RoundSignals`,
+inputs for delayed raw; no shot paths or noisy outputs enter prepare caches.
+The same physical inputs feed ADC's required batch-based trace interface in
+decimated mode. Both modes share each shot's full CTMC path across carriers,
+ADCs and windows. Decimated acquisition returns `RoundSignals`,
 reordering point-major samples into QICK loop order. ADC owns integrated raw generation, noise, rounding and loop layout. Program
 owns detached buffers, declaration order and acquisition averaging. All channels at the same shot
 index share one sampled joint state; receiver noise is independent. There is no
@@ -286,9 +289,11 @@ program ADC declaration order, which is mux tone order, not sorted channel index
 
 The model assumes weak dispersive readout, independent weak-coupling Markov
 secular baths and exponential echo-characteristic dephasing. Truncations and
-numerical tolerances remain user choices. Conditional means include multilevel
-relaxation, not random jump times. Variance includes initial-state mixture,
+numerical tolerances remain user choices. Direct conditional means include
+multilevel relaxation. Direct-mean variance includes initial-state mixture,
 receiver noise and the integrated rounding term.
+Physical raw and traces additionally resolve continuous jump times and cavity
+memory. They need only agree with direct means in expectation, not realization.
 
 `private_replay=absolute_directory` opts into checked private input archives.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,

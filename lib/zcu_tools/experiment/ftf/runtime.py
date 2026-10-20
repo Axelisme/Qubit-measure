@@ -15,6 +15,7 @@ from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
+    SamplingIdentity,
 )
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
@@ -76,7 +77,7 @@ class _Prepared:
     channels: tuple[ChannelReadout, ...]
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
-    raw: PreparedRawShots | None
+    raw: PreparedRawShots
 
 
 class FTFAcquire:
@@ -134,14 +135,8 @@ class FTFAcquire:
             self.routing.append(self._prepared.paths.for_reuse(telemetry=True))
         prepared = self._prepared
         acquire = self.request
-        arguments = dict(
-            reps=acquire.reps,
-            seed=acquire.root_seed,
-            acquire_sequence=acquire.sequence,
-            round_index=index,
-        )
         if acquire.mode == "integrated":
-            if prepared.sampler is None or prepared.raw is None:
+            if prepared.sampler is None:
                 raise RuntimeError("integrated preparation requires a sampler")
             statistics = prepared.sampler.draw(
                 seed=acquire.root_seed,
@@ -152,7 +147,16 @@ class FTFAcquire:
                 statistics, prepared.raw.bind(statistics.raw_identity)
             )
         else:
-            traces = sample_traces(prepared.populations, prepared.channels, **arguments)
+            traces = sample_traces(
+                prepared.populations,
+                dict(prepared.raw.batches),
+                rtol=owner.settings.numerics.solver.rtol,
+                atol=owner.settings.numerics.solver.atol,
+                reps=acquire.reps,
+                identity=SamplingIdentity(
+                    acquire.root_seed, (acquire.sequence, index, 0)
+                ),
+            )
             channels = []
             for channel in traces.channels:
                 shaped = channel.iq.reshape(
@@ -247,11 +251,7 @@ class FTFAcquire:
             )
             raise
         channels = [] if previous is None else list(previous.channels)
-        raw_batches = (
-            {}
-            if previous is None or previous.raw is None
-            else dict(previous.raw.batches)
-        )
+        raw_batches = {} if previous is None else dict(previous.raw.batches)
         if previous is None:
             for channel_index, first in enumerate(plans[0].readouts):
                 conditionals = []
@@ -304,16 +304,12 @@ class FTFAcquire:
                 if acquire.mode == "integrated"
                 else None
             )
-            raw = (
-                PreparedRawShots(
-                    probabilities,
-                    raw_batches,
-                    reps=acquire.reps,
-                    rtol=owner.settings.numerics.solver.rtol,
-                    atol=owner.settings.numerics.solver.atol,
-                )
-                if acquire.mode == "integrated"
-                else None
+            raw = PreparedRawShots(
+                probabilities,
+                raw_batches,
+                reps=acquire.reps,
+                rtol=owner.settings.numerics.solver.rtol,
+                atol=owner.settings.numerics.solver.atol,
             )
         return _Prepared(
             probabilities,

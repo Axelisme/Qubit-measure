@@ -20,7 +20,6 @@ from .readout_batch import (
     PreparedStatistics,
     ReadoutBatch,
     round_statistics,
-    sample_traces,
 )
 from .request import (
     ADCSamples,
@@ -31,4 +30,4 @@ from .request import (
     SampleGrid,
 )
 from .response import ConditionalReadout
-from .sampling import ADC
+from .sampling import ADC, sample_traces

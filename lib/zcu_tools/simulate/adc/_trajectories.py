@@ -1,11 +1,10 @@
-"""Continuous-time jump paths and vacuum-baseline cavity memory for traces."""
+"""Reusable arbitrary-envelope vacuum fields for physical cavity paths."""
 
 from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
-from scipy.linalg import expm
 
 from .model import ReadoutModel, RealArray
 from .request import PiecewiseLinearEnvelope, ReadoutPulse
@@ -14,7 +13,7 @@ ComplexArray = NDArray[np.complex128]
 
 
 class PathFields:
-    """Prepare no-jump vacuum fields once; propagate only memory per jump.
+    """Prepare no-jump vacuum fields once for arbitrary-envelope path observers.
 
     model and pulse are validated ADC records. times is a nonempty increasing
     emitted-ns vector, before receiver delay. rtol/atol are positive solver
@@ -43,28 +42,10 @@ class PathFields:
                 for detuning in model.frequencies_ghz - model.reference_frequency_ghz
             ]
         )
-        self._modes: list[tuple[ComplexArray, ComplexArray, ComplexArray] | None] = []
-        for a in self._a:
-            values, vectors = np.linalg.eig(-a)
-            if np.linalg.cond(vectors) < 1e4:
-                self._modes.append(
-                    (
-                        values,
-                        vectors,
-                        np.asarray(np.linalg.inv(vectors), dtype=np.complex128),
-                    )
-                )
-            else:
-                # Defective or nearly coalescent modes retain the matrix exponential.
-                self._modes.append(None)
         self._segments: list[
             tuple[float, float, Callable[[RealArray], ComplexArray]]
         ] = []
         self._prepare_baselines(rtol, atol)
-        self._baseline_samples = self.baseline(times)
-        self._incident = np.array(
-            [pulse.incident(float(t), model.reference_frequency_ghz) for t in times]
-        )
 
     def _prepare_baselines(self, rtol: float, atol: float) -> None:
         pulse = self.pulse
@@ -142,53 +123,3 @@ class PathFields:
                     (-1, len(self._a), 2)
                 )
         return fields
-
-    def _memory(
-        self, state: int, elapsed: RealArray, field: ComplexArray
-    ) -> ComplexArray:
-        modes = self._modes[state]
-        if modes is None:
-            return np.array(
-                [expm(-self._a[state] * t) @ field for t in elapsed],
-                dtype=np.complex128,
-            ).reshape((-1, 2))
-        values, vectors, inverse = modes
-        return (np.exp(elapsed[:, None] * values) * (inverse @ field)) @ vectors.T
-
-    def _shot(self, initial: int, rng: np.random.Generator) -> ComplexArray:
-        state = initial
-        left = self.pulse.start_ns
-        end = max(left, float(self.times[-1]))
-        memory = np.zeros(2, dtype=np.complex128)
-        fields = np.zeros((len(self.times), 2), dtype=np.complex128)
-        while left < end:
-            rates = self.model.rates_per_ns[:, state]
-            total = float(rates.sum())
-            jump = left + float(rng.exponential(1 / total)) if total else np.inf
-            selected = (self.times >= left) & (self.times < jump)
-            fields[selected] = self._baseline_samples[selected, state] + self._memory(
-                state, self.times[selected] - left, memory
-            )
-            if jump >= end:
-                break
-            target = int(rng.choice(len(rates), p=rates / total))
-            baseline = self.baseline(np.array([jump]))[0]
-            memory = (
-                baseline[state]
-                + self._memory(state, np.array([jump - left]), memory)[0]
-                - baseline[target]
-            )
-            state, left = target, jump
-        return self._incident - fields @ self._scattering
-
-    def draw(self, states: NDArray[np.int64], rng: np.random.Generator) -> ComplexArray:
-        """Draw CTMC paths; return complex emitted fields shaped (sample,shot).
-
-        states is a vector of valid initial indices in model order. rng is the
-        caller-owned local generator; initial draws have already been consumed.
-        This consumes waiting-time and target-state draws, without receiver noise.
-        """
-        outgoing = np.empty((len(self.times), len(states)), dtype=np.complex128)
-        for shot, state in enumerate(states):
-            outgoing[:, shot] = self._shot(int(state), rng)
-        return outgoing

@@ -6,6 +6,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
+from ._jump_paths import JumpPaths
 from ._trajectories import PathFields
 from .model import ReadoutModel, RealArray
 from .request import ReadoutPulse, SampleGrid
@@ -31,6 +32,8 @@ class _GridSums(NamedTuple):
     times: float64 (sample,) increasing emitted ns. oscillator: complex128
     (sample,) ADC demodulation including the reference-frame delay phase.
     prefix: complex128 (sample+1,state) cumulative weighted vacuum output.
+    samples: complex128 (sample,state) weighted vacuum output at each actual
+    sample, retained separately so overlapping trace windows agree bitwise.
     powers/sums: complex128 (state,bit,2,2) binary homogeneous step powers and
     discrete sums. uniform: True only for an exactly uniform stored grid.
     These arrays contain no sampled paths, noisy IQ or jump-time lookup tables.
@@ -39,6 +42,7 @@ class _GridSums(NamedTuple):
     times: RealArray
     oscillator: NDArray[np.complex128]
     prefix: NDArray[np.complex128]
+    samples: NDArray[np.complex128]
     powers: NDArray[np.complex128]
     sums: NDArray[np.complex128]
     uniform: bool
@@ -110,7 +114,7 @@ def _flat_baselines(a, v, pulse, coupling, safe, times):
 
 @njit(nogil=True, cache=False)
 def _segment_sums(a, scattering, grid, wave, shots, right):
-    times, oscillator, prefix, powers, sums, uniform = grid
+    times, oscillator, prefix, _, powers, sums, uniform = grid
     states, left, memory = wave
     output = np.zeros(len(shots), dtype=np.complex128)
     for index, shot in enumerate(shots):
@@ -140,6 +144,24 @@ def _segment_sums(a, scattering, grid, wave, shots, right):
 
 
 @njit(nogil=True, cache=False)
+def _segment_traces(a, scattering, grid, wave, step, output):
+    shots, right, _ = step
+    times, oscillator, _, samples, _, _, _ = grid
+    states, left, memory = wave
+    for index, shot in enumerate(shots):
+        state = states[shot]
+        first = np.searchsorted(times, left[shot])
+        last = np.searchsorted(times, right[index])
+        # Lookback samples have zero physical field; they remain zero until
+        # receiver offset and noise are added after all segments.
+        for sample in range(first, last):
+            output[shot, sample] = samples[sample, state]
+            if np.any(memory[shot]):
+                field = _exp2(-a[state], times[sample] - left[shot]) @ memory[shot]
+                output[shot, sample] -= oscillator[sample] * (scattering @ field)
+
+
+@njit(nogil=True, cache=False)
 def _jump_memory(a, shots, targets, jumps, baselines, wave):
     states, left, memory = wave
     for index, shot in enumerate(shots):
@@ -152,9 +174,9 @@ def _jump_memory(a, shots, targets, jumps, baselines, wave):
 
 
 class IntegratedPaths:
-    """Noiseless single-pulse discrete sums with exact CTMC cavity memory.
+    """Noiseless coherent multi-carrier sums/traces with exact CTMC memory.
 
-    Internal workspace for one content; model/pulse/grids are validated ADC
+    Internal workspace for one content; model/pulses/grids are validated ADC
     records, rtol/atol are the existing deterministic baseline solver tolerances.
     Flat vacuum fields use compiled phi1 propagation, including singular driven
     blocks. Other envelopes use one DOP853 dense vacuum solve for all states,
@@ -162,13 +184,14 @@ class IntegratedPaths:
     sums contain only the actual ADC sample coordinates. Uniform grids use exact
     binary geometric sums, irregular grids sum exact homogeneous exponentials.
 
-    model/pulse/grids retain the constructor inputs for this workspace's lifetime.
+    model/pulses/grids retain the constructor inputs for this workspace's lifetime.
     v/scattering are complex128 (2,) drive/output couplings; a is (state,2,2)
     complex128 damping/detuning. times holds each grid's emitted-ns vector;
-    end is the latest emitted time, no earlier than pulse start. path_fields is
-    the shaped vacuum solver or None for flat input. coupling and safe hold the
-    guarded flat driven solution (state,2) and its (state,) acceptance mask.
-    plans holds one noiseless _GridSums per read. No shot state survives draw.
+    start/end are the earliest pulse start and latest emitted time, with end
+    no earlier than start. path_fields holds a shaped vacuum solver or None
+    per carrier. couplings holds each guarded flat driven solution (state,2)
+    and its (state,) acceptance mask. plans holds one noiseless _GridSums per
+    read. No shot state survives evaluate.
     Solver failures raise RuntimeError. Invalid envelopes and unresolved
     floating-point transition times raise ValueError without partial results.
     """
@@ -176,12 +199,13 @@ class IntegratedPaths:
     def __init__(
         self,
         model: ReadoutModel,
-        pulse: ReadoutPulse,
+        pulses: tuple[ReadoutPulse, ...],
         grids: tuple[SampleGrid, ...],
         rtol: float,
         atol: float,
     ) -> None:
-        self.model, self.pulse, self.grids = model, pulse, grids
+        self.model, self.pulses, self.grids = model, pulses, grids
+        self.start = min(pulse.start_ns for pulse in pulses)
         self.v = np.asarray(
             np.sqrt(model.kappa_external_per_ns / 2), dtype=np.complex128
         )
@@ -196,19 +220,26 @@ class IntegratedPaths:
         delay = model.receiver.time_of_flight_ns
         self.times = tuple(grid.times_ns - delay for grid in grids)
         all_times = np.unique(np.concatenate(self.times))
-        self.end = max(pulse.start_ns, float(all_times[-1]))
-        self.path_fields = (
+        self.end = max(self.start, float(all_times[-1]))
+        self.path_fields = tuple(
             PathFields(model, pulse, all_times, rtol, atol)
             if pulse.envelope is not None
             else None
+            for pulse in pulses
         )
-        self.coupling, self.safe = self._flat_coupling()
+        self.couplings = tuple(self._flat_coupling(pulse) for pulse in pulses)
         self.plans = []
         delay_phase = np.exp(2j * np.pi * model.reference_frequency_ghz * delay)
         for grid, times in zip(grids, self.times, strict=True):
             baseline = self._baseline(times)
             incident = np.array(
-                [pulse.incident(float(t), model.reference_frequency_ghz) for t in times]
+                [
+                    sum(
+                        pulse.incident(float(t), model.reference_frequency_ghz)
+                        for pulse in pulses
+                    )
+                    for t in times
+                ]
             )
             outgoing = incident[:, None] - baseline @ self.scattering
             omega = (
@@ -242,14 +273,20 @@ class IntegratedPaths:
                     )
                     powers[state, bit] = previous @ previous
             self.plans.append(
-                _GridSums(times, oscillator, prefix, powers, sums, bool(uniform))
+                _GridSums(
+                    times,
+                    oscillator,
+                    prefix,
+                    outgoing * oscillator[:, None],
+                    powers,
+                    sums,
+                    bool(uniform),
+                )
             )
 
-    def _flat_coupling(self):
+    def _flat_coupling(self, pulse):
         """Use a guarded driven solve; singular/cancellation cases keep phi1."""
-        omega = (
-            2 * np.pi * (self.pulse.frequency_ghz - self.model.reference_frequency_ghz)
-        )
+        omega = 2 * np.pi * (pulse.frequency_ghz - self.model.reference_frequency_ghz)
         coupling = np.zeros((len(self.a), 2), dtype=np.complex128)
         safe = np.zeros(len(self.a), dtype=np.bool_)
         for state, a in enumerate(self.a):
@@ -266,73 +303,79 @@ class IntegratedPaths:
         return coupling, safe
 
     def _baseline(self, times):
-        if self.path_fields is not None:
-            return self.path_fields.baseline(times)
-        pulse = self.pulse
-        omega = 2 * np.pi * (pulse.frequency_ghz - self.model.reference_frequency_ghz)
-        return _flat_baselines(
-            self.a,
-            self.v,
-            (
-                pulse.start_ns,
-                pulse.end_ns,
-                pulse.amplitude * np.exp(1j * pulse.phase_rad),
-                omega,
-            ),
-            self.coupling,
-            self.safe,
-            times,
-        )
+        fields = np.zeros((len(times), len(self.a), 2), dtype=np.complex128)
+        for pulse, path_fields, (coupling, safe) in zip(
+            self.pulses, self.path_fields, self.couplings, strict=True
+        ):
+            if path_fields is not None:
+                fields += path_fields.baseline(times)
+            else:
+                omega = (
+                    2
+                    * np.pi
+                    * (pulse.frequency_ghz - self.model.reference_frequency_ghz)
+                )
+                fields += _flat_baselines(
+                    self.a,
+                    self.v,
+                    (
+                        pulse.start_ns,
+                        pulse.end_ns,
+                        pulse.amplitude * np.exp(1j * pulse.phase_rad),
+                        omega,
+                    ),
+                    coupling,
+                    safe,
+                    times,
+                )
+        return fields
 
-    def draw(self, initial: NDArray[np.int64], rng: np.random.Generator) -> RealArray:
-        """Return (shot,read,IQ) calibrated noiseless sums, consuming full paths.
+    def evaluate(
+        self, paths: JumpPaths, *, traces: bool = False
+    ) -> tuple[RealArray, ...]:
+        """Observe a shared path without RNG draws, returning one array per read.
 
-        initial is a vector of valid model-state indices. rng is the caller's
-        local stream. Waiting times and transition targets are sampled directly
-        from directional rates, with no jump-count conditioning or tail cutoff.
-        Only structural reads and active jump waves have Python loops.
+        paths covers this workspace's pulse origin and latest emitted sample.
+        traces=False returns (shot,IQ) discrete sums per grid; True returns
+        (shot,sample,IQ) traces. Calibration/offset occur once after coherent
+        carrier superposition. The caller owns receiver noise and rounding.
         """
-        states = initial.copy()
-        left = np.full(len(states), self.pulse.start_ns, dtype=np.float64)
+        states = paths.initial.copy()
+        left = np.full(len(states), paths.start, dtype=np.float64)
         memory = np.zeros((len(states), 2), complex)
         wave = _Wave(states, left, memory)
-        output = np.zeros((len(states), len(self.grids)), complex)
-        active = np.arange(len(states), dtype=np.int64)
-        rates = self.model.rates_per_ns
-        totals = rates.sum(axis=0)
-        if not np.isfinite(totals).all():
-            raise ValueError("transition rate totals must be finite")
-        while len(active):
-            total = totals[states[active]]
-            waiting = np.full(len(active), np.inf)
-            moving = total > 0
-            waiting[moving] = rng.exponential(1 / total[moving])
-            jumps = left[active] + waiting
-            if np.any(moving & (jumps <= left[active])):
-                raise ValueError(
-                    "transition times are below floating-point time resolution"
-                )
-            continuing = jumps < self.end
-            right = np.where(continuing, jumps, np.nextafter(self.end, np.inf))
+        output = [
+            np.zeros(
+                (len(states), len(grid.times_ns)) if traces else (len(states),), complex
+            )
+            for grid in self.grids
+        ]
+        for step in paths.steps:
+            active, right, targets = step
             for read, grid in enumerate(self.plans):
-                output[active, read] += _segment_sums(
-                    self.a, self.scattering, grid, wave, active, right
-                )
-            active = active[continuing]
-            jumps = jumps[continuing]
-            if not len(active):
-                break
-            cumulative = np.cumsum(rates[:, states[active]], axis=0)
-            uniforms = rng.random(len(active)) * totals[states[active]]
-            targets = (uniforms[None, :] >= cumulative[:-1]).sum(axis=0)
-            baselines = self._baseline(jumps)
-            _jump_memory(self.a, active, targets, jumps, baselines, wave)
-            states[active], left[active] = targets, jumps
-        if not np.isfinite(output).all():
-            raise RuntimeError("readout paths produced nonfinite fields")
+                if traces:
+                    _segment_traces(
+                        self.a, self.scattering, grid, wave, step, output[read]
+                    )
+                else:
+                    output[read][active] += _segment_sums(
+                        self.a, self.scattering, grid, wave, active, right
+                    )
+            moving = targets >= 0
+            shots, jumps, destinations = active[moving], right[moving], targets[moving]
+            if len(shots):
+                baselines = self._baseline(jumps)
+                _jump_memory(self.a, shots, destinations, jumps, baselines, wave)
+                states[shots], left[shots] = destinations, jumps
         receiver = self.model.receiver
-        calibrated = np.conj(output) * receiver.gain * np.exp(1j * receiver.phase_rad)
-        result = np.stack((calibrated.real, calibrated.imag), axis=-1)
-        for read, grid in enumerate(self.grids):
-            result[:, read] += len(grid.times_ns) * receiver.offset
-        return result
+        result = []
+        for grid, outgoing in zip(self.grids, output, strict=True):
+            if not np.isfinite(outgoing).all():
+                raise RuntimeError("readout paths produced nonfinite fields")
+            calibrated = (
+                np.conj(outgoing) * receiver.gain * np.exp(1j * receiver.phase_rad)
+            )
+            iq = np.stack((calibrated.real, calibrated.imag), axis=-1)
+            iq += (1 if traces else len(grid.times_ns)) * receiver.offset
+            result.append(iq)
+        return tuple(result)

@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-20，single-carrier integrated raw 與環境數值 raw owner
+**Last updated:** 2026-10-20，mux raw／trace 共用完整 CTMC 路徑
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -61,13 +61,14 @@ carrier tiles, retaining per-carrier numerical guards.
 
 `ADC.sample_windows` shares one initial-state draw across several per-execution
 windows, while receiver noise remains independent across windows.
-For a single pulse, `ADC.sample` draws an initial joint state and a continuous-time
+`ADC.sample` draws an initial joint state and a continuous-time
 Markov path from the directional rates per shot. Each jump changes the cavity
 generator without resetting its field. Vacuum fields are prepared once for all
 states, including shaped envelopes; only homogeneous cavity memory is propagated
-per jump. Grids in `sample_windows` share that path through ringdown. Multi-pulse
-sampling still uses conditional means. Receiver noise remains independent per
-sample and window. The result includes float64 traces and their exact discrete
+per jump. All incident carriers superpose on that path. Grids in
+`sample_windows` share it through ringdown and gaps. Batched `sample_traces`
+requires physical readout batches and shares each shot's path across ADCs.
+Receiver noise remains independent per sample and window. The result includes float64 traces and their exact discrete
 sums from one realization. Offset is added once per sample. Conditional responses
 and integrated round statistics remain deterministic first moments.
 A zero or singular positive-semidefinite 2x2 I/Q noise covariance is valid.

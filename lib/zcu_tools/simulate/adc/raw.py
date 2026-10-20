@@ -10,12 +10,10 @@ from numpy.typing import NDArray
 from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate.rounding import shot_layout
 
-from ._integrated_paths import IntegratedPaths
-from ._noise import noise_root
+from ._path_sampling import physical_shots
 from .model import RealArray, readonly_array
 from .populations import validate_populations
 from .readout_batch import ReadoutBatch
-from .response import ConditionalReadout
 
 
 @dataclass(frozen=True, init=False)
@@ -28,9 +26,10 @@ class PreparedRawShots:
     batches: constructor mapping from unique nonnegative ADC indices to ReadoutBatch;
         retained as an immutable tuple of (channel,batch) pairs. Each
         batch.content_index is flat C-order (prod(point_dims),), and the state
-        labels must agree across receivers. Sample counts may differ by read,
-        but must agree across contents of one ADC. Numeric records own immutable data;
-        opaque envelopes remain caller-owned and must stay deterministic.
+        labels and directional rates must agree across receivers. Sample
+        counts may differ by read, but must agree across contents of one ADC.
+        Numeric records own immutable data; opaque envelopes remain
+        caller-owned and must stay deterministic.
     reps: nonnegative integer shots per point, fixed for this preparation.
     rtol/atol: positive finite tolerances for noiseless arbitrary-envelope
         baseline solves; no shot LUT or jump-time interpolation is used.
@@ -63,6 +62,7 @@ class PreparedRawShots:
         if not np.isfinite([rtol, atol]).all() or min(rtol, atol) <= 0:
             raise ValueError("readout tolerances must be positive finite")
         labels = None
+        rates = None
         for channel, batch in batches.items():
             if type(channel) is not int or channel < 0:
                 raise ValueError("channel must be a nonnegative integer")
@@ -72,7 +72,12 @@ class PreparedRawShots:
                 raise ValueError("model state axis must match populations")
             if labels is not None and labels != batch.model.state_labels:
                 raise ValueError("readout model state order must match across ADCs")
+            if rates is not None and not np.array_equal(
+                rates, batch.model.rates_per_ns
+            ):
+                raise ValueError("directional rates must match across ADCs")
             labels = batch.model.state_labels
+            rates = batch.model.rates_per_ns
             counts = tuple(len(grid.times_ns) for grid in batch.grids[0])
             if any(
                 tuple(len(grid.times_ns) for grid in grids) != counts
@@ -118,10 +123,9 @@ class ADCRawShots:
         point dimensions and must be in [0,len(point_dims)]. Invalid arguments,
         nonfinite receiver output or int64 overflow raise ValueError; baseline
         solver failures raise RuntimeError. Receiver noise is independent per
-        ADC/read/shot. Initial states are shared across ADCs/reads. Single-pulse
-        reads share full continuous-time jump paths including all multi-jump
-        tails. Multiple incident carriers retain conditional responses until the
-        shared-path mux sampler is supplied. No raw is shifted to fit round sums.
+        ADC/read/shot. Initial states and full continuous-time jump paths are
+        shared across every carrier, ADC and read, including all multi-jump
+        tails and gaps. No raw is shifted to fit round sums.
         """
         prepared = self.prepared
         point_dims = prepared.populations.shape[:-1]
@@ -134,48 +138,8 @@ class ADCRawShots:
                 np.random.SeedSequence((self.identity.seed, *self.identity.stream))
             )
         )
-        probabilities = prepared.populations.reshape(
-            (-1, prepared.populations.shape[-1])
-        )
-        uniforms = rng.random((len(probabilities), reps))
-        states = np.sum(
-            uniforms[..., None] >= probabilities.cumsum(axis=-1)[:, None, :-1], axis=-1
-        )
-        output = {}
-        for channel, batch in prepared.batches:
-            reads = len(batch.grids[0])
-            shots = np.empty((len(probabilities), reps, reads, 2))
-            for content, (pulses, grids) in enumerate(
-                zip(batch.pulses, batch.grids, strict=True)
-            ):
-                points = np.flatnonzero(batch.content_index == content)
-                if not len(points) or not reps:
-                    continue
-                initial = states[points].ravel()
-                if len(pulses) == 1:
-                    paths = IntegratedPaths(
-                        batch.model, pulses[0], grids, prepared.rtol, prepared.atol
-                    )
-                    values = paths.draw(initial, rng)
-                else:
-                    solver = ConditionalReadout(
-                        batch.model, rtol=prepared.rtol, atol=prepared.atol
-                    )
-                    conditional = solver.responses(
-                        ReadoutBatch(
-                            batch.model,
-                            (pulses,),
-                            (grids,),
-                            np.array([0], dtype=np.int64),
-                        )
-                    )
-                    values = conditional.sums[0][:, initial, :].transpose(1, 0, 2)
-                shots[points] = values.reshape((len(points), reps, reads, 2))
-            root = noise_root(batch.model.receiver.noise_covariance)
-            if np.any(root) and reps:
-                counts = np.array([len(grid.times_ns) for grid in batch.grids[0]])
-                shots += (rng.standard_normal(shots.shape) @ root.T) * np.sqrt(counts)[
-                    None, None, :, None
-                ]
-            output[channel] = shot_layout(shots, point_dims, reps, avg_level)
-        return output
+        shots = physical_shots(prepared, rng)
+        return {
+            channel: shot_layout(values, point_dims, reps, avg_level)
+            for channel, values in shots.items()
+        }
