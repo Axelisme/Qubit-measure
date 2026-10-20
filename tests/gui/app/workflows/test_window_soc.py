@@ -5,16 +5,18 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.experiment.simulation import white_noise
 
 from tests.gui._user_input import ComponentDriver
 
-from ._window_support import WindowSession, bind_point, install_soc
+from ._window_support import WindowSession, bind_point
 
 
 @pytest.fixture
 def soc_session(window_session: WindowSession, qapp: QApplication) -> WindowSession:
     bind_point(window_session.harness, window_session.root)
-    install_soc(window_session.harness)
+    env = white_noise()
+    window_session.harness.services.soc_connection.install_soc(env.soc, env.soccfg)
     window_session.window.resize(1500, 900)
     window_session.window.show()
     qapp.processEvents()
