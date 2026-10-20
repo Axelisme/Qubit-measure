@@ -13,7 +13,7 @@ from zcu_tools.resources.entry import DestinationExistsError, load_entry_templat
 def startup(ctx: StartupContext) -> None:
     """Select ftf-demo/initial, seeding it from the template on first use.
 
-    No tab is opened; the user picks experiments from New Tab.
+    The GUI is then ready for the user to open experiment tabs.
 
     ctx is the GUI's typed startup capability, called on its background worker
     after lab components/adapters are registered. Use the GUI's data project
