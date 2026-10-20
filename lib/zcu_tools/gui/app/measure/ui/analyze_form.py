@@ -23,7 +23,7 @@ from zcu_tools.gui.widgets.form.value_widgets import (
     write_value_widget,
 )
 
-from ..adapter.analyze_params import _resolve_field_info, reconstruct_params
+from ..adapter.analyze_params import reconstruct_params, resolve_field_info
 
 
 @dataclass(frozen=True)
@@ -90,7 +90,7 @@ class AnalyzeFormWidget(QWidget):
         hints = get_type_hints(self._params_cls, include_extras=True)
         bindings: list[_FieldBinding] = []
         for field in dataclasses.fields(params_instance):
-            bare_type, choices, label, decimals, optional = _resolve_field_info(
+            bare_type, choices, label, decimals, optional = resolve_field_info(
                 field, hints
             )
             bindings.append(
