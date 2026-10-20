@@ -17,6 +17,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
+from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui._qt_waits import qt_until
@@ -55,6 +56,11 @@ def soc_app(
             yield app, entered, release
         finally:
             release.set()
+
+
+def arb_driver(app: LaunchedMeasureApp) -> ComponentDriver:
+    """Scope visible controls to ARB when Inspect remains open behind it."""
+    return ComponentDriver(next(iter(app.window.findChildren(ArbWaveformDialog))))
 
 
 @pytest.mark.parametrize(
@@ -99,9 +105,9 @@ def test_run_only_locks_setup_soc_and_preserves_remote_control_policy(
     ui.screenshot(shots / "04-local-running.png")
     assert ui.observe(action).enabled is run_editable
 
-    ui.click("Close")
     if opening == "Arb Waveforms…":
-        ui.click("Close")
+        arb_driver(app).click("Close")
+    ui.click("Close")
     # Opening a Run-locked window must not replace the registry's Local authority.
     ui.click("SoC…")
     assert not ui.observe("Connect").enabled
@@ -126,9 +132,9 @@ def test_run_only_locks_setup_soc_and_preserves_remote_control_policy(
     ui.click(object_name="control_indicator")
     ui.screenshot(shots / "08-finished-local.png")
     assert ui.observe(action).enabled
-    ui.click("Close")
     if opening == "Arb Waveforms…":
-        ui.click("Close")
+        arb_driver(app).click("Close")
+    ui.click("Close")
 
 
 def test_toolbar_soc_reopens_and_both_dialogs_follow_run_lock(
