@@ -212,7 +212,7 @@ def test_default_waveforms_publish_with_canonical_keys_and_only_unknown_raw(
 def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_leaf(
     request_data: MigrationRequest, default_mapping: MigrationMapping, label: str
 ) -> None:
-    request = replace(request_data, part="parameters")
+    request = replace(request_data, part="all")
     source = write_meta(request, label, _SCALARS)
     _library(source, _payload())
     dry = _convert(replace(request, dry_run=True), default_mapping)
