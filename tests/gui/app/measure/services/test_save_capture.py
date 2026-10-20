@@ -108,7 +108,9 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
         saved_at=datetime(2026, 10, 8, tzinfo=timezone.utc),
     )
     outputs = layout.outputs(ArtifactKey("run", "T1", "data"))
-    assert outputs[0].path == session.entry.database_path / "runs/run-a/data.h5"
+    assert (
+        outputs[0].path == session.entry.database_path / "runs/synthetic_run-a/data.h5"
+    )
     assert storage.ledger is capture.capture_storage().ledger
 
 

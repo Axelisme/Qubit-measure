@@ -144,7 +144,7 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     def init(_env: InitEnv[Context], _plan: Plan) -> None:
         return None
 
-    @workflow("capture-observer", plan=Plan, tunables=Tunables, init=init)
+    @workflow("capture/observer", plan=Plan, tunables=Tunables, init=init)
     def observe(
         env: WorkflowEnv[Context],
         plan: Plan,
@@ -172,7 +172,7 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     assert isinstance(token, int)
     controller = window.controller
     assert controller is not None and controller.status() is None
-    assert not (entry.result_path / "workflows/captured").exists()
+    assert not (entry.result_path / "workflows/capture_observer_captured").exists()
     context.set_parameter(context.read_context().target, "general.ext.value", 99.0)
     entry.new_point("later", description="later description")
     context.use_point(PointUseRequest("later"))
@@ -190,8 +190,11 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     assert harness.gate.snapshot()
     harness.background.deliver()
     assert not harness.gate.snapshot()
-    assert (entry.result_path / "workflows/captured").is_dir()
-    assert (entry.result_path / "workflows/captured/manifest.json").is_file()
+    assert (entry.result_path / "workflows/capture_observer_captured").is_dir()
+    assert (
+        entry.result_path / "workflows/capture_observer_captured/manifest.json"
+    ).is_file()
+    assert (entry.database_path / "workflows/capture_observer_captured").is_dir()
     assert window.tuning_panel is not None
     assert sample_input(window.tuning_panel.host.accepted_input.data)["value"] == {
         "expr": "general.ext.value"

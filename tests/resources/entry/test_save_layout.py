@@ -55,7 +55,10 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             ArtifactKey("run", "primary", "data"),
             None,
             (
-                ("data_h5", "Database/entry/runs/opaque_run%id/data.h5"),
+                (
+                    "data_h5",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/data.h5",
+                ),
                 (
                     "labber",
                     "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_run%id_1.hdf5",
@@ -66,7 +69,10 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             ArtifactKey("analysis", "other", "data"),
             "point",
             (
-                ("data_h5", "Database/entry/runs/opaque_run%id/data.h5"),
+                (
+                    "data_h5",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/data.h5",
+                ),
                 (
                     "labber",
                     "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_run%id_1.hdf5",
@@ -79,11 +85,11 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "png",
-                    "Database/entry/runs/opaque_run%id/figures/run_artifact_spectrum.png",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/run_artifact_spectrum.png",
                 ),
                 (
                     "png",
-                    "results/entry/points/point/figures/opaque%5Frun%25id_run_artifact_spectrum.png",
+                    "results/entry/points/point/figures/Synthetic_Experiment_opaque_run%id_run_artifact_spectrum.png",
                 ),
             ),
         ),
@@ -93,11 +99,11 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "png",
-                    "Database/entry/runs/opaque_run%id/figures/caller_artifact_spectrum.png",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/caller_artifact_spectrum.png",
                 ),
                 (
                     "png",
-                    "results/entry/figures/opaque%5Frun%25id_caller_artifact_spectrum.png",
+                    "results/entry/figures/Synthetic_Experiment_opaque_run%id_caller_artifact_spectrum.png",
                 ),
             ),
         ),
@@ -107,7 +113,7 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/analysis.json",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/analysis/analysis.json",
                 ),
             ),
         ),
@@ -117,7 +123,7 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/post_analysis.json",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/analysis/post_analysis.json",
                 ),
             ),
         ),
@@ -125,16 +131,28 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             ArtifactKey("a_b", "c", "figure", "x"),
             None,
             (
-                ("png", "Database/entry/runs/opaque_run%id/figures/a%5Fb_c_x.png"),
-                ("png", "results/entry/figures/opaque%5Frun%25id_a%5Fb_c_x.png"),
+                (
+                    "png",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/a%5Fb_c_x.png",
+                ),
+                (
+                    "png",
+                    "results/entry/figures/Synthetic_Experiment_opaque_run%id_a%5Fb_c_x.png",
+                ),
             ),
         ),
         (
             ArtifactKey("a", "b_c", "figure", "x"),
             None,
             (
-                ("png", "Database/entry/runs/opaque_run%id/figures/a_b%5Fc_x.png"),
-                ("png", "results/entry/figures/opaque%5Frun%25id_a_b%5Fc_x.png"),
+                (
+                    "png",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/a_b%5Fc_x.png",
+                ),
+                (
+                    "png",
+                    "results/entry/figures/Synthetic_Experiment_opaque_run%id_a_b%5Fc_x.png",
+                ),
             ),
         ),
         (
@@ -143,7 +161,7 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/m_%.json",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/analysis/m_%.json",
                 ),
             ),
         ),
@@ -151,10 +169,13 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             ArtifactKey("未知", "任意", "figure", "圖"),
             "工作點",
             (
-                ("png", "Database/entry/runs/opaque_run%id/figures/未知_任意_圖.png"),
                 (
                     "png",
-                    "results/entry/points/工作點/figures/opaque%5Frun%25id_未知_任意_圖.png",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/未知_任意_圖.png",
+                ),
+                (
+                    "png",
+                    "results/entry/points/工作點/figures/Synthetic_Experiment_opaque_run%id_未知_任意_圖.png",
                 ),
             ),
         ),
@@ -189,12 +210,12 @@ def test_members_of_one_artifact_have_distinct_destinations(
     assert (
         first[0].path
         == tmp_path
-        / f"Database/entry/runs/opaque_run%id/{folder}/{prefix}first.{extension}"
+        / f"Database/entry/runs/Synthetic_Experiment_opaque_run%id/{folder}/{prefix}first.{extension}"
     )
     assert (
         second[0].path
         == tmp_path
-        / f"Database/entry/runs/opaque_run%id/{folder}/{prefix}second.{extension}"
+        / f"Database/entry/runs/Synthetic_Experiment_opaque_run%id/{folder}/{prefix}second.{extension}"
     )
     assert set(first).isdisjoint(second)
 
@@ -247,7 +268,13 @@ def test_labber_avoids_existing_files_but_does_not_reserve(
     (folder / second_name).write_bytes(b"second")
     before = tree_bytes(tmp_path)
     expected = (
-        Output("data_h5", tmp_path / "Database/entry/runs" / run_id / "data.h5"),
+        Output(
+            "data_h5",
+            tmp_path
+            / "Database/entry/runs"
+            / f"Synthetic_Experiment_{run_id}"
+            / "data.h5",
+        ),
         Output("labber", folder / third_name),
     )
     assert save_layout.outputs(key) == expected
@@ -285,7 +312,10 @@ def test_relative_roots_become_absolute_without_requiring_entry_directories(
         saved_at=SAVED_AT,
     )
     assert save_layout.outputs(ArtifactKey("run", "data", "data")) == (
-        Output("data_h5", tmp_path / "Database/entry/runs/no-meaning/data.h5"),
+        Output(
+            "data_h5",
+            tmp_path / "Database/entry/runs/Synthetic_Experiment_no-meaning/data.h5",
+        ),
         Output(
             "labber",
             tmp_path
@@ -373,16 +403,21 @@ def test_unknown_member_fails_at_the_public_boundary(
 @pytest.mark.parametrize(
     ("root", "relative_link", "key", "point"),
     [
-        ("Database", "runs/opaque_run%id", ArtifactKey("run", "data", "data"), None),
         (
             "Database",
-            "runs/opaque_run%id/figures",
+            "runs/Synthetic_Experiment_opaque_run%id",
+            ArtifactKey("run", "data", "data"),
+            None,
+        ),
+        (
+            "Database",
+            "runs/Synthetic_Experiment_opaque_run%id/figures",
             ArtifactKey("run", "fit", "figure", "first"),
             None,
         ),
         (
             "Database",
-            "runs/opaque_run%id/analysis",
+            "runs/Synthetic_Experiment_opaque_run%id/analysis",
             ArtifactKey("run", "fit", "analysis", "first"),
             None,
         ),
@@ -482,7 +517,7 @@ def test_result_entry_exposes_readonly_exact_paths_for_layout(
         saved_at=SAVED_AT,
     )
     assert save_layout.outputs(ArtifactKey("run", "data", "data"))[0] == Output(
-        "data_h5", database / "entry/runs/run/data.h5"
+        "data_h5", database / "entry/runs/Synthetic_Experiment_run/data.h5"
     )
     for attribute in ("result_path", "database_path"):
         with pytest.raises(AttributeError):
@@ -495,10 +530,19 @@ def test_workflow_roots_are_exact_and_do_not_publish(tmp_path: Path) -> None:
         result_path=tmp_path / "results" / "entry",
         database_path=tmp_path / "Database" / "entry",
         run_id="opaque_run%id",
+        workflow="Synthetic/Workflow",
     )
     assert roots == WorkflowRoots(
-        result=tmp_path / "results" / "entry" / "workflows" / "opaque_run%id",
-        database=tmp_path / "Database" / "entry" / "workflows" / "opaque_run%id",
+        result=tmp_path
+        / "results"
+        / "entry"
+        / "workflows"
+        / "Synthetic_Workflow_opaque_run%id",
+        database=tmp_path
+        / "Database"
+        / "entry"
+        / "workflows"
+        / "Synthetic_Workflow_opaque_run%id",
     )
     assert list(tmp_path.iterdir()) == []
 
@@ -511,9 +555,32 @@ def test_workflow_roots_resolve_relative_entry_paths(
         result_path=Path("results/entry"),
         database_path=Path("Database/entry"),
         run_id="run",
+        workflow="Synthetic/Workflow",
     )
-    assert roots.result == tmp_path / "results" / "entry" / "workflows" / "run"
-    assert roots.database == tmp_path / "Database" / "entry" / "workflows" / "run"
+    assert (
+        roots.result
+        == tmp_path / "results" / "entry" / "workflows" / "Synthetic_Workflow_run"
+    )
+    assert (
+        roots.database
+        == tmp_path / "Database" / "entry" / "workflows" / "Synthetic_Workflow_run"
+    )
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "workflow", ["", ".", "..", "bad\\name", "bad\x00name", "C:drive"]
+)
+def test_workflow_roots_reject_unsafe_workflow_names(
+    tmp_path: Path, workflow: str
+) -> None:
+    with pytest.raises(ValueError, match="workflow"):
+        workflow_roots(
+            result_path=tmp_path / "results/entry",
+            database_path=tmp_path / "Database/entry",
+            workflow=workflow,
+            run_id="run",
+        )
     assert list(tmp_path.iterdir()) == []
 
 
@@ -524,12 +591,15 @@ def test_workflow_roots_reject_unsafe_run_identity(tmp_path: Path, run_id: str) 
             result_path=tmp_path / "results" / "entry",
             database_path=tmp_path / "Database" / "entry",
             run_id=run_id,
+            workflow="Synthetic/Workflow",
         )
     assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize("root", ["results", "Database"])
-@pytest.mark.parametrize("relative_link", ["workflows", "workflows/run"])
+@pytest.mark.parametrize(
+    "relative_link", ["workflows", "workflows/Synthetic_Workflow_run"]
+)
 def test_workflow_roots_reject_symlink_escape_without_publishing(
     tmp_path: Path, root: str, relative_link: str
 ) -> None:
@@ -546,6 +616,7 @@ def test_workflow_roots_reject_symlink_escape_without_publishing(
             result_path=tmp_path / "results" / "entry",
             database_path=tmp_path / "Database" / "entry",
             run_id="run",
+            workflow="Synthetic/Workflow",
         )
     assert {path.relative_to(tmp_path) for path in tmp_path.rglob("*")} == before_names
     assert tree_bytes(tmp_path) == before_contents
