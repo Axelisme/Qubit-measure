@@ -894,27 +894,6 @@ class ComponentDriver:
             key_click(popup, Qt.Key.Key_Escape)
         chooser.click("&Open")
 
-    def press_key(
-        self,
-        key: Qt.Key,
-        *,
-        object_name: str | None = None,
-        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
-    ) -> None:
-        """Send a real key to a named control or the window's current focus.
-
-        Without object_name, use actual Qt keyboard focus, or the window when
-        no child has focus. Never assign focus or bypass availability guards.
-        """
-        widget = (
-            self._find(None, object_name)
-            if object_name is not None
-            else self._window.focusWidget() or self._window
-        )
-        if self._can_interact(widget):
-            key_click(widget, key, modifiers)
-        QApplication.processEvents()
-
     def text_input(self, *, object_name: str) -> TextInputObservation:
         """Observe a named line edit; hidden controls expose no text or hints.
 
@@ -960,12 +939,22 @@ class ComponentDriver:
         object_name: str | None = None,
         modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
     ) -> None:
-        """Press a key on an interactive control found by label, caption or name.
+        """Send a real key with modifiers without assigning keyboard focus.
 
-        This sends a keyboard event without forcing focus. Tab uses Qt's normal
-        focus traversal. Hidden, disabled and clipped controls are not driven.
+        With no selector, use the window's actual Qt focus, or the window when
+        no child has focus. Otherwise, supply either text (a visible field label
+        or caption) or object_name (an existing Qt objectName) to target a control.
+        Tab uses Qt's normal focus traversal. Hidden, disabled and fully clipped
+        targets are not driven. Process pending Qt events after the key.
+
+        Raise ValueError if both selectors are supplied, or LookupError if a
+        selector does not identify exactly one control.
         """
-        widget = self._field_control(text, object_name)
+        widget = (
+            self._window.focusWidget() or self._window
+            if text is None and object_name is None
+            else self._field_control(text, object_name)
+        )
         if self._can_interact(widget):
             key_click(widget, key, modifiers)
         QApplication.processEvents()
