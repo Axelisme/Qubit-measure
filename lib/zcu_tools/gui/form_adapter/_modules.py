@@ -25,6 +25,7 @@ from zcu_tools.cfg_model import (
     ConfigBase,
     ModuleCfgFactory,
     ModuleSpec,
+    MuxReadoutSpec,
     Slot,
     Template,
     TemplateDef,
@@ -41,6 +42,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     InputConverter,
+    InputPolicy,
     Option,
     OptionCommand,
     static_defaults,
@@ -358,6 +360,14 @@ def _spec_display(name: str, info: FieldInfo) -> Display | None:
     return display
 
 
+def _spec_field_info(model: type[BaseModel], name: str, info: FieldInfo) -> FieldInfo:
+    """Copy Spec constraints and apply adapter-owned whole-list input policy."""
+    derived = deepcopy(info)
+    if issubclass(model, MuxReadoutSpec) and name == "tones":
+        derived.metadata.append(InputPolicy(indexed=False))
+    return derived
+
+
 def editable_spec(
     model: type[BaseModel],
     seeds: Mapping[str, JsonValue],
@@ -386,7 +396,7 @@ def editable_spec(
         annotations[name] = _editable(
             info.annotation, seed if isinstance(seed, dict) else {}
         )
-        derived = deepcopy(info)
+        derived = _spec_field_info(model, name, info)
         if inline_wrapper(annotations[name]) is not None:
             derived.discriminator = (
                 "kind"

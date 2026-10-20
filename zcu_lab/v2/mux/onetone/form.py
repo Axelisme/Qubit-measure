@@ -31,4 +31,12 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
             "sweep": {"df": Range.between(-1.0, 1.0, expts=101)},
             "initial_delay": Hidden(),
         },
+        field_order=(
+            "active_tones",
+            "sweep",
+            "modules",
+            "relax_delay",
+            "reps",
+            "rounds",
+        ),
     )

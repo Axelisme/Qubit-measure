@@ -42,4 +42,11 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
             "initial_delay": Hidden(),
         },
         fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        field_order=(
+            "participants",
+            "tones",
+            "shots",
+            "modules",
+            "relax_delay",
+        ),
     )

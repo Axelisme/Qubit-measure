@@ -45,4 +45,13 @@ def make_form(ctx: FormContext) -> Form[MuxT1Cfg]:
             "rounds": 100,
         },
         fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        field_order=(
+            "participants",
+            "tones",
+            "delays",
+            "modules",
+            "relax_delay",
+            "reps",
+            "rounds",
+        ),
     )

@@ -259,7 +259,12 @@ class Section:
     """
 
     def __init__(
-        self, core: type[BaseModel], tree: Mapping[str, FormNode], path: tuple[str, ...]
+        self,
+        core: type[BaseModel],
+        tree: Mapping[str, FormNode],
+        path: tuple[str, ...],
+        *,
+        field_order: tuple[str, ...] = (),
     ) -> None:
         unknown = tree.keys() - core.model_fields.keys()
         if unknown:
@@ -281,6 +286,7 @@ class Section:
         names = [name for name in core.model_fields if name not in program_fields] + [
             name for name in core.model_fields if name in program_fields
         ]
+        names = [*field_order, *(name for name in names if name not in field_order)]
         for name in names:
             info = core.model_fields[name]
             node = tree.get(name)

@@ -159,9 +159,13 @@ class InputPolicy:
     expression=False disables Expr envelopes in descriptions, evaluation,
     and defaults. Restoration preserves raw for general validation. True retains the annotation's capability;
     it cannot enable expressions on categorical or container fields.
+    indexed=False keeps a model list as one typed JSON container leaf instead
+    of exposing indexed paths. Validation still uses the original annotation.
+    Other field types are unchanged; True retains ordinary indexed editing.
     """
 
     expression: bool = True
+    indexed: bool = True
 
 
 @dataclass(frozen=True)

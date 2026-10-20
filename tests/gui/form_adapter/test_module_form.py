@@ -885,8 +885,11 @@ def test_empty_mux_tones_accept_typed_whole_list_input() -> None:
     assert description.children == ()
     state.write(
         {
-            ("gen_ch",): 0, ("nqz",): 1, ("mixer_freq",): 6000.0,
-            ("length",): 2.0, ("ro_length",): 1.5,
+            ("gen_ch",): 0,
+            ("nqz",): 1,
+            ("mixer_freq",): 6000.0,
+            ("length",): 2.0,
+            ("ro_length",): 1.5,
             ("tones",): [{"freq": 6020.0, "gain": 0.1, "ro_ch": 7, "label": "R1"}],
         },
         env,
