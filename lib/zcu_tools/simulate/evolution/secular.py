@@ -329,13 +329,50 @@ class ModelSource:
             return self._models[level]
 
     def register_shift(self, shift: SegmentShift) -> bytes:
+        """Register a correction and return its span-independent content bytes.
+
+        shift: validated SegmentShift with additive energy/h in GHz, shape (M,),
+            and coherence-pair dephasing in ns^-1, shape (M,M), in the physical
+            model's state order. Compatibility with a model is checked only
+            when shifted_model resolves it; registration does not build models.
+
+        Returns shift.content, fingerprinting the correction arrays, not their
+        start/end span. Equal content keeps the first registration and any
+        cached shifted models. Even zero correction arrays have nonempty
+        content; b'' is reserved by shifted_model for the unshifted model.
+        Registration and model caches persist until close(), which clears them.
+        Register again before resolving nonempty content after close().
+        """
         content = shift.content
         with self._lock:
             self._shifts.setdefault(content, shift)
         return content
 
     def shifted_model(self, level: FluxLevel, content: bytes = b"") -> SecularModel:
-        """Resolve without changing physical levels, eigenvectors or initial state."""
+        """Return the physical model with a registered energy/dephasing correction.
+
+        level: physical FluxLevel in the builder's loop order, with one integer
+            per loop; flux = round DC + level * 1e-3 Phi0. The all-zero tuple
+            selects the DC model.
+        content: bytes returned by register_shift on this source since its last
+            close(). The default b'' returns model(level) unchanged and needs no
+            registration. Nonempty content must be registered, even if all
+            correction values are zero. The registered span is ignored here.
+
+        Adds the registered GHz energies and ns^-1 coherence-pair dephasing to
+        model(level) and includes content in the returned model's identity.
+        Physical level, eigenvectors, drive quadratures, transition rates and
+        initial_density stay unchanged; no state reordering or basis rotation
+        occurs. Successful shifted models are cached per (level, content), with
+        serialized cache access. close() clears this cache and registrations.
+
+        Builder errors propagate unchanged, before content lookup. Unregistered
+        nonempty content raises KeyError. Incompatible correction/model shapes
+        or invalid resulting SecularModel data raise ValueError. Energy-order
+        inversion raises ValueError indicating that the cavity-drive Stark
+        shift exceeds dispersive validity; equal adjacent energies are valid.
+        Failed shifted models are not cached; the physical model may be cached.
+        """
         model = self.model(level)
         if not content:
             return model
