@@ -22,7 +22,7 @@
 │   │   ├── points/<label>/{point.yaml,module_cfg.yaml,figures/}
 │   │   └── records/manual-migration-report-<date>.json
 │   └── Database/<name>/
-│       ├── runs/<run_id>/data.h5         ← Labber 轉成的 native
+│       ├── runs/<experiment>_<run_id>/data.h5  ← 完整 run_id，Labber 轉成的 native
 │       ├── Labber/<原相對路徑>            ← 所有原 Labber 檔（含未轉 native 的），bytes 不變
 │       ├── arb_waveforms/**
 │       └── <原相對路徑>                   ← 無法轉換的舊 Database 檔，原樣放在對應位置
@@ -31,6 +31,8 @@
     ├── Database/<chip>/<qub>/            ← 原樣複製
     └── migration-records/<chip>/<qub>/   ← hash 清單、工作紀錄、報告
 ```
+
+Entry 本身只由 `result/<name>/` 構成。Database 是輸出位置，首次發布資料時才建立，不是開啟 entry 的前提。上圖的 Database 內容表示遷移已發布資料，不表示初始化會建立空 Database。
 
 三條規則決定整個流程：
 
@@ -66,7 +68,9 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
 
 核對 stdout 的 JSON report、pending 位置、備份與目的路徑。Dry-run 不建備份或目的、不寫報告，也不刪來源。確認後移除 `--dry-run`，其餘參數保持相同。Native 需要的歷史 evidence 另用 `--run-evidence <file>` 提供，缺必要證據的 Labber 保留原檔並列 pending，不猜 cfg 或量測時間。
 
-正式執行先完整備份並逐檔驗 SHA256，再發布新格式。兩部分與所有 publication 完成後，工具重驗備份與來源，才刪本次舊來源。自動報告在 `<checkout-name>-backup/migration-records/<chip>/<qubit>/migration-report-<UTC-date>.json`。完成後另存到新 entry 的 `records/`，同處的 `migration-state.json` 保存固定身分與比較依據。
+正式執行先完整備份並逐檔驗 SHA256，再發布新格式。初始化只在 Result root 的已記錄暫存名稱下建 entry，核對 staging 後 rename 到正式 Result 名稱。Database 不參與 staging 或 rename，首次 data publication 才建立所需輸出目錄。
+
+兩部分與所有 publication 完成後，工具重驗備份與來源，才刪本次舊來源。自動報告在 `<checkout-name>-backup/migration-records/<chip>/<qubit>/migration-report-<UTC-date>.json`。完成後另存到新 entry 的 `records/`，同處的 `migration-state.json` 保存固定身分與比較依據。
 
 中斷時保留 entry、工具暫存檔、manifest 與備份，直接重跑原指令。工具只補缺項，沿用 entry UUID、建立時間、run_id 與報告日期。`--resume` 仍可明填；parameters 與 data 分開執行時，第二次改 `--part` 即可。單位、CSV 欄名、kind、mapping 版本與已固定的歷史 evidence 不得改成另一份宣告。
 
@@ -112,7 +116,7 @@ realpath -m -- "$OLD_R" "$OLD_D" "$NEW_R" "$NEW_D" "$BR" "$BD" "$REC"
 
 - `CHIP`、`QUB`、`NAME` 各是單一路徑段，不含 `/`、`.`、`..`。
 - `BACKUP_ROOT` 在 repo 外。以下手動全新備份要求 `BR`、`BD`、`REC` 不存在。本工具已擁有的備份直接走工具重跑；其他既有備份走[部分接手](#部分接手)。
-- 手動全新遷移要求 `NEW_R`、`NEW_D` 不存在。本工具擁有的 entry 可直接重跑，其他既有 entry 走部分接手，不刪掉重來。
+- 手動全新遷移要求 `NEW_R`、`NEW_D` 不存在。這是遷移保護目的資料的條件，不是 `ResultEntry.create` 的規則；一般 create 只檢查 Result。本工具擁有的 entry 可直接重跑，其他既有 entry 走部分接手，不刪掉重來。
 - 新 entry 不包住、也不透過 symlink 指進任一來源。
 - `find "$OLD_R" "$OLD_D" -type l -o ! -type d ! -type f` 沒有輸出。有輸出就停下，向使用者確認實體來源。
 - `OLD_D` 不存在時，記下並取得使用者確認；之後只備份 `OLD_R`，不建立空 Database 充數。
@@ -181,7 +185,7 @@ label 不合法時，由使用者決定新名，報告記舊名、新名與理�
 | `arb_waveforms/**`（result 或 Database） | `Database/<name>/arb_waveforms/**` | 第 7 步 |
 | `data/fluxdep/spectrums.hdf5` | 新 entry 同相對位置；未轉原文另存 `data/fluxdep/spectrums.legacy.hdf5` | 第 7 步的 processed spectrum 規則。不能整檔當 generic raw copy。 |
 | `autofluxdep_runs/**`、其他不支援的 result 檔 | `result/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
-| Database 的 Labber 檔 | 原檔一律放 `Database/<name>/Labber/<原相對路徑>`；能轉的另產 `Database/<name>/runs/<run_id>/data.h5` | 第 8 步 |
+| Database 的 Labber 檔 | 原檔一律放 `Database/<name>/Labber/<原相對路徑>`；能轉的另產 `Database/<name>/runs/<experiment>_<run_id>/data.h5` | 第 8 步 |
 | 其他 Database 檔 | `Database/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
 
 `<Q>` 是舊 qubit 對應的新 component 名。找不到唯一對應時，所有寫到 `<Q>` 的項目整批列 permanent-pending，不任選一個。
@@ -226,7 +230,7 @@ print(entry.entry_id, entry.result_path, entry.database_path)
 PY
 ```
 
-印出的 UUID 與兩個路徑記入 `$REC/notes.md`。部分接手時跳過這段，沿用既有 UUID。
+印出的 UUID 與兩個路徑記入 `$REC/notes.md`。此時只建立 `$NEW_R`，`$NEW_D` 只是後續輸出位置，create／open 都不檢查或建立它。第 7 步的 Database 檔案複製或第 8 步的 native publication 才建立所需目錄。部分接手時跳過這段，沿用既有 UUID。
 
 接著編輯 `$NEW_R/setup.yaml`，欄位依[正式 component 定義](../zcu_lab/components/)：
 
@@ -548,10 +552,13 @@ Labber 與 native 都是 HDF5，但格式不同，把 `.hdf5` 改名成 `data.h5
 型別見 [datafile owner](../lib/zcu_tools/datafile/README.md) 與 [native models](../lib/zcu_tools/datafile/native_models.py)。
 分配 run_id 前，先把「來源、hash → run_id」對照寫進 `$REC`。中斷後沿用同一份對照，不重新分配。
 
+Native 路徑由 `SaveLayout` 依 evidence 的 experiment 與完整 run_id 計算，experiment 中的 `/` 轉 `_`，dry-run 與 resume 使用同一規則。原 Labber 檔仍保留原名與相對路徑，不改成新 Save 的檔名。
+
 以下是合成範例。`synthetic_demo`、`DemoCfg` 不是 repo 已註冊的實驗；真檔要換成確認過的 `(tag, cfg_type, schema_version)`、完整歷史 cfg 與正式 schema。
 
 ```python
 import hashlib, json, os
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 import numpy as np
@@ -561,7 +568,7 @@ from zcu_tools.datafile import (
     SoftwareProvenance, VariableSchema, load_run_data, save_run_data,
     validate_experiment_payload,
 )
-from zcu_tools.resources.entry import new_run_id
+from zcu_tools.resources.entry import ArtifactKey, SaveLayout, new_run_id
 
 bd = Path(os.environ["BD"])
 source = bd / "2024/05/01/synthetic.hdf5"
@@ -597,7 +604,13 @@ metadata = RunMetadata(
     ),
     device_snapshot=None,
 )
-destination = Path(os.environ["NEW_D"]) / "runs" / metadata.run_id / "data.h5"
+layout = SaveLayout(
+    result_path=Path(os.environ["NEW_R"]), database_path=Path(os.environ["NEW_D"]),
+    experiment=metadata.experiment, run_id=metadata.run_id,
+    point=metadata.snapshot.point, saved_at=datetime.now(timezone.utc),
+)
+outputs = layout.outputs(ArtifactKey(section="run", name="data", member="data"))
+destination = next(output.path for output in outputs if output.format == "data_h5")
 payload = load_legacy_labber_payload(source, schema=schema)
 validate_experiment_payload(payload, schema=schema)
 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -613,7 +626,7 @@ validate_experiment_payload(load_run_data(destination).payload, schema=schema)
 3. 報告記錄 run_id 與它的來源（「遷移賦值」或證據）、native 路徑、Labber 路徑、原檔 hash，以及哪些時間未知。
 
 native 已存在時，用 reader 核對既有的 ID 與資料，只補缺的部分，不用 `replace=True` 覆寫。
-不手造 ledger 事件；Measure GUI 的 Load 清單直接掃描 `runs/*/data.h5`。
+不手造 ledger 事件；Measure GUI 的 Load 清單直接掃描 `runs/*/data.h5`。Metadata 不可讀時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與錯誤，選取仍傳回 exact path，不從新舊目錄名猜身分。
 
 完成條件：每個 Labber 檔都是 native 加原檔副本、都已讀回，或列 permanent-pending 並附缺少的證據。
 
@@ -652,7 +665,8 @@ PY
 使用者看過以上結果並授權刪除後，才執行：
 
 ```bash
-realpath -- "$OLD_R" "$OLD_D" "$BR" "$BD" "$NEW_R" "$NEW_D"
+realpath -- "$OLD_R" "$OLD_D" "$BR" "$BD" "$NEW_R"
+realpath -m -- "$NEW_D"
 rm -ri -- "$OLD_R" "$OLD_D"
 test ! -e "$OLD_R" && test ! -e "$OLD_D"
 ```
@@ -682,6 +696,14 @@ test ! -e "$OLD_R" && test ! -e "$OLD_D"
 | 來源與目的都在，但 hash 不同 | 兩份都保存，不看 mtime 選新的。 | 列衝突，使用者決定前不刪來源。 |
 
 每補一項就讀回或 `cmp`，並更新該列的狀態。手動接手後，原工具可能無法再 resume；要切回工具前，先由工具 owner 確認接手方式。
+
+## Entry 改名與後續保存
+
+一般 entry 改名使用 `rename_entry(old, new, result_root=...)`，只移動 `result/<old>/` 到 `result/<new>/`，UUID 不變。Database 舊輸出不搬動，也沒有第二次目錄移動或復原步驟。以新名重新 open 後，新 Save 寫到 `Database/<new>/`，舊輸出留在 `Database/<old>/`。遷移未完成時先按固定名稱完成遷移，不在 resume 中途改名。
+
+後續 Save 使用 `Database/<name>/runs/<experiment>_<run_id>/`，Result 圖片副本為 `<experiment>_<run_id>_<圖名>.png`。Workflow 的 Result／Database 兩側都用 `workflows/<workflow名>_<run_id>/`。這些路徑保留完整 run_id，實驗與 workflow 名中的 `/` 轉 `_`。
+
+Labber 新 Save 仍用 `Labber/YYYY/MM/Data_MMDD/<experiment>_<id6>_<序號>.hdf5`。上述規則不重命名遷移保全的舊圖、workflow 或 Labber 檔，也不提供舊 run 目錄的相容邏輯，見 [ADR-0063](adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。
 
 ## 把 results 搬到 result
 
