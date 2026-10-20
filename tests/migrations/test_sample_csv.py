@@ -196,7 +196,10 @@ def test_unknown_csv_fields_keep_raw_values_in_plan_and_public_readback(
     assert list(rows["dev_value"]) == [0.002, 0.003]
     assert list(rows["dev_unit"]) == ["A", "A"]
     assert list(rows["t1_us"]) == [50, 60]
-    assert list(rows["tcomment"]) == ["known", None]
+    assert rows.iloc[0]["tcomment"] == "known"
+    last = entry.samples("Q1").latest("legacy-synthetic-2")
+    assert last is not None
+    assert last["tcomment"] is None
     assert source.read_bytes() == original
 
 

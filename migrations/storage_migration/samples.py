@@ -9,7 +9,7 @@ from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from migrations.sample_csv import plan_sample_csv
 
-from .models import KeyMappingItem, MigrationMapping
+from .models import KeyMappingItem, MigrationMapping, PreservedSampleField
 from .paths import contained_path
 from .state import MigrationSession, record_pending
 
@@ -25,7 +25,10 @@ def convert_samples(
     pending at the owner's source path/row/reason, with a complete byte-identical
     copy at entry/samples.csv; valid rows publish once to entry.samples(component), through a
     prepared JSONL temp and the same hash/recovery protocol as other artifacts.
-    Dry-run only plans, without binding an entry or creating any output.
+    Unsupported cells retain original strings, with collisions nested according
+    to the CSV plan. preserved_sample_fields reports source cells and actual
+    JSONL locations, distinct from converted files. Dry-run only plans, without
+    binding an entry or creating any output.
     A completed publication is hash-checked on resume, never appended again.
     Input, source/hash/destination conflicts and I/O failures propagate.
     """
@@ -76,11 +79,22 @@ def convert_samples(
         new_file=target,
         new_path=None,
         action="value",
-        reason=f"CSV plan: {len(plan.rows)} converted rows, {len(plan.pending)} pending rows; explicit independent sample declarations",
+        reason=f"CSV plan: {len(plan.rows)} converted rows, {len(plan.preserved_fields)} preserved fields, {len(plan.pending)} pending rows; explicit independent sample declarations",
     )
     session.report(
         replace(
             report,
+            preserved_sample_fields=(
+                *(
+                    item
+                    for item in report.preserved_sample_fields
+                    if item.field.source_path != source
+                ),
+                *(
+                    PreservedSampleField(field=field, output_path=target)
+                    for field in plan.preserved_fields
+                ),
+            ),
             key_mappings=(
                 *(
                     item

@@ -531,13 +531,23 @@ def test_unknown_csv_fields_survive_storage_publication_reports_and_completed_ed
         for path in root.rglob("*")
         if path.is_file()
     }
-    dry = migrate(replace(request, dry_run=True), analysis_mapping)
+    dry = migrate_storage(
+        replace(request, dry_run=True),
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
     assert not any(item.source == source for item in dry.pending)
     assert len(dry.preserved_sample_fields) == 6
     assert not (request.results_root / request.name).exists()
     assert dry.backup_path is not None and not dry.backup_path.exists()
     assert {path: path.read_bytes() for path in before} == before
-    report = migrate(request, analysis_mapping)
+    report = migrate_storage(
+        request,
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
     assert report.preserved_sample_fields == dry.preserved_sample_fields
     table = open_entry(request).samples("Qlegacy")
     assert list(table.read()["comment"]) == ["Manual Added", "Manual Added"]
@@ -571,10 +581,24 @@ def test_unknown_csv_fields_survive_storage_publication_reports_and_completed_ed
     ).read_bytes() == original
     assert not source.parent.exists()
     assert not (request.database_root / "chip/qubit").exists()
+    published = table.path.read_bytes()
+    resumed = migrate_storage(
+        replace(request, resume=True),
+        mapping=analysis_mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    assert resumed.preserved_sample_fields == report.preserved_sample_fields
+    assert table.path.read_bytes() == published
     table.append(run_id="legacy-samples-1", comment="user edit")
     edited = table.path.read_bytes()
-    resumed = migrate(replace(request, resume=True), analysis_mapping)
-    assert resumed.preserved_sample_fields == report.preserved_sample_fields
+    with pytest.raises(MigrationInputError, match="hash changed"):
+        migrate_storage(
+            replace(request, resume=True),
+            mapping=analysis_mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        )
     assert table.path.read_bytes() == edited
     persisted = json.loads(manifest_path(request).read_text())["report"]
     assert persisted["preserved_sample_fields"][0]["field"]["value"] == "Manual Added"

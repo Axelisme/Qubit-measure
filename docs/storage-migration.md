@@ -1,5 +1,7 @@
 # 舊資料遷移指南（手動）
 
+支援的檔案與格式就轉換，不支援的就原樣保留。欄位也一樣，未知欄位以原名原值留在新容器，報告區分已轉換與原樣保留。Pending 僅用於支援項目缺必要證據而無法轉換，原文仍須可見。非法輸入與安全衝突不能當成成功。
+
 本指南把一個舊 qubit 的資料，也就是 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/`，整理成一個新格式 entry。
 全程用 shell、編輯器與 repo 的公開 API 完成，不需要遷移腳本。
 
@@ -49,7 +51,7 @@
 - **來源**：本次的 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/`，包括隱藏檔、空目錄與未知檔。
 - **備份**：平行備份根裡與來源相同相對路徑的副本，hash 與來源逐檔相同。後續一律從備份讀，來源保持不動直到第 9 步。
 - **報告**：`manual-report.json`，每個來源檔與每個未轉欄位一列，記去向與狀態。它是交接清單，不是工具的 resume manifest。
-- **狀態**：`verified` 表示目的已讀回核對；`temporary-pending` 表示還能完成，只是尚未完成；`permanent-pending` 表示缺證據無法轉換，列出備份內的位置與缺的證據。
+- **狀態**：`verified` 表示轉換目的已讀回核對；`preserved` 表示原樣保留且已核對，不宣稱已轉格式或理解欄位語意。`temporary-pending` 表示仍待補齊必要證據；`permanent-pending` 表示缺證據無法轉換，列出備份內的位置與缺的證據。
 - **證據**：舊檔裡明寫的值。路徑日期、mtime、檔名、目前 setup 與目前裝置都不算證據。缺證據就列 pending，不推論、不補零。
 
 ## 1. 固定路徑與授權
@@ -204,7 +206,7 @@ PY
    | `pi_gain`、`pi_len`、`pi2_gain`、`pi2_len` | 有對應的轉換後 module 時寫進該 module；沒有時存 `Q.ext.<舊 key>` |
 
    Q、R、J 是已確認的實際 component 名。缺 R 或 J 的實體對應時，相關欄位列 pending，不新增虛構元件。
-   未列出的 key 原文保全並列 pending；歷史 key 全表在 [storage_mapping.py](../migrations/storage_mapping.py)。
+   未列出的 key 以原名原值保全在適用的 ext，報告標 `preserved`；缺必要轉換證據的支援項目才列 pending。歷史 key 全表在 [storage_mapping.py](../migrations/storage_mapping.py)。
 
 2. **單位照抄，不換算。** 頻率 MHz、時間 us、能量 GHz。磁通數字分兩組：`flux_unit` 管 global 組（`cur_A`、`flx_half`、`flx_period`、`flx_int`、`flux_bias`），單位寫到 `general.ext.flux_unit`；`jpa_flux_unit` 管 `best_jpa_flux`，單位寫到 `J.flux_unit`。`local_flux_unit` 只照抄成 `Q.flux_unit`，不當任何數字的單位。每組依序取單位：
    1. 同一份 meta 明寫的單位。
@@ -413,7 +415,13 @@ report = convert_sample_csv(
 print(report)
 ```
 
-  回傳的 pending 列逐列記入報告。使用者沒有指定值欄或單位時，整份 CSV 列 pending。用法細節見 [migrations README](../migrations/README.md#sample-csv--jsonl)。
+  已知量測欄按公開 converter 改名，座標與明示單位沿 sample owner 規則轉換。未知欄位原名原字串留在 JSONL 根層，包含空字串及前後空白，不猜型別。例如 `comment=Manual Added` 不改成 `Tcomment`，也不讓整列 pending。
+
+  原欄名碰到 `run_id`、`point`、`source`、`at` 或 canonical 量測名稱時，原值留在 `legacy_fields` mapping 的同名 key。來源本身的 `legacy_fields` 欄也存在 mapping 內。例如 `T1 (us)` 轉成數字 `t1_us`，原欄 `t1_us` 存到 `legacy_fields["t1_us"]`。
+
+  將回傳的 `preserved_fields` 逐筆記入手動報告，標為 `preserved`。每筆有來源檔、資料列號、原欄名與原字串、synthetic run_id 及 `destination_keys`。列號從 1 起算且不含 header，目的 keys 是 literal JSON key 序列，不用點號拆原欄名。直接 convert 的 `output_path` 是 JSONL 位置；storage migration 報告的 `preserved_sample_fields` 為每筆欄位另附 `output_path`，並存入 manifest，resume 不丟棄。
+
+  回傳的 pending 列也逐列記入報告。Legacy CSV 缺使用者宣告的值欄或單位時，相關列仍 pending，完整 CSV 另保留在新 entry 的 `samples.csv`；v2 CSV 自帶 `dev_value/dev_unit`，不需要 legacy 宣告。非法資料須列出錯誤與定位，不能記成已轉換。用法細節見 [migrations README](../migrations/README.md#sample-csv--jsonl)。
 
 完成條件：每對 hash 相同；每張 `exps` 圖都掛在正確的 point。helper 中斷可能留下半份目的檔，記入 `unfinished_publications`，從備份核對後再補。
 
