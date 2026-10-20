@@ -11,7 +11,7 @@ from zcu_tools.utils import atomic_replace
 
 
 class EntryAliases(BaseModel):
-    """An entry's authored insertion-ordered alias table, not resolved names.
+    """A setup or point authored insertion-ordered alias table, not resolved names.
 
     aliases maps string alias names to raw string bindings in authored order.
     An empty string is unbound; $ links keep their original text. An empty

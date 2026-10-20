@@ -455,8 +455,8 @@ class Form[C: ConfigBase]:
         """Build fresh creation input for this persistent module or waveform Spec.
 
         template names a catalog ID, with optional named placeholder bindings and
-        relative-path seed overrides. Explicit bindings override the fixed
-        defaults in env.placeholders; missing bindings raise ValueError.
+        relative-path seed overrides. Only template.bindings supplies placeholder
+        replacements; missing bindings raise ValueError.
         catalog maps IDs to
         TemplateDef values. env supplies captured parameters and library for
         Expr initial values and Slot resolution. Partial seeds overlay Spec

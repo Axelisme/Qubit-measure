@@ -12,14 +12,14 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 ### 保存目的與 owner
 
-- App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 提供單檔 I/O、格式錯誤的 default degradation 與 atomic replace。Measure framework 只在 lifecycle close 保存 Qt 視窗尺寸與左面板寬度，不保存或還原 domain session。SoC、device、entry／point、tabs／input 的檔案與重開政策由啟動腳本擁有，見 [[0064]]；entry aliases.yaml 仍由 entry 擁有。Autofluxdep GUI 另有 debounce 與 terminal 保存；shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
+- App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 提供單檔 I/O、格式錯誤的 default degradation 與 atomic replace。Measure framework 只在 lifecycle close 保存 Qt 視窗尺寸與左面板寬度，不保存或還原 domain session。SoC、device、entry／point、tabs／input 的檔案與重開政策由啟動腳本擁有，見 [[0064]]；setup／point 的 aliases.yaml 仍由 resources.entry 擁有。Autofluxdep GUI 另有 debounce 與 terminal 保存；shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
 - Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow run 保存跨步驟的提交與 audit。Engine 擁有 manifest、journal 與 best-effort iteration record.json；workflow 擁有 native 量測檔及圖形，並在 point record 記錄用途與檔名。Engine 每輪提供唯讀 absolute iteration_dir，不保存、追蹤或保證 workflow 檔案。單次量測 Completed 與保存分開，責任與失敗規則見 [[0062]]。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
 - 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameters` 的 2.0 header、metadata 讀寫與 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
 - 獨立參數能力由 `resources.parameters` 擁有。Caller 只傳既有文件路徑與自己的 Pydantic value model 給 `open_parameters`，不組裝 DocumentStore，不要求 entry、kind registry、general、roots 或 ledger。`components` 保存直接值，`metadata` 是 opaque YAML mapping 旁表。一般欄位回傳數字等原值，metadata 從獨立入口讀寫。DocumentStore 仍是唯一單檔交易 owner。Resources 不查 metadata 的來源，不解釋 stderr 或 comment，也不因改值自動產生或清除 metadata。Caller 在同筆 edit 中明確替換 metadata mapping，提交沿用既有 mapping-leaf 合併與衝突規則。FieldView 與完整 value-model staging 由 resources 共用，沒有第二套交易或 validator framework。依賴仍由 C8 分層、C9 無循環與 C10 有狀態能力模組獨立 contract 約束。
 - 使用者於 2026-10-13 裁決：「可以改metadata」。新參數容器寫 `format_version: "2.0"`，只讀 major 2，保留同 major 的 forward-minor 契約。入口直接拒絕舊 major 或任何含 `provenance` 旁表的文件，錯誤含路徑、讀到版本與期望版本 2.0。不雙讀、不附轉換工具，由使用者自行修改既有文件。這項參數格式變更不改 generic DocumentStore、ModuleLibrary 或其他成果的版本契約。
-- Entry 的 authored alias 表由 `resources.entry` 保存為 `aliases.yaml`，不是 point、setup、memento 或 ledger。ContextService 擁有有序表的語法、初始化與 Apply 時機，resources 擁有檔案表示及單檔原子替換。Notebook 不讀這份 GUI 表，MCP 的單次 aliases／target 覆寫不保存它。
+- Setup 與每個 point 各自的 authored alias 表由 `resources.entry` 保存為獨立的 `aliases.yaml`，不是 memento 或 ledger。ContextService 擁有有序表的語法與 Apply 時機，resources 擁有檔案表示、建立時複製及單檔原子替換。MCP 的單次 aliases／target 覆寫不保存它。
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；條目樣本使用 append-only JSONL，讀取取每個 run_id 最後一整行，CSV 只作匯出。舊 CSV reader 留在 root `migrations/` 供離線轉換，runtime 不作 fallback。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
 
@@ -86,13 +86,17 @@ GUI Native Load 由 LoadService 呼叫 datafile.load_run_data 讀成 StoredRun �
 
 Load Data 同時提供 File 選檔與 opened entry ledger 清單。清單按 run_id 合併 acquired／saved，只有成功 native 輸出能作為 data_path，取最近成功路徑。Recorded at 是首 acquired 或首 saved 的事件時間，不冒充量測開始時間。查詢不讀 data.h5、不 stat 或寫事件，損壞 ledger 明確失敗。
 
-### Entry alias 表
+### Setup 與 point alias 表
 
-`EntryAliases` 保留名稱到原字串的 mapping 順序、空列與 `$` softlinks，不保存解析後名稱。檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 是明確空表，只有缺檔才使用 caller preset；格式、結構或 alias 語法錯誤直接失敗，不回退 preset。
+Setup 的 alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<entry>/points/<p>/aliases.yaml`，與 `point.yaml`、`module_cfg.yaml` 並列。從 setup 新建 point 時有檔才複製，clone 則只複製來源 point 的檔。各表之後獨立修改，不繼承或覆寫 setup。既有 point 缺檔視為空表，不自動複製、不回退 setup。
 
-Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。EMPTY 只改 memory；普通 `set_alias_rows` 也只改 memory。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
+使用者於 2026-10-20 裁定：「採用乙，alias. yaml的獨立檔案，找不到就視內容為空，與其他兩個資料容器並列」。
 
-每次開 entry 載入自己的表。無檔則重設 caller preset，重新啟用該 entry 第一份非空 point 的 primary 唯一候選初始化。已保存的空表或空列不自填，切 point 不重讀檔或換表。Run 保留原 capture，後續改表或切 entry 不改歷史 Analyze／Writeback／Save 的來源。這個單檔替換不承諾跨檔交易、多 writer merge 或掉電恢復。
+`EntryAliases` 保留名稱到原字串的 mapping 順序、空列與 `$` softlinks，不保存解析後名稱。檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 與缺檔都讀成空表。格式、結構或 alias 語法錯誤直接失敗，不回退 preset。
+
+Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。未選 point 時 Apply 以 `FailedPreconditionError(no_context)` 拒絕，不寫 setup。普通 `set_alias_rows` 只改 memory，不要求 point。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
+
+切換 point 載入該 point 的表，Open／Reset 捕捉目前 point 的 alias。已保存的空表或空列不自填。Run 保留原 capture，後續改表或切 entry 不改歷史 Analyze／Writeback／Save 的來源。這個單檔替換不承諾跨檔交易、多 writer merge 或掉電恢復。
 
 ### 資料表示與完整性
 

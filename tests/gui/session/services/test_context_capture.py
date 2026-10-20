@@ -17,6 +17,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import RoleBinding, SessionEnv
 from zcu_tools.resources.entry import ResultEntry, RoleResolutionError, source_path
+from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -89,6 +90,9 @@ def test_capture_keeps_point_library_storage_and_rows_after_later_changes(
     control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.10))
     control.set_alias_rows(
         (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
+    )
+    session.entry.save_aliases(
+        EntryAliases(aliases={"driver": "Q2", "sense": "$driver.sense"}), point="second"
     )
     control.use_point(PointUseRequest("second"))
     source_path(session.entry.use_point("first")).unlink()
