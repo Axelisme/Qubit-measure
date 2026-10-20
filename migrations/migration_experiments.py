@@ -1,12 +1,10 @@
 """Fixed native declarations for offline migration, never a runtime registry."""
 
-from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from zcu_tools.datafile import CfgSnapshot, VariableSchema, validate_cfg_snapshot
+from zcu_tools.datafile import CfgSnapshot, validate_cfg_snapshot
 from zcu_tools.experiment import (
     AxesSpec,
     ExpCfgModel,
@@ -15,6 +13,7 @@ from zcu_tools.experiment import (
     native_schemas,
 )
 
+from migrations.experiment_declaration import MigrationExperiment
 from zcu_lab.v2.fastflux.distortion.acc_phase import (
     core as fastflux_distortion_acc_phase,
 )
@@ -112,31 +111,6 @@ from zcu_lab.v2.twotone.zigzag_sweep import core as twotone_zigzag_sweep
 
 ResultT = TypeVar("ResultT")
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
-
-
-@dataclass(frozen=True)
-class MigrationExperiment:
-    """Bind a concrete typed reader to its generic schema without erasing its cfg.
-
-    source_tag and cfg_type are the exact historical experiment/cfg identities;
-    neither determines the other. native_tag is the canonical spec tag written
-    into native RunMetadata; it may differ from source_tag only by an explicit
-    migration declaration. schemas is the generic
-    disk-unit variable declaration. validate_cfg checks a historical CfgSnapshot
-    for storage format, this pair's cfg_type, major version and concrete model.
-    It returns None without changing raw values and raises ValueError for
-    unconvertible cfg.
-    validate_native reads an exact native Path
-    with the corresponding typed load_run, returns None and propagates failures.
-    These bindings perform no acquisition, registration or live-context capture.
-    """
-
-    source_tag: str
-    native_tag: str
-    cfg_type: str
-    schemas: tuple[VariableSchema, ...]
-    validate_cfg: Callable[[CfgSnapshot], None]
-    validate_native: Callable[[Path], None]
 
 
 def _declaration(

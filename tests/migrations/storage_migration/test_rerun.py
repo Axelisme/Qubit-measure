@@ -17,7 +17,11 @@ from migrations.storage_migration import (
     MigrationRequest,
     migrate_storage,
 )
-from tests.migrations.storage_migration.fakes import noop_validation, write_meta, write_run
+from tests.migrations.storage_migration.fakes import (
+    noop_validation,
+    write_meta,
+    write_run,
+)
 
 pytestmark = pytest.mark.usefixtures("registry_guard")
 
@@ -157,18 +161,22 @@ def test_replayed_source_is_compared_and_never_cleaned_twice(
 
 @pytest.mark.parametrize("after_rename", [False, True])
 def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
-    request_data: MigrationRequest, mapping: MigrationMapping,
-    monkeypatch: pytest.MonkeyPatch, after_rename: bool
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
+    after_rename: bool,
 ) -> None:
     write_meta(request_data, "exps/bias", {"old_frequency": 4.0})
     target = request_data.results_root / request_data.name / "points/bias"
     rename = os.rename
+
     def interrupt(source: str | Path, destination: str | Path) -> None:
         if Path(destination) == target:
             if after_rename:
                 rename(source, destination)
             raise OSError("point rename interrupted")
         rename(source, destination)
+
     with monkeypatch.context() as patch:
         patch.setattr(os, "rename", interrupt)
         with pytest.raises(OSError, match="point rename interrupted"):
@@ -180,8 +188,11 @@ def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
     prepared = (target if after_rename else temporary) / "point.yaml"
     created_at = YAML(typ="safe").load(prepared.read_text())["general"]["created_at"]
     report = convert(request_data, mapping)
-    entry = ResultEntry.open(request_data.name, result_root=request_data.results_root,
-                             database_root=request_data.database_root)
+    entry = ResultEntry.open(
+        request_data.name,
+        result_root=request_data.results_root,
+        database_root=request_data.database_root,
+    )
     point = entry.use_point("bias")
     assert source_path(point) == target / "point.yaml"
     assert point.general.created_at == created_at
@@ -190,7 +201,9 @@ def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
     assert any(row.new_file == target / "point.yaml" for row in report.key_mappings)
 
 
-@pytest.mark.parametrize("kind", ["figure", "point-figure", "raw-result", "raw-database", "labber", "native"])
+@pytest.mark.parametrize(
+    "kind", ["figure", "point-figure", "raw-result", "raw-database", "labber", "native"]
+)
 def test_completed_binary_publications_are_skipped_or_located_without_writes(
     request_data: MigrationRequest, mapping: MigrationMapping, kind: str
 ) -> None:
@@ -204,7 +217,11 @@ def test_completed_binary_publications_are_skipped_or_located_without_writes(
         path.write_bytes(relative.encode())
     (database / "opaque.bin").write_bytes(b"raw database")
     first = convert(request, mapping)
-    native = next(row.destination for row in first.converted_files if row.destination.name == "data.h5")
+    native = next(
+        row.destination
+        for row in first.converted_files
+        if row.destination.name == "data.h5"
+    )
     paths = {
         "figure": first.destination.result_path / "figures/image/fit.png",
         "point-figure": first.destination.result_path / "points/bias/figures/fit.png",
@@ -214,40 +231,75 @@ def test_completed_binary_publications_are_skipped_or_located_without_writes(
         "native": native,
     }
     assert first.backup_path is not None
-    before = files_under(first.destination.result_path, first.destination.database_path, first.backup_path)
+    before = files_under(
+        first.destination.result_path,
+        first.destination.database_path,
+        first.backup_path,
+    )
     rerun = convert(replace(request, resume=True), mapping)
     assert set(paths.values()) <= {row.destination for row in rerun.skipped}
-    assert files_under(first.destination.result_path, first.destination.database_path, first.backup_path) == before
+    assert (
+        files_under(
+            first.destination.result_path,
+            first.destination.database_path,
+            first.backup_path,
+        )
+        == before
+    )
     paths[kind].write_bytes(b"different output")
-    edited = files_under(first.destination.result_path, first.destination.database_path, first.backup_path)
+    edited = files_under(
+        first.destination.result_path,
+        first.destination.database_path,
+        first.backup_path,
+    )
     with pytest.raises(MigrationInputError) as caught:
         convert(replace(request, resume=True), mapping)
-    assert any(row.destination == paths[kind] and row.comparison == "sha256" for row in caught.value.differences)
-    assert files_under(first.destination.result_path, first.destination.database_path, first.backup_path) == edited
+    assert any(
+        row.destination == paths[kind] and row.comparison == "sha256"
+        for row in caught.value.differences
+    )
+    assert (
+        files_under(
+            first.destination.result_path,
+            first.destination.database_path,
+            first.backup_path,
+        )
+        == edited
+    )
 
 
 @pytest.mark.parametrize("after_replace", [False, True])
 def test_prepared_document_recovers_fixed_owner_intent(
-    request_data: MigrationRequest, mapping: MigrationMapping,
-    monkeypatch: pytest.MonkeyPatch, after_replace: bool
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch,
+    after_replace: bool,
 ) -> None:
     target = request_data.results_root / request_data.name / "setup.yaml"
     original = os.replace
+
     def interrupt(source: str | Path, destination: str | Path) -> None:
         if Path(destination) == target:
             if after_replace:
                 original(source, destination)
             raise OSError("document publish interrupted")
         original(source, destination)
+
     with monkeypatch.context() as patch:
         patch.setattr(os, "replace", interrupt)
         with pytest.raises(OSError, match="document publish interrupted"):
             convert(request_data, mapping)
     state = json.loads((target.parent / "records/migration-state.json").read_text())
-    assert "documents" in state, "Prepared publication must persist typed owner intent before replacement"
+    assert "documents" in state, (
+        "Prepared publication must persist typed owner intent before replacement"
+    )
     expected = state["documents"][str(target)]["value"]["general"]["created_at"]
     report = convert(request_data, mapping)
-    entry = ResultEntry.open(request_data.name, result_root=request_data.results_root, database_root=request_data.database_root)
+    entry = ResultEntry.open(
+        request_data.name,
+        result_root=request_data.results_root,
+        database_root=request_data.database_root,
+    )
     assert entry.setup.general.created_at == expected
     assert entry.setup.C1.frequency == 1.0
     assert report.failures == ()

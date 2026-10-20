@@ -381,8 +381,22 @@ def verify_backup(backup: MigrationBackup, source: MigrationSource) -> BackupInv
         inventory_path = records / f"{label}.sha256"
         _reject_symlinks(inventory_path)
         _reject_symlinks(mirror)
-        if file_hash(inventory_path) != backup.inventory_hashes[label]:
-            raise MigrationInputError(f"{path}: backup inventory hash changed")
+        actual_hash = (
+            file_hash(inventory_path) if inventory_path.is_file() else "absent"
+        )
+        if actual_hash != backup.inventory_hashes[label]:
+            raise MigrationInputError(
+                f"{path}: backup inventory hash changed",
+                differences=(
+                    MigrationDifference(
+                        source=_source_roots(source)[label],
+                        destination=inventory_path,
+                        comparison="sha256",
+                        expected=backup.inventory_hashes[label],
+                        actual=actual_hash,
+                    ),
+                ),
+            )
         try:
             inventory = _INVENTORY.validate_json(
                 inventory_path.read_bytes(), strict=True
@@ -390,8 +404,34 @@ def verify_backup(backup: MigrationBackup, source: MigrationSource) -> BackupInv
         except ValidationError as exc:
             raise MigrationInputError(f"{path}: invalid backup inventory") from exc
         mirror_label = mirror.relative_to(path).as_posix()
-        if _inventory({mirror_label: mirror}) != inventory:
-            raise MigrationInputError(f"{path}: backup contents differ from inventory")
+        current = _inventory({mirror_label: mirror}, missing_ok=True)
+        if current != inventory:
+            differences = tuple(
+                MigrationDifference(
+                    source=_source_roots(source)[label]
+                    / name.removeprefix(mirror_label + "/"),
+                    destination=path / name,
+                    comparison="sha256",
+                    expected=inventory.hashes.get(name, "absent"),
+                    actual=current.hashes.get(name, "absent"),
+                )
+                for name in sorted(set(inventory.hashes) | set(current.hashes))
+                if inventory.hashes.get(name) != current.hashes.get(name)
+            )
+            if not differences:
+                differences = (
+                    MigrationDifference(
+                        source=_source_roots(source)[label],
+                        destination=mirror,
+                        comparison="backup-inventory",
+                        expected=inventory.summary,
+                        actual=current.summary,
+                    ),
+                )
+            raise MigrationInputError(
+                f"{path}: backup contents differ from inventory",
+                differences=differences,
+            )
         hashes.update(
             {
                 f"{label}{name.removeprefix(mirror_label)}": digest
@@ -437,11 +477,35 @@ def validate_backup_sources(session: MigrationSession) -> BackupInventory:
     )
     for relative, digest in current.hashes.items():
         if inventory.hashes.get(relative) != digest:
+            label, name = relative.split("/", 1)
+            original = _source_roots(source)[label] / name
             raise MigrationInputError(
-                f"{relative}: source differs from verified backup"
+                f"{relative}: source differs from verified backup",
+                differences=(
+                    MigrationDifference(
+                        source=original,
+                        destination=backup_source_path(backup.path, source, original),
+                        comparison="sha256",
+                        expected=inventory.hashes.get(relative, "absent"),
+                        actual=digest,
+                    ),
+                ),
             )
     if not set(current.directories).issubset(inventory.directories):
-        raise MigrationInputError("source directories differ from verified backup")
+        raise MigrationInputError(
+            "source directories differ from verified backup",
+            differences=(
+                MigrationDifference(
+                    source=source.result_path,
+                    destination=backup.path,
+                    comparison="source-inventory",
+                    expected=inventory.summary,
+                    actual=current.summary,
+                ),
+            ),
+        )
+    if session.manifest.cleanup_phase == "complete":
+        _validate_replayed_sources(current, inventory, source, backup)
     if session.manifest.cleanup_phase == "pending":
         removable = {
             f"Database/{state.source.relative_to(source.database_path).as_posix()}"
@@ -454,7 +518,86 @@ def validate_backup_sources(session: MigrationSession) -> BackupInventory:
             or current.directories != inventory.directories
         ):
             raise MigrationInputError("source disappeared since verified backup")
+    skipped = list(session.manifest.report.skipped)
+    for original, digest in backup.source_hashes.items():
+        source_path = Path(original)
+        target = backup_source_path(backup.path, source, source_path)
+        skipped = [item for item in skipped if item.destination != target]
+        skipped.append(
+            ExistingItem(
+                source=source_path,
+                destination=target,
+                comparison="sha256",
+                summary=digest,
+            )
+        )
+    for label, digest in backup.inventory_hashes.items():
+        target = backup_records_path(backup.path, source) / f"{label}.sha256"
+        skipped = [item for item in skipped if item.destination != target]
+        skipped.append(
+            ExistingItem(
+                source=_source_roots(source)[label],
+                destination=target,
+                comparison="backup-inventory",
+                summary=digest,
+            )
+        )
+    session.manifest = replace(
+        session.manifest,
+        report=replace(session.manifest.report, skipped=tuple(skipped)),
+    )
     return inventory
+
+
+def _validate_replayed_sources(
+    current: BackupInventory,
+    inventory: BackupInventory,
+    source: MigrationSource,
+    backup: MigrationBackup,
+) -> None:
+    for label, root in _source_roots(source).items():
+        if not root.exists():
+            continue
+        expected_hashes = {
+            key: value
+            for key, value in inventory.hashes.items()
+            if key.startswith(label + "/")
+        }
+        actual_hashes = {
+            key: value
+            for key, value in current.hashes.items()
+            if key.startswith(label + "/")
+        }
+        expected_directories = tuple(
+            key
+            for key in inventory.directories
+            if key == label or key.startswith(label + "/")
+        )
+        actual_directories = tuple(
+            key
+            for key in current.directories
+            if key == label or key.startswith(label + "/")
+        )
+        if (
+            actual_hashes != expected_hashes
+            or actual_directories != expected_directories
+        ):
+            raise MigrationInputError(
+                "replayed source differs from verified backup",
+                differences=(
+                    MigrationDifference(
+                        source=root,
+                        destination=backup_source_path(backup.path, source, root),
+                        comparison="source-inventory",
+                        expected=BackupInventory(
+                            hashes=expected_hashes, directories=expected_directories
+                        ).summary,
+                        actual=BackupInventory(
+                            hashes=actual_hashes, directories=actual_directories
+                        ).summary,
+                    ),
+                ),
+            )
 
 
 def _ready(session: MigrationSession) -> bool:
@@ -514,8 +657,6 @@ def finish_cleanup(session: MigrationSession) -> None:
         raise MigrationInputError("manifest: verified backup is required")
     source = session.manifest.report.source
     if session.manifest.cleanup_phase == "complete":
-        if any(root.exists() for root in _source_roots(source).values()):
-            raise MigrationInputError("source tree reappeared after completed cleanup")
         return
     session.manifest = replace(session.manifest, cleanup_phase="cleaning")
     session.checkpoint()

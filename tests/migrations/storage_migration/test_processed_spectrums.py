@@ -114,10 +114,14 @@ def test_completed_processed_outputs_are_verified_skipped_and_never_overwritten(
     first = _convert(request_data, mapping)
     root = first.destination.result_path / "data/fluxdep"
     targets = {root / "spectrums.hdf5", root / "spectrums.legacy.hdf5"}
-    before = {target: (target.read_bytes(), target.stat().st_mtime_ns) for target in targets}
+    before = {
+        target: (target.read_bytes(), target.stat().st_mtime_ns) for target in targets
+    }
     report = _convert(replace(request_data, resume=True), mapping)
     assert targets <= {row.destination for row in report.skipped}
-    assert {target: (target.read_bytes(), target.stat().st_mtime_ns) for target in targets} == before
+    assert {
+        target: (target.read_bytes(), target.stat().st_mtime_ns) for target in targets
+    } == before
     target = root / relative
     target.write_bytes(b"changed binary")
     edited = target.read_bytes()
@@ -125,7 +129,10 @@ def test_completed_processed_outputs_are_verified_skipped_and_never_overwritten(
     manifest_before = manifest.read_bytes()
     with pytest.raises(MigrationInputError) as caught:
         _convert(replace(request_data, resume=True), mapping)
-    assert any(row.destination == target and row.comparison == "sha256" for row in caught.value.differences)
+    assert any(
+        row.destination == target and row.comparison == "sha256"
+        for row in caught.value.differences
+    )
     assert target.read_bytes() == edited
     assert manifest.read_bytes() == manifest_before
 

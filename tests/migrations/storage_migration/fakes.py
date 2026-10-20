@@ -30,19 +30,36 @@ from migrations.storage_migration import (
 )
 
 
-def assert_difference(action: Callable[[], object], request: MigrationRequest, destinations: Sequence[Path]) -> None:
+def assert_difference(
+    action: Callable[[], object],
+    request: MigrationRequest,
+    destinations: Sequence[Path],
+) -> None:
     """Require a located public conflict and no changes to outputs or reports."""
-    roots = (request.results_root / request.name, request.database_root / request.name,
-             request.result_root.parent.parent / "repo-backup")
+    roots = (
+        request.results_root / request.name,
+        request.database_root / request.name,
+        request.result_root.parent.parent / "repo-backup",
+    )
+
     def snapshot_files() -> dict[Path, tuple[bytes, int]]:
-        return {path: (path.read_bytes(), path.stat().st_mtime_ns)
-                for root in roots for path in root.rglob("*") if path.is_file()}
+        return {
+            path: (path.read_bytes(), path.stat().st_mtime_ns)
+            for root in roots
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
     before = snapshot_files()
     with pytest.raises(MigrationInputError) as caught:
         action()
-    assert any(row.destination in destinations and row.expected != row.actual
-               for row in caught.value.differences), "Conflict must carry a located typed difference"
-    assert snapshot_files() == before, "Diagnostics must not modify outputs, manifest, or reports"
+    assert any(
+        row.destination in destinations and row.expected != row.actual
+        for row in caught.value.differences
+    ), "Conflict must carry a located typed difference"
+    assert snapshot_files() == before, (
+        "Diagnostics must not modify outputs, manifest, or reports"
+    )
 
 
 class SyntheticChannel(BaseModel):

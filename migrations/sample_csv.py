@@ -1,6 +1,7 @@
 """Explicit offline CSV conversion into entry-bound JSONL sample history."""
 
 import csv
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 from pydantic import JsonValue
+from zcu_tools.datafile import JsonObject, json_values_equal
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.sample_table import (
     SAMPLE_COORDINATE_COLUMNS,
@@ -15,6 +17,8 @@ from zcu_tools.resources.sample_table import (
     migrate_sample_table_v2,
     validate_sample_table_v2,
 )
+
+from migrations.comparison import ExistingItem, MigrationDifference, MigrationInputError
 
 # Evidence: notebook_md/single_qubit.md's sample_table.add_sample producer.
 # Units are already microseconds / MHz; only names change here.
@@ -73,11 +77,12 @@ class PreservedCsvField:
 class MigrationReport:
     """Outcome of a completed offline conversion.
 
-    converted_rows counts appended rows, including repeated synthetic keys.
+    converted_rows counts newly appended rows; identical synthetic keys skip.
     pending_rows lists omitted data rows in input order, with their reasons.
     output_path is the entry-bound samples/<component>.jsonl destination; it
     need not exist when nothing was converted. preserved_fields locates raw
     unsupported fields in appended rows, distinct from converted measurements.
+    skipped lists verified identical synthetic keys without appending history.
     Source files are never changed.
     """
 
@@ -85,6 +90,7 @@ class MigrationReport:
     pending_rows: tuple[PendingRow, ...]
     output_path: Path
     preserved_fields: tuple[PreservedCsvField, ...] = ()
+    skipped: tuple[ExistingItem, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -316,7 +322,10 @@ def convert_sample_csv(
     CSV headers must be nonempty and unique; malformed CSV/I/O errors propagate.
     Successful rows append in input order. I/O failures may leave earlier rows
     appended; no batch transaction, retry, or concurrent-writer guarantee.
-    Repeating a conversion appends history with the same synthetic keys.
+    Repeating equal synthetic keys skips without appending. Different content
+    for a present key raises MigrationInputError with typed differences before
+    any row is appended. The existing generated at is retained for comparison;
+    this is not a general history merge or a change to table owner semantics.
     """
     paths = [Path(source) for source in sources]
     table = entry.samples(component)
@@ -327,7 +336,52 @@ def convert_sample_csv(
     plan = plan_sample_csv(
         paths, dev_value_column=dev_value_column, source_unit=source_unit
     )
+    skipped: list[ExistingItem] = []
+    differences: list[MigrationDifference] = []
+    accepted: list[SampleCsvRow] = []
     for sample in plan.rows:
+        existing = table.latest(sample.run_id)
+        if existing is None:
+            accepted.append(sample)
+            continue
+        source = next(
+            path
+            for path in paths
+            if sample.run_id.rsplit("-", 1)[0] == f"legacy-{path.stem}"
+        )
+        expected: JsonObject = {
+            "run_id": sample.run_id,
+            "point": point,
+            "source": "manual",
+            "at": existing["at"],
+            "dev_value": sample.dev_value,
+            "dev_unit": sample.dev_unit,
+            **sample.fields,
+        }
+        if json_values_equal(existing, expected):
+            skipped.append(
+                ExistingItem(
+                    source=source,
+                    destination=output,
+                    comparison="sample-row",
+                    summary=sample.run_id,
+                )
+            )
+        else:
+            differences.append(
+                MigrationDifference(
+                    source=source,
+                    destination=output,
+                    comparison="sample-row",
+                    expected=json.dumps(expected, sort_keys=True),
+                    actual=json.dumps(existing, sort_keys=True),
+                )
+            )
+    if differences:
+        raise MigrationInputError(
+            "synthetic sample differs", differences=tuple(differences)
+        )
+    for sample in accepted:
         table.append(
             run_id=sample.run_id,
             point=point,
@@ -337,4 +391,6 @@ def convert_sample_csv(
             dev_unit=sample.dev_unit,
             **sample.fields,
         )
-    return MigrationReport(len(plan.rows), plan.pending, output, plan.preserved_fields)
+    return MigrationReport(
+        len(accepted), plan.pending, output, plan.preserved_fields, tuple(skipped)
+    )

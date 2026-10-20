@@ -207,12 +207,16 @@ def test_data_resume_reports_valid_user_edit_without_overwriting(
         database_root=request_data.database_root,
     )
     entry.use_point("context").C1.frequency = 19.0
-    assert_difference(lambda: migrate_storage(
-        replace(request_data, part="data", resume=True),
-        mapping=mapping,
-        validate_cfg=validate_cfg,
-        validate_native=noop_validation,
-    ), request_data, [entry.result_path / "points/context/point.yaml"])
+    assert_difference(
+        lambda: migrate_storage(
+            replace(request_data, part="data", resume=True),
+            mapping=mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        ),
+        request_data,
+        [entry.result_path / "points/context/point.yaml"],
+    )
     assert entry.use_point("context").C1.frequency == 19.0
 
 

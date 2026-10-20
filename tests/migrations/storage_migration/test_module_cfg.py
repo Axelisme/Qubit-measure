@@ -348,8 +348,11 @@ def test_module_unknown_content_is_visible_without_duplicate_converted_leaves(
     assert report.failures == ()
     with view.edit() as draft:
         draft.set("general.ext.legacy_module_cfg", {"user": "edited"})
-    assert_difference(lambda: _convert(replace(request, resume=True), library_mapping), request,
-                      [entry.result_path / ("points/context/point.yaml" if point else "setup.yaml")])
+    assert_difference(
+        lambda: _convert(replace(request, resume=True), library_mapping),
+        request,
+        [entry.result_path / ("points/context/point.yaml" if point else "setup.yaml")],
+    )
     edited = _entry(request)
     edited_view = edited.setup if point is None else edited.use_point(point)
     assert document_value(snapshot(edited_view), "general.ext.legacy_module_cfg") == {
@@ -722,8 +725,11 @@ def test_published_slots_preserve_point_inheritance_overrides_and_completed_edit
         and item.new_file == entry.result_path / "points/override/point.yaml"
         for item in report.key_mappings
     )
-    assert_difference(lambda: _convert(replace(request, resume=True), slot_mapping), request,
-                      [entry.result_path / "setup.yaml"])
+    assert_difference(
+        lambda: _convert(replace(request, resume=True), slot_mapping),
+        request,
+        [entry.result_path / "setup.yaml"],
+    )
     entry = _entry(request)
     for label in (None, "inherited", "override"):
         view = entry.setup if label is None else entry.use_point(label)
@@ -1024,8 +1030,11 @@ def test_resume_rejects_changed_library_hash_without_overwriting(
         raw["future"] = {"authored": "different"}
         path.write_text(json.dumps(raw))
     before = (source.read_bytes(), destination.read_bytes())
-    assert_difference(lambda: _convert(replace(request, resume=True), library_mapping), request,
-                      [backup if changed == "source" else destination])
+    assert_difference(
+        lambda: _convert(replace(request, resume=True), library_mapping),
+        request,
+        [backup if changed == "source" else destination],
+    )
     assert (source.read_bytes(), destination.read_bytes()) == before
     assert backup.read_bytes() == backup_before
 
@@ -1041,7 +1050,10 @@ def test_library_formatting_rerun_is_semantically_equal_and_not_rewritten(
     destination.write_text(json.dumps(raw, sort_keys=True))
     before = destination.read_bytes(), destination.stat().st_mtime_ns
     resumed = _convert(replace(request, resume=True), library_mapping)
-    assert any(row.destination == destination and row.comparison == "library" for row in resumed.skipped)
+    assert any(
+        row.destination == destination and row.comparison == "library"
+        for row in resumed.skipped
+    )
     assert (destination.read_bytes(), destination.stat().st_mtime_ns) == before
 
 

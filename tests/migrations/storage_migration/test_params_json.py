@@ -535,7 +535,11 @@ def test_unknown_meta_has_literal_preservation_rows_and_survives_resume(
     with view.edit() as draft:
         draft.set("general.description", "edited after migration")
     edited = target.read_bytes()
-    assert_difference(lambda: migrate(replace(request_data, resume=True), metadata_mapping), request_data, [target])
+    assert_difference(
+        lambda: migrate(replace(request_data, resume=True), metadata_mapping),
+        request_data,
+        [target],
+    )
     assert target.read_bytes() == edited
 
 
@@ -1608,7 +1612,11 @@ def test_analysis_file_resume_validates_unfinished_and_preserves_completed_edits
         raw["source"]["run_id"] = "user-edited"
         file.write_text(json.dumps(raw), encoding="utf-8")
         edited = file.read_bytes()
-        assert_difference(lambda: migrate(replace(request_data, resume=True), analysis_mapping), request_data, [file])
+        assert_difference(
+            lambda: migrate(replace(request_data, resume=True), analysis_mapping),
+            request_data,
+            [file],
+        )
         assert file.read_bytes() == edited
 
 
@@ -1776,7 +1784,11 @@ def test_raw_params_preservation_is_typed_located_and_durable(
         entry.result_path / "points/bias/point.yaml",
     ]
     before = [path.read_bytes() for path in paths]
-    assert_difference(lambda: migrate(replace(request_data, resume=True), analysis_mapping), request_data, paths)
+    assert_difference(
+        lambda: migrate(replace(request_data, resume=True), analysis_mapping),
+        request_data,
+        paths,
+    )
     assert [path.read_bytes() for path in paths] == before
 
 
@@ -1963,7 +1975,11 @@ def test_completed_resume_reports_user_edits_without_overwriting(
         entry.result_path / "points/bias/point.yaml",
     ]
     before = [path.read_bytes() for path in paths]
-    assert_difference(lambda: migrate(replace(request_data, resume=True), analysis_mapping), request_data, paths)
+    assert_difference(
+        lambda: migrate(replace(request_data, resume=True), analysis_mapping),
+        request_data,
+        paths,
+    )
     assert [path.read_bytes() for path in paths] == before
 
 
@@ -2296,7 +2312,11 @@ def test_unfinished_resume_accepts_same_predictor_without_rewriting(
     document["flux_unit"] = "V"
     interrupted_predictor.write_text(json.dumps(document), encoding="utf-8")
     edited = interrupted_predictor.read_bytes()
-    assert_difference(lambda: migrate(replace(request_data, resume=True), analysis_mapping), request_data, [interrupted_predictor])
+    assert_difference(
+        lambda: migrate(replace(request_data, resume=True), analysis_mapping),
+        request_data,
+        [interrupted_predictor],
+    )
     assert interrupted_predictor.read_bytes() == edited
 
 
@@ -2336,5 +2356,9 @@ def test_dry_run_predictor_plan_matches_apply_and_completed_resume_reports_edits
     edited["flux_unit"] = "V"
     predictor_path.write_text(json.dumps(edited), encoding="utf-8")
     before = predictor_path.read_bytes()
-    assert_difference(lambda: migrate(replace(request_data, resume=True), analysis_mapping), request_data, [predictor_path])
+    assert_difference(
+        lambda: migrate(replace(request_data, resume=True), analysis_mapping),
+        request_data,
+        [predictor_path],
+    )
     assert predictor_path.read_bytes() == before

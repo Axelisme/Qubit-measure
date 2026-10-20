@@ -19,6 +19,7 @@ from .backup import (
     validate_backup_report_path,
     validate_backup_sources,
 )
+from .documents import capture_document, recover_documents, validate_document_baselines
 from .errors import MigrationInputError
 from .evidence import validate_run_evidence
 from .initialization import initialize_entry
@@ -34,6 +35,7 @@ from .models import (
     ModuleRule,
 )
 from .paths import contained_path, validate_segment
+from .points import recover_points, validate_points
 from .preservation import preflight_preservation
 from .recovery import validate_owned_state
 from .state import MigrationSession, read_manifest, report_json, write_json
@@ -177,9 +179,11 @@ def _resume_session(
             f"{path}: verified backup identity changed or missing"
         )
     validate_backup_report_path(backup.path, manifest.report_path)
-    validate_backup_sources(MigrationSession(path, manifest, dry_run=True))
     _validate_report_location(manifest.report_path, source, destination)
     manifest = _recover_first_report(manifest)
+    verification = MigrationSession(path, manifest, dry_run=True)
+    validate_backup_sources(verification)
+    manifest = verification.manifest
     expected = _identity(request, manifest.identity.entry_id)
     if (
         manifest.identity != expected
@@ -204,6 +208,10 @@ def _resume_session(
         preflight_preservation(
             source, destination, manifest.report.declarations, manifest=manifest
         )
+    validate_points(manifest)
+    validation = MigrationSession(path, manifest, dry_run=True)
+    validate_document_baselines(validation)
+    manifest = validation.manifest
     entry = ResultEntry.open(
         request.name,
         result_root=expected.results_root,
@@ -211,8 +219,12 @@ def _resume_session(
     )
     if UUID(entry.entry_id) != manifest.identity.entry_id:
         raise MigrationInputError(f"{path}: entry_id changed")
+    ignored = {
+        point.temporary_label for point in manifest.points if not point.published
+    }
     for label in entry.list_points():
-        entry.use_point(label)
+        if label not in ignored:
+            entry.use_point(label)
     union = request.part if manifest.report.part == request.part else "all"
     return replace(manifest, report=replace(manifest.report, part=union)), entry
 
@@ -393,6 +405,9 @@ def prepare_session(
     Manifest resume verifies the backup independently of removed old sources.
     Bootstrap does not delete sources; I/O/schema failures propagate."""
     _declarations(request)
+    automatic = request.results_root / request.name / "records/migration-state.json"
+    if automatic.is_file():
+        request = replace(request, resume=True)
     source, destination = _locations(request)
     path = destination.result_path / "records" / "migration-state.json"
     if request.resume and path.is_file():
@@ -406,9 +421,29 @@ def prepare_session(
             raise MigrationInputError(f"{path}: resume requires this tool's manifest")
         manifest, entry = _new_session(request, mapping, source, destination)
     session = MigrationSession(path, manifest, dry_run=request.dry_run)
+    if not path.is_file() and entry is not None and not request.dry_run:
+        capture_document(
+            session, source.result_path, destination.result_path / "setup.yaml", "setup"
+        )
+        capture_document(
+            session,
+            source.result_path,
+            destination.result_path / "module_cfg.yaml",
+            "library",
+        )
     validate_owned_state(session, entry=entry)
     if request.resume:
         validate_run_evidence(request, session)
+    if session.manifest.cleanup_phase == "complete":
+        return session, entry
+    refresh_setup = any(
+        item.kind == "setup" and item.phase == "prepared"
+        for item in (session.manifest.documents or {}).values()
+    )
+    recover_documents(session)
+    recover_points(session)
+    if refresh_setup and entry is not None and not session.dry_run:
+        entry.setup.refresh()
     session.checkpoint()
     publish_report(session)
     return session, entry

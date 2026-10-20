@@ -91,11 +91,20 @@ def test_csv_cli_rerun_skips_and_conflict_exits_two(
     tmp_path: Path, entry: ResultEntry, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import json
+
     source = tmp_path / "cli.csv"
     source.write_text("dev_value,dev_unit,T1 (us)\n0.1,V,50\n")
-    arguments = [str(source), "--result-root", str(entry.result_path.parent),
-                 "--database-root", str(entry.database_path.parent),
-                 "--entry", "synthetic", "--component", "Q1"]
+    arguments = [
+        str(source),
+        "--result-root",
+        str(entry.result_path.parent),
+        "--database-root",
+        str(entry.database_path.parent),
+        "--entry",
+        "synthetic",
+        "--component",
+        "Q1",
+    ]
     assert main(arguments) == 0
     capsys.readouterr()
     output = entry.samples("Q1").path

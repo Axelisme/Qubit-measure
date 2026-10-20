@@ -1,5 +1,6 @@
 """Typed setup/point legacy library conversion in the parameter migration step."""
 
+import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
@@ -19,10 +20,12 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
+from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.views import EditView
 
 from ._legacy_modules import legacy_module_candidate
+from .documents import edit_parameter, publish_document
 from .errors import MigrationInputError
 from .models import (
     FileMigrationItem,
@@ -292,6 +295,7 @@ def _preserve_in_context(view: EditView, retained: JsonObject) -> None:
 
 
 def _set_slots(
+    session: MigrationSession,
     entry: ResultEntry,
     label: str | None,
     published: LibrarySnapshot,
@@ -300,7 +304,9 @@ def _set_slots(
     modules = published.module_keys()
     slots: set[str] = set()
     view = entry.setup if label is None else entry.use_point(label)
-    with view.edit() as draft:
+    with edit_parameter(
+        session, session.manifest.report.source.result_path, view
+    ) as draft:
         for rule in mapping.module_rules:
             if (
                 rule.kind == "module"
@@ -386,14 +392,28 @@ def convert_module_cfg(
         candidate, retained = _prepare_library(
             session, source, values, mapping, library.source_path
         )
-        with library.edit() as draft:
-            for path in candidate.module_keys():
-                draft.set_module(path, candidate.module_spec(path))
-            for path in candidate.waveform_keys():
-                draft.set_waveform(path, candidate.waveform_spec(path))
-        _set_slots(entry, label, candidate, mapping)
+        owned = (session.manifest.documents or {}).get(str(library.source_path))
+        if owned is None or owned.source != source:
+
+            def build(path: Path) -> None:
+                shutil.copyfile(library.source_path, path)
+                with DocumentStore(
+                    path,
+                    ModuleLibraryDocument,
+                    format=MODULE_LIBRARY_FORMAT,
+                    supported_version=MODULE_LIBRARY_VERSION,
+                ).edit() as document:
+                    planned = candidate.document()
+                    document.components = planned.components
+                    document.provenance = planned.provenance
+
+            publish_document(session, source, library.source_path, "library", build)
+            library.refresh()
+        else:
+            candidate = library.snapshot()
+        _set_slots(session, entry, label, candidate, mapping)
         view = entry.setup if label is None else entry.use_point(label)
-        with view.edit() as draft:
+        with edit_parameter(session, source, view) as draft:
             _preserve_in_context(draft, retained)
         _record_preserved(session, source, values, retained, context_target)
         destination_hash = file_hash(library.source_path)

@@ -1,9 +1,9 @@
-# 舊資料遷移指南（手動）
+# 舊資料遷移指南
 
 支援的檔案與格式就轉換，不支援的就原樣保留。欄位也一樣，未知欄位以原名原值留在新容器，報告區分已轉換與原樣保留。Pending 僅用於支援項目缺必要證據而無法轉換，原文仍須可見。非法輸入與安全衝突不能當成成功。
 
 本指南把一個舊 qubit 的資料，也就是 `result/<chip>/<qub>/` 與 `Database/<chip>/<qub>/`，整理成一個新格式 entry。
-全程用 shell、編輯器與 repo 的公開 API 完成，不需要遷移腳本。
+正常遷移使用下列工具指令，中斷或完成後都可直接重跑。第 1 到第 9 步另提供不用遷移腳本的手動路線。
 
 ## 遷移完成後的樣子
 
@@ -42,9 +42,45 @@
 
 | 現況 | 走法 |
 | --- | --- |
-| 舊資料還沒動過 | 依序做第 1 到第 9 步。 |
+| 舊資料還沒動過 | 先用[工具路線](#工具路線與直接重跑)做 dry-run；要手動操作時依序做第 1 到第 9 步。 |
+| 本工具已開始或完成同一份遷移 | 以原來源、entry 名稱與宣告直接重跑，不需先手動補檔或加 `--resume`。 |
+| 工具回報差異 | 保存兩邊內容，按來源／目的與比較摘要逐項人工確認，不刪檔強迫重跑。 |
 | 已有部分新 entry（應急工具或人工只做一半） | 做第 1 到第 3 步，再到[部分接手](#部分接手)。 |
 | 他機把新 entry 寫在 `results/<name>/`（多一個 s） | 只需[搬到 result](#把-results-搬到-result)，不重做遷移。 |
+
+## 工具路線與直接重跑
+
+停止來源目錄的其他 writer。確認本次讀寫範圍，以及完成後刪除兩棵舊來源的授權。未取得刪除授權時，只執行 dry-run。以下路徑、kind、欄名與單位都須由操作者確認，不從檔名推論。
+
+```bash
+uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage \
+  --repo-root <checkout> --backup-parent <external-parent> \
+  --result-root <checkout>/result --database-root <checkout>/Database \
+  --entry-result-root <checkout>/result \
+  --source-chip <chip> --source-qubit <qubit> --name <new-entry> \
+  --part all --qubit-kind qubit/fluxonium \
+  --assume-flux-unit mA --assume-jpa-flux-unit V \
+  --sample-value-column "calibrated mA" --sample-source-unit mA \
+  --dry-run
+```
+
+核對 stdout 的 JSON report、pending 位置、備份與目的路徑。Dry-run 不建備份或目的、不寫報告，也不刪來源。確認後移除 `--dry-run`，其餘參數保持相同。Native 需要的歷史 evidence 另用 `--run-evidence <file>` 提供，缺必要證據的 Labber 保留原檔並列 pending，不猜 cfg 或量測時間。
+
+正式執行先完整備份並逐檔驗 SHA256，再發布新格式。兩部分與所有 publication 完成後，工具重驗備份與來源，才刪本次舊來源。自動報告在 `<checkout-name>-backup/migration-records/<chip>/<qubit>/migration-report-<UTC-date>.json`。完成後另存到新 entry 的 `records/`，同處的 `migration-state.json` 保存固定身分與比較依據。
+
+中斷時保留 entry、工具暫存檔、manifest 與備份，直接重跑原指令。工具只補缺項，沿用 entry UUID、建立時間、run_id 與報告日期。`--resume` 仍可明填；parameters 與 data 分開執行時，第二次改 `--part` 即可。單位、CSV 欄名、kind、mapping 版本與已固定的歷史 evidence 不得改成另一份宣告。
+
+完成後也用原指令重跑。工具先核對完整備份，再比較 setup、points、libraries、分析 JSON、JSONL、processed 正式與 companion，以及 figures、raw、Labber 和 native。YAML／JSON 用 owner typed 語意並保留 unknown raw，排版不算差異。Binary 與 JSONL 使用已驗 SHA256。同內容不重寫、不追加、不重新分配 ID，stdout report 的 `skipped` 逐項列出 `source`、`destination`、`comparison` 與 `summary`，成功 exit 0。
+
+不同內容，包括合法的人工改值，會在 stderr 列出來源、目的、比較種類、預期與實際摘要，exit 2。工具不覆寫目的、manifest 或原報告。需要保留診斷時，由操作者把 stdout／stderr 另存到獨立檔案，不指定受檢檔案作為輸出。執行或 I/O 故障 exit 1，保留現有狀態後重跑。
+
+舊本工具 manifest 缺文件 baseline 時會報「缺比較依據」並 exit 2，需人工比對或在新備份上重新遷移。
+
+來源清理後即使來源不在，工具仍從已驗 backup／manifest 重驗目的。把相同 baseline 的來源放回時，工具先驗全部目的，再成功略過並保留放回的來源，不刪第二次。來源不同則報差異。這些重驗也可帶 `--dry-run`，仍然零寫入。
+
+獨立 `python -m migrations` 的 CSV converter 同樣可重跑。同 synthetic run_id 同內容略過且不新增歷史列，不同內容 exit 2。其他 history、單位、原文保留與 pending 規則不變。
+
+無本工具 ownership／manifest 的 entry 不會被自動認領。應急工具或人工留下的半份資料，仍走[部分接手](#部分接手)。不要把手動備份命令當成工具 resume；兩者的 hash 清單格式不同。
 
 ## 名詞
 
@@ -75,13 +111,15 @@ realpath -m -- "$OLD_R" "$OLD_D" "$NEW_R" "$NEW_D" "$BR" "$BD" "$REC"
 逐項確認，全部成立才往下：
 
 - `CHIP`、`QUB`、`NAME` 各是單一路徑段，不含 `/`、`.`、`..`。
-- `BACKUP_ROOT` 在 repo 外。`BR`、`BD`、`REC` 都還不存在；已存在表示這個 qubit 遷移過，改走[部分接手](#部分接手)。
-- 全新遷移時 `NEW_R`、`NEW_D` 都不存在；已存在就改走部分接手，不刪掉重來。
+- `BACKUP_ROOT` 在 repo 外。以下手動全新備份要求 `BR`、`BD`、`REC` 不存在。本工具已擁有的備份直接走工具重跑；其他既有備份走[部分接手](#部分接手)。
+- 手動全新遷移要求 `NEW_R`、`NEW_D` 不存在。本工具擁有的 entry 可直接重跑，其他既有 entry 走部分接手，不刪掉重來。
 - 新 entry 不包住、也不透過 symlink 指進任一來源。
 - `find "$OLD_R" "$OLD_D" -type l -o ! -type d ! -type f` 沒有輸出。有輸出就停下，向使用者確認實體來源。
 - `OLD_D` 不存在時，記下並取得使用者確認；之後只備份 `OLD_R`，不建立空 Database 充數。
 
 ## 2. 備份到平行備份根並驗證
+
+本節只建全新的手動備份，不能對本工具的既有備份紀錄執行。手動清單是 `sha256sum` 文字，工具的同名 `.sha256` 是含檔案與目錄的 typed JSON，兩者不互換。
 
 ```bash
 hash_tree() {

@@ -15,9 +15,11 @@ from zcu_tools.datafile import JsonObject
 
 from .errors import MigrationInputError
 from .models import (
+    ExistingItem,
     FailureItem,
     FileMigrationItem,
     KeyMappingItem,
+    MigrationDifference,
     MigrationFileState,
     MigrationManifest,
     MigrationReport,
@@ -91,7 +93,18 @@ def _manifest_json(manifest: MigrationManifest) -> JsonObject:
         _MANIFEST.dump_json(manifest, exclude={"raw", "report"})
     )
     known["report"] = report_json(manifest.report)
-    return _JSON.validate_python(_merge_raw(manifest.raw, known), strict=True)
+    encoded = _JSON.validate_python(_merge_raw(manifest.raw, known), strict=True)
+    # Baseline values are opaque complete data, not forward-minor schema fields:
+    # merging their old keys back would resurrect fields removed by a real edit.
+    documents = known.get("documents")
+    merged_documents = encoded.get("documents")
+    if isinstance(documents, dict) and isinstance(merged_documents, dict):
+        for key, baseline in documents.items():
+            merged = merged_documents.get(key)
+            if isinstance(baseline, dict) and isinstance(merged, dict):
+                merged["value"] = baseline["value"]
+                merged["previous"] = baseline["previous"]
+    return encoded
 
 
 def _check_header(raw: JsonObject, expected: str, path: Path) -> None:
@@ -113,6 +126,8 @@ def read_manifest(path: Path) -> MigrationManifest:
     Invalid headers/types raise located MigrationInputError; I/O errors propagate.
     Identity, path ownership and hash checks belong to the converter before writes.
     """
+    if path.is_symlink() or path.parent.is_symlink():
+        raise MigrationInputError(f"{path}: manifest symlink conflict")
     try:
         text = path.read_text(encoding="utf-8")
         raw = _JSON.validate_json(text, strict=True)
@@ -232,16 +247,46 @@ class MigrationSession:
         self.manifest = replace(self.manifest, files=(*files, state))
         self.checkpoint()
 
-    def verify_destination(self, state: MigrationFileState) -> None:
+    def verify_destination(
+        self, state: MigrationFileState, *, record_existing: bool = True
+    ) -> None:
         """Require prepared hash to match actual destination bytes or raise conflict.
 
         Missing or unreadable destination propagates filesystem errors.
         """
-        if (
-            state.destination_hash is None
-            or file_hash(state.destination) != state.destination_hash
-        ):
-            raise MigrationInputError(f"{state.destination}: destination hash changed")
+        actual = (
+            file_hash(state.destination)
+            if state.destination.is_file() and not state.destination.is_symlink()
+            else "absent or non-regular destination"
+        )
+        if state.destination_hash is None or actual != state.destination_hash:
+            raise MigrationInputError(
+                f"{state.destination}: destination hash changed",
+                differences=(
+                    MigrationDifference(
+                        source=state.source,
+                        destination=state.destination,
+                        comparison="sha256",
+                        expected=state.destination_hash or "prepared hash",
+                        actual=actual,
+                    ),
+                ),
+            )
+        if not record_existing:
+            return
+        report = self.manifest.report
+        item = ExistingItem(
+            source=state.source,
+            destination=state.destination,
+            comparison="sha256",
+            summary=actual,
+        )
+        skipped = tuple(
+            old for old in report.skipped if old.destination != state.destination
+        )
+        self.manifest = replace(
+            self.manifest, report=replace(report, skipped=(*skipped, item))
+        )
 
     def failure(self, source: Path, operation: str, error: Exception | None) -> None:
         """Replace this absolute source/action diagnostic, or remove it with None.
@@ -361,12 +406,13 @@ class MigrationSession:
             raise MigrationInputError(f"{source}: publication destination changed")
         if self.dry_run:
             return state
+        existing = state.phase in ("published", "source_removed")
         try:
             if state.phase == "planned":
                 state = self._prepare(state, build)
             if state.phase == "prepared":
                 state = self._publish_prepared(state)
-            self.verify_destination(state)
+            self.verify_destination(state, record_existing=existing)
             if operation == "move_labber" and state.phase == "published":
                 if source.exists():
                     if self.baseline(source) != state.source_hash:

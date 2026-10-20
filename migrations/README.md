@@ -10,7 +10,7 @@
 
 `migrations.storage_migration` 擁有離線轉換、歷史 evidence 與可續跑 publication。Caller 明填 mapping 與 native 驗證，不接正常 runtime。`migrations.legacy_labber.load_legacy_labber_payload` 以明確 disk schema 讀取 single 或 marker-qualified grouped Labber。未標記多 log 以 caller 的 schema 變數順序對應 root、Log_2 等，各自嚴格驗證 label、單位與 shape，不猜 variable identity 或單位。
 
-CLI 以 `python -m migrations.migrate_storage` 執行。操作授權、dry-run、pending 與 resume 步驟見 [Agent 離線遷移說明書](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 在 `storage_mapping.py`，固定 native declarations 在 `migration_experiments.py`，兩者都只為遷移存在，跟本目錄一起保留或刪除。`lib` 與 `zcu_lab` 都不 import 本目錄。
+CLI 以 `python -m migrations.migrate_storage` 執行。同來源、同宣告可直接重跑，中斷補缺，完成後逐項重驗；`--resume` 仍可使用。相同目的以 typed `skipped` 列出且不重寫，不同目的以 `MigrationInputError.differences` 定位並 exit 2，不改目的、manifest 或原報告。YAML／JSON 按 owner typed 語意比較並保留 unknown raw，binary／JSONL 按已驗 SHA256。操作授權、dry-run、pending 與 resume 步驟見 [Agent 離線遷移說明書](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 在 `storage_mapping.py`，固定 native declarations 在 `migration_experiments.py`，兩者都只為遷移存在，跟本目錄一起保留或刪除。`lib` 與 `zcu_lab` 都不 import 本目錄。
 
 `--result-root` 指定舊來源根目錄，`--entry-result-root` 指定新 entry 根目錄。兩者可同為 `<checkout>/result`，但新 entry 不得與本次來源樹互相包含。以下只做 dry-run，不建立備份或寫入目的地：
 
@@ -24,7 +24,7 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
   --backup-parent <external-backup-parent> --dry-run
 ```
 
-正式執行前，依遷移說明書核對報告與備份位置。預設備份累積在 checkout 平行的 `<checkout-name>-backup/`，保留 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`。共用根可以已存在。本次鏡像先核對完整來源，相同檔案略過，缺項補完，不同內容或額外項目停止且不覆寫。初始化 ownership 固定 identity 與生成值，備份／entry 初始化中斷可直接用原指令重跑，不認領無工具紀錄的 entry。逐檔 hash 清單與自動日期報告在 `migration-records/<chip>/<qubit>/`，不寫入來源鏡像。兩部分與安全清理完成後，entry 的 `records/` 另存日期報告。`--qubit-kind` 須符合來源元件，不由工具推論。
+正式執行前，依遷移說明書核對報告與備份位置。預設備份累積在 checkout 平行的 `<checkout-name>-backup/`，保留 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`。共用根可以已存在。本次鏡像先核對完整來源，相同檔案略過，缺項補完，不同內容或額外項目停止且不覆寫。初始化 ownership 固定 identity 與生成值，備份、entry 初始化與正式 publication 中斷都可直接用原指令重跑，不認領無工具紀錄的 entry。逐檔 hash 清單與自動日期報告在 `migration-records/<chip>/<qubit>/`，不寫入來源鏡像。兩部分與安全清理完成後，entry 的 `records/` 另存日期報告。來源缺席時仍以已驗 backup／manifest 重驗；相同 baseline 來源放回時先核全部目的，成功略過且保留放回的來源，不再刪除。`--qubit-kind` 須符合來源元件，不由工具推論。
 
 需要操作者宣告單位或 CSV 欄位時，在首次 dry-run 與正式執行明填：
 
@@ -65,7 +65,7 @@ v2 CSV 已有 `dev_value` 和 `dev_unit`，不需提供 legacy 參數。舊格�
 
 每筆 `PreservedCsvField` 記錄來源檔、從 1 起算且不含 header 的資料列號、原欄名與原值、synthetic run_id，以及 `destination_keys`。目的以 literal JSON keys 序列表示，`("extra.with.dot",)` 是根層的一個 key，`("legacy_fields", "t1_us")` 才是兩層位置。它只表示原樣保留，不宣稱已理解欄位語意。Storage migration 的 `preserved_sample_fields` 另附每筆欄位的 JSONL `output_path`，dry-run、正式報告與 manifest 都保留這份資訊。
 
-合成 key 為 `legacy-<Path.stem>-<資料列號>`。列號從 1 起算，不計 header。來源為 manual，point 預設為 null，可明填。同次輸入 stem 重複時，寫入任何列前拒絕。再次執行會追加相同 key 的歷史，讀取時取最後一列，不提供批次 rollback 或並行 writer 保證。
+合成 key 為 `legacy-<Path.stem>-<資料列號>`。列號從 1 起算，不計 header。來源為 manual，point 預設為 null，可明填。同次輸入 stem 重複時，寫入任何列前拒絕。再次執行時，同 key 且整列內容相同就略過，不追加歷史；不同則以 typed 差異拒絕，整批在追加前先核對。既有 `at` 沿用，不重新產生時間。這只約束 converter 的 synthetic keys，不改樣本 owner 讀取最新整行的 history 契約。不提供批次 rollback 或並行 writer 保證。
 
 CLI 使用既有 Result／Database 條目：
 
@@ -76,4 +76,4 @@ uv run --directory <checkout> --no-sync -- python -m migrations old.csv \
   --dev-value-column "calibrated mA" --source-unit mA
 ```
 
-CLI 在 stdout 輸出 JSON report。有待判斷列時 exit 1，全部轉換成功時 exit 0。I/O 與設定錯誤直接回報。使用者應先核對合成資料試轉結果，再自行安排真實資料遷移。
+CLI 在 stdout 輸出 JSON report，`skipped` 列出略過的相同 synthetic rows。有差異時 stderr 列來源、JSONL 目的與預期／實際內容，exit 2，既有歷史不變。有待判斷列時 exit 1，全部轉換或略過時 exit 0。I/O 與設定錯誤直接回報。使用者應先核對合成資料試轉結果，再自行安排真實資料遷移。

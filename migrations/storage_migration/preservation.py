@@ -9,6 +9,7 @@ from .errors import MigrationInputError
 from .models import (
     MigrationDeclarations,
     MigrationDestination,
+    MigrationDifference,
     MigrationManifest,
     MigrationSource,
 )
@@ -183,9 +184,19 @@ def _check_existing(
         raise FileExistsError(
             f"{target.source} -> {path}: unowned destination collision"
         )
-    if owned.destination_hash != file_hash(path):
+    actual = file_hash(path)
+    if owned.destination_hash != actual:
         raise MigrationInputError(
-            f"{target.source} -> {path}: destination hash changed"
+            f"{target.source} -> {path}: destination hash changed",
+            differences=(
+                MigrationDifference(
+                    source=target.source,
+                    destination=path,
+                    comparison="sha256",
+                    expected=owned.destination_hash or "prepared hash",
+                    actual=actual,
+                ),
+            ),
         )
 
 

@@ -78,11 +78,17 @@ def migrate_storage(
     immutable entry identity,
     exact mapping revision and owned file hashes. It reuses run assignments and
     completes planned/prepared/published moves without deleting unverified sources.
-    Completed setup/point documents remain editable and are validated, not restored.
-    Completed module_cfg files must match their recorded hash and are not rewritten.
-    Library commit and manifest checkpoint are not cross-file atomic. The caller
-    must keep this migration uninterrupted; a library write not yet recorded has
-    no recovery procedure here. Delete its destination and rerun if that occurs.
+    Both implicit reruns and explicit resume compare all fixed documents with
+    public owner types, retaining unknown raw fields; binary/JSONL publications
+    use verified hashes. Equal content is skipped without rewrites. Legal edits
+    also produce located typed differences, never restoration. Document writes
+    prepare owner artifacts and fixed expected/previous values before replacing
+    the destination. Points prepare under a manifest-owned temporary label before
+    rename and are reopened with the final binding. Creation times and run IDs
+    do not regenerate after preparation. Missing document baseline evidence in
+    an old manifest is a typed conflict, not permission to adopt current files.
+    Completed cleanup permits absent sources; matching replayed sources are
+    verified against backup and retained, never deleted for a second time.
     dry_run reads/validates sources and returns a report without any writes, moves
     or native validation callback. Missing cfg identity or other required evidence,
     or an undeclared (tag, cfg_type) schema is pending; never fall back to a
@@ -96,6 +102,8 @@ def migrate_storage(
     """
     validate_mapping(mapping)
     session, entry = prepare_session(request, mapping)
+    if session.manifest.cleanup_phase == "complete":
+        return session.manifest.report
     if session.manifest.cleanup_phase != "pending":
         validate_run_evidence(request, session)
         finish_cleanup(session)

@@ -17,7 +17,6 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
     PredictorSource,
-    load_predictor_file,
     save_predictor_file,
     validate_predictor_file,
 )
@@ -25,7 +24,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from .analysis_files import convert_analysis_files, proven_created_at
 from .backup import backup_source_path
-from .errors import MigrationInputError
+from .documents import edit_parameter, publish_document
 from .models import KeyMappingItem, MigrationMapping
 from .paths import contained_path
 from .state import MigrationSession, record_pending
@@ -41,6 +40,8 @@ class _Context:
     """Setup metadata, including seed values when no dry-run handle exists."""
 
     target: Path
+    session: MigrationSession
+    source: Path
     view: SetupView | None
     values: YamlMap
 
@@ -54,7 +55,7 @@ class _Context:
 
     def set(self, path: str, value: YamlValue) -> None:
         if self.view is not None:
-            with self.view.edit() as draft:
+            with edit_parameter(self.session, self.source, self.view) as draft:
                 draft.set(path, value)
         self.values[path] = value
 
@@ -72,6 +73,8 @@ def _setup_context(
     model = component_registry.get(kind).model_validate(seed)
     return _Context(
         target=session.manifest.report.destination.result_path / "setup.yaml",
+        session=session,
+        source=session.manifest.report.source.result_path / "params.json",
         view=entry.setup if entry is not None and not session.dry_run else None,
         values={
             f"{name}.{key}": _YAML.validate_python(value, strict=True)
@@ -92,25 +95,6 @@ def _flux_unit(
     if not isinstance(unit, str) or unit not in ("A", "mA", "V", "mV"):
         return None, "Missing or unsupported explicit flux_unit (A/mA/V/mV)"
     return unit, None
-
-
-def _write_predictor(path: Path, predictor: PredictorFile) -> None:
-    # The destination belongs to this migration, but an interrupted write may
-    # already have committed it. Never replace a conflicting document on resume.
-    if path.is_symlink():
-        raise MigrationInputError(f"{path}: predictor symlink conflict")
-    if path.exists():
-        try:
-            existing = load_predictor_file(path)
-        except ValueError as error:
-            raise MigrationInputError(f"{path}: invalid predictor: {error}") from error
-        if existing != predictor:
-            raise MigrationInputError(
-                f"{path}: predictor differs from planned legacy fit"
-            )
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_predictor_file(path, predictor)
 
 
 def _project_model_params(
@@ -284,7 +268,13 @@ def _project_fit(
     )
     validate_predictor_file(predictor)
     if not session.dry_run:
-        _write_predictor(target, predictor)
+        publish_document(
+            session,
+            source,
+            target,
+            "predictor",
+            lambda path: save_predictor_file(path, predictor),
+        )
     return rows
 
 

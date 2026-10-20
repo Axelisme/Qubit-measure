@@ -1,5 +1,6 @@
 """Offline migration parameters ownership."""
 
+import shutil
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,18 +9,24 @@ from pydantic import JsonValue, TypeAdapter
 from zcu_tools.datafile import (
     JsonObject,
 )
-from zcu_tools.resources.document_store import YamlMap, YamlValue
+from zcu_tools.resources.document_store import DocumentStore, YamlMap, YamlValue
 from zcu_tools.resources.entry import (
     EditView,
     ResultEntry,
+    SetupView,
     document_value,
     snapshot,
 )
-from zcu_tools.resources.entry.schema import SetupDocument
+from zcu_tools.resources.entry.schema import (
+    PARAMETER_FORMAT,
+    PARAMETER_VERSION,
+    SetupDocument,
+)
 
 from ._flux_units import apply_flux_groups, resolve_flux_units
 from ._meta_info import preserve_meta_field
 from ._module_cfg import convert_module_cfg
+from .documents import edit_parameter, publish_document
 from .errors import MigrationInputError
 from .evidence import has_legacy_expression
 from .models import (
@@ -30,6 +37,7 @@ from .models import (
 )
 from .params_json import convert_params_json
 from .paths import contained_path, validate_segment
+from .points import create_point
 from .samples import convert_samples
 from .state import MigrationSession, clear_pending, record_key_mapping, record_pending
 
@@ -38,7 +46,9 @@ _YAML_MAP = TypeAdapter(YamlMap)
 _JSON = TypeAdapter(JsonObject)
 
 
-def _seed_components(entry: ResultEntry, mapping: MigrationMapping) -> None:
+def _seed_components(
+    session: MigrationSession, entry: ResultEntry, mapping: MigrationMapping
+) -> None:
     for name, seed in mapping.components.items():
         fields = _YAML_MAP.validate_python(seed, strict=True)
         kind = fields.pop("kind", None)
@@ -48,7 +58,34 @@ def _seed_components(entry: ResultEntry, mapping: MigrationMapping) -> None:
         try:
             getattr(entry.setup, name)
         except AttributeError:
-            entry.setup.add_component(name, kind=kind, **fields)
+
+            def build(
+                path: Path,
+                *,
+                name: str = name,
+                kind: str = kind,
+                fields: YamlMap = fields,
+            ) -> None:
+                shutil.copyfile(entry.result_path / "setup.yaml", path)
+                seeded = SetupView(
+                    DocumentStore(
+                        path,
+                        SetupDocument,
+                        format=PARAMETER_FORMAT,
+                        supported_version=PARAMETER_VERSION,
+                    ),
+                    path,
+                )
+                seeded.add_component(name, kind=kind, **fields)
+
+            publish_document(
+                session,
+                session.manifest.report.source.result_path,
+                entry.result_path / "setup.yaml",
+                "setup",
+                build,
+            )
+            entry.setup.refresh()
 
 
 def _missing_evidence(rule: KeyRule, values: JsonObject) -> tuple[str, ...]:
@@ -390,12 +427,14 @@ def _module_scalar_destination(
 
 
 def _retain_point_slots(
-    entry: ResultEntry, label: str, mapping: MigrationMapping
+    session: MigrationSession, entry: ResultEntry, label: str, mapping: MigrationMapping
 ) -> None:
     # New points copy setup YAML but deliberately start with an empty library.
     # Keep only references that this point's own published library can resolve.
     published = entry.module_library(label).snapshot().module_keys()
-    with entry.use_point(label).edit() as draft:
+    with edit_parameter(
+        session, session.manifest.report.source.result_path, entry.use_point(label)
+    ) as draft:
         document = snapshot(draft)
         for name in mapping.components:
             path = f"{name}.module"
@@ -437,10 +476,10 @@ def _convert_context(
             if is_setup
             else entry.use_point(label)
             if label in entry.list_points()
-            else entry.new_point(label)
+            else create_point(session, entry, label, candidate)
         )
         if not is_setup:
-            _retain_point_slots(entry, label, mapping)
+            _retain_point_slots(session, entry, label, mapping)
     dry_context = (
         (dry_setup if is_setup else EditView(snapshot(dry_setup)))
         if dry_setup is not None
@@ -458,7 +497,7 @@ def _convert_context(
         session.baseline(source)
         values = _JSON.validate_json(source.read_text(encoding="utf-8"), strict=True)
         if view is not None:
-            with view.edit() as draft:
+            with edit_parameter(session, source, view) as draft:
                 _map_parameters(session, source, target, values, mapping, draft)
         elif dry_context is not None:
             _map_parameters(session, source, target, values, mapping, dry_context)
@@ -505,7 +544,7 @@ def convert_parameters(
         return
     source_root = session.manifest.report.source.result_path
     if entry is not None and not session.dry_run:
-        _seed_components(entry, mapping)
+        _seed_components(session, entry, mapping)
     convert_params_json(session, entry, mapping)
     dry_setup = None
     if session.dry_run:

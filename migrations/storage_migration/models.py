@@ -15,6 +15,8 @@ from zcu_tools.datafile import (
     VariableSchema,
 )
 
+from migrations.comparison import ExistingItem
+from migrations.comparison import MigrationDifference as MigrationDifference
 from migrations.sample_csv import PreservedCsvField
 
 type MigrationPart = Literal["parameters", "data", "all"]
@@ -379,37 +381,6 @@ class PreservedSampleField:
 
 
 @dataclass(frozen=True, kw_only=True)
-class ExistingItem:
-    """Verified existing content that was not rewritten.
-
-    source is the baseline input; destination is the reused absolute path.
-    comparison names the contract used (for example sha256 or backup-inventory).
-    summary describes the verified value, such as a lowercase SHA256 digest.
-    """
-
-    source: Path
-    destination: Path
-    comparison: str
-    summary: str
-
-
-@dataclass(frozen=True, kw_only=True)
-class MigrationDifference:
-    """Located conflict, not authorization to overwrite either side.
-
-    source identifies the expected input and destination the conflicting path.
-    comparison names the comparison contract. expected and actual are readable
-    summaries (hashes, types, identities or typed values), not executable patches.
-    """
-
-    source: Path
-    destination: Path
-    comparison: str
-    expected: str
-    actual: str
-
-
-@dataclass(frozen=True, kw_only=True)
 class MigrationReport:
     """Cumulative report of attempted parts, not a claim that pending is empty.
 
@@ -537,6 +508,50 @@ class MigrationBackup:
     skipped: tuple[ExistingItem, ...] = ()
 
 
+type DocumentKind = Literal[
+    "setup", "point", "library", "predictor", "dispersive", "t1_curve"
+]
+
+
+@dataclass(frozen=True, kw_only=True)
+class DocumentBaseline:
+    """Owner-normalized publication intent, fixed before replacing a document.
+
+    source locates the original input. destination/temp_path are contained absolute
+    final/staging paths. kind selects the public owner codec. value includes typed
+    defaults and unknown raw fields. previous is the last verified value, or None
+    for a new document. prepared allows only previous, value, or absent-new-file;
+    published requires value. The same-directory temp contains owner-written bytes.
+    """
+
+    source: Path
+    destination: Path
+    temp_path: Path
+    kind: DocumentKind
+    value: JsonObject
+    previous: JsonObject | None
+    phase: Literal["prepared", "published"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class PointPublication:
+    """One tool-owned point staging directory and its fixed first contents.
+
+    label is the final safe point label; temporary_label is the manifest-owned
+    safe sibling label. documents maps relative point.yaml/module_cfg.yaml paths
+    to typed baselines after preparation; None means creation is not prepared.
+    hashes/directories fix all other owner-created content and directories.
+    published records the final rename; existing formal points are never adopted.
+    """
+
+    label: str
+    temporary_label: str
+    documents: Mapping[str, DocumentBaseline] | None = None
+    hashes: Mapping[str, str] = field(default_factory=dict)
+    directories: tuple[str, ...] = ()
+    published: bool = False
+
+
 @dataclass(frozen=True, kw_only=True)
 class MigrationManifest:
     """Durable state for this tool's entry, not a multi-file transaction.
@@ -582,3 +597,6 @@ class MigrationManifest:
     module_files: tuple[ModuleFilePublication, ...] = ()
     backup: MigrationBackup | None = None
     cleanup_phase: Literal["pending", "cleaning", "complete"] = "pending"
+    # None identifies old manifests without comparison evidence; never adopt them.
+    documents: Mapping[str, DocumentBaseline] | None = None
+    points: tuple[PointPublication, ...] = ()

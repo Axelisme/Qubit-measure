@@ -1,26 +1,23 @@
 """Project legacy analysis sections through the entry fit-file owners."""
 
 import json
-from collections.abc import Callable
 from pathlib import Path
 
-from pydantic import BaseModel, JsonValue, ValidationError
+from pydantic import JsonValue, ValidationError
 from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.analysis_source import AnalysisSource
 from zcu_tools.resources.dispersive_file import (
     DispersiveFile,
-    load_dispersive_file,
     save_dispersive_file,
 )
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.t1_curve_file import (
     T1CurveFile,
-    load_t1_curve_file,
     save_t1_curve_file,
 )
 
 from .backup import backup_source_path
-from .errors import MigrationInputError
+from .documents import publish_document
 from .models import KeyMappingItem
 from .state import MigrationSession
 
@@ -38,33 +35,6 @@ def proven_created_at(value: object) -> str | None:
         return AnalysisSource(run_id=None, created_at=value).created_at
     except ValidationError:
         return None
-
-
-def _publish[Fit: BaseModel](
-    path: Path,
-    planned: Fit,
-    load: Callable[[Path], Fit],
-    save: Callable[[Path, Fit], None],
-) -> None:
-    if path.is_symlink():
-        raise MigrationInputError(f"{path}: analysis file symlink conflict")
-    if path.exists():
-        try:
-            existing = load(path)
-        except ValueError as exc:
-            raise MigrationInputError(
-                f"{path}: analysis file validation failed"
-            ) from exc
-        # Presence distinguishes an active-but-unknown T1 channel from absence.
-        if existing.model_dump(exclude_unset=True) != planned.model_dump(
-            exclude_unset=True
-        ):
-            raise MigrationInputError(
-                f"{path}: analysis file differs from planned legacy fit"
-            )
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save(path, planned)
 
 
 def _row(
@@ -247,8 +217,12 @@ def _convert_dispersive(
                 )
             else:
                 if not session.dry_run:
-                    _publish(
-                        target, document, load_dispersive_file, save_dispersive_file
+                    publish_document(
+                        session,
+                        source,
+                        target,
+                        "dispersive",
+                        lambda path: save_dispersive_file(path, document),
                     )
                 rows.extend(evidence_rows)
                 if "dispersive" in values:
@@ -346,7 +320,13 @@ def _convert_t1(
             )
         else:
             if not session.dry_run:
-                _publish(target, t1_document, load_t1_curve_file, save_t1_curve_file)
+                publish_document(
+                    session,
+                    source,
+                    target,
+                    "t1_curve",
+                    lambda path: save_t1_curve_file(path, t1_document),
+                )
             rows.extend(evidence_rows)
             rows.append(
                 _row(

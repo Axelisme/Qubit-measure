@@ -237,8 +237,11 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     assert states[0].operation == "copy"
     assert states[0].destination == target
     entry.use_point("070716_0.500").C1.frequency = 99.0
-    assert_difference(lambda: _convert(replace(request, part="all", resume=True), mapping),
-                      request, [entry.result_path / "points/070716_0.500/point.yaml"])
+    assert_difference(
+        lambda: _convert(replace(request, part="all", resume=True), mapping),
+        request,
+        [entry.result_path / "points/070716_0.500/point.yaml"],
+    )
     assert _entry(request).use_point("070716_0.500").C1.frequency == 99.0
     assert target.read_bytes() == retained_figure.read_bytes()
     assert not (request.result_root / "chip/qubit").exists()
