@@ -82,7 +82,7 @@ class T2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
 @dataclass(frozen=True)
 class T2RamseyAnalyzeOptions:
     fit_fringe: bool = True
-    fit_phase: bool = False
+    fit_phase: bool = True
 
 
 @dataclass(frozen=True)
