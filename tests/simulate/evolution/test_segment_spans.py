@@ -4,13 +4,12 @@ from contextlib import closing
 from dataclasses import replace
 from threading import Event
 
-from scipy.linalg import expm
-
 import numpy as np
 import pytest
+from scipy.linalg import expm
 from zcu_tools.simulate import evolution
 
-from ._engine import batch, track
+from ._engine import batch, source, track
 
 
 def test_segment_spans_include_neutral_boundaries_and_microwave_plateaus():
@@ -36,9 +35,9 @@ def test_segment_spans_include_neutral_boundaries_and_microwave_plateaus():
     [((3.0, 2.0),), ((2.0, 2.0),), ((-1.0,),), ((4.0,),), ((np.nan,),), ((), ())],
 )
 def test_segment_boundaries_fail_fast(boundaries):
-    evolution.segment_spans
+    query = evolution.segment_spans
     with pytest.raises(ValueError, match="boundar"):
-        replace(batch(1), segment_boundaries=boundaries)
+        query(replace(batch(1), segment_boundaries=boundaries))
 
 
 def test_single_segment_constant_photons_matches_two_level_stark_solution():
@@ -150,6 +149,61 @@ def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_cache_hits():
     assert sum(first.paths.segments_by_kernel.values()) == sum(
         map(len, query(timeline))
     )
+
+
+def test_gate_usage_inventory_distinguishes_shift_content_and_identical_repeats():
+    src = source()
+    size = src.initial_density.shape[0]
+    envelope = evolution.EnvelopeSpec(
+        "sampled", np.array([0, 1, 0], complex), np.array([0, 4, 8])
+    )
+    timeline = replace(batch(1, duration=8), tracks=(track(1, envelope, duration=8),))
+    shift = evolution.SegmentShift(0, 8, np.arange(size) * 0.01, np.zeros((size, size)))
+    with closing(evolution.Engine(1, 1024**2)) as engine:
+        engine.evolve(src, (timeline,), cancel=Event())
+        unshifted = src.gate_usage
+        assert unshifted
+        changed = replace(timeline, segment_shifts=((shift,),))
+        engine.evolve(src, (changed,), cancel=Event(), reuse_key=b"gate-shift")
+        combined = src.gate_usage
+        assert len(combined) == 2 * len(unshifted)
+        assert all(combined[key] == value for key, value in unshifted.items())
+        assert engine.reuse(src, b"gate-shift")
+        engine.evolve(src, (changed,), cancel=Event(), reuse_key=b"gate-shift")
+        assert src.gate_usage == combined
+
+
+@pytest.mark.parametrize("excited_shift", [-0.2, -0.1])
+def test_shifted_energy_ordering_reports_context_without_reordering(excited_shift):
+    shift = evolution.SegmentShift(2, 6, np.array([0, excited_shift]), np.zeros((2, 2)))
+    model = evolution.SecularModel(
+        (0,),
+        "ordered-two-level",
+        np.array([0.0, 0.1]),
+        np.eye(2, dtype=complex),
+        (),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    initial = np.full((2, 2), 0.5, complex)
+    src = evolution.ModelSource(initial, lambda _: model)
+    timeline = replace(
+        batch(1, duration=6),
+        points=np.array([17]),
+        segment_boundaries=((2.0,),),
+        segment_shifts=((shift,),),
+    )
+    with closing(evolution.Engine(1, 1024**2)) as engine:
+        if excited_shift < -0.1:
+            with pytest.raises(
+                ValueError, match="point 17.*segment.*Stark.*ordering.*dispersive"
+            ):
+                engine.evolve(src, (timeline,), cancel=Event())
+        else:
+            result = engine.evolve(src, (timeline,), cancel=Event())
+            np.testing.assert_allclose(
+                result.densities[0, 0, 1], 0.5 * np.exp(2j * np.pi * 0.2), atol=1e-12
+            )
 
 
 @pytest.mark.parametrize("span", [(0, 12), (1, 2), (2, 7), (12, 14)])
