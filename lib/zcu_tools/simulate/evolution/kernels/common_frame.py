@@ -520,7 +520,7 @@ def _propagate_row(frame, args, control, rho):
     this density. The base step never exceeds the admitted fixed-step ceiling.
     """
     duration, steps = control
-    offsets, times, counts = args[2], args[3], args[5]
+    _, _, offsets, times, _, counts = args
     knots = np.unique(
         np.concatenate(
             (
