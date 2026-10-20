@@ -5,6 +5,7 @@ import scipy.linalg
 from numpy.typing import NDArray
 
 from ._integrated import IntegratedLine
+from ._quadratic import field_product_integral
 from ._sampled import SampledLine
 from .model import ReadoutModel, RealArray
 from .request import ReadoutPulse, SampleGrid
@@ -56,6 +57,43 @@ class ConstantLine:
             float, tuple[NDArray[np.complex128], NDArray[np.complex128]]
         ] = {}
         self._integrated: IntegratedLine | None = None
+
+    def coherent_integral(
+        self,
+        fields: NDArray[np.complex128],
+        incidents: NDArray[np.complex128],
+        omegas: RealArray,
+        duration: float,
+    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
+        """Advance fixed branches and integrate their coherent field products.
+
+        This route requires Q=0: fields (state,2) are sqrt(photons), incidents
+        (carrier,) are sqrt(photons/ns) at the interval start, and omegas are
+        carrier/reference rad/ns. duration is positive ns. Return final fields
+        and (state,2,state,2) integrals in photon*ns, retaining all cross terms.
+        Singular generators use augmented exponentials, not ODE or inversion.
+        Nonfinite propagation/integrals raise RuntimeError.
+        """
+        if np.any(self._q):
+            raise ValueError("coherent field integrals require fixed state branches")
+        n = len(fields)
+        generators = np.array(
+            [self._m[2 * s : 2 * s + 2, 2 * s : 2 * s + 2] for s in range(n)]
+        )
+        products = field_product_integral(
+            generators, self._b[:2, 0].real, fields, incidents, omegas, duration
+        )
+        times = np.array([duration])
+        _, homogeneous, _ = self.propagators(0.0, 0j, times)[duration]
+        final = homogeneous @ fields.ravel()
+        for incident, omega in zip(incidents, omegas, strict=True):
+            _, _, driven = self.propagators(float(omega), complex(incident), times)[
+                duration
+            ]
+            final += (driven @ np.ones(n)) * np.exp(-1j * omega * duration)
+        if not np.isfinite(final).all():
+            raise RuntimeError("constant cavity propagation is nonfinite")
+        return final.reshape(n, 2), products
 
     def integrated_sums(
         self, model: ReadoutModel, pulse: ReadoutPulse, grids: tuple[SampleGrid, ...]

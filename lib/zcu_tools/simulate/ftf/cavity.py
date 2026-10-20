@@ -1,12 +1,11 @@
 """Driven cavity photons, dispersive Stark shifts and branch dephasing."""
 
 from dataclasses import dataclass
-from functools import lru_cache
 
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.adc import ReadoutPulse, cavity_fields
+from zcu_tools.simulate.adc import ReadoutPulse, cavity_field_average, cavity_fields
 
 from .model import JointModel, readout_model
 from .parameters import Resonator
@@ -81,51 +80,32 @@ class CavityDrive:
     def average(self, start_ns: float, end_ns: float) -> CavityResponse:
         """Average photons, Stark shifts and decay rates over a positive interval.
 
-        Endpoints are finite absolute emitted ns, with end_ns > start_ns. Fields
-        retain their full pulse history, even for an interval after switch-off.
-        Integrates the rates themselves, not squared time-averaged fields.
-        Gaussian quadrature splits at pulse supports and declared envelope corners
-        and refines to rtol=1e-7, atol=1e-13. Nonconvergence raises RuntimeError;
-        invalid intervals/envelopes raise ValueError. Output has no time axis.
+        Endpoints are finite absolute emitted ns, with end_ns > start_ns. ADC
+        retains full pulse history, including ringdown, and integrates same-time
+        quadratic fields, not squared time-averaged fields. Flat inputs use
+        analytic integrals; shaped inputs retain rtol=1e-7, atol=1e-13 quadrature.
+        Invalid intervals/envelopes raise ValueError; solver or convergence
+        failures raise RuntimeError. Output has no time axis.
         """
-        if not np.isfinite([start_ns, end_ns]).all() or end_ns <= start_ns:
-            raise ValueError("cavity average interval must be finite and positive")
-        corners = {start_ns, end_ns} | {
-            t
-            for pulse in self._pulses
-            for t in (pulse.start_ns, pulse.end_ns, *pulse.breakpoints_ns)
-            if start_ns < t < end_ns
-        }
-        boundaries = np.array(sorted(corners))
-        previous = None
-        for order in (16, 32, 64, 128, 256, 512, 1024):
-            nodes, weights = _gauss_rule(order)
-            half = np.diff(boundaries) / 2
-            mid = (boundaries[1:] + boundaries[:-1]) / 2
-            times = (mid[:, None] + half[:, None] * nodes).ravel()
-            scaled = (half[:, None] * weights).ravel() / (end_ns - start_ns)
-            response = self.response(times)
-            values = tuple(
-                np.einsum("t,t...->...", scaled, value)
-                for value in (
-                    response.photons,
-                    response.stark_shift_ghz,
-                    response.dephasing_per_ns,
-                )
-            )
-            if previous is not None and all(
-                np.allclose(a, b, rtol=1e-7, atol=1e-13)
-                for a, b in zip(values, previous, strict=True)
-            ):
-                return CavityResponse(self._chi.copy(), *values)
-            previous = values
-        raise RuntimeError("cavity segment average did not converge")
-
-
-@lru_cache(maxsize=7)
-def _gauss_rule(order: int) -> tuple[RealArray, RealArray]:
-    """Share immutable quadrature coordinates, never physical response data."""
-    nodes, weights = np.polynomial.legendre.leggauss(order)
-    nodes.setflags(write=False)
-    weights.setflags(write=False)
-    return nodes, weights
+        average = cavity_field_average(self._model, self._pulses, start_ns, end_ns)
+        products = average.field_products
+        n = len(self._chi)
+        same = products[np.arange(n), :, np.arange(n), :]
+        differences = (
+            same[:, None, :, :]
+            + same[None, :, :, :]
+            - products.transpose(0, 2, 1, 3)
+            - products.transpose(2, 0, 1, 3)
+        )
+        v = np.sqrt(self._model.kappa_external_per_ns / 2)
+        dephasing = np.einsum("ijrq,r,q->ij", differences, v, v).real / 2
+        dephasing += (
+            np.einsum("ijrr,r->ij", differences, self._model.kappa_internal_per_ns).real
+            / 2
+        )
+        return CavityResponse(
+            self._chi.copy(),
+            average.photons,
+            np.sum(self._chi * average.photons, axis=-1),
+            dephasing,
+        )

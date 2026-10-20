@@ -81,6 +81,36 @@ def test_cavity_response_uses_joint_pulls_and_coherent_shared_line_fields(cavity
     )
 
 
+def test_cavity_flat_four_us_average_is_finite_and_matches_weighted_subspans(cavity):
+    joint, _, _, _ = cavity
+    # Two long-lived modes, 110 MHz apart, retain fast beats during ring-up.
+    resonators = (
+        ftf.Resonator(7.19, (0.05, 0.01, 0), 0.006, 0.0009, 0),
+        ftf.Resonator(7.08, (0, 0.01, 0.05), 0.005, 0.0008, 0),
+    )
+    pulse = ReadoutPulse(0, 5500, 0.15, 7.19)
+    drive = ftf.CavityDrive(joint, resonators, (pulse,))
+    try:
+        average = drive.average(1500, 5500)
+    except RuntimeError as error:
+        pytest.fail(f"legal 4 us flat cavity average must converge: {error}")
+    # Unequal spans expose averaging that forgets the duration weights.
+    boundaries = (1500, 2000, 2750, 3750, 4500, 5500)
+    spans = tuple(zip(boundaries[:-1], boundaries[1:], strict=True))
+    pieces = [drive.average(left, right) for left, right in spans]
+    for name in ("photons", "stark_shift_ghz", "dephasing_per_ns"):
+        actual = getattr(average, name)
+        assert np.isfinite(actual).all(), f"4 us average {name} must be finite"
+        expected = (
+            sum(
+                (right - left) * getattr(piece, name)
+                for (left, right), piece in zip(spans, pieces, strict=True)
+            )
+            / 4000
+        )
+        np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=1e-13)
+
+
 def test_cavity_segment_average_retains_ringdown_and_integrates_rates(cavity):
     joint, resonators, pulse, drive_type = cavity
     assert callable(drive_type), (

@@ -12,6 +12,23 @@ from .request import PiecewiseLinearEnvelope, ReadoutPulse
 ComplexArray = NDArray[np.complex128]
 
 
+def line_parameters(model: ReadoutModel) -> tuple[ComplexArray, RealArray]:
+    """Return fixed-branch line blocks (state,2,2), 1/ns, and input coupling.
+
+    Coupling is (2,) sqrt(1/ns). Population rates and receiver calibration do
+    not enter these vacuum-field equations.
+    """
+    v = np.sqrt(model.kappa_external_per_ns / 2)
+    a = np.array(
+        [
+            np.diag(model.kappa_internal_per_ns / 2 + 2j * np.pi * detuning)
+            + np.outer(v, v)
+            for detuning in model.frequencies_ghz - model.reference_frequency_ghz
+        ]
+    )
+    return a, v
+
+
 class PathFields:
     """Prepare no-jump vacuum fields once for arbitrary-envelope path observers.
 
@@ -33,15 +50,8 @@ class PathFields:
         atol: float,
     ) -> None:
         self.model, self.pulse, self.times = model, pulse, times
-        self._v = np.sqrt(model.kappa_external_per_ns / 2)
+        self._a, self._v = line_parameters(model)
         self._scattering = self._v * np.exp(-1j * model.mismatch_phase_rad)
-        self._a = np.array(
-            [
-                np.diag(model.kappa_internal_per_ns / 2 + 2j * np.pi * detuning)
-                + np.outer(self._v, self._v)
-                for detuning in model.frequencies_ghz - model.reference_frequency_ghz
-            ]
-        )
         self._segments: list[
             tuple[float, float, Callable[[RealArray], ComplexArray]]
         ] = []
@@ -64,7 +74,14 @@ class PathFields:
             )
             if start < t < end
         }
-        points = sorted(corners)
+        corners = sorted(corners)
+        kappa = float(
+            np.max(self.model.kappa_internal_per_ns + self.model.kappa_external_per_ns)
+        )
+        points = [corners[0]]
+        for left, right in zip(corners[:-1], corners[1:], strict=True):
+            count = max(1, int(np.ceil((right - left) * kappa)))
+            points.extend(np.linspace(left, right, count + 1)[1:])
         fields = np.zeros((len(self._a), 2), dtype=np.complex128)
         fastest = max(
             float(
