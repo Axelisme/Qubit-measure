@@ -11,12 +11,12 @@ from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field, JsonValue
-from qtpy.QtCore import QObject, Signal
+from qtpy.QtCore import QObject, Qt, Signal
 from qtpy.QtWidgets import QApplication, QLineEdit, QVBoxLayout, QWidget
 from zcu_tools.gui.form import Display, FormEnv, FormModel, FormState, FormWritePath
 from zcu_tools.gui.widgets.form import FormEditor, value_widgets
 
-from tests.gui._user_input import ComponentDriver
+from tests.gui._user_input import ComponentDriver, key_click, type_text
 
 
 class ManualTimer(QObject):
@@ -104,6 +104,7 @@ type Batch = dict[FormWritePath, JsonValue]
 @pytest.fixture
 def form(
     qapp: QApplication,
+    clock: Clock,
 ) -> Iterator[tuple[FormEditor[IdleForm], FormState[IdleForm], list[Batch]]]:
     """Show a form with a recording public host write callback."""
     env = FormEnv()
@@ -273,8 +274,12 @@ def test_shared_scalar_helpers_use_the_same_idle_policy(
     window.activateWindow()
     qapp.processEvents()
     try:
-        driver = ComponentDriver(window)
-        driver.enter_text(value=typed, object_name="scalar", commit=False)
+        # Shared scalar callback contract, separate from driver UI acceptance.
+        text = widget if isinstance(widget, QLineEdit) else widget.findChild(QLineEdit)
+        assert text is not None
+        text.setFocus()
+        key_click(text, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        type_text(text, typed)
         assert commits == []
         clock.advance(500)
         assert commits == [type_(typed)]
