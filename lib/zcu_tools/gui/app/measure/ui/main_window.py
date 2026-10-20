@@ -1,3 +1,9 @@
+# tolerated(file-size): MainWindowToolbar, MainDialogRegistry,
+# MainWindowEventCoordinator and ExpTabWidget own toolbar, dialogs, events and tabs.
+# This window root coordinates tab mounting, window commands, diagnostic/screenshot
+# projections, control watches and close/drain. Moving these callbacks into wrappers
+# or mixins would split one view lifecycle without giving a separate set of widgets
+# and local state its own owner.
 """MainWindow — the top-level View for the v2_gui framework.
 
 Implements ViewProtocol; all state lives in Controller/State, never here.
