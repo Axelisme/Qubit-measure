@@ -104,6 +104,32 @@ def test_processed_spectrums_convert_axes_calibration_and_complex_values(
     assert target.read_bytes() == before
 
 
+@pytest.mark.parametrize("relative", ["spectrums.hdf5", "spectrums.legacy.hdf5"])
+def test_completed_processed_outputs_are_verified_skipped_and_never_overwritten(
+    request_data: MigrationRequest, mapping: MigrationMapping, relative: str
+) -> None:
+    source = _legacy_collection(request_data, False)
+    with h5py.File(source, "a") as handle:
+        handle["unknown"] = np.array([3, 7], dtype=np.int16)
+    first = _convert(request_data, mapping)
+    root = first.destination.result_path / "data/fluxdep"
+    targets = {root / "spectrums.hdf5", root / "spectrums.legacy.hdf5"}
+    before = {target: (target.read_bytes(), target.stat().st_mtime_ns) for target in targets}
+    report = _convert(replace(request_data, resume=True), mapping)
+    assert targets <= {row.destination for row in report.skipped}
+    assert {target: (target.read_bytes(), target.stat().st_mtime_ns) for target in targets} == before
+    target = root / relative
+    target.write_bytes(b"changed binary")
+    edited = target.read_bytes()
+    manifest = first.destination.result_path / "records/migration-state.json"
+    manifest_before = manifest.read_bytes()
+    with pytest.raises(MigrationInputError) as caught:
+        _convert(replace(request_data, resume=True), mapping)
+    assert any(row.destination == target and row.comparison == "sha256" for row in caught.value.differences)
+    assert target.read_bytes() == edited
+    assert manifest.read_bytes() == manifest_before
+
+
 def test_processed_spectrum_dry_run_plans_conversion_without_writes(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:

@@ -17,7 +17,7 @@ from migrations.storage_migration import (
     MigrationRequest,
     migrate_storage,
 )
-from tests.migrations.storage_migration.fakes import noop_validation, write_meta
+from tests.migrations.storage_migration.fakes import noop_validation, write_meta, write_run
 
 pytestmark = pytest.mark.usefixtures("registry_guard")
 
@@ -163,12 +163,12 @@ def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
     write_meta(request_data, "exps/bias", {"old_frequency": 4.0})
     target = request_data.results_root / request_data.name / "points/bias"
     rename = os.rename
-    def interrupt(source: str | Path, destination: str | Path, **kwargs: object) -> None:
+    def interrupt(source: str | Path, destination: str | Path) -> None:
         if Path(destination) == target:
             if after_rename:
-                rename(source, destination, **kwargs)
+                rename(source, destination)
             raise OSError("point rename interrupted")
-        rename(source, destination, **kwargs)
+        rename(source, destination)
     with monkeypatch.context() as patch:
         patch.setattr(os, "rename", interrupt)
         with pytest.raises(OSError, match="point rename interrupted"):
@@ -188,6 +188,69 @@ def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
     assert point.C1.frequency == 4.0
     assert not temporary.exists()
     assert any(row.new_file == target / "point.yaml" for row in report.key_mappings)
+
+
+@pytest.mark.parametrize("kind", ["figure", "point-figure", "raw-result", "raw-database", "labber", "native"])
+def test_completed_binary_publications_are_skipped_or_located_without_writes(
+    request_data: MigrationRequest, mapping: MigrationMapping, kind: str
+) -> None:
+    request, _ = write_run(request_data)
+    result = request.result_root / "chip/qubit"
+    database = request.database_root / "chip/qubit"
+    write_meta(request, "exps/bias", {})
+    for relative in ("image/fit.png", "exps/bias/image/fit.png", "opaque.bin"):
+        path = result / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(relative.encode())
+    (database / "opaque.bin").write_bytes(b"raw database")
+    first = convert(request, mapping)
+    native = next(row.destination for row in first.converted_files if row.destination.name == "data.h5")
+    paths = {
+        "figure": first.destination.result_path / "figures/image/fit.png",
+        "point-figure": first.destination.result_path / "points/bias/figures/fit.png",
+        "raw-result": first.destination.result_path / "opaque.bin",
+        "raw-database": first.destination.database_path / "opaque.bin",
+        "labber": first.destination.database_path / "Labber/2025/10/scan.hdf5",
+        "native": native,
+    }
+    assert first.backup_path is not None
+    before = files_under(first.destination.result_path, first.destination.database_path, first.backup_path)
+    rerun = convert(replace(request, resume=True), mapping)
+    assert set(paths.values()) <= {row.destination for row in rerun.skipped}
+    assert files_under(first.destination.result_path, first.destination.database_path, first.backup_path) == before
+    paths[kind].write_bytes(b"different output")
+    edited = files_under(first.destination.result_path, first.destination.database_path, first.backup_path)
+    with pytest.raises(MigrationInputError) as caught:
+        convert(replace(request, resume=True), mapping)
+    assert any(row.destination == paths[kind] and row.comparison == "sha256" for row in caught.value.differences)
+    assert files_under(first.destination.result_path, first.destination.database_path, first.backup_path) == edited
+
+
+@pytest.mark.parametrize("after_replace", [False, True])
+def test_prepared_document_recovers_fixed_owner_intent(
+    request_data: MigrationRequest, mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch, after_replace: bool
+) -> None:
+    target = request_data.results_root / request_data.name / "setup.yaml"
+    original = os.replace
+    def interrupt(source: str | Path, destination: str | Path) -> None:
+        if Path(destination) == target:
+            if after_replace:
+                original(source, destination)
+            raise OSError("document publish interrupted")
+        original(source, destination)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", interrupt)
+        with pytest.raises(OSError, match="document publish interrupted"):
+            convert(request_data, mapping)
+    state = json.loads((target.parent / "records/migration-state.json").read_text())
+    assert "documents" in state, "Prepared publication must persist typed owner intent before replacement"
+    expected = state["documents"][str(target)]["value"]["general"]["created_at"]
+    report = convert(request_data, mapping)
+    entry = ResultEntry.open(request_data.name, result_root=request_data.results_root, database_root=request_data.database_root)
+    assert entry.setup.general.created_at == expected
+    assert entry.setup.C1.frequency == 1.0
+    assert report.failures == ()
 
 
 def test_old_owned_manifest_without_document_baseline_is_not_adopted(
@@ -230,12 +293,10 @@ def test_interrupted_publication_automatically_fills_missing_item(
     target = request_data.results_root / request_data.name / "opaque.bin"
     original = os.link
 
-    def interrupt(
-        source: str | Path, destination: str | Path, **kwargs: object
-    ) -> None:
+    def interrupt(source: str | Path, destination: str | Path) -> None:
         if Path(destination) == target:
             raise OSError("injected publication interruption")
-        original(source, destination, **kwargs)
+        original(source, destination)
 
     with monkeypatch.context() as patch:
         patch.setattr(os, "link", interrupt)
