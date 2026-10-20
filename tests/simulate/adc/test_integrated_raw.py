@@ -100,6 +100,7 @@ def test_integrated_shots_form_bridge_and_match_conditional_expectation(rates, s
 
 def test_deferred_raw_does_not_change_statistics_stream_or_retain_noisy_results():
     content = batch(model(np.array([[0, 0.025, 0], [0, 0, 0.04], [0, 0, 0]])))
+    content = replace(content, grids=((content.grids[0][0], content.grids[0][0]),))
     conditional = adc.ADC(content.model).responses(content)
     channel = adc.ChannelReadout(0, conditional, np.array(0, dtype=np.int64), content.model.receiver)
     probabilities = np.array([0.1, 0.2, 0.7])
