@@ -194,32 +194,46 @@ def test_factory_two_layers(qapp):
 
 
 def test_total_setter(qapp):
-    """Integer totals use raw value as max; float totals use _FLOAT_SCALE for proportional fill."""
+    """Integer totals set the raw maximum; float progress fills proportionally."""
     from qtpy.QtWidgets import QApplication
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
 
-    from zcu_tools.gui.session.pbar_host import _FLOAT_SCALE
-
     # integer total → max == raw value
     pbar = factory(desc="t", total=5, leave=False)
-    QApplication.processEvents()
-    assert _layout_bars(stack)[0].maximum() == 5
+    try:
+        QApplication.processEvents()
+        assert _layout_bars(stack)[0].maximum() == 5
 
-    # changing to another integer → max updates
-    pbar.total = 20
-    QApplication.processEvents()
-    assert _layout_bars(stack)[0].maximum() == 20
-    assert pbar.total == 20
+        # changing to another integer → max updates
+        pbar.total = 20
+        QApplication.processEvents()
+        assert _layout_bars(stack)[0].maximum() == 20
+        assert pbar.total == 20
 
-    # changing to float → scaled max, bar can fill proportionally
-    pbar.total = 3.14
-    QApplication.processEvents()
-    assert _layout_bars(stack)[0].maximum() == _FLOAT_SCALE
+        # changing to float → bar fills proportionally from zero to completion
+        pbar.total = 3.14
+        pbar.set_progress(0)
+        pbar.refresh()
+        QApplication.processEvents()
+        widget = _layout_bars(stack)[0]
+        assert widget.maximum() > 0
+        assert widget.value() == 0
 
-    pbar.close()
-    QApplication.processEvents()
+        pbar.set_progress(1.57)
+        pbar.refresh()
+        QApplication.processEvents()
+        assert widget.value() / widget.maximum() == pytest.approx(0.5)
+
+        pbar.set_progress(3.14)
+        pbar.refresh()
+        QApplication.processEvents()
+        assert widget.value() == widget.maximum()
+        assert pbar.total == 3.14
+    finally:
+        pbar.close()
+        QApplication.processEvents()
 
 
 def test_total_change_updates_widget_in_place_no_flicker(qapp):
