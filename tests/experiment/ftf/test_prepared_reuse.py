@@ -130,6 +130,7 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put():
     import numpy as np
     from zcu_tools.core.simulation import PulseEnvelope
     from zcu_tools.experiment.ftf.preparation import PreparationCache
+
     class CountingPreparations(PreparationCache):
         def __init__(self):
             super().__init__()
@@ -176,7 +177,57 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put():
         assert source.evaluations[0].paths == first_paths
         assert numeric.gate_usage == {k: 2 * n for k, n in first_usage.items()}
         assert cache.hits == 1
-        assert cache.puts == 1, "unchanged results must retain their population preparation"
+        assert cache.puts == 1, (
+            "unchanged results must retain their population preparation"
+        )
+    finally:
+        source.close()
+
+
+@pytest.mark.parametrize("clear", [False, True])
+def test_repeated_content_does_not_inflate_source_amortization(clear):
+    import numpy as np
+    from zcu_tools.core.simulation import PulseEnvelope
+
+    base = template(tones=1)
+    drive, readout = base.events
+    times = np.linspace(0.0, 0.128, 129)
+    waveform = PulseEnvelope(
+        tuple(times),
+        tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex)),
+    )
+    acquire = request(
+        templates=(
+            replace(
+                base,
+                events=(
+                    replace(
+                        drive,
+                        start_us=np.zeros(2),
+                        duration_us=np.full(2, 0.128),
+                        gain=np.full(2, -0.002),
+                        envelopes=(waveform,),
+                    ),
+                    replace(readout, start_us=np.full(2, 0.140)),
+                ),
+            ),
+        )
+    )
+    source = FTFSource(settings(), DeviceManager())
+    try:
+        draw(source, acquire)
+        numeric = source.model_facts(snapshot()).source
+        first = numeric.gate_usage
+        first_paths = source.evaluations[0].paths
+        assert first and first_paths.segments_by_kernel.get("shaped_sambe") == 2
+        for sequence in range(8, 20):
+            if clear:
+                source.preparation_cache.clear()
+            draw(source, replace(acquire, sequence=sequence))
+            assert numeric.gate_usage == first, (
+                "one content contributes its rows only once"
+            )
+            assert source.evaluations[0].paths == first_paths
     finally:
         source.close()
 
