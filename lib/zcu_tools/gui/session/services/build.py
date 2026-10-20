@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from zcu_tools.cfg_model import PlaceholderRegistry
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
@@ -73,8 +72,6 @@ class SessionServices:
         device_control: Narrow device command/query/progress/event facade.
         setup_control: Entry/point setup and independent SoC command facade.
         settings: Entry opening/creation and remembered setup preferences.
-        placeholders: Initially empty, session-owned template default bindings.
-            Commands and snapshots run on the session owner thread; no I/O.
         values: Read-only lookup of the session value-source registry.
         value_sources: Binder publishing cached owner-specific value sources.
         arb_waveform: Qubit-scoped arbitrary waveform assets of the session
@@ -97,7 +94,6 @@ class SessionServices:
     setup_control: SetupControlPort
     settings: ProjectSettingsService
     values: ValueLookup
-    placeholders: PlaceholderRegistry
     value_sources: ValueSourceBinder
     arb_waveform: ArbWaveformService
 
@@ -191,7 +187,6 @@ def build_session_services(
         setup_control=setup_control,
         settings=settings,
         values=value_registry,
-        placeholders=PlaceholderRegistry(),
         value_sources=value_sources,
         arb_waveform=ArbWaveformService(state),
     )

@@ -152,11 +152,10 @@ Measure 不再使用 CfgSchema 的跨 tab refresh／Unavailable 恢復模型。
 `cfg_model.TemplateDef` 宣告持久 Spec 型別、label 與 seeds。表在 `zcu_lab.templates`，
 組合根以 `Registry(templates=TEMPLATES)` 注入。Library 新建選單使用同一份表，
 reload candidate 從 current Registry 取得表，不重建角色表。
-佔位符使用具名 `Template.bindings`，顯式值覆蓋 session 的 `PlaceholderRegistry` 預設值，也可使用未登錄名稱。
-Registry 初始為空。Session 組裝擁有唯一 mutable instance，`ctx.placeholders` 提供登錄與讀取。
-Host 將 detached defaults 放進固定 `FormEnv`；Open／Reset 重新 capture，既有 input 與 env 不隨登錄變更。
+佔位符只使用呼叫端明填的 `Template.bindings`，例如 `qubit → $qubit` 或 `qubit → $qubit1`。
+Session、startup 與 FormEnv 不提供模板綁定預設值。模板展開不解析 alias。
 `TemplateDef` 建構只驗證語法與結構，實際展開缺 binding 時報 `ValueError`。
-Registry 不擁有名稱清單、alias 解析或保存政策，腳本自行保存與恢復。
+使用者於 2026-10-20 裁定：「你搞錯了吧，模板/alias是不同的東西，後者才是startup填的」「模板是form adapter提供的工具的語法，讓呼叫端可以填需要的名子，比如$qubit或$qubit1，來展開成使用不同alias的表達式」。
 範本 seeds 疊在 Spec defaults 上。Trig_offset 政策由實驗室的範本工具參數宣告。
 
 範本目錄是固定資料。`bath_reset.pi2_cfg` 使用 x90 Slot，有來源時保留引用，

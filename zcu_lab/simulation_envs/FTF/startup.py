@@ -34,10 +34,10 @@ def startup(ctx: StartupContext) -> None:
         )
         fields.pop("kind")
         ctx.context.add_component(name, component.kind, fields, setup=True)
+    ctx.setup.new_point("initial")
     ctx.context.apply_alias_rows(
         tuple(AliasRow(name, value) for name, value in template.aliases.aliases.items())
     )
-    ctx.setup.new_point("initial")
 
     ctx.progress("Building offline FTF resources")
     environment = build_environment(

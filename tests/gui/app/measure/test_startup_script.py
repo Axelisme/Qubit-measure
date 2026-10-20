@@ -24,7 +24,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.resources.entry import component_registry
+from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
@@ -108,40 +108,6 @@ def run_script(ctrl: Controller, path: Path) -> None:
     )
     outcome = ctrl.operation_control.await_operation(token, 0).outcome
     assert outcome is not None and outcome.status == "finished", outcome
-
-
-def test_placeholder_facet_restores_script_session_and_saves_live_defaults(
-    startup_app, tmp_path
-):
-    behavior, assembly, ctrl, _window, probe = startup_app
-    session_path = tmp_path / "synthetic-session.json"
-    session_path.write_text(
-        '{"drive": "$source", "sensor": "$detector"}', encoding="utf-8"
-    )
-    path = write_script(
-        tmp_path,
-        "    import json\n"
-        f"    from pathlib import Path\n    path = Path({str(session_path)!r})\n"
-        "    assert hasattr(ctx, 'placeholders'), 'startup requires placeholder facet'\n"
-        "    assert ctx.placeholders.current() == {}\n"
-        "    for name, binding in json.loads(path.read_text()).items():\n"
-        "        ctx.placeholders.register(name, binding)\n"
-        "    assert ctx.placeholders.current() == {'drive': '$source', 'sensor': '$detector'}\n"
-        "    def closing():\n"
-        "        ctx.placeholders.register('sensor', '$later')\n"
-        "        path.write_text(json.dumps(ctx.placeholders.current()))\n"
-        "        p.calls.append('placeholders-saved')\n"
-        "    ctx.on_close(closing)\n",
-    )
-    run_script(ctrl, path)
-    behavior.close(assembly)
-    import json
-
-    assert json.loads(session_path.read_text()) == {
-        "drive": "$source",
-        "sensor": "$later",
-    }
-    assert probe.calls == ["placeholders-saved"]
 
 
 def test_script_selection_uses_only_default_custom_or_clean(tmp_path):
@@ -261,7 +227,7 @@ def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
     assert probe.calls == ["worker finished", "callback", "hardware"]
 
 
-def test_startup_creates_entry_seed_aliases_and_first_point(startup_app, tmp_path):
+def test_startup_creates_point_then_persists_its_aliases(startup_app, tmp_path):
     _behavior, _assembly, ctrl, _window, _probe = startup_app
     before = registry_state()
     try:
@@ -271,8 +237,8 @@ def test_startup_creates_entry_seed_aliases_and_first_point(startup_app, tmp_pat
             "    from zcu_tools.gui.session.aliases import AliasRow\n"
             "    ctx.setup.new_entry('created')\n"
             "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, setup=True)\n"
-            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n"
-            "    ctx.setup.new_point('initial')\n",
+            "    ctx.setup.new_point('initial')\n"
+            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n",
         )
         token = ctrl.start_startup(path)
         qt_until(
@@ -285,6 +251,12 @@ def test_startup_creates_entry_seed_aliases_and_first_point(startup_app, tmp_pat
         assert outcome is not None and outcome.status == "finished"
         assert ctrl.context_control.current_point_label() == "initial"
         assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+        entry = ResultEntry.open(
+            "created",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+        assert entry.load_aliases(point="initial").aliases == {"qubit": "Q1"}
         ctrl.setup_control.open_entry(EntryRequest("synthetic"))
         ctrl.setup_control.open_entry(EntryRequest("created"))
         ctrl.setup_control.use_point(PointUseRequest("initial"))

@@ -47,7 +47,7 @@ from .spec_types import (
     is_waveform_spec_type,
 )
 from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
-from .templates import PlaceholderRegistry, TemplateDef, expand_path
+from .templates import TemplateDef, expand_path
 from .waveform import (
     AbsWaveformCfg,
     ArbWaveformCfg,
@@ -80,7 +80,6 @@ __all__ = [
     "is_module_spec_type",
     "is_waveform_spec_type",
     "expand_path",
-    "PlaceholderRegistry",
     "FieldMeta",
     "get_field_meta",
     "CfgValidationContext",
