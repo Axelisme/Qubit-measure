@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-20，entry 範本讀取與建立分離、predictors 唯讀路徑與 point 來源 YAML 複製
+**Last updated:** 2026-10-20，setup／point alias 獨立讀寫與建立時複製
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -8,11 +8,15 @@
 
 `predictors_path` 是 Result 條目下 `predictors/` 的唯讀路徑。讀取 property 不建立目錄，也不列檔或驗證內容。`resources.predictor_file` 擁有其中 predictor JSON 的格式與讀寫。
 
-## 條目 alias 表
+## Setup 與 point alias 表
 
-`ResultEntry.load_aliases` 與 `save_aliases` 使用具名 `EntryAliases`，保存 entry 的 authored 有序表。`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。空 mapping 是明確空表，只有檔案不存在才回 `None`。格式、結構與非字串值錯誤直接回報，不退回 preset。
+Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<entry>/points/<label>/aliases.yaml`，與 `point.yaml`、`module_cfg.yaml` 並列。各表獨立，既有 point 缺檔不複製 setup，也不回退到 setup。
 
-Resources 只保存與驗證資料表示。Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。這不是 point、setup、ledger 或 memento，也不提供跨檔交易、multiwriter merge 或掉電恢復。
+`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 setup；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，不寫檔。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Point 的 `point.yaml` 與 `module_cfg.yaml` 必須存在，否則讀寫都報 FileNotFoundError。Alias I/O 不解析或修改這兩份參數文件。
+
+`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。格式、結構、非字串值與 I/O 錯誤直接回報，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
+
+`new_point` 從 setup 建立時，有 alias 檔才逐 byte 複製；clone 則只複製來源 point 的 alias 檔，適用同 entry label、跨 entry 路徑與 PointView。來源缺檔就保持缺檔，不讀目的 setup 的 alias。之後改 setup、來源或目的表都不影響其他表。
 
 ## 可攜 entry 範本
 
