@@ -73,6 +73,59 @@ def test_preparation_hits_preserve_source_usage_for_later_acquires():
     assert routes[0] == routes[1]
 
 
+def test_cached_small_acquire_reselects_route_after_source_usage_grows():
+    import numpy as np
+    from zcu_tools.core.simulation import PulseEnvelope
+
+    base = template(tones=1)
+    drive, readout = base.events
+    times = np.linspace(0.0, 0.128, 129)
+    waveform = PulseEnvelope(
+        tuple(times),
+        tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex)),
+    )
+    shaped = replace(
+        base,
+        events=(
+            replace(
+                drive,
+                start_us=np.zeros(2),
+                duration_us=np.full(2, 0.128),
+                gain=np.full(2, -0.002),
+                envelopes=(waveform,),
+            ),
+            replace(readout, start_us=np.full(2, 0.140)),
+        ),
+    )
+    small = request(templates=(shaped,))
+    large = replace(
+        small,
+        sequence=8,
+        point_dims=(160,),
+        loop_dims=(3, 160),
+        templates=tuple(
+            replace(shaped, points=shaped.points + 2 * i) for i in range(80)
+        ),
+    )
+    routes = []
+    for clear in (False, True):
+        source = FTFSource(settings(), DeviceManager())
+        try:
+            draw(source, small)
+            assert (
+                source.evaluations[0].paths.segments_by_kernel.get("shaped_sambe") == 2
+            )
+            draw(source, large)
+            if clear:
+                source.preparation_cache.clear()
+            draw(source, replace(small, sequence=9))
+            routes.append(source.evaluations[0].paths.segments_by_kernel)
+        finally:
+            source.close()
+    assert routes[0] == routes[1]
+    assert routes[0].get("single_tone_gate") == 2
+
+
 def test_equal_content_acquires_skip_adc_preparation_and_keep_streams_exact():
     source = FTFSource(settings(), DeviceManager())
     reference = FTFSource(settings(), DeviceManager())
