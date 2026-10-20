@@ -145,40 +145,70 @@ class StatisticsCopier:
             ch = by_channel[window.channel]
             shape = (*point_dims, window.reads, 2)
             conditional_shape = (*point_dims, window.reads, counts.shape[-1], 2)
-            if (
-                ch.sums.shape != shape
-                or ch.conditional_sums.shape != conditional_shape
-                or ch.shot_covariance.shape != (2, 2)
-            ):
-                raise ValueError(
-                    f"invalid ADC {window.channel} statistics shape or finite values"
-                )
-            # Exceptional reps/dtypes keep NumPy's original arithmetic semantics.
-            compiled_sums = compiled_reps and ch.sums.dtype == np.float64
-            finite, representable = (
-                _sums_validity(ch.sums.ravel(), request.reps)
-                if compiled_sums
-                else (np.all(np.isfinite(ch.sums)), True)
-            )
-            if not finite:
-                raise ValueError(
-                    f"invalid ADC {window.channel} statistics shape or finite values"
-                )
-            self._validate_conditional_statistics(ch)
-            # Static errors precede dynamic range errors, even on a cache miss.
-            if not representable:
-                raise ValueError("ADC sums must be finite and representable as int64")
-            if not compiled_sums:
-                rounded_sums(ch.sums / request.reps)
             channels.append(
-                ChannelStatistics(
-                    ch.channel,
-                    ch.sums.copy(),
-                    ch.conditional_sums.copy(),
-                    ch.shot_covariance.copy(),
+                self._copy_channel(
+                    ch, window.channel, request.reps, shape, conditional_shape
                 )
             )
         return RoundStatistics(counts.copy(), tuple(channels), result.raw_identity)
+
+    def _copy_channel(
+        self,
+        ch: ChannelStatistics,
+        expected_channel: int,
+        reps: int,
+        shape: tuple[int, ...],
+        conditional_shape: tuple[int, ...],
+    ) -> ChannelStatistics:
+        """Validate one borrowed ADC channel and detach all three arrays.
+
+        expected_channel labels errors with the request readout's ADC index;
+        the returned ChannelStatistics keeps the backend's ch.channel value.
+        shape is (*point_dims, reads, 2) for totals over reps; conditional_shape
+        is (*point_dims, reads, states, 2) for per-shot state-conditioned sums.
+        Point axes exclude the request's averaging axis, states matches the
+        round's state_counts last axis, and the final axis is [I, Q]. Covariance
+        must be (2, 2). reps is the request's repetition count, already checked
+        against each count row; it scales totals to per-shot int64 range.
+
+        Raise ValueError for shape/nonfinite totals first, then invalid
+        conditional sums/covariance, then unrepresentable per-shot totals.
+        Exceptional reps/dtypes retain NumPy arithmetic and its errors. Static
+        validation may reuse/update the owner's certificates, but every success
+        copies all arrays without mutating or retaining borrowed/returned arrays.
+        """
+        if (
+            ch.sums.shape != shape
+            or ch.conditional_sums.shape != conditional_shape
+            or ch.shot_covariance.shape != (2, 2)
+        ):
+            raise ValueError(
+                f"invalid ADC {expected_channel} statistics shape or finite values"
+            )
+        # Exceptional reps/dtypes keep NumPy's original arithmetic semantics.
+        compiled_reps = 0 < reps <= np.iinfo(np.int64).max
+        compiled_sums = compiled_reps and ch.sums.dtype == np.float64
+        finite, representable = (
+            _sums_validity(ch.sums.ravel(), reps)
+            if compiled_sums
+            else (np.all(np.isfinite(ch.sums)), True)
+        )
+        if not finite:
+            raise ValueError(
+                f"invalid ADC {expected_channel} statistics shape or finite values"
+            )
+        self._validate_conditional_statistics(ch)
+        # Static errors precede dynamic range errors, even on a cache miss.
+        if not representable:
+            raise ValueError("ADC sums must be finite and representable as int64")
+        if not compiled_sums:
+            rounded_sums(ch.sums / reps)
+        return ChannelStatistics(
+            ch.channel,
+            ch.sums.copy(),
+            ch.conditional_sums.copy(),
+            ch.shot_covariance.copy(),
+        )
 
     def _validate_conditional_statistics(self, ch: ChannelStatistics) -> None:
         conditional = ch.conditional_sums
