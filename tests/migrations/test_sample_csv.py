@@ -118,7 +118,7 @@ def test_legacy_conversion_requires_explicit_units(
     assert source.read_bytes() == before
 
 
-def test_pending_coordinates_and_unknown_measurements_are_reported_not_written(
+def test_pending_coordinates_are_reported_and_unknown_measurements_are_preserved(
     tmp_path: Path, entry: ResultEntry
 ) -> None:
     known = tmp_path / "known.csv"
@@ -131,16 +131,73 @@ def test_pending_coordinates_and_unknown_measurements_are_reported_not_written(
     report = sample_csv.convert_sample_csv(
         [known, unknown], entry=entry, component="Q1"
     )
-    assert report.converted_rows == 1
+    assert report.converted_rows == 2
     assert [(row.source_path, row.row_number) for row in report.pending_rows] == [
         (known, 2),
         (known, 3),
-        (unknown, 1),
     ]
     assert "dev_value" in report.pending_rows[0].reason
     assert "dev_unit" in report.pending_rows[1].reason
-    assert "T1 error (us)" in report.pending_rows[2].reason
-    assert list(entry.samples("Q1").read()["run_id"]) == ["legacy-known-1"]
+    assert list(entry.samples("Q1").read()["run_id"]) == [
+        "legacy-known-1",
+        "legacy-unknown-1",
+    ]
+    assert entry.samples("Q1").read().iloc[1]["T1 error (us)"] == "1"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_unknown_csv_fields_keep_raw_values_in_plan_and_public_readback(
+    tmp_path: Path, entry: ResultEntry, legacy: bool
+) -> None:
+    source = tmp_path / "synthetic.csv"
+    coordinate_header = "calibrated mA" if legacy else "dev_value,dev_unit"
+    first = "2" if legacy else "0.002,A"
+    second = "3" if legacy else "0.003,A"
+    source.write_text(
+        f"{coordinate_header},T1 (us),Tcomment,comment,custom,empty\n"
+        f"{first},50,known,Manual Added, 001 ,\n"
+        f"{second},60,,Manual Added,NaN,\n",
+        encoding="utf-8",
+    )
+    original = source.read_bytes()
+    plan = sample_csv.plan_sample_csv(
+        [source],
+        dev_value_column="calibrated mA" if legacy else None,
+        source_unit="mA" if legacy else None,
+    )
+    assert len(plan.rows) == 2
+    assert plan.pending == ()
+    expected = [
+        (source, 1, "comment", "Manual Added", "legacy-synthetic-1"),
+        (source, 1, "custom", " 001 ", "legacy-synthetic-1"),
+        (source, 1, "empty", "", "legacy-synthetic-1"),
+        (source, 2, "comment", "Manual Added", "legacy-synthetic-2"),
+        (source, 2, "custom", "NaN", "legacy-synthetic-2"),
+        (source, 2, "empty", "", "legacy-synthetic-2"),
+    ]
+    assert [
+        (item.source_path, item.row_number, item.column, item.value, item.run_id)
+        for item in plan.preserved_fields
+    ] == expected
+    report = sample_csv.convert_sample_csv(
+        [source],
+        entry=entry,
+        component="Q1",
+        dev_value_column="calibrated mA" if legacy else None,
+        source_unit="mA" if legacy else None,
+    )
+    assert report.converted_rows == 2
+    assert report.pending_rows == ()
+    assert report.preserved_fields == plan.preserved_fields
+    rows = entry.samples("Q1").read()
+    assert list(rows["comment"]) == ["Manual Added", "Manual Added"]
+    assert list(rows["custom"]) == [" 001 ", "NaN"]
+    assert list(rows["empty"]) == ["", ""]
+    assert list(rows["dev_value"]) == [0.002, 0.003]
+    assert list(rows["dev_unit"]) == ["A", "A"]
+    assert list(rows["t1_us"]) == [50, 60]
+    assert list(rows["tcomment"]) == ["known", None]
+    assert source.read_bytes() == original
 
 
 @pytest.mark.parametrize("second_name", ["old.csv", "old.txt"])
