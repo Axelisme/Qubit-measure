@@ -1,3 +1,9 @@
+# tolerated(file-size): The adapter catalog owns driver creation, OperationRunner
+# owns generic execution, and State and request/read models have separate owners.
+# This service keeps per-device inflight/prior, registry/cache commits, rollback
+# and handle settlement in one transition. Terminal paths commit State before
+# settlement and emit device-change and outcome facts afterward. Splitting
+# callbacks scatters that transition; short helpers/projections add no new owner.
 from __future__ import annotations
 
 import logging
