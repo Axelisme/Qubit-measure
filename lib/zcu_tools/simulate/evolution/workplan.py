@@ -66,6 +66,7 @@ class GainGroupPlan:
     frequency_ghz: float
     gains: tuple[float, ...]
     builders: tuple[GainBuildPlan, ...]
+    shift_content: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,7 @@ class CF4CarrierGroupPlan:
     gain: float
     carriers_ghz: tuple[float, ...]
     anchors_ghz: tuple[float, ...]
+    shift_content: bytes = b""
 
 
 @dataclass(frozen=True)

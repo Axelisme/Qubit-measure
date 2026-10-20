@@ -230,6 +230,14 @@ large-amplitude flux controls, filtering or flux-tail paths. Version 2 settings
 group physical values, named DC/drive lines, readout and numerics. Version 1 is
 not accepted.
 
+Readout-channel pulses before the terminal readout are cavity drives. FTF
+queries evolution's final spans, then averages the cavity-induced Stark energy
+shifts and branch dephasing over each span. Fields retain ringdown after pulse
+switch-off. The averages enter evolution as neutral `SegmentShift` values;
+evolution owns segmentation and propagation, not the cavity field equations.
+A Stark shift that reverses state-energy order raises a point/segment-specific
+error because it exceeds the dispersive model's validity. States are not reordered.
+
 Readout uses the DC model and populations in its energy basis. FTF explicitly
 calls ADC's `normalize_populations` once after `batch_populations`, before
 conditional responses or sampling. ADC owns the 1e-6 probability tolerance,
@@ -307,14 +315,14 @@ memory. They need only agree with direct means in expectation, not realization.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v11`. Integrated raw and decimated traces resolve
+The backend is `ftf-segment-v12`. Integrated raw and decimated traces resolve
 continuous CTMC jump times and cavity memory, with one physical path per shot
-shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v10`
-and earlier backends fail explicitly because their raw sampling is incompatible.
+shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v11`
+and earlier backends fail explicitly because they predate cavity-drive evolution.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal
-seed, inputs and recorded versions. Evolution's numeric version is unchanged.
+seed, inputs and recorded versions. Evolution uses `segment-engine-v5`.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

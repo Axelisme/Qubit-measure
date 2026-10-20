@@ -286,6 +286,7 @@ class T6Kernel:
             len(rows),
             dtype=[
                 ("level", "<i8", (table.level.shape[1],)),
+                ("shift", "S64"),
                 ("port", "<i8"),
                 ("frequency", "<f8"),
                 ("amplitude", "<f8"),
@@ -293,6 +294,7 @@ class T6Kernel:
             ],
         )
         keys["level"] = table.level[rows]
+        keys["shift"] = table.shift_content[rows]
         keys["port"] = table.tone_port[rows, 0]
         keys["frequency"] = table.tone_frequency_ghz[rows, 0]
         keys["amplitude"] = table.tone_amplitude[rows, 0]
@@ -324,7 +326,7 @@ class T6Kernel:
         entries = [
             _fourier(
                 _problem(
-                    source.model(tuple(int(v) for v in table.level[row])),
+                    table.model(source, row),
                     table,
                     int(row),
                     budget,

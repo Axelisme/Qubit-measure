@@ -182,8 +182,12 @@ class DOP853Kernel:
     ) -> NDArray[np.void]:
         """Return fixed-width level keys, excluding every apply-only parameter."""
         del context
-        keys = np.empty(len(rows), dtype=[("level", "<i8", (table.level.shape[1],))])
+        keys = np.empty(
+            len(rows),
+            dtype=[("level", "<i8", (table.level.shape[1],)), ("shift", "S64")],
+        )
         keys["level"] = table.level[rows]
+        keys["shift"] = table.shift_content[rows]
         return keys
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
@@ -211,7 +215,10 @@ class DOP853Kernel:
         del table, rows
         tolerances(budget)
         models = [
-            source.model(tuple(int(value) for value in key["level"])) for key in keys
+            source.shifted_model(
+                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+            )
+            for key in keys
         ]
         return prepare_models(models)
 

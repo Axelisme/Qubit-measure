@@ -1071,7 +1071,7 @@ class FloquetKernel:
         params = _parameters(table, selected)
         for key_index, representative in enumerate(representatives):
             level = tuple(int(v) for v in keys[key_index]["level"])
-            model = source.model(level)
+            model = source.shifted_model(level, bytes(keys[key_index]["shift"]))
             key = keys[key_index]
             ratio = _sampling_extent(
                 model, int(key["port"]), float(key["gain"])
@@ -1117,12 +1117,14 @@ class FloquetKernel:
             len(rows),
             dtype=[
                 ("level", "i8", (table.level.shape[1],)),
+                ("shift", "S64"),
                 ("port", "i8"),
                 ("frequency", "f8"),
                 ("gain", "f8"),
             ],
         )
         keys["level"] = table.level[rows]
+        keys["shift"] = table.shift_content[rows]
         stark = _slots(table, rows)
         keys["port"] = table.tone_port[rows, stark]
         keys["frequency"] = table.tone_frequency_ghz[rows, stark]
@@ -1160,7 +1162,9 @@ class FloquetKernel:
         candidates = candidates[_candidate_positions(table, candidates)]
         candidate_keys = self.prepare_keys(table, candidates, context)
         for key in keys:
-            model = source.model(tuple(int(v) for v in key["level"]))
+            model = source.shifted_model(
+                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+            )
             parameters = _parameters(table, candidates[candidate_keys == key])
             try:
                 entries.append(

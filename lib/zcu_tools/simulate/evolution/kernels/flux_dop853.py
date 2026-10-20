@@ -46,18 +46,21 @@ class _FluxData(NamedTuple):
     segments: Segments
     expansion: _Expansion
     waveform: _Waveform
+    energy_shifts: NDArray[np.float64]
 
 
 class _FluxContext(NamedTuple):
     drive: Context
     expansion: _Expansion
     waveform: _Waveform
+    energy_shifts: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
 class _Prepared:
     source: ModelSource
     expansion: _Expansion
+    key_count: int
 
     @property
     def nbytes(self) -> int:
@@ -81,7 +84,7 @@ def _pack_expansion(expansion: FluxExpansion) -> _Expansion:
 
 @njit(nogil=True, cache=True)
 def _rhs(time, state, context):
-    drive, expansion, waveform = context
+    drive, expansion, waveform, energy_shifts = context
     models, segments, row, model = drive
     size = models.energies.shape[1]
     rho = state.reshape(size, size)
@@ -101,7 +104,7 @@ def _rhs(time, state, context):
     basis = models.basis[model]
     h = hamiltonian(time, drive)
     for i in range(size):
-        h[i, i] -= models.energies[model, i]
+        h[i, i] -= models.energies[model, i] - energy_shifts[model, i]
     h += basis.conj().T @ fixed_h @ basis
     derivative = -2j * np.pi * (h @ rho - rho @ h)
     derivative -= models.decay[model] * rho
@@ -115,8 +118,10 @@ def _rhs(time, state, context):
 
 @njit(nogil=True, cache=True)
 def _context(data, row, model):
-    models, segments, expansion, waveform = data
-    return _FluxContext(Context(models, segments, row, model), expansion, waveform)
+    models, segments, expansion, waveform, energy_shifts = data
+    return _FluxContext(
+        Context(models, segments, row, model), expansion, waveform, energy_shifts
+    )
 
 
 @njit(nogil=True, cache=True)
@@ -164,8 +169,9 @@ class FluxDOP853Kernel:
     ) -> NDArray[np.void]:
         """Return one source-scoped key, excluding every apply-only parameter."""
         del context
-        del table
-        return np.zeros(len(rows), dtype=[("source", "i8")])
+        keys = np.zeros(len(rows), dtype=[("source", "i8"), ("shift", "S64")])
+        keys["shift"] = table.shift_content[rows]
+        return keys
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
         """Estimate integration and basis-multiplication work without timing."""
@@ -186,12 +192,12 @@ class FluxDOP853Kernel:
         Missing expansion or out-of-range loop indices raises ValueError.
         """
         source, budget = context.source, context.budget
-        del keys, rows
+        del rows
         tolerances(budget)
         expansion = source.flux_expansion()
         if any(term.loop >= table.level.shape[1] for term in expansion.terms):
             raise ValueError("flux expansion loop exceeds waveform width")
-        return _Prepared(source, _pack_expansion(expansion))
+        return _Prepared(source, _pack_expansion(expansion), len(keys))
 
     def admit_prepared(
         self,
@@ -270,13 +276,24 @@ class FluxDOP853Kernel:
             *prepared.expansion.static.shape,
         ):
             raise ValueError("flux DOP853 state/index shape mismatch")
-        if np.any(key_index != 0):
+        if np.any(key_index < 0) or np.any(key_index >= prepared.key_count):
             raise ValueError("flux DOP853 prepared index out of range")
         if not len(rows):
             return np.zeros(len(rows), dtype=np.bool_)
-        levels, inverse = np.unique(table.level[rows], axis=0, return_inverse=True)
-        models = pack_models(
-            [prepared.source.model(tuple(int(v) for v in level)) for level in levels]
+        from ._dyson_model import model_keys
+
+        _, first, inverse = np.unique(
+            model_keys(table, rows), return_index=True, return_inverse=True
+        )
+        selected_models = [
+            table.model(prepared.source, int(rows[index])) for index in first
+        ]
+        models = pack_models(selected_models)
+        shifts = np.array(
+            [
+                model.energies_ghz - prepared.source.model(model.level).energies_ghz
+                for model in selected_models
+            ]
         )
         if models.energies.shape[1] != states.shape[1]:
             raise ValueError("flux DOP853 expansion/model shape mismatch")
@@ -289,6 +306,7 @@ class FluxDOP853Kernel:
             segments,
             prepared.expansion,
             _Waveform(waveform.offsets, waveform.time_ns, waveform.flux),
+            shifts,
         )
         _run(data, (rows, inverse, plan.chain), states, controls)
         return np.zeros(len(rows), dtype=np.bool_)

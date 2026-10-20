@@ -87,7 +87,7 @@ class CommonFrameKernel:
         frames = []
         for row in rows:
             count = int(table.tones[row])
-            model = context.source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(context.source, row)
             frames.append(
                 build_common_frame(
                     model,

@@ -17,6 +17,7 @@ from .engine import (
     EvolutionResult,
     PathDiagnostics,
     TimelineBatch,
+    segment_spans,
 )
 from .model import DriveSource, NumericModel
 from .secular import (
@@ -28,6 +29,7 @@ from .secular import (
     ModelSource,
     SecularDrive,
     SecularModel,
+    SegmentShift,
 )
 from .state import Basis, DensityState, Populations, batch_populations, populations
 from .telemetry import FamilyRouting

@@ -12,21 +12,25 @@ from ._secular import coherence_decay, population_generator, relaxation_decay
 
 def model_keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
     """Encode flux levels; the engine supplies the round's DC-model namespace."""
-    levels = np.ascontiguousarray(table.level[rows])
-    return levels.view(
-        np.dtype((np.void, levels.dtype.itemsize * levels.shape[1]))
-    ).ravel()
+    keys = np.empty(
+        len(rows), dtype=[("level", "i8", table.level.shape[1]), ("shift", "S64")]
+    )
+    keys["level"] = table.level[rows]
+    keys["shift"] = table.shift_content[rows]
+    return keys
 
 
 def model_groups(
     table: SegmentTable, rows: NDArray[np.int64], source: ModelSource
 ) -> Iterator[tuple[NDArray[np.int64], SecularModel]]:
     """Yield row positions and models, looping only over unique flux levels."""
-    levels, inverse = np.unique(table.level[rows], axis=0, return_inverse=True)
-    for index, level in enumerate(levels):
+    _, first, inverse = np.unique(
+        model_keys(table, rows), return_index=True, return_inverse=True
+    )
+    for index, representative in enumerate(first):
         yield (
             np.flatnonzero(inverse == index),
-            source.model(tuple(int(v) for v in level)),
+            table.model(source, int(rows[representative])),
         )
 
 

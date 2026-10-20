@@ -50,7 +50,7 @@ def direct_preferred(
         positions = np.flatnonzero(inverse == group)
         selected = rows[positions]
         row = selected[0]
-        model = source.model(tuple(int(v) for v in table.level[row]))
+        model = table.model(source, row)
         scale = len(model.energies_ghz) / 16
         width = float(np.ptp(model.energies_ghz))
         norms = np.array(
