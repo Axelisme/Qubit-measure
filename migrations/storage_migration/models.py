@@ -37,6 +37,10 @@ class KeyRule:
     non-None, wraps a value in one named field for a complete container write;
     only value actions support it. requires_keys lists explicit, non-expression
     keys required in the same source JSON; absent evidence leaves this pending.
+    candidate_path optionally names a concrete library leaf for module scalar
+    deduplication, never a role or active slot. Only an equal owner-resolved value
+    in the successfully converted same-context library may replace the scalar.
+    Missing, invalid or different candidates preserve the scalar in component.ext.
     """
 
     old_key: str
@@ -45,6 +49,7 @@ class KeyRule:
     reason: str
     wrap_key: str | None = None
     requires_keys: tuple[str, ...] = ()
+    candidate_path: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -295,7 +300,8 @@ class KeyMappingItem:
     For comparison rows, remove means equal values deduplicated against that
     projection; preserved means different or unmatched values retained at
     destination_keys. reason records both source values for comparison.
-    library_kind is module/waveform for a library entry, or None for meta keys.
+    library_kind is module/waveform for a library entry or a scalar deduplicated
+    against that library family; other meta keys use None.
     Same-name library keys in different source partitions remain distinct.
     """
 

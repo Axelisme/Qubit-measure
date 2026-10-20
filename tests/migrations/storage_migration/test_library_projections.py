@@ -269,7 +269,7 @@ def test_unmatched_pi_scalars_keep_original_values_in_their_context(
     payload = _payload()
     modules = payload["modules"]
     assert isinstance(modules, dict)
-    values = dict(_SCALARS)
+    values: JsonObject = dict(_SCALARS)
     if mode == "different":
         # These equal unrelated leaves, not the declared candidates.
         values = {"pi_gain": 0.9, "pi_len": 2.0, "pi2_gain": 0.8, "pi2_len": 4.0}

@@ -9,6 +9,7 @@ from pydantic import JsonValue, TypeAdapter
 from zcu_tools.datafile import (
     JsonObject,
 )
+from zcu_tools.resources.context.library import LibrarySnapshot
 from zcu_tools.resources.document_store import DocumentStore, YamlMap, YamlValue
 from zcu_tools.resources.entry import (
     EditView,
@@ -32,7 +33,6 @@ from .evidence import has_legacy_expression
 from .models import (
     KeyMappingItem,
     KeyRule,
-    MappingAction,
     MigrationMapping,
 )
 from .params_json import convert_params_json
@@ -148,25 +148,56 @@ def _accept_parameter(
 
 def _map_module_scalar(
     session: MigrationSession,
-    source: Path,
-    rule: KeyRule | None,
-    mapping: MigrationMapping,
+    row: KeyMappingItem,
     view: EditView,
     value: JsonValue,
-) -> tuple[MappingAction, str | None, str]:
-    if rule is None:
-        raise MigrationInputError("A module scalar requires its declared key rule")
-    path = _module_scalar_destination(session, source, rule, mapping)
+    library: LibrarySnapshot | None,
+    candidate: str | None,
+) -> None:
+    if library is not None and candidate is not None:
+        try:
+            converted = library.lookup(candidate)
+        except (ValueError, KeyError, TypeError):
+            # A valid Spec can still lack materialization evidence (e.g. an asset).
+            # It cannot justify removing the independently supplied scalar.
+            converted = None
+        if (
+            converted is not None
+            and converted.present
+            and isinstance(value, bool) == isinstance(converted.value, bool)
+            and value == converted.value
+        ):
+            if row.new_file is None:
+                raise MigrationInputError("A module scalar requires its context file")
+            clear_pending(session, row.old_file, row.old_key)
+            record_key_mapping(
+                session,
+                replace(
+                    row,
+                    action="remove",
+                    new_file=row.new_file.parent / "module_cfg.yaml",
+                    new_path=candidate,
+                    destination_keys=tuple(candidate.split(".")),
+                    library_kind="module",
+                    reason="Same value as the declared same-context library leaf; duplicate omitted",
+                ),
+            )
+            return
+    path = row.new_path
     if path is None:
-        reason = f"{rule.reason}; module_cfg conversion owns this value"
-        record_pending(session, source, rule.old_key, reason)
-        return "module", rule.target_path, reason
+        _preserve_parameter(session, view, row, value, legacy=True)
+        return
     view.set(path, _YAML_VALUE.validate_python(value, strict=True))
-    clear_pending(session, source, rule.old_key)
-    return (
-        "value",
-        path,
-        "No converted matching module; preserve scalar in component.ext",
+    clear_pending(session, row.old_file, row.old_key)
+    record_key_mapping(
+        session,
+        replace(
+            row,
+            action="value",
+            new_path=path,
+            destination_keys=tuple(path.split(".")),
+            reason="No equal owner-resolved candidate; preserve scalar in component.ext",
+        ),
     )
 
 
@@ -287,10 +318,11 @@ def _map_parameters(
     session: MigrationSession,
     source: Path,
     target: Path,
-    values: JsonObject,
     mapping: MigrationMapping,
     view: EditView,
+    library: LibrarySnapshot | None,
 ) -> None:
+    values = _JSON.validate_json(source.read_text(encoding="utf-8"), strict=True)
     units = resolve_flux_units(session, source, values, mapping)
     consumed = apply_flux_groups(session, source, target, view, mapping, units)
     rules = {rule.old_key: rule for rule in mapping.rules}
@@ -344,10 +376,16 @@ def _map_parameters(
                 "Legacy expression preserved without evaluation",
             )
         if action == "module":
-            action, path, reason = _map_module_scalar(
-                session, source, rule, mapping, view, value
+            _map_module_scalar(
+                session,
+                replace(row, new_path=_module_scalar_destination(rule, mapping)),
+                view,
+                value,
+                library,
+                rule.candidate_path,
             )
-        elif action == "pending":
+            continue
+        if action == "pending":
             _preserve_parameter(
                 session,
                 view,
@@ -356,7 +394,7 @@ def _map_parameters(
                 legacy=False,
             )
             continue
-        elif action in ("value", "stderr"):
+        if action in ("value", "stderr"):
             unresolved = _accept_parameter(view, rule, value, values, mapping)
             if unresolved is None:
                 clear_pending(session, source, key)
@@ -371,13 +409,7 @@ def _map_parameters(
                     legacy=True,
                 )
                 continue
-        new_file = (
-            target.parent / "module_cfg.yaml"
-            if action == "module"
-            else target
-            if action != "remove"
-            else None
-        )
+        new_file = target if action != "remove" else None
         record_key_mapping(
             session,
             KeyMappingItem(
@@ -388,8 +420,6 @@ def _map_parameters(
                 if path is not None and rule.wrap_key is not None
                 else path
                 if path is not None
-                else "general.ext"
-                if action == "pending"
                 else None,
                 action=action,
                 reason=reason,
@@ -398,29 +428,11 @@ def _map_parameters(
         )
 
 
-def _module_scalar_destination(
-    session: MigrationSession,
-    source: Path,
-    rule: KeyRule | None,
-    mapping: MigrationMapping,
-) -> str | None:
-    if rule is None or rule.target_path is None:
+def _module_scalar_destination(rule: KeyRule, mapping: MigrationMapping) -> str | None:
+    if rule.target_path is None:
         return None
-    segments = rule.target_path.split(".")
-    name = mapping.roles.get(segments[0], segments[0])
-    slot = ".".join((name, *segments[1:3]))
-    converted = {
-        row.new_path
-        for row in session.manifest.report.key_mappings
-        if row.old_file == source.with_name("module_cfg.yaml")
-        and row.library_kind == "module"
-        and row.action == "module"
-    }
-    if any(
-        item.reference_path == slot and item.target_path in converted
-        for item in mapping.module_rules
-    ):
-        return None
+    component = rule.target_path.split(".")[0]
+    name = mapping.roles.get(component, component)
     if name not in mapping.components:
         return None
     return f"{name}.ext.{rule.old_key}"
@@ -485,7 +497,7 @@ def _convert_context(
         if dry_setup is not None
         else None
     )
-    convert_module_cfg(
+    library = convert_module_cfg(
         session,
         entry=entry,
         label=None if is_setup else label,
@@ -495,12 +507,11 @@ def _convert_context(
     )
     if source.is_file():
         session.baseline(source)
-        values = _JSON.validate_json(source.read_text(encoding="utf-8"), strict=True)
         if view is not None:
             with edit_parameter(session, source, view) as draft:
-                _map_parameters(session, source, target, values, mapping, draft)
+                _map_parameters(session, source, target, mapping, draft, library)
         elif dry_context is not None:
-            _map_parameters(session, source, target, values, mapping, dry_context)
+            _map_parameters(session, source, target, mapping, dry_context, library)
         else:
             raise MigrationInputError(
                 "Context mapping requires an entry or dry-run draft"
