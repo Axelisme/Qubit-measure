@@ -52,6 +52,7 @@ from ._converters import module_converter
 from ._display import field_display
 from ._seeds import (
     complete_input,
+    declaration_seed,
     inline_wrapper,
     persistent_input,
     scalar_seed,
@@ -399,6 +400,11 @@ def editable_spec(
             derived.default = PydanticUndefined
             derived.default_factory = None
         display = _spec_display(name, info)
+        if isinstance(seed, dict) and "hidden" in seed:
+            derived.default = seed["hidden"]
+            derived.default_factory = None
+            derived.validate_default = True
+            display = replace(display or Display(), hidden=True)
         if display is not None:
             derived.metadata.append(display)
         namespace[name] = derived
@@ -677,7 +683,7 @@ class ModuleField:
             seeds = template_seed_tree(template, catalog)
         if isinstance(self.node, Slot):
             for path, value in self.node.set.items():
-                set_path(seeds, path, scalar_seed(value))
+                set_path(seeds, path, declaration_seed(value))
         if seeds:
             self.editable = tuple(editable_spec(spec, seeds) for spec in self.specs)
             module = union_type(self.editable)

@@ -89,8 +89,15 @@ FTF roles 的 f1、f2、coupler、mux、tone index 與 tone_count 供驗證、�
 
 Bath reset freq 的 `tested_reset.pi2_cfg.phase` 移除舊 lock，由 Template 的 `set` 給初值 90，欄位可編輯。
 `run()` 組 program 時使用 cfg 的 phase，不覆寫為固定值。Guide 註明 90 是建議的 tomography offset。
-現有 Template 沒有 nested Hidden／readonly 作者入口，且只有這一處需要，因此不新增 nested metadata API。
-不複製共用 module 型別，也不另建局部 cfg 型別。
+Run 會覆寫的必填欄位由實驗 form 顯式宣告 `Hidden(合法值)`。普通 core tree、
+`Template.set` 與 `Slot.set` 的 dotted Spec 路徑共用這個節點。生成器供值並隱藏欄位，
+填入值仍受 core／Spec 驗證。沒有參數的 `Hidden()` 保留普通 core 欄位的 default 還原用途。
+生成器不推導 sweep 與 module 的關係，不另設 hidden_paths，也不改 core input 型別或 Run。
+Bath reset phase 仍可編輯。這個入口不擴充 nested readonly，不複製共用 module 型別，
+也不另建局部 cfg 型別。
+
+使用者於 2026-10-20 裁定：「應該有更簡單的做法，比如就隨便填一個合法值，或是給adapter生成時說明哪些路徑不重要。」
+同日補充：「不只是onetone/freq有這個問題」。各實驗依自己的 Run 覆寫路徑宣告 Hidden，不靠欄位同名推定。
 
 缺 Slot 來源時，optional 欄位停用且有效，required 欄位留空且 Invalid。
 沒有 Slot fallback 或 init 模式。需要選來源時，make_form 明寫 if／else。

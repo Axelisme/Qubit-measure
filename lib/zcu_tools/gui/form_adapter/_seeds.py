@@ -4,10 +4,12 @@ from collections.abc import Mapping
 from typing import Literal, get_args, get_origin
 
 from pydantic import BaseModel, JsonValue
+from pydantic_core import PydanticUndefinedType
 
 from zcu_tools.cfg_model import (
     ConfigBase,
     Expr,
+    Hidden,
     Slot,
     Template,
     TemplateDef,
@@ -37,6 +39,10 @@ def slot_key(slot: Slot, env: FormEnv) -> str | None:
 
 
 def scalar_seed(seed: TemplateSeed) -> JsonValue:
+    if isinstance(seed, Hidden):
+        if isinstance(seed.value, PydanticUndefinedType):
+            raise ValueError("Hidden module seeds require an explicit literal value")
+        return scalar_seed(seed.value)
     if isinstance(seed, Expr):
         return {"expr": seed.text}
     if isinstance(seed, complex):
@@ -44,6 +50,15 @@ def scalar_seed(seed: TemplateSeed) -> JsonValue:
     if isinstance(seed, Slot):
         raise TypeError("Slot seeds require captured source resolution")
     return seed
+
+
+def declaration_seed(seed: TemplateSeed) -> JsonValue:
+    """Retain Hidden metadata only in the private model-declaration seed tree.
+
+    Actual input uses scalar_seed instead, so this marker never becomes input.
+    """
+    value = scalar_seed(seed)
+    return {"hidden": value} if isinstance(seed, Hidden) else value
 
 
 def set_path(data: dict[str, JsonValue], path: str, value: JsonValue) -> None:
@@ -391,10 +406,10 @@ def template_seed_tree(
         if isinstance(seed, Slot):
             nested: dict[str, JsonValue] = {}
             for child_path, value in seed.set.items():
-                set_path(nested, child_path, scalar_seed(value))
+                set_path(nested, child_path, declaration_seed(value))
             set_path(data, path, nested)
         else:
-            set_path(data, path, scalar_seed(seed))
+            set_path(data, path, declaration_seed(seed))
     return data
 
 

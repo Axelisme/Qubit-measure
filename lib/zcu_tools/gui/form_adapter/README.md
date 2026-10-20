@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-20，Log／List 的正值政策、logical observation readonly 與通用佔位符
+**Last updated:** 2026-10-20，Hidden 合法填入值與 Template／Slot 路徑
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -50,6 +50,24 @@ Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、
 Module 子欄位唯讀不移除 library key 選項。Module 節點本身標唯讀則固定整個 module 子樹，包含 ref／inline 選擇與所有子欄位，不論初值是 ref 或 inline。不另設 selector-only 宣告，也不自動強制 inline。
 
 只為組實驗 cfg 存在的固定值不進 Form 或實驗 cfg 型別，由實驗的 `run()` 補齊。供驗證、analysis 或 writeback 使用的固定輸入仍可保留為唯讀欄位。具體分類由 [ADR-0073](../../../../docs/adr/0073-measure-form-derivation.md#form-的形狀與初值) 定義。
+
+## Hidden 填入值
+
+`Hidden(value)` 隱藏欄位並提供明確的 literal。沒有 core default 的必填欄位也可使用，
+但填入值仍受 core／Spec 的型別、範圍與交叉欄位驗證。普通 core tree 在 `to_cfg` 供值；
+module 的 generated input 使用該 literal 作為隱藏欄位的初值與 default，不新增 readonly。
+`Hidden()` 不帶值時保留普通 core 欄位的省略語意，由 core default 還原；必填且無 default 時
+在 Form 建構報錯。Module seed 必須明填值，`Hidden(None)` 表示 literal None，不是省略。
+
+實驗 form 在自己的 `Template.set`／`Slot.set` 以 dotted Spec 路徑標出 Run 會覆寫的欄位，
+例如 `Template("readout", set={"freq": Hidden(0.0)})`。巢狀 waveform 路徑寫
+`"waveform.length"`，不含 generated input 的 `module` wrapper。Slot 的 `set` 仍只作用於
+`copy=True` 的 inline 初值；未複製的 ref 仍使用固定 library 的完整有效值，不改 library。
+Inline 選項共用該欄位的隱藏政策。真正 user-owned 欄位照常顯示與驗證。
+
+生成器不推導來源，不新增 sweep→module 關係或另一份 hidden_paths 表。Run 照原樣覆寫，
+core input 型別不變。只有經 Run 確認會覆寫的欄位才能這樣宣告，不能以隱藏規避無效設定。
+Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/0073-measure-form-derivation.md#form-的形狀與初值)。
 
 ## 固定元素宣告
 
