@@ -12,6 +12,7 @@ from .models import (
     ModuleFilePublication,
 )
 from .paths import contained_path, source_identity, source_removed, validate_segment
+from .processed_spectrums import LEGACY_PATH, SPECTRUM_PATH
 from .state import MigrationSession, file_hash
 
 
@@ -57,6 +58,15 @@ def _validate_file_paths(
         ):
             raise MigrationInputError("manifest: invalid samples publication paths")
         validate_segment(state.destination.stem, "sample component")
+    elif state.operation in ("spectrums", "spectrums_legacy"):
+        relative = SPECTRUM_PATH if state.operation == "spectrums" else LEGACY_PATH
+        if (
+            state.source != source.result_path / SPECTRUM_PATH
+            or state.destination != destination.result_path / relative
+        ):
+            raise MigrationInputError(
+                "manifest: invalid processed spectrum publication paths"
+            )
     elif state.operation == "native":
         assignment = next(
             (run for run in manifest.runs if run.source == state.source), None

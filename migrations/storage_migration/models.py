@@ -262,7 +262,9 @@ class KeyMappingItem:
 
     old_file is an absolute source file; old_key is the legacy key or a dotted
     display label for nested analysis data. source_keys is the exact sequence of
-    literal JSON keys when recorded, authoritative over that display label; None
+    literal JSON keys (or HDF5 object path segments) when recorded, authoritative
+    over that display label. HDF5 attribute rows use an attribute: display prefix
+    and append the literal attribute name to the owning object path; None
     means no exact source-key sequence was recorded. A value row with source_keys
     identifies content transferred to a formal destination, not a whole section
     implied by a summary row. Pending display labels can retain their historical
@@ -302,8 +304,11 @@ class KeyMappingItem:
 class FileMigrationItem:
     """Completed file action with absolute source/destination and SHA256 hashes.
 
-    status is converted for native or typed module cfg, moved after Labber source removal, or
-    preserved for a byte-identical copy. Pending and failed actions are separate.
+    status is converted for native, samples, typed module cfg or processed spectra,
+    moved after Labber source removal, or
+    preserved for a byte-identical copy or residual processed HDF5 content.
+    Residual preservation retains values/dtypes, not whole-file byte identity.
+    Pending and failed actions are separate.
     """
 
     source: Path
@@ -403,8 +408,9 @@ class MigrationReport:
 class MigrationFileState:
     """Manifest-owned file publication state; paths are absolute and resolved.
 
-    operation is copy, move_labber, native or samples (CSV to JSONL).
-    source_hash is baseline SHA256; samples/native output need not equal it.
+    operation is copy, move_labber, native, samples (CSV to JSONL), spectrums
+    (formal collection) or spectrums_legacy (residual HDF5 preservation).
+    source_hash is baseline SHA256; converted/residual output need not equal it.
     destination_hash is None while planned, then SHA256 of prepared temp bytes.
     temp_path names only this action's owned same-directory temporary file.
     phase is planned/prepared/published, or source_removed for move_labber only.
@@ -412,7 +418,9 @@ class MigrationFileState:
     A published native is not removable-source evidence until validation passes.
     """
 
-    operation: Literal["copy", "move_labber", "native", "samples"]
+    operation: Literal[
+        "copy", "move_labber", "native", "samples", "spectrums", "spectrums_legacy"
+    ]
     source: Path
     destination: Path
     temp_path: Path

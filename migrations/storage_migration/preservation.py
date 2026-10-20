@@ -13,6 +13,7 @@ from .models import (
     MigrationSource,
 )
 from .paths import contained_path, source_removed, validate_segment
+from .processed_spectrums import LEGACY_PATH, SPECTRUM_PATH
 from .state import MigrationSession, clear_pending, file_hash, record_pending
 
 _RESULT_RESERVED = frozenset(
@@ -42,6 +43,7 @@ class _CopyTarget:
     destination: Path
     point: str | None = None
     reserved: bool = False
+    operation: str = "copy"
 
 
 def _result_target(
@@ -53,7 +55,7 @@ def _result_target(
     relative = path.relative_to(source.result_path)
     parts = relative.parts
     top = parts[0]
-    if relative == Path("params.json"):
+    if relative in (Path("params.json"), SPECTRUM_PATH):
         return None
     if relative == Path("samples.csv"):
         plan = plan_sample_csv(
@@ -109,6 +111,22 @@ def _copy_targets(
             target = _result_target(path, source, destination, declarations)
             if target is not None:
                 targets.append(target)
+    processed = source.result_path / SPECTRUM_PATH
+    if processed.is_file():
+        targets.extend(
+            (
+                _CopyTarget(
+                    processed,
+                    destination.result_path / SPECTRUM_PATH,
+                    operation="spectrums",
+                ),
+                _CopyTarget(
+                    processed,
+                    destination.result_path / LEGACY_PATH,
+                    operation="spectrums_legacy",
+                ),
+            )
+        )
     for path in sorted(source.database_path.rglob("*")):
         if not path.is_file():
             continue
@@ -153,7 +171,10 @@ def _check_existing(
             for state in (() if manifest is None else manifest.files)
             if state.source == target.source
             and state.destination == path
-            and state.operation in ("copy", "move_labber")
+            and (
+                state.operation == target.operation
+                or (target.operation == "copy" and state.operation == "move_labber")
+            )
             and state.phase in ("prepared", "published", "source_removed")
         ),
         None,
@@ -242,7 +263,9 @@ def preserve_result_files(session: MigrationSession) -> None:
     """
     report = session.manifest.report
     for target in _copy_targets(report.source, report.destination, report.declarations):
-        if target.source.is_relative_to(report.source.result_path):
+        if target.operation == "copy" and target.source.is_relative_to(
+            report.source.result_path
+        ):
             _publish_target(session, target)
 
 

@@ -40,6 +40,7 @@ from .models import (
 )
 from .paths import contained_path, source_removed
 from .preservation import preserve_database_files, preserve_result_files
+from .processed_spectrums import convert_processed_spectrums
 from .state import MigrationSession, clear_pending, record_pending
 
 
@@ -336,6 +337,7 @@ def convert_data(
     Other unknown Database files keep entry-relative paths. Only validated native
     permits individual source removal; full cleanup still requires both parts.
     dry_run invokes only the pure cfg check and never writes or validates native."""
+    convert_processed_spectrums(session)
     preserve_result_files(session)
     source_root = session.manifest.report.source.database_path
     evidence = (

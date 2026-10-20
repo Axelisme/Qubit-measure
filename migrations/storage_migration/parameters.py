@@ -441,12 +441,18 @@ def _convert_context(
         )
         if not is_setup:
             _retain_point_slots(entry, label, mapping)
+    dry_context = (
+        (dry_setup if is_setup else EditView(snapshot(dry_setup)))
+        if dry_setup is not None
+        else None
+    )
     convert_module_cfg(
         session,
         entry=entry,
         label=None if is_setup else label,
         source=candidate / "module_cfg.yaml",
         mapping=mapping,
+        dry_view=dry_context,
     )
     if source.is_file():
         session.baseline(source)
@@ -454,9 +460,8 @@ def _convert_context(
         if view is not None:
             with view.edit() as draft:
                 _map_parameters(session, source, target, values, mapping, draft)
-        elif dry_setup is not None:
-            draft = dry_setup if is_setup else EditView(snapshot(dry_setup))
-            _map_parameters(session, source, target, values, mapping, draft)
+        elif dry_context is not None:
+            _map_parameters(session, source, target, values, mapping, dry_context)
         else:
             raise MigrationInputError(
                 "Context mapping requires an entry or dry-run draft"

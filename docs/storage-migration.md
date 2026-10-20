@@ -141,6 +141,7 @@ label 不合法時，由使用者決定新名，報告記舊名、新名與理�
 | exps 以外的圖 | `result/<name>/figures/<原相對路徑>` | 第 7 步 |
 | `samples.csv` | `samples/<Q>.jsonl` | 第 7 步。有列轉不了時，原檔另外原樣放 `result/<name>/samples.csv`。 |
 | `arb_waveforms/**`（result 或 Database） | `Database/<name>/arb_waveforms/**` | 第 7 步 |
+| `data/fluxdep/spectrums.hdf5` | 新 entry 同相對位置；未轉原文另存 `data/fluxdep/spectrums.legacy.hdf5` | 第 7 步的 processed spectrum 規則。不能整檔當 generic raw copy。 |
 | `autofluxdep_runs/**`、其他不支援的 result 檔 | `result/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
 | Database 的 Labber 檔 | 原檔一律放 `Database/<name>/Labber/<原相對路徑>`；能轉的另產 `Database/<name>/runs/<run_id>/data.h5` | 第 8 步 |
 | 其他 Database 檔 | `Database/<name>/<原相對路徑>` | 第 7 步，原樣複製。 |
@@ -361,9 +362,12 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 
 舊 `module_cfg.yaml` 的 `modules`、`waveforms` mapping 不是新 library，只換 header 不算轉換。逐筆建立「舊 family、舊 key、新 canonical key、引用位置」的對照，轉成 `components.<Q>.{pulses,readout,reset,waveforms}.<name>`，再把 point 的 module slot 指到新 key，例如 `components.Q0.module.x180: Q0.pulses.pi_amp`。
 
-1. 用 [cfg_model](../lib/zcu_tools/cfg_model/README.md) 的 `module_spec_from_raw(raw)`、`waveform_spec_from_raw(raw)` 驗證每筆候選；child key 用 `remap_module_references`、`remap_waveform_references` 改。expression 不求值，缺的必要欄位不猜。
-2. readout 要轉成平鋪的 `readout/pulse` Spec：generator 是 `gen_ch`，ADC 是 `ro_ch`，只有一個 `freq`。不能確定舊 `pulse_cfg`、`ro_cfg` 怎麼組合時，該筆列 pending。
-3. 用 owner 提交並讀回：
+1. 先重建已證實的歷史 shape。完整的舊 Pulse 至少有 ch、nqz、freq、gain、waveform；沒有其他 type 證據且缺 type 時才補 `type: pulse`，不按名稱猜。歷史 `Pulse.auto_fill` 的 phase、pre_delay、post_delay 預設都是 0.0，已有值保持不動。desc 與 mixer_freq 是正式欄位，不能丟掉。
+2. 舊 `type: base` 轉成平鋪的 `readout/pulse`。pulse_cfg.ch 改名 gen_ch，pulse_cfg 的頻率、gain、phase、延遲、mixer_freq、waveform 保持原值；ro_cfg 的 ro_ch、ro_length、trig_offset 移到外層。外層 desc 是正式描述，內層 pulse_cfg.desc 沒有獨立對應，要留原文。沒有 ro_freq 時，ADC 使用 pulse_cfg.freq。明示 ro_freq 等於 pulse_cfg.freq 時共用正式 freq，不另存同值；不同時現行單一 freq 無法同時表達，整條原文保全，不建該條 Spec，pending 記兩個頻率。
+3. 舊 `type: bath` 改為 `reset/bath`。cavity_tone_cfg、qubit_tone_cfg、pi2_cfg 是三個已知 Pulse 位置，分別補 type、套用上述 defaults，保留其 desc、mixer_freq、phase 等正式值。name、block_mode 等未表達欄位留原位置，不把整條成功 Spec 再存一份。
+4. 用 [cfg_model](../lib/zcu_tools/cfg_model/README.md) 的 `partition_module_spec(raw)`、`partition_waveform_spec(raw)` 分離未知欄位，取得 typed spec 與 unrecognized 樹。輸入此時必須已是現行欄名與 discriminator。輸出仍經 `module_spec_from_raw`／`waveform_spec_from_raw` strict 驗證。Child key 用 `remap_module_references`、`remap_waveform_references` 改；expression 不求值，缺的必要欄位不猜。只在未知欄位中的 expression 原樣保全，不阻斷其餘正式輸出。
+5. 把未表達欄位樹寫進該 context 的 `general.ext.legacy_module_cfg[原section][原name]`。未知 section 保持原 section 名。完整不支援或沒有 mapping 的條目才存整條原文，不列 pending。支援項缺欄位或 child mapping 仍 pending，原文也要在此可讀。只留未轉 leaf，移除空分支，不把成功值存兩份。透過 view.edit() 設定整個 general.ext mapping，可保留含點號的 literal key。例如未知 `modules.drive.old.key` 若原本 old.key 是單一 key，就寫 `legacy_module_cfg: {modules: {drive: {old.key: 原值}}}`，不要拆開它。報告的 preserved row 用 literal source_keys／destination_keys、new_file 與 new_path=None 定位。
+6. 用 owner 提交並讀回：
 
 ```python
 from zcu_tools.cfg_model import waveform_spec_from_raw
@@ -376,9 +380,9 @@ print(entry.module_library(label).snapshot().waveform_spec("Q0.waveforms.drive")
 `entry` 依第 9 步的方式註冊 component models 後開啟。provenance 由 owner 產生，不手寫事件或 run_id。
 一般讀取 library 時會自動備份並移除壞掉的條目，所以先在工作副本試轉候選，不拿真檔試錯。
 
-**根層 `module_cfg.yaml`** 用同樣規則轉成 entry 的 setup library，新 point 從 setup library 繼承。目前 main 的 `module_library` 只接受 point label；setup library 的支援 land 前，根層 module_cfg 列 temporary-pending，land 後再補。
+**根層 `module_cfg.yaml`** 用同樣規則經 `entry.module_library()` 寫入 setup library。Point 自己的庫用 `entry.module_library(label)`，新 point 不自動複製 setup library。Slots 只指向成功發布的 Spec，按 mapping 次序選第一個成功候選；不能用 pending 或只保全原文的名稱建立引用。
 
-完成條件：每筆舊 module 和 waveform 都已轉換並讀回，或逐筆列 pending。空 library 本身合法，但不能說成「舊 library 已全部轉換」。
+完成條件：每筆舊 module 和 waveform 都已經 owner 提交並讀回，或在新 context 的 legacy_module_cfg 可讀且報告標 preserved。真正缺轉換證據的支援項另列 pending。空 library 本身合法，但不能說成「舊 library 已全部轉換」。
 
 ## 7. 複製圖、樣本與保全檔
 
@@ -428,6 +432,41 @@ print(report)
   回傳的 pending 列也逐列記入報告。Legacy CSV 缺使用者宣告的值欄或單位時，相關列仍 pending，完整 CSV 另保留在新 entry 的 `samples.csv`；v2 CSV 自帶 `dev_value/dev_unit`，不需要 legacy 宣告。非法資料須列出錯誤與定位，不能記成已轉換。用法細節見 [migrations README](../migrations/README.md#sample-csv--jsonl)。
 
 完成條件：每對 hash 相同；每張 `exps` 圖都掛在正確的 point。helper 中斷可能留下半份目的檔，記入 `unfinished_publications`，從備份核對後再補。
+
+### Processed spectrum
+
+舊 `data/fluxdep/spectrums.hdf5` 不能只複製到新 entry。從 `$BR` 的備份讀取，正式目的為 `$NEW_R/data/fluxdep/spectrums.hdf5`，剩餘原文目的為同目錄 `spectrums.legacy.hdf5`。現有 processed publication 只重用 matching manifest 的 prepared/published ownership 且 hash 一致的目的，不認領任意同名檔。遇到衝突不覆寫。手動接手時先保存已有目的及 hash，依原文逐項比對，不按同名檔猜測已完成。
+
+以每個原 group 名建立一個 `SpectrumResult`。欄位依下表轉換，陣列不改值或 dtype，不按數字量級換算單位。
+
+| 舊位置 | 正式位置／公式 |
+| --- | --- |
+| `mA_c` | `flux_half` |
+| `period` | `flux_period` |
+| `mA_c`、`period` | `flux_int = mA_c + 0.5 * period` |
+| `spectrum/mAs`、`points/mAs` | 同 section 的 `dev_values` |
+| `spectrum/fpts`、`points/fpts` | 同 section 的 `freqs`，不再做 Hz→GHz 換算 |
+| 各 section 的 `mAs`、group 的 `mA_c/period` | `fluxs = (mAs - mA_c) / period + 0.5` |
+| `spectrum/data` | `spectrum/signals`，按下述軸向規則處理 |
+| 字串 group attr `type` | 正式 group attr `type`，原字串不改 |
+
+`mAs/fpts/data` 格式曾使用兩種軸向。若兩條軸長度不同，shape 為 `[len(mAs), len(fpts)]` 就直接使用，反過來就轉置。現行 `signals` 的第一維是 device，第二維是 frequency。平方矩陣缺歷史版本證據時不能猜軸向，整個 group 先留 companion，報 permanent-pending 並指出缺少版本證據。其他 group 照常轉換。中繼格式的 `flx_half/flx_int/flx_period` 改名為 `flux_half/flux_int/flux_period`，已有的 `dev_values/fluxs/freqs/signals` 直接沿用。非字串 `type` 留 companion，不捏造 OneTone／TwoTone。
+
+公式與欄位的依據是 repo Git 的實際讀寫程式。`3904bec70:lib/zcu_tools/analysis/fluxdep/persistence.py` 寫讀 `mA_c/period/mAs/fpts/data`。`187e2d75a:notebook_md/analysis/fluxdep_fit.md` 使用 `mA_e=mA_c+0.5*period`。`8d08978c2:lib/zcu_tools/simulate/__init__.py` 定義上述 fluxs 公式。`646fb3e33:lib/zcu_tools/analysis/fluxdep/processing.py` 的舊陣列是 frequency-major，`8d08978c2:lib/zcu_tools/notebook/persistance.py` 是 device-major。`664019b8d` 把 `flx_*` 改為 `flux_*`。
+
+正式檔交給現有 owner，不手寫其 HDF5 layout：
+
+```python
+from zcu_tools.analysis.fluxdep.io import dump_spectrums, load_spectrums
+
+# converted maps each original group name to the SpectrumResult built above.
+dump_spectrums(str(new_r / "data/fluxdep/spectrums.hdf5"), converted)
+restored = load_spectrums(str(new_r / "data/fluxdep/spectrums.hdf5"))
+```
+
+逐一核對 restored 的 scalar、兩條軸、picked points、signals 數值及 dtype。另用 h5py 的 `File(..., "x")` 建 companion，只寫尚未轉換的 datasets、groups 與 attrs。每項都沿原 hierarchy，dataset 可用 h5py `Group.copy` 保留 dtype 與 attrs。已轉 dataset 若仍有 attrs，改建同路徑 group 承載 attrs，不再存 data。Attr 用原名、原值與原 dtype 建立。已正式轉換的 `type` 不重存。沒有剩餘原文就不建 companion。
+
+Companion 是 migration 保留的原文，不是 SpectrumResult 格式，正常 runtime 不讀它。用 h5py 讀回逐項核對原值、shape、dtype 與 attrs，不能只核對整個來源備份存在。報告逐項分成正式轉換、`preserved` 及缺證據 pending。工具的 `key_mappings` 保留 literal source/destination keys，attr 定位為 object path 加原 attr 名，display key 以 `attribute:` 開頭。保留 row 的 `new_path` 為 null，`new_file` 指 companion。手動報告也記下同樣位置及正式／companion 各自的 SHA256。兩檔都核對後才算這項完成。
 
 ## 8. Labber 檔轉 native
 
@@ -584,6 +623,7 @@ test ! -e "$OLD_R" && test ! -e "$OLD_D"
 | fit 被寫進了 setup 或 point 的 component 欄位 | 另寫 entry predictor；只移除能證明是 fit 誤寫的欄位。 | meta_info 本身的正式欄位保留。 |
 | point 有 flux 數字卻缺單位 | 依第 4 步的單位規則補單位或標「假設單位」。 | 沒有單位證據也沒有宣告時，移除數字並列 pending。 |
 | library 只換了 header，或有 dangling slot | 依第 6 步補轉換，有效的 Spec 不動。 | Spec、child key、slot 都核對過。 |
+| processed spectrum 只做了原樣複製 | 保存現有檔與 hash，依第 7 步逐 group 建正式輸出與 residual companion，不在原檔上覆寫。 | 正式檔經 load_spectrums 讀回；未轉 datasets／attrs 在 companion 可見；已轉 data 不重複。 |
 | Labber 已搬走，但沒有 native | 用原始 hash 清單確認備份裡有原 bytes，再依第 8 步轉換。 | 「已搬」與「已轉」分開記錄。 |
 | 已有 native 或已固定 run_id | 用 reader 核對，沿用既有 ID。 | 有效的 native 不覆寫，固定的 ID 不重新分配。 |
 | 來源與目的都在，但 hash 不同 | 兩份都保存，不看 mtime 選新的。 | 列衝突，使用者決定前不刪來源。 |
