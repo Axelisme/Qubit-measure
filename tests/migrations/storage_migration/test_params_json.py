@@ -416,6 +416,66 @@ def test_unknown_meta_collision_keeps_formal_value_and_reports_exact_destination
     assert dry.key_mappings == report.key_mappings
 
 
+def test_unknown_expression_collision_preserves_pending_and_formal_value(
+    request_data: MigrationRequest, metadata_mapping: MigrationMapping
+) -> None:
+    source = write_meta(
+        request_data, "",
+        {"cur_A": 0.4, "flux_unit": "V", "flux_value": "=md.other"},
+    )
+    report = migrate(request_data, metadata_mapping)
+    setup = snapshot(open_entry(request_data).setup)
+    assert document_value(setup, "general.ext.flux_value") == 0.4
+    assert document_value(setup, "general.ext.legacy_meta_info") == {
+        "flux_value": "=md.other"
+    }
+    row = next(row for row in report.key_mappings if row.old_file == source and row.old_key == "flux_value")
+    assert row.action == "preserved"
+    assert row.source_keys == ("flux_value",)
+    assert row.destination_keys == ("general", "ext", "legacy_meta_info", "flux_value")
+    assert row.new_path is None
+    assert any(
+        item.source == source and item.location == "flux_value" and "expression" in item.reason
+        for item in report.pending
+    )
+
+
+@pytest.mark.parametrize("raw_value", [0.4, 0.9])
+def test_point_unknown_collision_protects_only_successful_setup_projection(
+    request_data: MigrationRequest,
+    metadata_mapping: MigrationMapping,
+    raw_value: float,
+) -> None:
+    write_meta(request_data, "", {"cur_A": 0.4, "flux_unit": "V", "arbitrary": 0.4})
+    source = write_meta(
+        request_data, "exps/bias", {"flux_value": raw_value, "arbitrary": raw_value}
+    )
+    dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
+    report = migrate(request_data, metadata_mapping)
+    entry = open_entry(request_data)
+    setup = snapshot(entry.setup)
+    point = snapshot(entry.use_point("bias"))
+    assert document_value(setup, "general.ext.flux_value") == 0.4
+    assert document_value(point, "general.ext.flux_value") == 0.4
+    assert document_value(point, "general.ext.arbitrary") == raw_value
+    rows = {row.old_key: row for row in report.key_mappings if row.old_file == source}
+    assert rows["arbitrary"].action == "preserved"
+    assert rows["arbitrary"].destination_keys == ("general", "ext", "arbitrary")
+    row = rows["flux_value"]
+    assert row.source_keys == ("flux_value",)
+    assert row.new_file == entry.result_path / "points/bias/point.yaml"
+    if raw_value == 0.4:
+        assert row.action == "remove"
+        assert row.new_path == "general.ext.flux_value"
+        assert "inherited" in row.reason.lower()
+    else:
+        assert document_value(point, "general.ext.legacy_meta_info") == {"flux_value": 0.9}
+        assert row.action == "preserved"
+        assert row.destination_keys == ("general", "ext", "legacy_meta_info", "flux_value")
+    assert not [item for item in report.pending if item.source == source]
+    assert dry.key_mappings == report.key_mappings
+
+
 def test_missing_units_drive_alias_and_module_scalars_remain_observable(
     request_data: MigrationRequest, metadata_mapping: MigrationMapping
 ) -> None:
