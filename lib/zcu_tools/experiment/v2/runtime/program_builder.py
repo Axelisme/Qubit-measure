@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Generic, Protocol, Self, TypeAlias
+from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, Self, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
@@ -50,7 +50,9 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     and the supplied cancel_flag; they check that flag before starting another
     round. Return the final raw data, retaining completed rounds on cancellation.
     Raise StoppedPartialAcquireError if cancelled before any round completes.
-    Other producer errors propagate to the builder's partial-result policy.
+    This synchronous contract uses the default step_rounds=False mode; stepped
+    preparation is not a completed raw result. Other producer errors propagate
+    to the builder's partial-result policy.
     """
 
     @property
@@ -63,6 +65,7 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
         progress: bool,
         round_hook: Callable[[int, T_AcquireRaw_co, CancelFlagProtocol], object],
         cancel_flag: CancelFlagProtocol,
+        step_rounds: Literal[False] = False,
         **kwargs: object,
     ) -> T_AcquireRaw_co: ...
 
@@ -73,6 +76,7 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
         progress: bool,
         round_hook: Callable[[int, T_DecimatedRaw_co, CancelFlagProtocol], object],
         cancel_flag: CancelFlagProtocol,
+        step_rounds: Literal[False] = False,
         **kwargs: object,
     ) -> T_DecimatedRaw_co: ...
 

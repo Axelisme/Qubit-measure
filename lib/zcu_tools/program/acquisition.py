@@ -5,7 +5,7 @@ import operator
 import os
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Protocol, TypeAlias, cast, final
+from typing import Literal, Protocol, TypeAlias, cast, final, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -111,8 +111,29 @@ class TypedAcquireMixin(AcquireMixin):
         # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
         return super()._process_accumulated(acc_buf)  # pyright: ignore[reportReturnType]
 
+    @overload
+    def acquire(
+        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire(
+        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+    ) -> None: ...
+
+    @overload
+    def acquire(
+        self, soc: object, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
     def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
-        """Return averaged IQ, or None after preparation when step_rounds=True."""
+        """Return averaged IQ for omitted/False step_rounds; True prepares only.
+
+        Preparation returns None. Mode typing is precise with only soc
+        positional; extra positional options or a dynamic bool retain the union.
+        QICK argument/transport errors propagate. Cancellation retains completed
+        rounds, or raises StoppedPartialAcquireError if none completed.
+        """
         return self._acquire_configured(*args, **kwargs)
 
     def _acquire_configured(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
@@ -120,8 +141,29 @@ class TypedAcquireMixin(AcquireMixin):
         # have supplied their options through the normal acquire chain.
         return super().acquire(*args, **kwargs)
 
+    @overload
+    def acquire_decimated(
+        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+    ) -> None: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
     def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
-        """Return decimated IQ, or None after preparation when step_rounds=True."""
+        """Return decimated IQ for omitted/False step_rounds; True prepares only.
+
+        Preparation returns None. Mode typing is precise with only soc
+        positional; extra positional options or a dynamic bool retain the union.
+        QICK argument/transport errors propagate. Cancellation retains completed
+        rounds, or raises StoppedPartialAcquireError if none completed.
+        """
         return super().acquire_decimated(*args, **kwargs)
 
     def _completed_round_count(self) -> int:
