@@ -16,6 +16,8 @@ from tests.experiment._ftf_templates import (
     template,
 )
 
+pytestmark = pytest.mark.sim
+
 
 def draw(source, acquire=None, snap=None):
     return source.execute(

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+import pytest
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -15,6 +16,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from tests.experiment._ftf_templates import settings
 
 
+@pytest.mark.sim
 def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path: Path):
     directory = tmp_path / "enabled"
     try:

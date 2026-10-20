@@ -13,6 +13,8 @@ from zcu_tools.resources.ftf import parse_ftf
 
 from tests.resources._ftf_data import ftf_document
 
+pytestmark = pytest.mark.sim
+
 
 @pytest.mark.parametrize(
     "backend", ["ftf-direct-v1", "ftf-direct-v2", "ftf-segment-v6", "ftf-segment-v7"]

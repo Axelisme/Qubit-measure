@@ -12,6 +12,8 @@ from zcu_tools.simulate.evolution import Engine, EvolutionResult, PathDiagnostic
 
 from tests.experiment._ftf_templates import request, settings, snapshot, template
 
+pytestmark = pytest.mark.sim
+
 
 def configuration(channels=(4, 1)):
     config_type = getattr(ftf_module, "FTFReadoutConfig", None)
