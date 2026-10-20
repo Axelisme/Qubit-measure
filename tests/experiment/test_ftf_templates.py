@@ -119,7 +119,7 @@ def test_template_engine_paths_match_strict_secular_reference(
         )
 
 
-def test_readout_ignores_controls_after_start_and_rejects_multiple_pulses() -> None:
+def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_pulses() -> None:
     import zcu_tools.experiment.ftf as ftf
 
     base = template()
@@ -143,6 +143,67 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_pulses() -> N
         ftf.plan_template(
             settings(), snapshot(), replace(base, events=(*base.events, base.events[0]))
         )
+
+
+def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> None:
+    import zcu_tools.experiment.ftf as ftf
+
+    base = template()
+    terminal = base.events[-1]
+    earlier = replace(
+        terminal, start_us=np.array([0.0, 0.002]),
+        duration_us=np.full(2, 0.004), frequency_mhz=np.full(2, 5900.),
+        gain=np.array([0.3, -0.4]),
+    )
+    # Mutually exclusive slots must classify by active point, not slot order.
+    alternate = replace(earlier, active=np.array([False, True]))
+    earlier = replace(earlier, active=np.array([True, False]))
+    try:
+        plan = ftf.plan_template(
+            settings(), snapshot(), replace(base, events=(terminal, earlier, alternate))
+        )
+    except ValueError as error:
+        pytest.fail(f"nonterminal cavity drives must be accepted: {error}")
+    drives = getattr(plan, "cavity_drives", None)
+    assert drives is not None, "plan must retain nonterminal readout drives"
+    assert tuple(map(len, drives)) == (1, 1)
+    first, second = drives[0][0], drives[1][0]
+    assert (first.start_ns, first.end_ns, first.frequency_ghz) == (0, 4, 5.9)
+    assert (second.start_ns, second.end_ns) == (2, 6)
+    assert first.amplitude == pytest.approx(0.6j)
+    assert second.amplitude == pytest.approx(-0.8j)
+    assert first.envelope is None
+    assert second.phase_rad == pytest.approx(np.pi / 6 - 2 * np.pi * 5.9 * 3)
+    np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
+    assert all(len(content) == 1 for content in plan.readouts[0].batch.pulses)
+
+
+@pytest.mark.parametrize("trigger", [0.007999999999, 0.0])
+def test_terminal_readout_rejects_first_trigger_before_latest_block(trigger) -> None:
+    import zcu_tools.experiment.ftf as ftf
+
+    base = template()
+    window = replace(base.readouts[0], trigger_us=np.full((2, 1), trigger))
+    with pytest.raises(ValueError, match="trigger"):
+        ftf.plan_template(settings(), snapshot(), replace(base, readouts=(window,)))
+
+
+def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
+    import zcu_tools.experiment.ftf as ftf
+
+    base = template()
+    terminal = base.events[-1]
+    earlier = replace(terminal, start_us=np.zeros(2), duration_us=terminal.start_us)
+    try:
+        plan = ftf.plan_template(settings(), snapshot(), replace(base, events=(earlier, terminal)))
+    except ValueError as error:
+        pytest.fail(f"cavity drives may end exactly at terminal start: {error}")
+    drives = getattr(plan, "cavity_drives", None)
+    assert drives is not None, "plan must retain earlier readout drives"
+    assert tuple(len(p) for p in drives) == (1, 1)
+    crossing = replace(earlier, duration_us=earlier.duration_us + 1e-12)
+    with pytest.raises(ValueError, match="cross|overlap"):
+        ftf.plan_template(settings(), snapshot(), replace(base, events=(crossing, terminal)))
 
 
 class CountingEngine(Engine):
