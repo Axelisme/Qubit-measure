@@ -66,6 +66,19 @@ def test_shot_path_mean_and_variance(rates: np.ndarray) -> None:
     assert_array_equal(adc.response((pulse,), grid).traces, conditional.traces)
 
 
+@pytest.mark.parametrize("rate", [0.0, 0.1])
+def test_empty_incident_field_keeps_receiver_offset_with_or_without_jumps(rate) -> None:
+    readout = replace(
+        model(np.array([[0, rate, 0], [0, 0, 0], [0, 0, 0]])),
+        receiver=Receiver(offset=np.array([0.2, -0.4])),
+    )
+    grid = SampleGrid(np.array([-5.0, 0.0, 5.0]), 6.0)
+    population = PopulationInput(readout.state_labels, np.array([0.0, 1.0, 0.0]))
+    result = ADC(readout).sample(population, (), grid, SamplingIdentity(1), shots=8)
+    assert_array_equal(result.traces, np.broadcast_to([0.2, -0.4], (8, 3, 2)))
+    assert_array_equal(result.sums, result.traces.sum(axis=1))
+
+
 def test_single_jump_preserves_cavity_memory_and_exponential_survival() -> None:
     rate = 0.025
     adc = ADC(model(np.array([[0, rate, 0], [0, 0, 0], [0, 0, 0]])))
