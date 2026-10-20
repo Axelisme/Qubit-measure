@@ -109,9 +109,9 @@ def test_decimated_zero_reps_reproducibility_global_rng_and_content_order():
     populations = np.array([[[0.25, 0.75], [0.0, 1.0]]])
     original = populations.copy()
     before = legacy_rng_state()
-    kwargs = dict(reps=100, identity=SamplingIdentity(73, (2, 3, 0)))
-    first = adc.sample_traces(populations, batches, **kwargs)
-    repeated = adc.sample_traces(populations, batches, **kwargs)
+    identity = SamplingIdentity(73, (2, 3, 0))
+    first = adc.sample_traces(populations, batches, reps=100, identity=identity)
+    repeated = adc.sample_traces(populations, batches, reps=100, identity=identity)
     np.testing.assert_array_equal(first.channels[0].iq, repeated.channels[0].iq)
     expected = (
         adc.ADC(content.model).responses(replace(content, include_traces=True)).traces
