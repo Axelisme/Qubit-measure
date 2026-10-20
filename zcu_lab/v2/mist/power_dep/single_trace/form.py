@@ -16,7 +16,10 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "init_pulse": Slot("$qubit.module.x180"),
                 "probe_pulse": Template(
-                    "res_probe", bindings={"resonator": "$resonator"}
+                    "res_probe",
+                    bindings={"resonator": "$resonator"},
+                    # Run supplies these probe scan coordinates.
+                    set={"gain": Hidden(0.0)},
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")

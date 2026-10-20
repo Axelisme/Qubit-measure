@@ -9,7 +9,7 @@ from typing import Annotated, get_args, get_origin
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
-from pydantic_core import PydanticUndefined
+from pydantic_core import PydanticUndefined, PydanticUndefinedType
 
 from zcu_tools.cfg_model import (
     AliasName,
@@ -259,7 +259,12 @@ class Section:
     """
 
     def __init__(
-        self, core: type[BaseModel], tree: Mapping[str, FormNode], path: tuple[str, ...]
+        self,
+        core: type[BaseModel],
+        tree: Mapping[str, FormNode],
+        path: tuple[str, ...],
+        *,
+        field_order: tuple[str, ...] = (),
     ) -> None:
         unknown = tree.keys() - core.model_fields.keys()
         if unknown:
@@ -281,11 +286,12 @@ class Section:
         names = [name for name in core.model_fields if name not in program_fields] + [
             name for name in core.model_fields if name in program_fields
         ]
+        names = [*field_order, *(name for name in names if name not in field_order)]
         for name in names:
             info = core.model_fields[name]
             node = tree.get(name)
             if isinstance(node, Hidden):
-                if info.is_required():
+                if info.is_required() and node.value is PydanticUndefined:
                     raise ValueError(
                         f"{'.'.join((*path, name))}: Hidden requires a core default"
                     )
@@ -551,6 +557,44 @@ class Section:
                 }
         return result
 
+    def _module_hidden_paths(self) -> dict[tuple[str, ...], frozenset[str]]:
+        """Collect only module visibility declarations, without values or sources."""
+        paths: dict[tuple[str, ...], frozenset[str]] = {
+            (name,): frozenset(
+                path
+                for path, seed in field.node.set.items()
+                if isinstance(seed, Hidden)
+            )
+            if field.node is not None
+            else frozenset()
+            for name, field in self.modules.items()
+        }
+        for name, child in self.children.items():
+            paths.update(
+                {
+                    (name, *path): hidden
+                    for path, hidden in child._module_hidden_paths().items()
+                }
+            )
+        return paths
+
+    def _share_hidden_paths(self, positions: tuple["Section", ...]) -> None:
+        """Install a homogeneous list policy; position defaults remain independent."""
+        if not positions:
+            return
+        common = positions[0]._module_hidden_paths()
+        for index, position in enumerate(positions[1:], start=1):
+            if position._module_hidden_paths() != common:
+                raise ValueError(
+                    f"{self.path!r}: Hidden paths must match at every list position; "
+                    f"positions 0 and {index} differ"
+                )
+        for path, hidden in common.items():
+            section = self
+            for name in path[:-1]:
+                section = section.children[name]
+            section.modules[path[-1]].shared_hidden_paths = hidden
+
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
         """Validate and bind a detached catalog recursively, then rebuild model.
 
@@ -564,6 +608,8 @@ class Section:
                 raise ValueError(
                     f"Adapter {adapter!r}, {'.'.join(field.path)}: {exc}"
                 ) from exc
+        for name, child in self.lists.items():
+            child._share_hidden_paths(self.element_seeds.get(name, ()))
         for child in (*self.children.values(), *self.lists.values()):
             child.bind_templates(catalog, adapter)
         for seeds in self.element_seeds.values():
@@ -619,6 +665,14 @@ class Section:
         """
         prefix = self.path if path is None else path
         raw: dict[str, CfgInputValue] = value.model_dump(mode="python")
+        raw.update(
+            {
+                name: node.value
+                for name, node in self.tree.items()
+                if isinstance(node, Hidden)
+                and not isinstance(node.value, PydanticUndefinedType)
+            }
+        )
         raw.update(self._list_raw(value, env, errors, prefix))
         for name, child in self.children.items():
             item: object = getattr(value, name)

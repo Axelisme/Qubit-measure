@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from .template_nodes import Expr, Template, TemplateSeed
+from .template_nodes import Expr, Hidden, Template, TemplateSeed
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,15 +80,6 @@ class AliasName:
 
     alias: str
     choices_source: Literal["devices"] | None = "devices"
-
-
-@dataclass(frozen=True, slots=True)
-class Hidden:
-    """Omit a core field from input; cfg validation restores its declared default.
-
-    The field must have a core default. A required hidden field fails during
-    form construction because no value could be restored during conversion.
-    """
 
 
 type FormNode = (

@@ -1,9 +1,16 @@
 """Capture-owned native mux Form; the picker never selects participants."""
 
-from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
+from dataclasses import replace
+
+from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import captured_mux_names, mux_relax_delay
+from zcu_lab.v2._support.measure.mux_forms import (
+    READOUT_ELEMENTS,
+    captured_mux_names,
+    mux_readout_initial,
+    mux_relax_delay,
+)
 from zcu_lab.v2._support.measure.rabi_initial_values import len_rabi_initial_values
 
 from .core import MuxLenRabiCfg
@@ -21,6 +28,8 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
     tones: list[FormNode] = []
     for name in names:
         drive, stop = len_rabi_initial_values(ctx.parameters, qubit=name)
+        # Core requires const/flat_top and replaces each total duration.
+        drive = replace(drive, set={**drive.set, "waveform.length": Hidden(0.0)})
         tones.append(
             {
                 "name": name,
@@ -33,9 +42,7 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
         tree={
             "modules": {
                 "reset": Slot("$mux.module.reset"),
-                "readout": Slot("$mux.module.readout")
-                if ctx.has("$mux.module.readout")
-                else Template("readout/mux:blank"),
+                "readout": mux_readout_initial(ctx),
             },
             "tones": tones,
             "participants": list(names),
@@ -44,5 +51,16 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
             "reps": 1000,
             "rounds": 100,
         },
-        fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        fixed_elements=(
+            FixedElements(("tones",), "name", ("participants",)),
+            READOUT_ELEMENTS,
+        ),
+        field_order=(
+            "participants",
+            "tones",
+            "modules",
+            "relax_delay",
+            "reps",
+            "rounds",
+        ),
     )
