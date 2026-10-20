@@ -19,6 +19,8 @@ from tests.experiment._ftf_templates import (
     template,
 )
 
+pytestmark = pytest.mark.sim
+
 
 class ObservedEngine(Engine):
     """Delegate real evolution without keeping the physical model alive."""

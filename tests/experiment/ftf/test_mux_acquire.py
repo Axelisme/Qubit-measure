@@ -10,6 +10,8 @@ from zcu_tools.resources.ftf import parse_ftf
 
 from tests.resources._ftf_data import mux_document
 
+pytestmark = pytest.mark.sim
+
 
 @pytest.mark.parametrize("channels", [(4, 1), (1,)])
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
