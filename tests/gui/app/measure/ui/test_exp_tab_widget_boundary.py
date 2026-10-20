@@ -807,6 +807,8 @@ def test_retired_view_stops_authority_projection(
 
 
 @pytest.mark.slow
+# tolerated(capability): Qt process exit must not quit the suite's QApplication.
+@pytest.mark.requires_subprocess
 def test_application_quit_stops_authority_projection(tmp_path: Path) -> None:
     """Exercise real Qt process exit without mutating the suite's QApplication."""
     with subprocess.Popen(
