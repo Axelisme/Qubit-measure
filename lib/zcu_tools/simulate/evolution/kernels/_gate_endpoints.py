@@ -11,7 +11,7 @@ from ..kernel import SegmentTable
 from ..secular import SecularModel
 from ._dop853 import Tolerances, integrate
 
-_SUBSEGMENTS = 4
+GATE_SUBSEGMENTS = 4
 
 
 class _GateContext(NamedTuple):
@@ -74,7 +74,7 @@ def build_endpoints(
     energies = model.energies_ghz
     h0 = np.diag(energies - (energies[0] + energies[-1]) / 2).astype(complex)
     identity = np.broadcast_to(np.eye(size, dtype=complex), (count, size, size))
-    samples = np.empty((_SUBSEGMENTS, count, size, size), dtype=complex)
+    samples = np.empty((GATE_SUBSEGMENTS, count, size, size), dtype=complex)
     # Reserve the segment budget for Strang/Fourier errors. A 1e-8 U tolerance
     # avoids oversolving high-energy modes while retaining budget scaling.
     tolerance = min(1e-8, budget * 1e-4)
@@ -82,10 +82,10 @@ def build_endpoints(
         tolerance, tolerance * 0.01, min(0.1, 0.25 / max(abs(frequency), 1e-12))
     )
     knots = envelope.sample_ns - offset
-    for segment in range(_SUBSEGMENTS):
+    for segment in range(GATE_SUBSEGMENTS):
         start, end = (
-            duration * segment / _SUBSEGMENTS,
-            duration * (segment + 1) / _SUBSEGMENTS,
+            duration * segment / GATE_SUBSEGMENTS,
+            duration * (segment + 1) / GATE_SUBSEGMENTS,
         )
         boundaries = np.concatenate(
             ([start], knots[(knots > start) & (knots < end)], [end])

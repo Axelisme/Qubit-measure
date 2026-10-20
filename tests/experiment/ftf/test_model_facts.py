@@ -27,15 +27,26 @@ class ObservedEngine(Engine):
         super().__init__(1, 1_000_000)
         self.sources: list[weakref.ReferenceType[ModelSource]] = []
 
-    def evolve(self, source, batches, *, budget=1e-3, cancel):
+    def evolve(
+        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
+    ):
         self.sources.append(weakref.ref(source))
-        return super().evolve(source, batches, budget=budget, cancel=cancel)
+        return super().evolve(
+            source,
+            batches,
+            budget=budget,
+            cancel=cancel,
+            telemetry=telemetry,
+            reuse_key=reuse_key,
+        )
 
 
 @pytest.fixture
 def observed_source():
     engine = ObservedEngine()
     source = FTFSource(settings(), DeviceManager(), engine=engine)
+    # Isolate physical facts; test_prepared_reuse covers the outer preparation cache.
+    source.preparation_cache.max_bytes = 0
     try:
         yield source, engine
     finally:

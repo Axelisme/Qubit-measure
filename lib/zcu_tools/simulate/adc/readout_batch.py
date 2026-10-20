@@ -202,29 +202,92 @@ def round_statistics(
     Raise ValueError for invalid probabilities, reps/identity, duplicate ADCs,
     incompatible point/state shapes or unequal read sample counts.
     """
-    probabilities = _validate_round_inputs(populations, channels, reps)
-    identity = SamplingIdentity(seed, (acquire_sequence, round_index, 0))
-    rng = np.random.Generator(
-        np.random.PCG64(np.random.SeedSequence((identity.seed, *identity.stream)))
+    return PreparedStatistics(populations, channels, reps=reps).draw(
+        seed=seed, acquire_sequence=acquire_sequence, round_index=round_index
     )
-    counts = rng.multinomial(reps, probabilities)
-    output = []
-    for channel in channels:
-        conditional = channel.conditional.sums[channel.content_index]
-        covariance = (
-            int(channel.conditional.sample_counts[0])
-            * channel.receiver.noise_covariance
+
+
+@dataclass(frozen=True)
+class _StatisticsChannel:
+    channel: int
+    conditional: RealArray
+    covariance: RealArray
+    noise_root: RealArray
+
+
+@dataclass(frozen=True, init=False)
+class PreparedStatistics:
+    """Owned immutable integrated sampling inputs; no seed, counts or noisy IQ.
+
+    Constructor inputs and errors match round_statistics, including probability,
+    reps and channel layout validation. Copies probabilities and expands owned
+    conditional means once. Each channel's covariance is factored once, without
+    changing draw order or arithmetic. populations is read-only float64 in the
+    explicit readout-state order; reps is the validated shots per point. draw
+    validates a fresh identity on every call and returns independently owned
+    counts/noisy totals, so previous rounds and delayed raw remain usable.
+    """
+
+    populations: RealArray
+    reps: int
+    _channels: tuple[_StatisticsChannel, ...]
+
+    def __init__(
+        self, populations: RealArray, channels: tuple[ChannelReadout, ...], *, reps: int
+    ) -> None:
+        probabilities = _validate_round_inputs(populations, channels, reps)
+        object.__setattr__(
+            self, "populations", readonly_array(probabilities, "populations")
         )
-        means = np.einsum("...s,...rsi->...ri", counts, conditional)
-        noise = _gaussian_noise(rng, reps * (covariance + np.eye(2) / 12), means.shape)
-        output.append(
-            ChannelStatistics(channel.channel, means + noise, conditional, covariance)
+        object.__setattr__(self, "reps", reps)
+        prepared = []
+        for channel in channels:
+            conditional = channel.conditional.sums[channel.content_index]
+            covariance = (
+                int(channel.conditional.sample_counts[0])
+                * channel.receiver.noise_covariance
+            )
+            root = _noise_root(reps * (covariance + np.eye(2) / 12))
+            prepared.append(
+                _StatisticsChannel(
+                    channel.channel,
+                    readonly_array(conditional, "conditional means"),
+                    readonly_array(covariance, "shot covariance"),
+                    readonly_array(root, "noise root"),
+                )
+            )
+        object.__setattr__(self, "_channels", tuple(prepared))
+
+    def draw(
+        self, *, seed: int, acquire_sequence: int, round_index: int
+    ) -> RoundStatistics:
+        """Draw a joint multinomial followed by ADC-ordered Gaussian noise.
+
+        Identity parameters are nonnegative integers with the same PCG64 stream
+        policy and errors as round_statistics. No global RNG state is changed.
+        """
+        identity = SamplingIdentity(seed, (acquire_sequence, round_index, 0))
+        rng = np.random.Generator(
+            np.random.PCG64(np.random.SeedSequence((identity.seed, *identity.stream)))
         )
-    return RoundStatistics(
-        counts,
-        tuple(output),
-        SamplingIdentity(seed, (acquire_sequence, round_index, 1)),
-    )
+        counts = rng.multinomial(self.reps, self.populations)
+        output = []
+        for channel in self._channels:
+            means = np.einsum("...s,...rsi->...ri", counts, channel.conditional)
+            noise = rng.standard_normal(means.shape) @ channel.noise_root.T
+            output.append(
+                ChannelStatistics(
+                    channel.channel,
+                    means + noise,
+                    channel.conditional,
+                    channel.covariance,
+                )
+            )
+        return RoundStatistics(
+            counts,
+            tuple(output),
+            SamplingIdentity(seed, (acquire_sequence, round_index, 1)),
+        )
 
 
 def sample_traces(
@@ -299,7 +362,11 @@ def _gaussian_noise(
     rng: np.random.Generator, covariance: RealArray, shape: tuple[int, ...]
 ) -> RealArray:
     """Independent I/Q draws, including degenerate receiver covariances."""
+    root = _noise_root(covariance)
+    return rng.standard_normal(shape) @ root.T
+
+
+def _noise_root(covariance: RealArray) -> RealArray:
     eigenvalues, vectors = np.linalg.eigh(covariance)
     # Receiver already validates PSD. Only factorization roundoff may be negative.
-    root = vectors @ np.diag(np.sqrt(np.maximum(eigenvalues, 0)))
-    return rng.standard_normal(shape) @ root.T
+    return vectors @ np.diag(np.sqrt(np.maximum(eigenvalues, 0)))

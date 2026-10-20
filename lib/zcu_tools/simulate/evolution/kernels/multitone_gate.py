@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from ..kernel import KernelContext, SegmentTable
 from ..secular import ModelSource
 from ..workplan import FactKey, WorkPlan
-from ._rwa_gate import GATE_POLICY, CovariantGateKernel, canonical_key
+from ._rwa_gate import GATE_POLICY, CovariantGateKernel, canonical_keys
 
 # Above the measured four-U break-even range (3--19 rows).
 _MIN_REUSE = 20
@@ -29,7 +29,10 @@ def populate_gate_inventory(
             (table.tones >= 2)
             & ~table.constant_envelopes(np.arange(len(table.timeline)))
         )
-        counts = Counter(canonical_key(table, int(row), source) for row in rows)
+        if not len(rows):
+            return ()
+        canonical = canonical_keys(table, KernelContext(source, 1e-3, plan))
+        counts = Counter(canonical[row] for row in rows)
         return tuple(sorted(counts.items()))
 
     return plan.fact(_INVENTORY, build)
@@ -38,8 +41,9 @@ def populate_gate_inventory(
 class MultitoneGateKernel(CovariantGateKernel):
     """Joint RWA gates with complete-inventory reuse >=20 and shared numerics.
 
-    Requires coextensive real sampled support, shared RWA admission, pruning
-    bound <=min(budget,1e-3), and four-way secular split proxy <=.01.
+    Requires shared real-envelope RWA admission, pruning bound <=min(budget,1e-3),
+    and adaptive n-way secular split proxy <=.01. Row support bounds playback;
+    sampled slices, constant companions and final sample hold are supported.
     Rejection retains ordinary row RWA. Products use the Engine resident LRU.
     """
 
@@ -50,13 +54,8 @@ class MultitoneGateKernel(CovariantGateKernel):
     ) -> NDArray[np.bool_]:
         """Combine fixed whole-acquire reuse with row-local numerical admission."""
         counts = dict(populate_gate_inventory(table, context.source, context.work_plan))
-        reuse = np.array(
-            [
-                counts.get(canonical_key(table, int(row), context.source), 0)
-                >= _MIN_REUSE
-                for row in rows
-            ]
-        )
+        canonical = canonical_keys(table, context)
+        reuse = np.array([counts.get(canonical[row], 0) >= _MIN_REUSE for row in rows])
         accepted = np.zeros(len(rows), dtype=bool)
         accepted[reuse] = super().guard(table, rows[reuse], context)
         return accepted

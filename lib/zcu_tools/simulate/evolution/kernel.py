@@ -6,6 +6,7 @@ opaque prepared payloads; the engine only sees their resident array byte size.
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
 from types import MappingProxyType
 from typing import Protocol
 
@@ -291,6 +292,11 @@ class GuardPreparation:
     keys: NDArray[np.void]
     prepared: Prepared
 
+    @cached_property
+    def nbytes(self) -> int:
+        """Array charge read once for transfer into whole-payload ownership."""
+        return self.prepared.nbytes
+
     def __post_init__(self) -> None:
         keys = self.keys.copy()
         if keys.ndim != 1 or keys.dtype.kind != "V":
@@ -362,8 +368,10 @@ class Kernel(Protocol):
         Known input means the source initial density or the engine-computed
         density for this row's certified prefix group. Guard may read that
         immutable input, but never evolve density or inspect worker states.
-        Only algorithm-local guards apply here; the engine owns branch order
-        and cross-family rules such as prepare-key usage counts.
+        The engine owns branch order and cross-family cost comparisons. Family
+        wrappers may also require immutable complete-acquire key counts, as
+        multitone_gate does. Prefix and worker calls borrow those same counts;
+        subset reuse and resident cache warmth never decide admission.
         """
         ...
 
@@ -375,11 +383,13 @@ class Kernel(Protocol):
     ) -> GuardResult | None:
         """Optionally return guard decisions and the preparations they required.
 
-        Called instead of guard during classification. None declines the hook,
-        so the engine calls guard unchanged. Builder families supply GuardResult;
-        other families return None. Acceptance must obey guard's row locality,
-        including empty/reversed subsets. Only known inputs may be read; no density
-        is evolved or mutated. Returned preparations remain model-only.
+        Classification calls this only when guard_builds is True, instead of
+        guard. It must then return GuardResult, including for empty or rejected
+        rows; None raises RuntimeError rather than retrying guard. When
+        guard_builds is False, classification calls guard directly and does not
+        invoke this hook. Acceptance must obey guard's row locality, including
+        empty/reversed subsets. Only known inputs may be read; no density is
+        evolved or mutated. Returned preparations remain model-only.
 
         The engine reuses returned preparations only for accepted rows with
         the same kernel, prepare key, source and budget in this evolve. They
@@ -416,6 +426,9 @@ class Kernel(Protocol):
         context shares immutable workload facts with guard and preparation.
         Keys include the model identity and exclude apply-only parameters;
         the exact algorithm determines which parameters belong in each half.
+        Resident inventory calls this before guard on structural candidates.
+        Numerically ineligible rows may use inventory-only identities disjoint
+        from preparable keys. Only guard-accepted rows reach prepare and apply.
         """
         ...
 

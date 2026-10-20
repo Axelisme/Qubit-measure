@@ -15,9 +15,12 @@ from threading import RLock
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from .kernel import SegmentTable
     from .kernels._carrier_reuse import CarrierWorkspace
 
 import numpy as np
+
+from .telemetry import RoutingCollector
 
 
 @dataclass(frozen=True)
@@ -295,10 +298,14 @@ class WorkPlan:
     RuntimeError. Model-only resident cache ownership is separate.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, content_key: bytes = b"") -> None:
+        # Engine supplies the whole numerical input digest, independent of caches.
+        self.content_key = content_key
+        self.routing = RoutingCollector()
         self._facts: dict[Hashable, _Resource] = {}
         self._resources: dict[Hashable, _Resource] = {}
         self._carrier_workspace: CarrierWorkspace | None = None
+        self._common_frame_table: SegmentTable | None = None
         self._published: set[str] = set()
         self._gain_groups: tuple[GainGroupPlan, ...] = ()
         self._cf4_carrier_groups: tuple[CF4CarrierGroupPlan, ...] = ()
@@ -306,6 +313,21 @@ class WorkPlan:
         self._ramp_families: tuple[RampFamilyPlan, ...] = ()
         self._lock = RLock()
         self._closed = False
+
+    @property
+    def common_frame_table(self) -> SegmentTable | None:
+        """Borrow the complete immutable geometry for lazy common-frame pricing.
+
+        None before publication. This is a reference to the Engine-owned table,
+        not a copied tensor product. Prefixes and workers price its complete
+        inventory, and close drops the reference after all workers drain.
+        """
+        return self._common_frame_table
+
+    def publish_common_frame_table(self, table: SegmentTable) -> None:
+        """Publish complete candidate geometry once before prefix classification."""
+        self._publish("common-frame")
+        self._common_frame_table = table
 
     @property
     def gain_groups(self) -> tuple[GainGroupPlan, ...]:
@@ -417,6 +439,7 @@ class WorkPlan:
             self._facts.clear()
             self._resources.clear()
             self._carrier_workspace = None
+            self._common_frame_table = None
             self._published.clear()
             self._gain_groups = ()
             self._cf4_carrier_groups = ()

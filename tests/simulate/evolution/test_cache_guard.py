@@ -6,10 +6,76 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, FluxSchedule
+from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, FluxSchedule, ModelSource
+from zcu_tools.simulate.evolution.cache import RESIDENT_METADATA_BYTES
 from zcu_tools.simulate.evolution.kernel import GuardPreparation, GuardResult
+from zcu_tools.simulate.evolution.kernels.single_tone_rwa import SingleToneRWAKernel
 
-from ._engine import RecordingKernel, batch, source
+from ._engine import RecordingKernel, batch, source, track
+from .contract.kernel_suite import synthetic_model
+
+
+@pytest.mark.parametrize("frequency", [0.04, -0.04])
+@pytest.mark.parametrize("mixed", [False, True])
+def test_low_carrier_fallback_is_independent_of_warm_rwa_residents(frequency, mixed):
+    model = synthetic_model()
+    model = replace(
+        model,
+        rates_per_ns=np.zeros((3, 3)),
+        dephasing_per_ns=np.zeros((3, 3)),
+    )
+    src = ModelSource(np.eye(3, dtype=np.complex128) / 3, lambda level: model)
+    duration = 20.0
+
+    def timelines(frequencies, point):
+        pulse = replace(
+            track(len(frequencies), EnvelopeSpec("constant"), duration=duration),
+            frequency_ghz=np.array(frequencies),
+            amplitude=np.full(len(frequencies), 0.001),
+        )
+        return (
+            replace(
+                batch(len(frequencies), duration=duration),
+                tracks=(pulse,),
+                points=np.arange(len(frequencies)) + point,
+            ),
+        )
+
+    class CountedRWA(SingleToneRWAKernel):
+        def __init__(self):
+            self.preparations = 0
+
+        def prepare(self, keys, table, rows, context):
+            self.preparations += len(keys)
+            return super().prepare(keys, table, rows, context)
+
+    rwa = CountedRWA()
+    fallback = RecordingKernel("floquet_period")
+    kernels = (RecordingKernel("dyson", accepts=False), rwa, fallback)
+    with closing(Engine(1, 1000000, kernels=kernels)) as engine:
+        cold = engine.evolve(src, timelines([frequency], 0), cancel=Event())
+        assert cold.paths.segments_by_kernel == {"floquet_period": 1}
+        np.testing.assert_array_equal(cold.densities[0], src.initial_density)
+
+        first = engine.evolve(src, timelines([0.13], 10), cancel=Event())
+        warm = engine.evolve(src, timelines([0.13], 20), cancel=Event())
+        assert first.paths.segments_by_kernel == {"single_tone_rwa": 1}
+        assert warm.paths.segments_by_kernel == first.paths.segments_by_kernel
+        assert rwa.preparations == 1, "the second acquire must borrow a resident"
+
+        frequencies = [frequency, 0.13] if mixed else [frequency]
+        try:
+            result = engine.evolve(src, timelines(frequencies, 30), cancel=Event())
+        except ValueError as error:
+            raise AssertionError(
+                "warm RWA residents must preserve low-carrier fallback"
+            ) from error
+        expected = {"floquet_period": 1}
+        if mixed:
+            expected["single_tone_rwa"] = 1
+        assert result.paths.segments_by_kernel == expected
+        np.testing.assert_array_equal(result.densities[0], cold.densities[0])
+        assert rwa.preparations == 1
 
 
 class CountedGuardKernel(RecordingKernel):
@@ -45,7 +111,10 @@ class CountedGuardKernel(RecordingKernel):
 def test_resident_guard_payload_skips_build_but_rechecks_rows_and_domain(timelines):
     kernel = CountedGuardKernel()
     src = source()
-    with closing(Engine(1, 4096, kernels=(kernel,))) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(
+        Engine(1, 4096 + 8 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
+    ) as engine:
         engine.evolve(src, (batch(2),), cancel=Event())
         cold_builds = kernel.builds
         # Distinct point IDs bypass exact-result memo while preserving prepare keys.
@@ -128,7 +197,10 @@ class OverlappingGuardKernel(RecordingKernel):
 def overlapping_guard():
     kernel = OverlappingGuardKernel()
     src = source()
-    with closing(Engine(1, 4096, kernels=(kernel,))) as engine:
+    # Include metadata for the intended resident working set.
+    with closing(
+        Engine(1, 4096 + 8 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
+    ) as engine:
         # Two shared guard builds retain overlapping domains in this order.
         engine.evolve(
             src,
