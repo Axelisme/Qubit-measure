@@ -1,3 +1,9 @@
+# tolerated(file-size): Services and control facets own domain work. This owner
+# keeps app composition, diagnostic/render-host wiring, the application facade,
+# and drain -> script callbacks -> hardware close ordering together. Another
+# facade/mixin or moving view protocols would hide no new behavior and only
+# scatter the same composition contract.
+
 from __future__ import annotations
 
 import logging
