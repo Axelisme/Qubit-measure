@@ -676,6 +676,59 @@ def test_empty_evolve_has_zero_trace_diagnostic():
     assert getattr(result.paths, "max_trace_error", None) == 0.0
 
 
+@pytest.mark.parametrize(
+    ("closed", "budget", "error", "message"),
+    [
+        pytest.param(
+            True,
+            np.nan,
+            RuntimeError,
+            r"\Aengine is closed\Z",
+            id="closed-before-budget",
+        ),
+        pytest.param(
+            False,
+            np.nan,
+            ValueError,
+            r"\Abudget must be finite and positive\Z",
+            id="nan-budget-before-cancel",
+        ),
+        pytest.param(
+            False,
+            np.inf,
+            ValueError,
+            r"\Abudget must be finite and positive\Z",
+            id="infinite-budget-before-cancel",
+        ),
+        pytest.param(
+            False,
+            0.0,
+            ValueError,
+            r"\Abudget must be finite and positive\Z",
+            id="zero-budget-before-cancel",
+        ),
+        pytest.param(
+            False,
+            -1.0,
+            ValueError,
+            r"\Abudget must be finite and positive\Z",
+            id="negative-budget-before-cancel",
+        ),
+        pytest.param(False, 1e-3, Cancelled, None, id="cancel-before-empty"),
+    ],
+)
+def test_empty_evolve_preserves_preflight_error_order(
+    closed: bool, budget: float, error: type[Exception], message: str | None
+) -> None:
+    cancel = Event()
+    cancel.set()
+    with closing(Engine(1, 0, kernels=())) as engine:
+        if closed:
+            engine.close()
+        with pytest.raises(error, match=message):
+            engine.evolve(source(), (), budget=budget, cancel=cancel)
+
+
 def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
     from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
