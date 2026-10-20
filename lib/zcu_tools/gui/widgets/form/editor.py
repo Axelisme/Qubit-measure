@@ -28,6 +28,7 @@ from zcu_tools.gui.form import (
     FormWritePath,
     WriteRejected,
 )
+from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from ._controls import FieldRow, GroupBlock, LocalText, RowActions
@@ -63,6 +64,34 @@ def _shape(field: FieldView) -> tuple[object, ...]:
     )
 
 
+def _completion_candidates(env: FormEnv) -> tuple[str, ...]:
+    """Project sorted alias names and one component-field level once per capture.
+
+    Device/unbound aliases have names only. Source faults disable suggestions;
+    the ordinary form preview still reports errors at consuming fields.
+    """
+    context = env.parameters
+    if context is None:
+        return ()
+    try:
+        aliases = context.resolved_aliases()
+        point = context.document()
+    except ContextSourceUnavailableError:
+        return ()
+    candidates: list[str] = []
+    for row in aliases:
+        name = f"${row.alias}"
+        candidates.append(name)
+        component = (
+            point.components.get(row.resolved) if row.resolved is not None else None
+        )
+        if component is not None:
+            candidates.extend(
+                f"{name}.{field}" for field in type(component).model_fields
+            )
+    return tuple(sorted(candidates))
+
+
 class FormEditor[F: FormModel](QWidget):
     """Edit a caller-owned FormState on the Qt GUI thread, without submitting it.
 
@@ -80,6 +109,18 @@ class FormEditor[F: FormModel](QWidget):
     expressed as PydanticCustomError become field-local errors, retaining the
     previous committed state; other failures propagate.
     No Engine update, revision check, source capture, persistence or I/O occurs.
+    Construction and refresh project completion names once from the supplied
+    capture, using resolved_aliases() and document().components. Expression
+    inputs offer case-sensitive, lexicographically sorted $alias or one-level
+    $alias.field completions with no selection and only whitespace or end of
+    text immediately after the cursor. A following identifier character,
+    operator or closing parenthesis blocks hints. Device aliases offer only names.
+    A grey suffix is painted inline, shifting any displayed right-hand text
+    without changing the draft. Its accessible description announces the same
+    suffix and keyboard controls. First Tab accepts without committing or moving
+    focus; consecutive Tab presses cycle the original candidates, wrapping.
+    Esc dismisses until another edit/cursor move. Focus loss ends a cycle.
+    Direct/read-only inputs, selections and deeper paths have no suggestions.
 
     Public child object names use model-field paths and indexes joined by dots:
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
@@ -270,6 +311,7 @@ class FormEditor[F: FormModel](QWidget):
         super().__init__(parent)
         self._state: FormState[F] | None = state
         self._env: FormEnv | None = env
+        self._completion_names = _completion_candidates(env)
         self._host_write = write
         self._host_command = run_command
         self._host_select = select
@@ -332,7 +374,9 @@ class FormEditor[F: FormModel](QWidget):
         Inactive branch text is discarded. Raises RuntimeError after detach.
         """
         self._require_state()
+        names = _completion_candidates(env)
         self._env = env
+        self._completion_names = names
         self._publish()
 
     def discard_local_text(self) -> None:
@@ -571,6 +615,7 @@ class FormEditor[F: FormModel](QWidget):
                 local = None
             if redraw or fresh:
                 row.display(field, local, editable=self._editing_enabled)
+                row.set_completion_candidates(self._completion_names)
             self._sync_children(level, row, data, preview, redraw=redraw)
         _align_labels([row.label for row in level.rows.values()])
 
