@@ -1,5 +1,7 @@
 # Conditional Ramsey 與 idle ZZ
 
+Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 scalar 設定。缺 slot 時從 blank mux 範本開始，須手填全部必要讀出欄位。
+
 `ftf/idle_zz` 比較 spectator 的 I、Xπ 兩個名目分支。Target 可選 F1 或 F2，每個 shot 做 target π/2 → delay → 單一 phase projection → 一次完整 mux readout。不做 heralding、post-selection 或純態初始化。兩分支在熱初態上施加不同 pulse，不代表已準備出純 spectator 狀態。
 
 ## 開啟前確認

@@ -5,7 +5,7 @@
 ## 準備輸入
 
 1. 在 Inspect 的 Parameters 建立 `kind: group/mux` 元件，例如 `MG12`。設定有序 `resonators: [R1, R2, R3]`，並把 `module.readout` 指到已有的 `readout/mux` library key。完整 tones[i] 對應 resonators[i]，label 不決定綁定。
-2. 在 Aliases 設定 scalar alias `mux = MG12`。開啟 `mux/onetone` 時，Readout 引用 `$mux.module.readout` 的條目。
+2. 在 Aliases 設定 scalar alias `mux = MG12`。Open／Reset 時，Readout 複製 `$mux.module.readout` 的 scalar 設定，tones 由 group resonators 校準值產生。缺 slot 時沿 blank mux 範本加 group tones。共同 trigger 增加最小 kappa 對應的五倍 ringup 等待，pulse 至少涵蓋 ADC window。
 3. 核對 generator、mixer、每個 tone 的 ADC channel、frequency、gain，以及共用播放長度、ADC window 和 trigger timing。範本的 scalar 初值只供編輯，不代表硬體安全設定。
 4. 可選已有的 readout/mux key，或用 Convert to inline 複製內容再修改。Tones 是單行 JSON，例如 `[{"freq":5980,"gain":0.1,"ro_ch":4,"label":"R1"},{"freq":6020,"gain":0.1,"ro_ch":5,"label":"R2"},{"freq":6040,"gain":0.1,"ro_ch":6}]`。這是格式例子，不是建議的硬體輸入。
 5. Active tones 選 None 量全部，或輸入原始序號 JSON list，例如 `[0,2]` 只量第一及第三個 tone。`[2,0]` 也有效，program、曲線與資料 columns 都保持此順序。不接受空 list、重複、越界、bool 或非整數 index。宿主的 result／Run 診斷會指出 `active_tones` 的錯誤並拒絕 Run，不保證欄位本身變紅。
@@ -29,11 +29,9 @@ Live 圖以共同 offset 為橫軸，顯示 K 條 active magnitude 曲線。Lege
 
 ## FIT
 
-所有 active tones 共用 onetone/freq 的設定。Model type 可選 hanger `hm`、transmission `t` 或 `auto`。Amplitude background 與 phase curvature 可獨立開關。Electrical-delay mode 有三種：
+所有 active tones 共用 onetone/freq 的四欄設定。Model type 可選 hanger `hm`、transmission `t` 或 `auto`，預設 `hm`。Fit amplitude background 預設開啟，Fit phase curvature 預設關閉，兩者可獨立切換。
 
-- `auto` 先找對應 resonator.ext.edelay 的 generator／ADC route 校準，沒有匹配時作 global 搜尋。Maximum electrical-delay search radius 必須是正的有限 scalar。
-- `calibrated` 要求每個 tone 有匹配的有限 route prior，缺少時只讓該 tone 失敗。
-- `manual` 對所有 active tone 使用同一個有限 Manual electrical delay 作 branch seed。Delay 單位是 MHz⁻¹，不是固定模型參數。
+Electrical delay seed 單位為 us，預設留空。留空時，每個 tone 各自使用對應 resonator.ext.edelay 的有限 generator／ADC route 校準作 branch seed。沒有匹配時，該 tone 使用內部固定 100 us 上限作 global 搜尋。明填有限數字時，所有 active tones 共用此 branch seed，0 與負值也有效。Seed 只選擇擬合起點，不固定模型 delay。非有限或非數字 delay 輸入會拒絕整次 FIT。
 
 FIT 只處理 active columns。每條曲線以保存的原始 base frequency 加共同 nominal dfs 作 MHz 座標，去掉首尾點。這不是 DDS 實際頻率。Cfg、selection、tone_indices 或 shape 不符時整次拒絕。單一 tone 的數值擬合失敗會留下原因與診斷圖，其餘 tone 繼續。
 
@@ -41,10 +39,12 @@ K 張圖使用 `fit_i` 命名，i 是原始 tone 序號。例如 `[2,0]` 產生 
 
 ## Writeback
 
-成功 FIT 提出一個完整 readout/mux module，只換成功 active tone 的 freq。Inactive 或失敗 tone 保留原值，全部失敗時不提 module。固定 target 是 `$mux.readout.readout_rf`，不跟隨來源 slot；Apply 缺少該 library key 時建立它，不改 `module.readout` slot。描述列出 active tone 的頻率變化或失敗。
+成功 FIT 提出一個完整 readout/mux module，只換成功 active tone 的 freq。Inactive 或失敗 tone 保留原值，全部失敗時不提 module。固定 target 是 `$mux.readout.readout_rf`。描述列出 active tone 的頻率變化或失敗。
+
+有 Run／Load capture 時，下一列 ParameterWriteback 提案寫到 `$mux.module.readout`，值是同份 capture 解析的 module root。Apply 模組列與 slot 列後，library 保存擬合後的 readout，slot 指向該 root。下次開表單沿 slot 讀取該 library 模組。
 
 Adapter 只從 Run／Load capture 讀取 `$mux.resonators`。Resonators 長度必須等於完整 readout 的 N，不是 active 數 K。成功 tone i 透過 resonators[i] 各提一列 freq、kappa、ext.theta0，可以逐列取消。Delay 沿單 tone 政策，使用 seed 或非等距 grid 時才提 route-qualified ext.edelay。Inactive 和失敗 tone 不提單一參數。
 
-沒有 qubits 的 bring-up 不以 resonators 長度限制 Run。Resonators 長度不符時，summary 顯示實際數量和完整 N，只保留有效 fit 的 module proposal。Alias 未綁或來源故障仍會報錯，不改成長度不符，也不讀目前表單補綁定。Resonators 可以重複；若所選 proposals 有重複 destination，Apply 會在寫入前拒絕，可取消其中一列再套用。
+沒有 qubits 的 bring-up 不以 resonators 長度限制 Run。Resonators 長度不符時，summary 顯示實際數量和完整 N，保留有效 fit 的 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar。Alias 未綁或來源故障仍會報錯，不改成長度不符，也不讀目前表單補綁定。Resonators 可以重複；若所選 proposals 有重複 destination，Apply 會在寫入前拒絕，可取消其中一列再套用。
 
 Run 的 capture 固定解析 module alias 與 resonator 資料，其後修改全域 aliases 不影響這次提案。同 entry 的 Load 使用檔案 history 的 point／roles 讀取目前持久值，不承諾未保存的歷史 revision。無分析 capture 的 Load 可純計算並列 module proposal，但不能非空 Apply，也不另造 group snapshot。

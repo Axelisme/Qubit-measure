@@ -41,9 +41,7 @@ T2RamseyRunResult: TypeAlias = RunRecord[T2RamseyCfg, T2RamseyResult]
 @dataclass
 class T2RamseyAnalyzeParams:
     fit_fringe: Annotated[bool, ParamMeta(label="Fit fringe")] = True
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = (
-        False
-    )
+    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = True
 
 
 @dataclass

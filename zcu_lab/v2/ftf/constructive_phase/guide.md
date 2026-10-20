@@ -1,5 +1,7 @@
 # Constructive relative phase
 
+Readout references `$mux.module.readout` when present, preserving the library's complete tones and scalar settings. Without a slot, fill every required readout field in the blank mux template.
+
 ## Purpose
 
 Scan F2 relative to F1 phase and common drive duration in the nominal B11 branch.
