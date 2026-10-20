@@ -121,6 +121,17 @@ class RecordingKernel:
         return np.zeros(len(rows), dtype=np.bool_)
 
 
+class TimelineKernel(RecordingKernel):
+    """Conservative timeline keys, optionally shared by equivalent copies."""
+
+    def __init__(self, name, *, copies=1):
+        super().__init__(name)
+        self.copies = copies
+
+    def prepare_keys(self, table, rows, context: KernelContext):
+        return (table.timeline[rows] // self.copies).copy().view("V8")
+
+
 def run(engine: Engine, src: ModelSource, batches: tuple[TimelineBatch, ...]):
     try:
         return engine.evolve(src, batches, cancel=Event())
