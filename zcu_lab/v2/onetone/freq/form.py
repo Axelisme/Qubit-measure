@@ -19,7 +19,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.onetone._shared import initial_ro_length
+from zcu_lab.v2.onetone._shared import initial_readout_timing
 from zcu_lab.v2.onetone.freq.core import FreqCfg, HomophasalSamplingCfg
 
 
@@ -107,7 +107,7 @@ def lower_sampling(extras: SamplingInput, cfg: FreqCfg) -> FreqCfg:
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     """Build starting values and shape from the captured source availability."""
-    del ctx
+    timing = initial_readout_timing(ctx)
     return Form(
         FreqCfg,
         tree={
@@ -120,7 +120,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                         # Run supplies the linear sweep or homophasal frequency grid.
                         "freq": Hidden(0.0),
                         "gain": 0.05,
-                        "ro_length": initial_ro_length(),
+                        **timing,
                     },
                 ),
             },
