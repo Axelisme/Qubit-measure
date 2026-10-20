@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-20，single-carrier readout jump traces
+**Last updated:** 2026-10-20，single-carrier integrated raw 與環境數值 raw owner
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -76,9 +76,12 @@ PCG64 stream without changing global RNG state. The ADC and deferred integrated
 raw generation share this identity format.
 
 Environment code owns unit conversion from QICK us/MHz/degrees to ns/GHz/radians
-and composes evolution, explicit populations and ADC. Program adapters still own
-channel order, QICK buffer shapes, nearest-even int64 conversion and acquisition
-normalization. [`evolution`](evolution/README.md) uses the segment engine's fast
+and composes evolution, explicit populations and ADC. ADC and white_noise own
+complete integrated raw through structurally typed sources. `simulate.rounding`
+owns shared numeric nearest-even int64 conversion and shot-axis layout. Program
+owns the RawShots protocol, channel declaration order and acquisition normalization.
+Core statistics remain pure data. Deferred raw does no work during mean draws;
+its full CTMC paths use a separate stream and are not shifted to direct totals. [`evolution`](evolution/README.md) uses the segment engine's fast
 algorithms by default and retains prepared data in memory. It does not read or
 write an offline U-table library or persistent density records. Private replay
 recomputes from archived inputs under matching numeric and RNG versions.

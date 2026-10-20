@@ -63,7 +63,7 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
 
 
 def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) -> None:
-    from zcu_tools.core.simulation import RoundRequest, RoundStatistics
+    from zcu_tools.core.simulation import RoundRequest
     from zcu_tools.device import DeviceManager
     from zcu_tools.experiment.ftf import FTFSource, replay_round
     from zcu_tools.resources.simulation_replay import (
@@ -94,8 +94,7 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
     saved = read_replay(paths[0])
     assert saved.round.numeric_manifest is None
     assert saved.acquire.library_path is None
-    actual = replay_round(paths[0])
-    assert isinstance(actual, RoundStatistics)
+    actual = expect_statistics(replay_round(paths[0]))
     np.testing.assert_array_equal(actual.channels[0].sums, expected.channels[0].sums)
     for name in ("numeric", "rng"):
         incompatible = saved.acquire.model_copy(

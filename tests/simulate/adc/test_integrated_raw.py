@@ -54,7 +54,9 @@ def test_zero_jump_raw_preserves_receivers_windows_and_loop_layout(shaped, avg_l
     receiver = adc.Receiver(
         gain=17, phase_rad=0.3, offset=np.array([0.2, -0.4]), time_of_flight_ns=2.5
     )
-    readout_model = replace(model(receiver=receiver), mismatch_phase_rad=np.array([0.6, 0.0]))
+    readout_model = replace(
+        model(receiver=receiver), mismatch_phase_rad=np.array([0.6, 0.0])
+    )
     content = batch(readout_model, shaped=shaped)
     content = replace(content, content_index=np.zeros(6, dtype=np.int64))
     populations = np.zeros((2, 3, 3))
@@ -68,7 +70,10 @@ def test_zero_jump_raw_preserves_receivers_windows_and_loop_layout(shaped, avg_l
     assert flat.shape == (2, 3, 7, 2, 2)
     assert_array_equal(flat, np.broadcast_to(np.rint(expected), flat.shape))
     raw[...] = -999
-    assert_array_equal(source.materialize(7, avg_level)[3], np.moveaxis(np.broadcast_to(np.rint(expected), flat.shape), 2, avg_level))
+    assert_array_equal(
+        source.materialize(7, avg_level)[3],
+        np.moveaxis(np.broadcast_to(np.rint(expected), flat.shape), 2, avg_level),
+    )
 
 
 @pytest.mark.parametrize(
@@ -84,10 +89,16 @@ def test_zero_jump_raw_preserves_receivers_windows_and_loop_layout(shaped, avg_l
 def test_integrated_shots_form_bridge_and_match_conditional_expectation(rates, shaped):
     readout_model = model(rates)
     content = batch(readout_model, shaped=shaped)
-    populations = np.array([0.0, 1.0, 0.0]) if not rates[:, 2].any() else np.array([0.0, 0.0, 1.0])
+    populations = (
+        np.array([0.0, 1.0, 0.0])
+        if not rates[:, 2].any()
+        else np.array([0.0, 0.0, 1.0])
+    )
     source = prepare(populations, {0: content}, reps=1600).bind(SamplingIdentity(52))
     raw = source.materialize(1600, 0)[0]
-    expected = adc.ADC(readout_model).responses(content).sums[0, :, populations.argmax()]
+    expected = (
+        adc.ADC(readout_model).responses(content).sums[0, :, populations.argmax()]
+    )
     error = np.abs(raw.mean(axis=0) - expected)
     stderr = raw.std(axis=0) / np.sqrt(len(raw))
     assert np.all(error <= 6 * stderr + 0.51)
@@ -102,7 +113,9 @@ def test_deferred_raw_does_not_change_statistics_stream_or_retain_noisy_results(
     content = batch(model(np.array([[0, 0.025, 0], [0, 0, 0.04], [0, 0, 0]])))
     content = replace(content, grids=((content.grids[0][0], content.grids[0][0]),))
     conditional = adc.ADC(content.model).responses(content)
-    channel = adc.ChannelReadout(0, conditional, np.array(0, dtype=np.int64), content.model.receiver)
+    channel = adc.ChannelReadout(
+        0, conditional, np.array(0, dtype=np.int64), content.model.receiver
+    )
     probabilities = np.array([0.1, 0.2, 0.7])
     sampler = adc.PreparedStatistics(probabilities, (channel,), reps=13)
     prepared = prepare(probabilities, {0: content}, reps=13)
@@ -114,22 +127,37 @@ def test_deferred_raw_does_not_change_statistics_stream_or_retain_noisy_results(
     assert_array_equal(before.state_counts, after.state_counts)
     assert_array_equal(before.channels[0].sums, after.channels[0].sums)
     assert_array_equal(prepared.bind(after.raw_identity).materialize(13, 0)[0], first)
-    assert not np.array_equal(prepared.bind(SamplingIdentity(13)).materialize(13, 0)[0], first)
+    assert not np.array_equal(
+        prepared.bind(SamplingIdentity(13)).materialize(13, 0)[0], first
+    )
 
 
-@pytest.mark.parametrize("reps,avg_level", [(6, 0), (-1, 0), (7, -1), (7, 1), (True, 0)])
+@pytest.mark.parametrize(
+    "reps,avg_level", [(6, 0), (-1, 0), (7, -1), (7, 1), (True, 0)]
+)
 def test_raw_rejects_reps_or_layout_mismatch(reps, avg_level):
-    source = prepare(np.array([1.0, 0, 0]), {0: batch(model())}, reps=7).bind(SamplingIdentity(3))
+    source = prepare(np.array([1.0, 0, 0]), {0: batch(model())}, reps=7).bind(
+        SamplingIdentity(3)
+    )
     with pytest.raises(ValueError, match="reps|avg_level|layout"):
         source.materialize(reps, avg_level)
 
 
 def test_zero_reps_is_empty_and_receiver_overflow_fails():
     content = batch(model())
-    source = prepare(np.array([1.0, 0, 0]), {0: content}, reps=0).bind(SamplingIdentity(3))
+    source = prepare(np.array([1.0, 0, 0]), {0: content}, reps=0).bind(
+        SamplingIdentity(3)
+    )
     assert source.materialize(0, 0)[0].shape == (0, 2, 2)
-    overflow = replace(content, model=replace(content.model, receiver=adc.Receiver(offset=np.array([2.0**63, 0]))))
-    source = prepare(np.array([1.0, 0, 0]), {0: overflow}, reps=1).bind(SamplingIdentity(3))
+    overflow = replace(
+        content,
+        model=replace(
+            content.model, receiver=adc.Receiver(offset=np.array([2.0**63, 0]))
+        ),
+    )
+    source = prepare(np.array([1.0, 0, 0]), {0: overflow}, reps=1).bind(
+        SamplingIdentity(3)
+    )
     with pytest.raises(ValueError, match="int64"):
         source.materialize(1, 0)
 
@@ -143,6 +171,14 @@ def test_state_independent_coalescent_cavities_keep_exact_sum_despite_many_jumps
         kappa_external_per_ns=np.array([0.08, 0.08]),
     )
     content = batch(readout_model)
-    raw = prepare(np.array([0.2, 0.3, 0.5]), {0: content}, reps=30).bind(SamplingIdentity(2)).materialize(30, 0)[0]
-    expected = adc.ADC(replace(readout_model, rates_per_ns=np.zeros((3, 3)))).responses(content).sums[0, :, 0]
+    raw = (
+        prepare(np.array([0.2, 0.3, 0.5]), {0: content}, reps=30)
+        .bind(SamplingIdentity(2))
+        .materialize(30, 0)[0]
+    )
+    expected = (
+        adc.ADC(replace(readout_model, rates_per_ns=np.zeros((3, 3))))
+        .responses(content)
+        .sums[0, :, 0]
+    )
     assert_allclose(raw, np.broadcast_to(np.rint(expected), raw.shape), atol=0)

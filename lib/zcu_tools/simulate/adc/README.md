@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-20, single-carrier trace jump paths
+**Last updated:** 2026-10-20, exact single-carrier integrated raw and deferred sources
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
@@ -132,10 +132,28 @@ damping. Vacuum baselines support flat, piecewise-linear and opaque envelopes;
 no ODE is solved per shot. Delay, mismatch and receiver calibration follow the
 same conventions as conditional responses. Windows share one path per shot and
 add independent receiver noise. Zero rates retain deterministic conditional
-traces. Multi-pulse and integrated round samplers still draw initial states and
-use conditional moments, not jump trajectories. The integrated sampler also
-accounts for nearest-even shot rounding variance. QICK buffer layout and
-acquisition averaging belong to the program adapter.
+traces. Multi-pulse sampling retains conditional moments until the shared-path
+mux sampler is supplied. Integrated direct means retain conditional moments and
+nearest-even shot rounding variance. Acquisition averaging belongs to program.
+
+`PreparedRawShots(populations, batches, reps=...)` owns noiseless probabilities
+and per-channel ReadoutBatch inputs. `bind(identity)` returns an `ADCRawShots`
+source without doing shot work. `materialize(reps, avg_level)` alone draws full
+single-carrier CTMC paths and independent receiver noise. Zero jumps use direct
+vacuum sums. Jumped shots use compiled exact homogeneous propagation and discrete
+sample sums. Uniform samples use binary geometric sums; irregular samples keep
+their original coordinates. Flat baselines use singular-safe phi1 propagation.
+Shaped and opaque envelopes retain the existing DOP853 vacuum-baseline tolerances.
+There is no ODE per shot, jump-time LUT, path-count conditioning or tail cutoff.
+Reads share one path through ringdown; offset is added once per sample.
+
+The source retains its inputs independently of later rounds and prepare-cache
+eviction. Every call restarts its private PCG64 stream and returns fresh int64
+arrays, keyed by ADC channel with shape `(*loop_dims, reads, 2)`. It does not cache
+noisy results or adjust shots to independently drawn mean totals. Invalid reps,
+layout, shapes or states raise ValueError, as do unsafe integer sums. Solver
+failures raise RuntimeError. `simulate.rounding` owns shared numeric int64
+conversion and shot-axis layout. Numeric sources do not import program.
 
 `PreparedStatistics(populations, channels, reps=...)` validates and owns immutable
 integrated sampling inputs. It expands conditional means and factors each ADC's

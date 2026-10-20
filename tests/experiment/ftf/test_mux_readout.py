@@ -4,9 +4,9 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import RoundStatistics
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import ftf as ftf_module
+from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.adc import ConditionalReadout, ConditionalSums
 from zcu_tools.simulate.evolution import Engine, EvolutionResult, PathDiagnostics
 
@@ -122,14 +122,16 @@ def test_mux_ftf_channels_decode_to_the_same_joint_state_per_shot(mode, monkeypa
     acquire = replace(request(mode), reps=128, templates=(mux_template(),))
     try:
         result = source.open_acquire(acquire).sample_round(snapshot(), 0)
-        if isinstance(result, RoundStatistics):
-            raw = result.materialize_raw(acquire.reps, acquire.avg_level)
+        if isinstance(result, IntegratedRound):
+            raw = result.raw.materialize(acquire.reps, acquire.avg_level)
+            channel_order = tuple(ch.channel for ch in result.statistics.channels)
             first = raw[4].reshape(-1, 2)[:, 0] / 40
             second = raw[1].reshape(-1, 2)[:, 0] / 300
         else:
+            channel_order = tuple(ch.channel for ch in result.channels)
             first = result.channels[0].iq[:, 0, 0, 0] / 10
             second = result.channels[1].iq[:, 0, 0, 0] / 100
-        assert tuple(ch.channel for ch in result.channels) == (4, 1)
+        assert channel_order == (4, 1)
         assert set(first) == {1, 2}, "the test must exercise both joint states"
         np.testing.assert_array_equal(first, second)
     finally:

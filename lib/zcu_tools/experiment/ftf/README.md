@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-20, route-aware preparation hits and shared accuracy warnings
+**Last updated:** 2026-10-20, IntegratedRound and ADC-owned deferred raw sources
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -274,10 +274,12 @@ then calibrate once per receiver. Single-carrier fast paths and evolution are un
 
 The receiver noise PSD is two-sided, in ADC sample units squared times ns.
 Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
-does not scale noise. Integrated acquisition returns `RoundStatistics` with joint
-state counts shared across all ADCs/reads, and separate channel totals. Decimated acquisition returns `RoundSignals`,
-reordering point-major samples into QICK loop order. The adapter owns packing,
-rounding, deferred raw generation and averaging. All channels at the same shot
+does not scale noise. Integrated acquisition returns `IntegratedRound` with pure
+`RoundStatistics` and an ADC-owned RawShots source. Counts remain shared across
+all ADCs/reads, with separate direct totals. ADC retains noiseless model/pulse/grid
+inputs for delayed raw; no shot paths or noisy outputs enter prepare caches. Decimated acquisition returns `RoundSignals`,
+reordering point-major samples into QICK loop order. ADC owns integrated raw generation, noise, rounding and loop layout. Program
+owns detached buffers, declaration order and acquisition averaging. All channels at the same shot
 index share one sampled joint state; receiver noise is independent. There is no
 extra tone axis: each declared ADC has its own raw-shot array. Output follows
 program ADC declaration order, which is mux tone order, not sorted channel index.

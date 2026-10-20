@@ -61,7 +61,7 @@ class PathFields:
             tuple[float, float, Callable[[RealArray], ComplexArray]]
         ] = []
         self._prepare_baselines(rtol, atol)
-        self._baseline_samples = self._baseline(times)
+        self._baseline_samples = self.baseline(times)
         self._incident = np.array(
             [pulse.incident(float(t), model.reference_frequency_ghz) for t in times]
         )
@@ -128,7 +128,12 @@ class PathFields:
             self._segments.append((left, right, solution.sol))
             fields = solution.y[:, -1].reshape((-1, 2))
 
-    def _baseline(self, times: RealArray) -> ComplexArray:
+    def baseline(self, times: RealArray) -> ComplexArray:
+        """Evaluate vacuum fields at emitted ns, shaped (time,state,cavity).
+
+        times is a finite vector within the prepared time support. No sampling
+        occurs; earlier lookback times return zero. Output owns its storage.
+        """
         fields = np.zeros((len(times), len(self._a), 2), dtype=np.complex128)
         for left, right, evaluate in self._segments:
             selected = (times > left) & (times <= right)
@@ -167,7 +172,7 @@ class PathFields:
             if jump >= end:
                 break
             target = int(rng.choice(len(rates), p=rates / total))
-            baseline = self._baseline(np.array([jump]))[0]
+            baseline = self.baseline(np.array([jump]))[0]
             memory = (
                 baseline[state]
                 + self._memory(state, np.array([jump - left]), memory)[0]

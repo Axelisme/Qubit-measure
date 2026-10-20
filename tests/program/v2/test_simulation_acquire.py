@@ -168,6 +168,10 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
             "synthetic-v1", "retained-model-v1", (("bias", value),)
         )
 
+    from zcu_tools.program.v2.simulation import IntegratedRound
+
+    from tests.program.v2.simulation.support import FixedRawShots
+
     def source(request):
         seen.append(request)
         bias = request.snapshot.values[0][1]
@@ -180,10 +184,13 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
             channels.append(
                 ChannelStatistics(ch, sums, sums[:, None, :], np.zeros((2, 2)))
             )
-        return RoundStatistics(
+        statistics = RoundStatistics(
             np.array([1], dtype=np.int64),
             tuple(channels),
             SamplingIdentity(12, (request.index,)),
+        )
+        return IntegratedRound(
+            statistics, FixedRawShots({ch.channel: ch.sums for ch in channels})
         )
 
     def hook(count, data, stop):

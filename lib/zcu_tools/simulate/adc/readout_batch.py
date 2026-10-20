@@ -19,6 +19,7 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
 )
 
+from ._noise import noise_root
 from .model import ReadoutModel, RealArray, Receiver, readonly_array
 from .populations import validate_populations
 from .request import ReadoutPulse, SampleGrid
@@ -247,7 +248,7 @@ class PreparedStatistics:
                 int(channel.conditional.sample_counts[0])
                 * channel.receiver.noise_covariance
             )
-            root = _noise_root(reps * (covariance + np.eye(2) / 12))
+            root = noise_root(reps * (covariance + np.eye(2) / 12))
             prepared.append(
                 _StatisticsChannel(
                     channel.channel,
@@ -362,11 +363,5 @@ def _gaussian_noise(
     rng: np.random.Generator, covariance: RealArray, shape: tuple[int, ...]
 ) -> RealArray:
     """Independent I/Q draws, including degenerate receiver covariances."""
-    root = _noise_root(covariance)
+    root = noise_root(covariance)
     return rng.standard_normal(shape) @ root.T
-
-
-def _noise_root(covariance: RealArray) -> RealArray:
-    eigenvalues, vectors = np.linalg.eigh(covariance)
-    # Receiver already validates PSD. Only factorization roundoff may be negative.
-    return vectors @ np.diag(np.sqrt(np.maximum(eigenvalues, 0)))

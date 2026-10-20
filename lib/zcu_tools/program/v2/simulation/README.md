@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-20，SoC-owned statistics validation certificates, optional round pacing and acquire completion observer；board 自述身分與 caller-owned 啟動
+**Last updated:** 2026-10-20，program-owned RawShots 與環境完整 raw 生成
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
@@ -99,8 +99,9 @@ distinct readout content; populations combine these means linearly.
 
 Integrated statistics draw noise once per (round, point), not per shot.
 Multinomial state counts represent projection noise. Gaussian receiver noise
-uses the covariance of the sum over reps. Raw materialization uses the retained
-round identity, so requesting shots does not rerun evolution or draw a new round.
+uses the covariance of the sum over reps. Environments deliver an independent
+RawShots source with retained noiseless inputs and a local round identity.
+Requesting shots calls that source without rerunning evolution or the backend.
 Raw ADC values remain int64, and round indices select distinct sampling streams.
 
 Python loop counts do not grow with shots or sweep points. Template construction,
@@ -185,8 +186,10 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   the next snapshot. It cannot change this acquire's controls or layout.
 - `SimulationBinding(capture_snapshot, execute, backend_version=..., seed=...)`
   coordinates admission and retains `last_request` and `rounds` privately in
-  memory. `execute(RoundRequest)` returns `RoundStatistics` for integrated mode
-  or `RoundSignals` for decimated mode. Mode/result mismatches raise.
+  memory. `execute(RoundRequest)` returns `IntegratedRound(statistics, raw)` for
+  integrated mode or `RoundSignals` for decimated mode. Mode/result mismatches raise.
+  `statistics` is a pure core `RoundStatistics`; `raw` satisfies the program-owned
+  `RawShots.materialize(reps, avg_level)` protocol.
 - Integrated statistics contain per-point totals over reps, shared state counts,
   conditional per-shot sums and receiver covariance. The adapter validates and
   detaches these arrays. Each SimulationSoc retains at most 64 KiB of successful
@@ -198,7 +201,15 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   totals by reps and readout length, removes QICK offsets and moves reads first,
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
   Threshold, classification, trackers and `get_raw()` materialize deterministic
-  int64 shots from the retained last-round identity. Getters never rerun a backend.
+  int64 shots from the retained last-round source. The environment owns signal,
+  noise, rounding and loop layout. Every source call returns fresh arrays with
+  shape `(*loop_dims, reads, 2)`, keyed by requested ADC indices. Sources retain
+  their noiseless inputs beyond backend borrows, cache eviction and subsequent
+  rounds. Equal inputs, identity and numeric/RNG versions reproduce shots.
+  Wrong reps/layout, invalid values and overflow raise ValueError. Numeric solver
+  failures may raise RuntimeError. Raw is not shifted to fit the independently
+  drawn direct totals. Getters cache the detached last-round arrays and never
+  rerun a backend.
 - Decimated IQ has shape `(execution, read, sample, 2)` and contains float64 ADC
   samples. Last axis is I/Q. Backend arrays are borrowed until the adapter copies
   them. Missing, duplicate or extra ADCs, wrong shapes and nonfinite values fail.

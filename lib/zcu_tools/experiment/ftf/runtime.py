@@ -15,13 +15,13 @@ from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
-    RoundStatistics,
 )
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import EnvironmentWarmup, SimulationEnvironment
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.simulation import (
+    IntegratedRound,
     SimulationBinding,
     SimulationCallbacks,
     SimulationSoc,
@@ -32,7 +32,9 @@ from zcu_tools.simulate.adc import (
     ChannelReadout,
     ConditionalSums,
     PopulationValidationError,
+    PreparedRawShots,
     PreparedStatistics,
+    ReadoutBatch,
     ReadoutCache,
     normalize_populations,
     sample_traces,
@@ -74,6 +76,7 @@ class _Prepared:
     channels: tuple[ChannelReadout, ...]
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
+    raw: PreparedRawShots | None
 
 
 class FTFAcquire:
@@ -104,7 +107,7 @@ class FTFAcquire:
 
     def sample_round(
         self, snapshot: EnvironmentSnapshot, index: int
-    ) -> RoundStatistics | RoundSignals:
+    ) -> IntegratedRound | RoundSignals:
         """Return integrated totals or decimated shots for this snapshot/index.
 
         Numeric/ADC errors propagate without partial results or changing the
@@ -138,12 +141,15 @@ class FTFAcquire:
             round_index=index,
         )
         if acquire.mode == "integrated":
-            if prepared.sampler is None:
+            if prepared.sampler is None or prepared.raw is None:
                 raise RuntimeError("integrated preparation requires a sampler")
-            result = prepared.sampler.draw(
+            statistics = prepared.sampler.draw(
                 seed=acquire.root_seed,
                 acquire_sequence=acquire.sequence,
                 round_index=index,
+            )
+            result = IntegratedRound(
+                statistics, prepared.raw.bind(statistics.raw_identity)
             )
         else:
             traces = sample_traces(prepared.populations, prepared.channels, **arguments)
@@ -241,10 +247,17 @@ class FTFAcquire:
             )
             raise
         channels = [] if previous is None else list(previous.channels)
+        raw_batches = (
+            {}
+            if previous is None or previous.raw is None
+            else dict(previous.raw.batches)
+        )
         if previous is None:
             for channel_index, first in enumerate(plans[0].readouts):
                 conditionals = []
                 traces = []
+                raw_pulses = []
+                raw_grids = []
                 content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
                 offset = 0
                 for plan in plans:
@@ -255,6 +268,8 @@ class FTFAcquire:
                         atol=owner.settings.numerics.solver.atol,
                     )
                     conditionals.append(conditional)
+                    raw_pulses.extend(readout.pulses)
+                    raw_grids.extend(readout.grids)
                     if conditional.traces is not None:
                         traces.append(conditional.traces)
                     content_index[plan.batch.points] = offset + readout.content_index
@@ -263,6 +278,12 @@ class FTFAcquire:
                     np.concatenate([item.sums for item in conditionals]),
                     conditionals[0].sample_counts,
                     np.concatenate(traces) if traces else None,
+                )
+                raw_batches[first.channel] = ReadoutBatch(
+                    first.batch.model,
+                    tuple(raw_pulses),
+                    tuple(raw_grids),
+                    content_index,
                 )
                 channels.append(
                     ChannelReadout(
@@ -276,9 +297,21 @@ class FTFAcquire:
         probabilities.setflags(write=False)
         if previous is not None and np.array_equal(probabilities, previous.populations):
             sampler = previous.sampler
+            raw = previous.raw
         else:
             sampler = (
                 PreparedStatistics(probabilities, tuple(channels), reps=acquire.reps)
+                if acquire.mode == "integrated"
+                else None
+            )
+            raw = (
+                PreparedRawShots(
+                    probabilities,
+                    raw_batches,
+                    reps=acquire.reps,
+                    rtol=owner.settings.numerics.solver.rtol,
+                    atol=owner.settings.numerics.solver.atol,
+                )
                 if acquire.mode == "integrated"
                 else None
             )
@@ -287,6 +320,7 @@ class FTFAcquire:
             tuple(channels),
             evolved.paths.for_reuse(telemetry=False),
             sampler,
+            raw,
         )
 
 
@@ -437,7 +471,7 @@ class FTFSource:
         self.evaluations = ()
         return self._session
 
-    def execute(self, request: RoundRequest) -> RoundStatistics | RoundSignals:
+    def execute(self, request: RoundRequest) -> IntegratedRound | RoundSignals:
         """Execute a detached round with bounded exact noiseless reuse and fresh draws."""
         if self._session is None or self._session.request is not request.acquire:
             self.open_acquire(request.acquire)

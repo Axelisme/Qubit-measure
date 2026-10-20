@@ -3,8 +3,9 @@
 from importlib.metadata import version
 from pathlib import Path
 
-from zcu_tools.core.simulation import RoundRequest, RoundSignals, RoundStatistics
+from zcu_tools.core.simulation import RoundRequest, RoundSignals
 from zcu_tools.device import DeviceManager
+from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.simulation_replay import read_replay
 from zcu_tools.simulate.evolution import SEGMENT_NUMERIC_VERSION
 
@@ -26,7 +27,7 @@ def replay_versions() -> tuple[tuple[str, str], ...]:
     )
 
 
-def replay_round(path: Path) -> RoundStatistics | RoundSignals:
+def replay_round(path: Path) -> IntegratedRound | RoundSignals:
     """Reload and execute only one saved private FTF round, without live devices.
 
     path is an immutable round JSON path from resources.simulation_replay.

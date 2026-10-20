@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-20，儀器角色 helpers 移至使用者套件、原子替換的 Windows 短暫鎖重試
+**Last updated:** 2026-10-20，環境接線 program-owned RawShots
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 只提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
@@ -20,9 +20,12 @@ Successful builder return transfers cleanup to the host. Read the
 [acquisition environment contract](../program/v2/simulation/README.md) before
 writing a builder or numeric source. Public Run metadata contains only the
 optional opaque `simulation_id`; private replay inputs remain on the binding.
-WhiteNoise returns compact `RoundStatistics` for integrated acquisition and keeps
-per-execution `RoundSignals` for decimated traces. Raw integrated shots are drawn
-only when processing or a getter needs them, using a separate retained identity.
+WhiteNoise numeric code lives in `simulate.white_noise`. This composition root
+wraps its statistics and complete raw source in program's `IntegratedRound`.
+Decimated acquisition keeps per-execution `RoundSignals`. ADC and white_noise
+structurally satisfy program's `RawShots` without importing program. Processing
+or a getter requests shots from a separate retained identity. Direct means keep
+their existing moment calculation and RNG stream.
 
 [`ftf`](ftf/README.md) composes a named YAML sample, fixed V/A memory devices,
 fixed-coordinate joint circuits, explicit evolution/population conversion and the
