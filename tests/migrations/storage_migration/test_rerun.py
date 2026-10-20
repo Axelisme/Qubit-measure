@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from ruamel.yaml import YAML
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, source_path
 
 from migrations.storage_migration import (
     MigrationInputError,
@@ -153,6 +153,41 @@ def test_replayed_source_is_compared_and_never_cleaned_twice(
         )
         == before
     )
+
+
+@pytest.mark.parametrize("after_rename", [False, True])
+def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
+    request_data: MigrationRequest, mapping: MigrationMapping,
+    monkeypatch: pytest.MonkeyPatch, after_rename: bool
+) -> None:
+    write_meta(request_data, "exps/bias", {"old_frequency": 4.0})
+    target = request_data.results_root / request_data.name / "points/bias"
+    rename = os.rename
+    def interrupt(source: str | Path, destination: str | Path, **kwargs: object) -> None:
+        if Path(destination) == target:
+            if after_rename:
+                rename(source, destination, **kwargs)
+            raise OSError("point rename interrupted")
+        rename(source, destination, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "rename", interrupt)
+        with pytest.raises(OSError, match="point rename interrupted"):
+            convert(request_data, mapping)
+    manifest = target.parent.parent / "records/migration-state.json"
+    state = json.loads(manifest.read_text())
+    publication = state["points"][0]
+    temporary = target.parent / publication["temporary_label"]
+    prepared = (target if after_rename else temporary) / "point.yaml"
+    created_at = YAML(typ="safe").load(prepared.read_text())["general"]["created_at"]
+    report = convert(request_data, mapping)
+    entry = ResultEntry.open(request_data.name, result_root=request_data.results_root,
+                             database_root=request_data.database_root)
+    point = entry.use_point("bias")
+    assert source_path(point) == target / "point.yaml"
+    assert point.general.created_at == created_at
+    assert point.C1.frequency == 4.0
+    assert not temporary.exists()
+    assert any(row.new_file == target / "point.yaml" for row in report.key_mappings)
 
 
 def test_old_owned_manifest_without_document_baseline_is_not_adopted(
