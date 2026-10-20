@@ -165,13 +165,18 @@ class Tolerances(NamedTuple):
 
     phase_budget is a positive rad allowance used by the density chain runner
     to tighten lab-frame row controls. Infinity disables that extra control.
-    The interval integrator itself consumes only rtol, atol and max_step.
+    norm_size=0 uses state.size. A compressed exact-zero support may
+    supply its original dimension, preserving the dense RMS error denominator.
+    Removing identically zero errors must not change adaptive step selection.
+    All fields are explicit: Numba does not reliably materialize NamedTuple
+    defaults when a compiled caller constructs a shortened positional tuple.
     """
 
     rtol: float
     atol: float
-    max_step: float = np.inf
-    phase_budget: float = np.inf
+    max_step: float
+    phase_budget: float
+    norm_size: int
 
 
 def tolerances(budget: float) -> Tolerances:
@@ -186,7 +191,9 @@ def tolerances(budget: float) -> Tolerances:
         raise ValueError("DOP853 budget must be positive and finite")
     # s=.03 passes the 3-tone isolated-feature budget=1e-8 case; .04 fails it.
     scale = 0.03
-    return Tolerances(min(1e-4, budget * scale), min(1e-6, budget * scale * 0.01))
+    return Tolerances(
+        min(1e-4, budget * scale), min(1e-6, budget * scale * 0.01), np.inf, np.inf, 0
+    )
 
 
 @njit(nogil=True, cache=True, inline="always")
@@ -214,6 +221,9 @@ def _trial(rhs, context, state, time, step):
 
 @njit(nogil=True, cache=True)
 def _error_norm(stages, state, candidate, step, controls):
+    norm_size = controls.norm_size
+    if norm_size == 0:
+        norm_size = state.size
     fifth_norm = 0.0
     third_norm = 0.0
     for index in range(state.size):
@@ -229,7 +239,7 @@ def _error_norm(stages, state, candidate, step, controls):
         third_norm += abs(third / scale) ** 2
     if fifth_norm == 0 and third_norm == 0:
         return 0.0
-    return step * fifth_norm / np.sqrt((fifth_norm + 0.01 * third_norm) * state.size)
+    return step * fifth_norm / np.sqrt((fifth_norm + 0.01 * third_norm) * norm_size)
 
 
 @njit(nogil=True, cache=True, inline="always")
@@ -245,7 +255,10 @@ def integrate(
 
     rhs(time_ns, flat_state, context) is a numba-compiled autonomous context
     callback, with time local to this interval. state is a complex128 vector;
-    it is not mutated. duration_ns is nonnegative. first_step is positive ns,
+    it is not mutated. controls.norm_size can preserve a compressed support's
+    original RMS error dimension; omitted exact zeros still count in the dense
+    denominator. This does not change rtol/atol or other callers' controls.
+    duration_ns is nonnegative. first_step is positive ns,
     capped by max_step; no accepted-step history is returned. Zero duration
     preserves the state. No derivative is reused across
     calls, so controls and bath can jump at boundaries. RuntimeError signals

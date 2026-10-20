@@ -96,6 +96,8 @@ def run_chain(
             controls.rtol * scale,
             controls.atol * scale,
             min(controls.max_step, _sample_ceiling(segments, row)),
+            np.inf,
+            0,
         )
         result = integrate(
             rhs,

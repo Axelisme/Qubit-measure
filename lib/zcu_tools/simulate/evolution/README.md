@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-20, direct-solver phase accuracy and row frames
+**Last updated:** 2026-10-20, retained-graph RWA density support
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -227,6 +227,18 @@ at most 0.002947. The same-tone counterexample has proxy 0.015629. The stricter
 shared transfer cap remains 0.0058. Multitone rows now restore the terms that
 previously forced whole-row fallback. Single-tone shaped gates also use adaptive
 retention. Simultaneous covariant gates do not.
+
+Ordinary RWA closes density support under the exact retained Fourier union
+graph. All populations and within-component coherences remain present.
+Cross-component rectangles remain present whenever either input rectangle has
+an exactly nonzero entry; there is no amplitude cutoff. Only exact-zero
+homogeneous rectangles are skipped. The full secular bath still transfers
+populations across Hamiltonian components. Sparse Hamiltonian assembly shares
+`interaction_hamiltonian` with gate builders and retains every virtual diagonal
+shift. The compressed DOP853 state keeps the original dense M² RMS error
+normalization, so removing zeros does not change the adaptive error criterion.
+The support and sparse lookup arrays are apply-local scratch, not uncharged
+resident preparation products. Neither admission nor cold-cost selection changes.
 
 Dual constant integration retains the adaptive solver and its error estimator,
 with a 16 ns ceiling. Constant envelopes have no sampled internal features.

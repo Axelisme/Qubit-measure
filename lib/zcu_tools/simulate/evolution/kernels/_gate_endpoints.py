@@ -79,7 +79,11 @@ def build_endpoints(
     # avoids oversolving high-energy modes while retaining budget scaling.
     tolerance = min(1e-8, budget * 1e-4)
     controls = Tolerances(
-        tolerance, tolerance * 0.01, min(0.1, 0.25 / max(abs(frequency), 1e-12))
+        tolerance,
+        tolerance * 0.01,
+        min(0.1, 0.25 / max(abs(frequency), 1e-12)),
+        np.inf,
+        0,
     )
     knots = envelope.sample_ns - offset
     for segment in range(GATE_SUBSEGMENTS):
