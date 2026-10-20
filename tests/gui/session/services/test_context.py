@@ -108,78 +108,6 @@ def _entry_command(context: ContextService, command: str, entry_id: str) -> obje
     return context.entry_ledger(entry_id)
 
 
-def test_alias_defaults_initialize_once_without_resetting_on_point_changes(
-    context: ContextService, tmp_path: Path
-) -> None:
-    entry = _entry(tmp_path)
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
-    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
-    context.install_entry(entry)
-    assert context.get_alias_rows()[0].value == ""
-    context.new_point(_new_request("first"))
-    assert context.get_alias_rows() == (
-        AliasRow("driver", "Q1"),
-        AliasRow("sense", "$driver.sense"),
-    )
-    context.set_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
-    context.new_point(_new_request("second"))
-    assert context.get_alias_rows()[0].value == ""
-    capture = context.read_context()
-    assert capture is not None
-    with pytest.raises(RoleResolutionError, match="driver"):
-        capture.value("$driver.rate")
-
-
-def test_alias_defaults_use_an_already_published_snapshot_without_binding_assets(
-    context: ContextService,
-    tmp_path: Path,
-) -> None:
-    entry = _entry(tmp_path)
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
-    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
-    context.install_entry(entry)
-    context.new_point(_new_request("first"))
-
-    def no_asset_binding(_path: Path) -> WaveformAssetInfo:
-        raise AssertionError("Cached initialization must not reopen assets")
-
-    installed = ContextService(
-        SessionState(context.get_session_env()),
-        BaseEventBus(),
-        bind_assets=no_asset_binding,
-        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
-    )
-    assert installed.get_alias_rows()[0] == AliasRow("driver", "Q1")
-    captured = installed.read_context()
-    assert captured is not None
-    assert captured.value("$driver.rate") == 4300.0
-
-
-def test_empty_alias_submission_before_a_point_prevents_default_rebinding(
-    context: ContextService, tmp_path: Path
-) -> None:
-    with pytest.raises(FailedPreconditionError) as caught:
-        context.read_context()
-    assert caught.value.reason_code == "no_context"
-    entry = _entry(tmp_path)
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0)
-    context.install_entry(entry)
-    context.set_alias_rows(context.get_alias_rows())
-    context.new_point(_new_request("first"))
-    assert context.get_alias_rows()[0].value == ""
-
-
-def test_first_component_publication_initializes_the_alias_default(
-    context: ContextService, tmp_path: Path
-) -> None:
-    context.install_entry(_entry(tmp_path))
-    context.new_point(_new_request("working"))
-    context.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
-    assert context.get_alias_rows()[0] == AliasRow("driver", "Q1")
-    context.add_component("Q2", "fake/drive/a", {"rate": 5100.0})
-    assert context.get_alias_rows()[0] == AliasRow("driver", "Q1")
-
-
 def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches() -> (
     None
 ):
@@ -213,7 +141,7 @@ def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fi
 ) -> None:
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("first"))
-    assert context.get_alias_rows()[0].value == ""
+    assert context.get_alias_rows() == ()
     context.set_alias_rows(
         (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
@@ -252,6 +180,7 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     )
     context.install_entry(rich_entry)
     context.new_point(_new_request("first"))
+    context.set_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
     before = context.get_alias_rows()
     version = state.version.snapshot()
     temporary = context.read_context(aliases={"driver": "Q2"})

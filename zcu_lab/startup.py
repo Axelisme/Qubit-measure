@@ -1,7 +1,8 @@
 """Default lab session policy, independent of the framework's layout cache.
 
 Only this script owns measure-session.json under ctx.cache_root. Aliases remain
-entry-owned in aliases.yaml. Authored tab inputs are copied as opaque Form JSON.
+point-local in points/<label>/aliases.yaml and return when that point is selected.
+Authored tab inputs are copied as opaque Form JSON.
 No hardware settings, raw measurement data or component bindings are saved here.
 """
 

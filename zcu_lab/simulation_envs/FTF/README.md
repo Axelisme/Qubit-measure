@@ -1,6 +1,6 @@
 # 模擬環境
 
-**Last updated:** 2026-10-20，FTF startup script 與資源交接
+**Last updated:** 2026-10-20，point-local alias 初始化與 FTF startup 資源交接
 
 這裡放 GUI 與 Notebook 共用的可信 Python 環境。`environment.py` 的 `build_environment()` 預設讀取相鄰 `ftf.yaml`，也接受明確的 `settings_path=Path(...)`。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
 
@@ -25,7 +25,8 @@ uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
 
 `--project-root` 須指向既存的絕對目錄。省略時使用 repo root。
 Script 透過公開 ctx 在該專案建立 `ftf-demo`，從相鄰 `entry-template.yaml`
-加入 Q1、Q2、coupler、R1、R2，提交 entry aliases，再建立並選取第一個 point `initial`。
+加入 Q1、Q2、coupler、R1、R2，再建立並選取第一個 point `initial`。
+Script 用 `ctx.context.apply_alias_rows` 初始化該 point 的 alias，框架保存到 `points/initial/aliases.yaml`。
 新 point 從 setup 複製這些元件。任一 entry 目錄已存在就報錯，不覆寫。
 後續失敗可能留下部分 entry，沒有跨檔交易或自動 rollback。
 
