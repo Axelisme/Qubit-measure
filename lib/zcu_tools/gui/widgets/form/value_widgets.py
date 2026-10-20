@@ -167,7 +167,7 @@ class _TextCommit(QObject):
         self._widget = widget
         self._text = text
         self._callback = callback
-        self._last_text = text.text()
+        self._last_text: str | None = text.text()
         self._pending_text: str | None = None
         self._interpreting = False
         self._timer = QTimer(self)
@@ -197,6 +197,9 @@ class _TextCommit(QObject):
             self._timer.start()
 
     def _text_changed(self, text: str) -> None:
+        # A host reset can restore an older value between identical edits.
+        # Deduplicate notifications only until the next text change.
+        self._last_text = None
         # textEdited precedes textChanged for a user edit. Host publications
         # and setText emit only textChanged and must not leave an old timer.
         if text != self._pending_text:
