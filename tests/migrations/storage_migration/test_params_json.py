@@ -40,7 +40,9 @@ from migrations.storage_migration import (
     MigrationReport,
     MigrationRequest,
     migrate_storage,
+    report_json,
 )
+from migrations.storage_migration.state import read_manifest
 from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
@@ -70,11 +72,13 @@ def analysis_kind() -> Generator[None]:
     before = registry_state()
     component_registry.register("qubit/migration_analysis", AnalysisQubit)
     component_registry.register("amplifier/migration_analysis", AnalysisQubit)
+    component_registry.register("qubit/migration_no_ext", ComponentSchema)
     try:
         yield
     finally:
         component_registry.unregister("qubit/migration_analysis")
         component_registry.unregister("amplifier/migration_analysis")
+        component_registry.unregister("qubit/migration_no_ext")
         assert registry_state() == before
 
 
@@ -1017,6 +1021,85 @@ def test_analysis_dry_run_reports_the_same_files_without_writes(
     assert not backup_path(request_data).exists()
 
 
+def test_raw_params_preservation_is_typed_located_and_durable(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    legacy_fit: JsonObject,
+    analysis_sections: JsonObject,
+) -> None:
+    write_meta(request_data, "bias", {})
+    # Keep real evidence defects alongside successful analysis publications.
+    legacy_fit["timestamp"] = "unproven"
+    legacy_fit["params"] = {"EJ": True, "EC": 1.41, "EL": 0.8}
+    values: JsonObject = {
+        **analysis_sections,
+        "fluxdep_fit": legacy_fit,
+        "unknown.section": {"list": [None, False, "raw"], "x.y": 7},
+        "unknown": {"section": "a different literal key"},
+        "project": {"chip": "original", "timestamp": None},
+    }
+    source = write_params(request_data, values)
+    dry = migrate(replace(request_data, dry_run=True), analysis_mapping)
+    preserved = [row for row in dry.key_mappings if row.action == "preserved"]
+    assert {row.old_key for row in preserved} == set(values), (
+        "Every raw params section needs an explicit preserved decision, not pending"
+    )
+    for row in preserved:
+        assert row.old_file == source
+        assert row.new_file == request_data.results_root / request_data.name / "setup.yaml"
+        assert row.new_path is None
+        assert row.destination_keys == ("Qlegacy", "ext", "legacy_params", row.old_key)
+    expected_pending = {
+        "fluxdep_fit.params.EJ",
+        "fluxdep_fit.flux_unit",
+        "fluxdep_fit.timestamp",
+        "dispersive.timestamp",
+    }
+    assert {item.location for item in dry.pending if item.source == source} == expected_pending
+    assert not (request_data.results_root / request_data.name).exists()
+    assert not backup_path(request_data).exists()
+
+    unavailable = migrate(
+        replace(request_data, dry_run=True),
+        replace(
+            analysis_mapping,
+            components={"Qlegacy": {"kind": "qubit/migration_no_ext"}},
+        ),
+    )
+    assert not any(row.action == "preserved" for row in unavailable.key_mappings)
+    assert {item.location for item in unavailable.pending if item.source == source} >= set(values)
+
+    report = migrate(request_data, analysis_mapping)
+    assert report.key_mappings == dry.key_mappings
+    assert report.pending == dry.pending
+    entry = open_entry(request_data)
+    for view in (entry.setup, entry.use_point("bias")):
+        assert document_value(snapshot(view), "Qlegacy.ext.legacy_params") == values
+    predictor = load_migrated_predictor(request_data)
+    assert predictor.params.EJ is None
+    assert predictor.params.EC == 1.41
+    assert predictor.flux_unit is None
+    assert predictor.source.created_at is None
+    assert load_dispersive_file(entry.dispersive_path / "Qlegacy.json").params.bare_rf == 5.1
+    assert load_t1_curve_file(entry.t1_curve_path / "Qlegacy.json").params.params.Temp == 0.04
+
+    # Both report encoding and durable manifest decoding must retain typed status/keys.
+    encoded = report_json(report)
+    restored = TypeAdapter(MigrationReport).validate_json(json.dumps(encoded), strict=True)
+    assert restored.key_mappings == report.key_mappings
+    manifest = read_manifest(manifest_path(request_data))
+    assert manifest.report.key_mappings == report.key_mappings
+    for view in (entry.setup, entry.use_point("bias")):
+        with view.edit() as draft:
+            draft.set("Qlegacy.ext.legacy_params", {"user.edit": ["keep"]})
+    paths = [entry.result_path / "setup.yaml", entry.result_path / "points/bias/point.yaml"]
+    before = [path.read_bytes() for path in paths]
+    resumed = migrate(replace(request_data, resume=True), analysis_mapping)
+    assert resumed.key_mappings == report.key_mappings
+    assert resumed.pending == report.pending
+    assert [path.read_bytes() for path in paths] == before
+
+
 def test_lossless_sections_are_inherited_before_point_meta_overrides(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
@@ -1041,8 +1124,8 @@ def test_lossless_sections_are_inherited_before_point_meta_overrides(
         }
     assert any(
         item.old_key == "dispersive"
-        and item.new_path == "Qlegacy.ext.legacy_params.dispersive"
-        and item.action == "pending"
+        and item.destination_keys == ("Qlegacy", "ext", "legacy_params", "dispersive")
+        and item.action == "preserved"
         for item in report.key_mappings
     )
     assert source.read_bytes() == before
@@ -1104,7 +1187,8 @@ def test_dry_run_reports_preservation_without_destination_writes(
     assert any(
         item.old_file == source
         and item.old_key == "t1_curve_fit"
-        and item.new_path == "Qlegacy.ext.legacy_params.t1_curve_fit"
+        and item.destination_keys == ("Qlegacy", "ext", "legacy_params", "t1_curve_fit")
+        and item.action == "preserved"
         for item in dry.key_mappings
     )
     assert not (request_data.results_root / request_data.name).exists()
