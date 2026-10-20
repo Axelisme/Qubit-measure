@@ -48,7 +48,6 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.entry.ledger_models import JsonObject, JsonValue
-from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
     PointDocument,
     SetupDocument,
@@ -72,7 +71,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.resources.entry import (
-        ComponentSchema,
         PointView,
         ResultEntry,
         SetupView,
@@ -144,13 +142,11 @@ class ContextService:
         installation. Its capability stays with the library capture, not a
         global Database selection. Binding errors abort publication. values
         defaults to State's facade and does not change parameter content/version.
-        alias_rows supplies the caller's fallback for each missing-file entry.
-        On its first nonempty snapshot, the empty primary shorthand row gets
-        the registry's sole default-focus candidate, or remains empty. Defaults
-        never reset on later point changes. Each entry install loads its saved
-        table, or resets this fallback and its first-point initialization. Saved
-        empty rows are authoritative. Explicit set/apply disables initialization
-        until the next entry install.
+        alias_rows supplies initial memory-only rows before an entry is opened.
+        Entry installation and clearing reset the table to empty. Selecting or
+        creating a point replaces it with that point's saved rows; a missing
+        file is empty, with no setup or caller-preset fallback. No component
+        publication fills aliases automatically.
         """
         self._owner = OwnerThreadGuard()
         self._state = state
@@ -165,12 +161,7 @@ class ContextService:
         self._points: tuple[WorkingPointInfo, ...] = ()
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
-        self._alias_preset = AliasTable(alias_rows).rows
-        self._aliases = AliasTable(self._alias_preset)
-        self._aliases_initialized = False
-        parameters = state.session_env.parameters
-        if parameters is not None and not parameters.source_faults:
-            self._initialize_aliases(parameters.document().components)
+        self._aliases = AliasTable(alias_rows)
         if state.session_env.values is not self._values:
             state.set_context(replace(state.session_env, values=self._values))
 
@@ -178,11 +169,8 @@ class ContextService:
         """Prepare an opened entry and atomically publish metadata without selecting a point.
 
         Prepare setup, the complete point-description cache, and entry-scoped
-        assets and saved aliases before replacing any binding. A missing alias
-        file resets the caller preset and first-nonempty-point initialization;
-        a saved table (including empty rows) disables it. Header/structure or
-        alias syntax failures propagate, never falling back to the preset.
-        Failure retains the old binding,
+        assets before replacing any binding. Alias rows reset to empty because
+        no point is selected; setup aliases are not read. Failure retains the old binding,
         not deleting an entry already created by resources. Success bumps the
         context once and publishes a switch fact after installation. It clears
         point selection and publishes EMPTY with parameters=None, while retaining
@@ -190,14 +178,6 @@ class ContextService:
         independent predictor capabilities remain with their own owners.
         """
         self._owner.assert_owner()
-        saved_aliases = entry.load_aliases()
-        aliases = AliasTable(
-            self._alias_preset
-            if saved_aliases is None
-            else tuple(
-                AliasRow(name, value) for name, value in saved_aliases.aliases.items()
-            )
-        )
         setup = entry.setup
         points = self._load_points(entry)
         self._bind_assets(entry.database_path / "arb_waveforms")
@@ -214,8 +194,7 @@ class ContextService:
         self._point = None
         self._library = None
         self._points = points
-        self._aliases = aliases
-        self._aliases_initialized = saved_aliases is not None
+        self._aliases = AliasTable()
         self._publish(None, sources, ContextReadiness.EMPTY, active_label="")
         return info
 
@@ -258,7 +237,11 @@ class ContextService:
         return deepcopy(self._points)
 
     def use_point(self, request: PointUseRequest) -> SavedPoint:
-        """Prepare point/library/assets, then install ACTIVE and publish facts.
+        """Prepare point/library/assets/aliases, then install ACTIVE and publish facts.
+
+        Load point-local aliases, including an empty table for a missing file.
+        No setup or preset fallback is used. Alias syntax and storage errors
+        propagate before replacing the binding or table.
 
         No opened entry raises FailedPreconditionError(no_entry). Preparation
         failure retains the old binding. The returned target has no session
@@ -267,9 +250,10 @@ class ContextService:
         self._owner.assert_owner()
         entry = self._require_open_entry()
         point = entry.use_point(request.label)
-        parameters, library, sources, info = self._prepare_point(
+        parameters, library, sources, info, aliases = self._prepare_point(
             entry, request.label, point
         )
+        self._aliases = aliases
         self._install_point(point, library, parameters, sources, info)
         return SavedPoint(entry_id=entry.entry_id, point=request.label)
 
@@ -309,7 +293,7 @@ class ContextService:
         except DestinationExistsError as exc:
             raise InvalidInputError(str(exc)) from exc
         try:
-            parameters, library, sources, info = self._prepare_point(
+            parameters, library, sources, info, aliases = self._prepare_point(
                 entry, request.label, point
             )
         except Exception as exc:
@@ -317,6 +301,7 @@ class ContextService:
             raise PointBindingError(
                 entry_id=entry.entry_id, label=request.label
             ) from exc
+        self._aliases = aliases
         self._install_point(point, library, parameters, sources, info)
         return SavedPoint(entry_id=entry.entry_id, point=request.label)
 
@@ -332,6 +317,7 @@ class ContextService:
         self._point = None
         self._library = None
         self._points = ()
+        self._aliases = AliasTable()
         self._publish(None, (), ContextReadiness.EMPTY, active_label="")
 
     def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
@@ -432,7 +418,11 @@ class ContextService:
         return parameters.bind_aliases(table.rows, {})
 
     def get_alias_rows(self) -> tuple[AliasRow, ...]:
-        """Read immutable authored global rows without expanding links or I/O."""
+        """Read authored rows without expansion or I/O, even without a point.
+
+        Entry installation/clearing leaves an empty table; explicit memory-only
+        set_alias_rows may populate it before selecting a point.
+        """
         self._owner.assert_owner()
         return self._aliases.rows
 
@@ -444,34 +434,39 @@ class ContextService:
         Bindings are checked only when read, not against the current point here.
         A changed table bumps context once and publishes AliasesChangedPayload
         after installation. An identical explicit submission publishes nothing
-        but still prevents later default initialization. No file or ledger write.
+        and writes no file or ledger. No point is required. Selecting a point
+        replaces these memory-only rows with its saved table.
         """
         self._owner.assert_owner()
         previous = self._aliases.rows
         self._aliases.replace(rows)
-        self._aliases_initialized = True
         if self._aliases.rows != previous:
             self._state.version.bump("context")
             self._bus.emit(AliasesChangedPayload(rows=self._aliases.rows))
 
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Explicitly confirm authored rows, saving only when an entry is open.
+        """Validate and atomically save authored rows to the selected point.
 
-        On the owner thread, validate syntax/order through AliasTable, then save
-        through the entry before installing memory and publishing changes. Without
-        an opened entry it succeeds in memory only. An opened entry in EMPTY
-        still saves its table. InvalidInputError(alias_invalid) or storage I/O
-        errors preserve old rows, versions and destination file; storage causes
-        propagate unchanged. Identical rows still save but publish no event.
-        Successful Apply disables default initialization. No ledger or point
+        Runs on the owner thread. Without an opened entry and selected point,
+        raise FailedPreconditionError(no_context) before validation or I/O.
+        Otherwise validate syntax/order, save that point's aliases.yaml, then
+        install memory and publish changes. Never write setup aliases.
+        InvalidInputError(alias_invalid) and storage errors preserve rows,
+        versions and the old file; causes propagate unchanged. Identical rows
+        still save but publish no event. No ledger or other point-container
         write occurs; set_alias_rows remains memory-only.
         """
         self._owner.assert_owner()
-        candidate = AliasTable(rows)
-        if self._entry is not None:
-            self._entry.save_aliases(
-                EntryAliases(aliases={row.alias: row.value for row in candidate.rows})
+        label = self._state.session_env.active_label
+        if self._entry is None or self._point is None or not label:
+            raise FailedPreconditionError(
+                "Select or create a working point first", reason_code="no_context"
             )
+        candidate = AliasTable(rows)
+        self._entry.save_aliases(
+            EntryAliases(aliases={row.alias: row.value for row in candidate.rows}),
+            point=label,
+        )
         self.set_alias_rows(candidate.rows)
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
@@ -785,26 +780,8 @@ class ContextService:
             return self._library
         return entry.module_library(target.point)
 
-    def _initialize_aliases(self, components: Mapping[str, ComponentSchema]) -> None:
-        if self._aliases_initialized or not components:
-            return
-        self._aliases_initialized = True
-        if not role_registry.shorthand:
-            return
-        primary = role_registry.shorthand[0]
-        self._aliases.replace(
-            tuple(
-                AliasRow(row.alias, role_registry.default_focus(components) or "")
-                if row.alias == primary and not row.value
-                else row
-                for row in self._aliases.rows
-            )
-        )
-
     def _publish_write(self, parameters: ParameterContext, *, parameter: bool) -> None:
         """Install a committed projection/version before its single content fact."""
-        if not self._aliases_initialized and not parameters.source_faults:
-            self._initialize_aliases(parameters.document().components)
         self._state.set_context(replace(self._state.session_env, parameters=parameters))
         self._state.version.bump("context")
         payload = MdChangedPayload if parameter else MlChangedPayload
@@ -823,7 +800,11 @@ class ContextService:
     def _prepare_point(
         self, entry: ResultEntry, label: str, point: PointView
     ) -> tuple[
-        ParameterContext, ModuleLibrary, tuple[ContextSource, ...], WorkingPointInfo
+        ParameterContext,
+        ModuleLibrary,
+        tuple[ContextSource, ...],
+        WorkingPointInfo,
+        AliasTable,
     ]:
         if self._setup is None:
             raise RuntimeError("Opened entry has no setup binding")
@@ -843,7 +824,13 @@ class ContextService:
             ContextSource("module_cfg", library.source_path, None),
         )
         info = WorkingPointInfo(label, document.general.description or "")
-        return parameters, library, sources, info
+        saved_aliases = entry.load_aliases(point=label)
+        aliases = AliasTable(
+            tuple(
+                AliasRow(name, value) for name, value in saved_aliases.aliases.items()
+            )
+        )
+        return parameters, library, sources, info, aliases
 
     def _install_point(
         self,
@@ -870,8 +857,6 @@ class ContextService:
         *,
         active_label: str,
     ) -> None:
-        components = parameters.document().components if parameters is not None else {}
-        self._initialize_aliases(components)
         if not sources:
             self._source_binding = None
         else:

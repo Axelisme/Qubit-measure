@@ -26,6 +26,10 @@ class FakeDeviceRegistry:
             raise ValueError(f"Device {name} not found")
         del self._devices[name]
 
+    def close_device(self, name: str) -> None:
+        self.get_device(name).close()
+        self.drop_device(name)
+
     def get_device(self, name: str) -> Any:
         if name not in self._devices:
             raise ValueError(f"Device {name} not found")

@@ -13,19 +13,20 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-from .persistence_types import PersistedSession, PersistedTab
 from .ports import RestoreDroppedInputs, RestoreIssue, RestoreReport
+from .tab_input import TabInput
+from .workspace_types import WorkspaceSnapshot, WorkspaceTab
 
 if TYPE_CHECKING:
     from .ports import TabLifecyclePort
 
 
 class WorkspaceService:
-    """Own tab lifecycle and tab-session capture/apply workflow.
+    """Own tab lifecycle and RAM-only tab capture/apply for live catalog reload.
 
     Capture preserves the shared FormInput JSON including explicit selections.
-    Tab resources own recursive restoration against a new source capture; the PersistenceCaretaker only
-    reads/writes the resulting versioned PersistedSession memento.
+    Tab resources own recursive restoration against a new source capture.
+    This service does not save files or restore tabs at process startup.
     """
 
     def __init__(
@@ -38,12 +39,19 @@ class WorkspaceService:
         self._tabs = tabs
         self._bus = bus
 
-    def new_tab(self, adapter_name: str) -> str:
+    def new_tab(self, adapter_name: str, *, input: TabInput | None = None) -> str:
         """Create, activate and announce a tab using current global sources.
 
-        Default-cfg failure publishes no tab fact.
+        Owner-only; input is optional opaque authored Form JSON. The tab/form
+        owner restores compatible paths, logs discards and rejects malformed JSON
+        before publication. Caller retains input, GUI owns the new tab. Source or
+        default-cfg failure publishes no tab fact.
         """
-        tab_id = self._tabs.new_tab(adapter_name)
+        tab_id = (
+            self._tabs.new_tab(adapter_name)
+            if input is None
+            else self._tabs.new_tab(adapter_name, input=input)
+        )
         self._state.set_active_tab(tab_id)
         self._bus.emit(
             TabAddedPayload(tab_id=tab_id, adapter_name=adapter_name),
@@ -65,10 +73,11 @@ class WorkspaceService:
     def reorder_tabs(self, tab_ids: Sequence[str]) -> None:
         self._state.reorder_tabs(tab_ids)
 
-    def capture_session(self) -> PersistedSession:
+    def capture_session(self) -> WorkspaceSnapshot:
         """Snapshot authored Form input, including unfinished expressions, without I/O.
 
-        Sources, alias overrides, result models and figures are not persisted.
+        Call on the owner thread. The returned RAM copy belongs to the caller.
+        Sources, alias overrides, result models and figures are not included.
         """
         tabs = list(self._state.tabs.items())
         tab_ids = [tab_id for tab_id, _ in tabs]
@@ -78,7 +87,7 @@ class WorkspaceService:
             else None
         )
         payload_tabs = tuple(
-            PersistedTab(
+            WorkspaceTab(
                 adapter_name=tab.adapter_name,
                 form_input=TypeAdapter(dict[str, JsonValue]).validate_json(
                     tab.cfg.input.to_json()
@@ -86,15 +95,16 @@ class WorkspaceService:
             )
             for _, tab in tabs
         )
-        return PersistedSession(tabs=payload_tabs, active_tab_index=active_tab_index)
+        return WorkspaceSnapshot(tabs=payload_tabs, active_tab_index=active_tab_index)
 
-    def apply_session(self, session: PersistedSession) -> RestoreReport:
+    def apply_session(self, session: WorkspaceSnapshot) -> RestoreReport:
         """Create fresh resources and recursively restore shared FormInput JSON.
 
         Per-tab preparation failures are rejected_tabs; other tabs still restore.
         Successfully restored tabs report discarded raw/selection paths through dropped_inputs.
-        Ordinary unfinished/invalid input remains editable. Old memento versions
-        are rejected by the caretaker codec, not migrated here.
+        Call on the owner thread for live reload, not process startup. Ordinary
+        unfinished/invalid input remains editable. The caller owns the detached
+        snapshot; this command does not read or write files.
         """
         restored_by_index: dict[int, str] = {}
         rejected: list[RestoreIssue] = []

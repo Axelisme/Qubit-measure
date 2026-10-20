@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-17，共用初值政策的 owner 邊界
+**Last updated:** 2026-10-20，Sample writeback 座標宣告
 
 # Measure GUI contracts
 
@@ -6,6 +6,10 @@
 
 Post-analysis adapters 以 `get_post_writeback_items()` 提出 post-owned proposal；framework 將
 primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Writeback 實作。
+
+提供 `SampleWriteback` 的 adapter 宣告 `sample_device_alias = "$flux_dev"`。
+Framework 只依宣告從固定 Run／Load capture 與 device snapshot 補入座標。
+未宣告時不提供 Sample writeback，Parameter／Module proposals 不受影響。
 
 ## Ownership
 

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-19，跨平台 GUI cache 隔離
+**Last updated:** 2026-10-20，evolution／adc／ftf 模擬引擎選集與跨平台 GUI cache 隔離
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -68,20 +68,35 @@ import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warnin
 若 integration test 允許某個 fit fallback warning，使用 test-local `filterwarnings` marker
 標註該測試的預期退化。
 
-pytest 預設排除 `slow`。ticket 內只跑受影響選集，不跑 slow，最多使用兩個 worker：
+pytest 預設使用 `-m "not slow and not sim"`，排除慢測試與模擬測試。
+ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` 時，才用
+`-m sim` 或包含 sim 的受影響選集跑模擬測試。`-m` 會取代預設過濾，
+若仍要排除慢測試，明寫 `-m "sim and not slow"`。
+
+少數 targeted tests 直接用 `-n 0`。跨多檔的 pytest 經共用重工作佇列，最多使用兩個 worker：
 
 ```bash
-uv run --directory <worktree> --no-sync -- pytest <affected-paths> -n 2
+<repo>/.agent_state/resource-coordination/heavy-slot.sh 900 \
+  uv run --directory <worktree> --no-sync -- pytest <affected-paths> -n 2
 ```
 
-task 進 land review 前才跑整套驗證。CLI 的 `-m ""` 取代預設 marker 過濾，包含 slow 與非 slow。
-完整測試固定使用四個 worker。重檢查經過全機資源限制，同 task 用 lock 串行：
+task 進 land review 前才跑全樹驗證。依變更範圍選擇 marker expression，兩種都包含 slow：
+
+- 未改 `lib/zcu_tools/simulate/`，用 `-m "not sim"`。
+- 改到 `lib/zcu_tools/simulate/`，用 `-m ""`，包含所有測試。
 
 ```bash
-flock <task-scratch>/heavy-task.lock <repo>/.agent_state/tools/heavy.sh \
+<repo>/.agent_state/resource-coordination/heavy-slot.sh 3000 \
   uv run --directory <worktree> --no-sync -- \
-  pytest -n 4 --dist=worksteal -m "" --durations=25
+  pytest -n 2 --dist=worksteal -m "not sim" --durations=25
+# 若改到 lib/zcu_tools/simulate/，將上面的 -m "not sim" 換成 -m ""。
 ```
+
+`tests/simulate/conftest.py` 在 collection 時為該目錄全部案例加上 `sim`，
+避免新測試檔漏標。其他目錄以 coverage per-test context 判定，只標記實際驅動
+`lib/zcu_tools/simulate/evolution/`、`adc/` 或 `ftf/` 模擬引擎函式本體的測試。
+只 import 型別或常數、呼叫 predictor 或其他物理模型 helper 不算。
+module 內超過半數案例符合門檻時用 `pytestmark`，否則逐 test function 標記。
 
 `-m slow` 只驗證 slow 選集，不是整套驗證。`requires_loopback` 等能力 marker 只宣告資源需求，
 不用來跳過慢測試。slow 門檻依整套實測決定，數據與理由記在 task receipt。
@@ -269,7 +284,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ### Experiment device contracts
 
-`tests/experiment/utils/test_device.py` 在選定 driver 的公開接縫驗證 flux 單位、模式、安全限制、取消與錯誤傳播。Cfg assembly tests 驗證角色到名稱的 mapping，且不讀硬體。用到 device 的合成 cfg 在自身宣告該欄位，不依賴 framework base 的 default。
+`tests/device/` 在 driver 與 Info 的公開接縫驗證單位、模式、安全限制、取消與錯誤傳播。實驗角色 helpers 由 zcu_lab 擁有，不由框架測試匯入。Cfg assembly tests 驗證角色到名稱的 mapping，且不讀硬體。用到 device 的合成 cfg 在自身宣告該欄位，不依賴 framework base 的 default。
 
 GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guard 沒有可觀測的 driver 接縫，不在這些案例加入硬體讀取計數。Run 與 Notebook owner tests 驗證 acquisition 前讀全部 connected drivers 一次、讀取失敗拒 Run，以及固定 metadata 經 Save 後的讀回。DeviceInfo label 逆向投影與實驗自動 setup 的專用案例已退休，手動設定與 manager 的有效 owner tests 保留。
 
@@ -383,7 +398,7 @@ interaction.
 
 `DeviceManager` 是 instance registry，入口只接受 `BaseDevice` instance。GUI service unit tests 若用
 `MagicMock` driver 驗證 call interaction，注入 `tests/gui/session/services/_device_fakes.py::FakeDeviceRegistry`。
-Registry CRUD 使用真 `FakeDevice`。`test_simulated_environment.py` 經真 session owners 驗證明確組裝、部分斷線失敗與來源綁定，不靠一般 SoC change 通知補建資源。
+Registry CRUD 使用真 `FakeDevice`。`services/test_device_registration.py` 經真 manager 與 session owner 驗證 runtime 註冊、失敗保留與逐台 close；`app/measure/test_device_lifecycle.py` 驗證 drain 保留資源，以及 app 關閉隔離 driver 錯誤並卸載 SoC。不靠 SoC change 通知補建資源。
 
 `DeviceService.poll_device_info(name)` 測試應視為 best-effort off-main live-read contract：memory-only、
 connect/disconnect 等非 setup mutation 會 skip；`SETTING_UP` 的 selected device 可 poll current driver

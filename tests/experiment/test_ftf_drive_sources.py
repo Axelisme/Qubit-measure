@@ -8,6 +8,8 @@ from zcu_tools.simulate.ftf import JointModel
 
 from tests.resources._ftf_data import ftf_document
 
+pytestmark = pytest.mark.sim
+
 
 @pytest.mark.parametrize("explicit", [False, True])
 def test_charge_drive_matrices_preserve_full_charge_bitwise(explicit: bool) -> None:

@@ -1,9 +1,12 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-20，strict Spec 與未知欄位的純分離介面
+**Last updated:** 2026-10-20，strict Spec partition、明填模板 bindings 與持久 Spec family
 
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
+
+`Template.bindings` 提供任意具名替換，是模板佔位符唯一的綁定來源。
+`TemplateDef` 建構只驗語法，展開時缺 binding 就報 `ValueError`。展開保留 escaped braces，不解析 alias、不讀寫檔案。
 
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。
 - `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description、group、readonly 與 element_label，不改 cfg 驗證或序列化的值。group 是 MCP schema 可用的前端中立分類名稱 hint。前端用 `get_field_meta` 讀取，並決定實際的 widget、排版與折疊行為。`readonly=True` 由上層 Form core 強制執行，同值寫入通過，不同值拒絕；element_label 提供 picker label。
@@ -13,6 +16,7 @@ Caller 從 package root import 公開名稱。
 - `WaveformSamples` 由 core.waveform_format 擁有。它攜帶一次 asset 讀取的 reference time axis 與 normalized I/Q samples，不從 cfg_model re-export。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。
 - `partition_module_spec(raw)` 與 `partition_waveform_spec(raw)` 接受現行欄名與 discriminator 的 JSON mapping，回傳 `SpecPartition(spec, unrecognized)`。它們把巢狀未知欄位分出來，保留原名原值，已支援的 leaf 不另存。List 中的未知欄位保持原 index，沒有未知欄位的元素以空 object 佔位。缺少或非法的已知欄位、未知 family 仍 raise ValueError。輸出 Spec 再經普通 strict reader 驗證，runtime 不接受 extra。這兩個介面不處理舊 type、欄名或單位，也不解析引用。
+- `spec_types` 集中持久 Spec union 的展開。`concrete_spec_types` 供 TemplateDef 檢查宣告中的具體型別；`is_module_spec_type`／`is_waveform_spec_type` 供 library consumer 判定 family，接受已宣告型別及其 subclass。
 - `ModuleCfg`／`WaveformCfg` 表示已展開的執行參數。它們只提供欄位驗證與 `set_param`，不建立 program runtime 物件。
 - `readout/pulse` 獨立持有平鋪的 generator／ADC 欄位與 waveform。唯一 `freq` 同時供 generator／ADC 使用，waveform 仍可引用 key。Readout 不引用 Pulse，也沒有 DirectReadout；Reset 的 Pulse 引用保持不變。Pulse cfg 不保存 `ro_ch`，ADC matching 由 program runtime 提供。
 - `readout/mux` 的持久 Spec 與數字 cfg 共用驗證。Module 明填 generator、Nyquist zone 與 mixer；有序的 1 至 8 筆 tones 各自保存頻率、gain、phase 與 logical ADC channel。每筆 tone 的選填 label 預設空字串，隨 Spec、cfg 與 library 保存，只作顯示且可重複。Tone 序號定義資料軸，program 不解讀 label。時間使用共用 const duration 與 ADC window，不含 waveform、逐 tone 引用或 sweep。整個 module 可透過固定 snapshot 的 key materialize；`set_param` 拒絕更新，caller 必須重建數字 cfg 與 program。

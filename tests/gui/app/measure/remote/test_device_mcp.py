@@ -45,7 +45,9 @@ def device_client(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_manual_fake_device_is_rejected_through_mcp(device_client) -> None:
     invoke = device_client
     before = invoke("rpc_call", {"method": "device.list"})
-    with pytest.raises(GuiRpcError, match="simulation.*publish"):
+    with pytest.raises(
+        GuiRpcError, match="cannot be added manually; register.*remember.*Reconnect"
+    ):
         invoke(
             "rpc_call",
             {

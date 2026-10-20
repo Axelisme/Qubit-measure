@@ -11,8 +11,12 @@ embedded in the work thunk.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError
 from zcu_tools.gui.session.scopes import progress_ambient
 
 from tests.gui._qt_waits import qt_until
@@ -176,6 +180,55 @@ def test_terminal_admission_drains_accepted_delivery_and_rejects_submit(
     with pytest.raises(RuntimeError, match="background") as caught:
         bg.submit(lambda: 9, on_done=delivered.append, on_error=delivered.append)
     assert type(caught.value).__name__ == "BackgroundAdmissionClosedError"
+
+
+@pytest.mark.parametrize("run_in_pool", [True, False])
+@pytest.mark.parametrize("owner_fails", [True, False])
+def test_quiesce_pumps_owner_calls_before_joining_workers(
+    qapp, run_in_pool, owner_fails
+):
+    bg = _bg()
+    scheduler = QtOwnerScheduler()
+    reached = threading.Event()
+    release = threading.Event()
+    delivered: list[object] = []
+    owner_calls: list[int] = []
+    failure = ValueError("owner command failed")
+
+    def owner_command() -> int:
+        owner_calls.append(threading.get_ident())
+        with pytest.raises(BackgroundAdmissionClosedError):
+            bg.submit(lambda: 99, on_done=delivered.append, on_error=delivered.append)
+        if owner_fails:
+            raise failure
+        return 7
+
+    def work() -> int:
+        reached.set()
+        release.wait()
+        return scheduler.call(owner_command)
+
+    bg.submit(
+        work,
+        run_in_pool=run_in_pool,
+        on_done=delivered.append,
+        on_error=delivered.append,
+    )
+    try:
+        qt_until(reached.is_set, label="worker reached external barrier")
+        bg.stop_accepting()
+        assert not bg.quiesce(timeout_ms=0)
+        assert delivered == [] and owner_calls == []
+        release.set()
+        assert bg.quiesce(timeout_ms=1000), (
+            "drain must service owner calls while work is live"
+        )
+        assert delivered == [failure if owner_fails else 7]
+        assert owner_calls == [threading.get_ident()]
+        assert bg.quiesce(timeout_ms=0)
+    finally:
+        release.set()
+        assert bg.quiesce(timeout_ms=30_000)
 
 
 def test_repeatable_quiesce_does_not_close_qt_admission(qapp):

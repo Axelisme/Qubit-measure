@@ -60,15 +60,17 @@ Read、preview、result 與 accept 不捕捉來源。通知期間允許讀取，
 
 Run 只接受目前有效的 Form result，不收 cfg ref 或 expected revision，也不回退上次有效 cfg。Accepted config 深層隔離執行值與來源 provenance。後續 Edit、全域來源變更與 Reset 都不改已接受 Run。控制身份見 [[0070]]，hardware guard、lease 與 operation lifecycle 見 [[0066]]。
 
-Tab 建立時就能 headless 編輯。Qt attach/detach 只管理 view 與訂閱。Idle close 撤銷舊 handle，重建同名 tab 建立新資源。Active Run 禁止同 tab 的人工 Edit、Reset、replacement 與 close，其他 tab 仍可編輯。Load 只載既有結果及分析來源，保留表單原輸入與固定來源。有效、Invalid 與未完成的 draft 都不被改寫，Load 不要求 current 有效，也不從 native cfg 推回 extras。Wire 回覆保留結果與分析準備 facts，不提供回填狀態。原始 cfg 保存在 native 資料檔，透過公開 datafile.load_run_data 離線讀取為 StoredRun，GUI 不提供檢視入口，見 [[0063]]。
+Tab 在來源就緒後建立，建立時 capture 一次，隨即能 headless 編輯。腳本可用 `tabs.new_tab(adapter, input=TabInput(form_json))` 交回 opaque authored input，由 Form owner 解碼及還原，不由腳本重建 form 或來源。`TabInput` 保存 data、expression 原稿、一般 invalid draft 與 explicit selections，不含結果或來源，也不是 framework session 磁碟 schema。不相容路徑由既有 restore 政策丟棄並記 log，未知 adapter、無效 JSON 或來源建立失敗在 tab 發布前報錯。框架沒有 pending 還原；腳本選擇何時建 tab，見 [[0064]]。
+
+Qt attach/detach 只管理 view 與訂閱。Idle close 撤銷舊 handle，重建同名 tab 建立新資源。Active Run 禁止同 tab 的人工 Edit、Reset、replacement 與 close，其他 tab 仍可編輯。Load 只載既有結果及分析來源，保留表單原輸入與固定來源。有效、Invalid 與未完成的 draft 都不被改寫，Load 不要求 current 有效，也不從 native cfg 推回 extras。Wire 回覆保留結果與分析準備 facts，不提供回填狀態。原始 cfg 保存在 native 資料檔，透過公開 datafile.load_run_data 離線讀取為 StoredRun，GUI 不提供檢視入口，見 [[0063]]。
 
 ## 固定來源與 Form library key
 
-Open 與 Reset 捕捉一次 point、library、alias 表、cached device infos 與已發布 value sources。Edit、parameter_read、preview、result 與 Run 使用這份 capture，直到下一次 Reset。全域來源事件不刷新既有 tab。捕捉不輪詢硬體。
+Open、Refresh 與 Reset 各捕捉一次 point、library、alias 表、cached device infos 與已發布 value sources。Edit、parameter_read、preview、result 與 Run 使用這份 capture，直到下一次 Refresh 或 Reset。全域來源事件不刷新既有 tab。捕捉不輪詢硬體。
 
 公開 `read_context(aliases=None)` 固定 point、library、storage 與全表。非空 aliases 只覆寫這次 capture 的具名列，保留 dependent authored links，不改全域表。省略、None 與 {} 使用全域列。EMPTY 且無覆寫時回 None，保留 context-free defaults，非空覆寫仍拒絕 no_context。
 
-`tab.reset_cfg(aliases=...)` 是 tab 的單次覆寫入口，重新捕捉來源並恢復 defaults。覆寫不存入 alias 表或 memento。`tab.parameter_read` 只讀 resource.env.parameters，不收 aliases。`tab.run_start` 在任何 focus 或 operation 效果前拒絕非空 aliases，None 與 {} 使用畫面上的值與固定 capture。
+`tab.refresh_sources(aliases=...)` 重新捕捉來源，保留全部 input data 與 explicit selections，包括 expression 原稿與先前初值求得的 direct 值，再以新來源驗證。缺失來源仍是欄位錯誤。`tab.reset_cfg(aliases=...)` 重新捕捉來源並以新來源重算 defaults。兩者的單次覆寫都不存入 alias 表或 memento。`tab.parameter_read` 只讀 resource.env.parameters，不收 aliases。`tab.run_start` 在任何 focus 或 operation 效果前拒絕非空 aliases，None 與 {} 使用畫面上的值與固定 capture。
 
 RecipeSession.open_tab 的公開 aliases/reuse 用法不變。新 tab 與 reuse tab 都先 Reset，再設定參數與 Run。Target 對到 Reset 的 aliases，而非 preview 或 Run 的臨時解析。Recipe 的參數 schema 保持手寫，不從 Form 或 Python signatures 生成。
 
@@ -94,12 +96,14 @@ New 從 Registry 注入的 TemplateDef 目錄建立 entry input。換範本建�
 
 Inspect、Device 與 ARB UI 及其 service 由 session 提供，host 經公開入口注入必填協作者，不靠 host 差異猜能力。Inspect 有 Parameters、Modules、Aliases 三頁。Parameters 使用自己的 YamlValue／FieldSpec，不屬 Form 遷移。Run 或 agent 接管時，Inspect 表單不可改，但仍可選取文字、展開與捲動。
 
-Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Apply 將有序 authored rows 整表交 `apply_alias_rows`；有 opened entry 時先原子保存，再安裝 memory 與發布，無 entry 時只改 memory。失敗保留舊表、檔案、版本與 draft。未存修改走 Save／Discard／Cancel，沒有 Revert。
+Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Apply 將有序 authored rows 整表交 `apply_alias_rows`。它要求已選 point，否則回 `no_context`；成功時先原子保存該 point 的 `aliases.yaml`，再安裝 memory 與發布。失敗保留舊表、檔案、版本與 draft。Alias draft 固定載入時的 entry／point，沿用 Modules 固定 capture 的慣例。Clean draft 隨切換換表，dirty draft 保留。Apply 發現來源與目前 target 不同時拒絕並提示，兩端檔案都不改。同 target 才能提交；Revert 或重開會丟棄草稿並載入目前 point 的表。關閉時未存修改仍走 Save／Discard／Cancel。
 
 MCP 直接呼叫 owning context，不開 dialog、不切頁或焦點。`context.aliases_set` 回已安裝的 authored rows，不解析；解析另讀 snapshot。`context.set_parameter` 用一次 capture 固定具體 target 與 before，保留 metadata、不寫 ledger。這些 mutation 沿既有 owner 與 holder admission，Run 中可寫，但不改既有 Form 或 Run 的固定 capture。`dialog.screenshot` 只擷取目前已開 dialog 的當前頁，不切 Inspect tab。
 
 ## 取捨與相鄰責任
 
-單一表單核心讓各宿主共用 input、驗證與 editor，宿主仍決定 lifetime、來源捕捉與提交時機。來源變更不提示、不自動更新；Measure 要最新值就明確 Reset。Source basis 記錄 provenance，不是 cfg admission 門檻。這不取代 [[0079]] 還原時的型別與元素 identity 檢查；library 內容版本不同本身不是 identity mismatch。舊 `@{}` 補全、eval／value_ref wire tags 與 editor.* 事件／RPC 不再提供。`value.list`／`value.read` 與內部 ValueRef／resolve_value_ref 保留，見 [[0037]]。
+單一表單核心讓各宿主共用 input、驗證與 editor，宿主仍決定 lifetime、來源捕捉與提交時機。來源變更不提示、不自動更新。Measure 要保留目前 input 並取新來源就明確 Refresh，要重算初值就 Reset。
+
+使用者於 2026-10-19 裁定：「Reset/Refresh應該是不同分工，而不是捆綁」「我認為Reset可以包含Refresh，這樣方便」。Source basis 記錄 provenance，不是 cfg admission 門檻。這不取代 [[0079]] 還原時的型別與元素 identity 檢查；library 內容版本不同本身不是 identity mismatch。舊 `@{}` 補全、eval／value_ref wire tags 與 editor.* 事件／RPC 不再提供。`value.list`／`value.read` 與內部 ValueRef／resolve_value_ref 保留，見 [[0037]]。
 
 參數容器與 Library 寫入權由 [[0067]] 定義；保存與 crash durability 歸 [[0063]]；workflow run 與 patches 歸 [[0062]]；wire、guard 與 delivery failure 見 [[0068]]。模組入口見 [Form](../../lib/zcu_tools/gui/form/README.md)、[生成器](../../lib/zcu_tools/gui/form_adapter/README.md)、[session](../../lib/zcu_tools/gui/session/README.md) 與 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)。

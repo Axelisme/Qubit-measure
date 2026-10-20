@@ -1,4 +1,4 @@
-"""Cross-family decision graph; numerical guards remain kernel-owned."""
+"""Cross-family order and costs; kernels own numerical guards and family-local reuse."""
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -9,8 +9,10 @@ from joblib import delayed
 from numpy.typing import NDArray
 
 from ._carrier_plan import populate_carrier_plan
+from ._common_frame_dispatch import preferred as common_frame_preferred
 from ._dop853_dispatch import direct_plans
 from ._gain_plan import plan_gain_groups
+from ._multitone_dispatch import populate_multitone_inventory, populate_multitone_plan
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
@@ -21,7 +23,7 @@ from ._shaped_dispatch import (
     single_gate_preferred,
 )
 from ._two_tone_dispatch import direct_preferred
-from .cache import PrepareCache, PreparedPayload
+from .cache import RESIDENT_METADATA_BYTES, PrepareCache, PreparedPayload
 from .engine import PathDiagnostics
 from .kernel import (
     GuardPreparation,
@@ -34,22 +36,34 @@ from .kernel import (
 from .kernels.floquet import FloquetKernel, FloquetPlan
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.multitone_gate import populate_gate_inventory
+from .kernels.multitone_rwa import MultitoneRWAKernel
 from .secular import ModelSource
 from .workplan import WorkPlan
 
 
-def create_work_plan(table: SegmentTable, source: ModelSource) -> WorkPlan:
+def create_work_plan(
+    table: SegmentTable,
+    source: ModelSource,
+    budget: float = 1e-3,
+    *,
+    telemetry: bool = False,
+    content_key: bytes = b"",
+) -> WorkPlan:
     """Create ownership for the complete evolve before prefix/worker planning.
 
     table is the full immutable geometry and source owns model identity.
     Algorithm-specific group planners populate this plan before workers start;
-    no numerical routing or expensive candidate graph is constructed here.
+    budget is the numerical admission budget for cold mixed gate plans.
+    telemetry enables calling-thread CPU accounting before those plans build.
     """
-    plan = WorkPlan()
+    plan = WorkPlan(content_key=content_key)
+    plan.routing.enabled = telemetry
+    plan.publish_common_frame_table(table)
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)
-    populate_single_gate_plan(table, source, plan)
+    populate_single_gate_plan(table, source, plan, budget)
+    populate_multitone_inventory(table, source, plan, budget)
     return plan
 
 
@@ -74,7 +88,7 @@ def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
         "idle": _CandidateDomain(table.tones == 0, ("t4",)),
         "flux": _CandidateDomain(flux, ("flux_dop853",)),
         "plateau": _CandidateDomain(
-            single & constant, ("dyson", "floquet_period", "t6")
+            single & constant, ("dyson", "single_tone_rwa", "floquet_period", "t6")
         ),
         "shaped": _CandidateDomain(
             single & ~constant,
@@ -88,11 +102,11 @@ def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
         ),
         "two": _CandidateDomain(
             ordinary & (table.tones == 2) & constant,
-            ("multitone_rwa", "floquet", "dop853"),
+            ("common_frame", "multitone_rwa", "floquet", "dop853"),
         ),
         "multiple": _CandidateDomain(
             ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)),
-            ("multitone_gate", "multitone_rwa", "dop853"),
+            ("common_frame", "multitone_gate", "multitone_rwa", "dop853"),
         ),
     }
 
@@ -113,11 +127,7 @@ def resident_inventory(
     table = geometry.table
     zero = tuple(0 for _ in range(table.level.shape[1]))
     identity = context.source.model(zero).identity
-    current = {
-        name
-        for name, model, budget in cache.namespaces
-        if model == identity and budget == context.budget
-    }
+    current = cache.families(identity, context.budget)
     inventory = {}
     if current:
         domains = _candidate_domains(geometry)
@@ -172,7 +182,7 @@ class Selection:
 
 @dataclass(frozen=True)
 class Dispatch:
-    """Call-local legacy single-interval execution plan, consumed by Schedule.
+    """Call-local interval execution plan, consumed by Schedule.
 
     Within the classified scope, every pending interval is covered exactly once:
     all Geometry.pending rows for an acquire, or Selection.rows for one worker.
@@ -270,11 +280,14 @@ def prepare(
     build. Other families use their ordinary prepare entry point unchanged.
     Keys, representatives, budget and failure semantics follow Kernel.prepare.
     """
-    if isinstance(kernel, GateCacheKernel):
-        duration = keys["duration"]
-        phase_adaptive = (duration > 0) & (duration <= 30.0)
-        return kernel.prepare(keys, table, rows, context, phase_adaptive=phase_adaptive)
-    return kernel.prepare(keys, table, rows, context)
+    with context.work_plan.routing.measure(kernel.name, "prepare"):
+        if isinstance(kernel, GateCacheKernel):
+            duration = keys["duration"]
+            phase_adaptive = (duration > 0) & (duration <= 30.0)
+            return kernel.prepare(
+                keys, table, rows, context, phase_adaptive=phase_adaptive
+            )
+        return kernel.prepare(keys, table, rows, context)
 
 
 class _GuardCacheHits(tuple[PreparedPayload, ...]):
@@ -316,7 +329,8 @@ def _guard_key(
     rows: NDArray[np.int64],
 ) -> _Guarded:
     """Separate consumer handoffs from model-only products with no accepted row."""
-    result = kernel.guard_prepared(table, rows, context)
+    with context.work_plan.routing.measure(kernel.name, "prepare"):
+        result = kernel.guard_prepared(table, rows, context)
     if result is None:
         raise RuntimeError(
             f"kernel {kernel.name} declares guard_builds without a handoff"
@@ -356,11 +370,15 @@ def _guard_cached(
         if not len(covered):
             continue
         selected = rows[covered]
-        result = kernel.admit_prepared(hits[index].prepared, table, selected, context)
+        with context.work_plan.routing.measure(kernel.name, "prepare"):
+            result = kernel.admit_prepared(
+                hits[index].prepared, table, selected, context
+            )
         if result is None:
             continue
         remaining[covered] = False
         accepted = result.accepted
+        context.work_plan.routing.hit(kernel.name, table, selected[accepted])
         results.append(
             _Guarded(
                 selected[accepted],
@@ -374,9 +392,10 @@ def _guard_cached(
         if rejected_limit is not None and built.rejected_preparations:
             retained: list[GuardPreparation] = []
             for preparation in built.rejected_preparations:
-                if preparation.prepared.nbytes <= rejected_limit:
+                charge = preparation.nbytes + RESIDENT_METADATA_BYTES
+                if charge <= rejected_limit:
                     retained.append(preparation)
-                    rejected_limit -= preparation.prepared.nbytes
+                    rejected_limit -= charge
             built = _Guarded(
                 built.rows,
                 built.rejected,
@@ -470,6 +489,14 @@ class _Classifier:
                 self.cached.get(kernel.name, _EMPTY_GUARD_HITS),
             )
         groups = group_keys(kernel, self.table, rows, self.context)
+        # A common refusal must reach the caller's complete legacy key groups.
+        # Deferring a unique common key can otherwise split one shared Floquet
+        # (or RWA/gate) build into one build per timeline after the refusal.
+        caller_keys = (
+            np.ones(len(groups.keys), dtype=bool)
+            if kernel.name == "common_frame"
+            else groups.shared
+        )
         if self.cache is not None:
             dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
             self.cached[kernel.name] = _GuardCacheHits(
@@ -485,19 +512,24 @@ class _Classifier:
         # Bound rejected handoffs even while pooled shared guards are returning.
         # Equal per-key quotas deliberately decline large non-revisiting scans.
         rejected_limit = (
-            max(0, self.cache.limit - self.cache.bytes)
-            // max(1, int(np.count_nonzero(groups.shared)))
+            max(
+                0,
+                self.cache.limit
+                - self.cache.charged_bytes
+                + self.cache.reclaimable_bytes,
+            )
+            // max(1, int(np.count_nonzero(caller_keys)))
             if self.cache is not None
             else 0
         )
-        local = rows[~groups.shared[groups.inverse]]
+        local = rows[~caller_keys[groups.inverse]]
         self.deferred[local] = True
         if len(local):
             self.costs[local] = kernel.cost(self.table, local)
         selections = (
-            selected for index, selected in groups.selections() if groups.shared[index]
+            selected for index, selected in groups.selections() if caller_keys[index]
         )
-        if self.pool is not None and np.count_nonzero(groups.shared) >= 8:
+        if self.pool is not None and np.count_nonzero(caller_keys) >= 8:
             batches = self.pool(
                 delayed(_guard_cached)(
                     kernel, self.table, self.context, selected, hits, rejected_limit
@@ -533,9 +565,10 @@ class _Classifier:
         namespace = kernel.name, dc.identity, self.budget
         extended: list[PreparedPayload] = []
         for payload in hits:
-            prepared = kernel.extend_prepared(
-                payload.prepared, self.table, self.context
-            )
+            with self.context.work_plan.routing.measure(kernel.name, "prepare"):
+                prepared = kernel.extend_prepared(
+                    payload.prepared, self.table, self.context
+                )
             if prepared is payload.prepared:
                 extended.append(payload)
                 continue
@@ -558,12 +591,14 @@ class _Classifier:
         if kernel.guard_builds:
             results = self.guard_keys(kernel, eligible)
         else:
-            accepted = kernel.guard(self.table, eligible, self.context)
+            with self.context.work_plan.routing.measure(kernel.name, "prepare"):
+                accepted = kernel.guard(self.table, eligible, self.context)
             results = (_Guarded(eligible[accepted], eligible[~accepted], ()),)
         for result in results:
             if result is None:
                 raise RuntimeError("guard job returned no decision")
             self.names[result.rows] = kernel.name
+            self.context.work_plan.routing.reject(kernel.name, len(result.rejected))
             if len(result.rejected):
                 self.rejected.setdefault(
                     kernel.name, np.zeros(len(self.names), dtype=bool)
@@ -630,14 +665,22 @@ class _Classifier:
         for name in ("idle", "flux"):
             domain = self.domains[name]
             self.accept(rows[domain.mask[rows]], domain.families)
+        # Group shaped and constant consumers together before any legacy prepare.
+        common = self.domains["two"].mask | self.domains["multiple"].mask
+        self.try_common_frame(rows[common[rows]])
         domain = self.domains["plateau"]
         plateau = rows[domain.mask[rows]]
-        # Distinct inputs cannot share Dyson paths; period propagation is cheaper
-        # within the 10 us FTF coverage. Keep Dyson when the period guard rejects.
+        # Distinct inputs cannot share Dyson paths; try constant RWA and period
+        # propagation first within 10 us. Keep Dyson when both guards reject.
         distinct_input = _unshared_driven_input(table) & (table.duration_ns <= 10000.0)
-        dyson, period, terminal = domain.families
-        self.accept(plateau[distinct_input[plateau]], (period, dyson, terminal))
-        self.accept(plateau[~distinct_input[plateau]], domain.families)
+        dyson, rwa, period, terminal = domain.families
+        prefix = (rwa,) if rwa in self.kernels else ()
+        self.accept(
+            plateau[distinct_input[plateau]], (*prefix, period, dyson, terminal)
+        )
+        self.accept(
+            plateau[~distinct_input[plateau]], (dyson, *prefix, period, terminal)
+        )
         shaped = np.flatnonzero(self.domains["shaped"].mask & self.scope)
         if len(shaped):
             self.classify_shaped(shaped)
@@ -646,26 +689,69 @@ class _Classifier:
             self.classify_two_tone(two_tone)
         domain = self.domains["multiple"]
         multiple = rows[domain.mask[rows]]
-        # A calibrated approximation has its own visible family. Custom
-        # registries can omit this optional fast path, like shaped_sambe.
-        if domain.families[1] in self.kernels:
-            candidates = tuple(name for name in domain.families if name in self.kernels)
-            self.accept(multiple, candidates)
-        else:
-            self.accept(multiple, domain.families[2:])
+        self.classify_multiple(multiple)
         return self._result()
+
+    def try_common_frame(self, rows: NDArray[np.int64]) -> NDArray[np.int64]:
+        """Try the cold-priced variant without removing any original fallback."""
+        kernel = self.kernels.get("common_frame")
+        candidates = rows[self.table.tones[rows] == 2]
+        if kernel is not None and len(candidates):
+            rwa = self.kernels.get("multitone_rwa")
+            preferred = common_frame_preferred(
+                self.table,
+                candidates,
+                self.context,
+                rwa if isinstance(rwa, MultitoneRWAKernel) else None,
+            )
+            if np.any(preferred):
+                self.try_kernel(kernel, candidates[preferred])
+        return rows[(self.names[rows] == "") & ~self.deferred[rows]]
+
+    def expanded_direct(self, rows: NDArray[np.int64]) -> NDArray[np.bool_]:
+        """Borrow the cold comparison only when both families are available."""
+        if (
+            not len(rows)
+            or not isinstance(self.kernels.get("multitone_rwa"), MultitoneRWAKernel)
+            or ("dop853" not in self.kernels)
+        ):
+            return np.zeros(len(rows), dtype=bool)
+        direct = populate_multitone_plan(
+            self.table, self.source, self.context.work_plan, self.budget
+        )
+        return np.array([int(row) in direct for row in rows], dtype=bool)
+
+    def classify_multiple(self, rows: NDArray[np.int64]) -> None:
+        """Try reusable gates, then the cheaper admitted RWA/direct alternative."""
+        _, gate, rwa, direct = self.domains["multiple"].families
+        rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
+        if gate in self.kernels and len(rows):
+            rows = self.try_kernel(self.kernels[gate], rows)
+        preferred = self.expanded_direct(rows)
+        optional = (rwa,) if rwa in self.kernels else ()
+        self.accept(rows[preferred], (direct, *optional))
+        self.accept(rows[~preferred], (*optional, direct))
 
     def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
         """Fix acquire-wide costs before either guard; workers borrow the plan."""
+        selected = rows[
+            self.scope[rows] & (self.names[rows] == "") & ~self.deferred[rows]
+        ]
+        if not len(selected):
+            return
         if self.two_tone_direct is None:
             self.two_tone_direct = np.zeros(len(self.names), dtype=bool)
             self.two_tone_direct[rows] = direct_preferred(
                 self.table, rows, self.context
             )
-        selected = rows[self.scope[rows]]
-        direct = self.two_tone_direct[selected]
-        rwa, floquet, dop853 = self.domains["two"].families
+        expanded = self.expanded_direct(selected)
+        _, rwa, floquet, dop853 = self.domains["two"].families
         prefix = (rwa,) if rwa in self.kernels else ()
+        self.accept(selected[expanded], (dop853, *prefix, floquet))
+        selected = selected[~expanded]
+        direct = self.two_tone_direct[selected]
+        # Production DOP853 accepts every valid row and is terminal here.
+        # Keep the Floquet tail for injected same-name kernels that may reject.
         self.accept(selected[direct], (*prefix, dop853, floquet))
         self.accept(selected[~direct], (*prefix, floquet, dop853))
         self.retain_floquet_plan()

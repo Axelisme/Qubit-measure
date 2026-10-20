@@ -15,6 +15,7 @@ from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
@@ -22,6 +23,7 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceRegistrationError,
@@ -30,6 +32,7 @@ from zcu_tools.gui.session.services.device import (
     SetupDeviceRequest,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._completion_helpers import (
     on_device_connected,
@@ -91,6 +94,65 @@ def _connect(svc: DeviceService) -> None:
     )
     qt_until(lambda: bool(connected or errors), label="connect test_dev")
     assert not errors
+
+
+@pytest.mark.parametrize("origin", ["register", "remember"])
+def test_script_rows_reconnect_after_rename_without_manual_admission(qapp, origin):
+    bus = EventBus()
+    gate = OperationGate(bus)
+    bg = _bg()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    registry = DeviceManager()
+    service = DeviceService(
+        bus,
+        State(MagicMock()),
+        gate,
+        bg,
+        OperationRunner(gate, handles, progress, bg, bus),
+        handles,
+        device_registry=registry,
+    )
+    driver = FakeDevice(address="script-bias", fast_mode=True)
+    driver.set_value(1.25)
+    _workers.watch(bus)
+    if origin == "register":
+        service.register_device("bias", driver)
+        done: list[object] = []
+        on_device_disconnected(service, done.append)
+        service.start_disconnect_device(DisconnectDeviceRequest("bias"))
+        # The no-op fake close must produce a terminal owner delivery.
+        qt_until(lambda: bool(done or _workers.errors), label="script disconnect")
+        assert not _workers.errors
+    else:
+        service.register_remembered_devices(
+            [DeviceMemoryInfo("FakeDevice", "bias", "script-bias")]
+        )
+    service.rename_device("bias", "renamed")
+    with pytest.raises(FailedPreconditionError):
+        service.start_connect_device(
+            ConnectDeviceRequest("FakeDevice", "renamed", "script-bias")
+        )
+    connected: list[object] = []
+    on_device_connected(service, connected.append)
+    try:
+        admission_errors: list[str] = []
+        try:
+            service.start_reconnect_device("renamed")
+        except FailedPreconditionError as exc:
+            admission_errors.append(str(exc))
+        assert admission_errors == [], "Stored script rows must admit Reconnect"
+        # Known adapter creates/retrieves the addressed fake, then owner settles.
+        qt_until(lambda: bool(connected or _workers.errors), label="script reconnect")
+        assert not _workers.errors
+        row = service.get_device_snapshot("renamed")
+        assert row is not None and row.status is DeviceStatus.CONNECTED
+        assert row.address == "script-bias"
+        assert service.get_cached_device_value("renamed") == 1.25
+        assert registry.get_device("renamed") is driver
+    finally:
+        _workers.close()
+        registry.close_all_devices()
 
 
 def test_device_setup_failure_emits_setup_failed(qapp):

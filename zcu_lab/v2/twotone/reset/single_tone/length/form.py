@@ -16,11 +16,13 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
                 "reset": Slot("$qubit.module.reset"),
                 "init_pulse": Slot("$qubit.module.x180"),
                 "tested_reset": Template(
-                    "reset", set={"pulse_cfg.freq": Expr("$qubit.ext.reset_f")}
+                    "reset",
+                    bindings={"qubit": "$qubit"},
+                    set={"pulse_cfg.freq": Expr("$qubit.ext.reset_f")},
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {"length": Range.between(0.1, 20.0, expts=50)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

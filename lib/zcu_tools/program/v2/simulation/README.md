@@ -1,17 +1,33 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-18，fixed mux profile 與 frontend lowering
+**Last updated:** 2026-10-20，SoC-owned statistics validation certificates, optional round pacing and acquire completion observer；board 自述身分與 caller-owned 啟動
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
 and supplies numeric round data to the existing QICK acquisition pipeline.
-`SimulationBinding` optionally accepts a `wait_ready` callback. Admission calls
+`SimulationBinding` optionally accepts `SimulationCallbacks(wait_ready=callback)`. Admission calls
 it before consuming the acquire sequence or constructing a request. Failure
 releases admission and propagates; the environment callback owns any optional
 startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
-Other SoC objects use the original path. Classification, hooks, tracker,
-normalization, averaging and Stop still belong to that pipeline.
+`SimulationBinding(..., min_round_duration_s=0.0)` optionally paces each
+successful round using monotonic wall time, including snapshot and execution.
+It waits only for a positive remainder and propagates failures without waiting.
+Zero disables pacing and clock reads; generic bindings remain unpaced by default.
+The environment builder owns the policy (FTF defaults to 0.2 seconds), not the GUI.
+`SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
+acquire after all software rounds, including partial or failed acquisitions.
+The callback receives captured `RoundRequest` records and admitted wall seconds,
+including pacing. It runs before admission releases. Observer errors warn at
+most once and cannot mask acquisition failures, even under warning-as-error
+filters. An omitted on_end avoids this observer and its acquire-level clocks. FTF uses the
+callback to persist its own local routing reports; program knows no file format.
+Other SoC objects use the original path. Integrated simulation configures the
+compiled program and readouts without serializing DAC/weight arrays for no-op
+transport. Requested uploads still validate int16 envelope and weight dtypes;
+QICK retains first-compilation ownership. Hardware and decimated paths keep
+their original configuration. Classification, hooks, tracker, normalization,
+averaging and Stop still belong to that pipeline.
 
 ## Build and own an environment
 
@@ -28,10 +44,11 @@ def build_environment():
     )
 ```
 
-The measure launcher accepts `--simulate /absolute/path/noise_environment.py`.
-It imports the file and calls `build_environment()` without arguments once.
-No environment path means normal mode, without an automatic board connection.
-Load or installation errors abort startup without a fallback.
+The caller imports the builder and owns the returned environment. GUI startup
+scripts can install its board and register its built drivers through public
+facets. The GUI does not load or select an environment. `SimulationSoc.is_mock`
+is True, so consumers can forward the board's identity without importing the
+simulation implementation.
 
 Notebook callers import the same builder and use its returned objects:
 
@@ -59,13 +76,13 @@ finally:
 ```
 
 `SimulationEnvironment` returns `soc`, matching `soccfg`, `devices` and a public
-`description`. The builder owns cleanup before successful return. The host owns
-cleanup after return, even if publication or window assembly fails. GUI injects
-the same `DeviceManager`, publishes live drivers through `DeviceService`, and
-restores preferences afterward. Same-name live devices win; other remembered
-rows remain offline. After operation admission closes and work drains, composition
-closes the manager. Failed driver closes remain registered and propagate. There
-is no automatic retry. `Controller.close()` drains work but does not close drivers.
+`description`. The builder owns cleanup before successful return. The caller
+owns cleanup after return. GUI registration transfers each accepted driver's
+lifetime to DeviceService; rejected candidates remain caller-owned. The caller
+retains ownership of the board and other environment resources. Register their
+cleanup with the startup script's on-close hook when needed. After callbacks and
+operation drain, the GUI tries every registered driver once. Failed closes stay
+registered with an error; they do not prevent GUI exit or trigger automatic retry.
 
 ## Compact timelines and statistics
 
@@ -151,6 +168,11 @@ without padding to the longest entry. TablePulseReadout first plays its initial
 compiled template; only its named loop's exec-after hook prepares the next words.
 The last update restores table entry zero for the next outer repetition. Register
 and template state belongs to one frontend preparation, never to another acquire.
+The binding retains detached immutable DAC envelopes in a 32 MiB LRU pool across
+acquisitions. Every preparation checks current DAC content, normalization, clocks
+and flat-top duration; names and program identities are not cross-acquire keys.
+The budget includes keys, Python samples and containers. Eviction releases only
+pool references, so existing requests keep their immutable envelopes unchanged.
 Normal hardware compilation and the existing block_mode timing policy are unchanged.
 
 - `AcquireRequest` fixes C-order `loop_dims`, `avg_level`, non-reps `point_dims`
@@ -167,7 +189,12 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   or `RoundSignals` for decimated mode. Mode/result mismatches raise.
 - Integrated statistics contain per-point totals over reps, shared state counts,
   conditional per-shot sums and receiver covariance. The adapter validates and
-  detaches these arrays. Without threshold, classification or trackers, it divides
+  detaches these arrays. Each SimulationSoc retains at most 64 KiB of successful
+  conditional-sum/covariance validation certificates, keyed by shape, dtype and
+  exact bytes, not borrowed array identity. Counts, layout and noisy totals are
+  checked each round, and every returned array is detached even on a certificate
+  hit. Certificates live with the SoC and do not cross the core/backend boundary.
+  Without threshold, classification or trackers, it divides
   totals by reps and readout length, removes QICK offsets and moves reads first,
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
   Threshold, classification, trackers and `get_raw()` materialize deterministic

@@ -228,26 +228,16 @@ class DriverFactoryPort(Protocol):
 
 @dataclass(frozen=True)
 class DeviceMemoryInfo:
-    """A remembered (memory-only) device's identity — the element type of
-    ``RememberedDevicePort.register_remembered_devices``. Lives in the seam so both
-    the device service and project settings depend on it here, not on each other's
-    module.
+    """Identity for explicit memory-only registration through DeviceService.
+
+    type_name identifies the device driver type, name is its session-unique
+    identifier, and address is the connection string used by Reconnect. The
+    caller decides which identities to remember; this value does not own storage.
     """
 
     type_name: str
     name: str
     address: str
-
-
-@runtime_checkable
-class RememberedDevicePort(Protocol):
-    """Remembered-device registration as used by ``ProjectSettingsService.restore_settings``.
-
-    The one device command settings restore issues; depends on the port, not the
-    concrete ``DeviceService``.
-    """
-
-    def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None: ...
 
 
 @runtime_checkable
@@ -296,6 +286,15 @@ class DeviceRegistryPort(Protocol):
 
     def register_device(self, name: str, device: Any) -> None: ...
     def drop_device(self, name: str, *, ignore_error: bool = False) -> None: ...
+
+    def close_device(self, name: str) -> None:
+        """Close and remove one driver; retain registration on failure.
+
+        Registry coordinates identity claims so concurrent close cannot run twice.
+        Failure propagates with the device name and original cause.
+        """
+        ...
+
     def get_device(self, name: str) -> Any: ...
     def get_all_devices(self) -> dict[str, Any]: ...
     def get_info(self, name: str) -> Any: ...

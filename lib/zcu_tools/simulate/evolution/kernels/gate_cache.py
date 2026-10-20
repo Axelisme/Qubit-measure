@@ -9,13 +9,12 @@ from scipy.linalg import expm
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from . import gate_phase
-from ._gate_endpoints import build_endpoints
+from ._gate_endpoints import GATE_SUBSEGMENTS, build_endpoints
 from ._secular import coherence_decay, population_generator, split_step
 from ._shaped import drive_bounds
 from ._workload_facts import envelope_bounds
 
 _PHASE_COUNT = 16
-_SUBSEGMENTS = 4
 _MODES = np.fft.fftfreq(_PHASE_COUNT) * _PHASE_COUNT
 
 
@@ -50,7 +49,7 @@ def _apply_gates(
     for row in range(len(states)):
         key = key_index[row]
         rho = states[row].copy()
-        for segment in range(_SUBSEGMENTS):
+        for segment in range(GATE_SUBSEGMENTS):
             unitary = np.zeros((size, size), dtype=np.complex128)
             for mode in range(_PHASE_COUNT):
                 unitary += (
@@ -110,7 +109,7 @@ class GateCacheKernel:
             table.duration_ns[selected] ** 3
             * gamma
             * (table.tone_amplitude[selected, 0] * peak * strength) ** 2
-            / _SUBSEGMENTS**2
+            / GATE_SUBSEGMENTS**2
         )
         accepted[accepted] = estimate <= 0.01
         return accepted
@@ -152,7 +151,7 @@ class GateCacheKernel:
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
         """Return constant matrix-action work per row after preparation."""
         return np.full(
-            table.duration_ns[rows].shape, float(_SUBSEGMENTS * _PHASE_COUNT)
+            table.duration_ns[rows].shape, float(GATE_SUBSEGMENTS * _PHASE_COUNT)
         )
 
     def prepare(
@@ -190,7 +189,7 @@ class GateCacheKernel:
         coefficients, populations, coherences = [], [], []
         for row, adaptive in zip(rows, phase_adaptive, strict=True):
             model = source.model(tuple(int(v) for v in table.level[row]))
-            half_step = float(table.duration_ns[row]) / (2 * _SUBSEGMENTS)
+            half_step = float(table.duration_ns[row]) / (2 * GATE_SUBSEGMENTS)
             population = expm(half_step * population_generator(model.rates_per_ns))
             coherence = np.exp(-half_step * coherence_decay(model))
             coefficient = None
@@ -214,7 +213,7 @@ class GateCacheKernel:
             )
         else:
             arrays = (
-                np.empty((0, _SUBSEGMENTS, _PHASE_COUNT, 0, 0), complex),
+                np.empty((0, GATE_SUBSEGMENTS, _PHASE_COUNT, 0, 0), complex),
                 np.empty((0, 0, 0)),
                 np.empty((0, 0, 0)),
             )

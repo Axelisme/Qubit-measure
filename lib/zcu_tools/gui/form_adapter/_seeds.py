@@ -342,8 +342,11 @@ def template_input(
             f"Template {template.id!r} has incompatible module {definition.module.__name__}"
         )
     model = compatible[0]
-    seeds = definition.expanded_seeds(
-        qubit=template.qubit, resonator=template.resonator
+    # Catalog binding validates structure before input expansion.
+    seeds = (
+        dict(definition.seeds)
+        if env is None
+        else definition.expanded_seeds(bindings=template.bindings)
     )
     seeds.update(template.set)
     data: dict[str, JsonValue] = {}
@@ -378,9 +381,8 @@ def template_seed_tree(
     This tree is only for deriving field requirements, never for Slot presence
     or actual input. Literal overrides replace earlier Expr seeds.
     """
-    seeds = catalog[template.id].expanded_seeds(
-        qubit=template.qubit, resonator=template.resonator
-    )
+    # Requirements depend on the authored seed kinds, not replacement values.
+    seeds = dict(catalog[template.id].seeds)
     seeds.update(template.set)
     data: dict[str, JsonValue] = {}
     for path, seed in seeds.items():

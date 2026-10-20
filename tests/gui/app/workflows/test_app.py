@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Event
 
 import pytest
+from pydantic import JsonValue
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import (
     QApplication,
@@ -20,6 +21,8 @@ from qtpy.QtWidgets import (
 from zcu_tools.device import FakeDevice
 from zcu_tools.device.manager import DeviceManager
 from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
+from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
 from zcu_tools.gui.app.workflows.remote import WorkflowRemoteControlAdapter
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -30,11 +33,7 @@ from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.runtime import GuiAssembly
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import (
-    CommandOrigin,
-    EntryRequest,
-    PointCreateRequest,
-)
+from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -51,8 +50,17 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.gui.app.workflows._synthetic import PlanForm, TunablesForm
 from tests.resources.entry.fakes import registry_state, restore_registry
 
+from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
-from ._synthetic import ALIAS_PRESET, Component, Context, OtherComponent, build_registry
+from ._synthetic import (
+    ALIAS_PRESET,
+    Component,
+    Context,
+    OtherComponent,
+    build_registry,
+    context_seed,
+    sample_step,
+)
 
 
 @pytest.fixture(scope="session")
@@ -105,9 +113,10 @@ def test_named_presets_reach_workflows_composition_without_overwriting_saved_row
     entry = ResultEntry.create(
         "sample", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
+    entry.new_point("first")
     if saved is not None:
         entry.save_aliases(
-            EntryAliases(aliases={row.alias: row.value for row in saved})
+            EntryAliases(aliases={row.alias: row.value for row in saved}), point="first"
         )
     try:
         behavior = WorkflowsGuiBehavior(
@@ -126,9 +135,9 @@ def test_named_presets_reach_workflows_composition_without_overwriting_saved_row
         context = behavior.services.context
         assert context.get_alias_rows() == presets["default"]
         context.install_entry(entry)
-        assert context.get_alias_rows() == (
-            presets["default"] if saved is None else saved
-        )
+        assert context.get_alias_rows() == ()
+        context.use_point(PointUseRequest("first"))
+        assert context.get_alias_rows() == (() if saved is None else saved)
         # Edits to the installed table do not edit caller preset definitions.
         context.set_alias_rows((AliasRow("replacement", "R2"),))
         assert behavior.alias_presets == presets
@@ -341,49 +350,72 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     )
 
 
-def test_capture_failure_preserves_both_panels_and_local_input(
-    app: WorkflowsGuiBehavior[Context], tmp_path: Path, qapp: QApplication
+@pytest.mark.parametrize("rows", [(), (AliasRow("qubit", ""),)])
+def test_prepare_forms_without_workflow_alias_dependencies(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    rows: tuple[AliasRow, ...],
 ) -> None:
-    app.assemble(None)
-    open_point(app, tmp_path, qapp)
-    app.window.prepare_forms()
-    plan, knobs = app.window.plan_panel, app.window.tunables_panel
+    window, harness, _entry = attachment
+    old_plan, old_knobs = window.plan_panel, window.tunables_panel
+    harness.services.context.set_alias_rows(rows)
+    try:
+        window.prepare_forms()
+    except RoleResolutionError as error:
+        pytest.fail(f"Alias-independent workflow must prepare successfully: {error}")
+    assert window.plan_panel is not old_plan
+    assert window.tunables_panel is not old_knobs
+    reply = window.inspect_form("tunables")
+    assert not isinstance(reply, FormErrors)
+    assert reply["errors"] == []
+    assert {"path": ["sample", "value"], "value": 20.0} in reply["values"]
+
+
+@pytest.mark.parametrize("rows", [(), (AliasRow("probe", ""),)])
+def test_prepare_form_dependency_names_missing_alias_and_preserves_panels(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+    rows: tuple[AliasRow, ...],
+) -> None:
+    window, harness, _entry = attachment
+
+    class ProbePlan(PlanForm):
+        @classmethod
+        def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+            data = super().defaults(env)
+            if env.parameters is not None:
+                env.parameters.resolve_path("$probe.kind")
+            return data
+
+    harness.services.context.set_alias_rows(
+        (AliasRow("qubit", "Q1"), AliasRow("probe", "Q1"))
+    )
+    window.prepare_forms()
+    catalog_source.catalog = WorkflowCatalog(
+        (
+            WorkflowAttachment(
+                step=sample_step,
+                plan_model=ProbePlan,
+                knobs_model=TunablesForm,
+                plan_to_cfg=ProbePlan.to_cfg,
+                knobs_to_cfg=TunablesForm.to_cfg,
+                seed=context_seed,
+            ),
+        )
+    )
+    window.reload_source()
+    plan, knobs = window.plan_panel, window.tunables_panel
     knobs.state.write({("sample", "value"): 17.0}, knobs.env)
     edit = knobs.findChild(QLineEdit, "form.input.sample.value")
     assert edit is not None
     edit.setText("1+")
     edit.editingFinished.emit()
     before = knobs.state.input.data
-    app.services.settings.open_entry(EntryRequest("sample"))
-    app.services.context.new_point(
-        PointCreateRequest("empty", "", CommandOrigin("gui"))
-    )
-    with pytest.raises(RoleResolutionError, match="qubit"):
-        app.window.prepare_forms()
-    assert app.window.plan_panel is plan and app.window.tunables_panel is knobs
-    assert knobs.state.input.data == before
-    assert edit.text() == "1+" and knobs.editor.local_parse_errors() is not None
-
-
-@pytest.mark.parametrize("rows", [(), (AliasRow("qubit", ""),)])
-def test_prepare_missing_or_unbound_qubit_names_alias_and_preserves_panels(
-    app: WorkflowsGuiBehavior[Context],
-    tmp_path: Path,
-    qapp: QApplication,
-    rows: tuple[AliasRow, ...],
-) -> None:
-    app.assemble(None)
-    open_point(app, tmp_path, qapp)
-    window = app.window
-    window.prepare_forms()
-    plan, knobs = window.plan_panel, window.tunables_panel
-    knobs.state.write({("sample", "value"): 17.0}, knobs.env)
-    before = knobs.state.input.data
-    app.services.context_control.set_alias_rows(rows)
-    with pytest.raises(RoleResolutionError, match="qubit"):
+    harness.services.context.set_alias_rows(rows)
+    with pytest.raises(RoleResolutionError, match="probe"):
         window.prepare_forms()
     assert window.plan_panel is plan and window.tunables_panel is knobs
     assert knobs.state.input.data == before
+    assert edit.text() == "1+" and knobs.editor.local_parse_errors() is not None
 
 
 def test_prepare_accepts_other_component_kind_and_reports_consuming_field_error(
@@ -526,6 +558,9 @@ def test_window_close_rejects_queued_connect_before_driver_registration(
 
     QTimer.singleShot(0, queued_connect)
     assert app.window.close()
+    # Closing an idle executor need not pump unrelated queued Qt callbacks.
+    # The scheduled request must return or reject on the next owner-loop turn.
+    qt_until(lambda: accepted or rejections, label="queued connect after close")
     assert accepted == [], "queued connect escaped terminal admission"
     assert [type(error).__name__ for error in rejections] == [
         "BackgroundAdmissionClosedError"

@@ -6,11 +6,22 @@ real GUI seam request ``qapp`` for one headless QApplication per session.
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Never
 
 import pytest
 from qtpy.QtWidgets import QApplication
 
 from ._support import MeasureClient
+
+
+@pytest.fixture(autouse=True)
+def forbid_process_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail at the OS boundary if an in-process MCP test tries to spawn a GUI."""
+
+    def unexpected_process(*args: object, **kwargs: object) -> Never:
+        pytest.fail(f"In-process MCP test attempted subprocess.Popen: {args!r}")
+
+    monkeypatch.setattr("subprocess.Popen", unexpected_process)
 
 
 @pytest.fixture(autouse=True)

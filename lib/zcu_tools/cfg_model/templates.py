@@ -4,43 +4,46 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from string import Formatter
 from types import MappingProxyType
-from typing import get_args
 
 from .base import ConfigBase
 from .module import ModuleSpec
+from .spec_types import concrete_spec_types
 from .template_nodes import Expr, Slot, TemplateSeed
 from .waveform import WaveformSpec
 
 
-def expand_path(
-    path: str, *, qubit: str = "$qubit", resonator: str = "$resonator"
-) -> str:
-    """Expand component placeholders in a slot path or seed string.
-
-    Only ``{qubit}`` and ``{resonator}`` are accepted field names. Bindings are
-    authored paths such as ``$q2``; defaults retain the primary aliases. Python
-    ``str.format`` handles escaping braces and formatting. Malformed syntax or
-    an unknown field raises ValueError. This function never resolves aliases.
-    """
+def _validate_placeholders(text: str) -> None:
     try:
-        for _, field_name, _, _ in Formatter().parse(path):
-            if field_name is not None and field_name not in {"qubit", "resonator"}:
-                raise ValueError(f"Unknown placeholder {field_name!r}")
-        return path.format(qubit=qubit, resonator=resonator)
+        for _, name, spec, conversion in Formatter().parse(text):
+            if name is not None and not name.isidentifier():
+                raise ValueError(f"Expected a plain placeholder name, got {name!r}")
+            if conversion not in (None, "s", "r", "a"):
+                raise ValueError(f"Invalid conversion {conversion!r}")
+            if spec:
+                _validate_placeholders(spec)
+    except ValueError as exc:
+        raise ValueError(f"Invalid template placeholder in {text!r}: {exc}") from exc
+
+
+def expand_path(
+    path: str,
+    *,
+    bindings: Mapping[str, str] | None = None,
+) -> str:
+    """Expand plain named placeholders using a fixed set of authored bindings.
+
+    bindings supplies caller-authored replacements and defaults to empty.
+    Replacements are literal text, not recursively expanded or resolved as
+    aliases. Double braces
+    escape literal braces. Standard string conversion and formatting are
+    supported. Missing bindings, traversal fields or malformed placeholders
+    raise ValueError naming the path and offending placeholder.
+    """
+    _validate_placeholders(path)
+    try:
+        return path.format_map(bindings or {})
     except (KeyError, IndexError, ValueError) as exc:
         raise ValueError(f"Invalid template placeholder in {path!r}: {exc}") from exc
-
-
-def _spec_members(annotation: object) -> tuple[type[ConfigBase], ...]:
-    # Type aliases may resolve to a concrete Spec rather than a union.
-    alias_value: object = getattr(annotation, "__value__", annotation)
-    if isinstance(alias_value, type) and issubclass(alias_value, ConfigBase):
-        return (alias_value,)
-    return tuple(
-        member
-        for argument in get_args(alias_value)
-        for member in _spec_members(argument)
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,20 +71,29 @@ class TemplateDef:
 
     def __post_init__(self) -> None:
         if self.module not in (
-            *_spec_members(ModuleSpec),
-            *_spec_members(WaveformSpec),
+            *concrete_spec_types(ModuleSpec),
+            *concrete_spec_types(WaveformSpec),
         ):
             raise TypeError("Template module must be a concrete persistent Spec type")
         object.__setattr__(self, "seeds", MappingProxyType(dict(self.seeds)))
-        self.expanded_seeds()
+        for seed in self.seeds.values():
+            if isinstance(seed, Expr):
+                _validate_placeholders(seed.text)
+            elif isinstance(seed, Slot):
+                _validate_placeholders(seed.path)
+            elif isinstance(seed, str):
+                _validate_placeholders(seed)
 
     def expanded_seeds(
-        self, *, qubit: str = "$qubit", resonator: str = "$resonator"
+        self,
+        *,
+        bindings: Mapping[str, str] | None = None,
     ) -> dict[str, TemplateSeed]:
         """Return fresh seeds with component placeholders expanded.
 
-        Defaults use primary aliases; pass authored paths to bind another pair
-        of components. Ordinary strings remain literal, Expr remains Expr and
+        bindings supplies caller-authored replacements, empty when omitted.
+        Missing bindings raise ValueError only at expansion, not construction.
+        Ordinary strings remain literal, Expr remains Expr and
         Slot remains Slot with only its path expanded, and other scalars remain
         unchanged. Expansion does not resolve values or mutate this definition.
         Invalid placeholders raise ValueError.
@@ -89,12 +101,13 @@ class TemplateDef:
         expanded: dict[str, TemplateSeed] = {}
         for path, seed in self.seeds.items():
             if isinstance(seed, Expr):
-                seed = Expr(expand_path(seed.text, qubit=qubit, resonator=resonator))
+                seed = Expr(expand_path(seed.text, bindings=bindings))
             elif isinstance(seed, Slot):
                 seed = replace(
-                    seed, path=expand_path(seed.path, qubit=qubit, resonator=resonator)
+                    seed,
+                    path=expand_path(seed.path, bindings=bindings),
                 )
             elif isinstance(seed, str):
-                seed = expand_path(seed, qubit=qubit, resonator=resonator)
+                seed = expand_path(seed, bindings=bindings)
             expanded[path] = seed
         return expanded

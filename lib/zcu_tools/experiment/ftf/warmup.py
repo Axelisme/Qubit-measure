@@ -12,7 +12,15 @@ from threading import Event, Lock
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    ChannelStatistics,
+    ReadoutWindow,
+    RoundStatistics,
+    SamplingIdentity,
+)
 from zcu_tools.experiment.warmup import EnvironmentWarmup
+from zcu_tools.program.v2.simulation.signals import StatisticsCopier
 from zcu_tools.simulate.adc import (
     ConditionalReadout,
     PiecewiseLinearEnvelope,
@@ -40,9 +48,13 @@ COVERAGE = (
     "shaped_direct",
     "shaped_complex",
     "multitone_rwa",
+    "multitone_constant",
     "multitone_direct",
     "multitone_gate",
     "single_tone_gate",
+    "single_tone_gate_adaptive",
+    "single_tone_gate_retained",
+    "single_tone_rwa",
     "floquet_probe_windows",
     "dyson_gain_batch",
     "floquet_period",
@@ -54,6 +66,7 @@ COVERAGE = (
     "readout_decimated",
     "readout_mux",
     "readout_sampled",
+    "statistics_copy",
 )
 
 _lock = Lock()
@@ -119,6 +132,9 @@ def _batch(
 
 
 def _prepare(name: str) -> None:
+    if name == "statistics_copy":
+        _statistics_copy()
+        return
     if name.startswith("readout_"):
         _readout(name)
         return
@@ -146,14 +162,30 @@ def _single_track(name: str) -> None:
         envelope = EnvelopeSpec(
             "sampled", np.array([0.0, 1.0], complex), np.array([0.0, duration])
         )
-    elif name == "single_tone_gate":
+    elif name == "single_tone_rwa":
+        duration = 200.0
+        # Keep the ordinary window and restore an off-window edge as well.
+        # Nonempty retained graphs pass a bool4 mask to the coefficient builder,
+        # a distinct compiled signature from the default-window None variant.
+        frequencies = np.array([5.0, 4.89])
+        gains = np.array([0.5, 1.0])
+    elif name in (
+        "single_tone_gate",
+        "single_tone_gate_adaptive",
+        "single_tone_gate_retained",
+    ):
         duration = 128.0
         times = np.linspace(0.0, duration, 129)
         envelope = EnvelopeSpec(
             "sampled", np.exp(-0.5 * ((times - 64) / 32) ** 2).astype(complex), times
         )
-        frequencies = np.full(1024, 5.0)
-        gains = np.full(1024, 0.08)
+        # Restored masks select the bool4 coefficient specialization, not
+        # the default-window None variant of ordinary single-tone gates.
+        frequency, gain = {"single_tone_gate_retained": (4.89, 1.0)}.get(
+            name, (5.0, 0.08)
+        )
+        frequencies = np.full(1024, frequency)
+        gains = np.full(1024, gain)
     elif name == "shaped_direct":
         envelope = EnvelopeSpec(
             "sampled",
@@ -185,6 +217,10 @@ def _single_track(name: str) -> None:
             batch, tracks=(prefix, probe), end_ns=np.full(len(gains), duration + 6)
         )
     source = _source()
+    if name == "single_tone_gate_adaptive":
+        model = source.model((0,))
+        model = replace(model, rates_per_ns=model.rates_per_ns * 20_000)
+        source = ModelSource(source.initial_density, lambda _: model)
     if name in ("floquet_low_carrier", "floquet_cf4"):
         # A remote spectator makes spectral construction cheaper than CF4;
         # the narrow spectrum independently exercises the CF4 builder.
@@ -193,7 +229,8 @@ def _single_track(name: str) -> None:
             source.model((0,)), energies_ghz=np.array([0.0, 0.05, spectator])
         )
         source = ModelSource(source.initial_density, lambda _: model)
-    _evolve(source, batch)
+    # Tight budgets keep the period workloads on their original exact families.
+    _evolve(source, batch, budget=1e-4 if name.startswith("floquet_") else 1e-3)
 
 
 def _multitone(name: str) -> None:
@@ -202,7 +239,9 @@ def _multitone(name: str) -> None:
     envelope = EnvelopeSpec(
         "sampled", np.exp(-(((times - 64) / 32) ** 2) / 2).astype(complex), times
     )
-    if name == "multitone_direct":
+    if name == "multitone_constant":
+        envelope = EnvelopeSpec("constant")
+    elif name == "multitone_direct":
         envelope = EnvelopeSpec(
             "sampled",
             np.array([0.0, 1.0j, 0.01], complex),
@@ -226,10 +265,10 @@ def _multitone(name: str) -> None:
     _evolve(source, batch)
 
 
-def _evolve(source: ModelSource, batch: TimelineBatch) -> None:
+def _evolve(source: ModelSource, batch: TimelineBatch, *, budget: float = 1e-3) -> None:
     engine = Engine(1, 0)
     try:
-        engine.evolve(source, (batch,), cancel=Event())
+        engine.evolve(source, (batch,), budget=budget, cancel=Event())
     finally:
         engine.close()
 
@@ -324,6 +363,39 @@ def _readout(name: str) -> None:
                 include_traces=traces,
             )
         )
+
+
+def _statistics_copy() -> None:
+    request = AcquireRequest(
+        "integrated",
+        (2, 4),
+        1,
+        (ReadoutWindow(0, 0, 8, 100.0, (0.0,)),),
+        0,
+        0,
+        "startup",
+        reps=4,
+    )
+    counts = np.array([[1, 3], [2, 2]], dtype=np.int64)
+    sums = np.zeros((2, 1, 2), dtype=np.float64)
+    result = RoundStatistics(
+        counts,
+        (
+            ChannelStatistics(
+                0,
+                sums,
+                np.zeros((2, 1, 2, 2), dtype=np.float64),
+                np.eye(2, dtype=np.float64),
+            ),
+        ),
+        SamplingIdentity(0, (0, 0, 1)),
+    )
+    copier = StatisticsCopier()
+    # Borrowed results can be writable or readonly; Numba specializes on both.
+    for writable in (True, False):
+        counts.setflags(write=writable)
+        sums.setflags(write=writable)
+        copier.copy(request, result)
 
 
 def _joint_gate() -> None:

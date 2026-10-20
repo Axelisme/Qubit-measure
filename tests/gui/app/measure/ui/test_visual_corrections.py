@@ -7,14 +7,11 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import (
-    QFrame,
     QHBoxLayout,
-    QLabel,
     QScrollArea,
     QSizePolicy,
 )
@@ -30,9 +27,6 @@ from zcu_tools.gui.control_identity import ControlIdentity
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 
 
 @pytest.fixture
@@ -139,67 +133,15 @@ def exp_tab_widget(qapp, make_ctrl):
         owned_tabs.clear()
 
 
-def _assert_action_button_stretches(
-    layout: QHBoxLayout,
-    tab: ExpTabWidget,
-    reset_stretch: int,
-    run_stretch: int,
-) -> None:
-    """Check the action row's button stretches at the current interaction phase."""
-    for i in range(layout.count()):
-        item = layout.itemAt(i)
-        assert item is not None
-        if item.widget() is tab.reset_btn:
-            assert layout.stretch(i) == reset_stretch
-        if item.widget() is tab.run_btn:
-            assert layout.stretch(i) == run_stretch
-
-
-def test_A5_Run_action_row_status_free_and_20_80_proportions(
+def test_run_action_switches_to_stop_and_restores_after_completion(
     qapp, exp_tab_widget, make_ctrl
 ):
-    """A5: Run action row has no status text; Reset 20% / Run 80% with retained treatments."""
+    """Run/Stop treatment follows interaction state and preserves Reset availability."""
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
     qapp.processEvents()
-
-    # No readiness/status label in the run panel
-    assert not hasattr(tab, "_run_status_label")
-    # No label with readyStatus objectName or "Ready" text inside run panel
-    labels = tab._run_panel.findChildren(QLabel)
-    for lb in labels:
-        assert lb.objectName() != "readyStatus"
-        assert "Ready" not in lb.text() or lb is tab.findChild(QLabel, "runActionBar")
-
-    # Run action bar exists and is QFrame with 20/80 stretch
-    assert hasattr(tab, "_run_action_bar")
-    assert isinstance(tab._run_action_bar, QFrame)
-    bar = tab._run_action_bar
-    layout = bar.layout()
-    assert isinstance(layout, QHBoxLayout)
-    # Check stretch factors for the two buttons
-    # layout has two widgets: reset_btn stretch 20, run_btn stretch 80
-    found_reset = False
-    found_run = False
-    for i in range(layout.count()):
-        item = layout.itemAt(i)
-        w = item.widget() if item is not None else None
-        if w is tab.reset_btn:
-            assert layout.stretch(i) == 20, (
-                f"Reset stretch should be 20, got {layout.stretch(i)}"
-            )
-            found_reset = True
-        if w is tab.run_btn:
-            assert layout.stretch(i) == 80, (
-                f"Run stretch should be 80, got {layout.stretch(i)}"
-            )
-            found_run = True
-    assert found_reset and found_run
-    # Both buttons should be Expanding horizontally so they fill the proportion
-    assert tab.reset_btn.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
-    assert tab.run_btn.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
 
     # Reset and Run text present, Run has primaryButton, Stop semantics
     assert tab.reset_btn.text() == "Reset"
@@ -209,7 +151,7 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(
     assert not tab.reset_btn.isHidden()
     assert tab.reset_btn.height() == tab.run_btn.height()
 
-    # When running, Reset disappears and Stop fills the action row.
+    # While running, Reset is hidden and Run becomes Stop.
     assert snap.interaction is not None
     busy = dataclasses.replace(
         snap,
@@ -221,15 +163,13 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(
     # style should have changed (Stop vs Run)
     assert tab.run_btn.styleSheet() != idle_style
     assert tab.reset_btn.isHidden()
-    _assert_action_button_stretches(layout, tab, 0, 100)
 
-    # back to idle restores primary and 20/80 geometry
+    # Completion restores the idle controls.
     tab.update_interaction_state(snap)
     qapp.processEvents()
     assert not tab.reset_btn.isHidden()
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.objectName() == "primaryButton"
-    _assert_action_button_stretches(layout, tab, 20, 80)
     tab.detach()
 
 

@@ -17,6 +17,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
+from zcu_tools.simulate.evolution.cache import RESIDENT_METADATA_BYTES
 from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
 from zcu_tools.simulate.evolution.workplan import WorkPlan
@@ -132,7 +133,8 @@ def test_parallel_windows_replace_cache_charge_instead_of_accumulating_frames():
     probe = CountingFloquet()
     with closing(Engine(1, 0, kernels=(probe, direct))) as sizing:
         acquire(sizing, src, window([0.0]))
-    limit = 2 * probe.sizes[0] + 8_000
+    # Include metadata for two retained allocations without allowing a third frame.
+    limit = 2 * (probe.sizes[0] + RESIDENT_METADATA_BYTES) + 8_000
     solver = CountingFloquet()
     with (
         closing(Engine(2, limit, kernels=(solver, direct))) as engine,

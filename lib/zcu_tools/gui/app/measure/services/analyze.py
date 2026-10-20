@@ -427,6 +427,7 @@ class AnalyzeService(_StagedAnalyzeService):
                 run_id=captured_inputs.run_id,
                 experiment_name=captured_inputs.experiment_name,
                 device_snapshot=captured_inputs.device_snapshot,
+                sample_device_alias=adapter.sample_device_alias,
             )
             plots.finish()
             retired = self._state.update_tab_analyze(

@@ -128,9 +128,11 @@ class InspectDialog(QDialog):
     opens a NewEntryDialog over templates and selects the created entry.
     "Arb Waveforms…" calls the host's open_arb_waveforms.
 
-    Aliases loads the installed alias rows when the dialog is built and
-    commits them only through its Apply; its Load preset menu replaces the
-    whole draft with one of alias_presets without committing. Closing with an Unsaved module entry
+    Aliases fixes its draft to the loaded entry/point. Clean drafts follow
+    session switches; dirty drafts stay shown and Apply rejects a different
+    current entry/point. Revert loads the current point's table. Apply saves
+    only that selected point. Its Load preset menu replaces the whole draft
+    with one of alias_presets without committing. Closing with an Unsaved module entry
     or alias draft asks Save, Discard or Cancel for each in turn; a rejected
     alias Save keeps the dialog open on the Aliases page with its error.
     """
@@ -183,20 +185,7 @@ class InspectDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-        toolbar = QHBoxLayout()
-        self._status_label = QLabel("No context")
-        toolbar.addWidget(self._status_label)
-        toolbar.addStretch()
-        self._arb_waveform_btn = QPushButton("Arb Waveforms…")
-        self._arb_waveform_btn.clicked.connect(self._on_arb_waveforms_clicked)
-        toolbar.addWidget(self._arb_waveform_btn)
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.refresh)
-        toolbar.addWidget(refresh_btn)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
-        toolbar.addWidget(close_btn)
-        layout.addLayout(toolbar)
+        layout.addLayout(self._build_toolbar())
 
         self._tabs = QTabWidget()
         self._component_tree = ComponentTreeWidget(ctrl)
@@ -217,6 +206,22 @@ class InspectDialog(QDialog):
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
+
+    def _build_toolbar(self) -> QHBoxLayout:
+        toolbar = QHBoxLayout()
+        self._status_label = QLabel("No context")
+        toolbar.addWidget(self._status_label)
+        toolbar.addStretch()
+        self._arb_waveform_btn = QPushButton("Arb Waveforms…")
+        self._arb_waveform_btn.clicked.connect(self._on_arb_waveforms_clicked)
+        toolbar.addWidget(self._arb_waveform_btn)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh)
+        toolbar.addWidget(refresh_btn)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        toolbar.addWidget(close_btn)
+        return toolbar
 
     def _build_modules_tab(self) -> QWidget:
         widget = QWidget()
@@ -309,7 +314,12 @@ class InspectDialog(QDialog):
         self._update_controls()
 
     def refresh(self) -> None:
-        """Reread the component tree and the library from a new capture."""
+        """Refresh components/library and follow alias selection only while clean.
+
+        Unsaved alias drafts keep their loaded entry/point and reject Apply
+        after selection changes. Revert explicitly loads the current point.
+        """
+        self._aliases.refresh()
         self._component_tree.refresh()
         try:
             parameters = self._ctrl.read_context()

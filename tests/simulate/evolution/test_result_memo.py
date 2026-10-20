@@ -170,6 +170,42 @@ def _changed_batch(
     return b
 
 
+@pytest.mark.parametrize("changed", ["samples", "sample_ns", "kind", "order"])
+def test_envelope_candidates_use_complete_ordered_content_identity(changed):
+    def make_batch():
+        selected = EnvelopeSpec("constant")
+        unused = EnvelopeSpec("sampled", np.array([0.2, 0.8j]), np.array([0.0, 2.0]))
+        return replace(
+            batch(1),
+            tracks=(replace(track(1, selected), envelopes=(selected, unused)),),
+        )
+
+    kernel = CountingKernel("dyson")
+    with closing(Engine(1, 100_000, kernels=(kernel,))) as engine:
+        first = engine.evolve(source(), (make_batch(),), cancel=Event())
+        counts = kernel.counts
+        # Distinct immutable records with equal content must share an exact hit.
+        repeated = engine.evolve(source(), (make_batch(),), cancel=Event())
+        assert kernel.counts == counts
+        assert repeated.densities.tobytes() == first.densities.tobytes()
+        b = make_batch()
+        tr = b.tracks[0]
+        selected, unused = tr.envelopes
+        if changed == "samples":
+            unused = replace(unused, samples=unused.samples.conjugate())
+        elif changed == "sample_ns":
+            unused = replace(unused, sample_ns=unused.sample_ns * 2)
+        elif changed == "kind":
+            unused = EnvelopeSpec("constant")
+        candidates = (selected, unused)
+        if changed == "order":
+            candidates = candidates[::-1]
+            tr = replace(tr, envelope_index=np.array([1]))
+        b = replace(b, tracks=(replace(tr, envelopes=candidates),))
+        engine.evolve(source(), (b,), cancel=Event())
+        assert kernel.counts != counts
+
+
 def test_cancelled_work_is_not_admitted_and_hits_still_check_cancel():
     cancel = Event()
     kernel = CountingKernel(cancel=cancel)

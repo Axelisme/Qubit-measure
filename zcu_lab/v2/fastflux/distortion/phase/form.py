@@ -15,13 +15,17 @@ def make_form(ctx: FormContext) -> Form[PhaseCfg]:
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
-                "flux_pulse": Template("flux_pulse", set={"waveform.length": 1.0}),
+                "flux_pulse": Template(
+                    "flux_pulse",
+                    bindings={"qubit": "$qubit"},
+                    set={"waveform.length": 1.0},
+                ),
                 "pi2_pulse": Slot("$qubit.module.x90")
                 if ctx.has("$qubit.module.x90")
-                else Template("pi2_pulse"),
+                else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "length": Range.between(0.0, 1.0, expts=101),

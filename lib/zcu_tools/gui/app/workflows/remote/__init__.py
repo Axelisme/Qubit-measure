@@ -292,8 +292,7 @@ class WorkflowRemoteControlAdapter[C](RemoteControlServiceBase):
             owner_scheduler=owner_scheduler,
             wire_version=WIRE_VERSION,
             gui_version=GUI_VERSION,
-            # Preserve the published server identity across the host relocation.
-            server_name="T1WorkflowRemoteServer",
+            server_name="WorkflowRemoteServer",
             method_registry={
                 "workflow.start": BoundMethod(
                     self._start, METHOD_SPECS["workflow.start"]

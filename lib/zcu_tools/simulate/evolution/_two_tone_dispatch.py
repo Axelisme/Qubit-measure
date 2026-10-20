@@ -4,6 +4,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .kernel import KernelContext, SegmentTable
+from .kernels._floquet_policy import (
+    MAX_PHASE_SAMPLES,
+    phase_sample_count,
+    probe_bin_index,
+)
 from .kernels.floquet import FloquetKernel
 
 
@@ -74,17 +79,14 @@ def direct_preferred(
         probe = 1 - stark
         bins = np.empty(len(selected), dtype=[("port", "i8"), ("bin", "f8")])
         bins["port"] = table.tone_port[selected, probe]
-        bins["bin"] = np.round(frequency[np.arange(len(selected)), probe] / 0.002)
+        bins["bin"] = probe_bin_index(frequency[np.arange(len(selected)), probe])
         bin_count = len(np.unique(bins))
         # Smooth expected certificate charge, without predicting guard acceptance.
         certificate_fraction = np.minimum(1, duration * strength / 0.15)
         safe_frequency = np.maximum(stark_frequency, 1e-12)
         samples = np.minimum(
-            4096,
-            2
-            ** np.ceil(
-                np.log2(np.maximum(128, 32 * (width + 2 * strength) / safe_frequency))
-            ),
+            MAX_PHASE_SAMPLES,
+            phase_sample_count(width + 2 * strength, safe_frequency),
         )
         # A weak probe does not pay the dual-strong cold surcharge. Balance is
         # gain-weighted operator strength, not raw DAC gain or port independence.
@@ -103,5 +105,7 @@ def direct_preferred(
             1.05 * bin_count * scale**6 * certificate_fraction * (1 + 3.1 * dual_work)
         )
         floquet = 0.07 * scale**6 + (frame + certificates) / len(selected)
+        context.work_plan.routing.expect("dop853", table, selected, direct)
+        context.work_plan.routing.expect("floquet", table, selected, floquet)
         preferred[positions] = direct < floquet
     return preferred

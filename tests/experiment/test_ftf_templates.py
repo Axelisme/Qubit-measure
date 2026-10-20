@@ -21,6 +21,8 @@ from tests.experiment._ftf_templates import (
     template,
 )
 
+pytestmark = pytest.mark.sim
+
 
 def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
     import zcu_tools.experiment.ftf as ftf
@@ -148,9 +150,18 @@ class CountingEngine(Engine):
         super().__init__(1, 1_000_000)
         self.calls = 0
 
-    def evolve(self, source, batches, *, budget=1e-3, cancel):
+    def evolve(
+        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
+    ):
         self.calls += 1
-        return super().evolve(source, batches, budget=budget, cancel=cancel)
+        return super().evolve(
+            source,
+            batches,
+            budget=budget,
+            cancel=cancel,
+            telemetry=telemetry,
+            reuse_key=reuse_key,
+        )
 
 
 def test_round_statistics_reuse_snapshot_and_engine_across_acquires() -> None:
@@ -185,7 +196,9 @@ class ResidualEngine(Engine):
         super().__init__(1, 0)
         self.populations = populations
 
-    def evolve(self, source, batches, *, budget=1e-3, cancel):
+    def evolve(
+        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
+    ):
         from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
 
         points = np.concatenate([batch.points for batch in batches])

@@ -17,6 +17,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 "init_pulse": Slot("$qubit.module.x180"),
                 "tested_reset": Template(
                     "two_pulse_reset",
+                    bindings={"qubit": "$qubit"},
                     set={
                         "pulse1_cfg.gain": Expr("$qubit.ext.reset_gain1"),
                         "pulse2_cfg.gain": Expr("$qubit.ext.reset_gain2"),
@@ -24,7 +25,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "freq1": Range.around("$qubit.ext.reset_f1", 50.0, expts=201),

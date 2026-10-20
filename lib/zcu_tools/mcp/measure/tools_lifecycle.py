@@ -28,15 +28,15 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
     ControlConnection.parse(
         arguments.get("label", "agent"), arguments.get("mode", "owner")
     )
-    simulate = arguments.get("simulate")
-    if simulate is not None and (not isinstance(simulate, str) or not simulate):
-        raise ValueError("simulate must be a non-empty environment Python path")
+    script = arguments.get("script")
+    if script is not None and (not isinstance(script, str) or not script):
+        raise ValueError("script must be a non-empty startup Python path")
     project_root = arguments.get("project_root")
     if project_root is not None and not isinstance(project_root, str):
         raise ValueError("project_root must be a string")
     connection = ctx.session.connect_to_gui(
         port=port,
-        startup_paths=GuiStartupPaths(simulate=simulate, project_root=project_root),
+        startup_paths=GuiStartupPaths(script=script, project_root=project_root),
         launch=launch,
         clean=clean,
         token=token,
@@ -47,7 +47,7 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
 
 CONNECT_TOOL: dict[str, Any] = {
     "handler": tool_connect,
-    "description": "Attach to the live GUI or launch one when requested. Initially label=agent and mode=owner; readonly never acquires. Reconnect retains omitted identity options; changing them reopens the socket. Return native control status even when the GUI is locked or another holder controls it. Supply token if required. Never connects hardware; authentication and incompatible wire contracts are distinct errors.",
+    "description": "Attach to the live GUI or launch one when requested. Initially label=agent and mode=owner; readonly never acquires. Reconnect retains omitted identity options; changing them reopens the socket. Return native control status even when the GUI is locked or another holder controls it. Supply token if required. Startup scripts may connect hardware; launch only trusted scripts with authorization. Authentication and incompatible wire contracts are distinct errors.",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -57,11 +57,15 @@ CONNECT_TOOL: dict[str, Any] = {
                 "enum": ["never", "if_missing", "new"],
                 "default": "never",
             },
-            "clean": {"type": "boolean", "default": False},
-            "simulate": {
+            "clean": {
+                "type": "boolean",
+                "default": False,
+                "description": "Skip every startup script. Mutually exclusive with script.",
+            },
+            "script": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Trusted environment Python path; only applies when launching a new GUI. Attach with a path is rejected.",
+                "description": "Trusted Python path defining startup(ctx); replaces the default script only when launching a new GUI. Attach with a path is rejected.",
             },
             "project_root": {
                 "type": "string",

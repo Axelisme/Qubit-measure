@@ -17,6 +17,7 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                 "reset": Hidden(),
                 "readout": Template(
                     "readout",
+                    bindings={"resonator": "$resonator"},
                     set={"ro_length": initial_ro_length()},
                 ),
             },

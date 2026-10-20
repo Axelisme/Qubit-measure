@@ -8,7 +8,7 @@ from qick import QickConfig
 from zcu_tools.core.simulation import AcquireRequest, RoundSignals, RoundStatistics
 
 from .binding import SimulationBinding
-from .signals import copy_statistics, pack_signals
+from .signals import StatisticsCopier, pack_signals
 
 
 class SimulationSoc(QickConfig):
@@ -18,6 +18,9 @@ class SimulationSoc(QickConfig):
     supplied by make_mock_soccfg; using an unbound route fails before acquisition.
     Getters retain the last completed realization, never execute or resample it.
     """
+
+    # Consumers forward this board-owned identity without importing simulation.
+    is_mock: bool = True
 
     def __init__(
         self,
@@ -38,6 +41,7 @@ class SimulationSoc(QickConfig):
         self._decimated = {}
         self._poll_done = False
         self._statistics: RoundStatistics | None = None
+        self._statistics_copier = StatisticsCopier()
         self._raw_layout = (1, 0)
 
     def install_request(self, request: AcquireRequest) -> None:
@@ -80,7 +84,7 @@ class SimulationSoc(QickConfig):
         result = self.binding.sample_round(self._request, self._round_index)
         self._statistics = None
         if isinstance(result, RoundStatistics):
-            result = copy_statistics(self._request, result)
+            result = self._statistics_copier.copy(self._request, result)
             self._statistics = result
             self._raw_layout = (self._request.reps, self._request.avg_level)
             self._accumulated, self._decimated = {}, {}

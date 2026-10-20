@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-19，Log／List 的正值政策與 logical observation readonly
+**Last updated:** 2026-10-20，Log／List 的正值政策、logical observation readonly 與明填模板 bindings
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -36,6 +36,9 @@
 `Slot(copy=True).set` 的 dotted Spec 路徑若穿過 captured child key，生成器只把路徑上的 child Spec 複製成 inline，再套用覆寫。未涉及的 child key 與來源保持不變，既有 input 不隨後續來源更新重填。查詢不 materialize 或讀 asset；缺 child、錯 family 與來源故障直接回報，None 覆寫沿用必填空白語意。
 
 Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Measure 在 Open／Reset 捕捉來源，呼叫 adapter 的 `make_form(ctx)`，再綁定 Registry 的範本目錄。註冊與 reload 不呼叫 factory，也不預檢範本。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
+通用佔位符只使用呼叫端明填的 `Template.bindings`，例如 `bindings={"qubit": "$qubit1"}`。
+FormEnv 只提供來源，不提供模板綁定預設值。
+綁定 catalog 時保留語法、family 與 seed 路徑檢查，真正建立 input 時才展開佔位符並拒絕缺 binding。
 
 Spec Form 的 `template_input(Template(id), catalog, env)` 直接建立範本的 fresh input，不需先 bind。它沿用 Expr 初值與宣告唯讀規則。缺 Slot 來源時，required 欄位留空並標 Invalid；alternate 來源由 make_form(ctx) 決定。已綁定 Slot 保留 child library key，`to_cfg` 回持久 Spec，不展開 native cfg。Core cfg Form 拒絕這個入口。
 

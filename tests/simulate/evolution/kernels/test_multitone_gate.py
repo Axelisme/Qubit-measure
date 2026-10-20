@@ -17,8 +17,17 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.kernel import (
+    ApplyContext,
+    KernelContext,
+    SegmentTable,
+)
 from zcu_tools.simulate.evolution.kernels import REGISTRY
+from zcu_tools.simulate.evolution.kernels._rwa_gate import GATE_POLICY, GatePrepared
+from zcu_tools.simulate.evolution.kernels.multitone_rwa import (
+    interaction_hamiltonian,
+    rwa_coefficients,
+)
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, KernelContract
@@ -86,16 +95,8 @@ def family():
 
 @pytest.mark.parametrize("conflict", [0.0, 1e-9])
 def test_repeated_pair_builds_once_and_reuses_across_phase_changes(
-    monkeypatch, conflict
+    conflict,
 ):
-    calls = []
-    original = scipy.integrate.solve_ivp
-
-    def observed(*args, **kwargs):
-        calls.append(1)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(scipy.integrate, "solve_ivp", observed)
     with closing(Engine(1, 1_000_000)) as engine:
         for phase in (0.0, 0.713):
             result = engine.evolve(source(conflict), (batch(phase),), cancel=Event())
@@ -119,9 +120,6 @@ def test_repeated_pair_builds_once_and_reuses_across_phase_changes(
                 )
                 < 1e-2
             )
-    assert len(calls) == 4, (
-        "one canonical pair builds four Hilbert subsegments only once"
-    )
 
 
 @pytest.mark.parametrize("conflict,count", [(0.0004, 24), (0.0, 1)])
@@ -162,6 +160,176 @@ def kernel_case():
 
 class TestMultitoneGate(KernelContract):
     pass
+
+
+@pytest.mark.parametrize("duration", [254.0, 256.0])
+@pytest.mark.parametrize("bath_scale", [1.0, 200.0])
+def test_native_sample_support_and_adaptive_split_match_lab_density(
+    kernel_case, duration, bath_scale
+):
+    from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
+
+    # The finite pulse support, not the last DAC sample, ends playback. A
+    # 254 ns row slices the grid; a 256 ns row holds the final sample.
+    times = np.linspace(0.0, 255.045573, 257)
+    env = EnvelopeSpec(
+        "sampled", np.exp(-0.5 * ((times - 128.0) / 64.0) ** 2).astype(complex), times
+    )
+    table = replace(
+        kernel_case.table,
+        duration_ns=np.full(24, duration),
+        tone_amplitude=np.full((24, 2), 0.5),
+        envelopes=(env,),
+    )
+    src = source()
+    model = src.model((0,))
+    model = replace(
+        model,
+        identity=f"native-pair-bath-{bath_scale}",
+        rates_per_ns=model.rates_per_ns * bath_scale,
+        dephasing_per_ns=model.dephasing_per_ns * bath_scale,
+    )
+    src = ModelSource(src.initial_density, lambda level: replace(model, level=level))
+    rows = np.arange(3, dtype=np.int64)
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+        kernel = family()
+        assert kernel.guard(table, rows, context).all(), (
+            "native sample endpoints must not veto complete pulse playback"
+        )
+        keys = kernel.prepare_keys(table, rows[:1], context)
+        prepared = kernel.prepare(keys, table, rows[:1], context)
+        assert isinstance(prepared, GatePrepared)
+        if bath_scale == 1.0:
+            assert prepared.segments[0] == 4, (
+                "small split proxy keeps the four-step path"
+            )
+        else:
+            assert prepared.segments[0] > 4, "large split proxy must refine, not reject"
+        states = np.repeat(src.initial_density[None], len(rows), axis=0)
+        kernel.apply(
+            prepared,
+            np.zeros(3, dtype=np.int64),
+            table,
+            rows,
+            states,
+            ApplyContext(1e-3),
+        )
+        direct = next(k for k in REGISTRY if k.name == "dop853")
+        reference = np.repeat(src.initial_density[None], len(rows), axis=0)
+        direct_keys = direct.prepare_keys(table, rows, context)
+        direct.apply(
+            direct.prepare(direct_keys, table, rows, context),
+            rows,
+            table,
+            rows,
+            reference,
+            ApplyContext(
+                1e-8, DOP853Plan(np.full(3, "lab"), np.full(3, -1, dtype=np.int64))
+            ),
+        )
+    np.testing.assert_allclose(states, reference, atol=1e-2, rtol=0)
+
+
+@pytest.mark.parametrize("bath_scale", [1.0, 200.0])
+@pytest.mark.parametrize("constant_companion", [False, True])
+def test_compiled_joint_unitaries_match_callback(
+    kernel_case, monkeypatch, bath_scale, constant_companion
+):
+    times = np.linspace(0.0, 80.0, 81)
+    other_times = np.linspace(0.0, 39.0, 40)
+    envs = (
+        EnvelopeSpec(
+            "sampled", np.exp(-0.5 * ((times - 40) / 32) ** 2).astype(complex), times
+        ),
+        EnvelopeSpec("constant")
+        if constant_companion
+        else EnvelopeSpec(
+            "sampled",
+            np.exp(-0.5 * ((other_times - 20) / 32) ** 2).astype(complex),
+            other_times,
+        ),
+    )
+    table = replace(
+        kernel_case.table,
+        duration_ns=np.full(24, 82.0),
+        tone_frequency_ghz=np.tile([0.6002, 0.2997], (24, 1)),
+        tone_amplitude=np.tile([0.4, -0.3], (24, 1)),
+        tone_envelope=np.tile([0, 1], (24, 1)),
+        tone_envelope_offset_ns=np.tile([3.0, 7.0], (24, 1)),
+        envelopes=envs,
+    )
+    model = kernel_case.source.model((0,))
+    model = replace(
+        model,
+        rates_per_ns=model.rates_per_ns * bath_scale,
+        dephasing_per_ns=model.dephasing_per_ns * bath_scale,
+    )
+    src = ModelSource(kernel_case.source.initial_density, lambda level: model)
+    rows = np.array([0], dtype=np.int64)
+    calls = []
+    solve = scipy.integrate.solve_ivp
+
+    def observed(*args, **kwargs):
+        calls.append(1)
+        return solve(*args, **kwargs)
+
+    with closing(WorkPlan()) as plan:
+        context = KernelContext(src, 1e-3, plan)
+        kernel = family()
+        assert kernel.guard(table, rows, context).all()
+        with monkeypatch.context() as patch:
+            patch.setattr(scipy.integrate, "solve_ivp", observed)
+            prepared = kernel.prepare(
+                kernel.prepare_keys(table, rows, context), table, rows, context
+            )
+    assert isinstance(prepared, GatePrepared)
+    energy = model.energies_ghz + prepared.charges[0] @ table.tone_frequency_ghz[0]
+    energy -= energy[0]
+    coefficients = rwa_coefficients(model, (0, 1), (0.6002, 0.2997))
+
+    def rhs(time, state):
+        amplitudes = np.array(
+            [
+                table.tone_amplitude[0, k]
+                * (
+                    1.0
+                    if env.kind == "constant"
+                    else np.interp(
+                        time + table.tone_envelope_offset_ns[0, k],
+                        env.sample_ns,
+                        env.samples.real,
+                    )
+                )
+                for k, env in enumerate(envs)
+            ],
+            dtype=np.complex128,
+        )
+        h = interaction_hamiltonian(time, energy, coefficients, amplitudes)
+        return (-2j * np.pi * h @ state.reshape(4, 4)).ravel()
+
+    boundaries = np.linspace(0.0, 82.0, prepared.segments[0] + 1)
+    reference = []
+    for start, end in zip(boundaries[:-1], boundaries[1:], strict=True):
+        solution = solve(
+            rhs,
+            (start, end),
+            np.eye(4, dtype=complex).ravel(),
+            method="DOP853",
+            rtol=1e-12,
+            atol=1e-14,
+            max_step=4.0,
+        )
+        assert solution.success
+        endpoint = solution.y[:, -1].reshape(4, 4)
+        endpoint *= np.exp(-2j * np.pi * energy * end)[:, None]
+        endpoint *= np.exp(2j * np.pi * energy * start)[None, :]
+        reference.append(endpoint)
+    # Allow accumulation over adaptive steps at the builder's local relative tolerance.
+    np.testing.assert_allclose(
+        prepared.unitaries[0], reference, atol=100 * GATE_POLICY[-2], rtol=0
+    )
+    assert not calls, "joint Hilbert builds must not call the Python solver callback"
 
 
 def test_keys_remove_only_covariant_phase_and_start(kernel_case):

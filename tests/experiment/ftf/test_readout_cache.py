@@ -14,6 +14,8 @@ from tests.experiment._ftf_templates import (
     snapshot,
 )
 
+pytestmark = pytest.mark.sim
+
 
 def test_acquires_share_solver_and_exact_sums_but_not_sampling(monkeypatch):
     schur = scipy.linalg.schur
@@ -69,7 +71,7 @@ def test_receiver_configuration_restored_to_exact_content_hits_old_solver():
             source.open_acquire(request()).sample_round(snapshot(), 0)
         )
         assert source.readout_cache.builds == 2
-        assert source.readout_cache.hits == 1
+        assert source.preparation_cache.hits == 1
         assert (
             first.channels[0].conditional_sums.tobytes()
             == restored.channels[0].conditional_sums.tobytes()
@@ -102,5 +104,19 @@ def test_source_generation_changes_drop_solver(change):
         assert source.readout_cache.builds == 2
         source.close()
         assert source.readout_cache.resident_bytes == 0
+    finally:
+        source.close()
+
+
+def test_new_template_reuses_readout_solver_after_preparation_miss():
+    source = FTFSource(settings(), DeviceManager())
+    try:
+        source.open_acquire(request()).sample_round(snapshot(), 0)
+        # A different reps count needs another sampling plan, not another solver.
+        source.open_acquire(replace(request(), reps=4, loop_dims=(4, 2))).sample_round(
+            snapshot(), 0
+        )
+        assert source.readout_cache.builds == 1
+        assert source.readout_cache.hits == 1
     finally:
         source.close()

@@ -13,6 +13,8 @@ from zcu_tools.simulate.adc import ConditionalReadout, ReadoutModel, Receiver
 
 from tests.experiment._ftf_templates import settings, snapshot, template
 
+pytestmark = pytest.mark.sim
+
 
 def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
     """Keep two flat carriers in the plan, with only the addressed one incident."""

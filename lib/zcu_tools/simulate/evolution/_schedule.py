@@ -171,6 +171,7 @@ class Schedule:
                 payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
+                    array_bytes=preparation.nbytes,
                 )
                 reusable = available.intersection(payload.keys)
                 if not reusable:
@@ -223,7 +224,9 @@ class Schedule:
         for key in payload.keys:
             if key in key_positions:
                 eligible[key_positions[key]] = True
-        return _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+        binding = _bind(entry, payload, eligible[entry.inverse], self.dispatch)
+        self.context.work_plan.routing.hit(entry.kernel.name, self.table, binding.rows)
+        return binding
 
     def _admit_gain_builds(
         self,
@@ -266,6 +269,7 @@ class Schedule:
                 payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
+                    array_bytes=preparation.nbytes,
                 )
                 self.resident.offer_rejected(
                     (name, self.dc_identity, self.budget), payload
@@ -299,14 +303,17 @@ class Schedule:
                     overlap = model.eigenvectors.conj().T @ dc.eigenvectors
                     initial = overlap @ initial @ overlap.conj().T
                 initial.setflags(write=False)
-                payload = binding.kernel.bind_input(
-                    binding.payload.prepared,
-                    key,
-                    self.table,
-                    rows,
-                    initial,
-                    self.context,
-                )
+                with self.context.work_plan.routing.measure(
+                    binding.kernel.name, "prepare"
+                ):
+                    payload = binding.kernel.bind_input(
+                        binding.payload.prepared,
+                        key,
+                        self.table,
+                        rows,
+                        initial,
+                        self.context,
+                    )
                 if payload is not None:
                     bound.append(
                         _Binding(
@@ -344,23 +351,61 @@ class Schedule:
         for (key, _, group), rows in selected.items():
             yield key, np.array(rows, dtype=np.int64), group
 
+    def timeline_chunks(self, workers: int, fallback: int) -> int:
+        """Batch short gate inventories without changing preparation parallelism.
+
+        Calibration used 21-depth, 20-seed IRB at integer, 0.48 and half flux:
+        roughly 180 rows/timeline, half gate and half t4, with at most 1% Sambe.
+        One timeline chunk/worker cut apply calls by 50--80%. Flux scans had
+        about three rows/timeline and lost up to 4%, so keep six chunks there.
+        Require at least 64 rows/timeline and 95% cheap matrix-action rows:
+        prebuilt single-/multi-tone gates or analytic no-drive propagation.
+        These families have low per-apply overhead regardless of gate duration;
+        ordinary RWA and direct integration do not belong to this group.
+        The 64/95% margins admit half-depth and minor Sambe tails, not short
+        scans or integrator-heavy inventories. Require multiple timelines per
+        worker. These thresholds select scheduling, not numerical admission.
+        The full classified inventory is fixed before any worker starts; no
+        resident state, prepare outcome or execution order enters this choice.
+        """
+        count = len(self.geometry.points)
+        names = self.dispatch.names
+        if count < 2 * workers or len(names) < 64 * count:
+            return fallback
+        cheap = np.isin(names, ("t4", "single_tone_gate", "multitone_gate"))
+        if np.count_nonzero(cheap) < 0.95 * len(names):
+            return fallback
+        return workers
+
     def run(
         self,
         kernels: Mapping[str, Kernel],
         cache: PrepareCache,
         pool: Executor,
         chunks: int,
+        *,
+        timeline_workers: int | None = None,
     ) -> EvolutionResult:
-        """Return point-ordered densities and aggregate post-apply diagnostics."""
+        """Return point-ordered densities and aggregate post-apply diagnostics.
+
+        chunks fixes prepare partitioning. timeline_workers opts into complete-
+        inventory timeline batching; None retains the fixed chunks for both.
+        """
         self.kernels = kernels
         entries = _deduplicate(self.table, self.dispatch, kernels, self.context)
+        timeline_chunks = (
+            chunks
+            if timeline_workers is None
+            else self.timeline_chunks(timeline_workers, chunks)
+        )
         shared = self.prepare_shared(entries, cache, pool, chunks)
         count = len(self.geometry.points)
         cost = np.bincount(
             self.table.timeline, weights=self.dispatch.costs, minlength=count
         )
         ordered = np.argsort(-cost, kind="stable")
-        work = [ordered[i :: min(chunks, count)] for i in range(min(chunks, count))]
+        width = min(timeline_chunks, count)
+        work = [ordered[i::width] for i in range(width)]
         results = pool(delayed(self.chunk)(points, entries, shared) for points in work)
         self.resident.commit(cache)
         output = np.empty(
@@ -379,6 +424,9 @@ class Schedule:
         self, output: NDArray[np.complex128], exceeded: Counter[str]
     ) -> PathDiagnostics:
         """Count suffix work plus actual prefix paths once per adopting timeline."""
+        self.context.work_plan.routing.planned(
+            self.table, self.dispatch.names, self.dispatch.costs
+        )
         paths = dispatch_diagnostics(self.table, self.dispatch.names)
         segments = Counter(paths.segments_by_kernel)
         points = {
@@ -403,6 +451,7 @@ class Schedule:
             {name: len(timelines) for name, timelines in points.items()},
             exceeded,
             float(np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))),
+            routing=self.context.work_plan.routing.snapshot(segments),
         )
 
     def resolve_deferred(
@@ -434,6 +483,7 @@ class Schedule:
                 payload = PreparedPayload(
                     preparation.prepared,
                     tuple(key.tobytes() for key in preparation.keys),
+                    array_bytes=preparation.nbytes,
                 )
                 self.retain_local(entry.kernel, payload)
                 bindings.append(
@@ -452,6 +502,7 @@ class Schedule:
         # Workers write disjoint row slices; only the caller reads all names
         # after the pool joins. Entries and bindings never read this array.
         self.dispatch.names[rows] = dispatch.names[rows]
+        self.dispatch.costs[rows] = dispatch.costs[rows]
         return bindings, dispatch
 
     def chunk(
@@ -627,16 +678,21 @@ class _Chunk:
         # neither chain expansion nor a second density copy.
         states = self.states[state_slots]
         try:
-            exceeded = binding.kernel.apply(
-                binding.payload.prepared,
-                self.key[rows],
-                self.table,
-                rows,
-                states,
-                ApplyContext(
-                    self.schedule.budget, binding.plan, self.schedule.context.work_plan
-                ),
-            )
+            with self.schedule.context.work_plan.routing.measure(
+                binding.kernel.name, "apply"
+            ):
+                exceeded = binding.kernel.apply(
+                    binding.payload.prepared,
+                    self.key[rows],
+                    self.table,
+                    rows,
+                    states,
+                    ApplyContext(
+                        self.schedule.budget,
+                        binding.plan,
+                        self.schedule.context.work_plan,
+                    ),
+                )
         except RuntimeError as error:
             raise RuntimeError(
                 f"point {self.schedule.geometry.points[self.points[slots[0]]]} segment {rows[0]}: {error}"

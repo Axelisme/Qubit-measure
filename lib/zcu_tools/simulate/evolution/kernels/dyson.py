@@ -747,7 +747,7 @@ class DysonKernel:
     The r limit follows cubic off-resonant coherence-error scaling; the population
     limit follows the two-level estimate (2/3)*abs(delta_p)**(3/2). Coefficients
     are calibrated by synthetic scans, not a rigorous multilevel remainder
-    proof. Guard failures try the engine's Hilbert period kernel, then T6.
+    proof. Cross-family fallback order belongs to the dispatch decision graph.
     Prepared modes are shared across frequency, gain, duration, phase and port.
     Preparation never reads a density. apply accepts arbitrary densities, not
     only diagonal or stationary states. bind_input greedily prunes the shared

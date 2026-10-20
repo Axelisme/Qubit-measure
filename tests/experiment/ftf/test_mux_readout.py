@@ -12,6 +12,8 @@ from zcu_tools.simulate.evolution import Engine, EvolutionResult, PathDiagnostic
 
 from tests.experiment._ftf_templates import request, settings, snapshot, template
 
+pytestmark = pytest.mark.sim
+
 
 def configuration(channels=(4, 1)):
     config_type = getattr(ftf_module, "FTFReadoutConfig", None)
@@ -89,7 +91,9 @@ class MixedEngine(Engine):
     def __init__(self):
         super().__init__(1, 0)
 
-    def evolve(self, source, batches, *, budget=1e-3, cancel):
+    def evolve(
+        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
+    ):
         points = np.concatenate([batch.points for batch in batches])
         densities = np.tile(np.diag([0.4, 0.6])[None], (len(points), 1, 1))
         return EvolutionResult(points, densities, PathDiagnostics())

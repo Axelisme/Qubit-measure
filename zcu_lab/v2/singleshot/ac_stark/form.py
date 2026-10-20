@@ -17,6 +17,7 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
                 "init_pulse": None,
                 "stark_pulse1": Template(
                     "res_probe",
+                    bindings={"resonator": "$resonator"},
                     set={
                         "gain": 0.0,
                         "waveform.length": Expr(
@@ -26,6 +27,7 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
                 ),
                 "stark_pulse2": Template(
                     "pi_pulse",
+                    bindings={"qubit": "$qubit"},
                     set={
                         "waveform.length": Expr("$qubit.module.x180.waveform.length"),
                         "mixer_freq": Expr("$qubit.module.x180.mixer_freq"),
@@ -35,7 +37,7 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
                 ),
                 "readout": Slot("$qubit.module.readout")
                 if ctx.has("$qubit.module.readout")
-                else Template("readout"),
+                else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
                 "gain": Range.between(0.0, 0.22, expts=301),

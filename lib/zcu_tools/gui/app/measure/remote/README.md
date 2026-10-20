@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-20，Predictor entry-local filenames
+**Last updated:** 2026-10-20，launch-only startup、來源 Refresh、錯誤歸因與 Predictor entry-local filenames
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -77,14 +77,38 @@ Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission
 
 Handler 將 LogicalEditError 投影為 invalid_params 與原 reason，保留 path、edit_index、selector_path、available_keys。FormPathError 保留 form_path，LogicalSourceError 回 precondition_failed/library_source，並帶 consuming path 與來源身分。Cfg/control 失敗沿既有投影。ParamSpec primitive/required/enum 失敗維持原生 reason；handler carrier 與 action/key 語義失敗才回 form_errors。Unexpected provider/declaration failures 不重分類。
 
-## Simulation startup
+## Startup scripts
 
-Simulation environments are installed before remote readiness with
-`--simulate <environment.py>`. GUI runtime environment switching and
-`simulation.initialize` are retired. RPC cannot replace the environment;
-changing it requires a restart. See the
-[simulation contract](../../../../program/v2/simulation/README.md#build-and-own-an-environment)
-for the startup entry point and ownership.
+The launch composition selects one trusted `startup(ctx)` Python file. With no
+startup option, measure runs `zcu_lab/startup.py`; `--script` replaces that default.
+`--clean` runs neither and conflicts with `--script`. Custom code must import and
+call the default itself if needed. MCP `connect(script=...)` forwards the choice
+only when launching a new GUI. Explicit script options are refused on attach,
+and attaching never reruns startup. See [ADR-0064](../../../../../../docs/adr/0064-process-startup.md).
+
+GUI, session and MCP do not load simulation environments. The
+[FTF startup example](../../../../../../zcu_lab/simulation_envs/FTF/README.md)
+builds and installs resources through the same public facets as other scripts.
+`--simulate` and `simulation.initialize` have no compatibility entry point.
+RPC readiness does not mean background startup has completed; Run remains locked
+until its terminal delivery. Unhandled startup failures retain completed work
+and report the script path and line.
+
+Device terminal facts and failed handles remain visible for script-origin
+operations. Measure omits only their item error dialog so the default script can
+log each failure and publish one status summary. Manual GUI device errors still
+show dialogs. Normal window close and RPC `app.shutdown` both drain work, run
+script on-close callbacks once in reverse order, then close managed drivers.
+
+## Source refresh
+
+`tab.refresh_sources(aliases=...)` recaptures sources while preserving all authored
+input and explicit selections, including expressions and prior direct values.
+`tab.reset_cfg(aliases=...)` recaptures and computes fresh defaults. Both return
+Form input, values and errors, and neither changes global aliases. Source events
+do not refresh existing tabs. Recipe aliases continue through Reset, not Run.
+The Form owner defines these rules; RPC forwards them without a second evaluator
+or implicit refresh. See [ADR-0065](../../../../../../docs/adr/0065-cfg-editing.md).
 
 ## Authority and dispatch
 

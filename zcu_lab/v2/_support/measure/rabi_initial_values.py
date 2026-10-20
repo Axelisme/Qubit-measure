@@ -31,10 +31,10 @@ def len_rabi_initial_values(
     A non-pulse x180 raises TypeError. Nothing is refreshed or written back.
     """
     if parameters is None:
-        return Template("qub_probe", qubit=qubit, set={"gain": 1.0}), 1.0
+        return Template("qub_probe", bindings={"qubit": qubit}, set={"gain": 1.0}), 1.0
     pulse = _x180_spec(parameters, qubit)
     if pulse is None:
-        return Template("qub_probe", qubit=qubit, set={"gain": 1.0}), 1.0
+        return Template("qub_probe", bindings={"qubit": qubit}, set={"gain": 1.0}), 1.0
     waveform = _waveform_spec(parameters, pulse)
     if isinstance(waveform, ArbWaveformCfg):
         return Slot(f"{qubit}.module.x180"), 1.0
@@ -67,12 +67,16 @@ def amp_rabi_initial_pulse(
     """
     if parameters is None:
         return Template(
-            "qub_probe", qubit=qubit, set={"gain": 1.0, "waveform.length": 1.0}
+            "qub_probe",
+            bindings={"qubit": qubit},
+            set={"gain": 1.0, "waveform.length": 1.0},
         )
     pulse = _x180_spec(parameters, qubit)
     if pulse is None:
         return Template(
-            "qub_probe", qubit=qubit, set={"gain": 1.0, "waveform.length": 1.0}
+            "qub_probe",
+            bindings={"qubit": qubit},
+            set={"gain": 1.0, "waveform.length": 1.0},
         )
     waveform = _waveform_spec(parameters, pulse)
     if isinstance(waveform, ArbWaveformCfg):
