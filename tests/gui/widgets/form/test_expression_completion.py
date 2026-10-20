@@ -247,7 +247,7 @@ def test_tab_cycle_survives_idle_timeout_without_submitting(
     driver.enter_text(value="$qubit.freq + 1", object_name=INPUT, commit=False)
     clock.advance(500)
     shot(driver, tmp_path, "07-new-edit-idle-committed")
-    assert driver.observe(object_name="form.value.amount").text == "= 5"
+    assert driver.observe(object_name="form.value.amount").text == "= 5.0"
 
 
 def test_hint_requires_whitespace_or_end_after_cursor(
