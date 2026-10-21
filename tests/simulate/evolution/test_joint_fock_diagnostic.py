@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from zcu_tools.simulate import evolution
 from zcu_tools.simulate.evolution import (
+    JointFockDiagnostic,
     JointFockRequest,
     SecularDrive,
     SecularModel,
@@ -13,18 +14,20 @@ from zcu_tools.simulate.evolution import (
 )
 
 
-def diagnostic_request(*, virtual_coupling=0.03, circular=False) -> JointFockRequest:
+def diagnostic_request(
+    *, virtual_coupling=0.03, circular=False, resonant_coupling=0.002
+) -> JointFockRequest:
     assert hasattr(evolution, "JointFockDiagnostic"), (
         "Named multilevel diagnostic is missing"
     )
     from zcu_tools.simulate.evolution import JointFockDiagnostic
 
     x = np.zeros((5, 5), dtype=np.complex128)
-    x[0, 2] = x[2, 0] = 0.002
+    x[0, 2] = x[2, 0] = resonant_coupling
     x[2, 4] = x[4, 2] = virtual_coupling
     y = np.zeros_like(x)
     if circular:
-        y[0, 2], y[2, 0] = 0.002j, -0.002j
+        y[0, 2], y[2, 0] = 1j * resonant_coupling, -1j * resonant_coupling
     model = SecularModel(
         level=(0,),
         identity="synthetic-joint-fock",
@@ -118,6 +121,91 @@ def test_diagnostic_cutoff_represents_displaced_physical_vacuum():
     assert np.max(result.vacuum_trace_error) < 1e-12
     assert np.max(result.vacuum_edge_population) < 1e-3
     assert np.max(result.trace_error) < 1e-11
+
+
+def stiff_prefill_request() -> JointFockRequest:
+    zeros = np.zeros((4, 4))
+    model = SecularModel(
+        level=(0,),
+        identity="synthetic-stiff-prefill",
+        energies_ghz=np.array([0, 0.02, 0.04, 0.06]),
+        eigenvectors=np.eye(4, dtype=np.complex128),
+        drives=(SecularDrive("q", zeros.astype(complex), zeros.astype(complex)),),
+        rates_per_ns=zeros,
+        dephasing_per_ns=zeros,
+    )
+    return JointFockRequest(
+        frequencies_ghz=np.tile([7.19005, 7.07959], (4, 1)),
+        kappa_external_per_ns=np.array([0.006283, 0.006283]),
+        kappa_internal_per_ns=np.array([0.0006283, 0.0006283]),
+        resonator_carriers_ghz=np.array([7.1894875]),
+        qubit_carriers_ghz=np.array([0.04]),
+        qubit_frequency_ghz=0.04,
+        incident_per_sqrt_ns=0.067,
+        down_per_ns=0,
+        up_per_ns=0,
+        gamma2_per_ns=0,
+        pi_duration_ns=0,
+        pi_rabi_rad_per_ns=0,
+        prefill_duration_ns=1500,
+        probe_duration_ns=0,
+        probe_rabi_rad_per_ns=0,
+        diagnostic=JointFockDiagnostic(model, 0, 0, 0, (0, 2)),
+    )
+
+
+def test_smaller_step_completes_vacuum_far_spectator_prefill():
+    request = stiff_prefill_request()
+    assert request.diagnostic is not None
+    result = joint_fock_spectrum(
+        replace(request, diagnostic=replace(request.diagnostic, step_ns=0.25))
+    )
+    assert result.cutoffs == (5,)
+    # No drive or bath changes the qubit. Its exact population stays in ground.
+    np.testing.assert_allclose(result.populations[..., 0], 1, rtol=0, atol=1e-10)
+    np.testing.assert_allclose(result.populations[..., 1], 0, rtol=0, atol=1e-14)
+    assert np.max(result.trace_error) < 1e-10
+    assert np.max(result.initial_trace_error) < 1e-10
+    assert np.max(result.vacuum_trace_error) < 1e-12
+    assert np.max(result.vacuum_edge_population) < 1e-3
+
+
+def test_default_step_rejects_nonfinite_prefill_without_retry():
+    with pytest.raises(FloatingPointError, match="Nonfinite joint-Fock RK4 density"):
+        joint_fock_spectrum(stiff_prefill_request())
+
+
+@pytest.mark.parametrize("segment", ["pi", "probe"])
+def test_step_controls_driven_segments_against_exact_rabi_and_isolates_requests(
+    segment,
+):
+    # Circular resonant drive gives exactly Omega=1 rad/ns, with no virtual shift.
+    request = diagnostic_request(
+        virtual_coupling=0, circular=True, resonant_coupling=1 / (4 * np.pi)
+    )
+    assert request.diagnostic is not None
+    fine = replace(request.diagnostic, step_ns=0.25)
+    duration = 4.13  # A noninteger number of requested steps in either case.
+    request = replace(
+        request,
+        diagnostic=fine,
+        pi_duration_ns=duration if segment == "pi" else 0,
+        probe_duration_ns=duration if segment == "probe" else 0,
+    )
+    expected = np.sin(duration / 2) ** 2
+    expected_branches = [0, expected] if segment == "pi" else [expected, expected]
+    result = joint_fock_spectrum(request)
+    # Rotation RK4 remainder bounds population error by
+    # T * Omega**5 * dt**4 * exp(Omega*dt) / 240 < 8.7e-5 for dt<=0.25.
+    np.testing.assert_allclose(
+        result.populations[0, :, 0, 2], expected_branches, rtol=0, atol=1e-4
+    )
+    coarse = joint_fock_spectrum(replace(request, diagnostic=replace(fine, step_ns=1)))
+    assert abs(coarse.populations[0, 1, 0, 2] - expected) > 1e-3
+    repeated = joint_fock_spectrum(request)
+    np.testing.assert_array_equal(repeated.populations, result.populations)
+    assert request.diagnostic is fine
+    assert fine.step_ns == 0.25
 
 
 def test_diagnostic_step_defaults_to_one_ns_and_validates_finite_positive_bound():
