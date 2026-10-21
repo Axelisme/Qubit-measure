@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttac
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormModel
+from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import ResultEntry
 
@@ -222,6 +223,9 @@ def test_workflow_readonly_connection_can_preview_but_cannot_edit(workflow_rpc):
     controller, rpc = workflow_rpc
     tab = result(rpc, "workflow.open", name="synthetic")["tab_id"]
     result(rpc, "control.release")
+    rpc.remote.on_client_close(rpc.link, on_owner_thread=True)
+    rpc.link = ClientLink("observer", token_required=False)
+    rpc.remote.on_client_open(rpc.link)
     result(rpc, "control.connect", label="observer", mode="readonly")
     assert result(
         rpc,
