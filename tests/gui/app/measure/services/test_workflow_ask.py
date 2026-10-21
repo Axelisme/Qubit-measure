@@ -2,7 +2,7 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from threading import get_ident
+from threading import Event, get_ident
 
 import pytest
 from pydantic import ValidationError
@@ -148,11 +148,32 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
     assert author.deliveries == [], "Stop is pure control, not author cleanup"
     assert control.tabs()[0].operation_id == token
     assert not control.close(tab)
+    cleanup_entered, release_cleanup = Event(), Event()
+
+    def hold_cleanup():
+        cleanup_entered.set()
+        # The caller releases this finite author cleanup in finally below.
+        assert release_cleanup.wait(30)
+
+    author.on_finish = hold_cleanup
     with ThreadPoolExecutor(max_workers=1) as worker:
-        worker.submit(harness.background.execute).result(timeout=30)
-    assert author.deliveries == [(None, author.deliveries[0][1])]
-    assert author.deliveries[0][1] != get_ident()
-    assert author.cancelled_followups == [None, None]
+        completed = worker.submit(harness.background.execute)
+        try:
+            # The submitted drain must reach the retained generator finally.
+            assert cleanup_entered.wait(30)
+            assert author.finally_threads[0] != get_ident()
+            assert control.tabs()[0].operation_id == token
+            assert not control.close(tab)
+            assert harness.handles.known_outcome(token) is None
+        finally:
+            release_cleanup.set()
+            completed.result(timeout=30)
+    if io_failure:
+        assert author.deliveries == []
+    else:
+        assert author.deliveries == [(None, author.deliveries[0][1])]
+        assert author.deliveries[0][1] != get_ident()
+        assert author.cancelled_followups == [None, None]
     assert control.tabs()[0].operation_id == token
     assert not control.close(tab)
     harness.owner.pump_all()

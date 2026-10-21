@@ -50,6 +50,8 @@ class AskAuthor:
     captures: list[int] = field(default_factory=list)
     cancelled_followups: list[object] = field(default_factory=list)
     on_cancel: Callable[[], None] = lambda: None
+    finally_threads: list[int] = field(default_factory=list)
+    on_finish: Callable[[], None] = lambda: None
 
     def attachment(
         self,
@@ -64,16 +66,22 @@ class AskAuthor:
             if state:
                 return Done()
             self.captures.append(tun.value)
-            answer = yield from env.ask(Choose())
-            self.deliveries.append((answer, get_ident()))
-            if answer is None:
-                self.on_cancel()
-                self.cancelled_followups.append(
-                    (yield from env.wait_until(env.started_at + timedelta(days=1)))
-                )
-                self.cancelled_followups.append((yield from env.ask(Choose(point=99))))
-                return Done()
-            return Next(answer.value, 1)
+            try:
+                answer = yield from env.ask(Choose())
+                self.deliveries.append((answer, get_ident()))
+                if answer is None:
+                    self.on_cancel()
+                    self.cancelled_followups.append(
+                        (yield from env.wait_until(env.started_at + timedelta(days=1)))
+                    )
+                    self.cancelled_followups.append(
+                        (yield from env.ask(Choose(point=99)))
+                    )
+                    return Done()
+                return Next(answer.value, 1)
+            finally:
+                self.finally_threads.append(get_ident())
+                self.on_finish()
 
         return WorkflowAttachment(
             step=step,
