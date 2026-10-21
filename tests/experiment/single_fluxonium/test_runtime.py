@@ -5,7 +5,6 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-
 from zcu_tools.core.simulation import AcquireRequest, PulseEnvelope, RoundRequest
 from zcu_tools.device import DeviceManager, FakeDevice
 
@@ -23,19 +22,27 @@ def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> N
         first = source.snapshot()
         facts = source.model_facts(first)
         assert facts.model.dc_flux == 0.5
-        assert facts.source.initial_density().shape == (4, 4)
+        assert facts.source.initial_density.shape == (4, 4)
         model = facts.source.model((0,))
         _, vectors = facts.model.eigensystem(0.5)
         charge = vectors.conj().T @ facts.model.charge_operator() @ vectors
-        np.testing.assert_allclose(model.drives[0].in_phase_ghz, 0.1 * charge, atol=1e-12)
-        np.testing.assert_allclose(model.drives[0].quadrature_ghz, 0.02 * charge, atol=1e-12)
+        np.testing.assert_allclose(
+            model.drives[0].in_phase_ghz, 0.1 * charge, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            model.drives[0].quadrature_ghz, 0.02 * charge, atol=1e-12
+        )
         assert source.model_facts(first) is facts
         original = template()
         planned = source.plan_template(first, original)
         assert source.plan_template(first, original) is planned
         # Same metadata and support, different samples must not reuse the plan.
-        changed_event = replace(original.events[1], envelopes=(PulseEnvelope((0, 0.008), (0j, 1j)),))
-        changed = replace(original, events=(original.events[0], changed_event, original.events[2]))
+        changed_event = replace(
+            original.events[1], envelopes=(PulseEnvelope((0, 0.008), (0j, 1j)),)
+        )
+        changed = replace(
+            original, events=(original.events[0], changed_event, original.events[2])
+        )
         new_plan = source.plan_template(first, changed)
         assert new_plan is not planned
         assert new_plan.batch.flux_waveform is not None
