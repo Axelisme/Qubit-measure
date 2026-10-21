@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run mux Ramsey from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## GUI setup
 
@@ -26,6 +26,24 @@ appear on the Tones row. Select that element and correct it to enable Run.
 Reps, rounds and recovery delay are shared. Recovery initially uses five times
 the largest captured T1, with the default for missing T1 values. A stored invalid
 T1 leaves recovery blank for correction.
+
+## FTF cost example
+
+A two-participant offline Run used 16 delays from 0 to 3.75 us, 0.5 MHz
+nominal detune on both tones, 0.5 us const x90 pulses, 300 reps and 1 round.
+Recovery was 1007.509 us; readout and ADC integration were 2 and 1.5 us.
+Recorded RPC Run wall time was 19.095 s, about 1.19 s per joint delay point.
+It includes first simulation compilation and Run completion waiting, not just
+acquisition. Analyze and Save are outside that timer.
+
+This is one startup/cache state, not a cold benchmark for every Run.
+Do not compare it with other slots or experiments as a speed test.
+Delay point count and range, detune, pulse lengths, participants, reset,
+recovery and readout windows affect cost. Hardware repeats acquisitions for
+reps and rounds. FTF compilation and cached evolution can dominate, so reps
+do not imply proportional wall time. Budget from a short Run with the intended
+delay window. This example had about 7.96 samples per cycle and was undersampled.
+Its short-scan fit is not calibration evidence.
 
 ## Measurement and analysis
 
@@ -56,6 +74,37 @@ supplied frequencies; it does not rule out unknown higher-frequency aliases.
 Actual detune retains the hardware phase-wrap convention, including for signed
 detunes. Check the scan range before treating it as a signed frequency correction.
 A nonzero nominal detune with no positive rounded delay can yield NaN actual detune.
+
+## Multi-tone readout control
+
+Changing Participants changes both the active drives and the emitted readout
+tones. A Q1-only Run versus Q1/Q2 therefore does not isolate the effect of Q2
+drive. A second readout tone can contaminate raw IQ and produce apparent decay
+or fringes before analysis.
+
+For a readout control, keep Participants, all drive pulses, ADC channels and
+timing unchanged. Set only the second readout tone gain to zero, keeping its
+ADC declared. Compare raw IQ and magnitude with the original Run.
+Changing Participants to Q1-only is a separate reference, not this control.
+If testing Q2 drive separately, zero its drive gains without changing pulse
+lengths, then change only RO2 gain in the next comparison.
+
+Do not apply fitted frequency or T2 directly from a contaminated trace, even
+when a fit converges or a candidate starts selected. Inspect raw IQ, sampling,
+residuals and uncertainty, then review each candidate before Apply.
+These controls do not change the readout phase, integration window or simulation
+policy. In normal hardware use, avoid measuring coupled qubits simultaneously
+when choosing a mux group. The offline diagnostic deliberately measured a
+coupled Q1/Q2 pair; it does not establish that every mux group has this distortion.
+
+In the offline control, Q2 drive gains were already zero. Disabling only RO2
+raised the Q1 fringe fit r2 from 0.632 to 0.953.
+That identifies readout contamination in that configuration, not a calibrated
+change in T2. The scan had only 16 points over 3.75 us.
+Use mux Ramsey mainly for decay/T2 trends, not precise detuning.
+Prefer reviewing decay candidates; treat frequency candidates conservatively.
+Adequate sampling and automatic initial selection do not prove the absence
+of cross-tone contamination.
 
 ## Writeback
 

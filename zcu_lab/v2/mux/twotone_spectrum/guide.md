@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run the mux qubit frequency sweep from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## GUI setup
 
@@ -26,6 +26,27 @@ appear on the Tones row. Select that element and correct it to enable Run.
 Reps, rounds and recovery delay are shared. Recovery initially uses five times
 the largest captured T1, with the default for missing T1 values. A stored invalid
 T1 leaves recovery blank for correction.
+
+## FTF cost example
+
+A two-participant offline DAC sweep used 16 joint points, 300 reps and 1 round.
+Q1 swept 596 to 602 MHz and Q2 swept 295 to 301 MHz.
+Both drives were 1 us const pulses at gain 0.1.
+Recovery was 1007.509 us; readout and ADC integration were 1 and 0.5 us.
+The recorded Run action took 1.206 s, about 0.075 s per joint sweep point.
+The count is 16, not 16 squared, because the DAC ranges advance together.
+
+The timer includes inbox transport, ComponentDriver keyboard/mouse actions,
+terminal waiting and screenshots. It is not acquisition-only time and excludes
+Analyze and Save. Do not compare it with timings from other slots or experiments
+as a speed test. This example uses the current single-program DAC sweep.
+Historical host-side software-sweep timings do not estimate this path.
+
+Frequency point count, drive duration and shape, participants, reset, recovery
+and readout windows affect cost. Reps and rounds repeat hardware acquisitions.
+FTF compilation and cached evolution can dominate, so wall time need not scale
+with reps. Start with a short scan at the intended drive length.
+This 16-point example had large linewidth uncertainty and no calibration Apply.
 
 ## Measurement and analysis
 

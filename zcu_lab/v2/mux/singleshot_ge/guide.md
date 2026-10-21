@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run simultaneous mux GE readout from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## GUI setup
 
@@ -26,6 +26,25 @@ appear on the Tones row. Select that element and correct it to enable Run.
 Recovery delay is shared. Recovery initially uses five times
 the largest captured T1, with the default for missing T1 values. A stored invalid
 T1 leaves recovery blank for correction.
+
+## FTF cost example
+
+A two-participant offline Run used 300 shots per preparation, two preparations,
+0.02 us const probe pulses and 0.1 us recovery. Reps and rounds stayed fixed
+at 1. The recorded Run action took 6.118 s for the pair, about 3.06 s per
+preparation. There is no frequency or delay sweep point here.
+This preparation average is not per-shot acquisition latency.
+
+The timer includes the ComponentDriver button action, terminal wait and
+screenshots. It is not acquisition-only time and excludes Analyze and Save.
+Do not compare it with timings from other slots or experiments as a speed test.
+Shot count controls raw data volume and hardware repetitions. Preparation count,
+init/probe lengths, participants, reset, recovery and readout windows affect cost.
+FTF compilation and cache reuse can dominate the first Run, so do not extrapolate
+linearly from shots or assume hardware reps/rounds scaling describes simulation.
+Start with a small shot count and inspect both clouds before collecting more.
+Both tone fits failed in this uncalibrated example with an initial-guess bounds
+error. The raw clouds remain evidence of acquisition, not accepted fidelity.
 
 ## Measurement and analysis
 

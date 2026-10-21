@@ -2,7 +2,7 @@
 
 **讀者：** operator、agent。從 GUI 或 MCP 掃描 mux resonator 的共同頻率偏移，分析並套用校準結果。
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 每個 sweep 點的名目頻率是原始 tone 的 base frequency 加上共同 offset。
 圖與擬合都使用這個名目座標，DDS 實際量化頻率可能有差異。
@@ -24,6 +24,21 @@ Open／Reset 檢查每個元件是否存在、kind 是否正確，以及 `Q1.res
 
 未綁 group 或 alias 時，必要 Readout 欄位保持未填或 Invalid。
 手選或填寫有效 Readout 後仍可 Run。
+
+## FTF 成本例
+
+一次雙 tone 離線 Run 掃共同 offset −2 至 2 MHz，共 12 點，100 reps、1 round。
+Readout 長 1 us，ADC 積分窗 0.5 us，recovery 為 0.1 us。
+Driver 的 Run action 實測 2.807 s，除以共同掃描點數約為每點 0.23 s。
+這是短掃描的成本量級，不代表 readout 校準已通過。
+
+計時包含按 Run、等待終局與截圖，不是純 acquisition，也不含 Analyze 或 Save。
+不可拿不同 slot 或不同實驗的秒數作速度比較。
+共同 offset 每點同時量 active tones，不是各 tone 點數的乘積。
+點數、active tone 數、readout 長度、積分窗與 recovery 都會改變成本。
+硬體會隨 reps、rounds 增加重複 acquisition。
+FTF 的編譯與快取可能主導時間，不能假設成本與 reps 成正比，也不能視增加 reps 為免費。
+先用目標 readout 設定做短 Run，再估完整掃描的預算。
 
 ## Run 與圖形
 

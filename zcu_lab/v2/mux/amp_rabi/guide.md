@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run mux amplitude Rabi from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## GUI setup
 
@@ -26,6 +26,23 @@ appear on the Tones row. Select that element and correct it to enable Run.
 Reps, rounds and recovery delay are shared. Recovery initially uses five times
 the largest captured T1, with the default for missing T1 values. A stored invalid
 T1 leaves recovery blank for correction.
+
+## FTF cost example
+
+A two-participant offline Run used 8 gain points from 0 to 0.3, 100 reps
+and 1 round. Each drive was a 0.02 us const pulse, with 0.1 us recovery.
+The recorded Run action took 2.105 s, about 0.26 s per joint sweep point.
+This is an order-of-magnitude budget for that short smoke configuration,
+not a calibrated Rabi measurement.
+
+The timer includes the ComponentDriver button action, terminal wait and
+screenshots. It is not acquisition-only time and excludes Analyze and Save.
+Do not compare it with timings from other slots or experiments as a speed test.
+Gain point count, pulse shape and duration, participant count, reset, recovery
+and readout windows affect cost. Reps and rounds add repeated acquisitions on
+hardware. FTF compilation and cached evolution can dominate, so changing reps
+need not scale wall time proportionally. Time a short Run with your settings
+before increasing point count or rounds.
 
 ## Measurement and analysis
 
