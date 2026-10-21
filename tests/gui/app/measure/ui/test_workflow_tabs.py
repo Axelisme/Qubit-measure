@@ -552,7 +552,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
         driver.select_tab("Tunables")
         _ask_shot(driver, tmp_path, "remote-06-remote-tunables")
         assert not driver.observe("Apply").enabled
-        assert not driver.observe(object_name="form.input.value").enabled
+        assert driver.text_input(object_name="form.input.value").read_only
         driver.select_tab("Ask")
         _ask_shot(driver, tmp_path, "remote-07-remote-ask")
         driver.click("Stop")
