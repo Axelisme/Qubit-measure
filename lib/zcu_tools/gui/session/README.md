@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 

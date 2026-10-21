@@ -82,7 +82,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v116: explicit working-point selection and saved writeback destinations.
 # v117: holder/ref-free cfg integrated above the working-point and UI releases.
 # v122: predictor RPC uses entry-local filenames or independent inline params.
-MCP_VERSION = 122
+# v123: actionable launch collisions and explicit raw-save analysis observations.
+MCP_VERSION = 123
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.

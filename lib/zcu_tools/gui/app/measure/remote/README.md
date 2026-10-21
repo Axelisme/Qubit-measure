@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
