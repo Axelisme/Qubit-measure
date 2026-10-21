@@ -941,41 +941,41 @@ class WorkflowWindow[C](QWidget):
             return False
         return True
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:
-        """Handle Qt close on the owner thread, retaining an active producer/canvas.
-
-        a0 is Qt's close event, or None for binding-compatible direct dispatch.
-        Pending work requests Stop and ignores the event until owner delivery;
-        paused runs stop before shutdown. Control/cleanup failures are logged and
-        shown and reject close, without releasing retry resources. After terminal
-        delivery and successful on_close, close Setup/forms and release plots.
-        Borrowed services remain caller-owned; this never disconnects hardware
-        independently of on_close. No event-loop wait or retry occurs here.
-        """
+    def _stop_before_close(self) -> bool:
+        """Request Stop if ownership remains; retain the view until delivery."""
         run_id = self.controller.run_id
-        if self.controller.has_pending_segment:
-            if run_id is not None:
-                try:
-                    self.stop(run_id)
-                except Exception as error:
-                    logger.exception("Workflow Stop on close failed")
-                    self._controls.message.setText(str(error))
-                    if a0 is not None:
-                        a0.ignore()
-                    return
-            if a0 is not None:
-                a0.ignore()
-            return
         status = self.controller.status()
-        if status is not None and status.lifecycle == "paused" and run_id is not None:
+        needs_stop = self.controller.has_pending_segment or (
+            status is not None
+            and status.lifecycle in {"paused", "stopping"}
+            and self.controller.operation_id is not None
+        )
+        if needs_stop and run_id is not None:
             try:
                 self.stop(run_id)
             except Exception as error:
                 logger.exception("Workflow Stop on close failed")
                 self._controls.message.setText(str(error))
-                if a0 is not None:
-                    a0.ignore()
-                return
+                return False
+        return not self.controller.has_pending_segment
+
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        """Handle Qt close on the owner thread, retaining an active producer/canvas.
+
+        a0 is Qt's close event, or None for binding-compatible direct dispatch.
+        Pending work requests Stop and ignores the event until owner delivery;
+        paused runs stop before shutdown. Retained Ask cleanup queues a worker
+        drain and keeps this window alive until its terminal owner delivery.
+        Control/cleanup failures are logged and
+        shown and reject close, without releasing retry resources. After terminal
+        delivery and successful on_close, close Setup/forms and release plots.
+        Borrowed services remain caller-owned; this never disconnects hardware
+        independently of on_close. No event-loop wait or retry occurs here.
+        """
+        if not self._stop_before_close():
+            if a0 is not None:
+                a0.ignore()
+            return
         if not self._shutdown_on_close(a0):
             return
         self._session_dialogs.close()

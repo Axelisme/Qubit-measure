@@ -46,8 +46,15 @@ from zcu_tools.mcp.measure.recipe import (
     WritebackReceipt,
     WritebackResult,
 )
+from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
+from zcu_tools.mcp.measure.recipe_host import RecipeHostFactory, stub_recipe_host
 from zcu_tools.mcp.measure.recipe_inputs import RecipeInputs
+from zcu_tools.mcp.measure.script_recipe_execution import (
+    SCRIPT_TERMINAL,
+    ScriptRecipeExecution,
+    ScriptRecipeSnapshot,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -699,19 +706,31 @@ class RecipeExecutions:
     All executions use the first admitted tools context; replacements are refused.
     """
 
-    def __init__(self, closed: Event, *, recipes: Sequence[RecipeDefinition]) -> None:
+    def __init__(
+        self,
+        closed: Event,
+        *,
+        recipes: Sequence[RecipeDefinition | RecipeDeclaration],
+        host_factory: RecipeHostFactory | None = None,
+    ) -> None:
         self._closed = closed
         self._lock = Lock()
-        self._definitions: dict[str, RecipeDefinition] = {}
+        self._definitions: dict[str, RecipeDefinition | RecipeDeclaration] = {}
+        self._host_factory = host_factory or stub_recipe_host
         self._inputs: dict[str, RecipeInputs] = {}
-        self._executions: dict[str, RecipeExecution] = {}
+        self._executions: dict[str, RecipeExecution | ScriptRecipeExecution] = {}
         self._tools: MeasureToolContext | None = None
         for definition in recipes:
             if (
                 not definition.name.strip()
                 or not definition.description.strip()
-                or not definition.adapter_name.strip()
-                or not callable(definition.run)
+                or (
+                    isinstance(definition, RecipeDefinition)
+                    and (
+                        not definition.adapter_name.strip()
+                        or not callable(definition.run)
+                    )
+                )
             ):
                 raise ValueError(
                     "Recipe requires name, description, adapter and run callable"
@@ -719,17 +738,20 @@ class RecipeExecutions:
             if definition.name in self._definitions:
                 raise ValueError(f"Duplicate recipe name: {definition.name!r}")
             copied = deepcopy(definition)
-            self._inputs[copied.name] = RecipeInputs(copied.input_schema)
+            if isinstance(copied, RecipeDefinition):
+                self._inputs[copied.name] = RecipeInputs(copied.input_schema)
+            else:
+                copied.inputs.model_json_schema()
             self._definitions[copied.name] = copied
 
     @property
-    def definitions(self) -> tuple[RecipeDefinition, ...]:
+    def definitions(self) -> tuple[RecipeDefinition | RecipeDeclaration, ...]:
         """Return detached admitted definitions in supplied order, without registration."""
         return deepcopy(tuple(self._definitions.values()))
 
     def start(
         self, tools: MeasureToolContext, recipe: str, arguments: Mapping[str, object]
-    ) -> RecipeExecution:
+    ) -> RecipeExecution | ScriptRecipeExecution:
         """Validate explicit keywords and start one generator, or fail before GUI work.
 
         Unknown names/closed registry/replacement sessions raise GuiRpcError.
@@ -750,19 +772,29 @@ class RecipeExecutions:
                 )
             for existing in self._executions.values():
                 snapshot = existing.snapshot()
-                if snapshot.status not in TERMINAL_STATUSES:
+                if snapshot.status not in TERMINAL_STATUSES | SCRIPT_TERMINAL:
                     raise GuiRpcError(
                         f"Recipe {snapshot.execution} is {snapshot.status}",
                         reason="recipe_busy",
                     )
             self._tools = tools
-            execution = RecipeExecution(
-                tools, definition, arguments, self._closed, inputs=self._inputs[recipe]
+            execution = (
+                ScriptRecipeExecution(
+                    tools, definition, arguments, host_factory=self._host_factory
+                )
+                if isinstance(definition, RecipeDeclaration)
+                else RecipeExecution(
+                    tools,
+                    definition,
+                    arguments,
+                    self._closed,
+                    inputs=self._inputs[recipe],
+                )
             )
             self._executions[execution.snapshot().execution] = execution
             return execution
 
-    def get(self, execution: str) -> RecipeExecution:
+    def get(self, execution: str) -> RecipeExecution | ScriptRecipeExecution:
         """Read a session-local ID, or raise GuiRpcError(reason=unknown_execution)."""
         with self._lock:
             found = self._executions.get(execution)
@@ -784,6 +816,8 @@ class RecipeExecutions:
         with self._lock:
             executions = tuple(self._executions.values())
         for execution in executions:
+            if isinstance(execution, ScriptRecipeExecution):
+                continue
             snapshot = execution.snapshot()
             analysis_ops = tuple(
                 capture.op
@@ -794,7 +828,7 @@ class RecipeExecutions:
                 return execution
         return None
 
-    def snapshots(self) -> tuple[RecipeSnapshot, ...]:
+    def snapshots(self) -> tuple[RecipeSnapshot | ScriptRecipeSnapshot, ...]:
         """Read detached local captures in admission order, with no GUI requests."""
         with self._lock:
             executions = tuple(self._executions.values())
