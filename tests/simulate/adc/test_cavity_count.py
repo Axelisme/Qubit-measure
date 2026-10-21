@@ -14,7 +14,7 @@ def _model(*, jumping=False, identical=False, mismatch=True):
     if identical:
         frequencies[:] = 6.0
     rates = np.array([[0.0, 0.03, 0.0], [0.02, 0.0, 0.04], [0.0, 0.01, 0.0]])
-    options = {"mismatch_phase_rad": np.array([0.37])} if mismatch else {}
+    phases = np.array([0.37]) if mismatch else np.zeros(1)
     try:
         return adc.ReadoutModel(
             "one-cavity",
@@ -30,7 +30,7 @@ def _model(*, jumping=False, identical=False, mismatch=True):
                 offset=np.array([0.2, -0.4]),
                 time_of_flight_ns=1.5,
             ),
-            **options,
+            mismatch_phase_rad=phases,
         )
     except ValueError as error:
         if str(error) == "frequencies_ghz must have shape (3, 2)":
@@ -95,7 +95,8 @@ def _reference_fields(model, pulses, times, initial=0j, origin=0.0):
         )
         assert solution.success
         selected = (times > left) & (times <= right)
-        fields[selected] = solution.sol(times[selected]).T
+        if np.any(selected):
+            fields[selected] = solution.sol(times[selected]).T
         current = solution.y[:, -1]
     return fields
 
@@ -190,7 +191,8 @@ def test_one_cavity_raw_and_trace_paths_share_physical_memory(kind, jumping):
 
 
 def test_one_cavity_state_dependent_jumps_match_conditional_first_moment():
-    model = _model(jumping=True)
+    base = _model(jumping=True)
+    model = replace(base, receiver=replace(base.receiver, gain=1700))
     pulses = _pulses("flat")
     batch = _batch(model, pulses, include_traces=False)
     source = adc.PreparedRawShots(
@@ -268,7 +270,7 @@ def test_one_cavity_initial_field_continuation_and_empty_ringdown(kind):
         )
 
 
-def test_one_cavity_default_mismatch_is_owned_zero_array():
+def test_one_cavity_explicit_zero_mismatch_is_owned_zero_array():
     model = _model(mismatch=False)
     np.testing.assert_array_equal(model.mismatch_phase_rad, [0.0])
     assert not model.mismatch_phase_rad.flags.writeable
