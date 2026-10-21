@@ -75,10 +75,10 @@ def _coefficients(
 
 
 def _driven_rk4(
-    system: DrivenSystem, initial: ComplexArray, duration: float
+    system: DrivenSystem, initial: ComplexArray, duration: float, step_ns: float
 ) -> ComplexArray:
     states = initial.copy()
-    steps = max(1, int(np.ceil(duration)))
+    steps = max(1, int(np.ceil(duration / step_ns)))
     dt = duration / steps
     for step in range(steps):
         time = step * dt
@@ -131,7 +131,10 @@ def diagnostic_row(
         intrinsic_bath(rates, pure, 1),
     )
     pi = _driven_rk4(
-        pi_system, ground.ravel(order="F")[:, None], request.pi_duration_ns
+        pi_system,
+        ground.ravel(order="F")[:, None],
+        request.pi_duration_ns,
+        diagnostic.step_ns,
     )[:, 0].reshape(levels, levels, order="F")
     states = np.asarray(
         np.column_stack(
@@ -148,7 +151,9 @@ def diagnostic_row(
         request.kappa_internal_per_ns,
         request.incident_per_sqrt_ns,
     ) + intrinsic_bath(rates, pure, size)
-    states = rk4(sparse.csr_matrix(base), states, request.prefill_duration_ns)
+    states = rk4(
+        sparse.csr_matrix(base), states, request.prefill_duration_ns, diagnostic.step_ns
+    )
     states = _restore_endpoint(states, energies, size, request.prefill_duration_ns)
     dimension = levels * size
     initial = np.stack(
@@ -164,7 +169,9 @@ def diagnostic_row(
             size,
             sparse.csr_matrix(base),
         )
-        output = _driven_rk4(system, states, request.probe_duration_ns)
+        output = _driven_rk4(
+            system, states, request.probe_duration_ns, diagnostic.step_ns
+        )
         outputs.append(
             np.stack(
                 [output[:, b].reshape(dimension, dimension, order="F") for b in (0, 1)]

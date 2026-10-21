@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-22, explicit joint-Fock numeric prototype
+**Last updated:** 2026-10-22, explicit diagnostic RK4 step contract
 
 **讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -97,7 +97,13 @@ vacuum. Constant CSR generators use fixed RK4 steps no larger than 1 ns.
 
 An explicit `JointFockDiagnostic` changes preparation to numeric physical
 vacuum, finite-pi, prefill and probe. It retains [0,2] or [0,1,2,3].
-It builds RWA coefficients on the full supplied `SecularModel`, including
+Its `step_ns` sets the fixed RK4 step upper bound for every numeric segment.
+It defaults to 1 ns and accepts only finite values with 0 < step_ns <= 1.
+Each segment takes ceil(duration / step_ns) equal steps, so its actual step
+never exceeds the request. Zero-duration segments leave the state unchanged.
+The analytic-preparation path keeps its 1 ns upper bound.
+
+The diagnostic builds RWA coefficients on the full supplied `SecularModel`, including
 virtual sums, before selecting dynamic indices. Its cutoff scan starts at t=0
 to include displaced physical vacuum. Both paths report the cutoff inventory,
 probe-start and final density diagnostics, and the finite vacuum representation's
@@ -107,8 +113,10 @@ complete density's truncation error. Differences between the paths include
 preparation and cutoff selection, so they are not pure truncation errors.
 
 The prototype does not clip populations, repair densities or retry another
-solver. Nonfinite evolution fails. Fixed-step RK4 does not certify positivity
-or accuracy at arbitrary drive and frequency scales. The small-model tests
+solver. It does not reduce the requested step automatically. Nonfinite evolution
+raises `FloatingPointError`; callers must choose any smaller step explicitly.
+Fixed-step RK4 does not certify positivity or accuracy at arbitrary drive and
+frequency scales. The small-model tests
 compare analytic Rabi and relaxation, an independent physical-frame Lindblad
 ODE and a virtual shift from a state outside the dynamic projection.
 Full-map accuracy and wall measurements are separate validation work.

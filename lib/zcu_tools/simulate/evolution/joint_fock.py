@@ -25,7 +25,12 @@ class JointFockDiagnostic:
         Dynamic levels outside these indices are omitted without a bath sink.
         RWA coefficients are built on the FULL model before selecting indices.
 
-    Invalid indices, port or gains raise ValueError. This is a numerical
+    step_ns: fixed RK4 step upper bound in ns for all numeric preparation and
+        probe segments; finite 0 < step_ns <= 1, default 1 ns. Each segment
+        uses ceil(duration / step_ns) equal steps. No automatic reduction or
+        retry occurs; nonfinite densities raise FloatingPointError.
+
+    Invalid indices, port, gains or step_ns raise ValueError. This is a numerical
     diagnostic, not an acquisition backend or a pure truncation-error control:
     it changes analytic one-jump preparation to numeric vacuum/pi/prefill/probe,
     and includes physical vacuum in the sampled coherent cutoff heuristic.
@@ -36,6 +41,7 @@ class JointFockDiagnostic:
     pi_gain: float
     probe_gain: float
     retained_indices: tuple[int, ...] = (0, 1, 2, 3)
+    step_ns: float = 1.0
 
     def __post_init__(self) -> None:
         if self.retained_indices not in ((0, 2), (0, 1, 2, 3)) or max(
@@ -46,6 +52,8 @@ class JointFockDiagnostic:
             raise ValueError("drive_port must index model.drives")
         if not np.isfinite([self.pi_gain, self.probe_gain]).all():
             raise ValueError("diagnostic gains must be finite")
+        if not np.isfinite(self.step_ns) or not 0 < self.step_ns <= 1:
+            raise ValueError("step_ns must be finite and satisfy 0 < step_ns <= 1")
 
 
 @dataclass(frozen=True)
@@ -205,8 +213,8 @@ def joint_fock_spectrum(request: JointFockRequest) -> JointFockResult:
     use 65 jump times and 33 subsequent times. This sampled coherent heuristic
     is not a complete-density truncation bound. Cutoffs above 20 raise ValueError.
 
-    Constant CSR generators use RK4 <=1 ns. This is not a positivity or global
-    accuracy guarantee for arbitrary frequency/drive scales. Populations and
+    The analytic-preparation path uses fixed RK4 <=1 ns. This does not guarantee
+    positivity or global accuracy for arbitrary frequency/drive scales. Populations and
     diagnostics are not clipped, normalized or repaired. Singular driven
     steady pointers raise ValueError; nonfinite propagation raises
     FloatingPointError. No state/cache survives a call, no solver fallback
@@ -217,9 +225,11 @@ def joint_fock_spectrum(request: JointFockRequest) -> JointFockResult:
     normalized finite coherent vector in the same displaced basis. The scan
     starts at t=0, including that vacuum, and rejects an initial Poisson tail
     above 1e-3 or an unrepresentable vector. Numeric finite-pi, prefill and probe
-    use the projected baths and RK4 <=1 ns, with local carrier resets and
-    Schrödinger endpoint restoration. No-flip and one-jump pointers still use
-    physical states [0,2], not every multilevel jump history. This is a sampled
+    use the projected baths and equal RK4 steps <= diagnostic.step_ns in each
+    segment, with local carrier resets and Schrödinger endpoint restoration.
+    The requested step is never reduced automatically and failures are not retried.
+    No-flip and one-jump pointers still use physical states [0,2], not every
+    multilevel jump history. This is a sampled
     coherent heuristic, not a complete-density error bound. Preparation and
     cutoff differ from the two-state analytic path, so their difference is
     not a pure dynamic-truncation error measurement.

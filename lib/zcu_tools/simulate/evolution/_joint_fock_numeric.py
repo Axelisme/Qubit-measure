@@ -39,9 +39,9 @@ def _product(data, indices, indptr, states):
 
 
 @njit(cache=True)
-def _fixed_rk4(data, indices, indptr, states, duration):
+def _fixed_rk4(data, indices, indptr, states, duration, step_ns):
     result = states.copy()
-    steps = max(1, int(np.ceil(duration)))
+    steps = max(1, int(np.ceil(duration / step_ns)))
     dt = duration / steps
     for _ in range(steps):
         k1 = _product(data, indices, indptr, result)
@@ -53,15 +53,19 @@ def _fixed_rk4(data, indices, indptr, states, duration):
 
 
 def rk4(
-    generator: sparse.csr_matrix, states: ComplexArray, duration: float
+    generator: sparse.csr_matrix,
+    states: ComplexArray,
+    duration: float,
+    step_ns: float = 1.0,
 ) -> ComplexArray:
-    """Advance every independent column with fixed RK4 <=1 ns, without repair."""
+    """Advance columns with equal RK4 steps <= validated step_ns, without repair."""
     result = _fixed_rk4(
         generator.data,
         generator.indices,
         generator.indptr,
         np.ascontiguousarray(states),
         duration,
+        step_ns,
     )
     if not np.isfinite(result).all():
         raise FloatingPointError("Nonfinite joint-Fock RK4 density")
