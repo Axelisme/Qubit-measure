@@ -29,7 +29,7 @@ from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
 from ._synthetic import Context, Plan, Tunables
 from ._window_scenarios import install_pause_plot_workflow
-from ._window_support import form_editable
+from ._window_support import form_editable, show_sample_section
 
 
 def test_close_pending_start_requests_stop_without_destroying_producer_host(
@@ -153,6 +153,7 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
     status = controller.status()
     assert status is not None and status.lifecycle == "stopped"
     assert attempts == ["step"]
+    show_sample_section(window)
     assert form_editable(window.plan_panel) and form_editable(window.tunables_panel)
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
     assert harness.progress.bars_for_owner("workflow") == ()
@@ -203,6 +204,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     start = window.findChild(QPushButton, "workflow.run.start")
     pause = window.findChild(QPushButton, "workflow.run.pause")
     resume = window.findChild(QPushButton, "workflow.run.resume")
+    show_sample_section(window)
     assert form_editable(window.plan_panel) and form_editable(window.tunables_panel)
     assert start is not None and start.isEnabled()
     assert pause is not None and not pause.isEnabled()
@@ -338,6 +340,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
     assert sample_input(panel.panel.state.input.data)["value"] == 45.0
+    show_sample_section(window)
     assert form_editable(window.plan_panel) and form_editable(window.tunables_panel)
     assert controller.operation_id is None and not controller.has_pending_segment
     assert harness.handles.known_outcome(token) == OperationOutcome(

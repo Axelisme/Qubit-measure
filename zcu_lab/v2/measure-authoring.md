@@ -1,5 +1,7 @@
 # Measure adapter authoring
 
+使用者入口見 [tutorial](../tutorial/README.md)。
+
 **Last updated:** 2026-10-15，持久 Spec writeback 與共用 entry Form
 
 `zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。

@@ -128,6 +128,8 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 
 ### 文件規範
 
+使用者面向的文件（README、guide、教學、docstring）每句寫操作會發生什麼或會產生什麼狀態，不用品質形容詞代替輸入、動作與結果。
+
 #### 讀者宣告
 
 每份 tracked markdown 文件第一段的第一行宣告讀者與用途，格式固定：`**讀者：** <讀者>。<一句用途>`，英文文件用 `**Readers:** <readers>. <purpose>`。讀者取 operator（在 GUI／MCP 做量測的人）、lab-author（擴充 `zcu_lab/` 的人）、framework-dev（維護 `lib/`、`tests/`、`tools/` 的人）、agent（coding 或 measurement agent）之一或組合。ADR 與討論快照不逐篇宣告，由 `docs/adr/README.md` 與 `docs/discussions/INDEX.md` 各宣告一次。

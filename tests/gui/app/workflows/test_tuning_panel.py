@@ -18,6 +18,7 @@ from tests.gui.widgets.form._text_input import commit_text
 
 from ._sample_input import sample_input
 from ._synthetic import Context
+from ._window_support import show_sample_section
 
 
 @pytest.fixture
@@ -29,6 +30,7 @@ def tuning(
     window, _harness, _entry = attachment
     widget, engine = window.tuning_panel, window.controller.engine
     assert widget is not None and engine is not None
+    show_sample_section(window, "Tunables (live)")
     return widget, engine
 
 

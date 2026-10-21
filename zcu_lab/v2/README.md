@@ -1,5 +1,7 @@
 # v2 experiments
 
+使用者入口見 [tutorial](../tutorial/README.md)。
+
 **Last updated:** 2026-10-20，readout slot 引用初值
 
 ZigZag 的 `run()` 直接列出 pulse 序列，使用 register loop。

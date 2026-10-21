@@ -81,7 +81,7 @@ Reset captures current parameters and rebuilds initial values.
 
 MCP field paths use original tone positions, for example
 `("tones", 0, "drive", "gain")`. The integer selects the full tone list.
-See the [mux recipe guide](../../../recipes/mux-guide.md) for typed overrides,
+See the [mux recipe guide](../../../recipes/mux-guide.md#mux_amp_rabi) for typed overrides,
 parameter origins and explicit writeback decisions.
 
 The MCP recipe is `mux_amp_rabi`.

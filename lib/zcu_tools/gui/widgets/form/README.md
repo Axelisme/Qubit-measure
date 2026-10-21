@@ -12,7 +12,7 @@ Editor 初次只建立可見層與初始展開的 model rows。Group 預設折�
 
 Host 可訂閱 `errors_changed`，在 `errors()` 結果改變時取得新的 `FormErrors`，全部有效時取得 `None`。本地 parse／拒絕錯誤與 state publication 都會觸發比較；錯誤集合相同時不重送，detach 後不再發出。`validity_changed` 仍只在有效與無效之間切換時發出 bool。
 
-Model-list 的 `form.picker.<path>` 依 Core 的 elements 列出「index: name」。Picker 只控制哪個元素可見，不寫 FormState、不改 participants，也不抓取來源。切走保留該元素的 controls、未提交文字及 parse errors；切回能繼續修正。隱藏元素的錯誤標在 list 標題，row tooltip 指出元素名稱與欄位。Participants 使用獨立 JSON 清單輸入。`Display` 提供元素 label 與 readonly 呈現提示，固定 identity 的拒絕由宣告 owner 提供。唯讀模式仍可切 picker、展開與複製，不能編輯值。
+Model-list 的 `form.picker.<path>` 依 Core 的 elements 列出「index: name」。Picker 只控制哪個元素可見，不寫 FormState、不改 participants，也不抓取來源。選中元素的欄位直接接在清單列下，不畫元素子節標題或再縮排；欄位標籤維持原名，objectName 保留完整 index path。切走保留該元素的 controls、未提交文字及 parse errors；切回能繼續修正。隱藏元素的錯誤標在 list 標題，row tooltip 指出元素名稱與欄位。Participants 使用獨立 JSON 清單輸入。`Display` 提供元素 label 與 readonly 呈現提示，固定 identity 的拒絕由宣告 owner 提供。唯讀模式仍可切 picker、展開與複製，不能編輯值。
 
 `selection_fixed` 不鎖內層選項。`fixed` option.value 也不凍結 children 或移除 commands；只有固定 scalar 且沒有 command 時畫成唯讀文字。
 

@@ -10,6 +10,7 @@ from tests.gui.widgets.form._text_input import commit_text
 
 from ._start_fakes import StartHarness
 from ._synthetic import Context, Plan, PlanForm, TunablesForm, inline_input
+from ._window_support import show_sample_section
 
 
 def test_panel_presents_host_state_without_replacing_draft(
@@ -35,6 +36,7 @@ def test_panel_exposes_generic_local_parse_errors_and_host_reset(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
 ) -> None:
     window, harness, _entry = attachment
+    show_sample_section(window)
     panel = window.tunables_panel
     field = panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(field, QLineEdit)
@@ -52,6 +54,7 @@ def test_panel_exposes_generic_local_parse_errors_and_host_reset(
     updated = window.tunables_panel
     result = updated.state.result(updated.env)
     assert isinstance(result, TunablesForm) and result.sample.value == 40.0
+    show_sample_section(window)
     field = updated.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(field, QLineEdit) and float(field.text()) == result.sample.factor
 

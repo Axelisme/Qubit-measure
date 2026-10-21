@@ -62,6 +62,7 @@ from ._synthetic import (
     context_seed,
     sample_step,
 )
+from ._window_support import show_sample_section
 
 
 @pytest.fixture(scope="session")
@@ -341,6 +342,7 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     knobs = window.tunables_panel.state.result(env)
     assert isinstance(knobs, TunablesForm) and knobs.sample.value == 31.0
     window.tunables_panel.state.write({("sample", "value"): 8.0}, env)
+    show_sample_section(window)
     edit = window.tunables_panel.findChild(QLineEdit, "form.input.sample.value")
     assert edit is not None
     edit.setText("1+")
@@ -410,6 +412,7 @@ def test_prepare_form_dependency_names_missing_alias_and_preserves_panels(
     window.reload_source()
     plan, knobs = window.plan_panel, window.tunables_panel
     knobs.state.write({("sample", "value"): 17.0}, knobs.env)
+    show_sample_section(window)
     edit = knobs.findChild(QLineEdit, "form.input.sample.value")
     assert edit is not None
     edit.setText("1+")

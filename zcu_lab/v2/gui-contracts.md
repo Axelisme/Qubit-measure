@@ -2,6 +2,8 @@
 
 # Measure GUI contracts
 
+使用者入口見 [tutorial](../tutorial/README.md)。
+
 每個實驗的 `gui.py` 擁有 cfg definition、run/analyze/writeback policy 與 operator guide。修改一個實驗時，先讀同資料夾的 `gui.py` 與 `core.py`。共用框架實作位於 `zcu_tools.gui.app.measure.adapter.base`。
 
 Post-analysis adapters 以 `get_post_writeback_items()` 提出 post-owned proposal；framework 將

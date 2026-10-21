@@ -48,6 +48,7 @@ def test_workflow_step_expression_and_prepare(
     sampling_window: ComponentDriver, tmp_path: Path
 ):
     driver = sampling_window
+    driver.expand_section("form.fold.sweep")
     driver.screenshot(tmp_path / "00-workflow-range-expts.png")
     driver.invoke_context_action(object_name="form.fold.sweep", action="Switch to Step")
     driver.screenshot(tmp_path / "01-workflow-range-step.png")
@@ -64,6 +65,7 @@ def test_workflow_step_expression_and_prepare(
         driver.observe(object_name="form.value.sweep.center").text.split(": ")[-1]
     ) == pytest.approx(0.45)
     driver.click("Prepare forms")
+    driver.expand_section("form.fold.sweep")
     driver.screenshot(tmp_path / "04-workflow-prepare.png")
     count = next(
         item
@@ -77,6 +79,7 @@ def test_workflow_restores_step_expression(
     restored_sampling_window: ComponentDriver, tmp_path: Path
 ):
     driver = restored_sampling_window
+    driver.expand_section("form.fold.sweep")
     driver.screenshot(tmp_path / "01-workflow-restored-step.png")
     assert driver.observe(object_name="form.input.sweep.step").text == "0.1 * 3"
     assert float(
