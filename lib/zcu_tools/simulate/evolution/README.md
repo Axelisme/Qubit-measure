@@ -704,7 +704,7 @@ to resolve the current route.
 `ModelSource.close()` clears models and counts after active work drains. It is
 idempotent and leaves immutable builder inputs reusable with a fresh history.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v6`. `experiment.ftf` owns private
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v7`. `experiment.ftf` owns private
 replay and checks backend, model, numerical, RNG and dependency versions before
 recomputing a round. Evolution does not persist densities or offline tables
 across processes or Engine lifetimes.
