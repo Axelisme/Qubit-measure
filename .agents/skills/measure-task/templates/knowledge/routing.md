@@ -4,7 +4,7 @@
 
 ## 依實驗名稱
 
-名稱逐項對齊條目的 `experiments` frontmatter，不另設 alias。先讀 `judge` 判讀結果；需要實驗順序時讀 `route`，處理既有資料時讀 `analysis`。同列有多個 judge 時，依連結標示的判斷問題選擇。`lookback` 目前只有流程入口，沒有專屬 judge。
+名稱逐項對齊條目的 `experiments` frontmatter，不另設 alias。先讀 `judge` 判讀結果；需要實驗順序時讀 `route`，處理既有資料時讀 `analysis`。同列有多個 judge 時，依連結標示的判斷問題選擇。
 
 | 實驗名稱 | 相關條目與 kind，judge 優先 |
 | --- | --- |
