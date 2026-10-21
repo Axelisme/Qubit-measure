@@ -470,6 +470,9 @@ def test_external_answer_projects_accepted_exchange_to_window(
             label="rejected answer delivery",
         )
         _ask_shot(driver, tmp_path, "external-03-rejected")
+        assert _text(driver, "workflow.message") == (
+            "Choose: Answer must be an instance of Decision"
+        )
         assert driver.observe(object_name="workflow.answer_status").text == "等待回答"
         assert driver.observe("Answer").enabled
     control.answer(run_id, {"value": 29})
@@ -483,6 +486,11 @@ def test_external_answer_projects_accepted_exchange_to_window(
     assert driver.observe(object_name="workflow.answer_status").text == "已回答"
     assert not driver.observe("Answer").enabled
     assert "authored evidence" in driver.observe(object_name="workflow.ask").text
+    assert not any(
+        w.object_name == "workflow.message"
+        and "Choose: Answer must be an instance of Decision" in w.text
+        for w in driver.visible().widgets
+    ), "Accepted retry must clear the previous owner error from the Window"
 
 
 def test_external_facet_open_is_projected_without_gui_selection(
