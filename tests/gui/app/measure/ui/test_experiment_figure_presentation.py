@@ -74,6 +74,45 @@ class StaticInteractive(InteractiveFrontend):
         pass
 
 
+class LayoutAdapter(AnalysisSavingAdapter):
+    """Produce four figures first, then five, without instruments or lab definitions."""
+
+    run_count = 3
+    analysis_count = 3
+
+    @staticmethod
+    def draw_figures(plots: Plots, count: int, prefix: str) -> None:
+        for index in range(1, count + 1):
+            name = f"{prefix} tone {index}"
+            plots.subplots(name)
+
+            def draw(figure: Figure, name: str = name, height: int = index) -> None:
+                axes = figure.axes[0]
+                axes.plot([0, 1, 2], [0, height, 0], label=name)
+                axes.set_xlabel("Time")
+                axes.legend()
+
+            plots.draw(name, draw)
+
+    def run(
+        self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        record = super().run(req, cfg, context=context)
+        self.run_count += 1
+        self.draw_figures(context.plots, self.run_count, "Run")
+        return record
+
+    def analyze(
+        self,
+        req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams],
+        *,
+        plots: Plots,
+    ) -> PaneSummary:
+        self.analysis_count += 1
+        self.draw_figures(plots, self.analysis_count, "Analysis")
+        return PaneSummary()
+
+
 class PresentationAdapter(AnalysisSavingAdapter):
     """Offline adapter with two independently selectable figures in each result pane."""
 
@@ -134,6 +173,76 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.new_tab("presentation")
         app.window.resize(1280, 800)
         yield app.window
+
+
+@pytest.fixture
+def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
+    registry = Registry()
+    registry.register("layout", LayoutAdapter)
+    with launched_measure_app(qapp, tmp_path, registry=registry) as app:
+        app.controller.setup_control.new_entry(EntryRequest("layout"))
+        app.controller.setup_control.new_point(
+            PointCreateRequest("p", "Offline layout", CommandOrigin("gui"))
+        )
+        app.controller.new_tab("layout")
+        app.window.resize(1440, 900)
+        yield app.window
+
+
+@pytest.mark.parametrize("pane", ["Run", "Analysis", "Data"])
+def test_user_sees_four_figures_then_selects_from_five(
+    layout_window: QWidget, pane: str, tmp_path: Path
+) -> None:
+    flow = ComponentDriver(layout_window)
+    shots = tmp_path / f"layout-{pane}"
+    flow.click("Close")
+    flow.screenshot(shots / "01-ready.png")
+    flow.click("Run")
+    qt_until(
+        lambda: any(w.text == "Run" and w.enabled for w in flow.visible().widgets),
+        label="synthetic run settled",
+    )
+    action = "Run"
+    if pane == "Analysis":
+        flow.select_tab("Analysis")
+        action = "Analyze"
+        flow.click(action)
+        qt_until(
+            lambda: any(w.text == action and w.enabled for w in flow.visible().widgets),
+            label="synthetic analysis settled",
+        )
+    prefix = "Run" if pane == "Data" else pane
+    if pane == "Data":
+        flow.select_tab("Data")
+    flow.screenshot(shots / "02-four.png")
+    if pane == "Data":
+        assert {f"Run tone {i}" for i in range(1, 5)} <= {
+            widget.text for widget in flow.visible().widgets
+        }
+    else:
+        assert flow.legends().texts == tuple(f"{prefix} tone {i}" for i in range(1, 5))
+    assert not any(
+        w.kind == "QComboBox" and w.text == f"{prefix} tone 1"
+        for w in flow.visible().widgets
+    )
+    if pane == "Data":
+        flow.select_tab("Run")
+    flow.click(action)
+    qt_until(
+        lambda: any(w.text == action and w.enabled for w in flow.visible().widgets),
+        label="five-figure operation settled",
+    )
+    if pane == "Data":
+        flow.select_tab("Data")
+    flow.screenshot(shots / "03-five.png")
+    if pane != "Data":
+        assert flow.legends().texts == (f"{prefix} tone 1",)
+    flow.choose_option(f"{prefix} tone 1", f"{prefix} tone 5")
+    if pane == "Data":
+        assert flow.observe("Run tone 5").visible
+    else:
+        assert flow.legends().texts == (f"{prefix} tone 5",)
+    flow.screenshot(shots / "04-selected.png")
 
 
 @pytest.fixture(params=["mounted", "unmounted"])
@@ -199,26 +308,27 @@ def test_user_switches_named_figures_gallery_and_left_panel(
     flow.click("Analyze")
     # Both figures are committed by this finite offline analysis.
     qt_until(
-        lambda: flow.legends().texts == ("fit",) and flow.observe("Analyze").enabled,
+        lambda: (
+            flow.legends().texts == ("fit", "residual")
+            and flow.observe("Analyze").enabled
+        ),
         label="offline analysis presentation",
     )
     flow.screenshot(shots / "03-analysis-fit.png")
-    flow.choose_option("fit", "residual")
-    assert flow.legends().texts == ("residual",)
-    flow.screenshot(shots / "04-analysis-residual.png")
+    assert flow.legends().texts == ("fit", "residual")
+    flow.screenshot(shots / "04-analysis-together.png")
     flow.select_tab("Post-Analysis")
     flow.click("Run Post-Analysis")
     qt_until(
         lambda: (
-            flow.legends().texts == ("summary",)
+            flow.legends().texts == ("summary", "detail")
             and flow.observe("Run Post-Analysis").enabled
         ),
         label="offline post-analysis presentation",
     )
     flow.screenshot(shots / "05-post-summary.png")
-    flow.choose_option("summary", "detail")
-    assert flow.legends().texts == ("detail",)
-    flow.screenshot(shots / "06-post-detail.png")
+    assert flow.legends().texts == ("summary", "detail")
+    flow.screenshot(shots / "06-post-together.png")
     flow.select_tab("Data")
     assert flow.observe(object_name="dataFigurePreviewGallery").visible
     assert flow.observe("Save All").enabled
@@ -234,10 +344,13 @@ def test_user_switches_named_figures_gallery_and_left_panel(
     assert flow.legends().texts == ()
     flow.screenshot(shots / "10-guide.png")
     flow.select_tab("Analysis")
-    assert flow.legends().texts == ("residual",)
+    assert flow.legends().texts == ("fit", "residual")
     flow.screenshot(shots / "11-analysis-retained.png")
     flow.select_tab("Post-Analysis")
-    assert flow.legends().texts == ("detail",)
+    assert flow.legends().texts == (
+        "summary",
+        "detail",
+    )
     flow.screenshot(shots / "12-post-retained.png")
 
 
@@ -300,6 +413,8 @@ def test_named_collection_identity_blocks_selector_repopulation_and_keeps_figure
     second = Figure()
     collection.adopt("first", first)
     collection.adopt("second", second)
+    for index in range(3):
+        collection.adopt(f"extra-{index}", Figure())
     collection.seal()
     changes: list[int] = []
     selector.currentIndexChanged.connect(changes.append)

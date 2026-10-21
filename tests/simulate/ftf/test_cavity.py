@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.integrate import trapezoid
 from scipy.linalg import expm
-from zcu_tools.simulate import ftf
+from zcu_tools.simulate import adc, ftf
 from zcu_tools.simulate.adc import ReadoutPulse
 
 pytestmark = pytest.mark.sim
@@ -30,14 +30,18 @@ def cavity():
     return joint, resonators, pulse, drive_type
 
 
+@pytest.mark.parametrize("cached", [False, True])
 @pytest.mark.parametrize(
     "branch", [0, 1, None], ids=["ground", "prepared", "tie-lowest-energy"]
 )
-def test_cavity_advance_inherits_main_branch_and_keeps_ringdown(cavity, branch):
+def test_cavity_advance_inherits_main_branch_and_keeps_ringdown(cavity, branch, cached):
     from zcu_tools.simulate.adc import cavity_field_average, cavity_fields
 
     joint, resonators, pulse, _ = cavity
-    drive = ftf.CavityDrive(joint, resonators, (pulse,))
+    cache_type = getattr(adc, "CavityAverageCache", None)
+    assert cache_type is not None, "FTF must accept the ADC-owned average cache"
+    cache = cache_type() if cached else None
+    drive = ftf.CavityDrive(joint, resonators, (pulse,), cache=cache)
     assert callable(getattr(drive, "advance", None)), (
         "FTF must carry the main branch field between spans"
     )
@@ -76,6 +80,13 @@ def test_cavity_advance_inherits_main_branch_and_keeps_ringdown(cavity, branch):
     )
     np.testing.assert_allclose(next_final, expected_ringdown[-1, selected], atol=1e-11)
     assert np.max(ringdown.photons) > 0
+    if cache is not None:
+        repeated, repeated_final = ftf.CavityDrive(
+            joint, resonators, (pulse,), cache=cache
+        ).advance(10.0, 25.0, populations, inherited)
+        np.testing.assert_array_equal(repeated.photons, average.photons)
+        np.testing.assert_array_equal(repeated_final, final)
+        assert cache.hits == 1 and cache.misses == 2
     # Restarting each branch from vacuum would erase this entire span.
     np.testing.assert_array_equal(
         ftf.CavityDrive(joint, resonators, ()).average(25.0, 40.0).photons, 0

@@ -7,7 +7,12 @@ acquisition normalization belongs to program.
 """
 
 from .cache import ReadoutCache
-from .cavity import CavityFieldAverage, cavity_field_average, cavity_fields
+from .cavity import (
+    CavityAverageCache,
+    CavityFieldAverage,
+    cavity_field_average,
+    cavity_fields,
+)
 from .model import ReadoutModel, Receiver
 from .populations import (
     POPULATION_TOLERANCE,
