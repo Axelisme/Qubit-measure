@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.workflow_pane import WorkflowPane
 from zcu_tools.gui.app.measure.ui.workflow_tabs import WorkflowTabs
+from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.session.context_types import (
@@ -491,6 +492,100 @@ def test_external_answer_projects_accepted_exchange_to_window(
         and "Choose: Answer must be an instance of Decision" in w.text
         for w in driver.visible().widgets
     ), "Accepted retry must clear the previous owner error from the Window"
+
+
+def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
+    workflow_window, tmp_path
+):
+    ctrl, window = workflow_window
+    control = ctrl.workflow_control()
+    cleanup_entered, release_cleanup = Event(), Event()
+
+    def hold_cleanup() -> None:
+        cleanup_entered.set()
+        # The scenario releases the synthetic author's finite cleanup in finally.
+        assert release_cleanup.wait(30)
+
+    author = AskAuthor(on_cancel=hold_cleanup)
+    control.configure((author.attachment(),))
+    driver = ComponentDriver(window)
+    _ask_shot(driver, tmp_path, "remote-01-experiments")
+    driver.click(object_name="workflow.toggle")
+    _ask_shot(driver, tmp_path, "remote-02-workflows")
+    driver.select_menu("New Tab ▾", ("asking",))
+    _ask_shot(driver, tmp_path, "remote-03-opened")
+    driver.click("Start")
+    # The submitted finite segment must deliver its synthetic Ask pause.
+    qt_until(lambda: _status(driver, "paused"), label="remote Stop Ask pause")
+    _ask_shot(driver, tmp_path, "remote-04-question")
+    token = control.tabs()[0].operation_id
+    run_id = control.tabs()[0].run_id
+    assert token is not None and run_id is not None
+    lease = ctrl.get_hardware_gate_presence()
+    assert any(p.kind == "run" for p in lease)
+    ctrl.control_identity.connect("workflow-client", "workflow-agent", "owner")
+    observed: list[tuple[str, bool, str | None, int | None]] = []
+
+    def observe_authority(status: ControlStatus) -> None:
+        tab = control.tabs()[0]
+        observed.append(
+            (
+                status.holder,
+                status.locked,
+                tab.status.lifecycle if tab.status is not None else None,
+                tab.operation_id,
+            )
+        )
+
+    unwatch = ctrl.control_identity.watch(observe_authority)
+    try:
+        _ask_shot(driver, tmp_path, "remote-05-remote-question")
+        assert driver.observe(object_name="control_indicator").text == (
+            "Remote · workflow-agent · online"
+        )
+        assert driver.observe("Stop").enabled, (
+            "Remote must not disable local workflow Stop"
+        )
+        assert not driver.observe("Pause").enabled
+        assert not driver.observe("Resume").enabled
+        assert not driver.observe("Answer").enabled
+        driver.select_tab("Tunables")
+        _ask_shot(driver, tmp_path, "remote-06-remote-tunables")
+        assert not driver.observe("Apply").enabled
+        assert not driver.observe(object_name="form.input.value").enabled
+        driver.select_tab("Ask")
+        _ask_shot(driver, tmp_path, "remote-07-remote-ask")
+        driver.click("Stop")
+        # Stop must drain the retained Ask into the controlled author cleanup.
+        qt_until(cleanup_entered.is_set, label="remote Stop author cancellation")
+        _ask_shot(driver, tmp_path, "remote-08-local-cancelling")
+        assert driver.observe(object_name="control_indicator").text == "Local locked"
+        assert not driver.observe("Start").enabled
+        assert observed == [
+            ("rpc:workflow-agent", False, "paused", token),
+            ("gui", True, "paused", token),
+        ], "Reclaim must precede Stop's lifecycle change on the original operation"
+        assert control.tabs()[0].operation_id == token
+        assert control.tabs()[0].run_id == run_id
+        assert ctrl.get_hardware_gate_presence() == lease
+        assert ctrl.await_operation(token, 0) is None
+        release_cleanup.set()
+        # Released cleanup returns Done; the original owner must deliver stopped.
+        qt_until(
+            lambda: _status(driver, "stopped"), label="remote Stop terminal delivery"
+        )
+        _ask_shot(driver, tmp_path, "remote-09-local-stopped")
+        assert driver.observe("Start").enabled
+        assert driver.observe(object_name="workflow.answer_status").text == "提問已取消"
+        assert control.tabs()[0].run_id == run_id
+        assert control.tabs()[0].operation_id is None
+        assert not any(p.kind == "run" for p in ctrl.get_hardware_gate_presence())
+        outcome = ctrl.await_operation(token, 0)
+        assert outcome is not None and outcome.status == "cancelled"
+        assert [answer for answer, _thread in author.deliveries] == [None]
+    finally:
+        release_cleanup.set()
+        unwatch()
 
 
 def test_external_facet_open_is_projected_without_gui_selection(
