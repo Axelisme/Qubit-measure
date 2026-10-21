@@ -86,7 +86,6 @@ def startup_app(qapp, tmp_path, monkeypatch):
     finally:
         probe.release.set()
         behavior.close(assembly)
-        window.deleteLater()
         sys.excepthook = previous_hook
         qapp.processEvents()
 
@@ -198,7 +197,8 @@ def test_background_facets_lock_run_and_keep_completed_work(startup_app, tmp_pat
 def test_partial_failure_reports_script_line_and_retains_callbacks(
     startup_app, tmp_path, caplog
 ):
-    behavior, assembly, ctrl, _window, probe = startup_app
+    behavior, assembly, ctrl, window, probe = startup_app
+    window.destroyed.connect(lambda: probe.calls.append("view released"))
     path = write_script(
         tmp_path,
         "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: p.calls.append('first'))\n    def broken():\n        p.calls.append('broken')\n        raise ValueError('callback failure')\n    ctx.on_close(broken)\n    ctx.on_close(lambda: p.calls.append('last'))\n    p.tab = ctx.tabs.new_tab('sample')\n    raise ValueError('script failure')\n",
@@ -216,14 +216,15 @@ def test_partial_failure_reports_script_line_and_retains_callbacks(
     assert ctrl.has_tab(probe.tab)
     behavior.close(assembly)
     behavior.close(assembly)
-    assert probe.calls == ["last", "broken", "first", "hardware"]
+    assert probe.calls == ["last", "broken", "first", "hardware", "view released"]
     assert "callback failure" in caplog.text
 
 
 def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
     startup_app, tmp_path
 ):
-    behavior, assembly, ctrl, _window, probe = startup_app
+    behavior, assembly, ctrl, window, probe = startup_app
+    window.destroyed.connect(lambda: probe.calls.append("view released"))
     path = write_script(
         tmp_path,
         "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: (ctx.context.set_alias_rows(()), p.calls.append('callback')))\n    p.started.set()\n    p.release.wait()\n    ctx.context.set_alias_rows(())\n    p.calls.append('worker finished')\n",
@@ -235,7 +236,7 @@ def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
     assert probe.calls == []
     probe.release.set()
     behavior.close(assembly)
-    assert probe.calls == ["worker finished", "callback", "hardware"]
+    assert probe.calls == ["worker finished", "callback", "hardware", "view released"]
 
 
 def test_startup_creates_point_then_persists_its_aliases(startup_app, tmp_path):
@@ -600,7 +601,6 @@ def test_composition_starts_only_selected_synthetic_script(
             assert probe.calls == [selection]
     finally:
         behavior.close(assembly)
-        window.deleteLater()
         qapp.processEvents()
 
 

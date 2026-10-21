@@ -7,7 +7,6 @@ from typing import ClassVar
 import numpy as np
 import pytest
 import yaml
-from qtpy.QtWidgets import QDialog
 from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.records import RunRecord
@@ -122,10 +121,6 @@ def ftf_window(qapp, tmp_path):
             try:
                 env.devices.close_all_devices()
             finally:
-                for dialog in window.findChildren(QDialog):
-                    dialog.reject()
-                window.dispose_control_watches()
-                window.deleteLater()
                 qapp.processEvents()
         finally:
             sys.excepthook = old_hook

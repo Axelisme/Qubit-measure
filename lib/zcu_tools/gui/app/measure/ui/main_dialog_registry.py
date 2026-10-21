@@ -230,6 +230,20 @@ class MainDialogRegistry:
         except RuntimeError:
             self._forget(name)
 
+    def dispose(self) -> None:
+        """Finish retained windows before their parent destroys the Qt tree.
+
+        Terminal owner cleanup bypasses reject/close policies such as dirty
+        editor prompts and persistent-window hiding. QDialog.done emits finished
+        even for hidden windows, releasing each dialog owner's subscriptions.
+        Parent ownership destroys their widgets and timers afterwards.
+        """
+        for name in tuple(self._dialog_names):
+            dialog = self._dialog(name)
+            if dialog is not None:
+                dialog.done(QDialog.DialogCode.Rejected)
+            self._forget(name)
+
     def visible_names(self) -> list[DialogName]:
         """Return named dialogs that are currently visible on screen."""
         return _visible_dialog_names(self._dialog_names, self._dialog)
