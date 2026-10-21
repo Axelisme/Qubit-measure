@@ -26,6 +26,8 @@ def _adapter_with_params(params: ChoiceParams) -> MagicMock:
         ),
         capabilities=SimpleNamespace(analysis=AnalysisMode.FIT),
         interaction=None,
+        artifacts=(),
+        run=None,
     )
     control.analyze.return_value = "op-1"
     control.start_post_analyze.return_value = "op-1"

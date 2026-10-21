@@ -13,7 +13,7 @@ from pydantic import TypeAdapter, ValidationError
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.operation_wait import await_operation
-from zcu_tools.mcp.measure.raw_save import SaveReport
+from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcpSession
 
 AnalysisStage = Literal["primary", "post"]
@@ -91,6 +91,8 @@ class ExecutionSnapshot:
     result: Captured native analysis result, or None before result_read.
     interaction: Latest interaction handoff, or None if none was delivered.
     save_status: not_started, not_available, saving, saved, incomplete or unknown.
+    raw_data: Latest owner-observed acquisition identity and raw saved flag;
+        None before evidence is captured. Analysis saving does not change it.
     save_report: Latest complete synchronous native Save report, or None before
         a reply; it contains all outputs, including reserved/failed paths.
         There is no image-by-image successful prefix or session PNG path.
@@ -115,6 +117,7 @@ class ExecutionSnapshot:
     interaction: dict[str, Any] | None = None
     save_status: SaveStatus = "not_started"
     save_report: SaveReport | None = None
+    raw_data: RawDataState | None = None
     writeback: AnalysisWriteback | None = None
     error: ExecutionError | None = None
 
@@ -134,6 +137,15 @@ def _invalid_analysis_values(value: object) -> list[InvalidAnalysisValue]:
             )
         invalid.append({"path": item["path"], "reason": item["reason"]})
     return invalid
+
+
+def _raw_data_state(value: object) -> RawDataState | None:
+    if value is None:
+        return None
+    try:
+        return TypeAdapter(RawDataState).validate_python(value)
+    except ValidationError as exc:
+        raise GuiRpcError("Invalid raw data state", reason="incompatible_wire") from exc
 
 
 def _analysis_result(
@@ -358,6 +370,7 @@ class AnalysisExecution:
                 op=started["handle"],
                 start=AnalysisStart("running"),
                 params=deepcopy(started["params"]),
+                raw_data=_raw_data_state(started.get("raw_data")),
                 status="interactive" if started.get("interactive") else "running",
             )
             self._condition.notify_all()
@@ -572,7 +585,11 @@ class AnalysisExecution:
         )
         reply = self._rpc("result_read", method, {"tab_id": snapshot.tab})
         result, names = _analysis_result(reply, snapshot.stage)
-        self._publish(result=result, params=deepcopy(result.params))
+        self._publish(
+            result=result,
+            params=deepcopy(result.params),
+            raw_data=_raw_data_state(result.operation_state.get("raw_data")),
+        )
         reply = self._rpc(
             "image_save",
             "tab.save_artifacts",
