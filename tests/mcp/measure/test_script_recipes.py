@@ -1,11 +1,11 @@
 """Synthetic declarations through the public measure tool registration seam."""
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 
 import pytest
 from pydantic import BaseModel, ValidationError
-
 from zcu_tools.core.script_protocol import (
     Answer,
     Ask,
@@ -67,8 +67,12 @@ def test_declaration_schema_session_and_authored_report(
             yield
         return report
 
-    host = RecipeHost(session=session, runs=lambda: (RecipeRun("tab-1", "fake", "run-1"),))
-    client = make_client(tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host)
+    host = RecipeHost(
+        session=session, runs=lambda: (RecipeRun("tab-1", "fake", "run-1"),)
+    )
+    client = make_client(
+        tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host
+    )
     clients.append(client)
     assert client.tools["synthetic"]["inputSchema"]["required"] == ["count"]
     reply = client.call("synthetic", {"count": 9})
@@ -82,8 +86,9 @@ def test_declaration_schema_session_and_authored_report(
 
     execution = client.context.session.recipes.get(reply.data["execution"])
     assert isinstance(execution, ScriptRecipeExecution)
-    assert execution.snapshot().outcome is not None
-    assert execution.snapshot().outcome.report is report
+    outcome = execution.snapshot().outcome
+    assert outcome is not None
+    assert outcome.report is report
     assert client.transport.sent == []
 
 
@@ -109,10 +114,15 @@ def test_pending_question_validates_before_resume_and_blocks_other_recipes(
     status = client.call("status", {"execution": key})
     assert status["status"] == "paused"
     assert status["pending_question"] == {"evidence": "captured only"}
-    assert client.call("wait", {"execution": key, "timeout": 0}).data["status"] == "paused"
+    assert (
+        client.call("wait", {"execution": key, "timeout": 0}).data["status"] == "paused"
+    )
     assert resumed == []
-    with pytest.raises(RuntimeError, match="recipe_busy"):
+    from zcu_tools.mcp.measure.session import GuiRpcError
+
+    with pytest.raises(GuiRpcError) as busy:
         client.call(PIPELINE.name, {})
+    assert busy.value.reason == "recipe_busy"
     for invalid in ({"proceed": "not-a-bool"}, {"proceed": True, "extra": 1}):
         with pytest.raises(ValidationError):
             client.call("answer", {"execution": key, "answer": invalid})
@@ -136,21 +146,29 @@ def test_wait_delivery_does_not_override_generator_completion(
 
     operation = SyntheticOperation()
     statuses: dict[str, OperationStatus] = {
-        "completed": "completed", "cancelled": "cancelled", "failed": "failed"
+        "completed": "completed",
+        "cancelled": "cancelled",
+        "failed": "failed",
     }
 
     def wait(op: object, cancellation: Event) -> None:
         assert op is operation
-        operation.delivery = OperationResult(statuses[operation_status], 17, "diagnostic")
+        operation.delivery = OperationResult(
+            statuses[operation_status], 17, "diagnostic"
+        )
 
     @recipe("work", description="Wait for host-owned work")
     def synthetic(session: RecipeSession, inputs: Inputs) -> RecipeGenerator[Report]:
         yield Wait(operation)
         assert operation.delivery is not None
-        return Report(status=operation.delivery.status, count=operation.delivery.result or 0)
+        return Report(
+            status=operation.delivery.status, count=operation.delivery.result or 0
+        )
 
     host = RecipeHost(session=RecipeSession(), wait=wait)
-    client = make_client(tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host)
+    client = make_client(
+        tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host
+    )
     clients.append(client)
     reply = client.call("work", {"count": 1})
     assert reply.data["outcome"]["status"] == "completed"
@@ -178,6 +196,7 @@ def test_cancel_wait_drains_operation_and_closes_generator(
     @recipe("work", description="Cancel suspended work")
     def synthetic(session: RecipeSession, inputs: Inputs) -> RecipeGenerator[Report]:
         try:
+            yield Ask(Decision(evidence="start synthetic operation"))
             yield Wait(operation)
             return Report(status="unexpected resume", count=0)
         finally:
@@ -185,16 +204,29 @@ def test_cancel_wait_drains_operation_and_closes_generator(
             closed.set()
 
     host = RecipeHost(session=RecipeSession(), wait=wait, cancel=cancel)
-    client = make_client(tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host)
+    client = make_client(
+        tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host
+    )
     clients.append(client)
-    execution = client.context.session.recipes.start(client.context, "work", {"count": 1})
-    assert entered.wait(3)
-    key = execution.snapshot().execution
-    client.call("cancel", {"execution": key})
-    result = client.call("wait", {"execution": key, "timeout": 3})
-    assert result.data["outcome"] == {"status": "cancelled", "report": None, "runs": []}
-    assert closed.is_set()
-    assert drained.is_set()
+    key = client.call("work", {"count": 1}).data["execution"]
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        continuation = worker.submit(
+            client.call, "answer", {"execution": key, "answer": {"proceed": True}}
+        )
+        try:
+            assert entered.wait(3)
+            client.call("cancel", {"execution": key})
+            result = client.call("wait", {"execution": key, "timeout": 3})
+            assert result.data["outcome"] == {
+                "status": "cancelled",
+                "report": None,
+                "runs": [],
+            }
+            assert closed.is_set()
+            assert drained.is_set()
+        finally:
+            client.context.session.close()
+        assert continuation.result(timeout=3).data["status"] == "cancelled"
 
 
 def test_failure_and_default_convenience_stub_are_failed_outcomes(
@@ -263,3 +295,32 @@ def test_decorator_rejects_invalid_signatures_without_execution() -> None:
 
     with pytest.raises(TypeError, match="two"):
         recipe("invalid", description="invalid")(missing_inputs)
+
+
+def test_failed_host_work_closes_suspended_generator_before_terminal_reply(
+    tmp_path: Path, clients: list[MeasureClient]
+) -> None:
+    from zcu_tools.mcp.measure.recipe_api import RecipeGenerator, RecipeSession, recipe
+    from zcu_tools.mcp.measure.recipe_host import RecipeHost
+
+    closed = Event()
+    operation = SyntheticOperation()
+
+    def wait(op: object, cancellation: Event) -> None:
+        raise RuntimeError("host work failed after drain")
+
+    @recipe("failure", description="Host failure closes the generator")
+    def synthetic(session: RecipeSession, inputs: Inputs) -> RecipeGenerator[Report]:
+        try:
+            yield Wait(operation)
+            return Report(status="unexpected continuation", count=0)
+        finally:
+            closed.set()
+
+    host = RecipeHost(session=RecipeSession(), wait=wait)
+    client = make_client(tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host)
+    clients.append(client)
+    result = client.call("failure", {"count": 1})
+    assert result.data["outcome"]["status"] == "failed"
+    assert result.data["error"]["message"] == "host work failed after drain"
+    assert closed.is_set()

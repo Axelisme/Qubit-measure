@@ -307,7 +307,6 @@ def test_return_payload_is_not_projected_or_copied() -> None:
 
 def test_parse_answer_only_validates_and_preserves_pending_delivery() -> None:
     from pydantic import ValidationError
-
     from zcu_tools.core.script_protocol import Answer, Ask, Question
     from zcu_tools.experiment.script_driver import ScriptDriver
 
