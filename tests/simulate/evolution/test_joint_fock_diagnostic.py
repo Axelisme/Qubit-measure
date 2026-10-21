@@ -120,6 +120,18 @@ def test_diagnostic_cutoff_represents_displaced_physical_vacuum():
     assert np.max(result.trace_error) < 1e-11
 
 
+def test_diagnostic_step_defaults_to_one_ns_and_validates_finite_positive_bound():
+    diagnostic = diagnostic_request().diagnostic
+    assert diagnostic is not None
+    assert hasattr(diagnostic, "step_ns"), "Diagnostic fixed step is not exposed"
+    assert diagnostic.step_ns == 1.0
+    for step in (1.0, 0.25, 0.125):
+        assert replace(diagnostic, step_ns=step).step_ns == step
+    for step in (0.0, -0.25, 1.00001, np.nan, np.inf, -np.inf):
+        with pytest.raises(ValueError, match="step_ns"):
+            replace(diagnostic, step_ns=step)
+
+
 def test_diagnostic_rejects_more_than_four_dynamic_levels():
     request = diagnostic_request()
     assert request.diagnostic is not None
