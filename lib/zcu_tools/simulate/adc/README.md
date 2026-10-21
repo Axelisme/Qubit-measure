@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-22, joint-Fock validation limits
+**Last updated:** 2026-10-22, explicit-step joint-Fock diagnostics
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -232,11 +232,27 @@ probe propagation and output density diagnostics. It excludes imports, data
 reads, synthetic warmup, serialization, fitting and plotting. The historical
 129.426-s estimate extrapolates three rows, so this is not a paired speedup.
 
-Numeric-preparation diagnostics retaining [0,2] and the lowest four levels both
-fail with nonfinite RK4 density during prefill at the same research parameters.
-Four-level validation is therefore incomplete. No population clipping, density
+The original numeric-preparation diagnostics retaining [0,2] and [0,1,2,3]
+both fail with nonfinite prefill density at the default 1-ns RK4 step. Explicit
+`JointFockDiagnostic.step_ns=0.25` completes the same six-Pe small sample at
+one resonator carrier and three qubit carriers. For numeric [0,2], halving the
+step again to 0.125 ns changes Pe by at most 6.55e-15. This is local step
+convergence evidence, not a full-map or total-error bound. The analytic main
+path and its single production timing remain unchanged.
+
+At 0.25 ns the four-level sample completes with cutoff N6. Its physical-state-2
+Pe differs from numeric [0,2] by at most 4.22e-9 and from the saved analytic
+sample by at most 2.80e-5. Both numeric projections use physical-vacuum,
+finite-pi, prefill and probe propagation, with virtual sums computed before
+projection. Their cutoff scan includes the initial vacuum and selects N6;
+the analytic sample selects N3 and uses one-jump preparation. These comparisons
+do not isolate pure dynamic-level truncation error. The four-level sample has
+no separate step-halving study and does not validate an entire four-level map.
+
+The observed four-level prefill generator has an infinity norm of 4.19032
+per ns, which upper-bounds its eigenvalue magnitudes. Multiplying by its actual
+0.25-ns step gives 1.04758. This is not an actual eigenvalue or RK4 amplification factor,
+and does not prove stability or accuracy. No population clipping, density
 repair or solver substitution is applied. The sampled coherent cutoff rule is
 not a complete-density error bound, and fixed RK4 does not guarantee positivity
-for arbitrary inputs. Numeric preparation also changes the cutoff scan to
-include the initial vacuum, so comparison with analytic preparation would not
-isolate dynamic-level truncation error even after that failure is resolved.
+for arbitrary inputs.
