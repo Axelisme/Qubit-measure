@@ -10,7 +10,7 @@
 
 ## GUI 與板端 server
 
-- `run_workflows_gui.py`：工作站 workflows GUI，將 `zcu_lab.workflows.registry`、alias preset 與 source loader 注入 lib 宿主。模擬驗證在這個 GUI 的模擬模式完成，不另用 agent 專用模擬腳本。控制、保存與 reload 分工見 [workflows 宿主](../lib/zcu_tools/gui/app/workflows/README.md)。
+- `run_workflows_gui.py`：工作站 workflows GUI，將 `zcu_lab.workflows.registry` 與 source loader 注入 lib 宿主。模擬驗證在這個 GUI 的模擬模式完成，不另用 agent 專用模擬腳本。控制、保存與 reload 分工見 [workflows 宿主](../lib/zcu_tools/gui/app/workflows/README.md)。
 - `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。啟動後在背景執行選定的 `startup(ctx)`；框架只保存 Qt 視窗外觀，預設在 repo `logs/gui/measure/` 建立 session log。預設啟動 loopback remote-control socket；允許外部連線的選項會改變網路曝露範圍。`--clean` 不執行任何啟動腳本。未給 `--script` 時使用框架的 `lib/zcu_tools/gui/app/measure/default_startup.py`；給了就只跑指定腳本，且不能與 `--clean` 並用。量測 GUI 可透過 QICK 連接硬體；啟動器本身只組合 GUI 與 runtime。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
 - `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑；傳入的 project 與 repo root 交給 GUI runtime。預設各開 remote-control TCP socket（預設 port 8766、8767，未指定時占用會回退到臨時 port）；GUI 的分析或存檔由各自 app 負責，啟動器不直接改寫原始資料。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
 - 三個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔；repo root 仍由入口檔的 parent 定位。

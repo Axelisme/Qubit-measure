@@ -81,7 +81,6 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.runtime import launch_gui_runtime
     from zcu_tools.resources.entry import component_registry
 
-    from zcu_lab import load_alias_presets
     from zcu_lab.components import register_all
     from zcu_lab.templates import TEMPLATES
     from zcu_lab.workflows.registry import build_registry
@@ -95,7 +94,6 @@ def main(argv: list[str] | None = None) -> int:
             registrations=build_registry(),
             templates=TEMPLATES,
             loader=build_source_loader(),
-            alias_presets=load_alias_presets(),
         ),
         project_root=str(PROJECT_ROOT),
         clean=args.clean,
