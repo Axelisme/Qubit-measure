@@ -83,7 +83,9 @@ def h_tab_writeback_preview(
 
     Requires (tab_id, subtab_id) with closed values analysis|post_analysis.
     Each item includes the service-owned captured actual_path and existing
-    stderr (working units, or None). destination_context is the active context
+    stderr (working units, or None), and the adapter's note (plain text or None).
+    selected reflects current manual selection, initially the proposal's bool.
+    destination_context is the active context
     at reply time, not the draft's captured destination.
     """
     tab_id = str(params["tab_id"])
@@ -138,6 +140,7 @@ def h_tab_writeback_preview(
                 **_writeback_item_wire(item),
                 "actual_path": values[item.session_id].actual_path,
                 "stderr": item.stderr,
+                "note": item.note,
                 "current": _writeback_wire_value(values[item.session_id].current),
                 "proposed": _writeback_wire_value(values[item.session_id].proposed),
             }
