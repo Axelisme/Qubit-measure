@@ -235,7 +235,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "List experiment-role templates for context.ml_create_from_role. Returns "
             "{roles: [{role_id, label, item_kind, default_name}]}. Each role seeds a "
             "blank module/waveform with md-linked defaults (e.g. 'res_probe', "
-            "'bath_reset'); 'default_name' is the suggested entry name.",
+            "'bath_reset'); 'default_name' is the suggested entry name. Roles with "
+            "required fields, such as readout/mux:blank's tones, need edits in "
+            "context.ml_create_from_role before they can be created.",
             readonly=True,
         ),
     ),
@@ -247,12 +249,25 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Create a blank ModuleLibrary module/waveform from a named role "
             "(from context.ml_list_roles) and register it under 'name'. The item kind "
             "(module/waveform) is derived from 'role_id'. One-shot: seeds the role's "
-            "md-linked defaults (lowered to the md's current values) — it does NOT open "
-            "an editing session. Echoes {created: name}. To then change the entry use "
-            "context.ml_edit(kind, name, edits).",
+            "defaults from one fixed capture, applies optional edits, then validates "
+            "and writes the Spec. Edits have the same path/value Form input shape as "
+            "context.ml_edit; expressions use {expr: text}. Supply required fields "
+            "such as readout/mux:blank's tones via edits. Invalid paths, values or "
+            "Form results return invalid_params with data.errors: [{path, message}] "
+            "and leave the library unchanged. Echoes {created: name}. To change an "
+            "existing entry use context.ml_edit(kind, name, edits).",
             (
                 required_string("role_id", "role id from context.ml_list_roles"),
                 required_string("name", "new ml entry name"),
+                ParamSpec(
+                    "edits",
+                    JsonType.JSON,
+                    required=False,
+                    description=(
+                        "Optional initial Form edits: [{path: [model-field segments], "
+                        "value: Form input JSON}]. Expressions use {expr: text}."
+                    ),
+                ),
             ),
         ),
     ),

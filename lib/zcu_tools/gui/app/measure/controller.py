@@ -23,7 +23,14 @@ from zcu_tools.gui.app.measure.services.experiment_reload import (
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.form import FormErrors, FormWritePath
+from zcu_tools.gui.form import (
+    FormCommandError,
+    FormErrors,
+    FormInputRejected,
+    FormPathError,
+    FormWritePath,
+    StructureError,
+)
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
@@ -1083,14 +1090,24 @@ class Controller(SessionControllerMixin):
     def get_session_env(self) -> SessionEnv:
         return self._ctx_svc.get_session_env()
 
-    def create_from_template(self, item_kind: str, template_id: str, name: str) -> None:
+    def create_from_template(
+        self,
+        item_kind: str,
+        template_id: str,
+        name: str,
+        *,
+        edits: Mapping[FormWritePath, JsonValue] | None = None,
+    ) -> None:
         """Create a library root from a template using one fixed parameter capture.
 
-        Kind must match the template; the concrete name must be nonempty and
-        unused in its library family. Template, capture, Form validation,
+        item_kind is 'module' or 'waveform' and must match the template. name
+        is an unused '<component>.<partition>.<entry>' root in that family. Template, capture, Form validation,
         conflict and I/O failures propagate without a write. Expr seeds use
         the fixed alias-aware capture, and bound Slots keep child library keys.
-        The new state uses template_input's specialized model.
+        The new state uses template_input's specialized model. Optional edits
+        map model-field paths to Form input JSON and are applied as one batch
+        before validation. Invalid edits or Form results raise LibraryEntryInvalid
+        with field errors and leave the library unchanged.
         """
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
@@ -1117,6 +1134,19 @@ class Controller(SessionControllerMixin):
             self._registry.templates,
             arb_names=self._arb_waveform_svc.list_data_keys(),
         )
+        if edits is not None:
+            try:
+                entry.state.write(edits, entry.env)
+            except (
+                FormPathError,
+                FormInputRejected,
+                FormCommandError,
+                StructureError,
+            ) as exc:
+                path = () if isinstance(exc, FormCommandError) else exc.path
+                raise LibraryEntryInvalid(
+                    entry.kind, FormErrors({path: str(exc)})
+                ) from exc
         self.apply_library_change(parameters, entry.put(name))
 
     def has_ml_entry(self, item_kind: str, name: str) -> bool:

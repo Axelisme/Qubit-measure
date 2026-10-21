@@ -174,6 +174,16 @@ receipt, not terminal results; use wait or status to confirm the outcome.
 Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
 GUI hook and may report operation_failed for an already failed operation.
 
+Library creation uses rpc_call(method="context.ml_create_from_role", params=...).
+List templates with context.ml_list_roles. Provide role_id and a new name such as
+"R1.readout.mux". Optional edits use the same shape as context.ml_edit:
+[{"path": ["tones"], "value": [{"freq": 100.0, "gain": 0.2, "ro_ch": 0}]}].
+Roles with required fields, such as readout/mux:blank's tones, need these edits
+before creation. Expressions use {"expr": "<text>"}. The GUI applies edits to
+template input before validation and writes only a valid Spec. Invalid paths,
+values or Form results return invalid_params with data.errors: [{path, message}]
+and leave the library unchanged. Success returns {created: name}.
+
 Tab get_cfg, edit_cfg, reset_cfg and use_inline return Form input/values/errors,
 without schema. Use tab.describe_cfg(path=[]) for root fields, then request a
 child's full model-field path for its metadata and direct children. Options
