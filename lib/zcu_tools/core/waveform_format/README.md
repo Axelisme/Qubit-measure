@@ -1,6 +1,8 @@
 # waveform_format — samples and NPZ codec
 
-**Last updated:** 2026-10-08，shared format contract
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。波形 samples、NPZ codec 與格式錯誤契約。
 
 此模組只接收值或 bytes。`WaveformSamples`、`WaveformFile`、`validate_samples`、`decode_npz` 與 `encode_npz` 是公開接縫。
 

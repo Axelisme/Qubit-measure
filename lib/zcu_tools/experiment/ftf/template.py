@@ -23,12 +23,9 @@ from zcu_tools.simulate.evolution import (
     DriveTrack,
     EnvelopeSpec,
     ModelSource,
-    SegmentShift,
     TimelineBatch,
-    segment_spans,
 )
 from zcu_tools.simulate.ftf import (
-    CavityDrive,
     JointModel,
     model_source,
     readout_model,
@@ -103,9 +100,10 @@ class FTFTemplatePlan:
         constant envelope values; nonconstant envelopes retain their local shape.
         Empty point tuples mean no cavity drive. Earlier pulses must end no later
         than terminal start; crossing pulses raise ValueError during planning.
-    batch includes final-span averaged cavity shifts and dephasing, including
-    ringdown after drive switch-off. Planning solves conditional cavity fields,
-    but never propagates a density or draws random samples.
+    batch includes cavity pulse boundaries, but not cavity shifts. Runtime
+    queries final spans and advances densities and the dominant cavity branch
+    sequentially. Planning never solves cavity fields, propagates a density or
+    draws random samples.
     These inputs are author diagnostics, not public measurement metadata.
     """
 
@@ -367,11 +365,9 @@ def _local_readout_pulses(
 
 def _cavity_batch(
     batch: TimelineBatch,
-    joint: JointModel,
-    settings: FTFSettings,
     pulses: tuple[tuple[ReadoutPulse, ...], ...],
 ) -> TimelineBatch:
-    """Compose cavity averages over evolution-owned final spans, once per point."""
+    """Add cavity support boundaries without evolving densities or fields."""
     if not any(pulses):
         return batch
     boundaries = tuple(
@@ -382,25 +378,7 @@ def _cavity_batch(
         )
         for point in pulses
     )
-    batch = replace(batch, segment_boundaries=boundaries)
-    spans = segment_spans(batch)
-    pair = resonators(settings)
-    shifts = []
-    for point_pulses, point_spans in zip(pulses, spans, strict=True):
-        if not point_pulses:
-            shifts.append(())
-            continue
-        cavity = CavityDrive(joint, pair, point_pulses)
-        corrections = []
-        for start, end in point_spans:
-            average = cavity.average(start, end)
-            corrections.append(
-                SegmentShift(
-                    start, end, average.stark_shift_ghz, average.dephasing_per_ns
-                )
-            )
-        shifts.append(tuple(corrections))
-    return replace(batch, segment_shifts=tuple(shifts))
+    return replace(batch, segment_boundaries=boundaries)
 
 
 def plan_template(
@@ -500,8 +478,6 @@ def plan_template(
         source,
         _cavity_batch(
             _timeline_batch(settings, joint, template, end_ns, memo),
-            joint,
-            settings,
             cavity_drives,
         ),
         tuple(readouts),

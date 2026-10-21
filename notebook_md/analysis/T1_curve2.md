@@ -26,6 +26,8 @@ jupyter:
 
 # T1 Curve 2
 
+**Readers:** operator, lab-author. Fit T1 channels using a fixed frequency-dependent effective-temperature profile.
+
 Use `Eff_T(f01)` as a fixed temperature profile for intrinsic T1 channels.
 Purcell uses a fixed `Eff_T(bare_rf)`.
 

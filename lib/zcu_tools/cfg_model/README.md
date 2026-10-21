@@ -1,8 +1,10 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-20，strict Spec partition、Hidden literal、明填模板 bindings 與持久 Spec family 型別判定
+**Last updated:** 2026-10-21
 
-`cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
+**讀者：** framework-dev。配置模型、持久 Spec 與 materialization 邊界速查。
+
+`cfg_model` 提供純資料配置模型與具名依賴契約，執行與 I/O 由 consumer 負責。
 Caller 從 package root import 公開名稱。
 
 `Template.bindings` 提供任意具名替換，是模板佔位符唯一的綁定來源。
@@ -10,7 +12,7 @@ Caller 從 package root import 公開名稱。
 
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。
 - `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description、group、readonly 與 element_label，不改 cfg 驗證或序列化的值。group 是 MCP schema 可用的前端中立分類名稱 hint。前端用 `get_field_meta` 讀取，並決定實際的 widget、排版與折疊行為。`readonly=True` 由上層 Form core 強制執行，同值寫入通過，不同值拒絕；element_label 提供 picker label。
-- `Expr`、`Range`、`LogPoints`、`AliasName`、`Hidden`、`Slot` 與 `Template` 是前端中立的起始值宣告。它們不求值、不讀來源。`Hidden(value)` 攜帶 core 單位的 literal，包含明填 None；Form 隱藏欄位並保留 core 驗證。`Hidden()` 保留普通 core 欄位的 default 還原語意。`Template.set`／`Slot.set` 接受 dotted Spec 路徑的 `Hidden(value)`，不宣告值的來源或更動 Run。`LogPoints.include_zero` 預設 True，False 請求正值 Log／List；分支與產生規則由 form_adapter 擁有。固定欄位使用初值與 readonly，不提供 `Locked` 或 Slot／Template 的 lock 參數。FormNode 的 list 按位置提供 model 元素或 scalar list 的初值，各位置的唯讀值可以不同。`TemplateDef` 的持久 Spec 目錄由呼叫者注入，Form 保留各範本的非 lock 初值與 input projection，不以單值 Literal 實作 lock。還原保留唯讀欄位的存檔值，不重算宣告初值。Core cfg 自有的單值 Literal 仍保留其固定值語意。
+- `Expr`、`Range`、`LogPoints`、`AliasName`、`Hidden`、`Slot` 與 `Template` 是前端中立的起始值宣告。求值與來源讀取由 Form consumer 負責。`Hidden(value)` 攜帶 core 單位的 literal，包含明填 None；Form 隱藏欄位並保留 core 驗證。`Hidden()` 保留普通 core 欄位的 default 還原語意。`Template.set`／`Slot.set` 接受 dotted Spec 路徑的 `Hidden(value)`，不宣告值的來源或更動 Run。`LogPoints.include_zero` 預設 True，False 請求正值 Log／List；分支與產生規則由 form_adapter 擁有。固定欄位使用初值與 readonly。FormNode 的 list 按位置提供 model 元素或 scalar list 的初值，各位置的唯讀值可以不同。`TemplateDef` 的持久 Spec 目錄由呼叫者注入，Form 保留各範本的非 lock 初值與 input projection，不以單值 Literal 實作 lock。還原保留唯讀欄位的存檔值，不重算宣告初值。Core cfg 自有的單值 Literal 仍保留其固定值語意。
 - `Template.set`／`Slot.set` 可提供 typed model-list 初值。List 元素以原 Spec 欄位名對應 literal 或 Expr 等 seed，consumer 按原 schema 遞迴驗證，不改 annotation。它不把 scalar list 擴成逐項編輯，也不產生 mux group 或校準政策。
 - Pulse 與 Pulse readout 依模型宣告結構排列主要欄位，順序為 Waveform、Gen ch、Freq、Gain。Form 不另設前端排序表。Pulse 的持久欄位仍為 `ch`，Pulse readout 仍為 `gen_ch`；儲存形狀與驗證不因排版改變。Mux readout 沒有 waveform，不新增該欄位。
 - `Range.start`／`stop` 與 `Range.between` 的端點接受 `None`。它表示 Form 中可見空白且必填的端點，不是 0／1 或可執行預設。即使對應 input key 缺席，生成 model 仍要求操作員填入數字才能提交。另一端點與 `expts` 不受影響。Literal 與 `Expr` 端點沿用既有語意。

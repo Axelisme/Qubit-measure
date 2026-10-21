@@ -1,6 +1,8 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-20，program-owned RawShots 與環境完整 raw 生成；acquire-local request layout and normalization metadata；SoC-owned statistics validation certificates, optional round pacing and acquire completion observer；board 自述身分與 caller-owned 啟動
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,

@@ -1,5 +1,7 @@
 # 用 startup script 建立 entry 與 alias
 
+**讀者：** lab-author、agent。指定 startup 腳本，建立 entry、point 與 alias 表。
+
 讀完本篇，你能指定一份 startup script，建立自己的 entry，並讓表單透過 alias 讀取目前 point 的元件。先使用 [FTF kickstart](../kickstart/FTF/README.md)。這份腳本不連線 SoC 或 device，也不建立模擬環境。
 
 ## 先分清 startup 與 entry

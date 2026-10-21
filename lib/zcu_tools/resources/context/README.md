@@ -1,8 +1,10 @@
 # `zcu_tools.resources.context` point-local module library
 
-**Last updated:** 2026-10-15，library 讀取備份與清理
+**Last updated:** 2026-10-21
 
-本 package 擁有 point-local `ModuleLibrary`。條目、setup 與 point 參數由 [entry owner](../entry/README.md) 管理；GUI 的切換與命令由 ContextService 編排。Library 使用 typed 文件，不提供 flat modules／waveforms 或自動 mtime 同步。
+**讀者：** framework-dev。Point-local module library 的讀取、編輯與來源契約。
+
+本 package 擁有 point-local `ModuleLibrary`。條目、setup 與 point 參數由 [entry owner](../entry/README.md) 管理；GUI 的切換與命令由 ContextService 編排。Library 使用 typed 文件，呼叫 `refresh()` 明確同步磁碟內容。
 
 ## Module library
 
@@ -27,10 +29,12 @@ Library 的設計是「元件 → 分組 → pydantic model」，分組名稱不
 - 值與來源同檔提交。普通 replacement 記 manual 並清除 clone origin。明確來源沿 `entry.provenance` 驗證本條目 ledger 事件與附檔，不另設 producer。
 - `snapshot()` 只複製已發布記憶體。`refresh()` 顯式重載；`subscribe()` 在 publication 後通知。Handle 不自動監看、mtime sync 或建立缺失文件。
 
-舊 flat 文件必須由 root `migrations/` 的離線工具產生新文件。Runtime 不提供 alias bridge。Library 與參數文件各有自己的 snapshot 與 write owner，不提供雙 store memory 交換。
+舊 flat 文件由 root `migrations/` 的離線工具轉成現行文件後再使用。Library 與參數文件各自管理 snapshot 與寫入。
 
 Caller 透過 `ResultEntry.module_library(label)` 開啟既有 point 的 library；建立 point、seed 與 clone 由 ResultEntry 負責。Clone 先清理來源，再複製清理後文件，只匯入保留的合法 provenance。合法 Spec 若引用已移除 key，仍在使用該 reference 的原欄位報 missing-key 錯誤，不 cascade、不改 reference、不補 defaults。固定 LibrarySnapshot 不因磁碟清理自行改值。
 
 ## Cfg materialization
 
-Experiment cfg materialization 屬於 `zcu_tools.experiment.cfg_assembler`，不是 ModuleLibrary 的責任。Caller 提供固定 library projection 與 device snapshot。GUI 的 schema／expression lowering 由 adapter owner 完成。Notebook 的顯式 `CfgEnv` 選定 library snapshot 與 device manager，讀取失敗直接傳播。更新 library 後，caller 重新捕捉 snapshot 並建立 CfgEnv。
+`LibrarySnapshot.get_module()` 與 `get_waveform()` 透過 core factories，把固定 snapshot 的 Spec 轉成執行用 cfg；asset 讀取使用 snapshot 綁定的 capability，引用或讀取失敗直接傳播。GUI 的 schema／expression lowering 與 core cfg 轉換由 [gui.form_adapter](../../gui/form_adapter/README.md) 負責，使用捕捉的 library 與 device snapshots。
+
+Notebook caller 直接建立實驗的 typed cfg，需要 library 成品時可查詢固定 `LibrarySnapshot`。更新參數或 library 來源後，caller 重新捕捉所需 snapshot 並重建 cfg。Notebook 的 DeviceManager 綁定與 Run 前 device snapshot 見 [Notebook 入口](../../notebook/README.md#共用責任與目前邊界)。`experiment.cfg_assembler` 只提供 Run mapping 的共用值型別 `ExperimentScalar` 與 `ExperimentCfgValue`。

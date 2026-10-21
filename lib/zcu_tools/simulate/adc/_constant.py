@@ -83,6 +83,25 @@ class ConstantLine:
         products = field_product_integral(
             generators, self._b[:2, 0].real, fields, incidents, omegas, duration
         )
+        return self.coherent_step(fields, incidents, omegas, duration), products
+
+    def coherent_step(
+        self,
+        fields: NDArray[np.complex128],
+        incidents: NDArray[np.complex128],
+        omegas: RealArray,
+        duration: float,
+    ) -> NDArray[np.complex128]:
+        """Advance fixed (state,2) fields by positive ns with flat carriers.
+
+        Requires Q=0. incidents are sqrt(photons/ns) at the interval start;
+        omegas are carrier/reference rad/ns. Return owned sqrt(photons) fields.
+        Singular driven blocks retain the full exponential fallback. Nonzero Q
+        raises ValueError; nonfinite propagation raises RuntimeError.
+        """
+        if np.any(self._q):
+            raise ValueError("coherent fields require fixed state branches")
+        n = len(fields)
         times = np.array([duration])
         _, homogeneous, _ = self.propagators(0.0, 0j, times)[duration]
         final = homogeneous @ fields.ravel()
@@ -93,7 +112,7 @@ class ConstantLine:
             final += (driven @ np.ones(n)) * np.exp(-1j * omega * duration)
         if not np.isfinite(final).all():
             raise RuntimeError("constant cavity propagation is nonfinite")
-        return final.reshape(n, 2), products
+        return final.reshape(n, 2)
 
     def integrated_sums(
         self, model: ReadoutModel, pulse: ReadoutPulse, grids: tuple[SampleGrid, ...]

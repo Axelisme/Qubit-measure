@@ -1,8 +1,8 @@
-> 狀態：已退役（2026-09-27）。現行局部契約見 [`resources/waveform_assets.md`](../../../lib/zcu_tools/resources/waveform_assets.md)；以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-27）。現行局部契約見 [`resources/waveform_assets.md`](../../../lib/zcu_tools/resources/waveform_assets.md)；以下保留歷史正文。
 
 # Formula recipes use complex expressions and ordered segments
 

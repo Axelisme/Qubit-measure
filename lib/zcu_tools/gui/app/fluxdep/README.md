@@ -1,6 +1,8 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
 MCP server entry 位於 `zcu_tools.mcp.fluxdep.server`；本 package 只包含 GUI app、
 state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Import path 固定為
@@ -15,11 +17,11 @@ state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Im
 `gui/event_bus`（`BaseEventBus`/`BasePayload`），三個 app 共用一份**；domain 仍各
 app 自帶（version table、worker 模式等仍 per-app）。
 
-定位是**可選工具**，measure-gui 不含它。
+這是獨立於 measure-gui 的可選分析工具。
 
 ## Pipeline
 
-分析以決策點組織，步驟可反覆執行，順序由人或 agent 決定。資料依賴仍是對齊 → 採樣 → Filter → fit。下圖列出資料流，不是強制操作順序：
+分析以決策點組織，步驟可反覆執行，順序由人或 agent 決定。資料依賴仍是對齊 → 採樣 → Filter → fit。下圖列出資料依賴，使用者可反覆操作各決策點：
 
 ```
 載入 hdf5 spectrum(OneTone/TwoTone)
@@ -74,7 +76,7 @@ AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立�
 
 所有 State 寫入只在 Qt 主執行緒（沿用 measure 的不變式）。worker（互動 widget 的
 背景計算）不直接寫 State，只經 owner-loop delivery 提供計算結果。
-TwoTone preview completion 只更新 presentation，不提交 Session 或 spectrum points。
+TwoTone preview completion 只更新 presentation；Session 與 spectrum points 保留 committed state。
 
 ### 繪圖與分析核心
 
@@ -109,8 +111,8 @@ Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
 ### Checkpoints and export
 
 Processed restore 是採點後的 checkpoint，包含零點完成譜。
-Export 保存所有已採點，不保存 Filter 遮罩。
-Export 不改 State；失敗保留成功前綴，不 cleanup／rollback。
+Export 保存所有已採點，Filter 遮罩留在 Session。
+Export 保持 State 原狀。失敗保留已成功的輸出，後續清理由 caller 決定。
 
 [Load service](services/load.py) · [Export service](services/export.py) · [匯出收據](services/fit.py)
 

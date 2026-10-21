@@ -7,7 +7,7 @@ date: 2026-10-18
 
 ## 決策狀態與問題
 
-本篇記錄已採用的設計，實作尚未完成。它取代 [[0065]]、[[0073]] 中普通切換補 fresh defaults、數值葉 command 改 parent、僅保存 input 並丟棄不相容葉的規則，並擴充 [[0068]] 的 indexed paths 與 recipe 契約。既有 guard、capture、Run／Load 和 writeback 所有權不變。
+本篇記錄已採用的設計，實作尚未完成。它取代 [ADR-0065](0065-cfg-editing.md#局部取代範圍)、[ADR-0073](0073-measure-form-derivation.md#局部取代範圍) 中普通切換補 fresh defaults、數值葉 command 改 parent、僅保存 input 並丟棄不相容葉的規則，並擴充 [[0068]] 的 indexed paths 與 recipe 契約。既有 guard、capture、Run／Load 和 writeback 所有權不變。
 
 同一份 Form 必須讓 Qt、remote 與 recipe 執行同一操作。若 Core 認得每種 module、reference 或 sweep，新增領域型別就會改動通用核心。若 command 能改掛載欄位之外的資料，單看欄位宣告就無法判斷副作用。固定多元素設定還需要區分元素位置、顯示名稱與此次參與順序。
 

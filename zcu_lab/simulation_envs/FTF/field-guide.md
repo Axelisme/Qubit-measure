@@ -1,10 +1,24 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-21，腔驅動模型與 CKP 適用範圍
+**Last updated:** 2026-10-21，segment 主分支腔場繼承
+
+**讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
 樣板的 circuit energies、couplings 與 resonator frequencies 採用《FTF Architecture for Quantum Computing》第 5 章 Table 5.1 的 Device A。DC、微波、接收器與數值設定包含本機手動調整值，不能當作其他晶片的校準結果。樣板可執行，不代表截斷已收斂或模型適用於所有工作點。
+
+## 目錄
+
+- [先分清楚三種設定](#先分清楚三種設定)
+- [文件結構與共通規則](#文件結構與共通規則)
+- [Chip：物理電路與耦合](#chip物理電路與耦合)
+- [DC bias：live 電源與靜態磁通掃描](#dc-biaslive-電源與靜態磁通掃描)
+- [Drive lines：charge 與小訊號 flux 校準](#drive-linescharge-與小訊號-flux-校準)
+- [Readout：drive → 物理 resonators → ADC](#readoutdrive--物理-resonators--adc)
+- [Numerics：native、local、system 與 solver](#numericsnativelocalsystem-與-solver)
+- [Generator、ADC 與 entry 接線對照](#generatoradc-與-entry-接線對照)
+- [採用 v2 與調參順序](#採用-v2-與調參順序)
 
 ## 先分清楚三種設定
 
@@ -12,9 +26,9 @@
 - `dc_bias`、`drive_lines`、`readout` 描述 live DC 電源、charge/flux 接線與讀出訊號路徑。DC 電源設定靜態磁通工作點，drive line 透過所選 operator 驅動迴路。
 - `numerics` 決定基底維度、系統保留維度、solver 精度與亂數種子。它不描述晶片性質。
 
-FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小訊號 flux drive 與 readout。Flux drive 使用固定 DC 工作點的一階線性算符，不是 gate 內逐時重算 H(Phi(t)) 的大振幅 fast-flux 路徑。V2 沒有 `flux_lines`，即使填 `{}` 也會按未知欄位拒絕。未綁定 generator 沿用既有拒絕行為。
+FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小訊號 flux drive 與 readout。Flux drive 使用固定 DC 工作點的一階線性算符。這個近似適用於小訊號驅動，不支援 gate 內逐時重算 H(Phi(t)) 的大振幅 fast-flux。Loader 將 `flux_lines` 視為未知欄位，即使填 `{}` 也會拒絕。使用未綁定的 generator 也會失敗。
 
-共享 `simulate` 引擎仍保留 flux schedule、source-line filter 與 flux-tail Dyson 能力，FTF 不使用這些控制。不要把 `chip` 的 flux-noise 或 flux-line loss 參數當成 flux-pulse 接線。
+`chip` 的 flux-noise 與 flux-line loss 參數描述物理雜訊與耗散。FTF 的 flux-pulse 接線由 `drive_lines` 宣告。共享 `simulate` 引擎另有 flux schedule、source-line filter 與 flux-tail Dyson 能力，這些控制在 FTF 中停用。
 
 ## 文件結構與共通規則
 
@@ -158,11 +172,21 @@ Resonator 的頻率、full-charge coupling 與 linewidth 決定物理響應。AD
 
 FTF 在 terminal readout 使用該 DC 工作點的模型與 energy-basis populations。Terminal 起點是每個 point 的 readout generator 上最晚 active block 的起點，首個 ADC trigger 不得早於它。Pulse 模式每個 point 必須恰好有一個 active terminal readout pulse。Mux 模式允許 1 至 8 個共用 terminal 起點的 tone，每個 tone 有自己的 ADC。各 ADC 可有自己的 trigger windows，同一 shot index 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。所有 tone 都進入同一條 line，每個 ADC 解調總場，不把 tone 固定對應到 r1 或 r2。
 
+### Cavity
+
 Readout generator 上的非終端脈衝是腔驅動，必須在 terminal 起點前或恰好於該起點結束。跨越 terminal 起點的脈衝會引發 `ValueError`。腔驅動使用相同的 `input_per_gain` 換算，由 `simulate.adc` 求解線性、能階相依的複數腔場。每個聯合能階 s、resonator r 的光子數是 `n[s,r] = |alpha[s,r]|²`。Stark 能量頻移是 `sum_r chi[s,r] * n[s,r]`，單位 GHz。這裡的 chi 是模型的能階相依腔頻減裸腔頻，不是另外輸入的校準值。能階分支的輸出場差異產生 photon-shot-noise 去相位，包含共用線路的干涉與各腔的 internal loss。這份驅動去相位與殘餘 thermal-photon 去相位分開計算。
 
 FTF 將腔驅動起迄加入演化切分，對每個最終 segment 使用平均 Stark 頻移與平均驅動去相位率。段內不逐時套用瞬時場。脈衝結束後保留 ringdown，不清空腔場。Readout 開始前的 charge/flux drive controls 仍會演化狀態，terminal readout 期間及之後的 drive controls 不納入讀出計算。
 
-條件腔場依 qubit 能階自 t=0 各自從真空演化。Probe 不繼承 prepared 分支的腔場。這個近似讓 CKP 的 g/e preparation 分支給出相同腔中心，因此不支援 preparation-resolved χ 校準。
+FTF 依序推進各 segment 的 density 與腔場。每段開始時，所有能階的條件場都繼承上一段主分支的段末場，再依各自能階演化。第一段從零場開始。主分支取段首 density 中 population 最大的能階，相同時取最低能量。這讓探測段保留 prepared 分支留下的腔場。疊加態只攜帶一個主分支的場是半古典近似。這個逐 segment 平均並繼承主分支場的模型，對疊加態與 finite qubit drive 不描述完整的 qubit 與腔場量子糾纏。
+
+CKP 兩個 preparation 分支的腔中心分裂由 χ/κ 決定。κ ≫ χ 時，兩分支中心趨近。這個趨勢不保證有限探測強度下的擬合中心精度。
+
+同條件的 CKP 與獨立兩能階 qubit × 兩腔 Fock 截斷 Lindblad 比較仍未通過。保存的掃描使用 1 mK、Φ=(0.44, 0.20, 0.49)Φ0、κ/(2π)=1.1 MHz、|χe−χg|≈0.418869 MHz。脈衝為名義 π 1 µs、prefill 1.5 µs、probe 4 µs，有限探測強度 ΩT=1.049885。掃描包含 25 個腔頻率、51 個 qubit 頻率與 g／e 兩種 preparation，每點 4096 reps、1 round。
+
+以 finite estimator 擬合，Run 的 e−g 腔中心差為 −23.6374 kHz，同條件獨立 Lindblad 基準為 −134.5712 kHz。兩者相差 110.934 kHz，是原定 scaled SE 5.9727 kHz 的 18.57 倍。Fock 截斷與頻率網格的收斂變化均小於 local SE 2.8627 kHz，仍未達到中心差在誤差內一致的驗收條件。此次 Lorentzian 擬合所得的有效 κ 不等於 bare κ，且對 fit window 敏感，不能保證 κ 在 fit error 內與 bare 值一致。
+
+此模型可用於半古典趨勢與量測流程驗證，不應把 finite-drive CKP 的中心精度視為完整 Lindblad 結果或校準依據。目前沒有已證明能保證通過此精度驗收的 χ/κ、驅動強度或脈衝時序數值適用界。
 
 模型假設 weak dispersive coupling，不包含 MIST 躍遷或其 onset。只施加腔驅動、沒有 qubit drive 時，這些新增頻移與去相位不改變能階 populations。若 Stark 頻移讓能量排序反轉，演化會報錯並指出 point 與 segment，不重排能階。未報錯不代表強驅動、截斷或色散近似已通過適用性驗證。
 

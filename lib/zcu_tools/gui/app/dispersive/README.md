@@ -1,6 +1,8 @@
-**Last updated:** 2026-10-20，分析 project owner 移至 app 層
-
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
+
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。色散分析 GUI 的流程、運算與呈現分工。
 
 MCP server entry 位於 `zcu_tools.mcp.dispersive.server`；本 package 只包含 GUI app、
 state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Import path 固定為
@@ -10,9 +12,9 @@ state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Im
 
 獨立的分析型 GUI，把 `notebook_md/analysis/dispersive.md` 的 fluxonium **色散位移（dispersive shift）** g / bare_rf 擬合流程移植成 Qt 桌面工具。是 fluxdep-gui 的 sibling：自己的 state / services / UI / RPC + MCP server / skill。
 
-**領域依賴 fluxdep**：兩 app 經 **同一個 `params.json` 的不同 section** 銜接 —— fluxdep-gui 寫 `fluxdep_fit`（EJ/EC/EL + flux 對齊），dispersive 讀它當輸入、寫 `dispersive`（g, bare_rf）。典型工作流：先跑 fluxdep-gui，再跑 dispersive-fit-gui。`params.json` 讀寫經 `resources.qubit_params.QubitParams`，dispersive 不直接操作 JSON section；兩個 section 保持獨立，分別用自己的 `timestamp` 記錄最後修改時間。
+**領域依賴 fluxdep**：兩 app 經 **同一個 `params.json` 的不同 section** 銜接 —— fluxdep-gui 寫 `fluxdep_fit`（EJ/EC/EL + flux 對齊），dispersive 讀它當輸入、寫 `dispersive`（g, bare_rf）。典型工作流：先跑 fluxdep-gui，再跑 dispersive-fit-gui。`params.json` 讀寫經 `resources.qubit_params.QubitParams`，dispersive 透過 typed 方法讀寫 section；兩個 section 保持獨立，分別用自己的 `timestamp` 記錄最後修改時間。
 
-流程是 **load inputs → load onetone → preprocess → tune g/r_f（手動 slider 或 Auto tune）→ export**。**fit 由手動 accept 定案**：user 調 g/r_f（拖 slider，或先按 Auto tune 讓 scipy 粗調，見下方 step4 段）後按「Use these g/r_f」即最終 fit（`set_manual_fit` 記 State）；Auto tune 只回填 slider、不自動 accept。GUI 不提供 chi 圖 / Result tab；tune 圖（g/r_f 線疊 norm-phase）即最終結果。`qub_dim`/`qub_cutoff` 寫死在 `PredictService` 的 `PredictionResolution`（`qub_dim=15`/`qub_cutoff=30`/`res_dim=4`），不曝露為控件。預測一律跑全 preprocessed flux 軸（preprocess 已降採樣、fast 路徑夠快），`DispFitState` 無 step、`fit.result` RPC 無 step。
+流程是 **load inputs → load onetone → preprocess → tune g/r_f（手動 slider 或 Auto tune）→ export**。**fit 由手動 accept 定案**：user 調 g/r_f（拖 slider，或先按 Auto tune 讓 scipy 粗調，見下方 step4 段）後按「Use these g/r_f」即最終 fit（`set_manual_fit` 記 State）；Auto tune 回填 slider，使用者按「Use these g/r_f」才接受結果。Tune 圖（g/r_f 線疊 norm-phase）呈現最終結果。`qub_dim`/`qub_cutoff` 寫死在 `PredictService` 的 `PredictionResolution`（`qub_dim=15`/`qub_cutoff=30`/`res_dim=4`），不曝露為控件。預測一律跑全 preprocessed flux 軸（preprocess 已降採樣、fast 路徑夠快），`DispFitState` 無 step、`fit.result` RPC 無 step。
 
 ## 架構（對標 fluxdep，骨架共用、領域各寫）
 
@@ -45,7 +47,7 @@ state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Im
   - **Auto tune（off-main）**：`controller.auto_tune` 擷取 State 後呼叫 [analysis/dispersive](../../../analysis/dispersive/README.md) 的搜尋；完成後只回填 g/r_f slider，不 accept。無 sample 線時按鈕 disable。數值 loss、solver、bounds 與科學限制由數值 owner 說明。
   - viz：`render_tune_figure`（背景+r_f 線）/ `update_bare_line`（slider 即時）/ `set_dispersion_lines`（predict 後色散線）+ sample 四件 `add_sample_line`/`move_sample_line`/`remove_sample_line`/`update_sample_dots`（`TuneArtists.samples: list[SampleArtists]`，各帶 dot_ground/excited Optional）。
 
-Worker 只回資料，主執行緒擁有 Figure 與 canvas。Shared runtime 初始化 rendering 支援，不安裝自訂 pyplot backend。
+Worker 回傳純資料，主執行緒擁有 Figure 與 canvas。Shared runtime 初始化 rendering 支援，使用 Matplotlib 的 backend。
 
 ## 效能關鍵
 - `PredictService`：薄 adapter,固定 GUI `PredictionResolution` 後委派 `FluxoniumPredictionSession`。axis-bound cache、fast/scqubits fallback 與 backend provenance 屬 simulate engine；cache key 是 `(g,bare_rf,return_dim)`（**無 step**）。綁定一組 (params, flux-axis)，inputs/preprocess 變則 Controller 重建 service/session。

@@ -14,6 +14,8 @@ jupyter:
 
 # Find proper coupling length
 
+**Readers:** lab-author. Estimate resonator coupling length from frequency, linewidth and reference geometry.
+
 ```python
 import numpy as np
 import scipy as sp

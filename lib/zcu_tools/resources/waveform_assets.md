@@ -1,6 +1,8 @@
 # `waveform_assets` 參考
 
-**Last updated:** 2026-10-15 — root-bound repository instances
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Arb 波形資產的格式、方法與 recipe 約束。
 
 本檔是 [`waveform_assets.py`](waveform_assets.py) 的 owner 參考，記錄 `ArbWaveformDatabase` 的檔案格式、方法與約束。家族導覽見 [resources README](README.md)。
 
@@ -51,9 +53,8 @@ data = repository.load("my_pulse")
 | `import_file(data_key, source_path, *, overwrite=False)` / `import_data(data_key, *, idata, qdata, time, overwrite=False)` | `import_file` 只接受 `.npz`，原檔若含 recipe 會一併保留；`import_data` 接受記憶體中的三條 1D array，不寫 recipe。兩者在 key 已存在且 `overwrite=False` 時拋 `data_key_exists` |
 | `delete(...)` / `rename(...)` | 只操作 asset 檔案，不掃描 `ModuleLibrary` references |
 
-Formula 寫入方法 `create_from_formula`／`update_formula` 成功返回 `None`，不在寫檔後
-重新載入資產或產生預覽。需要 metadata 時，caller 另呼叫 `inspect`；該讀取失敗不
-撤銷已成功的寫入。`import_data`／`import_file` 的既有回傳契約不在這次變更範圍。
+Formula 寫入方法 `create_from_formula`／`update_formula` 完成寫入後返回 `None`。
+需要 metadata 時，caller 另呼叫 `inspect`；讀取失敗時已完成的寫入仍保留。
 
 **約束**：
 
@@ -73,7 +74,7 @@ Formula 寫入方法 `create_from_formula`／`update_formula` 成功返回 `None
 Data key 符合 `^[A-Za-z][A-Za-z0-9_]*$`，單一檔案為 `<data_key>.npz`。
 `core.waveform_format` 擁有 NPZ keys、arrays 與 JSON 語法驗證。Resources 管理實體 I/O 與 formula 語意，將格式錯誤轉成既有 ArbWaveformError，保留 reason、diagnostics 與 cause。Program/sim 只播放 samples，不重新驗 formula。
 `bound_info().path_for(key)` 回傳 capture-bound 絕對路徑，只驗 key 與檔存在。操作其他 repository 或切換 session context 不改這個 capability。`duration`／`samples` 每次讀取原目錄的現在 bytes，不凍結 samples；刪檔後依既有 missing-key 契約失敗。Native arb 透過 from_core 取得必填 path，序列化 key/path，不保留 provider、不附帶 NPZ、不凍結 bytes。
-載入拒絕未知 key；若有 `recipe_json` 卻無法解析則直接失敗，不退回 raw asset。
+載入拒絕未知 key；`recipe_json` 解析失敗時回報格式錯誤。
 三條 playback array 同長且長度介於 2 與 `MAX_ARB_WAVEFORM_SAMPLES = 1_000_001`；
 匯入 raw `.npz` 的 time 軸可不等距，但必須從 0 開始並嚴格遞增。
 `inspect` 即時計算衍生摘要，不另存 duration、sample count 或 `peak_abs`。
