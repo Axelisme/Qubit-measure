@@ -1,8 +1,11 @@
 """Non-blocking, single-owner driving for workflow and recipe generators."""
 
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Literal
+
+from pydantic import ValidationError
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from zcu_tools.core.script_protocol import (
     Answer,
@@ -121,6 +124,61 @@ class ScriptDriver[R]:
             raise ValueError("Non-cancel signals require an on_signal host callback")
         self._signals.append(signal)
 
+    def pending_answer_type(self) -> type[Answer] | None:
+        """Read the pending Ask's declared model without delivery or driving.
+
+        Return None outside an Ask. An unparameterized Question raises TypeError
+        just as answering it would. Hosts may project this model's JSON schema.
+        """
+        question = self.pending_question
+        return _answer_type(question) if question is not None else None
+
+    def parse_answer(self, mapping: Mapping[str, object]) -> Answer:
+        """Validate wire fields against the pending question's declared Answer.
+
+        This does not deliver or resume. Invalid fields raise ValidationError
+        titled with the Question type; no pending Ask raises RuntimeError.
+        The same generic inference serves answer() and validate_answer().
+        """
+        question = self.pending_question
+        if question is None:
+            raise RuntimeError("No pending question to answer")
+        expected = _answer_type(question)
+        try:
+            return expected.model_validate(mapping)
+        except ValidationError as error:
+            details: list[InitErrorDetails] = [
+                {
+                    "type": PydanticCustomError(
+                        "answer_validation",
+                        "{message}",
+                        {"message": item["msg"], "original_type": item["type"]},
+                    ),
+                    "loc": item["loc"],
+                    "input": item["input"],
+                }
+                for item in error.errors(include_url=False)
+            ]
+            raise ValidationError.from_exception_data(
+                type(question).__name__, details
+            ) from error
+
+    def validate_answer(self, answer: Answer) -> None:
+        """Check an Answer instance without delivering or running script code.
+
+        No pending Ask raises RuntimeError; the wrong model raises TypeError
+        naming the Question and required Answer. All state stays unchanged.
+        Hosts may validate before committing their own resume bookkeeping.
+        """
+        question = self.pending_question
+        if question is None:
+            raise RuntimeError("No pending question to answer")
+        expected = _answer_type(question)
+        if not isinstance(answer, expected):
+            raise TypeError(
+                f"{type(question).__name__}: Answer must be an instance of {expected.__name__}"
+            )
+
     def answer(self, answer: Answer) -> None:
         """Validate an Answer instance, deliver it to the pending Ask and drive.
 
@@ -135,9 +193,7 @@ class ScriptDriver[R]:
         request = self._pending
         if not isinstance(request, Ask):
             raise RuntimeError("No pending question to answer")
-        expected = _answer_type(request.question)
-        if not isinstance(answer, expected):
-            raise TypeError(f"Answer must be an instance of {expected.__name__}")
+        self.validate_answer(answer)
         request.delivery = answer
         self.advance()
 

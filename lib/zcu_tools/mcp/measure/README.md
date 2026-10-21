@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -57,6 +57,10 @@ filename 與 inline params 必須恰一個非 null。省略與 null 都視為未
 Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.connect` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
 
 ## Recipe 與 execution
+
+`recipe_api.py` 提供 `@recipe`／`RecipeDeclaration` 與 `RecipeOutcome`。Inputs schema 來自作者的 model，report 保留作者的回傳值，runs 由 host 收集。`RecipeSession`／`RecipeTab` 便利方法仍是 raise stubs；舊 `recipe.py` 路徑繼續可用。兩種宣告共用同一 registry 的 busy／closed admission，不另建執行清單。
+
+`script_recipe_execution.py` 以共用 `experiment.script_driver.ScriptDriver` 驅動新宣告。`recipe_host.py` 綁定 session、operation 的 wait／cancel／drain 與 acquisition history。未綁定的操作明確失敗，不建立 GUI 或硬體連線。Status 的 pending question 分開保留 authored evidence、Question 名稱與 Answer schema。`answer(execution, answer)` 依該 schema 驗證具名模型後續跑，舊 `answer(recipe, decision)` 契約不變。
 
 `recipe.py` 是正式 author import surface，保留 Session 準備與 definition，直接 re-export 同一個 RecipeTab class 及原有契約與 handles。`recipe_tab.py` 擁有 RecipeTab 的欄位編輯與 Run 準備。`recipe_contracts.py` 擁有共用 input schema、資料 carriers、missing-parameter、writeback 收據與 detached snapshots，供 input codec、writeback 與 handles 直接引用。`recipe_handles.py` 擁有 Run／analysis／question handles、共用 binding state 與 yield-from envelope，集中 completion、保存、取消及 lifetime 協調。含 RecipeRun annotation 的 step result 與 RecipeRun 留在同一 owner。
 
