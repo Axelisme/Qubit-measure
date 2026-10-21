@@ -22,11 +22,11 @@ def test_vacuum_spectrum_keeps_finite_pi_and_probe_preparations_independent():
         down_per_ns=0.0,
         up_per_ns=0.0,
         gamma2_per_ns=0.0,
-        pi_duration_ns=10.0,
-        pi_rabi_rad_per_ns=np.pi / 10,
+        pi_duration_ns=100.0,
+        pi_rabi_rad_per_ns=np.pi / 100,
         prefill_duration_ns=0.0,
-        probe_duration_ns=10.0,
-        probe_rabi_rad_per_ns=np.pi / 20,
+        probe_duration_ns=100.0,
+        probe_rabi_rad_per_ns=np.pi / 200,
     )
     result = joint_fock_spectrum(request)
     # A resonant pi/2 probe maps both the ground and finite-pi branches to Pe=1/2.
