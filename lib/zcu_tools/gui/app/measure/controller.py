@@ -1103,8 +1103,10 @@ class Controller(SessionControllerMixin):
 
         item_kind is 'module' or 'waveform' and must match the template. name
         is an unused '<component>.<partition>.<entry>' root in that family. Template, capture, Form validation,
-        conflict and I/O failures propagate without a write. Expr seeds use
-        the fixed alias-aware capture, and bound Slots keep child library keys.
+        conflict and I/O failures propagate without a write. Placeholders bind
+        to resolved same-named aliases, never the component in name. Missing
+        aliases raise InvalidInputError naming the required bindings. Expr seeds
+        use the fixed alias-aware capture, and bound Slots keep child library keys.
         The new state uses template_input's specialized model. Optional edits
         map model-field paths to Form input JSON and are applied as one batch
         before validation. Invalid edits or Form results raise LibraryEntryInvalid
@@ -1141,9 +1143,21 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists."
             )
+        bindings = {
+            row.alias: row.resolved
+            for row in parameters.resolved_aliases()
+            if row.resolved is not None
+        }
+        missing = self.get_template(template_id).placeholder_names() - bindings.keys()
+        if missing:
+            aliases = ", ".join(f"${alias}" for alias in sorted(missing))
+            raise InvalidInputError(
+                f"Template {template_id!r} requires resolved aliases {aliases}. "
+                "Bind these names in Aliases before creating the entry."
+            )
         entry = new_library_entry(
             parameters,
-            Template(template_id),
+            Template(template_id, bindings=bindings),
             self._registry.templates,
             arb_names=self._arb_waveform_svc.list_data_keys(),
         )
