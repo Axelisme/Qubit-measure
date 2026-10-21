@@ -202,8 +202,15 @@ def test_ml_create_from_role_applies_edits_before_validation(role_socket):
             ["length"],
         ),
         ([{"path": ["tones"], "value": []}], ["tones"]),
+        ([{"path": ["tones"], "value": {"freq": 100.0}}], ["tones"]),
     ],
-    ids=["required-list-missing", "unknown-path", "invalid-value", "invalid-form"],
+    ids=[
+        "required-list-missing",
+        "unknown-path",
+        "invalid-value",
+        "invalid-form",
+        "invalid-structure",
+    ],
 )
 def test_ml_create_from_role_rejects_invalid_input_without_writing(
     role_socket, edits, error_path
