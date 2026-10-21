@@ -329,7 +329,9 @@ readout_count = max(pulse ADC, all mux receivers if configured) + 1
 
 Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_source` 就替它填快速 flux channel。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
 
-FTF YAML 和 entry 是兩份獨立文件，loader 不自動互改或互相比對。修改 source 名稱、unit、gen_ch 或 ro_ch 時，必須同步修改使用中的 entry 引用與 wiring。修改 energies 時也要同步 entry 的 EJ/EC/EL 或 EJmax/EC/d。樣板 `r1/r2.frequency_ghz` 是 7.19/7.08 GHz，entry 的 R1/R2.freq 是 7190/7080 MHz。Qubit frequency 隨 bias 改變，entry 保留 `null`，不能直接拿 EJ 當 transition frequency。
+FTF YAML 和 entry 是兩份獨立文件，loader 不自動互改或互相比對。修改 source 名稱、unit、gen_ch 或 ro_ch 時，必須同步修改使用中的 entry 引用與 wiring。
+
+模擬 entry 範本省略 EJ/EC/EL、EJmax/EC/d 與 R1／R2.freq，物理模型仍從 FTF YAML 讀取這些值。Kickstart entry 範本另有示意 energies，單位為 GHz，並預填 R1／R2.freq 為 7190／7080 MHz，對應 `default.yaml` 的 `r1/r2.frequency_ghz` 7.19／7.08 GHz。若使用中的 entry 有這些欄位，修改模型後須自行核對或更新，loader 不會同步。兩份範本的 qubit frequency 都保留 `null`；該頻率隨 bias 改變，不能直接拿 EJ 當 transition frequency。
 
 ## 採用 v2 與調參順序
 
