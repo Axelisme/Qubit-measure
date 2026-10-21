@@ -36,6 +36,9 @@ Python builder, ownership, seeded white noise and the supported minimal readout.
 
 ## IR System & Hardware Alignment
 
+See the [tProc v2 ASM reference](../../../../docs/reference/tprocv2-asm-notes.md)
+for instructions, registers, timing and waveform memory limits.
+
 ### Packed data-memory lookups
 
 tProc v2's ALU uses only the low four bits of a shift-count operand, including

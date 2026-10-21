@@ -7,6 +7,17 @@ package root; dispatch, kernels, scheduling and caching are internal.
 [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md) records this
 boundary and the decision to keep algorithm knowledge in dispatch.
 
+## Contents
+
+- [Public entry points](#public-entry-points)
+- [Routing telemetry](#routing-telemetry)
+- [Decision graph](#decision-graph)
+- [Row plans and the kernel seam](#row-plans-and-the-kernel-seam)
+- [WorkPlan and cache ownership](#workplan-and-cache-ownership)
+- [Algorithm ownership and reuse](#algorithm-ownership-and-reuse)
+- [Accuracy, failures and lifecycle](#accuracy-failures-and-lifecycle)
+- [Research records](#research-records)
+
 ## Public entry points
 
 The exports in [__init__.py](__init__.py) fall into these groups:

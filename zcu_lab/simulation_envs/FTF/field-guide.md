@@ -1,10 +1,24 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-21，腔驅動模型與 CKP 適用範圍
+**Last updated:** 2026-10-21
+
+**讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
 樣板的 circuit energies、couplings 與 resonator frequencies 採用《FTF Architecture for Quantum Computing》第 5 章 Table 5.1 的 Device A。DC、微波、接收器與數值設定包含本機手動調整值，不能當作其他晶片的校準結果。樣板可執行，不代表截斷已收斂或模型適用於所有工作點。
+
+## 目錄
+
+- [先分清楚三種設定](#先分清楚三種設定)
+- [文件結構與共通規則](#文件結構與共通規則)
+- [Chip：物理電路與耦合](#chip物理電路與耦合)
+- [DC bias：live 電源與靜態磁通掃描](#dc-biaslive-電源與靜態磁通掃描)
+- [Drive lines：charge 與小訊號 flux 校準](#drive-linescharge-與小訊號-flux-校準)
+- [Readout：drive → 物理 resonators → ADC](#readoutdrive--物理-resonators--adc)
+- [Numerics：native、local、system 與 solver](#numericsnativelocalsystem-與-solver)
+- [Generator、ADC 與 entry 接線對照](#generatoradc-與-entry-接線對照)
+- [採用 v2 與調參順序](#採用-v2-與調參順序)
 
 ## 先分清楚三種設定
 
@@ -12,9 +26,9 @@
 - `dc_bias`、`drive_lines`、`readout` 描述 live DC 電源、charge/flux 接線與讀出訊號路徑。DC 電源設定靜態磁通工作點，drive line 透過所選 operator 驅動迴路。
 - `numerics` 決定基底維度、系統保留維度、solver 精度與亂數種子。它不描述晶片性質。
 
-FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小訊號 flux drive 與 readout。Flux drive 使用固定 DC 工作點的一階線性算符，不是 gate 內逐時重算 H(Phi(t)) 的大振幅 fast-flux 路徑。V2 沒有 `flux_lines`，即使填 `{}` 也會按未知欄位拒絕。未綁定 generator 沿用既有拒絕行為。
+FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小訊號 flux drive 與 readout。Flux drive 使用固定 DC 工作點的一階線性算符。這個近似適用於小訊號驅動，不支援 gate 內逐時重算 H(Phi(t)) 的大振幅 fast-flux。Loader 將 `flux_lines` 視為未知欄位，即使填 `{}` 也會拒絕。使用未綁定的 generator 也會失敗。
 
-共享 `simulate` 引擎仍保留 flux schedule、source-line filter 與 flux-tail Dyson 能力，FTF 不使用這些控制。不要把 `chip` 的 flux-noise 或 flux-line loss 參數當成 flux-pulse 接線。
+`chip` 的 flux-noise 與 flux-line loss 參數描述物理雜訊與耗散。FTF 的 flux-pulse 接線由 `drive_lines` 宣告。共享 `simulate` 引擎另有 flux schedule、source-line filter 與 flux-tail Dyson 能力，這些控制在 FTF 中停用。
 
 ## 文件結構與共通規則
 

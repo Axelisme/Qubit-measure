@@ -6,6 +6,23 @@
 
 ---
 
+## 目錄
+
+- [架構一覽（一句話版）](#架構一覽一句話版)
+- [DeviceManager 單名稱登記](#devicemanager-單名稱登記)
+- [活動觀察](#活動觀察)
+- [實驗控制與 acquisition snapshot](#實驗控制與-acquisition-snapshot)
+- [`BaseDeviceInfo`（`base.py:15`）](#basedeviceinfobasepy15)
+- [`BaseDevice`（`base.py:37`）](#basedevicebasepy37)
+- [並發與鎖（per-instance `op_lock` / `io_lock`）](#並發與鎖per-instance-op_lock--io_lock)
+- [`DeviceManager`（`manager.py:14`）](#devicemanagermanagerpy14)
+- [子類實作](#子類實作)
+- [設計要點對照](#設計要點對照)
+- [使用流程範例](#使用流程範例)
+- [新增裝置的步驟（checklist）](#新增裝置的步驟checklist)
+- [已知侷限 / 維護提醒](#已知侷限--維護提醒)
+- [原始碼出處](#原始碼出處)
+
 ## 架構一覽（一句話版）
 
 `BaseDevice` 封裝 pyvisa session；各硬體子類負責 SCPI 字串；`BaseDeviceInfo`（Pydantic model，繼承 `ConfigBase`）作為 setup/readback 的序列化結構；`DeviceInfo` 是 Union TypeAlias 匯總所有已知子類型；`DeviceManager` 以名稱為 key 管理已連線的裝置實例，供 caller 明確設定、讀回與釋放資源。
