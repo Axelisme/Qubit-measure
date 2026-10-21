@@ -101,6 +101,62 @@ def test_paused_question_stop_drains_on_worker_under_same_operation_and_lease(
     assert not harness.gate.snapshot()
 
 
+def test_stop_journal_failure_keeps_ownership_until_failed_worker_delivery(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+) -> None:
+    window, harness, entry = attachment
+    cleanup_threads: list[int] = []
+
+    def init(_env: InitEnv[Context], _plan: Plan) -> None:
+        return None
+
+    @workflow("stop-io-failure", plan=Plan, tunables=Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Context], plan: Plan, tun: Tunables, state: None
+    ) -> Step[None, int]:
+        try:
+            yield from env.ask(Question[Answer]())
+        finally:
+            cleanup_threads.append(get_ident())
+        return Done()
+
+    catalog_source.install(step, window)
+    token = window.start("failed-control")
+    assert isinstance(token, int)
+    harness.complete_segment()
+    journal = next(entry.result_path.rglob("journal.jsonl"))
+    contents = journal.read_bytes()
+    journal.unlink()
+    journal.mkdir()
+    try:
+        with pytest.raises(DIRECTORY_OPEN_ERROR) as caught:
+            window.stop("failed-control")
+    finally:
+        journal.rmdir()
+        journal.write_bytes(contents)
+    assert cleanup_threads == [], "Stop failure must still be pure control"
+    assert window.controller.operation_id == token
+    assert window.controller.has_pending_segment
+    assert harness.handles.known_outcome(token) is None
+    assert harness.gate.snapshot()
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        # The retained drain has no active operation and must publish failure.
+        worker.submit(harness.background.execute).result(timeout=30)
+    assert len(cleanup_threads) == 1 and cleanup_threads[0] != get_ident()
+    assert window.controller.operation_id == token
+    assert harness.gate.snapshot()
+    harness.owner.pump_all()
+    harness.background.deliver()
+    failed = window.controller.status()
+    assert failed is not None and failed.lifecycle == "failed"
+    assert failed.reason == f"{type(caught.value).__name__}: {caught.value}"
+    assert harness.handles.known_outcome(token) == OperationOutcome(
+        "failed", failed.reason
+    )
+    assert not harness.gate.snapshot()
+
+
 def test_question_stop_ui_retains_busy_controls_until_worker_delivery(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
