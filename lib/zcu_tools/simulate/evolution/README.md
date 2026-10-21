@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-21, point-aligned continuation, diagnostic merging, retained-graph RWA density support and two-tone Floquet k=0 numerical ownership
+**Last updated:** 2026-10-22, knot-aligned density integration with source-coordinate event endpoints
 
 **讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -611,7 +611,7 @@ class's methods.
 | Shared operation | Owner and users |
 | --- | --- |
 | Rates → population generator Q and coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
-| Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). |
+| Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
 | Ordinary density endpoint advancement | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py), used by ordinary DOP853 apply and period fractional tails with an explicitly supplied frame. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
@@ -622,6 +622,13 @@ class's methods.
 | Common-carrier frame, SW2 beat channels, omitted-channel indicators and dressed CF4/secular propagation | [kernels/common_frame.py](kernels/common_frame.py), the model-only numerical owner with row-local admission. [kernels/common_frame_kernel.py](kernels/common_frame_kernel.py) hands charged products to the engine; [_common_frame_dispatch.py](_common_frame_dispatch.py) owns cold variant pricing. |
 
 ## Accuracy, failures and lifecycle
+
+Ordinary and continuous-flux density DOP853 stop at every active sampled-control
+knot and restart the initial step per interval. A nextafter event bridge limits
+only its own interval, never the full row. Playback retains both source-coordinate
+endpoints and the original row-local carrier and interaction-picture phase.
+The full row still determines local tolerances and bath basis changes. Flux
+samples retain linear interpolation, including positive-duration event bridges.
 
 `budget` is an absolute per-segment population and low-four allowance, not a
 certified global error bound. Guards combine analytic bounds and calibrated
@@ -682,7 +689,7 @@ to resolve the current route.
 `ModelSource.close()` clears models and counts after active work drains. It is
 idempotent and leaves immutable builder inputs reusable with a fresh history.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v4`. `experiment.ftf` owns private
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v6`. `experiment.ftf` owns private
 replay and checks backend, model, numerical, RNG and dependency versions before
 recomputing a round. Evolution does not persist densities or offline tables
 across processes or Engine lifetimes.

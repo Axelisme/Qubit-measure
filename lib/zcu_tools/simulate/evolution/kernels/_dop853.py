@@ -184,7 +184,7 @@ def tolerances(budget: float) -> Tolerances:
 
     Relative and absolute errors scale together with the population budget.
     These empirical margins leave room for interval composition, not a global
-    error bound. The runner limits steps by active sampled-control spacing so a
+    error bound. The density chain stops at active sampled-control knots so a
     narrow feature cannot hide between stages of a large accepted step.
     """
     if not np.isfinite(budget) or budget <= 0:

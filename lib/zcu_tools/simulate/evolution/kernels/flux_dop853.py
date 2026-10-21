@@ -18,6 +18,7 @@ from ._dop853_data import (
     hamiltonian,
     pack_models,
 )
+from ._dop853_intervals import playback_time
 from ._workload_facts import packed_segments
 
 
@@ -85,12 +86,14 @@ def _pack_expansion(expansion: FluxExpansion) -> _Expansion:
 @njit(nogil=True, cache=True)
 def _rhs(time, state, context):
     drive, expansion, waveform, energy_shifts = context
-    models, segments, row, model = drive
+    models, segments, row, model, interval = drive
     size = models.energies.shape[1]
     rho = state.reshape(size, size)
     point = segments.timeline[row]
     begin, end = waveform.offsets[point : point + 2]
-    absolute = segments.start[row] + time
+    absolute = playback_time(
+        time, interval.flux_start, interval.flux_end, interval.duration
+    )
     fixed_h = expansion.static.copy()
     for term in range(len(expansion.loops)):
         loop = expansion.loops[term]
@@ -117,10 +120,13 @@ def _rhs(time, state, context):
 
 
 @njit(nogil=True, cache=True)
-def _context(data, row, model):
+def _context(data, row, model, interval):
     models, segments, expansion, waveform, energy_shifts = data
     return _FluxContext(
-        Context(models, segments, row, model), expansion, waveform, energy_shifts
+        Context(models, segments, row, model, interval),
+        expansion,
+        waveform,
+        energy_shifts,
     )
 
 
@@ -141,8 +147,9 @@ class FluxDOP853Kernel:
     levels; model references/workspaces are outside Prepared.nbytes, as for the
     other kernels. Operators and states use each row's bath eigenbasis. Chained
     rows switch basis at boundaries. The shared single-threaded, nogil DOP853
-    core resets a deterministic initial step per row and limits steps by the
-    smallest spacing of envelope/flux knots inside the row's local window.
+    core stops at each active envelope/flux knot and restarts a deterministic
+    initial step. Each interval limits only its own steps. Source-coordinate
+    endpoints preserve event sides without imposing their gap on the full row.
     No flux/DAC midpoint freezing occurs.
     """
 
@@ -247,8 +254,8 @@ class FluxDOP853Kernel:
         in that row's bath eigenbasis. Later input slots in a chain are ignored.
         Waveforms are indexed by table.timeline and interpolated at absolute ns;
         endpoint samples are held outside their span. Bath levels are table.level.
-        Stops at every row boundary. Each row resets a deterministic initial
-        step and limits steps by active sampled-control spacing. Raises
+        Stops at every row boundary and active sample knot, resetting the initial
+        step per interval and preserving source-coordinate endpoints. Raises
         ValueError for absent samples, incompatible payload/shapes/ports/indices;
         RuntimeError on integration failure, without clipping or renormalizing.
         Earlier rows may already be advanced on numerical failure.

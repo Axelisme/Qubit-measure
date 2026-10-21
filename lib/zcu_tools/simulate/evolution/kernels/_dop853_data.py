@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from .._envelope import sample_value
 from ..kernel import SegmentTable
 from ..secular import SecularModel
+from ._dop853_intervals import Interval, playback_time
 from ._secular import coherence_decay
 
 
@@ -38,7 +39,7 @@ class Segments(NamedTuple):
     sample_offsets: (envelopes+1,) ragged bounds into sample_time (ns) and
     samples (complex amplitudes); an empty span denotes constant unity.
     flux_offsets/time: optional ragged absolute flux-waveform sample times for
-    the row's sampled-control step ceiling. Ordinary DOP853 leaves these empty;
+    the row's sampled-control stops. Ordinary DOP853 leaves these empty;
     only continuous-flux DOP853 packs them.
     """
 
@@ -60,12 +61,13 @@ class Segments(NamedTuple):
 
 
 class Context(NamedTuple):
-    """One RHS evaluation: packed arrays plus selected row/model indices."""
+    """Packed row/model and interval-local playback clocks for RHS evaluation."""
 
     models: Models
     segments: Segments
     row: int
     model: int
+    interval: Interval
 
 
 def pack_models(models: list[SecularModel]) -> Models:
@@ -133,7 +135,7 @@ def pack_segments(table: SegmentTable, *, include_flux: bool = False) -> Segment
 
 @njit(nogil=True, cache=True)
 def hamiltonian(time, context):
-    """Return H0 plus drives in row eigenbasis at segment-local time in ns."""
+    """Return H0 plus drives in row eigenbasis at interval-local time in ns."""
     size = context.models.energies.shape[1]
     h = np.empty((size, size), dtype=np.complex128)
     fill_hamiltonian(time, context, h)
@@ -141,31 +143,42 @@ def hamiltonian(time, context):
 
 
 @njit(nogil=True, cache=True)
+def drive_amplitude(time, context, tone):
+    """Evaluate a tone at interval-local ns without restarting its carrier."""
+    segments, row, interval = context.segments, context.row, context.interval
+    env = segments.envelope[row, tone]
+    begin, end = segments.sample_offsets[env : env + 2]
+    local = playback_time(
+        time, interval.envelope[tone, 0], interval.envelope[tone, 1], interval.duration
+    )
+    amplitude = sample_value(
+        local, segments.sample_time[begin:end], segments.samples[begin:end]
+    )
+    row_time = playback_time(
+        time, interval.row_start, interval.row_end, interval.duration
+    )
+    phase = (
+        segments.theta[row, tone] + 2 * np.pi * segments.frequency[row, tone] * row_time
+    )
+    return segments.gain[row, tone] * amplitude * np.exp(1j * phase)
+
+
+@njit(nogil=True, cache=True)
 def fill_hamiltonian(time: float, context: Context, h: NDArray[np.complex128]) -> None:
     """Overwrite row-owned H with H0 plus drives in the secular eigenbasis.
 
-    time is segment-local ns; context selects packed model/row operators.
+    time is interval-local ns; context retains each control's source clock.
     h is a writable complex128 (M,M) workspace matching the model dimension.
     Tone and scalar accumulation order matches the allocating Hamiltonian.
     No workspace may be shared between concurrently integrating rows.
     """
-    models, segments, row, model = context
+    models, segments, row, model, _ = context
     size = models.energies.shape[1]
     h[:] = 0.0
     for index in range(size):
         h[index, index] = models.energies[model, index]
     for tone in range(segments.tones[row]):
-        env = segments.envelope[row, tone]
-        begin, end = segments.sample_offsets[env : env + 2]
-        amplitude = sample_value(
-            time + segments.offset[row, tone],
-            segments.sample_time[begin:end],
-            segments.samples[begin:end],
-        )
-        phase = (
-            segments.theta[row, tone] + 2 * np.pi * segments.frequency[row, tone] * time
-        )
-        z = segments.gain[row, tone] * amplitude * np.exp(1j * phase)
+        z = drive_amplitude(time, context, tone)
         port = segments.port[row, tone]
         for target in range(size):
             for source in range(size):
