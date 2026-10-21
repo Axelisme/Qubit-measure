@@ -1,5 +1,6 @@
 """User selection and native history filters at the Qt Load dialog seam."""
 
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -26,7 +27,9 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._form_fakes import configure_form_lookup
+from tests.gui.app.measure.ui._qt_interactions import modal_action
 
 
 @pytest.fixture
@@ -36,6 +39,118 @@ def rows(tmp_path: Path) -> tuple[SavedRunInfo, ...]:
         SavedRunInfo("r2", "p", "fit", "2026-10-09T02:00:00Z", tmp_path / "r2.h5"),
         SavedRunInfo("r3", "other", "scan", "2026-10-09T03:00:00Z", tmp_path / "r3.h5"),
     )
+
+
+@pytest.fixture
+def history_window(
+    qapp: QApplication, rows: tuple[SavedRunInfo, ...], tmp_path: Path
+) -> Iterator[MainWindow]:
+    """Show two synthetic tabs sharing an entry's saved run history."""
+    ctrl = MagicMock(control_identity=ControlIdentity())
+    configure_form_lookup(ctrl)
+    ctrl.get_adapter_guide.return_value = AdapterGuide(
+        markdown="# Synthetic guide\n", resource_dir=None
+    )
+    ctrl.get_left_panel_width.return_value = 500
+    ctrl.get_bus.return_value = BaseEventBus()
+    ctrl.active_operation_count.return_value = 0
+    ctrl.get_active_context_label.return_value = None
+    ctrl.has_project.return_value = False
+    ctrl.context_control.get_alias_rows.return_value = ()
+    ctrl.get_session_env.return_value = SessionEnv(
+        parameters=None,
+        soc=None,
+        soccfg=None,
+        active_label="p",
+        database_path=str(tmp_path),
+    )
+    ctrl.has_tab.return_value = True
+    snapshots = {
+        name: TabSnapshot(
+            adapter_name=name,
+            tab_id=name,
+            cfg_input={},
+            capabilities=AdapterCapabilities(load_data=True),
+            interaction=TabInteractionState(
+                False, False, False, True, True, False, False, False, False
+            ),
+            save=SavePaneSnapshot(),
+        )
+        for name in ("scan", "missing")
+    }
+    ctrl.get_tab_snapshot.side_effect = snapshots.__getitem__
+    ctrl.save_control.list_saved_runs.return_value = rows
+    dialogs = RecordingDialogPresenter()
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
+    window.add_tab_widget("scan", "scan")
+    window.add_tab_widget("missing", "missing")
+    window.show()
+    qapp.processEvents()
+    try:
+        yield window
+        dialogs.assert_no_unexpected_messages()
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_load_data_preselects_current_experiment_and_allows_all(
+    qapp: QApplication, history_window: MainWindow, tmp_path: Path
+) -> None:
+    ui = ComponentDriver(history_window)
+    ui.select_tab("scan")
+    ui.screenshot(tmp_path / "01-scan-tab.png")
+
+    def inspect_dialog(dialog: RunLoadDialog) -> None:
+        chooser = ComponentDriver(dialog)
+        chooser.screenshot(tmp_path / "02-scan-default.png")
+        assert chooser.observe(object_name="load_experiment").text == "scan"
+        assert chooser.observe(object_name="load_point").text == "p"
+        assert tuple(
+            row.columns[:3] for row in chooser.table_rows(object_name="load_runs")
+        ) == (("r1", "p", "scan"),)
+        chooser.select_combo("All experiments", object_name="load_experiment")
+        chooser.screenshot(tmp_path / "03-all-experiments.png")
+        assert chooser.observe(object_name="load_experiment").text == "All experiments"
+        assert chooser.observe(object_name="load_point").text == "p"
+        assert tuple(
+            row.columns[:3] for row in chooser.table_rows(object_name="load_runs")
+        ) == (("r1", "p", "scan"), ("r2", "p", "fit"))
+        chooser.click("Cancel")
+
+    modal_action(
+        qapp,
+        lambda: ui.click("Load Data"),
+        [(RunLoadDialog, inspect_dialog)],
+    )
+    ui.screenshot(tmp_path / "04-scan-cancelled.png")
+    assert ui.dialogs() == ()
+
+
+def test_load_data_without_current_experiment_keeps_all(
+    qapp: QApplication, history_window: MainWindow, tmp_path: Path
+) -> None:
+    ui = ComponentDriver(history_window)
+    ui.select_tab("missing")
+    ui.screenshot(tmp_path / "01-missing-tab.png")
+
+    def inspect_dialog(dialog: RunLoadDialog) -> None:
+        chooser = ComponentDriver(dialog)
+        chooser.screenshot(tmp_path / "02-missing-default.png")
+        assert chooser.observe(object_name="load_experiment").text == "All experiments"
+        assert chooser.observe(object_name="load_point").text == "p"
+        assert tuple(
+            row.columns[:3] for row in chooser.table_rows(object_name="load_runs")
+        ) == (("r1", "p", "scan"), ("r2", "p", "fit"))
+        chooser.click("Cancel")
+
+    modal_action(
+        qapp,
+        lambda: ui.click("Load Data"),
+        [(RunLoadDialog, inspect_dialog)],
+    )
+    ui.screenshot(tmp_path / "03-missing-cancelled.png")
+    assert ui.dialogs() == ()
 
 
 def test_dialog_filters_native_history_and_selects_file(
