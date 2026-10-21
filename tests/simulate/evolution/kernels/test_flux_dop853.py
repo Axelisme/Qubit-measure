@@ -281,7 +281,9 @@ def test_engine_flux_wiring_across_batches_and_no_drive_midpoint_budget():
             (driven,) if p else (),
             schedule,
             np.array([0.4]),
-            flux_waveform=waveform,
+            # The undriven midpoint path is quantized-only. Continuous
+            # undriven motion has a separate adiabatic transport contract.
+            flux_waveform=waveform if p else None,
         )
         for p in range(2)
     )

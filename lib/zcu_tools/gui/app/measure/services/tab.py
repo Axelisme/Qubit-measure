@@ -158,6 +158,9 @@ class TabService:
                 source_path=tab.run.source_path,
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,
+                acquisition_run_id=(
+                    tab.run.metadata.run_id if tab.run.metadata is not None else None
+                ),
             ),
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,

@@ -8,8 +8,9 @@ from __future__ import annotations
 
 # Workflow commands share the measure session and headless tab owners.
 # Writeback previews include adapter-authored initial selection and notes.
-WIRE_VERSION = 113
+# Library/recipe diagnostics, explicit raw-save observations and predictor files.
+WIRE_VERSION = 114
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 146
+GUI_VERSION = 147

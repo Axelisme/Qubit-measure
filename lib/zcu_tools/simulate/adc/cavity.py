@@ -23,14 +23,14 @@ def cavity_fields(
     initial_field: NDArray[np.complex128] | None = None,
     initial_time_ns: float = 0.0,
 ) -> NDArray[np.complex128]:
-    """Return coherent intracavity alpha, shaped (time,state,2), in sqrt(photons).
+    """Return coherent intracavity alpha, shaped (time,state,cavity), in sqrt(photons).
 
     model sets joint-state order, resonant frequencies, reciprocal shared-line
     damping and the rotating reference. pulses are incident fields in that
     reference's pulse-local convention. Pulse contributions add coherently,
     including ringdown and overlapping/different-start supports. times_ns is a
     finite nonempty strictly increasing emitted-ns vector.
-    initial_field is a finite complex (2,) field shared by all states, in
+    initial_field is a finite complex (cavity,) field shared by all states, in
     sqrt(photons) in model's rotating reference at initial_time_ns. None means
     zero. initial_time_ns is finite nonnegative absolute emitted ns, default 0,
     in the same origin as pulses and times_ns. Only pulse history at/after that
@@ -49,7 +49,7 @@ def cavity_fields(
     times = readonly_array(times_ns, "cavity times")
     if times.ndim != 1 or not len(times) or np.any(np.diff(times) <= 0):
         raise ValueError("cavity times must be nonempty and strictly increasing")
-    initial = _initial_field(initial_field)
+    initial = _initial_field(initial_field, model.cavity_count)
     _validate_origin(initial_time_ns, float(times[0]))
     if pulses and all(pulse.envelope is None for pulse in pulses):
         return _flat_fields(model, pulses, times, initial, initial_time_ns)
@@ -80,8 +80,8 @@ def cavity_fields(
 class CavityFieldAverage:
     """Owned second moments in the ReadoutModel's fixed joint-state order.
 
-    photons: (state,2) dimensionless time average of |alpha_s,r|².
-    field_products: (state,2,state,2) complex128 average alpha_s,r conj(alpha_u,q),
+    photons: (state,cavity) dimensionless time average of |alpha_s,r|².
+    field_products: (state,cavity,state,cavity) complex128 average alpha_s,r conj(alpha_u,q),
         in photons. Flattening each (state,resonator) pair gives a Hermitian
         positive-semidefinite matrix, up to floating-point roundoff. photons is
         its real diagonal. Both include coherent carrier interference, not
@@ -148,7 +148,7 @@ class CavityAverageCache:
         model fixes joint-state order and ns/GHz units. pulses are ordered
         coherent ReadoutPulse inputs, with absolute supports and local phases.
         Finite absolute emitted endpoints require end_ns > start_ns >=
-        initial_time_ns. initial_field is a finite complex (2,) shared field in
+        initial_time_ns. initial_field is a finite complex (cavity,) shared field in
         sqrt(photons) in model's reference at initial_time_ns (finite nonnegative
         ns). None means vacuum; the default origin is zero. History, cross-state
         and cross-carrier products and ringdown follow cavity_field_average.
@@ -159,7 +159,7 @@ class CavityAverageCache:
         """
         if not np.isfinite([start_ns, end_ns]).all() or end_ns <= start_ns:
             raise ValueError("cavity average interval must be finite and positive")
-        initial = _initial_field(initial_field)
+        initial = _initial_field(initial_field, model.cavity_count)
         _validate_origin(initial_time_ns, start_ns)
         if any(p.envelope is not None for p in pulses) or not (
             pulses or np.any(initial)
@@ -179,8 +179,9 @@ class CavityAverageCache:
             self.hits += 1
             products = products.copy()
             n = len(model.state_labels)
+            c = model.cavity_count
             photons = (
-                products.reshape(2 * n, 2 * n).diagonal().real.reshape(n, 2).copy()
+                products.reshape(c * n, c * n).diagonal().real.reshape(n, c).copy()
             )
             return CavityFieldAverage(photons, products)
         self.misses += 1
@@ -220,7 +221,7 @@ def cavity_field_average(
     exp(-2*pi*i*(carrier-reference)*local+i*phase). Products use the same-time
     alpha times conjugate-alpha convention and are invariant under a common
     rotating frame. No calibration, scattering mismatch or population-rate
-    mixing is applied. initial_field is a finite complex (2,) field shared by
+    mixing is applied. initial_field is a finite complex (cavity,) field shared by
     all states at initial_time_ns in sqrt(photons), in model's reference. None
     means zero. initial_time_ns is finite nonnegative absolute emitted ns in the
     same origin as pulses/start/end, default 0. Only subsequent pulse history
@@ -238,10 +239,11 @@ def cavity_field_average(
     """
     if not np.isfinite([start_ns, end_ns]).all() or end_ns <= start_ns:
         raise ValueError("cavity average interval must be finite and positive")
-    initial = _initial_field(initial_field)
+    c = model.cavity_count
+    initial = _initial_field(initial_field, c)
     _validate_origin(initial_time_ns, start_ns)
     n = len(model.state_labels)
-    products = np.zeros((n, 2, n, 2), dtype=np.complex128)
+    products = np.zeros((n, c, n, c), dtype=np.complex128)
     if pulses or np.any(initial):
         near, pulses, initial = _near_carrier(model, pulses, initial, initial_time_ns)
         if all(pulse.envelope is None for pulse in pulses):
@@ -252,7 +254,7 @@ def cavity_field_average(
             products = _shaped_average(
                 near, pulses, start_ns, end_ns, initial, initial_time_ns
             )
-    photons = products.reshape(2 * n, 2 * n).diagonal().real.reshape(n, 2).copy()
+    photons = products.reshape(c * n, c * n).diagonal().real.reshape(n, c).copy()
     return CavityFieldAverage(photons, products)
 
 
@@ -344,12 +346,13 @@ def _flat_key(
 
 def _initial_field(
     value: NDArray[np.complex128] | None,
+    cavities: int,
 ) -> NDArray[np.complex128]:
     if value is None:
-        return np.zeros(2, dtype=np.complex128)
+        return np.zeros(cavities, dtype=np.complex128)
     field = np.array(value, dtype=np.complex128, copy=True)
-    if field.shape != (2,) or not np.isfinite(field).all():
-        raise ValueError("initial field must be a finite complex (2,) vector")
+    if field.shape != (cavities,) or not np.isfinite(field).all():
+        raise ValueError(f"initial field must be a finite complex ({cavities},) vector")
     return field
 
 
@@ -367,7 +370,10 @@ def _memory_fields(
     origin: float,
 ) -> NDArray[np.complex128]:
     if not np.any(initial):
-        return np.zeros((len(times), len(model.state_labels), 2), dtype=np.complex128)
+        return np.zeros(
+            (len(times), len(model.state_labels), model.cavity_count),
+            dtype=np.complex128,
+        )
     a, _ = line_parameters(model)
     propagators = expm(-(times - origin)[:, None, None, None] * a[None])
     return np.einsum("tsru,u->tsr", propagators, initial)
@@ -420,7 +426,7 @@ def _flat_fields(
         np.concatenate((_boundaries(pulses, origin, float(times[-1])), times))
     )
     fields = np.tile(initial * np.exp(2j * np.pi * delta * origin), (n, 1))
-    output = np.empty((len(times), n, 2), dtype=np.complex128)
+    output = np.empty((len(times), n, model.cavity_count), dtype=np.complex128)
     cursor = 0
     if times[0] == origin:
         output[0] = fields
@@ -461,7 +467,8 @@ def _flat_average(
     boundaries = _boundaries(pulses, origin, end)
     boundaries = np.unique(np.append(boundaries, start))
     fields = np.tile(initial, (n, 1))
-    products = np.zeros((n, 2, n, 2), dtype=np.complex128)
+    c = model.cavity_count
+    products = np.zeros((n, c, n, c), dtype=np.complex128)
     for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
         active = tuple(
             pulse for pulse in pulses if pulse.start_ns <= left < pulse.end_ns

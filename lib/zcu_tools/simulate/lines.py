@@ -1,9 +1,9 @@
-"""Causal delay/first-order source lines, before reduced-flux loop mixing.
+"""Causal delayed multi-exponential source lines before reduced-flux mixing.
 
-The filter is the scalar convolution of the signed real lab-frame source with
-exp(-t/tau)/tau. It is not a density or conditional-field solver. Constant
-complex-envelope pulses use analytic integrals; arbitrary continuous envelopes
-use quadrature with the caller's tolerances. No tail truncation or shot memory.
+Each source filters its signed real lab-frame signal before mapping to n loops.
+Constant complex-envelope pulses use analytic integrals; arbitrary continuous
+envelopes use quadrature with the caller's tolerances. No tail truncation or
+shot memory, density propagation or conditional-field solution occurs here.
 """
 
 from dataclasses import dataclass
@@ -12,28 +12,56 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import quad
 
-from .evolution import ControlPulse, ControlSequence
-from .evolution.controls import quantize_ns
+from .evolution import ControlPulse, ControlSequence, quantize_ns
+
+
+@dataclass(frozen=True)
+class DistortionTerm:
+    """One exponential contribution to a source's causal step response.
+
+    amplitude: finite signed dimensionless step weight; negative values and sums
+        outside [0, 1] are allowed for overshoot/undershoot calibration.
+    tau_ns: finite strictly positive decay time in ns.
+    Invalid parameters raise ValueError at construction.
+    """
+
+    amplitude: float
+    tau_ns: float
+
+    def __post_init__(self) -> None:
+        if not np.isfinite([self.amplitude, self.tau_ns]).all() or self.tau_ns <= 0:
+            raise ValueError(
+                "distortion amplitude must be finite and tau positive finite"
+            )
 
 
 @dataclass(frozen=True)
 class FluxLine:
-    """source: numeric source name matching ControlPulse.source. coefficients:
+    """Calibration for one source, applied before reduced-flux loop mixing.
 
-    three finite signed F1/C/F2 reduced-flux per gain coefficients. delay_ns and
-    tau_ns: finite nonnegative source delay/time constant; tau=0 is instantaneous.
-    Response is applied per source before this loop mapping, not after mixing.
+    source: nonempty numeric source name matching ControlPulse.source.
+    coefficients: n >= 1 finite signed reduced-flux-per-gain coefficients, in the
+        same loop order as FilteredFlux.dc_flux (FTF uses F1/C/F2, n=3).
+    delay_ns: finite nonnegative causal delay in ns.
+    tau_ns: finite nonnegative base lowpass time in ns; zero is instantaneous.
+    distortion_terms: exponential step weights A_k and positive decay times tau_k.
+        Empty retains the base lowpass exactly. After delay the unit-step response
+        is 1 - (1-sum(A_k))*exp(-t/tau_ns) - sum(A_k*exp(-t/tau_k)) for t>=0,
+        zero before t=0. For tau_ns=0 its exponential is zero, including at t=0;
+        the instantaneous feedthrough is 1-sum(A_k). Tails are never truncated.
+    Invalid fields raise ValueError at construction.
     """
 
     source: str
-    coefficients: tuple[float, float, float]
+    coefficients: tuple[float, ...]
     delay_ns: float = 0.0
     tau_ns: float = 0.0
+    distortion_terms: tuple[DistortionTerm, ...] = ()
 
     def __post_init__(self) -> None:
         if (
             not self.source
-            or len(self.coefficients) != 3
+            or not self.coefficients
             or not np.isfinite((*self.coefficients, self.delay_ns, self.tau_ns)).all()
         ):
             raise ValueError("flux line requires named finite coefficients/delay/tau")
@@ -44,11 +72,16 @@ class FluxLine:
 class FilteredFlux:
     """Explicit independent-shot reduced flux from DC and source controls.
 
-    dc_flux: finite F1/C/F2 shape (3,), already offset+M_DC*live values. controls:
-    complete signed envelope/carrier history; lines: unique source calibrations.
-    rtol/atol: positive finite scalar convolution quadrature tolerances. Each
-    evaluation reconstructs that shot's filter, with zero pulse contribution
-    before source activity; no hidden cross-shot state or guessed settling time.
+    dc_flux: finite shape (n,), n>=1, already offset+M_DC*live values; copied at
+        construction, exposed as an owned array that callers must not modify.
+    controls: complete signed envelope/carrier history for this independent shot.
+    lines: unique source calibrations, each with n coefficients; unmapped controls
+        do not contribute. Empty lines return DC unchanged.
+    rtol/atol: positive finite scalar convolution quadrature tolerances.
+    Invalid dimensions, repeated source names or tolerances raise ValueError at
+    construction. Each evaluation reconstructs the causal shot response with zero
+    pulse contribution before activity; there is no cross-shot state or settling
+    cutoff. Public controls, lines, rtol and atol retain the constructor inputs.
     """
 
     def __init__(
@@ -61,8 +94,16 @@ class FilteredFlux:
         atol: float = 1e-12,
     ) -> None:
         self.dc_flux = np.array(dc_flux, dtype=float, copy=True)
-        if self.dc_flux.shape != (3,) or not np.isfinite(self.dc_flux).all():
-            raise ValueError("DC flux must be finite shape (3,)")
+        if (
+            self.dc_flux.ndim != 1
+            or not self.dc_flux.size
+            or not np.isfinite(self.dc_flux).all()
+        ):
+            raise ValueError("DC flux must be finite shape (n,) with n >= 1")
+        if any(len(line.coefficients) != self.dc_flux.size for line in lines):
+            raise ValueError(
+                "flux line coefficient dimensions must match DC flux shape"
+            )
         if not np.isfinite([rtol, atol]).all() or min(rtol, atol) <= 0:
             raise ValueError("line quadrature tolerances must be positive finite")
         if len({line.source for line in lines}) != len(lines):
@@ -94,7 +135,10 @@ class FilteredFlux:
         return tuple(sorted(events))
 
     def at(self, time_ns: float) -> NDArray[np.float64]:
-        """Return actual flux shape (3,) at absolute finite ns, including tail.
+        """Return actual flux shape (n,) at absolute finite ns, including tails.
+
+        Nonfinite time_ns raises ValueError; failed quadrature raises RuntimeError.
+        The returned array is owned by the caller; changing it does not affect DC.
 
         Pulse gain, sign and quadrature enter before delay/lowpass. Passive tails
         continue after pulse end without cutoff. No readout freezing is done by
@@ -104,11 +148,20 @@ class FilteredFlux:
             raise ValueError("flux evaluation time must be finite")
         result = self.dc_flux.copy()
         for line in self.lines:
-            value = sum(
-                self._pulse(pulse, time_ns - line.delay_ns, line.tau_ns)
-                for pulse in self.controls.pulses
-                if pulse.source == line.source
-            )
+            value = 0.0
+            for pulse in self.controls.pulses:
+                if pulse.source != line.source:
+                    continue
+                time = time_ns - line.delay_ns
+                base = self._pulse(pulse, time, line.tau_ns)
+                if not line.distortion_terms:
+                    value += base
+                    continue
+                value += (1 - sum(t.amplitude for t in line.distortion_terms)) * base
+                value += sum(
+                    term.amplitude * self._pulse(pulse, time, term.tau_ns)
+                    for term in line.distortion_terms
+                )
             result += np.array(line.coefficients) * value
         return result
 

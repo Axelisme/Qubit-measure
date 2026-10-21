@@ -11,6 +11,8 @@ from threading import Event, Lock, RLock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
+import psutil
+
 from zcu_tools.mcp.core.bridge import (
     GuiAuthenticationError,
     GuiTransportTimeoutError,
@@ -87,6 +89,30 @@ def _reject_launch_options_attach(
             'Existing GUI unchanged; close it first, then use launch="new" with project_root.',
             reason="project_root_requires_new_gui",
         )
+
+
+def _port_owner(port: int) -> str:
+    """Describe local IPv4 listener PIDs without attaching to or inspecting the GUI.
+
+    Process visibility is best-effort. Permission failures and a listener that
+    exits during inspection leave the original occupied-port error actionable.
+    """
+    try:
+        listeners = psutil.net_connections(kind="tcp4")
+    except (psutil.Error, OSError):
+        return "owner unknown (process information unavailable)"
+    pids = sorted(
+        {
+            connection.pid
+            for connection in listeners
+            if connection.status == psutil.CONN_LISTEN
+            and connection.laddr
+            and connection.laddr.port == port
+            and connection.laddr.ip in ("127.0.0.1", "0.0.0.0")
+            and connection.pid is not None
+        }
+    )
+    return ", ".join(f"pid={pid}" for pid in pids) or "owner unknown"
 
 
 def _transport_timeout(exc: GuiTransportTimeoutError) -> GuiRpcError:
@@ -535,7 +561,11 @@ class MeasureMcpSession:
         existing = self._port_is_open(selected)
         _reject_launch_options_attach(startup_paths, launch, existing=existing)
         if launch == "new" and existing:
-            raise GuiRpcError(f"GUI port {selected} is in use", reason="port_in_use")
+            raise GuiRpcError(
+                f"GUI port {selected} is in use ({_port_owner(selected)}). "
+                'Choose an unused port with the port parameter, e.g. connect(launch="new", port=<unused_port>).',
+                reason="port_in_use",
+            )
         if launch == "never" and not existing:
             raise GuiRpcError(
                 f"no GUI is listening on port {selected}", reason="no_gui"

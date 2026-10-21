@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-21, point-aligned continuation, diagnostic merging, retained-graph RWA density support and two-tone Floquet k=0 numerical ownership
+**Last updated:** 2026-10-21, continuous adiabatic transport and point-aligned continuation
 
 **讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -120,7 +120,8 @@ tries the next candidate in the following graph.
 
 | Row condition | Candidate order and numerical route |
 | --- | --- |
-| No drive, fixed or quantized varying flux | `t4`, analytic secular propagation with basis changes between flux levels. The varying-flux path is also called T5, not a separate kernel. |
+| No drive, fixed or quantized varying flux without continuous waveform motion | `t4`, analytic secular propagation with basis changes between flux levels. The varying-flux path is also called T5, not a separate kernel. |
+| No drive, continuous waveform motion inside the row | `adiabatic_map`, population-preserving transport in instantaneous endpoint eigenbases. Gauss-Legendre quadrature integrates continuous energies from `FluxExpansion`; the quantized row bath supplies coherence decay. Ordered overlaps retain endpoint gauge and geometric phase. |
 | Driven continuous flux | `flux_dop853`, continuous Hamiltonian evaluation from `FluxExpansion`, with baths switching at quantized segment boundaries. |
 | One constant tone, unshared driven input, duration at most 10 us | `single_tone_rwa` → `floquet_period` → `dyson` → `t6`. |
 | Other single constant tone | `dyson` → `single_tone_rwa` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
@@ -132,7 +133,7 @@ Expanded-RWA preparation is amortized over the complete acquire and source-cumul
 
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
 no-tone or single constant-tone row respectively. They have no DOP853 fallback.
-The internal [registry](kernels/__init__.py) contains 15 families. T7 is the
+The internal [registry](kernels/__init__.py) contains 16 families. T7 is the
 single-tone `dyson` family; the two-tone `floquet` family has its own modal
 second-order Dyson implementation. Production `dop853` is terminal for valid
 ordinary rows. The direct-first two-tone chain retains its Floquet tail only
@@ -387,6 +388,19 @@ between apply calls and returns the final density to the DC eigenbasis.
 `ApplyContext` and guard handoff records. These are internal contracts, not
 additional package integration entry points.
 
+[Adiabatic transport](kernels/adiabatic_map.py) takes density in the continuous
+row-start eigenbasis and returns it in the continuous row-end eigenbasis.
+Populations stay unchanged; coherences acquire integrated dynamical phase,
+row-bath decay and the parallel-transport gauge correction. Quadrature splits
+at waveform knots and doubles its order until complex phase factors converge
+within one tenth of the segment budget. The kernel docstring specifies the
+node limits and failure semantics. The scheduler carries the actual endpoint
+basis between these rows, without intermediate T5 bath-basis changes. It
+converts to a quantized basis only when entering another family, and returns
+the final density to the DC basis. Slow motion and a nondegenerate, noncrossing
+spectrum are the model owner's applicability conditions; quadrature convergence
+does not certify the adiabatic approximation.
+
 - `Prepared` is an opaque read-only numerical payload. `prepare` and guard
   handoffs build model-only data without reading density; `bind_input` may wrap
   that data in an evolve-local input-bound payload. `nbytes` charges owned arrays
@@ -610,6 +624,7 @@ class's methods.
 
 | Shared operation | Owner and users |
 | --- | --- |
+| Continuous flux waveform interpolation, term-kind interpretation and Hamiltonian accumulation | [kernels/_flux_expansion.py](kernels/_flux_expansion.py), shared by [adiabatic_map](kernels/adiabatic_map.py) and [flux_dop853](kernels/flux_dop853.py). Each kernel owns packing and integration. |
 | Rates → population generator Q and coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
 | Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). |
 | Ordinary density endpoint advancement | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py), used by ordinary DOP853 apply and period fractional tails with an explicitly supplied frame. |
