@@ -10,6 +10,9 @@
 - 2026-10-12 [Agent 介面分層的推導](2026-10-12-agent-interface-layers.md)：自動化往下推，agent 只在宣告的判斷交接處介入；決策見 [ADR-0075 Agent 介面分層](../adr/0075-agent-interface-layers.md)。
 - 2026-10-12 [fluxdep MCP 的定位與介面重設計](2026-10-12-fluxdep-mcp-design.md)：MCP 依 agent 的六個決策點與能力清單組裝 RPC，每張譜各自保有 context，證據圖只在決策點回；並歸納出十條適用於全部 MCP 的設計範式。
 - 2026-10-16 [Recipe 與 workflow 的協作模型：generator、阻塞函式或 async](2026-10-16-recipe-workflow-yield-vs-async.md)：保留 generator 由 driver 掌控進度，recipe 改用有型別的 `yield from` helper；主動訊息只支援控制命令與邊界生效的 tunables，不做 async。
+- 2026-10-21 [Recipe 接口重設計](2026-10-21-recipe-interface-redesign.md)：兩層執行（驅動引擎只懂 Wait／Ask／return，便利層包 GUI RPC）；輸入是作者定義的 FormModel、原生型別、兩態 None 保留；`@recipe` 取代 DEFINITION；回覆為作者 report 的包裝。
+- 2026-10-21 [三角色協定：Wait／Ask／Signal](2026-10-21-three-role-protocol.md)：agent、腳本、runtime 三角色；recipe 與 workflow Engine 底層同一份協定，effect 與 env 方法都是糖；Signal 第一版只有內建 kind 由 host 處理。
+- 2026-10-21 [Workflow 定位、承載與執行基底](2026-10-21-workflow-positioning-and-hosting.md)：recipe 操作 GUI tab 可多實驗，workflow 跑 Engine；workflow 由 measure-gui 承載；維持 helper，helper 搬到實驗目錄並列 core，共用零件不共用流程。
 
 ## 模擬量測環境
 
