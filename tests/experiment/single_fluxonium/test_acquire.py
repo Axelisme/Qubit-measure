@@ -429,6 +429,48 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
         pytest.fail("replay must reject settings belonging to another backend")
 
 
+def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: Path):
+    from zcu_tools.experiment.single_fluxonium import replay_round
+
+    config = physical_settings()
+    env = single_fluxonium(config)
+    source = SingleFluxoniumSource(
+        config, env.devices, private_replay=tmp_path / "archive"
+    )
+    try:
+        request = request_for(source, reps=8)
+        before = source.snapshot()
+        old_facts = source.model_facts(before)
+        source.settings = config.model_copy(
+            update={
+                "readout": config.readout.model_copy(
+                    update={
+                        "adc": config.readout.adc.model_copy(update={"gain": 2000.0})
+                    }
+                )
+            }
+        )
+        after = source.snapshot()
+        assert after.model_identity != before.model_identity
+        assert after.values == before.values
+        assert source.model_facts(after) is not old_facts
+        result = expect_integrated(source.execute(RoundRequest(request, after, 0)))
+        archived = replay_paths(tmp_path / "archive")[0]
+    finally:
+        source.close()
+        env.devices.close_all_devices()
+    replayed = expect_integrated(replay_round(archived))
+    np.testing.assert_array_equal(
+        replayed.statistics.channels[0].sums, result.statistics.channels[0].sums
+    )
+    for channel, values in result.raw.materialize(
+        request.reps, request.avg_level
+    ).items():
+        np.testing.assert_array_equal(
+            replayed.raw.materialize(request.reps, request.avg_level)[channel], values
+        )
+
+
 def test_builder_backend_cleanup_rejects_later_work_but_leaves_drivers_owned():
     env = single_fluxonium(physical_settings())
     driver = env.create_device("FakeDevice", physical_settings().dc_bias.source.name)
