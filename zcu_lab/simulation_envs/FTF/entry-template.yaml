@@ -5,9 +5,6 @@ format_version: "1.0"
 components:
   Q1:
     kind: qubit/fluxonium
-    EJ: 6.27 # GHz
-    EC: 1.41
-    EL: 0.80
     freq: null # Bias-dependent; not given by the physical settings.
     resonator: R1
     flux_source: f1_bias
@@ -16,9 +13,6 @@ components:
       ch: 2
   Q2:
     kind: qubit/fluxonium
-    EJ: 5.71 # GHz
-    EC: 1.30
-    EL: 0.59
     freq: null
     resonator: R2
     flux_source: f2_bias
@@ -27,21 +21,16 @@ components:
       ch: 3 # F2 charge line; coupler crosstalk is real 0.01 GHz/gain.
   coupler:
     kind: qubit/transmon
-    EJmax: 16.4 # GHz
-    EC: 0.32
-    d: 0.58536585
     freq: null
     flux_source: coupler_bias
     flux_unit: A
   R1:
     kind: resonator
-    freq: 7190.0 # MHz; model resonator r1 is 7.19 GHz.
     wiring:
       ch: 0
       ro_ch: 0
   R2:
     kind: resonator
-    freq: 7080.0 # MHz; model resonator r2 is 7.08 GHz.
     wiring:
       ch: 0
       ro_ch: 0
