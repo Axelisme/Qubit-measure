@@ -8,7 +8,7 @@
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
 - `predictor_file.py` 擁有 `zcu.predictor` v1 JSON 的具名讀寫。它依模型名稱使用 simulate 的 nullable 參數型別，驗證欄名、有限數值與來源 metadata。`validate_predictor_file(PredictorFile)` 提供不做 I/O 的候選驗證，與 load/save 共用表示規則，供 dry-run 使用。完整性與物理約束由 `params.build_predictor()` 驗證。它不讀 component、alias 或舊 `params.json`。
-- `simulation_replay.py` owns opt-in private FTF input JSON, content integrity,
+- `simulation_replay.py` owns opt-in private FTF and single-fluxonium input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit
   JSON records of dtype, shape and flat values, with typed float64, int64 and bool

@@ -58,11 +58,18 @@ for no mismatch. Receiver I/Q remains two-dimensional.
 The model owner supplies energy levels, projected operators, secular losses,
 equilibrium 0↔1 Purcell rates and residual-photon dephasing.
 The approximations assume weak dispersive coupling and Markov baths.
-The ADC owner supports single-cavity mean IQ and physical shot traces.
-This environment has not connected those ADC paths to acquisition yet.
-Acquire fails explicitly. MCP startup and small-scan acceptance remain pending.
+Acquisition uses the ADC owner's one-cavity conditional response, integrated
+statistics, physical raw shots and decimated traces. The density at terminal
+readout converts to populations in the DC energy basis. Readout uses DC energy
+levels and dressed cavity shifts even when a fast-flux tail remains.
+
+Only terminal readout is supported. Any earlier pulse on the readout generator
+raises ValueError before evolution. Cavity-drive Stark shifts, cavity memory
+before readout and their backaction are not implemented. A sequence requiring
+such a pulse must not be interpreted as a supported measurement.
 
 Solver tolerances control numerical integration, not basis convergence.
-Seed selects a root RNG identity for future acquisition.
+Seed selects the root RNG identity. Acquire sequence and software round select
+independent streams; raw shots use a stream separate from direct means.
 `min_round_duration_s` sets the successful-round pacing floor in seconds.
 The current assembly starts no background numerical preparation.

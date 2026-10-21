@@ -1,9 +1,11 @@
-"""Single-fluxonium runtime; acquisition awaits single-cavity ADC integration."""
+"""Single-fluxonium acquisition with complete timelines and single-cavity ADC."""
 
+import logging
 from dataclasses import dataclass
 from hashlib import sha256
+from math import prod
 from pathlib import Path
-from typing import NoReturn
+from threading import Event
 
 import numpy as np
 
@@ -11,18 +13,35 @@ from zcu_tools.core.simulation import (
     AcquireRequest,
     EnvironmentSnapshot,
     RoundRequest,
+    RoundSignals,
     TimelineTemplate,
 )
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
+from zcu_tools.program.v2.simulation import (
+    IntegratedRound,
+    SimulationBinding,
+    SimulationSoc,
+)
 from zcu_tools.resources.single_fluxonium import (
     load_single_fluxonium,
     parse_single_fluxonium,
 )
 from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
-from zcu_tools.simulate.evolution import DriveSource, ModelSource
+from zcu_tools.simulate.adc import (
+    PreparedRawShots,
+    ReadoutCache,
+    ReadoutModel,
+    normalize_populations,
+)
+from zcu_tools.simulate.evolution import (
+    Basis,
+    DriveSource,
+    Engine,
+    ModelSource,
+    batch_populations,
+)
 from zcu_tools.simulate.fluxonium import (
     DispersiveResonator,
     FluxoniumNoise,
@@ -30,7 +49,9 @@ from zcu_tools.simulate.fluxonium import (
 )
 
 from . import replay
+from .acquire import SingleFluxoniumAcquire, SingleFluxoniumPreparation
 from .numeric import dc_flux
+from .readout import prepare_readout, readout_model
 from .template import SingleFluxoniumPlan, plan_template
 
 
@@ -41,12 +62,14 @@ class SingleFluxoniumFacts:
     model: fixed-DC oscillator projection, retained eigenstates and charge n.
     source: Gibbs initial density, full-charge microwave quadratures in GHz/gain,
         quantized baths and continuous FluxExpansion for the evolution engine.
-    Both use settings' retained dimension. No ADC model, density propagation,
-    receiver, pulse or random output is retained. Treat their arrays as read-only.
+    readout: one physical cavity with Phi0 dressed frequencies and DC rates.
+    All use settings' retained dimension. No density propagation, calibrated
+    receiver, pulse or random output is retained. Treat arrays as read-only.
     """
 
     model: SingleFluxoniumModel
     source: ModelSource
+    readout: ReadoutModel
 
 
 def _build_facts(
@@ -80,7 +103,7 @@ def _build_facts(
             resonator.thermal_occupation,
         ),
     )
-    return SingleFluxoniumFacts(model, source)
+    return SingleFluxoniumFacts(model, source, readout_model(settings, model, source))
 
 
 def _template_digest(template: TimelineTemplate) -> bytes:
@@ -132,16 +155,29 @@ class SingleFluxoniumSource:
     unchanged detached plans; consumers must not modify them. No RNG or measured
     outputs are cached. Failed builds drop previous residents. close releases
     cached model/plan state but never closes caller-owned devices.
-    Direct callers must serialize all methods. Acquisition is deliberately
-    unavailable: open_acquire and execute raise NotImplementedError until the
-    single-cavity readout integration is connected. No placeholder IQ is returned.
+    Direct callers must serialize all methods. One Engine owns numeric caches,
+    one ReadoutCache owns ADC responses, and one complete preparation survives
+    across acquires. No noisy result or sampling identity enters these caches.
+    private_replay optionally selects an explicit absolute author archive root;
+    None disables I/O. The caller owns devices, including after source close.
     """
 
     def __init__(
-        self, settings: SingleFluxoniumSettings, devices: DeviceManager
+        self,
+        settings: SingleFluxoniumSettings,
+        devices: DeviceManager,
+        *,
+        private_replay: Path | None = None,
     ) -> None:
+        if private_replay is not None and not private_replay.is_absolute():
+            raise ValueError("private replay requires an explicit absolute root")
         self.settings = settings
         self.devices = devices
+        self.private_replay = private_replay
+        self.engine = Engine(workers=1, cache_bytes=256 * 1024**2)
+        self.readout_cache = ReadoutCache(8 * 1024**2)
+        self._prepared: SingleFluxoniumPreparation | None = None
+        self._session: SingleFluxoniumAcquire | None = None
         self._source_device = devices.get_all_devices().get(
             settings.dc_bias.source.name
         )
@@ -225,29 +261,126 @@ class SingleFluxoniumSource:
             self._plan_key = key
         return self._plan
 
-    def open_acquire(self, request: AcquireRequest) -> NoReturn:
-        """Reject either acquisition mode before creating a session or drawing RNG.
+    @property
+    def identity(self) -> str:
+        """SHA256 of startup physical settings, used to reject incompatible replay."""
+        return self._identity
 
-        request is the program's detached AcquireRequest. Always raises
-        NotImplementedError for the unconnected single-cavity readout, or
-        RuntimeError after close. No request state is retained.
+    def prepare(
+        self, request: AcquireRequest, snapshot: EnvironmentSnapshot
+    ) -> SingleFluxoniumPreparation:
+        """Prepare noiseless ADC inputs; used by the serialized acquire session.
+
+        Requires an admitted request (see open_acquire) and matching DC snapshot.
+        Complete template bytes, layout, settings, snapshot and numeric versions
+        key a single resident. Evolution alone segments the complete timelines.
+        ADC normalization is the sole probability repair. Errors clear partial
+        preparations and ADC responses; they propagate without a result.
         """
         self._require_open()
-        raise NotImplementedError(
-            f"single-cavity readout {request.mode} acquisition is not connected"
-        )
+        try:
+            facts = self.model_facts(snapshot)
+            digest = sha256(
+                repr(
+                    (
+                        self._facts_key,
+                        request.point_dims,
+                        request.loop_dims,
+                        request.avg_level,
+                        request.mode,
+                        request.reps,
+                        request.readouts,
+                    )
+                ).encode()
+            )
+            for template in request.templates:
+                digest.update(_template_digest(template))
+            key = digest.digest()
+            if (
+                self._prepared is not None
+                and self._prepared.key == key
+                and self.engine.reuse(facts.source, key)
+            ):
+                self._prepared.paths.warn_exceeded()
+                return self._prepared
+            plans = tuple(
+                self.plan_template(snapshot, template) for template in request.templates
+            )
+            if any(any(plan.cavity_drives) for plan in plans):
+                raise ValueError(
+                    "single fluxonium supports only terminal readout; earlier readout-generator pulses are unsupported"
+                )
+            evolved = self.engine.evolve(
+                facts.source,
+                tuple(plan.batch for plan in plans),
+                cancel=Event(),
+                reuse_key=key,
+            )
+            dc = facts.source.model((0,))
+            basis = Basis(dc.identity, facts.readout.state_labels, dc.eigenvectors)
+            probabilities = np.empty((prod(request.point_dims), len(basis.labels)))
+            probabilities[evolved.points] = normalize_populations(
+                batch_populations(evolved.densities, basis, basis)
+            )
+            probabilities = probabilities.reshape(
+                (*request.point_dims, len(basis.labels))
+            )
+            probabilities.setflags(write=False)
+            channel, batch = prepare_readout(
+                self.settings, facts.readout, plans, request, self.readout_cache
+            )
+            raw = PreparedRawShots(
+                probabilities,
+                {channel.channel: batch},
+                reps=request.reps,
+                rtol=self.settings.numerics.solver.rtol,
+                atol=self.settings.numerics.solver.atol,
+            )
+            self._prepared = SingleFluxoniumPreparation(
+                key, probabilities, channel, raw, evolved.paths
+            )
+            return self._prepared
+        except Exception:
+            self._prepared = None
+            self.readout_cache.clear()
+            raise
 
-    def execute(self, request: RoundRequest) -> NoReturn:
-        """Reject a numeric round without producing fake IQ or bypassing ADC.
+    def open_acquire(self, request: AcquireRequest) -> SingleFluxoniumAcquire:
+        """Start a request, invalidating the previous session without drawing RNG.
 
-        request is program's RoundRequest for either mode. Raises the same
-        NotImplementedError/RuntimeError as open_acquire; no state is retained.
+        Nonempty templates and the current PCG64 v2 stream version are required.
+        Unsupported inputs raise ValueError before numeric execution. Closed
+        sources raise RuntimeError. The binding serializes calls and owns Stop.
         """
-        self.open_acquire(request.acquire)
+        self._require_open()
+        if not request.templates:
+            raise ValueError("single fluxonium requires timeline templates")
+        if request.rng_version != f"PCG64/SeedSequence-v2/numpy-{np.__version__}":
+            raise ValueError("single-fluxonium RNG version mismatch")
+        if self._session is not None:
+            self._session.invalidate()
+        self._session = SingleFluxoniumAcquire(self, request)
+        return self._session
+
+    def execute(self, request: RoundRequest) -> IntegratedRound | RoundSignals:
+        """Execute detached round inputs with fresh round RNG and deferred raw.
+
+        Reuses the active session only for the identical request object. A new
+        request invalidates the old session. No backend work is repeated when
+        consumers later request raw. Numeric/ADC/replay failures propagate.
+        """
+        self._require_open()
+        if self._session is None or self._session.request is not request.acquire:
+            self.open_acquire(request.acquire)
+        if self._session is None:
+            raise RuntimeError("single-fluxonium acquire was not opened")
+        return self._session.sample_round(request.snapshot, request.index)
 
     def _clear(self) -> None:
         if self._facts is not None:
             self._facts.source.close()
+        self._prepared = None
+        self.readout_cache.clear()
         self._facts = None
         self._facts_key = None
         self._plan = None
@@ -259,12 +392,17 @@ class SingleFluxoniumSource:
         Call only after concurrent work has drained. The caller still owns driver
         cleanup. Already returned immutable numeric inputs remain usable.
         """
+        if self._session is not None:
+            self._session.invalidate()
         self._clear()
+        self.engine.close()
         self._closed = True
 
 
 def single_fluxonium(
     configuration: SingleFluxoniumSettings | str | Path,
+    *,
+    private_replay: Path | None = None,
 ) -> SimulationEnvironment:
     """Assemble one DC driver and a bound mock SoC, without acquiring or warmup.
 
@@ -274,9 +412,9 @@ def single_fluxonium(
     Source models/plans remain lazy. All three generators bind to the one ADC
     for transport admission. The planner still requires readout-generator ADC
     windows; transport routes do not enable microwave/fast-flux readout physics.
-    The independent single-fluxonium backend deliberately raises NotImplementedError
-    on any acquisition until single-cavity readout is connected. Successful assembly
-    is not a measurement or MCP startup acceptance. No real hardware is opened.
+    The backend evolves complete timelines and uses one physical ADC cavity.
+    private_replay enables author-only detached round inputs at an absolute root.
+    Successful assembly is not MCP acceptance. No real hardware is opened.
     Invalid YAML/settings/profile/binding errors propagate. Builder failure closes
     its devices and preserves cleanup errors alongside the original failure.
     """
@@ -286,6 +424,7 @@ def single_fluxonium(
         else load_single_fluxonium(configuration)
     )
     devices = DeviceManager()
+    source: SingleFluxoniumSource | None = None
     try:
         dc = settings.dc_bias.source
         device = FakeDevice(address=dc.name, fast_mode=True, value_unit=dc.unit)
@@ -300,7 +439,7 @@ def single_fluxonium(
             ),
             progress=False,
         )
-        source = SingleFluxoniumSource(settings, devices)
+        source = SingleFluxoniumSource(settings, devices, private_replay=private_replay)
         gens = (
             settings.drive_line.gen_ch,
             settings.flux_line.gen_ch,
@@ -320,13 +459,24 @@ def single_fluxonium(
             soc,
             soccfg,
             devices,
-            "Single fluxonium: assembly only; single-cavity acquisition is not connected",
+            "Single fluxonium with one microwave line, fast flux and one readout cavity",
+            close_backend=source.close,
         )
     except Exception as error:
+        errors = [error]
+        if source is not None:
+            try:
+                source.close()
+            except Exception as backend_error:
+                logging.exception("Single-fluxonium backend cleanup failed")
+                errors.append(backend_error)
         try:
             devices.close_all_devices()
-        except ExceptionGroup as cleanup:
+        except Exception as device_error:
+            logging.exception("Single-fluxonium device cleanup failed")
+            errors.append(device_error)
+        if len(errors) > 1:
             raise ExceptionGroup(
-                "single-fluxonium startup and cleanup failed", [error, cleanup]
+                "single-fluxonium startup and cleanup failed", errors
             ) from error
         raise

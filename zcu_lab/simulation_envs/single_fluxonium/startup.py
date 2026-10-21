@@ -1,5 +1,6 @@
 """Assemble the single-fluxonium demo entry and offline measure-GUI resources."""
 
+import logging
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -17,11 +18,13 @@ def startup(ctx: StartupContext) -> None:
     component/adapter registration. New entries use adjacent entry-template.yaml
     and seed point aliases once; existing entries reopen unchanged. Physical
     values come only from adjacent default.yaml. No hardware, acquire or numeric
-    warmup runs. Acquisition remains unavailable pending single-cavity readout
-    integration; successful assembly does not certify MCP/measurement acceptance.
+    warmup runs during startup. The mock SoC runs complete-timeline evolution
+    and single-cavity acquisition on demand.
 
     Successfully registered drivers become GUI-owned. The on-close callback
-    drops borrowed driver references before closing any untransferred devices.
+    closes the backend after acquire drain, then drops borrowed driver references
+    before closing any untransferred devices. Backend failure does not skip device
+    cleanup; simultaneous cleanup failures are preserved in an ExceptionGroup.
     Partial entries and startup errors propagate; no fallback environment runs.
     """
     try:
@@ -40,16 +43,27 @@ def startup(ctx: StartupContext) -> None:
     else:
         _seed_entry(ctx)
 
-    ctx.progress(
-        "Building offline single-fluxonium resources; acquisition not connected"
-    )
+    ctx.progress("Building offline single-fluxonium resources")
     environment = single_fluxonium(Path(__file__).with_name("default.yaml"))
     transferred: set[str] = set()
 
     def close_environment() -> None:
-        for name in transferred:
-            environment.devices.drop_device(name)
-        environment.devices.close_all_devices()
+        errors: list[Exception] = []
+        if environment.close_backend is not None:
+            try:
+                environment.close_backend()
+            except Exception as error:
+                logging.exception("Single-fluxonium backend cleanup failed")
+                errors.append(error)
+        try:
+            for name in transferred:
+                environment.devices.drop_device(name)
+            environment.devices.close_all_devices()
+        except Exception as error:
+            logging.exception("Single-fluxonium device cleanup failed")
+            errors.append(error)
+        if errors:
+            raise ExceptionGroup("single-fluxonium resource cleanup failed", errors)
 
     ctx.on_close(close_environment)
     ctx.soc.install(environment.soc, environment.soccfg)

@@ -35,8 +35,10 @@ single-receiver ADC. It uses the same bundle and acquisition contracts, without
 adding GUI physics or exposing state labels to ordinary Run metadata.
 
 [`single_fluxonium`](single_fluxonium/README.md) plans complete microwave/fast-flux
-timelines and assembles a one-source mock environment. Its acquisition remains
-explicitly unavailable pending single-cavity readout integration.
+timelines and assembles a one-source mock environment. Its source composes DC-basis
+population conversion, one-cavity ADC statistics, deferred raw shots and decimated
+traces. Hosts can call the optional `SimulationEnvironment.close_backend` after
+acquisition drains; device cleanup remains separate.
 
 `readout_plan.py` owns shared QICK drive/readout waveform conversion without
 settings or circuit physics. `drive_track` detaches microwave slots with the

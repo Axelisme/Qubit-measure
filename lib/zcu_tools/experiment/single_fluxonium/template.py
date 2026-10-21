@@ -42,8 +42,8 @@ class SingleFluxoniumPlan:
     cavity_drives: earlier readout-generator pulses per point, absolute ns/GHz,
         pulse-local radians with zero-GHz reference, retained but not solved.
     No model, density or random samples are built. Consumers must not modify
-    these values. Earlier cavity-drive physics and all acquisition remain
-    unavailable until the single-cavity readout integration is connected.
+    these values. Execution supports terminal readout only and rejects earlier
+    cavity drives; their Stark/backaction physics is not modeled here.
     """
 
     batch: TimelineBatch
