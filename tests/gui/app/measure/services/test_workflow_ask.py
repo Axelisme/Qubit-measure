@@ -49,8 +49,20 @@ def asking(tmp_path):
         control.close(tab)
 
 
+def run_lease_presence(harness: StartHarness) -> tuple[tuple[str, str, str], ...]:
+    # Elapsed seconds are presentation, not lease identity. Pair these public
+    # presence facts with the retained operation token and admission assertions.
+    return tuple(
+        (presence.kind, presence.origin_kind, presence.note)
+        for presence in harness.gate.snapshot()
+        if presence.kind == "run"
+    )
+
+
 def test_answer_keeps_invocation_operation_and_lease_until_owner_delivery(asking):
     control, harness, author, tab, token = asking
+    lease = run_lease_presence(harness)
+    assert lease
     question = control.pending_question("question-run")
     assert question is not None, "Facet must publish the native Ask envelope"
     assert question["question_type"] == "Choose"
@@ -69,12 +81,14 @@ def test_answer_keeps_invocation_operation_and_lease_until_owner_delivery(asking
         assert author.deliveries == [(Decision(value=23), author.deliveries[0][1])]
         assert author.deliveries[0][1] != get_ident()
         assert control.tabs()[0].operation_id == token
+        assert run_lease_presence(harness) == lease
         assert not control.close(tab)
         with pytest.raises(OperationConflictError):
             control.start(other, "competing")
         harness.owner.pump_all()
         harness.background.deliver()
         assert control.tabs()[0].operation_id is None
+        assert run_lease_presence(harness) == ()
         assert control.records("question-run")[0].revision == 0
         assert control.records("question-run")[0].encoded_record.value == 23
         assert harness.handles.known_outcome(token).status == "finished"
@@ -89,6 +103,8 @@ def test_answer_keeps_invocation_operation_and_lease_until_owner_delivery(asking
 
 def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path):
     control, harness, author, tab, token = asking
+    lease = run_lease_presence(harness)
+    assert lease
     assert control.answer("question-run", OtherAnswer(value=7)) == token
     harness.background.execute()
     assert isinstance(harness.background.error, TypeError)
@@ -97,6 +113,7 @@ def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path
     assert control.status("question-run").lifecycle == "paused"
     assert control.tabs()[0].operation_id == token
     assert control.pending_question("question-run") is not None
+    assert run_lease_presence(harness) == lease
     assert not control.close(tab)
     assert harness.handles.known_outcome(token) is None
     journal = next(tmp_path.rglob("journal.jsonl"))
@@ -108,6 +125,7 @@ def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path
     harness.complete_segment()
     assert control.status("question-run").lifecycle == "done"
     assert harness.handles.known_outcome(token).status == "finished"
+    assert run_lease_presence(harness) == ()
 
 
 def test_invalid_json_answer_is_rejected_without_consuming_question(asking):
@@ -131,6 +149,8 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
     asking, tmp_path, io_failure
 ):
     control, harness, author, tab, token = asking
+    lease = run_lease_presence(harness)
+    assert lease
     assert control.pending_question("question-run") is not None
     if io_failure:
         journal = next(tmp_path.rglob("journal.jsonl"))
@@ -163,6 +183,7 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
             assert cleanup_entered.wait(30)
             assert author.finally_threads[0] != get_ident()
             assert control.tabs()[0].operation_id == token
+            assert run_lease_presence(harness) == lease
             assert not control.close(tab)
             assert harness.handles.known_outcome(token) is None
         finally:
@@ -175,10 +196,12 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
         assert author.deliveries[0][1] != get_ident()
         assert author.cancelled_followups == [None, None]
     assert control.tabs()[0].operation_id == token
+    assert run_lease_presence(harness) == lease
     assert not control.close(tab)
     harness.owner.pump_all()
     harness.background.deliver()
     assert control.tabs()[0].operation_id is None
+    assert run_lease_presence(harness) == ()
     assert control.status("question-run").lifecycle == (
         "failed" if io_failure else "stopped"
     )
