@@ -75,10 +75,10 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         or None means no catalog and an empty initial table. An explicit mapping
         must contain "default" (its rows may be empty), or raise ValueError.
         Invalid table syntax, duplicates or forward links raise InvalidInputError.
-        The public ``alias_presets`` field retains the complete catalog for dialog
-        composition, not a file location. Assembly uses default rows for the
-        session's one-time unique-focus initialization. Saved entry tables take
-        precedence, including empty tables. No device or cache binding occurs.
+        The public ``alias_presets`` field retains the caller's catalog, not a
+        file location. Assembly uses default rows as the memory-only initial
+        table before an entry opens. Opening an entry clears it; selecting a
+        point loads only that point's table. No device or cache binding occurs.
         """
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (
@@ -220,7 +220,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             window = MainWindow(
                 ctrl,
                 templates=lambda: registry.templates,
-                alias_presets=self.alias_presets,
             )
             ctrl.add_view(window)
         except Exception:
