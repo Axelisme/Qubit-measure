@@ -26,6 +26,8 @@ class RunLoadDialog(QDialog):
 
     runs contains ordered SavedRunInfo from the opened entry; no files are read.
     initial_point selects a known point, or all points when empty/unknown.
+    initial_experiment selects a known experiment, or All experiments when
+    empty/unknown. Experiment selection does not change the point default.
     start_directory is QFileDialog's initial folder, not a reserved destination.
     Accepted implies selected_path() is nonempty. Reject/cancel returns no path.
     Point/experiment filters are exact; time filter matches started_at text.
@@ -44,6 +46,7 @@ class RunLoadDialog(QDialog):
         *,
         initial_point: str,
         start_directory: str,
+        initial_experiment: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -57,7 +60,7 @@ class RunLoadDialog(QDialog):
         self.resize(1100, 440)
         layout = QVBoxLayout(self)
         filters = QWidget()
-        filters.setLayout(self._build_filters(initial_point))
+        filters.setLayout(self._build_filters(initial_point, initial_experiment))
         layout.addWidget(filters)
         self._table = QTableWidget(0, 7)
         self._table.setObjectName("load_runs")
@@ -109,7 +112,9 @@ class RunLoadDialog(QDialog):
     def _finish_interaction(self) -> None:
         self._interaction_finished = True
 
-    def _build_filters(self, initial_point: str) -> QHBoxLayout:
+    def _build_filters(
+        self, initial_point: str, initial_experiment: str
+    ) -> QHBoxLayout:
         filters = QHBoxLayout()
         self._point = QComboBox()
         self._point.setObjectName("load_point")
@@ -124,6 +129,9 @@ class RunLoadDialog(QDialog):
         self._experiment.addItem("All experiments", None)
         for experiment in sorted({run.experiment for run in self._runs}):
             self._experiment.addItem(experiment, experiment)
+        index = self._experiment.findData(initial_experiment)
+        if index >= 0:
+            self._experiment.setCurrentIndex(index)
         self._time = QLineEdit()
         self._time.setObjectName("load_started_at")
         self._time.setPlaceholderText("Started at contains (UTC)")

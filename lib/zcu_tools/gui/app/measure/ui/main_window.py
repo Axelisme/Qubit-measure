@@ -930,6 +930,7 @@ class MainWindow(QMainWindow):
         dialog = RunLoadDialog(
             runs,
             initial_point=self._ctrl.get_session_env().active_label,
+            initial_experiment=self._ctrl.get_tab_snapshot(tab_id).adapter_name,
             start_directory=self._load_data_dialog_start_dir(),
             parent=self,
         )
