@@ -44,7 +44,7 @@ from zcu_lab.v2.mist.power_dep.single_trace import core as mist_power_dep_single
 from zcu_lab.v2.mux.amp_rabi import core as mux_amp_rabi
 from zcu_lab.v2.mux.freq import core as mux_freq
 from zcu_lab.v2.mux.len_rabi import core as mux_len_rabi
-from zcu_lab.v2.mux.onetone import core as mux_onetone
+from zcu_lab.v2.mux.onetone_fine import core as mux_onetone_fine
 from zcu_lab.v2.mux.singleshot_ge import core as mux_singleshot_ge
 from zcu_lab.v2.mux.t1 import core as mux_t1
 from zcu_lab.v2.mux.t2echo import core as mux_t2echo
@@ -178,7 +178,7 @@ MIGRATION_EXPERIMENTS = (
     _declaration(mux_amp_rabi.MuxAmpRabiExp.AXES_SPEC),
     _declaration(mux_freq.MuxFreqExp.AXES_SPEC),
     _declaration(mux_len_rabi.MuxLenRabiExp.AXES_SPEC),
-    _declaration(mux_onetone.MuxOnetoneExp.AXES_SPEC),
+    _declaration(mux_onetone_fine.MuxOnetoneExp.AXES_SPEC, source_tag="mux/onetone"),
     _declaration(mux_singleshot_ge.MuxGEExp.AXES_SPEC),
     _declaration(mux_t1.MuxT1Exp.AXES_SPEC),
     _declaration(mux_t2echo.MuxT2EchoExp.AXES_SPEC),

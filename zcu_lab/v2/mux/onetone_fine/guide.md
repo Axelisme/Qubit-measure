@@ -1,4 +1,4 @@
-# Mux onetone
+# Mux onetone fine
 
 掃共同的名目頻率偏移，同時取得選定 tones 的複數訊號。每個 sweep 點的頻率是原始 tone 的 base frequency 加上 offset，不累加。圖上不是 DDS 實際量化頻率。
 

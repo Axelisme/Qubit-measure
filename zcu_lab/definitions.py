@@ -33,7 +33,7 @@ from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
 from zcu_lab.v2.mux.freq.gui import MuxFreqAdapter
 from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
-from zcu_lab.v2.mux.onetone.gui import MuxOnetoneAdapter
+from zcu_lab.v2.mux.onetone_fine.gui import MuxOnetoneAdapter
 from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEAdapter
 from zcu_lab.v2.mux.t1.gui import MuxT1Adapter
 from zcu_lab.v2.mux.t2echo.gui import MuxT2EchoAdapter
@@ -140,7 +140,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/reset/bath/length": BathLengthAdapter,
     "twotone/reset/bath/phase": BathPhaseAdapter,
     "twotone/reset/check": RabiCheckAdapter,
-    "mux/onetone": MuxOnetoneAdapter,
+    "mux/onetone_fine": MuxOnetoneAdapter,
     "mux/freq": MuxFreqAdapter,
     "mux/len_rabi": MuxLenRabiAdapter,
     "mux/amp_rabi": MuxAmpRabiAdapter,
