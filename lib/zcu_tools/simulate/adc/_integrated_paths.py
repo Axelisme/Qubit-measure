@@ -16,7 +16,7 @@ class _Wave(NamedTuple):
     """Mutable workspace owned by one materialization, never a prepare cache.
 
     states: int64 (shot,) current model-state indices. left: float64 (shot,)
-    current segment starts in emitted ns. memory: complex128 (shot,2) cavity
+    current segment starts in emitted ns. memory: complex128 (shot,cavity) cavity
     amplitudes relative to that state's vacuum baseline at left. Kernels update
     these arrays in place; the tuple only groups the coherent path state.
     """
@@ -34,7 +34,7 @@ class _GridSums(NamedTuple):
     prefix: complex128 (sample+1,state) cumulative weighted vacuum output.
     samples: complex128 (sample,state) weighted vacuum output at each actual
     sample, retained separately so overlapping trace windows agree bitwise.
-    powers/sums: complex128 (state,bit,2,2) binary homogeneous step powers and
+    powers/sums: complex128 (state,bit,cavity,cavity) binary homogeneous step powers and
     discrete sums. uniform: True only for an exactly uniform stored grid.
     These arrays contain no sampled paths, noisy IQ or jump-time lookup tables.
     """
@@ -50,7 +50,9 @@ class _GridSums(NamedTuple):
 
 @njit(nogil=True, cache=False)
 def _exp2(matrix, duration):
-    """Two-dimensional exponential, including coincident/defective modes."""
+    """Exact scalar or two-dimensional exponential, including defective modes."""
+    if matrix.shape[0] == 1:
+        return np.exp(matrix * duration)
     mean = (matrix[0, 0] + matrix[1, 1]) / 2
     reduced = matrix - mean * np.eye(2, dtype=np.complex128)
     root = np.sqrt(reduced[0, 0] ** 2 + reduced[0, 1] * reduced[1, 0])
@@ -74,7 +76,7 @@ def _integral2(matrix, duration):
     scale = max(0, int(np.ceil(np.log2(size / 0.5)))) if size > 0.5 else 0
     step = duration / 2.0**scale
     z = matrix * step
-    term = np.eye(2, dtype=np.complex128)
+    term = np.eye(matrix.shape[0], dtype=np.complex128)
     exponential = term.copy()
     integral = term.copy()
     for order in range(1, 25):
@@ -91,7 +93,7 @@ def _integral2(matrix, duration):
 @njit(nogil=True, cache=False)
 def _flat_baselines(a, v, pulse, coupling, safe, times):
     start, stop, incident, omega = pulse
-    fields = np.zeros((len(times), len(a), 2), dtype=np.complex128)
+    fields = np.zeros((len(times), len(a), len(v)), dtype=np.complex128)
     for index, time in enumerate(times):
         if time <= start:
             continue
@@ -103,7 +105,7 @@ def _flat_baselines(a, v, pulse, coupling, safe, times):
                     - _exp2(-a[state], driven) @ coupling[state]
                 )
             else:
-                shifted = -a[state] + 1j * omega * np.eye(2, dtype=np.complex128)
+                shifted = -a[state] + 1j * omega * np.eye(len(v), dtype=np.complex128)
                 field = (_integral2(shifted, driven) @ v) * incident
                 field *= np.exp(-1j * omega * driven)
             if time > stop:
@@ -127,7 +129,7 @@ def _segment_sums(a, scattering, grid, wave, shots, right):
         if uniform:
             vector = _exp2(-a[state], times[first] - left[shot]) @ memory[shot]
             count = last - first
-            total = np.zeros(2, dtype=np.complex128)
+            total = np.zeros(len(scattering), dtype=np.complex128)
             bit = 0
             while count:
                 if count & 1:
@@ -185,11 +187,11 @@ class IntegratedPaths:
     binary geometric sums, irregular grids sum exact homogeneous exponentials.
 
     model/pulses/grids retain the constructor inputs for this workspace's lifetime.
-    v/scattering are complex128 (2,) drive/output couplings; a is (state,2,2)
+    v/scattering are complex128 (cavity,) drive/output couplings; a is (state,cavity,cavity)
     complex128 damping/detuning. times holds each grid's emitted-ns vector;
     start/end are the earliest pulse start and latest emitted time, with end
     no earlier than start. path_fields holds a shaped vacuum solver or None
-    per carrier. couplings holds each guarded flat driven solution (state,2)
+    per carrier. couplings holds each guarded flat driven solution (state,cavity)
     and its (state,) acceptance mask. plans holds one noiseless _GridSums per
     read. No shot state survives evaluate.
     Solver failures raise RuntimeError. Invalid envelopes and unresolved
@@ -260,12 +262,13 @@ class IntegratedPaths:
             # use the geometric route. All others keep their original times.
             uniform = len(times) == 1 or np.all(np.diff(times) == times[1] - times[0])
             bits = max(1, len(times).bit_length())
-            powers = np.empty((len(self.a), bits, 2, 2), complex)
+            c = model.cavity_count
+            powers = np.empty((len(self.a), bits, c, c), complex)
             sums = np.empty_like(powers)
             dt = float(times[1] - times[0]) if len(times) > 1 else 0.0
             for state, a in enumerate(self.a):
-                powers[state, 0] = _exp2(-a + 1j * omega * np.eye(2), dt)
-                sums[state, 0] = np.eye(2)
+                powers[state, 0] = _exp2(-a + 1j * omega * np.eye(c), dt)
+                sums[state, 0] = np.eye(c)
                 for bit in range(1, bits):
                     previous = powers[state, bit - 1]
                     sums[state, bit] = (
@@ -287,10 +290,10 @@ class IntegratedPaths:
     def _flat_coupling(self, pulse):
         """Use a guarded driven solve; singular/cancellation cases keep phi1."""
         omega = 2 * np.pi * (pulse.frequency_ghz - self.model.reference_frequency_ghz)
-        coupling = np.zeros((len(self.a), 2), dtype=np.complex128)
+        coupling = np.zeros((len(self.a), self.model.cavity_count), dtype=np.complex128)
         safe = np.zeros(len(self.a), dtype=np.bool_)
         for state, a in enumerate(self.a):
-            shifted = a - 1j * omega * np.eye(2)
+            shifted = a - 1j * omega * np.eye(self.model.cavity_count)
             if np.linalg.cond(shifted) >= 1e4:
                 continue
             value = np.linalg.solve(shifted, self.v)
@@ -303,7 +306,9 @@ class IntegratedPaths:
         return coupling, safe
 
     def _baseline(self, times):
-        fields = np.zeros((len(times), len(self.a), 2), dtype=np.complex128)
+        fields = np.zeros(
+            (len(times), len(self.a), self.model.cavity_count), dtype=np.complex128
+        )
         for pulse, path_fields, (coupling, safe) in zip(
             self.pulses, self.path_fields, self.couplings, strict=True
         ):
@@ -342,7 +347,7 @@ class IntegratedPaths:
         """
         states = paths.initial.copy()
         left = np.full(len(states), paths.start, dtype=np.float64)
-        memory = np.zeros((len(states), 2), complex)
+        memory = np.zeros((len(states), self.model.cavity_count), complex)
         wave = _Wave(states, left, memory)
         output = [
             np.zeros(

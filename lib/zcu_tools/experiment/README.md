@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-21，共用中性 readout waveform planning
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -33,6 +33,20 @@ their existing moment calculation and RNG stream.
 fixed-coordinate joint circuits, explicit evolution/population conversion and the
 single-receiver ADC. It uses the same bundle and acquisition contracts, without
 adding GUI physics or exposing state labels to ordinary Run metadata.
+
+[`single_fluxonium`](single_fluxonium/README.md) plans complete microwave/fast-flux
+timelines and assembles a one-source mock environment. Its source composes DC-basis
+population conversion, one-cavity ADC statistics, deferred raw shots and decimated
+traces. Hosts can call the optional `SimulationEnvironment.close_backend` after
+acquisition drains; device cleanup remains separate.
+
+`readout_plan.py` owns shared QICK drive/readout waveform conversion without
+settings or circuit physics. `drive_track` detaches microwave slots with the
+same support, carrier-phase and envelope semantics for both environments. It partitions terminal readout and earlier cavity
+drives, detaches envelopes, deduplicates pulse/grid contents and converts
+common-origin carrier phases to pulse-local phases. Environment planners supply
+`ReadoutDrive` calibration and retain responsibility for receiver binding,
+physical models, evolution and sampling.
 
 ## 實驗介面與資料
 

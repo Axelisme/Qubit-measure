@@ -1,4 +1,4 @@
-"""Joint state-conditioned first moments for a shared two-resonator line."""
+"""Joint state-conditioned first moments for a shared resonator line."""
 
 from collections import Counter
 
@@ -386,10 +386,13 @@ class ConditionalReadout:
             }
         )
         n = len(self.model.state_labels)
-        # state component, [population,moment_1,moment_2], initial condition
-        state: NDArray[np.complex128] = np.zeros((n, 3, n), dtype=np.complex128)
+        # One population component and one field moment per cavity.
+        components = 1 + self.model.cavity_count
+        state: NDArray[np.complex128] = np.zeros(
+            (n, components, n), dtype=np.complex128
+        )
         state[:, 0, :] = np.eye(n)
-        outputs = np.zeros((len(times), n, 3, n), dtype=np.complex128)
+        outputs = np.zeros((len(times), n, components, n), dtype=np.complex128)
         outputs[times <= start] = state
         interval = self._constant_interval if constant else self._interval
         for left, right in zip(points[:-1], points[1:], strict=True):
@@ -503,7 +506,8 @@ class ConditionalReadout:
         durations = np.diff(np.concatenate(([left], targets)))
         propagators = self._constant_line.propagators(omega, incident, durations)
         populations = state[:, 0, :]
-        moments = state[:, 1:, :].reshape(2 * n, n)
+        c = self.model.cavity_count
+        moments = state[:, 1:, :].reshape(c * n, n)
         result = state.copy()
         for step, dt in enumerate(durations):
             if dt:
@@ -511,7 +515,7 @@ class ConditionalReadout:
                 moments = em @ moments + driven @ populations
                 populations = ep @ populations
             result[:, 0, :] = populations
-            result[:, 1:, :] = moments.reshape(n, 2, n)
+            result[:, 1:, :] = moments.reshape(n, c, n)
             if step < len(selected):
                 outputs[selected[step]] = result
         return result

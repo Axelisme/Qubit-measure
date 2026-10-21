@@ -15,9 +15,9 @@ class ConstantLine:
     """Share homogeneous line propagation while keeping carrier shifts scalar.
 
     q: finite population generator (state,state), indexed [target,source], 1/ns.
-    a: finite complex line blocks (state,2,2), 1/ns.
-    v: finite drive coupling (2,), sqrt(1/ns).
-    scattering: finite complex output coupling (2,), including mismatch phase.
+    a: finite complex line blocks (state,cavity,cavity), 1/ns.
+    v: finite drive coupling (cavity,), sqrt(1/ns).
+    scattering: finite complex output coupling (cavity,), including mismatch phase.
     All arrays come from a validated ReadoutModel and remain caller-owned.
     Methods cache propagators for this model; no shot state is retained.
 
@@ -36,11 +36,12 @@ class ConstantLine:
     ):
         self._q = q
         n = len(q)
-        self._m = np.asarray(np.kron(q, np.eye(2)), dtype=np.complex128)
-        self._b = np.zeros((2 * n, n), dtype=np.complex128)
+        self._cavities = c = len(v)
+        self._m = np.asarray(np.kron(q, np.eye(c)), dtype=np.complex128)
+        self._b = np.zeros((c * n, n), dtype=np.complex128)
         for s in range(n):
-            self._m[2 * s : 2 * s + 2, 2 * s : 2 * s + 2] -= a[s]
-            self._b[2 * s : 2 * s + 2, s] = v
+            self._m[c * s : c * s + c, c * s : c * s + c] -= a[s]
+            self._b[c * s : c * s + c, s] = v
         self._output = np.tile(scattering, n)
         # A scalar carrier shift leaves both Schur bases unchanged, even for
         # defective generators. Only the triangular Sylvester solve repeats.
@@ -67,21 +68,22 @@ class ConstantLine:
     ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
         """Advance fixed branches and integrate their coherent field products.
 
-        This route requires Q=0: fields (state,2) are sqrt(photons), incidents
+        This route requires Q=0: fields (state,cavity) are sqrt(photons), incidents
         (carrier,) are sqrt(photons/ns) at the interval start, and omegas are
         carrier/reference rad/ns. duration is positive ns. Return final fields
-        and (state,2,state,2) integrals in photon*ns, retaining all cross terms.
+        and (state,cavity,state,cavity) integrals in photon*ns, retaining all cross terms.
         Singular generators use augmented exponentials, not ODE or inversion.
         Nonfinite propagation/integrals raise RuntimeError.
         """
         if np.any(self._q):
             raise ValueError("coherent field integrals require fixed state branches")
         n = len(fields)
+        c = self._cavities
         generators = np.array(
-            [self._m[2 * s : 2 * s + 2, 2 * s : 2 * s + 2] for s in range(n)]
+            [self._m[c * s : c * s + c, c * s : c * s + c] for s in range(n)]
         )
         products = field_product_integral(
-            generators, self._b[:2, 0].real, fields, incidents, omegas, duration
+            generators, self._b[:c, 0].real, fields, incidents, omegas, duration
         )
         return self.coherent_step(fields, incidents, omegas, duration), products
 
@@ -92,7 +94,7 @@ class ConstantLine:
         omegas: RealArray,
         duration: float,
     ) -> NDArray[np.complex128]:
-        """Advance fixed (state,2) fields by positive ns with flat carriers.
+        """Advance fixed (state,cavity) fields by positive ns with flat carriers.
 
         Requires Q=0. incidents are sqrt(photons/ns) at the interval start;
         omegas are carrier/reference rad/ns. Return owned sqrt(photons) fields.
@@ -112,7 +114,7 @@ class ConstantLine:
             final += (driven @ np.ones(n)) * np.exp(-1j * omega * duration)
         if not np.isfinite(final).all():
             raise RuntimeError("constant cavity propagation is nonfinite")
-        return final.reshape(n, 2)
+        return final.reshape(n, self._cavities)
 
     def integrated_sums(
         self, model: ReadoutModel, pulse: ReadoutPulse, grids: tuple[SampleGrid, ...]
@@ -222,9 +224,9 @@ class ConstantLine:
         )
         moments = (em_off * np.exp(1j * omega * after)) @ moments
         n = len(self._q)
-        state = np.empty((n, 3, n), dtype=np.complex128)
+        state = np.empty((n, 1 + self._cavities, n), dtype=np.complex128)
         state[:, 0, :] = ep_off @ ep_on
-        state[:, 1:, :] = moments.reshape(n, 2, n)
+        state[:, 1:, :] = moments.reshape(n, self._cavities, n)
         return state
 
     def propagators(self, omega: float, incident: complex, durations: RealArray):
@@ -234,7 +236,7 @@ class ConstantLine:
         rad/ns, and incident is the flat drive in its carrier frame. Cache only
         frequency-independent exponentials, not every carrier's dense matrices.
         Return a dict keyed by each distinct positive duration, with complex
-        population (n,n), moment (2*n,2*n), and driven (2*n,n) arrays. Near-
+        population (n,n), moment (cavity*n,cavity*n), and driven (cavity*n,n) arrays. Near-
         singular driven blocks use a full exponential without regularization.
         """
         shifted = self._m + 1j * omega * np.eye(len(self._m))
@@ -277,7 +279,8 @@ class ConstantLine:
 
     def _full_step(self, shifted, incident, dt):
         n = len(self._q)
-        generator = np.zeros((3 * n, 3 * n), dtype=np.complex128)
+        size = (1 + self._cavities) * n
+        generator = np.zeros((size, size), dtype=np.complex128)
         generator[:n, :n] = self._q
         generator[n:, n:] = shifted
         generator[n:, :n] = self._b * incident
