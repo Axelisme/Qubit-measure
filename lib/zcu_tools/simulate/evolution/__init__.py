@@ -20,6 +20,7 @@ from .engine import (
     merge_path_diagnostics,
     segment_spans,
 )
+from .joint_fock import JointFockRequest, JointFockResult, joint_fock_spectrum
 from .model import DriveSource, NumericModel
 from .secular import (
     FluxExpansion,

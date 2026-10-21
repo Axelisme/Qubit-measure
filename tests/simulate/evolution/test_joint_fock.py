@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-
 from zcu_tools.simulate import evolution
 
 
@@ -37,6 +36,8 @@ def test_vacuum_spectrum_keeps_finite_pi_and_probe_preparations_independent():
     assert np.max(result.hermitian_error) < 1e-12
     assert np.min(result.min_eigenvalue) > -1e-6
     # Repeated calls and repeated probe coordinates never carry a previous state.
-    np.testing.assert_array_equal(joint_fock_spectrum(request).populations, result.populations)
+    np.testing.assert_array_equal(
+        joint_fock_spectrum(request).populations, result.populations
+    )
     assert result.cutoffs == (1, 1)  # zero sampled mean -> N=0, conservative N+1
     assert np.max(result.edge_population) == pytest.approx(0.0, abs=1e-14)
