@@ -16,6 +16,7 @@ from ._recipe_execution_support import (
     wait_for_event,
 )
 from ._recipe_support import recipe_client
+from ._support import start_legacy_execution
 
 
 def test_helpers_deliver_named_results_and_preserve_answer_handoff(tmp_path):
@@ -37,7 +38,7 @@ def test_helpers_deliver_named_results_and_preserve_answer_handoff(tmp_path):
         recipe_client(tmp_path, AnalysisRecipeGui()) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         assert handoff(execution).data["status"] == "awaiting_answer"
         assert execution.answer("accepted").data["status"] == "finished"
         assert isinstance(delivered[0], recipe.RunStepResult)
@@ -76,7 +77,7 @@ def test_run_helper_exposes_stop_status_and_allows_author_cleanup(tmp_path, cont
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         # The worker either reaches native await or exits through author cleanup.
         wait_for_event(ready)
         if gui.awaited.is_set():
@@ -104,7 +105,9 @@ def test_direct_yield_operation_is_rejected_with_helper_guidance(tmp_path):
         recipe_client(tmp_path, AnalysisRecipeGui()) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        reply = completed(executions.start(client.context, "sample", {}))
+        reply = completed(
+            start_legacy_execution(executions, client.context, "sample", {})
+        )
         assert reply.data["status"] == "failed"
         assert "yield from" in reply.data["error"]["message"]
         assert "run_step" in reply.data["error"]["message"]

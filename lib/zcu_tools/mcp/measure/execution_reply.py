@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
@@ -15,6 +15,7 @@ from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath, field_path
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe import RecipeDefinition
+    from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 
 ReplyDetail = Literal["summary", "full"]
 
@@ -441,11 +442,28 @@ def _analysis_envelope(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _script_execution(snapshot: dict[str, object]) -> dict[str, object]:
+    """Encode the new dataclass snapshot's native models at the reply boundary."""
+    projected = deepcopy(snapshot)
+    pending = projected.get("pending_question")
+    if isinstance(pending, dict):
+        question = pending["question"]
+        if isinstance(question, BaseModel):
+            pending["question"] = question.model_dump(mode="json")
+    outcome = projected.get("outcome")
+    if isinstance(outcome, dict):
+        report = outcome["report"]
+        if isinstance(report, BaseModel):
+            outcome["report"] = report.model_dump(mode="json")
+        outcome["runs"] = list(outcome["runs"])
+    return projected
+
+
 def project_execution(
     snapshot: dict[str, Any],
     *,
-    recipes: Sequence[RecipeDefinition],
-    definition: RecipeDefinition | None = None,
+    recipes: Sequence[RecipeDefinition | RecipeDeclaration],
+    definition: RecipeDefinition | RecipeDeclaration | None = None,
     detail: ReplyDetail = "summary",
 ) -> dict[str, Any]:
     """Project local captures using injected declarations, without any GUI read.
@@ -466,6 +484,26 @@ def project_execution(
     only in error. No admission state is inferred from missing reports.
     Queries perform no RPC, image read, filesystem check or guard refresh.
     """
+    from zcu_tools.mcp.measure.recipe import RecipeDefinition
+
+    if "pending_question" in snapshot:
+        return _script_execution(snapshot)
+    return _legacy_execution(
+        snapshot,
+        recipes=tuple(item for item in recipes if isinstance(item, RecipeDefinition)),
+        definition=definition if isinstance(definition, RecipeDefinition) else None,
+        detail=detail,
+    )
+
+
+def _legacy_execution(
+    snapshot: dict[str, Any],
+    *,
+    recipes: Sequence[RecipeDefinition],
+    definition: RecipeDefinition | None,
+    detail: ReplyDetail,
+) -> dict[str, Any]:
+    """Project legacy recipe or analysis captures with legacy-only declarations."""
     if detail == "full":
         full = deepcopy(snapshot)
         if "recipe" in snapshot:

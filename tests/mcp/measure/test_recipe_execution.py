@@ -29,6 +29,7 @@ from ._recipe_execution_support import (
 )
 from ._recipe_support import LookbackGui, recipe_client
 from ._save_report_support import analysis_report
+from ._support import start_legacy_execution
 
 
 def test_generator_run_analysis_and_snapshot_capture_do_not_query_gui(tmp_path):
@@ -63,7 +64,9 @@ def test_generator_run_analysis_and_snapshot_capture_do_not_query_gui(tmp_path):
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample, schema)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {"gain": 4})
+        execution = start_legacy_execution(
+            executions, client.context, "sample", {"gain": 4}
+        )
         reply = completed(execution)
         assert reply.data["status"] == "finished" and not reply.is_error
         assert deliveries == ["completed", "completed", "completed"]
@@ -133,7 +136,7 @@ def test_two_interactive_stages_resume_in_background_without_tool_wait(tmp_path)
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         first = handoff(execution)
         assert first.data["status"] == "interactive"
         assert first.data["analysis_stage"] == "primary"
@@ -178,7 +181,7 @@ def test_question_captures_items_and_answer_only_delivers_decision(tmp_path, ans
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         question = handoff(execution)
         assert question.data["status"] == "awaiting_answer"
         assert question.data["question_items"] == ("frequency",)
@@ -186,7 +189,7 @@ def test_question_captures_items_and_answer_only_delivers_decision(tmp_path, ans
             question.data["question_preview"]["primary"]["items"][0]["proposed"] == 2.0
         )
         with pytest.raises(GuiRpcError) as busy:
-            executions.start(client.context, "sample", {})
+            start_legacy_execution(executions, client.context, "sample", {})
         assert busy.value.reason == "recipe_busy"
         assert question.data["execution"] in str(busy.value)
         reply = execution.answer(answer)
@@ -213,7 +216,7 @@ def test_completed_rejects_unexpected_question_handoff(tmp_path):
         recipe_client(tmp_path, AnalysisRecipeGui()) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         assert handoff(execution).data["status"] == "awaiting_answer"
         # A broken completion helper may join this unanswered question forever.
         # This safety fuse closes it after the helper's own 30s watchdog can diagnose it.
@@ -246,7 +249,7 @@ def test_question_cancel_delivers_none_and_clears_one_intent(tmp_path):
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         assert handoff(execution).data["status"] == "awaiting_answer"
         execution.cancel()
         assert completed(execution).data["status"] == "cancelled"
@@ -271,10 +274,10 @@ def test_native_run_stop_delivers_partial_handle_and_correct_status(tmp_path, co
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         wait_for_event(gui.awaited)
         with pytest.raises(GuiRpcError) as busy:
-            executions.start(client.context, "sample", {})
+            start_legacy_execution(executions, client.context, "sample", {})
         assert busy.value.reason == "recipe_busy"
         if control == "gui_cancel":
             gui.outcome = "cancelled"
@@ -310,7 +313,7 @@ def test_interactive_cancel_delivers_none_without_another_analysis_worker(tmp_pa
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         assert handoff(execution).data["status"] == "interactive"
         with pytest.raises(GuiRpcError) as error:
             execution.finish_early()
@@ -346,7 +349,7 @@ def test_between_yield_cancel_suppresses_once_but_keeps_fast_steps(tmp_path):
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         try:
             wait_for_event(between)
             execution.cancel()
@@ -392,7 +395,7 @@ def test_native_failure_is_thrown_at_yield_and_finally_runs(tmp_path, caught):
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         reply = completed(execution)
         assert reply.data["status"] == ("finished" if caught else "failed")
         assert failures == ["run_failed"]
@@ -423,7 +426,7 @@ def test_close_serializes_finally_and_never_resumes_a_closed_generator(
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         if interactive:
             assert handoff(execution).data["status"] == "interactive"
         else:
@@ -437,7 +440,7 @@ def test_close_serializes_finally_and_never_resumes_a_closed_generator(
         execution.close()
         execution.join()
         with pytest.raises(GuiRpcError) as closed:
-            executions.start(client.context, "sample", {})
+            start_legacy_execution(executions, client.context, "sample", {})
         assert closed.value.reason == "session_closed"
 
 
@@ -456,13 +459,15 @@ def test_needs_parameters_and_invalid_keywords_fail_without_starting_run(tmp_pat
         registry(client.context, definition(sample)) as executions,
     ):
         before = list(client.transport.sent)
-        rejected = completed(executions.start(client.context, "sample", {"extra": 1}))
+        rejected = completed(
+            start_legacy_execution(executions, client.context, "sample", {"extra": 1})
+        )
         assert rejected.is_error and rejected.data["status"] == "failed"
         assert rejected.data["error"]["phase"] == "preparing"
         assert "extra" in rejected.data["error"]["message"]
         assert not finally_ran.is_set()
         assert client.transport.sent == before
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         reply = completed(execution)
         assert reply.data["status"] == "needs_parameters"
         assert reply.data["missing"][0]["parameter"] == "frequency"
@@ -496,16 +501,16 @@ def test_registry_validates_definitions_and_rejects_unknown_identity(tmp_path):
         registry(client.context, valid) as executions,
     ):
         with pytest.raises(GuiRpcError) as name:
-            executions.start(client.context, "unknown", {})
+            start_legacy_execution(executions, client.context, "unknown", {})
         assert name.value.reason == "unknown_recipe"
         with pytest.raises(GuiRpcError) as identity:
             executions.get("missing")
         assert identity.value.reason == "unknown_execution"
-        first = executions.start(client.context, "sample", {})
+        first = start_legacy_execution(executions, client.context, "sample", {})
         completed(first)
         calls = list(client.transport.sent)
         with pytest.raises(GuiRpcError) as binding:
-            executions.start(replace(client.context), "sample", {})
+            start_legacy_execution(executions, replace(client.context), "sample", {})
         assert binding.value.reason == "wrong_binding"
         assert client.transport.sent == calls
         for timeout in (-1, float("inf"), float("nan")):

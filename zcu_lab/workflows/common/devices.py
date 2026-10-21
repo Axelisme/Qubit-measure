@@ -1,15 +1,14 @@
 """Workflow flux tools composed from live cfg reads and complete device setup."""
 
-from collections.abc import Generator
-
-from zcu_tools.experiment.workflows import Effect, WorkflowEnv
+from zcu_tools.core.script_protocol import ScriptGenerator
+from zcu_tools.experiment.workflows import WorkflowEnv
 
 from zcu_lab.v2._support.device import check_flux_unit
 
 
 def set_flux[C](
     env: WorkflowEnv[C], name: str, value: float, *, unit: str
-) -> Generator[Effect, None, None]:
+) -> ScriptGenerator[None]:
     """Set absolute flux in the explicitly declared stored coordinate.
 
     Live-read complete settings, check unit with the shared experiment owner,

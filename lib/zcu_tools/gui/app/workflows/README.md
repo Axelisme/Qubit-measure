@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。Workflow GUI 的註冊、表單、執行與繪圖分工。
 
@@ -34,7 +34,7 @@ Session 只以 default rows 作未開 entry 的 memory 初值。開 entry 清空
 
 `TunablesHost` 擁有該 run 唯一的 FormState、固定 evaluation capture 與 accepted expression input。GUI 與 RPC Apply 共用 Controller entry。TunablesHost 以驗證後的完整 Form 呼叫 WorkflowAttachment 的 knobs_to_cfg，與 Start 使用同一個 Form.to_cfg() 宣告。只有 Engine 成功 publication 才接受 input/base；invalid input、轉接失敗與 native failure 保留可修正 draft。Engine 擁有 numeric validation、revision、step capture 與 journal publication。沒有 holder enforcement 或 GUI revision guard。
 
-Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots。Resume 重用同一 token 和 settlement，不重新 init 或 capture。Terminal delivery 先清理原生 run 與 admission，再通知 view；view 錯誤只記錄，不改 native outcome。SessionDevices 使用 shared public drivers，每次 env.run callback 前讀 connected device evidence。Driver 擁有硬體限制、單位與 setup。Window 在 terminal delivery 後請 DeviceService 背景讀一次已連線儀器，成功台更新觀察 cache，失敗台保留既有值。Pause 不觸發這項讀回。讀回不改寫 acquisition evidence、native outcome 或原本的 settlement／lease 職責。
+Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots。Resume 重用同一 token 和 settlement，不重新 init 或 capture。等待 Ask 時的 Stop 只呼叫 Engine.stop 設 stopping，再以同一 operation 排 Engine.drain worker。作者在 worker 收到 None 並收尾，owner thread 不推進 generator。Controller 保留 token、settlement、RUN lease 與 view，直到 worker 返回且 terminal owner delivery 完成。此時 Close 先請求 Stop，保留視窗供 delivery；之後可再次關閉。Drain 提交失敗保留所有權，Stop／Close 可重試。Terminal delivery 先清理原生 run 與 admission，再通知 view；view 錯誤只記錄，不改 native outcome。SessionDevices 使用 shared public drivers，每次 env.run callback 前讀 connected device evidence。Driver 擁有硬體限制、單位與 setup。Window 在 terminal delivery 後請 DeviceService 背景讀一次已連線儀器，成功台更新觀察 cache，失敗台保留既有值。Pause 不觸發這項讀回。讀回不改寫 acquisition evidence、native outcome 或原本的 settlement／lease 職責。
 
 ## Input 與 reload
 

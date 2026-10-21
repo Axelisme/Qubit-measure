@@ -24,6 +24,8 @@ from zcu_tools.mcp.core.rpc import GuiInvocationError
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe import RecipeDefinition
+    from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
+    from zcu_tools.mcp.measure.recipe_host import RecipeHostFactory
 
 
 class GuiRpcError(GuiInvocationError):
@@ -286,7 +288,8 @@ class MeasureMcpSession:
         self,
         config: MCPBridgeConfig,
         *,
-        recipes: Sequence[RecipeDefinition],
+        recipes: Sequence[RecipeDefinition | RecipeDeclaration],
+        recipe_host_factory: RecipeHostFactory | None = None,
         bridge: McpBridge | None = None,
         resolve_connect_port: ResolveConnectPortFn,
         port_is_open: PortIsOpenFn,
@@ -296,6 +299,8 @@ class MeasureMcpSession:
         recipes is an explicit sequence, possibly empty, validated before GUI
         operations. Invalid/duplicate definitions raise ValueError. bridge may be
         attached now or later; resolver/probe supply the existing connection policy.
+        recipe_host_factory optionally binds a script declaration's session and
+        operation lifetime after inputs validate; omission uses raise stubs.
         close drains workers, never closes the GUI or stops hardware.
         """
         from zcu_tools.mcp.measure.analysis_execution import AnalysisExecutions
@@ -306,7 +311,9 @@ class MeasureMcpSession:
         self._close_lock = Lock()
         self._closed = Event()
         self.executions = AnalysisExecutions(self, self._closed)
-        self.recipes = RecipeExecutions(self._closed, recipes=recipes)
+        self.recipes = RecipeExecutions(
+            self._closed, recipes=recipes, host_factory=recipe_host_factory
+        )
         self._generation = 0
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port
