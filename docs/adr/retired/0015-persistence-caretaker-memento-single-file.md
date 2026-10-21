@@ -1,8 +1,12 @@
-> 狀態：已退役（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [measure GUI](../../../lib/zcu_tools/gui/app/measure/README.md) 與 [shared caretaker](../../../lib/zcu_tools/gui/session/README.md)。以下保留歷史正文。
+---
+status: retired
+---
+
+> 狀態：retired（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [measure GUI](../../../lib/zcu_tools/gui/app/measure/README.md) 與 [shared caretaker](../../../lib/zcu_tools/gui/session/README.md)。以下保留歷史正文。
 
 # 0015 — PersistenceCaretaker（Memento + Caretaker）+ 單檔 app-state + 關閉才寫
 
-**狀態：** accepted（Phase 126 gui2，live-verified）。
+**狀態：** retired（Phase 126 gui2，live-verified）。
 **關聯：** 採 [[0005]]（Hexagonal：Caretaker = Driven Adapter；Originator = Controller façade）；用 [[0004]]（狀態進 State 兩軸：startup 偏好進 `State.startup_prefs`）；承 [[0008]]（tabs cfg raw↔live codec 留 owner 服務）；起因於用戶質疑「persist 為何 runtime 一直寫盤 / 為何兩個檔 / PersistService 為何叫 Service」。
 
 ## 背景

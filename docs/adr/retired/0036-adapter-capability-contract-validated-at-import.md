@@ -1,12 +1,12 @@
-> 狀態：已退役（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [adapter README](../../../zcu_lab/v2/gui-contracts.md)。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [adapter README](../../../zcu_lab/v2/gui-contracts.md)。以下保留歷史正文。
 
 # Adapter capability contract — explicit `AdapterCapabilities`, validated at import
 
-**狀態：** accepted（已實作）。本檔以現在式描述目前生效的契約。
+**狀態：** retired（已實作）。本檔以現在式描述目前生效的契約。
 **關聯：** spec/value fluent + role default 見 [[0009]]；value 樹完整性見 [[0010]]；成品邊界驗證見 [[0011]]；value 層組裝 builder 見 [[0012]]。
 
 ## 脈絡

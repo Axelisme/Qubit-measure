@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # ADR-0067 — GUI 應用核心與前端邊界
 
 **狀態：** accepted。

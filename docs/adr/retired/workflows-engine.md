@@ -1,8 +1,8 @@
-> 狀態：已退役（2026-10-14）。具名 workflow 的執行契約由 [0062](../0062-experiment-workflow.md) 接替；本篇與 0062 有矛盾之處以 0062 為準。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: draft
----
+> 狀態：retired（2026-10-14）。具名 workflow 的執行契約由 [0062](../0062-experiment-workflow.md) 接替；本篇與 0062 有矛盾之處以 0062 為準。以下保留歷史正文。
 
 # 具名 workflows 與可丟棄的步驟執行
 

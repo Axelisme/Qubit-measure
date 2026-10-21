@@ -1,27 +1,27 @@
 ## Behavior
 
-One-tone resonator power dependence: a 2D sweep of readout power (gain) versus readout frequency, mapping how the resonator response shifts with drive strength. Used to find the punch-out / high-power transition and to pick a good low-power readout gain. Runs on real hardware; requires a SoC connection.
+**Readers:** operator, agent. How to measure one-tone resonator power dependence from the GUI or MCP and read the punch-out map.
 
-## Expects (parameter context)
+The 2D sweep varies readout gain and readout frequency to map how the resonator response shifts with drive strength. Use it to find the punch-out or high-power transition and choose a low-power readout gain. The measurement runs on real hardware and requires a SoC connection.
 
-Reads fixed tab parameters: resonator.freq and resonator.kappa seed the frequency sweep; resonator.wiring.ch/ro_ch seed the generator/ADC channels. Captured resonator.ext.default_probe_length minus 0.1 us seeds the ADC window, and resonator.ext.time_of_fly plus 0.05 us seeds trigger timing. Missing or null calibration and unbound aliases leave required fields Invalid without numeric fallback; source failures propagate.
+**Last updated:** 2026-10-21
 
-## Expects (ModuleLibrary)
+## Parameter sources
 
-Starts with a fresh inline pulse readout and const waveform. It does not adopt a library module or named waveform.
+The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the frequency sweep. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the generator and ADC channels. `resonator.ext.default_probe_length` minus 0.1 us seeds the ADC window, and `resonator.ext.time_of_fly` plus 0.05 us seeds trigger timing. Missing or null calibration and unbound aliases leave required fields Invalid until valid values are supplied. Other source failures are reported as errors.
 
-## Typical writeback
+## Readout module
 
-No writeback — this adapter has no analysis step (the underlying experiment is measurement-only). It produces a 2D map for visual inspection only; read off the punch-out power and low-power frequency by eye and update parameters in another step.
+The readout starts as a fresh inline pulse with a `const` waveform. Configure its pulse settings directly in the tab.
+
+## Results
+
+The run produces a 2D map for visual inspection. Read the punch-out power and low-power frequency from the map, then update parameters in a separate calibration step. Analysis and calibration updates are manual for this measurement.
 
 ## MCP recipe
 
-`onetone_spectrum_over_power` can omit `center_mhz` and `span_mhz`. Omitted
-center uses current `$resonator.freq`; omitted span uses 3 times current
-`$resonator.kappa` for the full frequency span. The recipe reads these values
-during preparation and writes numeric endpoints at center ± span/2, not live
-formulas. Omitted `freq_points` retains the GUI count.
+`onetone_spectrum_over_power` can omit `center_mhz` and `span_mhz`. Omitted center uses current `$resonator.freq`; omitted span uses 3 times current `$resonator.kappa` for the full frequency span. The recipe reads these values during preparation and sets fixed numeric endpoints at center ± span/2. Omitted `freq_points` retains the GUI count.
 
-## Recommended
+## Recommended use
 
-No analysis. Typical sweep: gain ~0.001 to 0.5 over ~101 points (low to high power), frequency resonator.freq ± linewidths over ~201 points. 'earlystop_snr' starts disabled (None or nonpositive): set it positive to stop a column early once a signal-to-noise target is reached, speeding up the scan. Narrow the gain range once you've located the transition.
+A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered from low to high power. Sweep frequency around `resonator.freq` by a few linewidths over about 201 points. `earlystop_snr` starts disabled, with `None` or a nonpositive value. Set it positive to stop a column early once the signal-to-noise target is reached. Narrow the gain range once you have located the transition.
