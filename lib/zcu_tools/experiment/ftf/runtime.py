@@ -587,17 +587,23 @@ def ftf(
             private_replay=private_replay,
             telemetry=telemetry,
         )
+        readout = coordinator.readout
+        mux = readout.mux
+        readout_gen = settings.readout.drive.gen_ch if mux is None else mux.gen_ch
         gens = (
-            settings.readout.drive.gen_ch,
+            readout_gen,
             *(s.gen_ch for s in settings.drive_lines.values()),
         )
-        readout = coordinator.readout
-        receivers = tuple(r.ro_ch for r in readout.receivers)
-        if readout.kind == "mux":
+        receivers = (
+            (readout.pulse.ro_ch,)
+            if mux is None
+            else tuple(r.ro_ch for r in mux.receivers)
+        )
+        if mux is not None:
             soccfg = make_mux_mock_soccfg(
                 max(gens) + 1,
                 max(receivers) + 1,
-                gen_ch=settings.readout.drive.gen_ch,
+                gen_ch=mux.gen_ch,
                 ro_chs=receivers,
             )
         else:

@@ -37,7 +37,7 @@ from zcu_tools.simulate.ftf import (
 
 from . import replay
 from .numeric import dc_flux, drive_sources, joint_parameters, resonators
-from .readout import FTFReadoutConfig, readout_configuration
+from .readout import FTFReadoutConfig, FTFReceiverConfig, readout_configuration
 
 
 class FTFModelFacts:
@@ -115,6 +115,30 @@ class FTFTemplatePlan:
     cavity_drives: tuple[tuple[ReadoutPulse, ...], ...]
 
 
+@dataclass(frozen=True)
+class _ReadoutPath:
+    """Selected source, calibration and ADC capabilities for one template."""
+
+    gen_ch: int
+    input_per_gain: float
+    receivers: tuple[FTFReceiverConfig, ...]
+    multiplexed: bool
+
+
+def _readout_path(settings: FTFSettings, config: FTFReadoutConfig) -> _ReadoutPath:
+    """Select the configured readout capability."""
+    if config.mux is not None:
+        return _ReadoutPath(
+            config.mux.gen_ch, config.mux.input_per_gain, config.mux.receivers, True
+        )
+    return _ReadoutPath(
+        settings.readout.drive.gen_ch,
+        settings.readout.drive.input_per_gain,
+        (config.pulse,),
+        False,
+    )
+
+
 def _envelopes(
     event: EventSlot, memo: dict[int, EnvelopeSpec]
 ) -> tuple[EnvelopeSpec, ...]:
@@ -160,13 +184,14 @@ def _timeline_batch(
     joint: JointModel,
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
+    path: _ReadoutPath,
     memo: dict[int, EnvelopeSpec],
 ) -> TimelineBatch:
     """Map charge/flux drive tracks onto the engine's fixed-DC schedule."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
     drives = []
     for event in template.events:
-        if event.gen_ch == settings.readout.drive.gen_ch:
+        if event.gen_ch == path.gen_ch:
             continue
         if event.gen_ch not in microwave:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
@@ -182,17 +207,12 @@ def _timeline_batch(
 
 
 def _classify_readout(
-    settings: FTFSettings,
+    path: _ReadoutPath,
     template: TimelineTemplate,
-    config: FTFReadoutConfig,
     memo: dict[int, EnvelopeSpec],
 ) -> tuple[tuple[EventSlot, ...], tuple[tuple[ReadoutPulse, ...], ...]]:
     """Partition active readout-generator slots at each point's latest start."""
-    slots = tuple(
-        event
-        for event in template.events
-        if event.gen_ch == settings.readout.drive.gen_ch
-    )
+    slots = tuple(event for event in template.events if event.gen_ch == path.gen_ch)
     if not slots:
         raise ValueError("FTF requires one terminal readout pulse per point")
     latest = np.max([np.where(e.active, e.start_us, -np.inf) for e in slots], axis=0)
@@ -204,7 +224,7 @@ def _classify_readout(
         terminal = event.active & (event.start_us == latest)
         earlier = event.active & ~terminal
         if np.any(earlier & (event.start_us + event.duration_us > latest)):
-            if config.kind == "mux":
+            if path.multiplexed:
                 raise ValueError(
                     "FTF mux tones require a common pulse start; blocks overlap"
                 )
@@ -222,14 +242,15 @@ def _classify_readout(
             )
         )
         for index in np.flatnonzero(earlier):
-            drives[index].append(_readout_pulse(settings, rows[index], envelopes))
+            drives[index].append(
+                _readout_pulse(path.input_per_gain, rows[index], envelopes)
+            )
     return tuple(terminals), _local_readout_pulses(tuple(tuple(p) for p in drives), 0.0)
 
 
 def _readout_contents(
-    settings: FTFSettings,
+    path: _ReadoutPath,
     template: TimelineTemplate,
-    config: FTFReadoutConfig,
     window: ReadoutSlot,
     memo: dict[int, EnvelopeSpec],
 ) -> tuple[
@@ -239,19 +260,17 @@ def _readout_contents(
     NDArray[np.int64],
 ]:
     """Merge mutually exclusive readout slots, then deduplicate their point rows."""
-    slots = tuple(
-        e for e in template.events if e.gen_ch == settings.readout.drive.gen_ch
-    )
+    slots = tuple(e for e in template.events if e.gen_ch == path.gen_ch)
     count = np.sum([e.active for e in slots], axis=0)
     if not slots or np.any(count == 0):
         raise ValueError("FTF requires one terminal readout pulse per point")
-    if config.kind == "pulse" and np.any(count != 1):
+    if not path.multiplexed and np.any(count != 1):
         raise ValueError("FTF requires one terminal readout pulse per point")
     tones = int(count[0])
     if tones > 8 or np.any(count != tones):
         raise ValueError("FTF mux requires a fixed 1..8 tone count per point")
     if not window.trigger_us.shape[1] or np.any(
-        window.generator_channels != settings.readout.drive.gen_ch
+        window.generator_channels != path.gen_ch
     ):
         raise ValueError("FTF requires ADC timing and its bound readout generator")
     fields = ("start_us", "duration_us", "frequency_mhz", "phase_deg", "gain")
@@ -293,7 +312,10 @@ def _readout_contents(
     dt = 1000 / window.sample_rate_mhz
     for index in representatives:
         pulses.append(
-            tuple(_readout_pulse(settings, row, envelopes) for row in values[index])
+            tuple(
+                _readout_pulse(path.input_per_gain, row, envelopes)
+                for row in values[index]
+            )
         )
         grids.append(
             tuple(
@@ -314,11 +336,11 @@ def _readout_contents(
 
 
 def _readout_pulse(
-    settings: FTFSettings, row: NDArray[np.float64], envelopes: list[EnvelopeSpec]
+    input_per_gain: float, row: NDArray[np.float64], envelopes: list[EnvelopeSpec]
 ) -> ReadoutPulse:
     start, duration, freq, phase, gain, envelope_index = row
     envelope = envelopes[int(envelope_index)]
-    amplitude = complex(settings.readout.drive.input_per_gain * gain)
+    amplitude = complex(input_per_gain * gain)
     callback = None
     corners = ()
     if envelope.kind == "sampled":
@@ -434,7 +456,8 @@ def plan_template(
     detach once per active point/slot. No per-point evolution planner is called.
     """
     config = readout_configuration(settings) if readout is None else readout
-    receivers = {receiver.ro_ch: receiver for receiver in config.receivers}
+    path = _readout_path(settings, config)
+    receivers = {receiver.ro_ch: receiver for receiver in path.receivers}
     if not template.readouts:
         raise ValueError("FTF requires at least one bound receiver")
     if len({window.channel for window in template.readouts}) != len(template.readouts):
@@ -442,15 +465,13 @@ def plan_template(
     # Identity lookup is safe: template keeps every input envelope alive for
     # this call. No memo survives a plan or retains compiled program buffers.
     memo: dict[int, EnvelopeSpec] = {}
-    terminal_slots, cavity_drives = _classify_readout(settings, template, config, memo)
+    terminal_slots, cavity_drives = _classify_readout(path, template, memo)
     terminal_template = replace(template, events=terminal_slots)
     contents = []
     for window in template.readouts:
         if window.channel not in receivers:
             raise ValueError(f"unbound FTF receiver {window.channel}")
-        contents.append(
-            _readout_contents(settings, terminal_template, config, window, memo)
-        )
+        contents.append(_readout_contents(path, terminal_template, window, memo))
     end_ns = contents[0][0]
     if facts is None:
         facts = FTFModelFacts(settings, snapshot)
@@ -499,7 +520,7 @@ def plan_template(
     return FTFTemplatePlan(
         source,
         _cavity_batch(
-            _timeline_batch(settings, joint, template, end_ns, memo),
+            _timeline_batch(settings, joint, template, end_ns, path, memo),
             joint,
             settings,
             cavity_drives,

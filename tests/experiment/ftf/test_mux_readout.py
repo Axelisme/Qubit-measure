@@ -16,30 +16,33 @@ pytestmark = pytest.mark.sim
 
 
 def configuration(channels=(4, 1)):
-    config_type = getattr(ftf_module, "FTFReadoutConfig", None)
-    receiver_type = getattr(ftf_module, "FTFReceiverConfig", None)
-    assert config_type is not None, "FTF must accept a detached readout configuration"
-    assert receiver_type is not None, "FTF must expose per-channel receiver values"
-    return config_type(
-        "mux",
-        tuple(
-            receiver_type(
-                ro_ch=ch,
-                gain=1000.0 + i * 100,
-                noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
-            )
-            for i, ch in enumerate(channels)
+    return ftf_module.FTFReadoutConfig(
+        pulse=ftf_module.FTFReceiverConfig(0, 1000, ((0.0, 0.0), (0.0, 0.0))),
+        mux=ftf_module.FTFMuxReadoutConfig(
+            gen_ch=1,
+            input_per_gain=1.0,
+            receivers=tuple(
+                ftf_module.FTFReceiverConfig(
+                    ro_ch=ch,
+                    gain=1000.0 + i * 100,
+                    noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
+                )
+                for i, ch in enumerate(channels)
+            ),
         ),
     )
 
 
 def mux_template():
     base = template()
-    pulse = base.events[0]
+    pulse = replace(base.events[0], gen_ch=1)
     second = replace(pulse, frequency_mhz=pulse.frequency_mhz + 80)
-    first_window = replace(base.readouts[0], channel=4)
+    window = replace(
+        base.readouts[0], generator_channels=np.ones((2, 1), dtype=np.int64)
+    )
+    first_window = replace(window, channel=4)
     second_window = replace(
-        base.readouts[0],
+        window,
         channel=1,
         frequency_mhz=base.readouts[0].frequency_mhz + 80,
         samples=3,
@@ -103,8 +106,13 @@ class MixedEngine(Engine):
 @pytest.mark.parametrize("jumping", [False, True])
 def test_mux_ftf_channels_share_physical_shots_and_initial_mixture(mode, jumping):
     config = configuration()
+    assert config.mux is not None
     config = replace(
-        config, receivers=tuple(replace(r, gain=1e12) for r in config.receivers)
+        config,
+        mux=replace(
+            config.mux,
+            receivers=tuple(replace(r, gain=1e12) for r in config.mux.receivers),
+        ),
     )
     numeric = settings()
     # A hot, lossy synthetic bath makes repeated paths observable in a short

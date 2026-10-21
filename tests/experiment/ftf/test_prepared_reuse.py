@@ -337,9 +337,7 @@ def test_changed_preparation_inputs_miss(change, monkeypatch):
         elif change == "receiver":
             source.readout = replace(
                 source.readout,
-                receivers=tuple(
-                    replace(r, gain=2 * r.gain) for r in source.readout.receivers
-                ),
+                pulse=replace(source.readout.pulse, gain=2 * source.readout.pulse.gain),
             )
         elif change == "tolerance":
             n = source.settings.numerics

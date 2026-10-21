@@ -8,6 +8,7 @@ from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
+from zcu_tools.resources.ftf.schema import MuxReadoutSource
 
 from tests.experiment._ftf_templates import settings
 from tests.resources._ftf_data import mux_document
@@ -29,13 +30,17 @@ def jumping_settings(mux):
     receiver = numeric.readout.receivers[0].model_copy(update={"gain": 1e12})
     readout = numeric.readout.model_copy(
         update={
-            "drive": numeric.readout.drive.model_copy(
-                update={"kind": "mux" if mux else "pulse"}
-            ),
-            "adc": (
-                tuple(receiver.model_copy(update={"ro_ch": ch}) for ch in (4, 1))
+            "adc": receiver,
+            "mux": (
+                MuxReadoutSource(
+                    gen_ch=1,
+                    input_per_gain=1.0,
+                    adc=tuple(
+                        receiver.model_copy(update={"ro_ch": ch}) for ch in (4, 1)
+                    ),
+                )
                 if mux
-                else receiver
+                else None
             ),
         }
     )
@@ -46,7 +51,7 @@ def jumping_program(env, mux, *, rounds=1):
     """Real QICK single/mux readout, 64 shots, identical carrier and ADC windows."""
     if mux:
         readout = MuxReadoutCfg(
-            gen_ch=0,
+            gen_ch=1,
             nqz=1,
             mixer_freq=6000.0,
             length=0.020,
@@ -162,7 +167,7 @@ def test_yaml_mux_program_produces_each_tones_raw_shots(channels, mode):
     env = ftf(settings)
     try:
         module = MuxReadoutCfg(
-            gen_ch=0,
+            gen_ch=1,
             nqz=1,
             mixer_freq=6000.0,
             length=0.020,
