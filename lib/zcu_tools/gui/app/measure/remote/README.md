@@ -73,7 +73,7 @@ parameter errors retain their existing predictor reasons in `method_entries`.
 
 ## Recipe 欄位
 
-`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 typed array，str 是欄位名，int 是原始 model-list 位置。兩者經共同 Form owner 解析 typed paths。Unknown、越界或非 index 的數字字串保留完整請求路徑，回 form_path。
+`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。真實的 modules 容器不省略，例如 mux readout 的 selector 是 `["modules", "readout"]`，與 recipe 相同。Edit 拒絕時列出目前的 canonical editable_paths 與 selection_paths。Ref 的子欄位要先 use_inline 才可編輯。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 typed array，str 是欄位名，int 是原始 model-list 位置。兩者經共同 Form owner 解析 typed paths。Unknown、越界或非 index 的數字字串保留完整請求路徑，回 form_path。
 
 `tab.read_elements(path)` 在一次 readonly owner turn 回傳全部元素的 index、name、canonical path、authored input、可用 preview values 與定向 errors。Values 使用完整 canonical typed paths，不是 lowered native cfg。完整 Form errors 另列在最外層，包含 participants 錯誤。某個元素 invalid 不會隱藏其他元素。RPC 只序列化 owner 的 aggregate，不逐元素 describe/read 拼接，不改 picker、focus、capture 或草稿。Busy 與 observer reads 仍可用。可選 `fields` 是元素相對 logical typed paths，例如 `[["drive", "gain"], ["sweep", "start"]]`。每個 row 的 `fields` 按請求順序回同一 owner turn 的 RecipeFieldObservation，包含 FixedElements identity、ref source、value_status 與 errors。省略 fields 保留原 aggregate。錯誤 carrier/path 沿既有 Form 錯誤投影。
 
@@ -154,6 +154,12 @@ Diagnostics are separate from EventBus. The controller pushes diagnostics to the
 remote adapter sink, which broadcasts diagnostic payloads to clients regardless
 of subscription. Measure MCP does not subscribe, queue or piggyback events.
 Agent-visible async completion comes from operation request/reply, not pushes.
+
+Run 完成不保存 raw。RPC 呼叫 `tab.save_data` 才保存 raw；recipe worker 的保存也是顯式呼叫。
+`tab.snapshot`、`tab.analyze` 的 start reply 與 source-bound analysis result 的 `operation_state`
+提供 `raw_data: {run_id, saved}`。這個 run_id 是固定 Run／Load metadata 的身分，保存前就存在。
+Saved 只反映 measurement_data 在 owner tracker 是否全部保存，不查檔案是否仍存在。
+保存 analysis 不會把 raw 的 saved 改成 true。原本頂層 run_id 仍只在至少一個持久輸出成功後出現。
 
 `tab.save_data` and `tab.save_artifacts` complete synchronously on the GUI owner
 thread. They return the current complete Save report with the original Run ID,

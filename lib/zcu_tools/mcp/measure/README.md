@@ -211,6 +211,8 @@ uv run --directory <lane> --no-sync -- pytest -q -n0 tests/mcp/measure/test_reci
 
 Recipe 以 `yield from ask(run.propose_writeback())` 提出 completed capture 的寫回候選，交還控制權並等待回答。`answer(recipe, decision)` 的 recipe 是 execution ID，decision 為 accepted 或 skipped；它只回答，不寫入也不授權。普通 `tab.accept(items)` 寫 GUI 當前 draft。摘要的 `question_items`／`question_preview` 是 active question，`writeback.receipts` 則列出實際寫入與失敗前綴；兩者不能互相冒充。Query 只讀 local capture。Session close 喚醒並收束 generator finally。
 
+Run 完成不保存 raw。RPC 呼叫 `tab.save_data` 才保存 raw；recipe 以顯式保存步驟處理，Run owner 不替作者保存。`tab_analyze` 不補存 raw。它的摘要 `raw_data: {run_id, saved}` 保留 GUI 對該 Run／Load 的 raw 觀察。run_id 是保存前就有的 acquisition identity，saved 只在 measurement_data 全部保存時為 true。這個旗標與 analysis artifact 的保存結果分開。尚未捕捉到 owner 觀察時 raw_data 為 null。`status(execution)` 重用這次 capture，不查目前 tab。
+
 `tab_analyze` 在既有資料上啟動 Primary 或 Post 分析。Execution 捕捉結果、實際參數、失效內容、完整 analysis artifact 的 Save report、當次 image content 及 writeback 候選。互動分析立即交接 tab、op、狀態、可用命令與圖像。
 
 Analysis completion 等原 GUI operation 完成，同步保存完整 analysis artifact，再以原 opaque operation 讀一次 writeback preview。沒有圖像也讀候選。Interactive handoff 不 capture，`done` 加入原 completion，完成後才 capture 定案 draft。屬於 recipe 的 done 等待該 recipe 的下一個結果／提問，不回另一個 analysis execution；standalone 保持原路徑。Recipe 分析由自己的 worker 完成同一份 capture，不另建等待 worker，也不另讀候選。Full 的 writeback 為 null 表示尚未取得；has_draft=false／items=[] 才是已確認空 draft。Read 失敗以 writeback_read error 回報，保留已知 result、當次 Save report 及可用 image content。來源 superseded 不改讀新 pane，不 retry，也不重新授權。Recipe wait 在 done 後等待本地 completion，交付完成的分析或下一個提問。
