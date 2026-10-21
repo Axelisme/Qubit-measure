@@ -58,7 +58,7 @@ The numerical core leaves component bindings and writeback to its caller.
 Example with validated cfg, RunContext and fresh analysis_plots::
 
     from zcu_tools.experiment.records import RunRecord
-    from zcu_lab.v2.mux.freq import MuxFreqExp
+    from zcu_lab.v2.mux.twotone_spectrum import MuxFreqExp
 
     core = MuxFreqExp()
     result = core.run(cfg, context=context)
