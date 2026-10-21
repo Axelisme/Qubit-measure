@@ -60,7 +60,9 @@ def test_ge_boundary_peak_recovers_mixed_populations_without_an_outer_tail(swap_
     try:
         fitted, covariance = fit_singleshot(xs, ground, excited)
     except ValueError as error:
-        pytest.fail(f"A finite boundary-peak histogram must fit without NaN width: {error}")
+        pytest.fail(
+            f"A finite boundary-peak histogram must fit without NaN width: {error}"
+        )
     expected = truth if not swap_labels else (1.0, -1.0, 0.3, 0.65, 0.35, 0.8, 0.3)
     np.testing.assert_allclose(fitted, expected, atol=0.03)
     assert np.isfinite(covariance).all()
@@ -73,7 +75,9 @@ def test_ge_rejects_nonfinite_supplied_initial_parameters(invalid):
     ground = calc_population_pdf(xs, *truth)
     excited = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
     with pytest.raises(ValueError, match="initial.*finite"):
-        fit_singleshot(xs, ground, excited, fitparams=[-1.0, 1.0, invalid, 0.65, 0.35, 0.2, 0.3])
+        fit_singleshot(
+            xs, ground, excited, fitparams=[-1.0, 1.0, invalid, 0.65, 0.35, 0.2, 0.3]
+        )
 
 
 def test_fit_singleshot_no_raise_when_s_exceeds_xs_range():

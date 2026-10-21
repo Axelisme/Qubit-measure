@@ -217,6 +217,20 @@ class GEAnalyzeOptions:
 
 @dataclass(frozen=True)
 class GEAnalysis:
+    """Prepared-label assignment and model-based GE calibration estimates.
+
+    initial_state maps probe off/on to predominantly g/e preparation rows, not
+    pure states. fidelity is the empirical equal-weight prepared-label assignment
+    score at the contrast-maximizing histogram edge, not latent pure-state readout
+    fidelity. theta rotates IQ by exp(1j*theta), in radians; threshold is the
+    selected edge in rotated ADC units. ge_s and g_center/e_center are fitted
+    width and original-frame complex centers in normalized ADC units.
+    init_pops is the fitted (2,2) g/e population matrix for the preparation rows.
+    fit_quality describes those histogram fits, or None when unavailable.
+    Poor histogram residuals make populations and the population-corrected post
+    confusion matrix unreliable even when empirical assignment is high.
+    """
+
     initial_state: Literal["ground", "excited"]
     fidelity: float
     theta: float
@@ -398,7 +412,10 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
 
         source contains probe-off/on IQ shaped (2, N), in normalized ADC units.
         options.initial_state maps the rows to physical G/E. Return fitted
-        centers, width, initial populations and readout fidelity; publish the
+        centers, width, model populations and empirical prepared-label assignment
+        fidelity, which includes preparation mixing and is not pure-state readout
+        fidelity. Poor histogram fit quality makes model populations and post
+        population correction unreliable. Publish the
         distribution fit to plots as figure_name. cfg=None is supported.
 
         Rotation/classification, histogram fitting, fitted population/center

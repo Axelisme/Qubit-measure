@@ -55,6 +55,22 @@ Post shows a per-qubit 3x3 g/e/other diagnostic with an isolated-other row.
 An infinite condition number or unresolved clusters makes it unsuitable for
 calibration. Four-state joint assignment needs a separate calibration.
 
+## Assignment and model quality
+
+Fidelity assigns the two prepared labels using their best projected-IQ histogram
+boundary, with equal preparation weights. Probe off/on need not be pure g/e
+states. The score includes thermal mixing and pulse errors. A threshold can
+exploit small within-cluster differences; it is not latent pure-state readout
+fidelity.
+
+Initial populations come from the histogram fit. Post-analysis uses nearest-center
+regions and a radius, then solves the fitted population matrix to remove
+preparation mixing. It does not use the primary histogram threshold. Low joint
+r2 makes fitted populations and the corrected post matrix unreliable, even if
+the two raw clusters look separate or the prepared-label score is high.
+Inspect each tone's raw IQ, residuals and uncertainties before applying a
+calibration. A numerical fit alone is not evidence that the model is adequate.
+
 ## Writeback
 
 A successful, finite primary row must pass the GE calibration validity check.

@@ -18,6 +18,23 @@ These starting values remain editable and separate from calibration writeback. A
 
 Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.reset` for optional reset, and `$qubit.module.readout` for readout. Missing required slots use pi_pulse/readout templates; missing optional slots stay disabled. Run uses the Open/Reset snapshot.
 
+## Assignment and model quality
+
+Fidelity is the empirical, equal-weight assignment of the two prepared labels at
+the best projected-IQ histogram boundary. Probe off/on are preparation labels,
+not guaranteed pure g/e states. Thermal mixing and imperfect pulses remain in
+this score. A threshold can also exploit small differences inside one cluster;
+a high prepared-label score does not establish pure-state readout fidelity.
+
+Initial populations come from the fitted histogram model. Post-analysis instead
+classifies shots by nearest-center regions and a radius, then solves the fitted
+population matrix to remove preparation mixing. It does not reuse the primary
+histogram threshold. These outputs need not equal the prepared-label score.
+Low joint r2 means the histogram model does not describe the observations;
+then fitted populations and population-corrected post results are not reliable
+calibration evidence. Inspect raw clusters, residuals and uncertainty before
+using centers, width or the confusion matrix.
+
 ## Typical writeback
 
 Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.

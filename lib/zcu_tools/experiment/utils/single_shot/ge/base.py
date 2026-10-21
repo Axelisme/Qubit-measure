@@ -137,15 +137,27 @@ def fidelity_func(tp: float, tn: float, fp: float, fn: float) -> float:
 def calc_fidelity(
     ng: NDArray[np.float64], ne: NDArray[np.float64], bins: NDArray[np.float64]
 ) -> tuple[float, float]:
+    """Return empirical preparation-assignment fidelity and its threshold edge.
+
+    ng/ne are normalized histogram masses, shape (N,), for equally weighted
+    preparations. bins contains their common increasing N+1 edges in the same
+    units as the projected IQ. Select the edge maximizing cumulative contrast.
+    Score both possible label orientations and return the larger correct fraction;
+    swapping preparation rows or reflecting the axis preserves that score.
+    The threshold is bins[split]: histogram entries [:split] lie below it,
+    entries [split:] above.
+    This score includes preparation mixing and is not pure-state readout fidelity.
+    """
     cum_ng, cum_ne = np.cumsum(ng), np.cumsum(ne)
     contrast = np.abs(2 * (cum_ng - cum_ne) / (ng.sum() + ne.sum()))
     tind = contrast.argmax()
 
-    tp, fp = ng[tind:].sum(), ne[tind:].sum()
-    tn, fn = ng[:tind].sum(), ne[:tind].sum()
+    split = tind + 1
+    tp, fp = ng[split:].sum(), ne[split:].sum()
+    tn, fn = ng[:split].sum(), ne[:split].sum()
     fid = fidelity_func(tp, tn, fp, fn)
 
-    return fid, float(0.5 * (bins[tind] + bins[tind + 1]))
+    return fid, float(bins[split])
 
 
 def calc_ideal_fidelity(sg: float, se: float, s: float) -> float:
@@ -382,7 +394,7 @@ def fitting_ge_and_plot(
     axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
 
     axs[1][0].set_title(
-        r"${F}_{ge}: $" + f"{fid:.1%} / {1e2 * ideal_fid:.3g}%", fontsize=14
+        f"Prepared assignment: {fid:.1%}; ideal model: {ideal_fid:.1%}", fontsize=12
     )
 
     _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
