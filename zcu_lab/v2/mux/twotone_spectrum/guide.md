@@ -1,8 +1,8 @@
-# Mux qubit frequency
+# Mux two-tone spectrum
 
 ## GUI setup
 
-Open `mux/freq` from **New Tab** after binding `$mux` to a MuxGroup.
+Open `mux/twotone_spectrum` from **New Tab** after binding `$mux` to a MuxGroup.
 The capture must contain every qubit and its matching resonator in readout order.
 Readout references `$mux.module.readout` when present, preserving the library's tones and scalar settings.
 The stored module must use the mux family with the full group tone count.
@@ -79,7 +79,7 @@ not a row in Participants and not a name key.
 
 ```python
 from zcu_tools.experiment.records import RunRecord
-from zcu_lab.v2.mux.freq import MuxFreqExp
+from zcu_lab.v2.mux.twotone_spectrum import MuxFreqExp
 
 core = MuxFreqExp()
 result = core.run(cfg, context=context)
@@ -103,9 +103,9 @@ outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
 ## Adapter source and proposals
 
 `MuxFreqAdapter` in `gui.py` connects the core to explicit Run/Load sources.
-Its native generated Form is registered as `mux/freq`.
-The registered MCP recipe is `mux_freq`. See the
-[mux recipe guide](../../../recipes/mux-guide.md#mux_freq)
+Its native generated Form is registered as `mux/twotone_spectrum`.
+The registered MCP recipe is `mux_twotone_spectrum`. See the
+[mux recipe guide](../../../recipes/mux-guide.md#mux_twotone_spectrum)
 for typed overrides, origins, source-bound reporting and explicit writeback decisions.
 
 Its summary lists each acquired tone's original `position`, source `name`, fit

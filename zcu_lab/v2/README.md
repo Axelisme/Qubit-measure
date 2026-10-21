@@ -37,7 +37,7 @@ Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。Mux Forms 的 fa
 
 ## Mux qubit numeric cores
 
-`mux/freq` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。
+`mux/twotone_spectrum` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。
 兩個 `run()` 各自在 core 直接寫出掃描與 pulse 序列，每點 compile 一次。
 共同 reset 後，既有 Join 讓 drives 同時起跑，短 branch 完成後等待當點最長 branch，
 再做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。

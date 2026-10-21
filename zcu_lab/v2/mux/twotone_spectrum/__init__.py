@@ -1,4 +1,4 @@
-"""Core-only mux freq exports; no GUI imports or registration."""
+"""Core-only mux two-tone spectrum exports; no GUI imports or registration."""
 
 from .core import MuxFreqCfg, MuxFreqExp, prepare_frequency_scan
 
