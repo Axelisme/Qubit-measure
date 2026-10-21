@@ -69,11 +69,12 @@ Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。Mux Forms 的 fa
 [mux recipe guide](../recipes/mux-guide.md)。
 各 leaf guide 說明 GUI、保存來源及 explicit Apply 操作，core 本身仍不依賴 GUI。
 
-`_support.mux_liveplot.draw_mux_magnitudes` 為七個實驗提供 combined `measurement` 圖，
-保留原有 `measurement_i`。Legend 取自 source cfg 原始 index/name，順序跟 participants。
-每線保留自己的 actual x；delay 類共用 requested-delay 軸，GE 另標 probe off/on。
-Helper 先複製本次座標、magnitude 及標籤，再經公開 `Plots.draw` 在 host owner 繪圖。
-Worker 不持有 active artists。它不讀 Form、改 acquisition 或將 partial NaN 補成零。
+Mux 實驗（onetone_find 除外）每個參與 tone 各有一張 `measurement_i`，
+不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
+requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩個 preparation。
+`_support.singleshot.plot.draw_ge_scatter` 供單 qubit 與 mux GE 共用，先複製 IQ，
+再經公開 `Plots.draw` 在 host owner 繪圖。Worker 不持有 active artists，
+partial NaN 不補零。
 
 七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[str]`。
 每個元素有固定 qubit `name` 與必填 drive；pulse sweep 類另有自己的 sweep，

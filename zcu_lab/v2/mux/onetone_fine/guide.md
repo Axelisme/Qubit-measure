@@ -31,8 +31,8 @@ Run 使用 tab 在 Open 或 Reset 時捕捉的參數來源。
 其後修改 aliases、group resonators 或 library，現有 draft 仍保留原來源。
 需要新來源時執行 Reset，這會重建初值。Active tones 只決定本次量測範圍，完整 readout 保留全部 tones。
 
-Live 圖以共同 offset 為橫軸，顯示 K 條 active magnitude 曲線。
-Legend 使用原始 tone label，空 label 顯示原始序號，例如 `tone 2`。Label 可以重複。
+Live 圖以共同 offset 為橫軸，每個 active tone 各有一張 `measurement_i` magnitude 圖。
+標題使用原始 tone 序號與 label，空 label 顯示例如 `tone 2`。Label 可以重複。
 資料軸使用原始 tone 序號。停止後保留已取得資料，未取得點保持 NaN。
 失敗操作即使取得部分資料，仍保留失敗狀態。
 

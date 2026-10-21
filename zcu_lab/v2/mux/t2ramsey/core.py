@@ -153,7 +153,6 @@ from zcu_lab.v2._support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
@@ -236,7 +235,10 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         # 2. Plot requested delay for each original tone, including partial data.
         viewers = [
             context.plots.liveplot_1d(
-                f"measurement_{index}", "Requested delay (us)", "Magnitude (a.u.)"
+                f"measurement_{index}",
+                "Requested delay (us)",
+                "Magnitude (a.u.)",
+                title=f"{index}: {cfg.tones[index].name}",
             )
             for index in indices
         ]
@@ -244,16 +246,6 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         def update(data: NDArray[np.complex128]) -> None:
             for row, viewer in enumerate(viewers):
                 viewer.update(times, np.abs(data[row]))
-            draw_mux_magnitudes(
-                context.plots,
-                np.broadcast_to(times, data.shape),
-                data,
-                [
-                    f"{index}: {tone.name}"
-                    for index, tone in zip(indices, tones, strict=True)
-                ],
-                "Requested delay (us)",
-            )
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
         with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
