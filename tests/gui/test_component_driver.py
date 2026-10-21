@@ -677,3 +677,45 @@ def test_choice_operations_reject_wrong_selector_and_ignore_unavailable_widgets(
     driver.choose_option(object_name="choice", value="Two")
     driver.invoke_context_action(object_name="choice", action="Copy choice")
     assert driver.observe(object_name="choice_status").text == "Ready"
+
+
+def test_object_name_prefers_visible_tab_without_weakening_ambiguity_or_hidden_gates(
+    surface, qapp, tmp_path
+) -> None:
+    tabs = surface.centralWidget()
+    hidden_page = QWidget()
+    layout = QFormLayout(hidden_page)
+    hidden_field = QLineEdit("hidden draft")
+    hidden_field.setObjectName("sample_name")
+    layout.addRow("Other sample:", hidden_field)
+    hidden_button = QPushButton("Hidden duplicate")
+    hidden_button.setObjectName("first")
+    layout.addRow(hidden_button)
+    tabs.addTab(hidden_page, "Other")
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    assert driver.observe(object_name="sample_name").text == "original"
+    driver.enter_text(object_name="sample_name", value="visible edit")
+    driver.screenshot(tmp_path / "01-visible-edit.png")
+    assert driver.status().text == "Committed: visible edit"
+    driver.click(object_name="first")
+    driver.select_tab("Other")
+    driver.screenshot(tmp_path / "02-other-tab.png")
+    assert driver.observe(object_name="sample_name").text == "hidden draft"
+    # Two simultaneously visible controls still cannot be selected by this name.
+    duplicate = QLineEdit("second visible")
+    duplicate.setObjectName("sample_name")
+    layout.addRow(duplicate)
+    qapp.processEvents()
+    with pytest.raises(LookupError, match="sample_name.*2 candidates"):
+        driver.enter_text(object_name="sample_name", value="ambiguous")
+    duplicate.hide()
+    hidden_field.hide()
+    qapp.processEvents()
+    with pytest.raises(LookupError, match="sample_name.*3 candidates"):
+        driver.observe(object_name="sample_name")
+    assert not driver.observe(object_name="hidden_action").visible
+    driver.click(object_name="hidden_action")
+    driver.select_tab("Run")
+    driver.screenshot(tmp_path / "03-hidden-noop.png")
+    assert driver.status().text == "Committed: visible edit"
