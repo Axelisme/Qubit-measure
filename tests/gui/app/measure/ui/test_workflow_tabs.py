@@ -95,6 +95,7 @@ def workflow_window(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
     ctrl.add_view(window)
+    window.refresh_context_panel()
     window.show()
     qapp.processEvents()
     try:
