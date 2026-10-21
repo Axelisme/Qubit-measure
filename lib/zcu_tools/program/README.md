@@ -1,6 +1,8 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-18, acquisition drift review
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
 這份筆記整理 `lib/zcu_tools/program` 對 QICK 的實際依賴，目的是讓後續開發能快速定位「應該看哪個 QICK 類別/方法」，而不用每次從頭追。
 
@@ -49,7 +51,7 @@
   - `jump()` / `cond_jump()` 會產生 `{"CMD": "JUMP", "LABEL": ...}`。
   - `call()` 會產生 `{"CMD": "CALL", "LABEL": ...}`。
   - 大 program memory 模式可能先用 `REG_WR` + `SRC: "label"` / `LABEL` 寫入 `s15`，再用 `ADDR: "s15"` 跳轉。
-- 因此 IR parser 不應只用 `"LABEL" in dict` 判斷為 label definition；有 `CMD` 時應保留為 instruction 並把 `LABEL` 視為 reference。
+- IR parser 以 `CMD` 區分 label 的用途。有 `CMD` 時保留 instruction 並把 `LABEL` 視為 reference；只有 label definition 才建立標籤。
 
 ## IR pass 維護注意事項
 

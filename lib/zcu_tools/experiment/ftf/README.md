@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-10-21
 
+**讀者：** lab-author。FTF 環境的組裝、數值接線與 acquisition 設定。
+
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, uses each source name as its explicit FakeDevice address,

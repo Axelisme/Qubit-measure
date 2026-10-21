@@ -1,6 +1,8 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-18, tone-ordered raw IQ acquisition
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。語意 program modules 的角色、組裝與邊界。
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module

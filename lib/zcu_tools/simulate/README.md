@@ -1,6 +1,8 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-20，mux raw／trace 共用完整 CTMC 路徑
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。數值模擬工具與各子模組的責任邊界。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium

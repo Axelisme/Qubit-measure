@@ -1,6 +1,8 @@
 # Circuit design
 
-**Last updated:** 2026-09-27
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。電路幾何元件與設計檔輸出工具的模組導覽。
 
 這裡放 Qiskit Metal 的電路幾何元件。`fillet_q.py` 定義帶圓角焊盤的 qubit，`round_tee.py` 定義 T 形耦合元件，`self_define.py` 定義 Cross 等幾何元件。[`notebook_md/circuit_design/R59_C1,1_3Q.md`](../../../../notebook_md/circuit_design/R59_C1,1_3Q.md) 使用這些元件建構平面電路，透過 Qiskit Metal 的 GDS renderer 輸出 `.gds` 設計檔，並展示 HFSS / Q3D 模擬設定。[`notebook_md/circuit_design/utils.md`](../../../../notebook_md/circuit_design/utils.md) 示範依目標頻率與線寬估算耦合長度。
 

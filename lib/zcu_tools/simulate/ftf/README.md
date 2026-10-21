@@ -1,6 +1,8 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-18, bounded exact physical memo
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。固定座標 FTF 數值模型、路由與快取契約。
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their

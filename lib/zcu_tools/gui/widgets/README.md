@@ -1,6 +1,8 @@
 # Shared GUI widgets
 
-**Last updated:** 2026-10-20, neutral file-dialog paths
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。跨 app 共用的 Qt 呈現元件與宿主邊界。
 
 `gui.widgets` owns app-independent Qt presentation helpers. Hosts keep domain
 state and commands. The shared Form editor has its own [README](form/README.md).
