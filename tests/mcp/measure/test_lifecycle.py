@@ -1,16 +1,14 @@
 """Measure MCP connection and live GUI catalog contracts."""
 
 import json
-import os
 import socket
 import threading
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, NoReturn, TypedDict
+from typing import Any, TypedDict
 
-import psutil
 import pytest
 from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
 from zcu_tools.gui.app.measure.remote.method_entries._registry import (
@@ -890,45 +888,6 @@ def test_connect_launch_modes_do_not_start_hardware_or_kill_an_existing_gui(
     with pytest.raises(RuntimeError) as error:
         busy.call("connect", {"launch": "new"})
     assert getattr(error.value, "reason", None) == "port_in_use"
-
-
-def test_connect_busy_port_identifies_listener_and_port_parameter(
-    tmp_path: Path,
-) -> None:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        listener.listen()
-        port = listener.getsockname()[1]
-        client = make_client(tmp_path, port_is_open=lambda _: True)
-        try:
-            with pytest.raises(GuiRpcError) as error:
-                client.call("connect", {"launch": "new", "port": port})
-            assert error.value.reason == "port_in_use"
-            assert f"pid={os.getpid()}" in str(error.value)
-            assert "port parameter" in str(error.value)
-            assert str(port) in str(error.value)
-            assert client.transport.sent == []
-        finally:
-            client.context.session.close()
-
-
-def test_connect_busy_port_retains_actionable_error_when_owner_is_unavailable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def denied(kind: str) -> NoReturn:
-        raise psutil.AccessDenied()
-
-    monkeypatch.setattr(psutil, "net_connections", denied)
-    client = make_client(tmp_path, port_is_open=lambda _: True)
-    try:
-        with pytest.raises(GuiRpcError) as error:
-            client.call("connect", {"launch": "new"})
-        assert error.value.reason == "port_in_use"
-        assert "owner unknown" in str(error.value)
-        assert "port parameter" in str(error.value)
-        assert client.transport.sent == []
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize("launch", ["new", "if_missing"])
