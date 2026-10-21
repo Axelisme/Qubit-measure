@@ -63,7 +63,9 @@ parameter errors retain their existing predictor reasons in `method_entries`.
 
 ## Library creation
 
-`context.ml_create_from_role(role_id, name, edits=...)` 先將可選的 Form path/value edits 套入 template input，再驗證及寫入。需要必填欄位的 role，例如 readout/mux:blank 的 tones，使用 edits 補齊。路徑、值或整體 Form 無效時回 invalid_params，data.errors 列出 path/message，library 不變。
+`context.ml_create_from_role(role_id, name, edits=...)` 使用 `component.partition.name` 名稱。Module partition 接受 pulses、readout、reset；waveform 使用 waveforms。它先將 Form path/value edits 套入 template input，再驗證及寫入。Blank pulse／readout 不填通道、gain 或時長，使用 edits 補齊必填欄位。Pulse waveform 時長的 Form 路徑是 `["waveform", "module", "length"]`，不是 YAML 的 waveform.length。Mux tone 使用 `["tones", index, "ro_ch"]`。Describe 列出主要必填欄位與路徑。路徑、值或整體 Form 無效時回 invalid_params，data.errors 列出 path/message，library 不變。明填值的 generator／ADC capability 相容性由 Run admission 檢查。
+
+帶佔位符的 role 使用固定 capture 的同名 resolved aliases。例如 qub_probe 要先在 Aliases 綁定 qubit。Name 的 component 不決定 alias；缺必要 alias 時回 invalid_params 並指名要綁定的名稱。`context.set_parameter(path="MG12.module.readout", value="MG12.readout.mux_ro")` 可建立缺失的 module slot，也可用 MG12.module 整份 mapping 寫入。回覆的 before 是原始 slot 值，不 materialize module。
 
 ## Form commands
 

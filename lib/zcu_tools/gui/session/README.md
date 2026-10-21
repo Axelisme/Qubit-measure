@@ -17,7 +17,7 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 
 模板綁定由呼叫端在 `Template.bindings` 明填。
 Inspect 的 New 以目前 point 的同名 alias 解析目標填入 bindings。缺少或無法解析的 alias 顯示綁定錯誤並停用 Create，切換範本重新載入。
-其他 library 新建 caller 仍須明填，缺 binding 在展開時報 `ValueError`。
+其他 library 新建 caller 仍須明填，缺 binding 在展開時報 `ValueError`。Measure RPC 的建立 caller 也使用固定 capture 的同名 resolved aliases，缺列或未綁定時先指名所需 alias，不由 entry 名稱推測角色。
 
 ## Context、session environment 與 Run snapshot
 
