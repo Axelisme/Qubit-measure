@@ -63,7 +63,7 @@ FTF 範本先放 `qubit: Q1`，再放 `resonator: $qubit.resonator` 與 `flux_de
 
 在 GUI 開啟 Inspect 的 Aliases 頁，把 `qubit` 改成 `Q2`，再按 Apply。`resonator` 與 `flux_dev` 會分別解析成 `R2` 與 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。Alias 綁定裝置名稱不會連線或建立 device。
 
-Apply 保存目前 point 的 `points/initial/aliases.yaml`。切到另一個 point 會載入另一張表，缺檔時是空表，不回退到 setup 或 preset。Load preset 只改 draft，按 Apply 才保存。Alias 解析與保存細節見 [context 與 Run snapshot](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot)。
+Apply 保存目前 point 的 `points/initial/aliases.yaml`。切到另一個 point 會載入另一張表，缺檔時是空表，不回退到 setup 或 preset。Alias 解析與保存細節見 [context 與 Run snapshot](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot)。
 
 既有 tab 不會因 alias 改變而更新 input。重新 Open 或 Reset，表單才會從新的 alias 表擷取初值。Alias rows 也不是 `Template.bindings`，不替表單補模板佔位符。範本與初值的 author 契約見 [measure adapter authoring](../v2/measure-authoring.md#目錄佈局)。
 

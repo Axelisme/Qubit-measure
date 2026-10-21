@@ -40,15 +40,20 @@ def power_map(
     or invalid cfg stops Run. Cancelled acquisition skips save and preview.
     This recipe performs no fit or writeback.
     """
+    # Prepare a tab with the requested fixed alias capture.
     if target is not None and not target.strip():
         raise ValueError("target must be a non-empty string or null")
     tab = session.open_tab(
         "twotone/power_map",
         aliases=None if target is None else {"qubit": target},
     )
+
+    # Measure with the tab inputs; cancellation skips persistence.
     result = yield from tab.run_step()
     if result.status == "cancelled" or result.run is None:
         return
+
+    # Save raw IQ and capture the Run preview without fitting.
     result.run.save_raw()
     result.run.preview()
 
@@ -118,7 +123,8 @@ recipe_guide(recipe="power_map")
 工具回覆 `recipe="power_map"`、`adapter="twotone/power_map"` 與 `guide`。
 `guide.markdown` 是 adapter 的 `guide.md` 全文，
 `guide.resource_dir` 是 GUI host 上該檔案目錄的絕對路徑。
-沒有宣告 guide 時，`guide` 為 null；跨機 client 不一定能存取那個目錄。
+沒有宣告 guide 時，`guide.markdown` 仍回傳「尚未撰寫」預設文字，只有 `guide.resource_dir` 為 null。
+跨機 client 不一定能存取 GUI host 上的資源目錄。
 工具不執行量測、不讀圖片，也不把 Python recipe docstring 當成 guide。
 Guide 查詢契約見 [setup 工具](../../lib/zcu_tools/mcp/measure/README.md#setup-工具)。
 
