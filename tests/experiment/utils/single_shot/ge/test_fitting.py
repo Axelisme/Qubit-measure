@@ -11,10 +11,26 @@ from zcu_tools.experiment.utils.single_shot import ge
 from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
 from zcu_tools.experiment.utils.single_shot.ge.base import (
     GEFitOptions,
+    calc_fidelity,
     fitting_ge_and_plot,
     hist,
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+
+@pytest.mark.parametrize("swap_rows", [False, True])
+@pytest.mark.parametrize("reflect_axis", [False, True])
+def test_assignment_fidelity_scores_the_selected_histogram_edge(swap_rows, reflect_axis):
+    ground = np.array([0.8, 0.1, 0.1])
+    excited = np.array([0.1, 0.1, 0.8])
+    if swap_rows:
+        ground, excited = excited, ground
+    if reflect_axis:
+        ground, excited = ground[::-1], excited[::-1]
+    fidelity, threshold = calc_fidelity(ground, excited, np.array([0.0, 1.0, 2.0, 3.0]))
+    # Either interior edge separates 80% of one preparation from 90% of the other.
+    assert fidelity == pytest.approx(0.85)
+    assert threshold in (1.0, 2.0)
 
 
 @pytest.mark.parametrize("title", [None, "Prepared populations"])
