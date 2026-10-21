@@ -25,7 +25,12 @@ class JointFockDiagnostic:
         Dynamic levels outside these indices are omitted without a bath sink.
         RWA coefficients are built on the FULL model before selecting indices.
 
-    Invalid indices, port or gains raise ValueError. This is a numerical
+    step_ns: fixed RK4 step upper bound in ns for all numeric preparation and
+        probe segments; finite 0 < step_ns <= 1, default 1 ns. Each segment
+        uses ceil(duration / step_ns) equal steps. No automatic reduction or
+        retry occurs; nonfinite densities raise FloatingPointError.
+
+    Invalid indices, port, gains or step_ns raise ValueError. This is a numerical
     diagnostic, not an acquisition backend or a pure truncation-error control:
     it changes analytic one-jump preparation to numeric vacuum/pi/prefill/probe,
     and includes physical vacuum in the sampled coherent cutoff heuristic.
@@ -36,6 +41,7 @@ class JointFockDiagnostic:
     pi_gain: float
     probe_gain: float
     retained_indices: tuple[int, ...] = (0, 1, 2, 3)
+    step_ns: float = 1.0
 
     def __post_init__(self) -> None:
         if self.retained_indices not in ((0, 2), (0, 1, 2, 3)) or max(
@@ -46,6 +52,8 @@ class JointFockDiagnostic:
             raise ValueError("drive_port must index model.drives")
         if not np.isfinite([self.pi_gain, self.probe_gain]).all():
             raise ValueError("diagnostic gains must be finite")
+        if not np.isfinite(self.step_ns) or not 0 < self.step_ns <= 1:
+            raise ValueError("step_ns must be finite and satisfy 0 < step_ns <= 1")
 
 
 @dataclass(frozen=True)
