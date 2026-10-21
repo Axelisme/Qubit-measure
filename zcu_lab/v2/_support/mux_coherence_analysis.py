@@ -6,6 +6,8 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import (
     FitQuality,
+    FringeSamplingQuality,
+    assess_fringe_sampling,
     compute_fit_quality,
     fit_decay,
     fit_decay_fringe,
@@ -21,6 +23,9 @@ class MuxCoherenceFit:
     time and one-sigma error in us. detune/detune_err are fitted fringe rate/error
     in MHz, zero for decay. quality describes the fitted observations, parameters
     and covariance. fit_fringe is True for a damped cosine, False for a decay.
+    sampling_quality describes delay-grid density relative to the fitted fringe
+    and caller-supplied known frequency lower bound; it is None for decay.
+    Adequate sampling does not exclude unknown higher-frequency aliases.
     Actual detune and source frequency remain in the measurement Result.
     """
 
@@ -31,6 +36,7 @@ class MuxCoherenceFit:
     detune_err: float
     quality: FitQuality
     fit_fringe: bool
+    sampling_quality: FringeSamplingQuality | None
 
 
 @dataclass(frozen=True)
@@ -86,6 +92,7 @@ def fit_coherence_trace(
     *,
     fit_fringe: bool,
     phase: float | None,
+    expected_frequency_mhz: float | None,
 ) -> tuple[MuxCoherenceFit, NDArray[np.float64]]:
     """Fit projected IQ to a damped cosine or exponential and return its curve.
 
@@ -93,7 +100,10 @@ def fit_coherence_trace(
     the matching projected IQ. fit_fringe selects the damped cosine. phase fixes
     its phase in degrees; None fits phase freely. Decay ignores phase. Return
     T2/error in us, fringe rate/error in MHz and fit quality, plus the predicted
-    real IQ at each trace time. Numeric fit errors propagate; nonfinite estimates
+    real IQ at each trace time. expected_frequency_mhz is a finite known alias-risk
+    lower bound in MHz, or None when unknown; decay ignores it. Fringe sampling
+    quality uses the fitted trace's masked delays, not the full raw delay grid.
+    Numeric fit errors propagate; nonfinite estimates
     raise ValueError. Inputs are not changed and no plotting occurs.
     """
     # Fit with the caller's numeric phase choice, never an experiment name.
@@ -132,6 +142,9 @@ def fit_coherence_trace(
             float(detune_error),
             quality,
             fit_fringe,
+            assess_fringe_sampling(trace.times, float(detune), expected_frequency_mhz)
+            if fit_fringe
+            else None,
         ),
         fitted,
     )

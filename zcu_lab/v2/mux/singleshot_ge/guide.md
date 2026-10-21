@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run simultaneous mux GE readout from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## GUI setup
 
@@ -26,6 +26,25 @@ appear on the Tones row. Select that element and correct it to enable Run.
 Recovery delay is shared. Recovery initially uses five times
 the largest captured T1, with the default for missing T1 values. A stored invalid
 T1 leaves recovery blank for correction.
+
+## FTF cost example
+
+A two-participant offline Run used 300 shots per preparation, two preparations,
+0.02 us const probe pulses and 0.1 us recovery. Reps and rounds stayed fixed
+at 1. The recorded Run action took 6.118 s for the pair, about 3.06 s per
+preparation. There is no frequency or delay sweep point here.
+This preparation average is not per-shot acquisition latency.
+
+The timer includes the ComponentDriver button action, terminal wait and
+screenshots. It is not acquisition-only time and excludes Analyze and Save.
+Do not compare it with timings from other slots or experiments as a speed test.
+Shot count controls raw data volume and hardware repetitions. Preparation count,
+init/probe lengths, participants, reset, recovery and readout windows affect cost.
+FTF compilation and cache reuse can dominate the first Run, so do not extrapolate
+linearly from shots or assume hardware reps/rounds scaling describes simulation.
+Start with a small shot count and inspect both clouds before collecting more.
+Both tone fits failed in this uncalibrated example with an initial-guess bounds
+error. The raw clouds remain evidence of acquisition, not accepted fidelity.
 
 ## Measurement and analysis
 
@@ -55,7 +74,30 @@ Post shows a per-qubit 3x3 g/e/other diagnostic with an isolated-other row.
 An infinite condition number or unresolved clusters makes it unsuitable for
 calibration. Four-state joint assignment needs a separate calibration.
 
+## Assignment and model quality
+
+Fidelity assigns the two prepared labels using their best projected-IQ histogram
+boundary, with equal preparation weights. Probe off/on need not be pure g/e
+states. The score includes thermal mixing and pulse errors. A threshold can
+exploit small within-cluster differences; it is not latent pure-state readout
+fidelity.
+
+Initial populations come from the histogram fit. Post-analysis uses nearest-center
+regions and a radius, then solves the fitted population matrix to remove
+preparation mixing. It does not use the primary histogram threshold. Low joint
+r2 makes fitted populations and the corrected post matrix unreliable, even if
+the two raw clusters look separate or the prepared-label score is high.
+Inspect each tone's raw IQ, residuals and uncertainties before applying a
+calibration. A numerical fit alone is not evidence that the model is adequate.
+
 ## Writeback
+
+Primary candidates are initially selected only when joint r2 is at least 0.9,
+normalized residual RMS at most 0.1 and relative width error at most 0.5.
+Post radius/confusion also require a finite condition number at most 10.
+Required missing/nonfinite metrics or their invalid issues leave candidates
+unselected with notes. Unrelated fixed-zero parameter issues do not reject them.
+You may select a candidate manually after inspecting the model and raw IQ.
 
 A successful, finite primary row must pass the GE calibration validity check.
 Its candidates update `ext.readout_cal.fidelity`, `sigma`, `g_center` and
@@ -65,10 +107,10 @@ Review cluster separation, quality, confusion diagnostics and destination.
 
 ## Results and saved sources
 
-Run draws a combined `measurement` figure.
-Each original tone has probe-off/on lines on the shot-index axis.
-Legends show the original index and source name in Participants order.
-Individual `measurement_i` figures remain available.
+Run draws one `measurement_i` IQ scatter per participant.
+Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
+These preparations may contain state mixtures; they are not classified shots.
+Analyze draws each participant's raw IQ clouds in `fit_i`.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i` and the Post figure picker for `post_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.

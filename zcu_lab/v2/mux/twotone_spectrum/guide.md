@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run the mux qubit frequency sweep from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## GUI setup
 
@@ -27,6 +27,27 @@ Reps, rounds and recovery delay are shared. Recovery initially uses five times
 the largest captured T1, with the default for missing T1 values. A stored invalid
 T1 leaves recovery blank for correction.
 
+## FTF cost example
+
+A two-participant offline DAC sweep used 16 joint points, 300 reps and 1 round.
+Q1 swept 596 to 602 MHz and Q2 swept 295 to 301 MHz.
+Both drives were 1 us const pulses at gain 0.1.
+Recovery was 1007.509 us; readout and ADC integration were 1 and 0.5 us.
+The recorded Run action took 1.206 s, about 0.075 s per joint sweep point.
+The count is 16, not 16 squared, because the DAC ranges advance together.
+
+The timer includes inbox transport, ComponentDriver keyboard/mouse actions,
+terminal waiting and screenshots. It is not acquisition-only time and excludes
+Analyze and Save. Do not compare it with timings from other slots or experiments
+as a speed test. This example uses the current single-program DAC sweep.
+Historical host-side software-sweep timings do not estimate this path.
+
+Frequency point count, drive duration and shape, participants, reset, recovery
+and readout windows affect cost. Reps and rounds repeat hardware acquisitions.
+FTF compilation and cached evolution can dominate, so wall time need not scale
+with reps. Start with a short scan at the intended drive length.
+This 16-point example had large linewidth uncertainty and no calibration Apply.
+
 ## Measurement and analysis
 
 Each tone supplies a drive-frequency range in MHz.
@@ -34,6 +55,11 @@ All tones use the same point count, including nonparticipants.
 At each point, the selected drives use their corresponding frequencies together.
 The sequence is common reset, simultaneous drives, then mux readout after the
 longest drive. Pulse pre/post delays stay as configured.
+One compiled program advances all drive DAC frequencies in the same hardware
+loop. It does not scan combinations of the independent ranges. Mux readout DAC
+tones and ADC frequencies stay fixed; this scan does not sweep readout frequency.
+The saved axes use each drive's hardware-rounded start and step, which can differ
+from rounding each requested point independently.
 
 Choose the Lorentzian or sinc model. Each tone needs at least six valid points.
 Frequency, FWHM and errors are in MHz. Check model quality and uncertainty before
@@ -48,10 +74,9 @@ Review the original tone position and captured destination before applying.
 
 ## Results and saved sources
 
-Run draws a combined `measurement` figure.
-Each line uses its own hardware-rounded scan coordinates, even when ranges differ.
-Legends show the original index and source name in Participants order.
-Individual `measurement_i` figures remain available.
+Run draws one `measurement_i` figure per participant, without a shared overlay.
+Each figure uses that tone's hardware-rounded scan coordinates.
+The index `i` is the original tone position in the saved configuration.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
@@ -61,7 +86,8 @@ A missing source configuration leaves the name unavailable.
 Use Data to save measurement data and analysis artifacts.
 Load Data selects a native file or saved run and preserves current Form inputs.
 The selected source fixes the historical pulse, binding and writeback destination.
-Cancellation retains acquired data and leaves missing data as NaN.
+Cancellation retains completed-round averages for the full sweep.
+If no round completed, signals remain NaN.
 Partial data from a failed operation retains its failure status.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.

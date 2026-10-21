@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,8 +81,62 @@ class GEPostAnalyzeParams:
 
 @dataclass(frozen=True)
 class GEPostAnalyzeResult(PostAnalyzeResultBase):
+    """Radius in normalized ADC units, 3x3 matrix and dimensionless condition."""
+
     ge_radius: float
     confusion: list[list[float]]
+    condition_number: float
+
+
+def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
+    """Explain manual selection for single/mux GE model-derived calibrations.
+
+    Joint histogram r2 must be >=0.9, normalized RMS <=0.1 and relative width
+    error <=0.5. These dimensionless gates also guard empirical assignment and
+    centers because a poor model is not calibration evidence. Required missing /
+    nonfinite metrics or their invalid issues prevent preselection. Unrelated
+    fixed-zero parameter issues do not. None means these review gates passed,
+    not that preparation or pure-state readout fidelity has been established.
+    """
+    quality = None if primary.fit_quality is None else primary.fit_quality.get("joint")
+    if quality is None:
+        return "Review required: joint histogram quality unavailable"
+    reasons = [
+        f"joint {issue.path}: {issue.reason}"
+        for issue in quality.invalid
+        if issue.path
+        in {"r2", "normalized_residual_rms", "relative_parameter_errors.s"}
+    ]
+    if quality.r2 is None or not math.isfinite(quality.r2):
+        reasons.append("joint r² unavailable")
+    elif quality.r2 < 0.9:
+        reasons.append(f"joint r²={quality.r2:.4g} <0.9")
+    rms = quality.normalized_residual_rms
+    if rms is None or not math.isfinite(rms):
+        reasons.append("joint normalized RMS unavailable")
+    elif rms > 0.1:
+        reasons.append(f"joint normalized RMS={rms:.4g} >0.1")
+    width_error = quality.relative_parameter_errors.get("s")
+    if width_error is None or not math.isfinite(width_error):
+        reasons.append("relative width error unavailable")
+    elif width_error > 0.5:
+        reasons.append(f"relative width error={width_error:.4g} >0.5")
+    return "Review required: " + "; ".join(reasons) if reasons else None
+
+
+def ge_post_review_note(primary: GEAnalysis, condition_number: float) -> str | None:
+    """Guard radius/confusion by primary GE quality and finite condition <=10.
+
+    The condition is dimensionless. Manual draft selection remains possible;
+    None means the review gates passed, not that the correction is reliable.
+    """
+    primary_note = ge_calibration_review_note(primary)
+    reasons = [] if primary_note is None else [primary_note]
+    if not math.isfinite(condition_number):
+        reasons.append("post condition number unavailable")
+    elif condition_number > 10:
+        reasons.append(f"post condition number={condition_number:.4g} >10")
+    return "; ".join(reasons) if reasons else None
 
 
 class GEAdapter(
@@ -160,6 +215,7 @@ class GEAdapter(
         return GEPostAnalyzeResult(
             ge_radius=analysis.confusion.radius,
             confusion=analysis.confusion.matrix.tolist(),
+            condition_number=analysis.confusion.condition_number,
         )
 
     def get_writeback_items(
@@ -167,27 +223,36 @@ class GEAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         result.validate_calibration()
+        note = ge_calibration_review_note(result)
         # AcceptedWrite owns native complex conversion; producers keep numbers.
         return [
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.fidelity",
-                description="Single-shot assignment fidelity",
+                description="Prepared-label assignment fidelity",
                 proposed_value=result.fidelity,
+                selected=note is None,
+                note=note,
             ),
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.sigma",
-                description="Single-shot IQ cluster width (s)",
+                description="Single-shot IQ cluster width (ADC units)",
                 proposed_value=result.ge_s,
+                selected=note is None,
+                note=note,
             ),
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.g_center",
                 description="Single-shot |g> IQ cluster centre (complex)",
                 proposed_value=result.g_center,
+                selected=note is None,
+                note=note,
             ),
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.e_center",
                 description="Single-shot |e> IQ cluster centre (complex)",
                 proposed_value=result.e_center,
+                selected=note is None,
+                note=note,
             ),
         ]
 
@@ -196,15 +261,20 @@ class GEAdapter(
         req: PostWritebackRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         result = req.post_analyze_result
+        note = ge_post_review_note(req.analyze_result, result.condition_number)
         return [
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.radius",
                 description="Single-shot classification radius",
                 proposed_value=result.ge_radius,
+                selected=note is None,
+                note=note,
             ),
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.confusion_matrix",
                 description="Single-shot 3x3 confusion matrix (prepared->measured)",
                 proposed_value=result.confusion,
+                selected=note is None,
+                note=note,
             ),
         ]
