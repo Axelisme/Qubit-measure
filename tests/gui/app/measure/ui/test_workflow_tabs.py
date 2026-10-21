@@ -494,6 +494,44 @@ def test_external_answer_projects_accepted_exchange_to_window(
     ), "Accepted retry must clear the previous owner error from the Window"
 
 
+def _check_remote_workflow_controls(driver: ComponentDriver, root: Path) -> None:
+    """Only emergency Stop bypasses the visible Remote mutation gate."""
+    _ask_shot(driver, root, "remote-05-remote-question")
+    assert driver.observe(object_name="control_indicator").text == (
+        "Remote · workflow-agent · online"
+    )
+    assert driver.observe("Stop").enabled, "Remote must not disable local workflow Stop"
+    assert not driver.observe("Pause").enabled
+    assert not driver.observe("Resume").enabled
+    assert not driver.observe("Answer").enabled
+    driver.select_tab("Tunables")
+    _ask_shot(driver, root, "remote-06-remote-tunables")
+    assert not driver.observe("Apply").enabled
+    assert driver.text_input(object_name="form.input.value").read_only
+    driver.select_tab("Ask")
+    _ask_shot(driver, root, "remote-07-remote-ask")
+
+
+def _check_workflow_cancelled(
+    driver: ComponentDriver,
+    ctrl: Controller,
+    run_id: str,
+    token: int,
+    author: AskAuthor,
+) -> None:
+    """Terminal delivery settles the original operation and restores admission."""
+    assert driver.observe("Start").enabled
+    assert driver.observe(object_name="workflow.answer_status").text == "提問已取消"
+    assert ctrl.workflow_control().tabs()[0].run_id == run_id
+    assert ctrl.workflow_control().tabs()[0].operation_id is None
+    assert not any(p.kind == "run" for p in ctrl.get_hardware_gate_presence())
+    completed = ctrl.await_operation(token, 0)
+    assert completed is not None and completed.reason == "completed"
+    assert completed.outcome is not None
+    assert completed.outcome.status == "cancelled"
+    assert [answer for answer, _thread in author.deliveries] == [None]
+
+
 def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
     workflow_window, tmp_path
 ):
@@ -542,22 +580,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
 
     unwatch = ctrl.control_identity.watch(observe_authority)
     try:
-        _ask_shot(driver, tmp_path, "remote-05-remote-question")
-        assert driver.observe(object_name="control_indicator").text == (
-            "Remote · workflow-agent · online"
-        )
-        assert driver.observe("Stop").enabled, (
-            "Remote must not disable local workflow Stop"
-        )
-        assert not driver.observe("Pause").enabled
-        assert not driver.observe("Resume").enabled
-        assert not driver.observe("Answer").enabled
-        driver.select_tab("Tunables")
-        _ask_shot(driver, tmp_path, "remote-06-remote-tunables")
-        assert not driver.observe("Apply").enabled
-        assert driver.text_input(object_name="form.input.value").read_only
-        driver.select_tab("Ask")
-        _ask_shot(driver, tmp_path, "remote-07-remote-ask")
+        _check_remote_workflow_controls(driver, tmp_path)
         driver.click("Stop")
         # Stop must drain the retained Ask into the controlled author cleanup.
         qt_until(cleanup_entered.is_set, label="remote Stop author cancellation")
@@ -586,16 +609,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
             lambda: _status(driver, "stopped"), label="remote Stop terminal delivery"
         )
         _ask_shot(driver, tmp_path, "remote-09-local-stopped")
-        assert driver.observe("Start").enabled
-        assert driver.observe(object_name="workflow.answer_status").text == "提問已取消"
-        assert control.tabs()[0].run_id == run_id
-        assert control.tabs()[0].operation_id is None
-        assert not any(p.kind == "run" for p in ctrl.get_hardware_gate_presence())
-        completed = ctrl.await_operation(token, 0)
-        assert completed is not None and completed.reason == "completed"
-        assert completed.outcome is not None
-        assert completed.outcome.status == "cancelled"
-        assert [answer for answer, _thread in author.deliveries] == [None]
+        _check_workflow_cancelled(driver, ctrl, run_id, token, author)
     finally:
         release_cleanup.set()
         unwatch()
