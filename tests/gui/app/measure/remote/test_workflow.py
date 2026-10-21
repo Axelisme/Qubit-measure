@@ -26,7 +26,7 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._qt_waits import qt_until
 
-from ._form_rpc import FormRpc
+from ._form_rpc import FormRpc, ImmediateScheduler
 
 
 class Values(FormModel):
@@ -89,7 +89,7 @@ def workflow_rpc(qapp, tmp_path):
         )
     )
     remote = RemoteControlAdapter(
-        controller, ControlOptions(port=0), controller.owner_scheduler
+        controller, ControlOptions(port=0), ImmediateScheduler()
     )
     rpc = FormRpc(remote)
     try:
