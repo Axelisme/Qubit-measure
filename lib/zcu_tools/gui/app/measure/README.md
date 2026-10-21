@@ -160,6 +160,10 @@ inside `question`. Engine/driver own schema inference and JSON answer validation
 `answer` returns the original pending operation token and schedules Engine.answer
 on the worker, without Resume/Execute. Wrong native Answer models deliver a
 recoverable error while retaining the paused question, operation and RUN lease.
+The headless owner retains `last_exchange` with the latest question, accepted
+answer and waiting/submitted/answered/cancelled presentation state. Qt panes and
+RPC/MCP status read the same facts regardless of the command's entry point.
+Submitted does not mean accepted; rejected native models retain no answer input.
 Stop is pure control; a retained Ask drains on the worker, including after control
 I/O failure. Only terminal owner delivery settles the operation and releases RUN.
 Hosting decisions and their reasons are in ADR-0067 and ADR-0068.

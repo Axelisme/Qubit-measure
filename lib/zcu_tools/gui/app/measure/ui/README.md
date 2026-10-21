@@ -28,7 +28,9 @@ The services own source capture, lowering, accepted tunables and run lifetime.
 Ask displays the authored question and driver-owned answer schema, with a JSON
 answer field. A new question selects Ask; the status badge returns there from
 other tabs. Answer submits to the retained worker. The pane preserves the last
-exchange, labels cancelled questions 「提問已取消」 and disables old answers.
+exchange from the owner's `last_exchange`, including answers submitted through
+facet/RPC/MCP. Only accepted answers display 「已回答」; pending submissions display
+「回答已提交」. Cancelled questions display 「提問已取消」 and disable old answers.
 `WorkflowFigures` owns only
 named canvas presentation through `QtPlotHost`. A refused close keeps the pane.
 After accepted close, the view detaches its subscriptions and editors and stops

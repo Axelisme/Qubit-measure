@@ -31,7 +31,7 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.plotting.plots import PlotHost, Plots
 
 from .workflow_attachment import Attachment
-from .workflow_run import PendingQuestion
+from .workflow_run import PendingQuestion, QuestionExchange
 from .workflow_tab import FormBatch, FormKind, WorkflowTab, WorkflowTabPort
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ class WorkflowTabSnapshot:
     delivery and paused lease ownership. error is the last producer failure text,
     or None when no failure was delivered. pending_question is the detached
     answerable Ask envelope, or None outside a delivered unanswered Ask pause.
+    last_exchange retains the latest per-run question and accepted answer facts.
     """
 
     tab_id: str
@@ -55,6 +56,7 @@ class WorkflowTabSnapshot:
     busy: bool
     error: str | None
     pending_question: PendingQuestion | None = None
+    last_exchange: QuestionExchange | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,7 @@ class WorkflowControlFacet:
                 None
                 if tab.run.run_id is None
                 else tab.run.pending_question(tab.run.run_id),
+                tab.run.last_exchange,
             )
             for key, tab in self._tabs.items()
         )

@@ -250,7 +250,10 @@ Start 省略/null batch 使用 shared GUI draft。明填 batch，包括 []，使
 mutation 仍受 holder、busy 與 RUN lease 限制。Terminal records/figures 可繼續讀取。
 Status 的 `pending_question` 是固定 `{question_type, question, answer_schema}`
 envelope；只有 `question` 含 authored fields，沒有問題時為 null。Schema 與 JSON
-轉換由 Engine/driver 擁有。錯欄位保留 paused 問題，回 `invalid_params/answer_validation`。
+轉換由 Engine/driver 擁有。Status 的 `last_exchange` 保留最近問題 envelope、接受的
+answer 或 null，以及 waiting/submitted/answered/cancelled。它與 GUI 共用 headless
+owner；submitted 不是已接受，錯型答案不記入 answer。錯欄位保留 paused 問題，
+回 `invalid_params/answer_validation`。
 Answer 與 execute 一樣會同步推進 generator，facet 將它排到 worker，保留同一
 RUN lease、operation 與 terminal delivery。UI owner thread 不 inline 續跑，也不
 另外呼叫 Resume。Stop 的 retained Ask drain 同樣在 worker，終局交付才釋放 RUN。

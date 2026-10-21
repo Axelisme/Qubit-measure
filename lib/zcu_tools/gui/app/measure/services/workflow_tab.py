@@ -32,7 +32,7 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from .workflow_attachment import Attachment
 from .workflow_devices import SessionDevices
-from .workflow_run import PendingQuestion, WorkflowController
+from .workflow_run import PendingQuestion, QuestionExchange, WorkflowController
 
 FormKind = Literal["plan", "tunables"]
 type FormBatch = Mapping[FormWritePath, JsonValue]
@@ -45,6 +45,8 @@ class WorkflowRunPort(Protocol):
     def run_id(self) -> str | None: ...
     @property
     def operation_id(self) -> int | None: ...
+    @property
+    def last_exchange(self) -> QuestionExchange | None: ...
     @property
     def has_pending_segment(self) -> bool: ...
     def status(self) -> RunStatus | None: ...

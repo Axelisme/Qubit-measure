@@ -91,7 +91,10 @@ Facet 的 pending_question 提供固定 question_type/question/answer_schema env
 問題 authored fields 只在 question 內。Engine/driver 擁有 schema 推導與答案轉換。
 Engine.answer 同步跑到下一個 paused 或 terminal，因此在 worker 執行。
 Facet 保留原 operation、RUN lease 與 terminal delivery，不在 UI owner thread
-續跑，也不將 Answer 拆成另一次 Resume。錯型答案由 engine 拒絕並保持 paused，
+續跑，也不將 Answer 拆成另一次 Resume。Headless run owner 保留最近一次問題、
+成功接受的答案與提交／已回答／取消的顯示事實。Pane 與 RPC/MCP status 共用投影，
+不因命令入口而顯示不同問答。未接受的錯型輸入不記為已回答。
+錯型答案由 engine 拒絕並保持 paused，
 facet 不複製驗型別或狀態規則。這維持 [[0066]] 的執行與終局責任。
 
 ## 動態資源與儀器 adapters

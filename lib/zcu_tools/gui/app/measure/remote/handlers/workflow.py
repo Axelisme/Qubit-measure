@@ -72,6 +72,13 @@ def _snapshot(tab: WorkflowTabSnapshot) -> dict[str, object]:
         "busy": tab.busy,
         "error": tab.error,
         "pending_question": tab.pending_question,
+        "last_exchange": None
+        if tab.last_exchange is None
+        else {
+            "question": tab.last_exchange.question,
+            "answer": tab.last_exchange.answer,
+            "state": tab.last_exchange.state,
+        },
     }
 
 

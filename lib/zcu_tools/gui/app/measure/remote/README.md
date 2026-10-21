@@ -62,7 +62,10 @@ Figures and committed records remain readable after terminal delivery. Names
 and status do not render; figure returns png_b64 for validated MCP image delivery.
 Status includes `pending_question`, a `{question_type, question, answer_schema}`
 envelope or null outside a delivered Ask pause. Answer returns the original
-pending `operation_id`. Engine/driver validate JSON fields; rejection projects
+pending `operation_id`. Status also retains `last_exchange` with the last
+question envelope, accepted answer fields or null, and state
+waiting/submitted/answered/cancelled. Submitted is not acceptance; only a returned
+Engine.answer segment records an accepted answer. Engine/driver validate JSON fields; rejection projects
 `invalid_params/answer_validation` without consuming the question. Execution
 continues on the worker under the existing RUN lease and terminal operation
 delivery, not the RPC/UI owner thread.

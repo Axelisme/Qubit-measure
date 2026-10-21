@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from threading import RLock
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
@@ -55,6 +56,32 @@ class PendingQuestion(TypedDict):
     answer_schema: dict[str, JsonValue]
 
 
+@dataclass(frozen=True)
+class QuestionExchange:
+    """Latest per-run Ask presentation shared by every driving adapter.
+
+    question is the detached question/type/schema envelope. answer contains only
+    an Engine-accepted model's JSON fields, or None before acceptance. state is
+    waiting, submitted, answered or cancelled; submitted is not acceptance.
+    Invalid native answers return to waiting without retaining their input.
+    """
+
+    question: PendingQuestion
+    answer: dict[str, JsonValue] | None
+    state: Literal["waiting", "submitted", "answered", "cancelled"]
+
+
+def _answer_model[C](
+    engine: Engine[C], run_id: str, value: Answer | JsonValue
+) -> Answer:
+    """Decode only the answer carrier; Engine/driver own model field validation."""
+    if isinstance(value, Answer):
+        return value
+    if not isinstance(value, dict):
+        raise TypeError("Workflow answer must be a JSON object or Answer model")
+    return engine.parse_answer(run_id, value)
+
+
 @dataclass
 class _Run[F: FormModel, C]:
     """Keep binding, producer ownership and cleanup together for one native run."""
@@ -74,6 +101,7 @@ class _Run[F: FormModel, C]:
     engine: Engine[C] | None = None
     settle: SettleFn | None = None
     native_error: Exception | None = None
+    last_exchange: QuestionExchange | None = None
 
 
 class WorkflowStartInputs[P: BaseModel, T: BaseModel, F: FormModel, C](TypedDict):
@@ -154,6 +182,12 @@ class WorkflowController[F: FormModel, C]:
         """Return the one live run token, retained while paused; None at terminal."""
         run = self._run
         return None if run is None or run.phase == "terminal" else run.token
+
+    @property
+    def last_exchange(self) -> QuestionExchange | None:
+        """Read detached latest question/accepted answer facts, or None before Ask."""
+        with self._lock:
+            return None if self._run is None else deepcopy(self._run.last_exchange)
 
     @property
     def has_pending_segment(self) -> bool:
@@ -299,6 +333,9 @@ class WorkflowController[F: FormModel, C]:
             # Rejected native Answer models never reserved a segment. Keep the
             # original operation answerable, and deliver the validation error.
             run.phase = "paused"
+            question = self.pending_question(run.binding.run_id)
+            if question is not None:
+                run.last_exchange = QuestionExchange(question, None, "waiting")
             self._notify(status, bg.error)
         elif status is not None and status.lifecycle == "stopping":
             # Stop or control I/O failure can precede continuation admission.
@@ -451,22 +488,27 @@ class WorkflowController[F: FormModel, C]:
                     "answer", "running" if status is None else status.lifecycle
                 )
             engine = run.engine
-            if not isinstance(answer, Answer):
-                if not isinstance(answer, dict):
-                    raise TypeError(
-                        "Workflow answer must be a JSON object or Answer model"
-                    )
-                answer = engine.parse_answer(run_id, answer)
+            answer = _answer_model(engine, run_id, answer)
             if run.token is None or run.settle is None:
                 raise RuntimeError("Answer requires retained Runner ownership")
             run.phase = "resuming"
+            if run.last_exchange is not None:
+                run.last_exchange = replace(run.last_exchange, state="submitted")
             validated = answer
 
         def work() -> RunStatus | None:
             with self._lock:
                 if run.stop.is_set():
                     return engine.status()
-            return engine.answer(run_id, validated)
+            status = engine.answer(run_id, validated)
+            with self._lock:
+                if run.last_exchange is not None:
+                    run.last_exchange = replace(
+                        run.last_exchange,
+                        answer=validated.model_dump(mode="json"),
+                        state="answered",
+                    )
+            return status
 
         try:
             token = self._runner.continue_operation(
@@ -480,6 +522,8 @@ class WorkflowController[F: FormModel, C]:
             run.phase = "paused"
             if run.stop.is_set():
                 self._drain(run, run_id)
+            elif run.last_exchange is not None:
+                run.last_exchange = replace(run.last_exchange, state="waiting")
             raise
         if run.phase == "resuming":
             run.phase = "producing"
@@ -522,6 +566,11 @@ class WorkflowController[F: FormModel, C]:
             if run is None:
                 raise RuntimeError("Stop requires a current run")
             run.stop.set()
+            if run.last_exchange is not None and run.last_exchange.state in {
+                "waiting",
+                "submitted",
+            }:
+                run.last_exchange = replace(run.last_exchange, state="cancelled")
             if run.engine is None:
                 return None
             try:

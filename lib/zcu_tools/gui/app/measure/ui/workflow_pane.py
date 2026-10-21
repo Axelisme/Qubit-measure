@@ -230,28 +230,41 @@ class WorkflowPane(QWidget):
         )
         if snapshot.error is not None:
             self._message.setText(snapshot.error)
-        self._project_question(snapshot, lifecycle)
+        self._project_question(snapshot)
 
-    def _project_question(self, snapshot: WorkflowTabSnapshot, lifecycle: str) -> None:
-        question = snapshot.pending_question
-        if question is not None:
-            if not self._ask_pending or self._question_run_id != snapshot.run_id:
-                self._question_run_id = snapshot.run_id
-                self._question_label.setText(
-                    f"{question['question_type']}\n"
-                    + json.dumps(question["question"], ensure_ascii=False, indent=2)
+    def _project_question(self, snapshot: WorkflowTabSnapshot) -> None:
+        pending = snapshot.pending_question is not None
+        if pending and (
+            not self._ask_pending or self._question_run_id != snapshot.run_id
+        ):
+            self._question_run_id = snapshot.run_id
+            self._answer_input.setText("{}")
+            self._subtabs.setCurrentWidget(self._ask_page)
+        exchange = snapshot.last_exchange
+        if exchange is not None:
+            question = exchange.question
+            self._question_label.setText(
+                f"{question['question_type']}\n"
+                + json.dumps(question["question"], ensure_ascii=False, indent=2)
+            )
+            self._answer_schema.setText(
+                "Answer schema: "
+                + json.dumps(question["answer_schema"], ensure_ascii=False)
+            )
+            if exchange.answer is not None:
+                self._answer_input.setText(
+                    json.dumps(exchange.answer, ensure_ascii=False)
                 )
-                self._answer_schema.setText(
-                    "Answer schema: "
-                    + json.dumps(question["answer_schema"], ensure_ascii=False)
-                )
-                self._answer_input.setText("{}")
-                self._answer_status.setText("等待回答")
-                self._subtabs.setCurrentWidget(self._ask_page)
-        elif self._ask_pending and lifecycle in {"stopping", "stopped", "failed"}:
-            self._answer_status.setText("提問已取消")
-        self._ask_pending = question is not None
-        enabled = self._writable and self._ask_pending
+            self._answer_status.setText(
+                {
+                    "waiting": "等待回答",
+                    "submitted": "回答已提交",
+                    "answered": "已回答",
+                    "cancelled": "提問已取消",
+                }[exchange.state]
+            )
+        self._ask_pending = pending
+        enabled = self._writable and pending
         self._answer_input.setEnabled(enabled)
         self._answer_button.setEnabled(enabled)
 
@@ -296,7 +309,6 @@ class WorkflowPane(QWidget):
         elif command == "Answer":
             answer = TypeAdapter(JsonValue).validate_json(self._answer_input.text())
             self._control.answer(run_id, answer)
-            self._answer_status.setText("已回答")
             self._message.setText("")
         elif command == "Apply":
             result = self._control.apply_tunables(
