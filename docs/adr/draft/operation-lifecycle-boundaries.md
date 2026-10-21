@@ -1,3 +1,7 @@
+---
+status: draft
+---
+
 # Operation 關閉與 disconnect 的未落實邊界（draft）
 
 **狀態：** draft。Measure close 的背景 drain／逾時留窗已併入 [[0066]]，其餘保留未落實目標。舊核准未保存裁決日期與使用者原話，不把它當成 accepted 契約；本票只處理文件，不新增機制。

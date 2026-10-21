@@ -1,4 +1,78 @@
-"""Acquisition, analysis and persistence for zipped mux spectroscopy."""
+"""Acquisition, analysis and persistence for zipped mux spectroscopy.
+
+Technical reference for lab authors and framework developers.
+MuxFreqExp.run(config, *, context) drives selected qubits simultaneously.
+
+Configuration and timing
+------------------------
+The full tones list matches the complete MuxReadoutCfg in count and order.
+Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+a nonempty, unique list of existing names. Q3/Q1 selects original indices [2, 0]
+from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
+including nonparticipants, on independent generators distinct from readout.
+The caller supplies the complete qubit/resonator bindings; numeric cfg validation
+does not resolve component identities.
+
+Sweep ranges may differ but every tone, including nonparticipants, must have the
+same point count. Point p pairs each active tone's p-th value, not a Cartesian
+product. Each point compiles once and executes optional common reset, Join of
+independent drive pulses, then active mux readout. Branches start together;
+short branches wait for the longest branch at that point. Pre/post delays stay
+unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
+All participants share reps, rounds, initial_delay and relax_delay.
+Program modules perform native conversion and averaging.
+
+Results and cancellation
+------------------------
+MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
+float64 (K,P) on each drive's own rounded grid. Signals are complex128 (K,P),
+ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
+original tone indices and each tone's own coordinates, so duplicate labels retain
+distinct plots. Cancellation preserves completed points and the current point's
+completed-round average. Unacquired points remain NaN.
+
+Frequency scan and analysis
+--------------------------
+MuxFreqCfg.modules contains optional common reset and full mux readout.
+Sweep bounds and returned coordinates are in MHz. prepare_frequency_scan
+validates cfg and constructs independent rounded drive-frequency axes in
+participant order. Run resolves original positions from names, not a MuxGroup.
+
+Analysis uses the single-qubit Lorentzian or sinc fitter. Each curve needs at
+least six valid points. Each original index returns MuxFreqFit or a reason-bearing
+MuxFitFailure and a fit_i figure. Frequency, FWHM and their errors are in MHz.
+FitQuality describes that model fit rather than calibration approval.
+
+Native persistence retains full cfg, original indices, independent coordinates
+and complex IQ. Frequency coordinates use Hz on disk and MHz in memory.
+
+Calling and ownership
+---------------------
+The caller supplies RunContext with compatible soc/soccfg, caller-owned Plots
+and a fresh StopSignal. After run, call context.cancel_signal.raise_if_error(),
+then inspect is_set() to distinguish cancellation from completion. Acquisition
+failures retain their cause even when partial data is available. Configuration,
+quantization and build errors propagate directly. The caller finishes/releases
+plots and cleans up devices. Run preserves the input cfg and leaves saving to
+the caller.
+
+Wrap cfg and result in RunRecord for analysis and save_run(source, path,
+metadata=...). load_run(path) restores that explicit historical source. Analysis
+does not consult the current Form or library. The caller records complete,
+partial or stopped status from the operation outcome rather than IQ availability.
+The numerical core leaves component bindings and writeback to its caller.
+
+Example with validated cfg, RunContext and fresh analysis_plots::
+
+    from zcu_tools.experiment.records import RunRecord
+    from zcu_lab.v2.mux.freq import MuxFreqExp
+
+    core = MuxFreqExp()
+    result = core.run(cfg, context=context)
+    context.cancel_signal.raise_if_error()
+    source = RunRecord(cfg=cfg, result=result)
+    outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
+"""
 
 from __future__ import annotations
 

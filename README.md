@@ -1,6 +1,10 @@
 # ZCU-Tools
 
-ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI、Notebook、分析與模擬；ZCU 板端提供 QICK Pyro server。連接硬體前，先確認板端環境與資產版本。板端部署和相容性尚未在硬體上核實。
+**讀者：** operator、framework-dev、agent。查找 ZCU-Tools 的執行環境和文件入口。
+
+ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI、Notebook、分析與模擬；ZCU 板端提供 QICK Pyro server。連接硬體前，先確認板端環境與資產版本。
+
+**Last updated:** 2026-10-21
 
 ## 執行環境
 
@@ -15,11 +19,15 @@ uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
 
 板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 `start_server.ipynb`；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘使用者 GUI 與資料處理入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。Workflow 模擬使用 workflows GUI 的模擬模式。
 
-## 從哪裡讀起
+## 操作與量測
 
+- [量測領域詞彙](docs/CONTEXT.md) 說明參數、量測成果與分析交接用語。
 - [結果傳輸](docs/result-transfer.md)：首次以官方 rclone GUI 授權並保存雲端位置，之後使用 `python scripts/transfer_results.py upload/download <name>`，agent 可直接從 Bash 呼叫。
 - [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
-- [領域詞彙](docs/CONTEXT.md) 與 [實驗層](lib/zcu_tools/experiment/README.md)與 [GUI](lib/zcu_tools/gui/README.md)的 README 提供實作定位；跨模組決策見 [ADR](docs/adr/README.md)。
+
+## 框架開發
+
+- [實驗層](lib/zcu_tools/experiment/README.md) 與 [GUI](lib/zcu_tools/gui/README.md) 的 README 說明模組責任與介面；跨模組決策見 [ADR](docs/adr/README.md)。
 - [測試目錄與 fixture](tests/README.md) 說明案例歸屬；[程式碼品質](docs/code-quality.md) 說明 review 判準。
 - [Agent MCP 組合根](mcp_servers/README.md) 使用工作站 GUI/MCP profile，注入 lab 定義與 repo 啟動設定。使用者入口放在 `scripts/`，框架仍在 lib。
 - [品質工具](tools/README.md) 說明 gate、ratchet 與報表的執行及判讀。開發操作與環境仍依 [repo 操作指引](CLAUDE.md)。

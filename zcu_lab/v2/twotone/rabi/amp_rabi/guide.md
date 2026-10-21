@@ -1,22 +1,24 @@
 ## Behavior
 
-Amplitude Rabi: drives the qubit at its known frequency and sweeps the drive-pulse gain, fitting the resulting Rabi oscillation to find the pi and pi/2 pulse amplitudes. Runs on real hardware. Run once you know the qubit frequency, to calibrate a pi pulse by amplitude (the pulse length stays fixed).
+**Readers:** operator, agent. Amplitude Rabi: drives the qubit at its known frequency and sweeps the drive-pulse gain, fitting the resulting Rabi oscillation to find the pi and pi/2 pulse amplitudes. Runs on real hardware. Run once you know the qubit frequency, to calibrate a pi pulse by amplitude (the pulse length stays fixed).
 
-## Expects (parameter context)
+**Last updated:** 2026-10-21
+
+## Parameter sources
 
 Gain runs -0.3 to 1.0 over 51 points; Run overwrites drive gain. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
 
-Both Amp Rabi forms sweep gain from -0.3 to 1.0 regardless of calibration. For x180 with a persistent scalar waveform length, the inline copy starts at length = 1.5*pi_len*pi_gain us. pi_len must be a finite positive non-bool number and pi_gain must be finite, non-bool and in (0, 1]. Missing/null or invalid leaves leave length required and empty. Finite invalid gain stays visible; nonfinite gain leaves both gain and length empty. Without x180, qub_probe starts at gain=1 and length=1 us. Arb x180 keeps its original Slot, shape and data without copying or overriding length or reading assets; change waveform first to edit duration.
+The gain sweep runs from -0.3 to 1.0 regardless of calibration. For an x180 pulse with a stored numeric waveform length, the editable copy starts at length = 1.5*pi_len*pi_gain us. Here pi_len is the calibrated x180 length and pi_gain its gain. Enter a finite positive pi_len and a finite pi_gain in (0, 1]; missing or invalid values leave length required and empty. A finite invalid gain stays visible; a nonfinite gain leaves both gain and length empty. If x180 is absent, qub_probe starts at gain=1 and length=1 us. An arbitrary-waveform x180 keeps its saved module, shape and data. Switch waveform type first to edit duration.
 
-T1-derived defaults use the fixed Open/Reset capture. A missing/null T1 or absent capture uses 30 us, so the 5*T1 wait starts at 150 us. Stored invalid T1 leaves derived required fields empty while the Form opens. Alias/path/source failures propagate. Defaults remain editable, are not written back as calibration, and do not shorten automatically for active reset.
+Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
-## Expects (ModuleLibrary)
+## Module slots
 
-Uses captured qubit.module.readout with a readout template fallback, and qubit.module.reset with no fallback (disabled when absent). The drive follows the shared Rabi source policy above, using qubit.module.x180 when present and qub_probe when absent. Unset or dangling slots use the named template, not a legacy blank. Key choices remain available. Inline templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us; missing required calibration remains Invalid.
+Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us; missing required calibration remains Invalid.
 
 ## Typical writeback
 
-Copies the source drive pulse into captured qubit.pulses.pi_amp and pi2_amp, replacing gain with the fitted pi and pi/2 gains. Separately proposes qubit.module.x180 and x90 pointing to those resolved library keys, even when already bound to the same keys. Also proposes qubit.ext.pi_product as fitted pi gain times the source pulse length (a.u. * us). Every item is independently selectable; none is proposed without a source cfg. Does not write separate gain scalars or read current calibration.
+Copies the source drive pulse into captured qubit.pulses.pi_amp and pi2_amp, replacing gain with the fitted pi and pi/2 gains. Separately proposes qubit.module.x180 and x90 pointing to those saved pulses, even when already bound to the same keys. Also proposes qubit.ext.pi_product as fitted pi gain times the source pulse length (a.u. * us). Every item is independently selectable. Proposals require acquired run settings and use that run's source pulse. Gain updates are part of the pulse copies.
 
 ## Recommended
 

@@ -1,12 +1,12 @@
-> 狀態：已退役（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md)。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md)。以下保留歷史正文。
 
 # Service 互依的「三問規則」—— 取代分層表，治「service 互呼卡循環」
 
-**狀態：** accepted。是一條判定準則（無程式碼產出），供未來新增 / 連接 service 時遵循。
+**狀態：** retired。是一條判定準則（無程式碼產出），供未來新增 / 連接 service 時遵循。
 
 ## 脈絡
 

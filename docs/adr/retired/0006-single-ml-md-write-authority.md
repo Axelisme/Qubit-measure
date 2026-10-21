@@ -1,8 +1,8 @@
-> 狀態：已退役（2026-09-27）。跨 owner 寫入邊界由 [ADR-0067](../0067-gui-application.md) 接替；cfg lowering 與 materialization 由 [ADR-0065](../0065-cfg-editing.md) 及 [measure README](../../../lib/zcu_tools/gui/app/measure/README.md) 接替。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-27）。跨 owner 寫入邊界由 [ADR-0067](../0067-gui-application.md) 接替；cfg lowering 與 materialization 由 [ADR-0065](../0065-cfg-editing.md) 及 [measure README](../../../lib/zcu_tools/gui/app/measure/README.md) 接替。以下保留歷史正文。
 
 # ModuleLibrary / MetaDict 內容寫入的唯一權威 = ContextService（經窄 write port）
 

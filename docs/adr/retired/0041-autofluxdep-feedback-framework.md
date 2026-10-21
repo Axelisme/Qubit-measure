@@ -1,8 +1,8 @@
-> 狀態：已退役（2026-09-26）。跨模組決策由 [ADR-0062](../0062-experiment-workflow.md) 接替；局部細節見 [`gui/app/autofluxdep/README.md`](../../../lib/zcu_tools/gui/app/autofluxdep/README.md)。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-26）。跨模組決策由 [ADR-0062](../0062-experiment-workflow.md) 接替；局部細節見 [`gui/app/autofluxdep/README.md`](../../../lib/zcu_tools/gui/app/autofluxdep/README.md)。以下保留歷史正文。
 
 # ADR-0041 — autofluxdep feedback framework
 

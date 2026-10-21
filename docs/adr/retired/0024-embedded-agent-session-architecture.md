@@ -1,8 +1,12 @@
-> 狀態：已退役（2026-09-27）。有效的 agent launch 邊界見 [ADR-0068](../0068-remote-transport.md)，operation feedback 邊界見 [ADR-0066](../0066-operation-lifecycle.md)。以下保留歷史正文。
+---
+status: retired
+---
+
+> 狀態：retired（2026-09-27）。有效的 agent launch 邊界見 [ADR-0068](../0068-remote-transport.md)，operation feedback 邊界見 [ADR-0066](../0066-operation-lifecycle.md)。以下保留歷史正文。
 
 # ADR-0024 — Agent launch UI 退役
 
-> **狀態：已退役。** measure-gui 不再提供 toolbar「Agent」按鈕、
+> **狀態：retired。** measure-gui 不再提供 toolbar「Agent」按鈕、
 > `AgentLaunchDialog` 或 `services/agent_launcher.py`。本 ADR 保留為歷史決策
 > 紀錄；目前仍生效的 user↔agent runtime feedback 設計見 [[0025]]。
 
