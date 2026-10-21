@@ -61,8 +61,10 @@ BaseAdapter 每次 `guide()` 讀 UTF-8 檔案，回 `AdapterGuide(markdown, reso
 只有需要純 preflight 的實驗才覆寫 `validate_run_request(req, cfg)`。框架把 Form 輸出原樣
 交給這個 hook 與 Run，不重新驗型別或 lower。Run 不重新讀目前的 point、library 或 alias。
 
-Make_form 只在 Open／Reset 執行。`ctx.has(ref)` 用固定來源選 Slot 或 Template，
-缺參照回 False，來源故障 raise。字串是 literal，Expr 才是運算式。
+Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refresh 也重建 Form 定義，
+但保留 authored input、explicit selections 與已解析初值，不重新套 defaults。
+`ctx.has(ref)` 用固定來源選 Slot 或 Template，缺參照回 False，來源故障 raise。
+字串是 literal，Expr 才是運算式。
 初值 expression 在建立 input 時求成 direct 值；使用者輸入的 expression 保留原文。
 必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
@@ -86,13 +88,29 @@ Core 用具名裝置欄位，例如 flux_dev、jpa_flux_dev。Form 的 AliasName
 
 ## 執行與分析契約
 
-`BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
-`exp.load(Path(filepath))`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
-參數、非 canonical/manual save、grouped data，或需要額外 metadata 才能安全分析/writeback 的
-adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。
-adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
-直接回報原始錯誤。`BaseAdapter.load` 只讀取結果，不修改 tab cfg；GUI
-`LoadService.load_result` 保留 tab input 與固定來源，不從 loaded RunRecord.cfg 回填表單。Adapters 用 RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
+GUI Load 由 `LoadService.load_result` 讀取 native data，核對 adapter 的 `experiment_tag`，
+再呼叫 `restore(stored)`。`BaseAdapter.restore` 預設建構 `exp_cls()` 並委派
+`from_stored(stored)`，回傳含 record 與 cfg_issue 的 `RestoredRun`。Single 與 grouped spec
+共用此入口。需要 constructor 參數或自訂結果形式時，adapter 實作 `restore`；不支援 Load
+則宣告 `load_data=False`。Hook 不做 I/O、不讀目前表單、不重捕 history，也不提供 legacy fallback。
+有效 native data 的 typed cfg 不相容時可保留資料與 cfg_issue；缺 cfg envelope 或壞資料仍拒絕。
+失敗在替換結果前回報，既有結果不變。
+
+Load 保留 tab input 與表單固定來源，不從 loaded RunRecord.cfg 回填。分析與 WB 另使用檔案
+history 的固定來源，同 entry 有 point 時讀取該 point 的現存持久值，並非重建未保存的歷史參數版本。
+跨 entry、EMPTY 或無 point 時來源為 None，仍可純計算，不回退目前 aliases。Save storage
+獨立固定於 Load request。Adapters 用 RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。
+OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
+
+GUI Save 呼叫 `data_item(key, result, *, comment)` 與
+`analysis_item(key, result, parameters, *, pane)` 取得保存內容，不呼叫 adapter load/save。
+Base 的 data producer 以明確 RunRecord 與 `exp_cls().persistence_spec()` 準備 DataItem；
+opaque 自訂結果須覆寫 producer。Analysis producer 只取已提交輸出與當次歷史輸入，不取編輯草稿。
+這些 hooks 不讀 live context、不選路徑或格式，也不寫檔。缺 cfg 不以目前表單補值，
+準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析。檔案寫入由 framework 保存流程負責。
+確切簽名見 [adapter protocol](../../lib/zcu_tools/gui/app/measure/adapter/protocol.py) 與
+[ArtifactHandover](../../lib/zcu_tools/gui/app/measure/artifacts/handover.py)；native／Labber 格式與
+部分失敗政策見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；
@@ -124,9 +142,9 @@ opaque draft，adapter不接觸Writeback implementation。
 不重跑fit、不重算stability，也不直接apply proposal。
 
 `singleshot/amp_rabi` 與 `singleshot/reset_check` 的 `g_center`、`e_center`、`radius` 是正式 experiment cfg
-欄位，預設 expression 指向 md 的 `g_center`、`e_center`、`ge_radius`。
-缺值保持 invalid；operator 可改用 direct complex／float 值。Run 凍結已解析的
-cfg 校正值，沿用 BaseAdapter.run；RunRecord.cfg 保留本次使用的值。
+欄位，Form 初值 expression 指向 `$qubit.ext.readout_cal` 的 `g_center`、`e_center`、`radius`。
+缺值保持 invalid；operator 可改用 direct complex／float 值。Run 使用已解析的
+cfg 校正值，由各 adapter 呼叫 core，再把同次 cfg 與純 Result 配成 RunRecord。
 兩者都沿用可調整的 Reps／Rounds；Amp Rabi 串接各 round 的 raw IQ，reset-check 平均各 round 的 populations。
 
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；

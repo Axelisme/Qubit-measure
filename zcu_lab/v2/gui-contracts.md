@@ -15,11 +15,11 @@
 - [Reset adapters](#reset-adapters)
 - [Singleshot 與 Readout optimize](#singleshot-與-readout-optimize)
 - [JPA adapters](#jpa-adapters)
-- [分析輸出與 cfg definition](#分析輸出與-cfg-definition)
+- [分析輸出與 Form cfg](#分析輸出與-form-cfg)
 - [Capability 宣告與實作](#capability-宣告與實作)
 - [修改原則](#修改原則)
 
-每個實驗的 `gui.py` 擁有 cfg definition、run/analyze/writeback policy 與 operator guide。修改一個實驗時，先讀同資料夾的 `gui.py` 與 `core.py`。共用框架實作位於 `zcu_tools.gui.app.measure.adapter.base`。
+每個實驗的 `core.py` 定義 cfg 與 FieldMeta，`form.py` 提供 `make_form(ctx)`。`gui.py` 接上 Form factory，擁有 run/analyze/writeback policy 與 operator guide 宣告。修改一個實驗時，先讀這三個檔案。共用框架實作位於 `zcu_tools.gui.app.measure.adapter.base`。
 
 Post-analysis adapters 以 `get_post_writeback_items()` 提出 post-owned proposal；framework 將
 primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Writeback 實作。
@@ -57,12 +57,26 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
 
 ## 共用 lifecycle hooks
 
+下表是 lab 作者實作或沿用的入口。完整簽名與 opaque result 契約見
+[`ExpAdapterProtocol`](../../lib/zcu_tools/gui/app/measure/adapter/protocol.py)，
+預設委派見 [`BaseAdapter`](../../lib/zcu_tools/gui/app/measure/adapter/base.py)。
+RunRecord 是本套件 concrete adapters 採用的結果形式，framework 不從 opaque handle 猜 cfg 或資料。
+
 | 入口 | 來源與結果契約 |
 | --- | --- |
-| `run(req, raw_cfg, *, context)` | 使用 Guard 凍結的 resolved cfg。RunService 提供單次 RunContext，adapter 與核心共用 devices、plots 和取消訊號。GUI run 將同次 cfg 與純 Result 配成 RunRecord。 |
-| `analyze(req, *, plots)` | 使用 explicit RunRecord，具名圖交給本次 Plots，數值結果不含 Figure。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。 |
-| `BaseAdapter.load/save` | 直接傳遞核心 records。Load 不用目前 cfg 補來源，Save 將 explicit source 和 exact path 交給核心，override 可接受 cfg=None。 |
-| `LoadService` | 保留目前表單與固定來源，不從 loaded record.cfg 回填。歷史 cfg 屬於 loaded RunRecord，缺失或不可採用時也保留有效 loaded data。 |
+| `make_form(ctx)` | 回傳 `Form(core_cfg, tree, ...)`。Open／Reset 用固定 FormContext 建 fresh input；Refresh 也重建定義，但保留輸入與已解析初值。Framework 綁定範本並管理可編輯狀態。 |
+| `validate_run_request(req, cfg)` | 選填的純 preflight，Guard 在開 operation 前必呼。cfg 已由 Form 驗證；hook 不碰裝置、不改 cfg 或 state。 |
+| `run(req, cfg, *, context)` | 使用 Guard 接受並隔離的 Form 輸出。Base 原樣交給 core；需 RunRecord 的 adapter 自行配對同次 cfg 與純 Result。RunService 提供單次 RunContext，adapter 與核心共用 devices、plots 和取消訊號。 |
+| `analyze(req, *, plots)` | FIT 讀取 req.run_result、analyze_params 與固定 Run／Load parameters。具名圖交給本次 Plots，數值結果不含 Figure。`post_analyze` 另接已採用的 primary result，不使用未重新分析的表單。 |
+| `restore(stored)` | LoadService 先讀 native data、核對 experiment_tag，再交 StoredRun。Base 委派 `exp_cls().from_stored(stored)`，回傳含 record 與 cfg_issue 的 RestoredRun。Hook 不讀檔、不讀目前表單或重捕歷史。有效資料可在 typed cfg 不相容時保留，缺 cfg envelope 或壞資料仍拒絕。 |
+| `data_item(key, result, *, comment)`、`analysis_item(key, result, parameters, *, pane)` | Save 在 GUI owner thread 同步要求內容。Base 從明確 RunRecord/spec 準備 DataItem，從已提交輸出與歷史分析輸入準備 AnalysisItem。Hook 不選路徑、不做 I/O、不讀 live context。缺 cfg 不以表單補值，準備失敗只使該 data output 失敗，獨立圖與分析仍可保存。 |
+
+[`LoadService`](../../lib/zcu_tools/gui/app/measure/services/load.py) 保留目前表單與其固定來源，
+不從 loaded record.cfg 回填。分析與 WB 的來源另依檔案 history 固定；同 entry 有 point 時讀取
+該歷史 point 的現存持久值，跨 entry 或無 point 時為 None，不回退目前 aliases。
+保存路徑、格式與檔案寫入由 framework 的
+[`ArtifactHandover`](../../lib/zcu_tools/gui/app/measure/artifacts/handover.py) caller 與
+[experiment artifacts owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料) 負責。
 
 ## Mux OneTone
 
@@ -87,7 +101,7 @@ OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interacti
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
 OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone FluxDep 的 run 也回傳 RunRecord，plugin 從 explicit source 捕捉 inputs，保留 phase 投影並共用這條終止 renderer。TwoTone Freq 的 FIT 回傳頻率與線寬及其誤差，fit 圖另交 Plots；TwoTone PowerDep 只提供 run 與 canonical records，不提供 analysis。Lookback FIT 只輸出 predict_offset scalar，具名 fit 另由 Plots 發布；GUI ratio0.1／smooth1.0 與 timeFly writeback 不變。其餘 adapters 同樣使用 explicit records，framework 不提供 pyplot 或舊簽名 fallback。
 TwoTone AmpRabi／LenRabi 的 run 回傳 RunRecord，FIT 以 explicit source 與 typed options 分析，結果包含 scalar 與 core fit_quality，`fit` 圖交給 Plots。Gain／length／Rabi frequency 的 scalar writeback 不依賴 cfg；校準 pulse module writeback 只從該 source.cfg 複製 qub_pulse，缺 cfg 時略過 module items。
-T2Echo／T2Ramsey 在 build_exp_cfg 將 detune_ratio 降為 cfg.detune，run 配對 cfg／Result，FIT 回傳 scalar 與 core fit_quality，並發布具名 fit。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時只提供 t2r。
+T2Echo／T2Ramsey 在 `form.py` 的 `lower_detune` 將 detune_ratio 降為 cfg.detune，run 配對 cfg／Result，FIT 回傳 scalar 與 core fit_quality，並發布具名 fit。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時只提供 t2r。
 CKP 的 run 配對 cfg 與純 Result 為 RunRecord，兩張 measurement 熱圖分別呈現 ground／excited。FIT 只提交 chi／kappa／res_freq scalar與具名 fit 圖，保留 chi／rf_w／readout_f writeback。
 
 ## Reset adapters
@@ -104,36 +118,46 @@ SingleToneFreq 只換本次 tested_reset 的 frequency，DualTonePower 只換兩
 bath 預設 ground。Cfg 或 capture 為 None 時只保留純量，source/alias/materialization
 錯誤仍傳播。三個 length adapter 無 fit，返回空 proposal collection，不提 cfg-only module。
 DualToneFreq 與 BathFreqGain 不提 module。逐列 Apply 與 ledger 失敗政策由 framework owner
-維持，不加聯動或跨檔交易。Dual Freq 的 GUI hard-sweep policy 仍在 build_exp_cfg 寫入
-cfg.method，不由 run kwargs 隱藏。
+維持，不加聯動或跨檔交易。Dual Freq 的 adapter `run` 以 `cfg.with_updates(method="hard")`
+建立實際執行的 cfg，交 core 並存入同次 RunRecord，不由 run kwargs 隱藏。
 
 ## Singleshot 與 Readout optimize
 
 Singleshot Amp／Len Rabi、Check、ResetCheck、AC Stark 的 run 回傳 RunRecord，FIT 使用 explicit source／typed options／Plots，不在 GUI 數值結果保存 Figure。Rabi 保留完整 numeric fit 供共同 calibration writeback 判斷；ResetCheck 只投影 populations summary，不推導 reset fidelity。Check 的 GE centers 與 AC Stark 的 chi／kappa 仍由分析當次 md 讀取，再交 core options。
 Singleshot T1／Tone／Tone sweep adapters 直接組裝含 uniform 的 typed cfg，將同次 cfg／Result 配成 RunRecord。FIT 向本次 Plots 發布 fit 圖；Tone 保留 t1_with_tone writeback，其餘兩者只提交空數值結果。Correction／photon-axis 參數仍從分析當次 md 讀取。
 Singleshot MIST Freq／Power／FreqPower adapters 將本次校準 cfg 與純 Result 配成 RunRecord。FIT 使用 explicit source 與 typed options，只提交空數值結果，fit 圖另交 Plots。Confusion matrix 仍讀分析當次 md；只有 Power 使用 ac_stark_coeff／log_scale，FreqPower 不轉交無作用的參數。
-Readout AutoOpt 將 num_points 保留在 typed cfg，run 配對 cfg／Result，FIT 只發布三個最佳 scalar 與具名 fit；readout_dpm 由 source.cfg 產生，缺 cfg 時只保留 scalar writeback。Canonical load/save 委派核心的 grouped record 入口。
+Readout AutoOpt 將 num_points 保留在 typed cfg，run 配對 cfg／Result，FIT 只發布三個最佳 scalar 與具名 fit；readout_dpm 由 source.cfg 產生，缺 cfg 時只保留 scalar writeback。Native restore 與保存內容準備沿用核心的 grouped persistence spec。
 Readout optimize Freq／FreqGain／Length／Power adapters 將 cfg／Result 配成 RunRecord，FIT 將表單 smoothing／duration／penalty 轉為 core options，只提交 best scalar 與獨立具名 fit。Writeback 保留 best_ro_* scalar；readout_dpm 以 source.cfg 的 pulse readout 配合當次 md 補足缺少的最佳值，cfg=None 時略過 module，不以目前表單補來源。
 
 ## JPA adapters
 
 JPA Freq／Flux／Power／Check／OneToneFlux 的 run 配對 cfg／Result。四個 FIT 使用 explicit source 與本次 Plots，前三者只回傳最佳 scalar，Check 為空數值結果。Flux／Power 保留 GUI 圖軸重標政策與 best_jpa_* writeback，缺 cfg 也可離線分析；OneToneFlux 沒有 analysis 或 writeback。AutoOptimize 也以 RunRecord 傳遞 grouped 結果，num_points 進 typed cfg；FIT 保留 phase 色彩與 neutral flux label，三個 best_jpa_* writeback 只取該來源的最佳 scalar。
 
-## 分析輸出與 cfg definition
+## 分析輸出與 Form cfg
 
-`RunRequest` 只提供 SoC handles 與 detached device snapshot。Base assembler
-以此 snapshot 和 `ml=None` 建立 experiment cfg。自訂 builder 若委派 Base，
-須宣告 `ExpCfg_cls`。Domain preflight 在硬體 I/O 前拒絕不合法的必要欄位。
-Analyze 與 writeback 保持各自的 context 契約。
+`RunRequest` 提供 `soc`、`soccfg` 與固定的 `cfg_context`，後者是 library/assets 的
+cfg materialization capability。None 只允許無來源依賴的 inline cfg。
+Form 以同一份固定 FormEnv 求值、轉換並驗證 typed cfg，Guard 接受隔離副本後，
+將它原樣交給 `validate_run_request(req, cfg)` 與 `run(req, cfg, *, context)`。
+Framework 不另組 experiment cfg，也不重新 lower。Domain preflight 在 operation 與
+硬體 I/O 前拒絕額外的不合法條件；失敗交給 Guard 的 admission error 轉譯。
+RunContext 擁有 devices、SoC handles、plots 與 cancel_signal。Device snapshot 由 Run owner
+在取得 hardware lease 後、呼叫 adapter.run 前捕捉，供當次 acquisition evidence 使用，
+不是 RunRequest 的表單初值來源。Analyze 與 writeback 保持各自的固定來源契約。
 
 插件自行定義 typed 成功輸出的欄位，決定需要保留的選項與重現資訊。
 Framework 保存來源、插件輸出與圖，不要求完整 options 或保證可重現性。
 `params` 保持表單輸入，互動 Done 不以終態 options 替換它。
 GUI 與 remote 讀同一份已提交輸出；取消或失敗不覆蓋前次成功紀錄。
 
-`cfg_definition()` 使用 `_support` 提供的 measure-domain builder vocabulary，但結構與預設
-policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_value` 兩個方法理解同一
-份設定。Generic Spec/Value assembly 由 `zcu_tools.gui.cfg` 擁有，不能搬回本 package。
+`form.py` 的 `make_form(ctx)` 以 `Form(core_cfg, tree, ...)` 集中表單結構、初值與來源選擇。
+`core.py` 的 cfg annotations 與 FieldMeta 定義型別、驗證和欄位顯示資訊。
+有 GUI 額外輸入時明列 extras 與具名 lower，`Form.to_cfg` 驗證 lower 的結果。
+Generic model 生成、module materialization 與 typed cfg 轉換由
+[`zcu_tools.gui.form_adapter`](../../lib/zcu_tools/gui/form_adapter/README.md) 擁有，
+通用輸入狀態與驗證由 [`gui.form`](../../lib/zcu_tools/gui/form/README.md) 擁有。
+Concrete Form 選擇 `_support/measure/` 的 domain helpers；實驗結構與初值政策仍由 lab 擁有，
+不移入 generic framework。
 
 ## Capability 宣告與實作
 
@@ -141,7 +165,7 @@ policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_valu
 
 `BaseAdapter.__init_subclass__` 在定義 subclass 時檢查宣告與條件式 hooks，不延後到 UI 或 worker 第一次使用。FIT 要有 `analyze()`，INTERACTIVE 要有 `make_interactive_plugin()` 與 `make_interactive_frontend()`，NONE 不接受分析 hooks；非 INTERACTIVE 不接受這兩個 interactive factories。Post-analysis 只配 FIT，並要求其 params 與 analyze hooks。需要值才能建立的 analyze params 必須提供 `get_analyze_params()`，全有預設值則可繼承 base 實作。檢查 method override 時比較沿 MRO 解析後的實作與 `BaseAdapter`，所以中間 base 提供的 override 有效，不維護子類白名單。
 
-`load_data=True` 須有 concrete `load()`，或有可無參數建立且提供 callable `load()` 的 `exp_cls`；`load_data=False` 不接受 concrete load override。這是 import-time 宣告一致性檢查，不證明某個檔案能載入、hook 語意正確或操作安全。`validate_run_request()` 是 framework 必呼的 preflight；base 提供 no-op default，不因繼承 no-op 而新增 capability flag。Subclass 拼錯預期要 override 的 no-op hook 名稱，驗證無法辨識其意圖。精確錯誤與預設值以 `zcu_tools.gui.app.measure.adapter.base` 為準。
+`load_data=True` 須有 concrete `restore()`，或有可無參數建立且提供 callable `from_stored()` 的 `exp_cls`；`load_data=False` 不接受 concrete restore override。這是 import-time 宣告一致性檢查，不證明某個檔案能載入、hook 語意正確或操作安全。`validate_run_request()` 是 framework 必呼的 preflight；base 提供 no-op default，不因繼承 no-op 而新增 capability flag。Subclass 拼錯預期要 override 的 no-op hook 名稱，驗證無法辨識其意圖。精確錯誤與預設值以 `zcu_tools.gui.app.measure.adapter.base` 為準。
 
 ## 修改原則
 
