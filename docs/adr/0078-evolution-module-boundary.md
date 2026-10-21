@@ -47,6 +47,14 @@ Apply 消費已完成的 admission 與 frame／chain 決策，不依當次 apply
 一個算法的數值實作集中在自己的模組及專用 helpers。
 多個算法共用的數值運算由一個模組擁有，例如 rates 到 Q／decay 的代數、period playback 與 fractional tail。
 Kernel 不呼叫另一個 kernel class 的方法來取得共用運算。
+
+使用者於 2026-10-21 裁決：「前兩個採用建議」。腔場 flat second moments 的
+exact-result memo 由 `simulate.adc.CavityAverageCache` 擁有，集中完整 lossless key、
+有界容量與回傳陣列 ownership。`experiment.ftf` 在一次 acquire 的 span composition
+建立至多 64 MiB owner，供 g/e 各點串行共用，並在 return 或 exception 時清理。
+`simulate.ftf.CavityDrive` 只轉交 owner，不組 ADC key。Owner 不留在 Engine、global
+或長駐 source；這讓重複 flat 積分可重用，又不延長數值產品的 acquire lifetime。
+Shaped/callable 路徑、末態場與主分支選擇不進 memo。
 排程共用接縫保留 `Kernel`、`Prepared`、`RowPlan` 與 `ApplyContext`，不把它們提升為對外擴充框架。
 `PathDiagnostics` 仍按 family 名稱計數，builder 與 frame variant 是內部資訊。
 

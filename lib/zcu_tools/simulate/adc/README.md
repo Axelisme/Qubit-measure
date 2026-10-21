@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-21, shared initial cavity fields
+**Last updated:** 2026-10-21, bounded flat-average ownership
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -19,6 +19,13 @@ ringdown. Flat inputs use analytic constant-line propagation and quadratic
 integrals. Shaped inputs retain the field ODE and converged quadrature, split at
 pulse boundaries, envelope corners and the decay timescale. ADC owns these
 field integrals; consumers project them into their own Stark or dephasing models.
+
+`CavityAverageCache.average` is the optional exact flat-result entry point;
+`cavity_field_average` remains uncached. The ADC owner retains complete lossless
+converted inputs and owned second moments within its fixed byte budget (default
+64 MiB). It rejects new residency when full, without changing returned results.
+Shaped/callable inputs bypass reuse. Hits and misses return independent arrays.
+Callers serialize access and clear the owner at the end of its lifetime.
 
 ADC consumes explicitly ordered classical populations, not densities. The
 probability tolerance is `POPULATION_TOLERANCE = 1e-6`. This is 1000 times below
