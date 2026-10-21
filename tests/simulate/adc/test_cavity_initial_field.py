@@ -33,14 +33,14 @@ def test_flat_cache_owns_exact_moments_for_complete_inputs(variant):
     )
     initial = np.array([0.2 + 0.1j, -0.3j])
     origin, end = 5.0, 20.0
-    first = adc.cavity_field_average(
+    assert callable(getattr(cache, "average", None)), "ADC owner must solve averages"
+    first = cache.average(
         model,
         pulses,
         5,
         end,
         initial_field=initial,
         initial_time_ns=origin,
-        cache=cache,
     )
     if variant == 0:
         initial = initial + 0.01j
@@ -77,14 +77,13 @@ def test_flat_cache_owns_exact_moments_for_complete_inputs(variant):
     expected = adc.cavity_field_average(
         model, pulses, 5, end, initial_field=initial, initial_time_ns=origin
     )
-    actual = adc.cavity_field_average(
+    actual = cache.average(
         model,
         pulses,
         5,
         end,
         initial_field=initial,
         initial_time_ns=origin,
-        cache=cache,
     )
     np.testing.assert_array_equal(actual.photons, expected.photons)
     np.testing.assert_array_equal(actual.field_products, expected.field_products)
@@ -92,14 +91,13 @@ def test_flat_cache_owns_exact_moments_for_complete_inputs(variant):
     actual.photons[:] = -1
     actual.field_products[:] = -1
     first.field_products[:] = -2
-    again = adc.cavity_field_average(
+    again = cache.average(
         model,
         pulses,
         5,
         end,
         initial_field=initial,
         initial_time_ns=origin,
-        cache=cache,
     )
     np.testing.assert_array_equal(again.photons, expected.photons)
     np.testing.assert_array_equal(again.field_products, expected.field_products)
@@ -115,36 +113,35 @@ def test_flat_cache_capacity_clear_bypass_and_failure():
     model = _model()
     pulses = (adc.ReadoutPulse(0, 10, 0.2, 6.01),)
     cache = cache_type()
-    expected = adc.cavity_field_average(model, pulses, 0, 20, cache=cache)
+    assert callable(getattr(cache, "average", None)), "ADC owner must solve averages"
+    expected = cache.average(model, pulses, 0, 20)
     resident = cache.resident_bytes
     assert resident > expected.photons.nbytes + expected.field_products.nbytes
     bounded = cache_type(resident)
-    adc.cavity_field_average(model, pulses, 0, 20, cache=bounded)
-    adc.cavity_field_average(model, pulses, 0, 21, cache=bounded)
+    bounded.average(model, pulses, 0, 20)
+    bounded.average(model, pulses, 0, 21)
     assert bounded.resident_bytes == resident and bounded.misses == 2
-    adc.cavity_field_average(model, pulses, 0, 20, cache=bounded)
+    bounded.average(model, pulses, 0, 20)
     assert bounded.hits == 1
     for capacity in (0, 1):
         disabled = cache_type(capacity)
         for _ in range(2):
-            result = adc.cavity_field_average(model, pulses, 0, 20, cache=disabled)
+            result = disabled.average(model, pulses, 0, 20)
             np.testing.assert_array_equal(
                 result.field_products, expected.field_products
             )
         assert disabled.resident_bytes == 0 and disabled.hits == 0
     shaped = (replace(pulses[0], envelope=lambda t: 1.0),)
-    adc.cavity_field_average(model, shaped, 0, 20, cache=cache)
+    cache.average(model, shaped, 0, 20)
     assert cache.misses == 1 and cache.hits == 0
-    with pytest.raises(ValueError):
-        adc.cavity_field_average(model, pulses, 20, 0, cache=cache)
+    with pytest.raises(ValueError, match="finite and positive"):
+        cache.average(model, pulses, 20, 0)
     with pytest.raises(ValueError, match="finite"):
-        adc.cavity_field_average(
-            model, (replace(pulses[0], envelope=lambda t: np.nan),), 0, 20, cache=cache
-        )
+        cache.average(model, (replace(pulses[0], envelope=lambda t: np.nan),), 0, 20)
     assert cache.resident_bytes == resident and cache.misses == 1
     cache.clear()
     assert cache.resident_bytes == 0 and cache.misses == 1 and cache.hits == 0
-    adc.cavity_field_average(model, pulses, 0, 20, cache=cache)
+    cache.average(model, pulses, 0, 20)
     assert cache.misses == 2
 
 
