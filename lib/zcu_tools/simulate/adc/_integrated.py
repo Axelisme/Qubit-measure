@@ -43,9 +43,9 @@ class IntegratedLine:
     """Spectral workspace for one validated constant-line model.
 
     q: population generator (states, states), 1/ns.
-    m: homogeneous moment generator (2*states, 2*states), 1/ns.
-    b: drive coupling (2*states, states).
-    output: scattered-field projection (2*states,).
+    m: homogeneous moment generator (cavity*states, cavity*states), 1/ns.
+    b: drive coupling (cavity*states, states).
+    output: scattered-field projection (cavity*states,).
     Arrays remain caller-owned. valid is False for ill-conditioned eigenbases
     or reconstruction residuals above 1e-13; sums then requests fallback.
     """

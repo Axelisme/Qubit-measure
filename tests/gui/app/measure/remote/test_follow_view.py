@@ -43,6 +43,8 @@ def test_write_follow_precedes_mutation_and_headless_still_works(
     control = adapter.run_analyze_control
     control.get_tab_snapshot.return_value = SimpleNamespace(
         interaction=None,
+        artifacts=(),
+        run=None,
         capabilities=SimpleNamespace(analysis=AnalysisMode.FIT),
         analysis=SimpleNamespace(params=Params(), has_writeback_draft=False),
         post_analysis=SimpleNamespace(

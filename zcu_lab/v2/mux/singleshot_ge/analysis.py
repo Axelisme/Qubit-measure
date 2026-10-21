@@ -13,6 +13,7 @@ from zcu_tools.experiment.utils.single_shot.ge import GENumericalError
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.mux import MuxFitFailure
+from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
 from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
     GE_Exp,
@@ -21,6 +22,7 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEAnalyzeOptions,
     GEPostAnalysis,
     GEPostAnalyzeOptions,
+    ge_signals_by_state,
 )
 
 if TYPE_CHECKING:
@@ -124,6 +126,12 @@ def analyze_ge(
     for row, (index, option) in enumerate(zip(indices, selected, strict=True)):
         name = f"fit_{index}"
         if not np.isfinite(source.result.signals[row]).all():
+            draw_ge_scatter(
+                plots,
+                name,
+                ge_signals_by_state(source.result.signals[row], option.initial_state),
+                labels=("g preparation", "e preparation"),
+            )
             reason = "GE fit requires both complete probe-off/on preparations"
             _failure_plot(plots, name, reason)
             outcomes.append(MuxFitFailure(index, reason))

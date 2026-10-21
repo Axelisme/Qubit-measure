@@ -36,7 +36,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Read one logical field from current input and fixed captured Specs. "
             "Generated wrappers are hidden; real field names remain. Paths keep str names "
-            "and int original list indexes, never element names. path=[] reads "
+            "and int original list indexes, never element names. Real containers "
+            'remain, e.g. ["modules", "readout"]; path=[] reads '
             "root. Returns metadata, authored input, ordinary value/value_status, "
             "selector/source, readonly and directed logical errors in one turn. "
             "Ref reads do not materialize input, refresh sources or grant writes.",
@@ -63,7 +64,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Select/copy/disable a typed logical generated module selector (str names/int indexes). use_library "
-            "requires an actual captured key allowed by the owner. Other actions "
+            "requires an actual captured key allowed by the owner. Keep real cfg "
+            'containers: mux readout uses ["modules", "readout"], as in recipes. Other actions '
             "must omit key; explicit null is invalid. use_inline explicitly copies "
             "fixed captured Spec content, preserving child keys; inline is a guarded "
             "no-op. Ref ancestors require explicit outer copies first. Returns "
@@ -268,7 +270,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Atomically write unique model-field leaf paths against fixed sources. "
             "Each edit has path: [segments] and value: Form input JSON. "
             "Expressions use {expr: text}, complex literals use __complex__, "
-            "and library keys are plain strings. Edit range leaves separately. "
+            "and child key leaves are literal strings. Module selection uses "
+            'tab.select_recipe_module with logical paths, e.g. ["modules", "readout"], '
+            "not a key string at the module container. Ref descendants require "
+            "use_inline first. Rejections list active editable_paths and selection_paths. "
+            "Edit range leaves separately. "
             "Invalid values stay editable with errors; structural failures preserve "
             "the entire input. Returns input, values and errors.",
             (

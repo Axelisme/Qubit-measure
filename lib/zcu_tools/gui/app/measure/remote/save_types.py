@@ -69,6 +69,36 @@ class SaveArtifactWire(BaseModel):
     members: dict[str, list[SaveOutputWire]]
 
 
+class RawDataStateWire(BaseModel):
+    """Current native raw evidence, independent of analysis artifact persistence.
+
+    run_id is the fixed Run/Load metadata identity, including before saving.
+    saved is true only when measurement_data is fully Saved in the owner tracker.
+    It does not stat files or treat saved analysis outputs as saved raw data.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    run_id: str | None
+    saved: bool
+
+
+def project_raw_data_state(
+    sections: tuple[ArtifactSectionSnapshot, ...], *, run_id: str | None
+) -> RawDataStateWire:
+    """Project the Run's raw status without saving or inferring output success.
+
+    sections is the current artifact tracker snapshot; run_id is the Run/Load
+    metadata identity, not the confirmed identity from a previous Save reply.
+    """
+    saved = any(
+        artifact.ref.name == "measurement_data" and artifact.status is SaveStatus.SAVED
+        for section in sections
+        if section.section == "run"
+        for artifact in section.artifacts
+    )
+    return RawDataStateWire(run_id=run_id, saved=saved)
+
+
 class SaveSnapshotWire(BaseModel):
     """Detached owning save evidence, not a second persistence policy.
 

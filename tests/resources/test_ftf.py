@@ -9,6 +9,74 @@ from zcu_tools.resources.ftf import load_ftf, parse_ftf
 from tests.resources._ftf_data import dual_readout_document, ftf_document
 
 
+def _design_record() -> dict[str, object]:
+    return {
+        "ej_ghz": 4.2,
+        "ec_ghz": 1.1,
+        "el_ghz": 0.45,
+        "flux_unit": "V",
+        "flux_half": -0.12,
+        "flux_period": -0.8,
+        "flux_bias": 0.03,
+    }
+
+
+@pytest.mark.parametrize("design", [None, {}], ids=["omitted", "empty"])
+def test_design_is_optional_without_truth_fallback(
+    design: dict[str, object] | None,
+) -> None:
+    document = ftf_document()
+    if design is not None:
+        document["design"] = design
+    try:
+        settings = parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"optional design must load: {error}")
+    assert settings.model_dump(mode="json").get("design") == {}
+
+
+def test_design_load_preserves_independent_nominal_values(tmp_path: Path) -> None:
+    document = ftf_document() | {"design": {"Q1": _design_record()}}
+    path = tmp_path / "design.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    try:
+        settings = load_ftf(path)
+    except ValueError as error:
+        pytest.fail(f"complete authored design must load: {error}")
+    assert settings.model_dump(mode="json")["design"] == {"Q1": _design_record()}
+    assert parse_ftf(settings.model_dump(mode="json")) == settings
+
+
+@pytest.mark.parametrize("field", list(_design_record()))
+def test_design_requires_every_authored_field(tmp_path: Path, field: str) -> None:
+    record = _design_record()
+    del record[field]
+    path = tmp_path / "incomplete.yaml"
+    path.write_text(
+        yaml.safe_dump(ftf_document() | {"design": {"Q1": record}}), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match=rf"design\.Q1\.{field}"):
+        load_ftf(path)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("ej_ghz", None),
+        ("ec_ghz", -1.0),
+        ("el_ghz", float("inf")),
+        ("flux_unit", "mA"),
+        ("flux_half", "0.2"),
+        ("flux_period", 0.0),
+        ("flux_bias", float("nan")),
+    ],
+)
+def test_design_rejects_invalid_values_at_the_field(field: str, value: object) -> None:
+    record = _design_record() | {field: value}
+    with pytest.raises(ValueError, match=rf"design\.Q1\.{field}"):
+        parse_ftf(ftf_document() | {"design": {"Q1": record}})
+
+
 def test_singular_receiver_spectral_density_is_legal() -> None:
     document = ftf_document()
     _set_field(document, "readout.adc.gain", 0.0)

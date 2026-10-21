@@ -121,7 +121,6 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
-from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
@@ -255,7 +254,10 @@ class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
         )
         viewers = [
             context.plots.liveplot_1d(
-                f"measurement_{index}", "Pulse length (us)", "Magnitude (a.u.)"
+                f"measurement_{index}",
+                "Pulse length (us)",
+                "Magnitude (a.u.)",
+                title=f"{index}: {cfg.tones[index].name}",
             )
             for index in scan.indices
         ]
@@ -263,13 +265,6 @@ class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
         def update(data: NDArray[np.complex128]) -> None:
             for row, viewer in enumerate(viewers):
                 viewer.update(scan.coordinates[row], np.abs(data[:, row]))
-            draw_mux_magnitudes(
-                context.plots,
-                scan.coordinates,
-                data.T,
-                [f"{index}: {cfg.tones[index].name}" for index in scan.indices],
-                "Pulse length (us)",
-            )
 
         # Point-major storage lets each scan step write one whole tone vector.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)

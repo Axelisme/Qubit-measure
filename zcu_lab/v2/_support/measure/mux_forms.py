@@ -26,10 +26,10 @@ def mux_readout_initial(
 
     With a readout slot and wait_for_ringup=False, return a library reference,
     preserving all stored tones and scalar settings. Without a slot, seed the
-    blank template with each resonator's calibration frequency, gain=0.1 and
-    group-order index as ro_ch. Labels start as resonator names. Missing/invalid
-    frequency leaves required input blank. The operator verifies initial gain
-    and channels against the lab wiring. Missing capture or a non-MuxGroup
+    blank template with each resonator's calibration frequency and name label.
+    Channels, gain and durations remain required and unfilled. Missing/invalid
+    frequency also leaves required input blank. The operator supplies wiring,
+    gain and timing before Run. Missing capture or a non-MuxGroup
     source raises ValueError; alias/source faults propagate.
 
     wait_for_ringup opts spectroscopy into an editable Open/Reset timing seed.
@@ -38,8 +38,9 @@ def mux_readout_initial(
     finite and positive in MHz, or raise ValueError (alias/source faults
     propagate). Add 5/(2*pi*min(set kappas)) us to the captured scalar trigger
     offset, or the blank template's zero offset. A minimum kappa of 1 MHz adds
-    approximately 0.795775 us. Preserve ro_length
-    and seed length=max(original length, trig_offset+ro_length) in us.
+    approximately 0.795775 us. With a captured readout, preserve ro_length and
+    seed length=max(original length, trig_offset+ro_length) in us. Without one,
+    keep both required durations unfilled.
     This spectroscopy exception uses a detached slot copy when available and
     replaces tones from the group on both paths. Open/Reset leaves editable
     timing; subsequent cfg output retains the operator's edits. No source is
@@ -52,7 +53,8 @@ def mux_readout_initial(
     group = parameters.document().components.get(name)
     if not isinstance(group, MuxGroupSchema):
         raise ValueError(f"$mux={name!r}: expected group/mux")
-    if not wait_for_ringup and ctx.has("$mux.module.readout"):
+    has_readout = ctx.has("$mux.module.readout")
+    if not wait_for_ringup and has_readout:
         return Slot("$mux.module.readout")
     tones: list[dict[str, TemplateSeed]] = []
     for index, resonator in enumerate(group.resonators):
@@ -61,18 +63,18 @@ def mux_readout_initial(
             raise ValueError(
                 f"$mux.resonators[{index}]={resonator!r}: expected resonator"
             )
-        tones.append(
-            {
-                "freq": Expr(f"{resonator}.freq"),
-                "gain": 0.1,
-                "ro_ch": index,
-                "label": resonator,
-            }
-        )
+        tone: dict[str, TemplateSeed] = {
+            "freq": Expr(f"{resonator}.freq"),
+            "label": resonator,
+        }
+        if has_readout:
+            # Preserve the existing ringup-copy defaults; only blank input changes.
+            tone.update({"gain": 0.1, "ro_ch": index})
+        tones.append(tone)
     seeds: dict[str, TemplateSeed] = {"tones": tones}
     if wait_for_ringup:
         seeds.update(_ringup_timing(ctx, group))
-    if ctx.has("$mux.module.readout"):
+    if has_readout:
         return Slot("$mux.module.readout", copy=True, set=seeds)
     return Template("readout/mux:blank", set=seeds)
 
@@ -108,16 +110,11 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
         trigger = readout.trig_offset + wait_us
         length = max(readout.length, trigger + readout.ro_length)
     else:
-        # The blank template's public scalar seeds supply its timing baseline.
-        blank = TEMPLATES["readout/mux:blank"].seeds
-        timing: dict[str, float] = {}
-        for field in ("trig_offset", "length", "ro_length"):
-            value = blank[field]
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise TypeError(f"Blank mux {field} seed must be a numeric scalar")
-            timing[field] = value
-        trigger = timing["trig_offset"] + wait_us
-        length = max(timing["length"], trigger + timing["ro_length"])
+        # Ringup can seed the trigger without inventing the required durations.
+        offset = TEMPLATES["readout/mux:blank"].seeds["trig_offset"]
+        if isinstance(offset, bool) or not isinstance(offset, (int, float)):
+            raise TypeError("Blank mux trig_offset seed must be a numeric scalar")
+        return {"trig_offset": offset + wait_us}
     return {"trig_offset": trigger, "length": length}
 
 

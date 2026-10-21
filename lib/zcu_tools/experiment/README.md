@@ -38,6 +38,20 @@ fixed-coordinate joint circuits, explicit evolution/population conversion and th
 single-receiver ADC. It uses the same bundle and acquisition contracts, without
 adding GUI physics or exposing state labels to ordinary Run metadata.
 
+[`single_fluxonium`](single_fluxonium/README.md) plans complete microwave/fast-flux
+timelines and assembles a one-source mock environment. Its source composes DC-basis
+population conversion, one-cavity ADC statistics, deferred raw shots and decimated
+traces. Hosts can call the optional `SimulationEnvironment.close_backend` after
+acquisition drains; device cleanup remains separate.
+
+`readout_plan.py` owns shared QICK drive/readout waveform conversion without
+settings or circuit physics. `drive_track` detaches microwave slots with the
+same support, carrier-phase and envelope semantics for both environments. It partitions terminal readout and earlier cavity
+drives, detaches envelopes, deduplicates pulse/grid contents and converts
+common-origin carrier phases to pulse-local phases. Environment planners supply
+`ReadoutDrive` calibration and retain responsibility for receiver binding,
+physical models, evolution and sampling.
+
 ## 實驗介面與資料
 
 - `records.py` 的 `RunRecord` 將 nullable cfg 與純 Result 配對。可選 `labber_metadata` 保存載入檔案的 comment、tags、project、user 與 creation_time；未捕捉時為 None。Typed `restore_run`、`load_run`、`load_run_with_metadata` 與 core `from_stored` 都沿此欄位保留 metadata，不改各入口原有 tuple 含義。建立時複製 cfg 與 Labber metadata，隔離 caller 之後對輸入的修改；record 內 cfg、Result 與 metadata 仍可修改。`interfaces.py` 的 `RecordExperiment` 定義 run／save／load，`SynchronousExperiment` 另加同步 analyze，不要求 interactive 實驗提供 analyze。

@@ -63,6 +63,81 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
         read_replay(second)
 
 
+def test_single_fluxonium_replay_roundtrip_keeps_its_own_settings(
+    tmp_path: Path,
+) -> None:
+    from pydantic import ValidationError
+    from zcu_tools.resources.simulation_replay import (
+        ReplayAcquire,
+        read_replay,
+        save_replay,
+    )
+    from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
+
+    settings = parse_single_fluxonium(
+        {
+            "format": "zcu.single-fluxonium",
+            "version": 1,
+            "chip": {
+                "qubit": {"ej_ghz": 4, "ec_ghz": 1, "el_ghz": 1},
+                "temperature_k": 0,
+            },
+            "dc_bias": {
+                "offset_phi0": 0.5,
+                "source": {
+                    "name": "bias",
+                    "unit": "A",
+                    "limits": [-1, 1],
+                    "initial": 0,
+                    "ramp_step": 0.01,
+                    "flux_per_unit": 0.1,
+                },
+            },
+            "drive_line": {
+                "name": "mw",
+                "gen_ch": 1,
+                "charge_drive_ghz_per_gain": {"real": 0.1, "imag": 0},
+            },
+            "flux_line": {"name": "ff", "gen_ch": 2, "flux_phi0_per_gain": 0.2},
+            "readout": {
+                "drive": {"gen_ch": 0, "input_per_gain": 10},
+                "resonator": {
+                    "frequency_ghz": 7,
+                    "charge_coefficient_ghz": 0,
+                    "kappa_external_mhz": 1,
+                    "kappa_internal_mhz": 0,
+                },
+                "adc": {"ro_ch": 0, "gain": 1, "noise_psd_adc2_ns": [[0, 0], [0, 0]]},
+            },
+            "numerics": {
+                "truncation": {"native_cutoff": 12, "levels": 4},
+                "solver": {
+                    "rtol": 1e-8,
+                    "atol": 1e-10,
+                    "max_step_ns": 0.1,
+                    "bath_segment_ns": 2,
+                },
+                "seed": 123,
+            },
+        }
+    )
+    request = AcquireRequest("integrated", (1,), 0, (), 123, 0, "test-rng-v1")
+    try:
+        fixed = ReplayAcquire(
+            settings=settings, request=request, versions=(("backend", "single"),)
+        )
+    except ValidationError as error:
+        pytest.fail(f"private replay must accept single-fluxonium settings: {error}")
+    snapshot = EnvironmentSnapshot(
+        "single-fluxonium-v1", "single-model", (("bias", 0.2),)
+    )
+    loaded = read_replay(save_replay(tmp_path, fixed, snapshot, 2))
+    assert loaded.acquire.settings == settings
+    assert loaded.acquire.settings.format == "zcu.single-fluxonium"
+    assert loaded.round.snapshot == snapshot
+    assert loaded.round.index == 2
+
+
 def test_replay_rejects_changed_saved_content(tmp_path: Path) -> None:
     from zcu_tools.resources.simulation_replay import read_replay
 

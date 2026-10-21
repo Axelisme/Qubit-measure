@@ -153,7 +153,6 @@ from zcu_lab.v2._support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
@@ -236,7 +235,10 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         # 2. Plot requested delay for each original tone, including partial data.
         viewers = [
             context.plots.liveplot_1d(
-                f"measurement_{index}", "Requested delay (us)", "Magnitude (a.u.)"
+                f"measurement_{index}",
+                "Requested delay (us)",
+                "Magnitude (a.u.)",
+                title=f"{index}: {cfg.tones[index].name}",
             )
             for index in indices
         ]
@@ -244,16 +246,6 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         def update(data: NDArray[np.complex128]) -> None:
             for row, viewer in enumerate(viewers):
                 viewer.update(times, np.abs(data[row]))
-            draw_mux_magnitudes(
-                context.plots,
-                np.broadcast_to(times, data.shape),
-                data,
-                [
-                    f"{index}: {tone.name}"
-                    for index, tone in zip(indices, tones, strict=True)
-                ],
-                "Requested delay (us)",
-            )
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
         with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
@@ -314,6 +306,9 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         fit_phase frees its phase instead of choosing 0/180 degrees from the
         nearest-zero signal. Return T2* (us), fringe rate (MHz), uncertainties
         and fit quality, or a failure reason, for each original tone index.
+        Sampling quality uses acquired delays and finite actual_detunes as known
+        alias-risk lower bounds. Unknown actual detune leaves a fitted-rate-only
+        assessment, which cannot exclude aliasing.
         Draw fit_i in plots; invalid sources raise.
         """
         # 1. Validate the saved source before opening per-tone fit figures.
@@ -337,7 +332,15 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                     zero = real[np.argmin(np.abs(trace.times))]
                     phase = 0.0 if zero > 0.5 * (np.max(real) + np.min(real)) else 180.0
                 outcome, fitted = fit_coherence_trace(
-                    trace, real, fit_fringe=options.fit_fringe, phase=phase
+                    trace,
+                    real,
+                    fit_fringe=options.fit_fringe,
+                    phase=phase,
+                    expected_frequency_mhz=(
+                        float(source.result.actual_detunes[row])
+                        if np.isfinite(source.result.actual_detunes[row])
+                        else None
+                    ),
                 )
             except (
                 ValueError,

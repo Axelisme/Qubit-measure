@@ -333,9 +333,21 @@ def _initial_ge_parameters(
 
         g_keep_pdf = g_pdfs[g_idxs]
         e_keep_pdf = e_pdfs[e_idxs]
-        sigma_g = np.sum(g_keep_pdf * np.abs(xs[g_idxs] - sg)) / np.sum(g_keep_pdf)
-        sigma_e = np.sum(e_keep_pdf * np.abs(xs[e_idxs] - se)) / np.sum(e_keep_pdf)
-        s = 0.5 * (sigma_g + sigma_e)
+        # Boundary peaks or zero-mass outer tails cannot estimate a width.
+        # Start from two bins in that case; the optimizer still fits the width.
+        resolution_width = 2 * (xs[1] - xs[0])
+        g_mass, e_mass = np.sum(g_keep_pdf), np.sum(e_keep_pdf)
+        sigma_g = (
+            np.sum(g_keep_pdf * np.abs(xs[g_idxs] - sg)) / g_mass
+            if g_mass > 0
+            else resolution_width
+        )
+        sigma_e = (
+            np.sum(e_keep_pdf * np.abs(xs[e_idxs] - se)) / e_mass
+            if e_mass > 0
+            else resolution_width
+        )
+        s = max(0.5 * (sigma_g + sigma_e), resolution_width)
 
         if sg == se:
             if np.sum(g_pdfs * xs) < np.sum(e_pdfs * xs):
@@ -434,7 +446,17 @@ def fit_singleshot(
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[tuple[float, float, float, float, float, float, float], NDArray[np.float64]]:
-    """fitparams: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"""
+    """Fit paired histogram masses to the GE readout-transition model.
+
+    xs is a finite increasing 1-D axis with at least three bins. g_pdfs and
+    e_pdfs are matching finite nonnegative masses with positive totals.
+    fitparams/fixedparams order is [sg, se, s, p0_g, p0_e, p_avg, length_ratio];
+    None entries request automatic initialization or a free parameter.
+    Empty/zero-mass outer tails use a finite bin-resolution width seed, not a
+    measured width. Supplied initial coordinates must be finite. Invalid inputs
+    raise ValueError; optimization failure raises rather than returning a seed.
+    Return fitted physical coordinates in that order and their covariance.
+    """
     _require_ge_histograms(xs, g_pdfs, e_pdfs)
     if fixedparams is not None:
         if len(fixedparams) != 7:
@@ -477,6 +499,10 @@ def fit_singleshot(
         ), transform @ covariance @ transform.T
 
     initial = _initial_ge_parameters(xs, g_pdfs, e_pdfs, fitparams, fixedparams)
+    if fitparams is not None and any(
+        value is not None and not np.isfinite(value) for value in fitparams
+    ):
+        raise ValueError("GE initial parameters must be finite")
     sg, se, s, _, _, _, _ = initial
     bounds = (
         [

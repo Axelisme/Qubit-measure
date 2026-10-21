@@ -105,6 +105,25 @@ def test_blocking_covers_rounded_generator_and_adc_windows(updates):
 
 
 @pytest.mark.parametrize(
+    "fault,field,reason",
+    [
+        ("generator", "mux.gen_ch", "mixmux8"),
+        ("adc", "mux.tones[1].ro_ch", "static PFBv4"),
+    ],
+)
+def test_wiring_rejection_names_the_configuration_field(fault, field, reason):
+    soccfg = mux_soccfg()
+    if fault == "generator":
+        soccfg["gens"][0]["type"] = "axis_signal_gen_v6"
+    else:
+        soccfg["readouts"][1]["ro_type"] = "axis_pfb_readout_v3"
+    with pytest.raises(ValueError, match=reason) as error:
+        RecordingProgram(soccfg, [native_mux().build("mux")])
+    assert field in str(error.value)
+    assert reason in str(error.value)
+
+
+@pytest.mark.parametrize(
     "field,value",
     [
         ("type", "axis_signal_gen_v6"),
