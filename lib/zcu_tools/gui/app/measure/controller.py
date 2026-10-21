@@ -102,6 +102,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
+    from zcu_tools.plotting.figures import FigureCollection
 
     from .artifacts import SaveControlPort
     from .services import AppServices
@@ -160,6 +161,16 @@ class RenderHost(Protocol):
     The worker captures the pane's container at start; switching the visible pane
     does not change the routing target. Save/Guide have no container (placeholder).
     """
+
+    def present_figures(
+        self, tab_id: str, pane: str, figures: FigureCollection
+    ) -> None:
+        """Borrow original names on the Qt owner after attachment; errors propagate.
+
+        Presentation references end at clear/replacement; Figures remain owned
+        by their operation. A closed tab is a no-op.
+        """
+        ...
 
     def make_run_container(self, tab_id: str) -> FigureContainer | None:
         """Run pane FigureContainer (live plot, view-only)."""
