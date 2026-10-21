@@ -386,6 +386,8 @@ class WritebackService:
         shallow-copied so draft-local ``session_id``, selection, target and value
         edits cannot mutate the adapter's proposal objects. Author element
         identities are detached at creation and never resolved against aliases.
+        Initial selection and the optional display note come from each proposal.
+        Quality decisions belong to the adapter; edits and Apply retain the note.
         Each module proposal
         is projected into a library entry Form (ModuleEntryForm): child library
         keys stay keys, and the optional hardware fields the shared Form
@@ -440,7 +442,6 @@ class WritebackService:
                     continue
             prefix = self._kind_prefix(item)
             item.session_id = self._next_session_id(entries, prefix)
-            item.selected = True
             entry = _DraftEntry(item)
             # Baseline capture — display-only, app/service-owned.
             self._capture_baseline(entry, parameters)
@@ -805,7 +806,6 @@ class WritebackService:
         copied = copy.copy(item)
         copied.element = copy.deepcopy(item.element)
         copied.session_id = ""
-        copied.selected = True
         return copied
 
     @staticmethod
