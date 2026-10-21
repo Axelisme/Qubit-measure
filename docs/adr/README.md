@@ -1,5 +1,7 @@
 # Architecture Decision Records
 
+**讀者：** framework-dev、agent。透過本索引與各篇 ADR 查找跨模組決策及其依據。
+
 每篇 ADR 以現在式描述目前生效的跨模組設計。索引只放定位用摘要；細節、替代方案與演化脈絡留在 ADR 本文。
 
 程式碼註解與記憶檔以 `ADR-NNNN` 引用本目錄；ADR 之間以 `[[NNNN]]` 互鏈。
