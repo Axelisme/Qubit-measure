@@ -35,4 +35,6 @@ Caller 透過 `ResultEntry.module_library(label)` 開啟既有 point 的 library
 
 ## Cfg materialization
 
-Experiment cfg materialization 的接合由 `zcu_tools.experiment.cfg_assembler` 負責。Caller 提供固定 library projection 與 device snapshot。GUI 的 schema／expression lowering 由 adapter owner 完成。Notebook 的顯式 `CfgEnv` 選定 library snapshot 與 device manager，讀取失敗直接傳播。更新 library 後，caller 重新捕捉 snapshot 並建立 CfgEnv。
+`LibrarySnapshot.get_module()` 與 `get_waveform()` 透過 core factories，把固定 snapshot 的 Spec 轉成執行用 cfg；asset 讀取使用 snapshot 綁定的 capability，引用或讀取失敗直接傳播。GUI 的 schema／expression lowering 與 core cfg 轉換由 [gui.form_adapter](../../gui/form_adapter/README.md) 負責，使用捕捉的 library 與 device snapshots。
+
+Notebook caller 直接建立實驗的 typed cfg，需要 library 成品時可查詢固定 `LibrarySnapshot`。更新參數或 library 來源後，caller 重新捕捉所需 snapshot 並重建 cfg。Notebook 的 DeviceManager 綁定與 Run 前 device snapshot 見 [Notebook 入口](../../notebook/README.md#共用責任與目前邊界)。`experiment.cfg_assembler` 只提供 Run mapping 的共用值型別 `ExperimentScalar` 與 `ExperimentCfgValue`。

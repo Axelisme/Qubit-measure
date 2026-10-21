@@ -57,7 +57,11 @@ GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 
 ## 共用責任與目前邊界
 
-Cfg 組裝使用 `experiment.cfg_assembler` 的 CfgEnv 與 make_cfg。Cfg.dev 只保存角色到 device 名稱的對應，使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Caller 必須明示 unit，不提供隱含 default。Run 不預查 cfg.dev 名稱是否存在，cfg 格式與必填 unit 的驗證仍保留。Core 實際以 `context.devices[cfg.dev[role]]` 選 driver 時，缺名即報錯並指名 device。Core 使用實驗層 helpers 設 flux／RF／output，不把 DeviceInfo 當設定命令，也不對未使用的 device 套 setup patch。單位換算由 caller 負責，RF helpers 接 Hz／dBm。RunContext 不提供 setters。CfgEnv 不執行 setup、不解析 md expression，也不關閉資源。切換參數／library 來源後由 caller 重建 CfgEnv。Run 不重做 make_cfg、不刷新 cfg、不重連或自動補裝置；make_cfg 的裝置讀取不能當成 Run snapshot。
+Caller 直接建立實驗的 typed cfg，再傳給 `NotebookExperiment.run(cfg)`。`experiment.cfg_assembler` 只提供 Run mapping 的共用值型別 `ExperimentScalar` 與 `ExperimentCfgValue`。需要 library 成品時，caller 可從固定 `LibrarySnapshot` 查詢；切換參數或 library 來源後，由 caller 重新捕捉所需 snapshot 並重建 cfg。GUI 的 schema／expression lowering 由 GUI 表單處理，Notebook 入口直接使用 caller 提供的 cfg。
+
+Cfg.dev 只保存角色到 device 名稱的對應，使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Caller 必須明示 unit，不提供隱含 default。Run 不預查 cfg.dev 名稱是否存在，cfg 格式與必填 unit 的驗證仍保留。Core 實際以 `context.devices[cfg.dev[role]]` 選 driver 時，缺名即報錯並指名 device。Core 透過實驗自己的 helpers 設 flux／RF／output，不把 DeviceInfo 當設定命令，也不對未使用的 device 套 setup patch。單位換算由 caller 負責，RF helpers 接 Hz／dBm。RunContext 不提供 setters。
+
+Caller 負責明確的 setup 與資源關閉。Run 不重新組裝或刷新 cfg、不重連或自動補裝置。建立 cfg 時的裝置讀取不能當成 Run snapshot。
 
 Notebook Run 在使用者的程序內同步執行，資源由 caller 擁有。入口只借用 drivers，不新增 lease、lock 或 registry。Driver mapping 只固定名稱到 instance，不是資源 lease。Hardware lease 後的 snapshot 時機只適用 GUI。
 
