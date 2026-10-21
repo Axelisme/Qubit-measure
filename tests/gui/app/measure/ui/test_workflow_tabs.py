@@ -521,8 +521,11 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
     token = control.tabs()[0].operation_id
     run_id = control.tabs()[0].run_id
     assert token is not None and run_id is not None
-    lease = ctrl.get_hardware_gate_presence()
-    assert any(p.kind == "run" for p in lease)
+    # Gate presence reports live age; compare only its stable public facts.
+    lease = tuple(
+        (p.kind, p.origin_kind, p.note) for p in ctrl.get_hardware_gate_presence()
+    )
+    assert any(kind == "run" for kind, _origin, _note in lease)
     ctrl.control_identity.connect("workflow-client", "workflow-agent", "owner")
     observed: list[tuple[str, bool, str | None, int | None]] = []
 
@@ -567,8 +570,16 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
         ], "Reclaim must precede Stop's lifecycle change on the original operation"
         assert control.tabs()[0].operation_id == token
         assert control.tabs()[0].run_id == run_id
-        assert ctrl.get_hardware_gate_presence() == lease
-        assert ctrl.await_operation(token, 0) is None
+        assert (
+            tuple(
+                (p.kind, p.origin_kind, p.note)
+                for p in ctrl.get_hardware_gate_presence()
+            )
+            == lease
+        )
+        pending = ctrl.await_operation(token, 0)
+        assert pending is not None and pending.reason == "timeout"
+        assert pending.outcome is None
         release_cleanup.set()
         # Released cleanup returns Done; the original owner must deliver stopped.
         qt_until(
@@ -580,8 +591,10 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
         assert control.tabs()[0].run_id == run_id
         assert control.tabs()[0].operation_id is None
         assert not any(p.kind == "run" for p in ctrl.get_hardware_gate_presence())
-        outcome = ctrl.await_operation(token, 0)
-        assert outcome is not None and outcome.status == "cancelled"
+        completed = ctrl.await_operation(token, 0)
+        assert completed is not None and completed.reason == "completed"
+        assert completed.outcome is not None
+        assert completed.outcome.status == "cancelled"
         assert [answer for answer, _thread in author.deliveries] == [None]
     finally:
         release_cleanup.set()
