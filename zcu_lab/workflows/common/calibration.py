@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Generator
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Literal
 
 import numpy as np
 from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from zcu_tools.core.script_protocol import ScriptGenerator
 from zcu_tools.datafile import RunSnapshot
-from zcu_tools.experiment.workflows import Effect, Failed, WorkflowEnv
+from zcu_tools.experiment.workflows import Failed, WorkflowEnv
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
 
@@ -258,7 +258,7 @@ def calibrate_frequency(
     inputs: CalibrationInputs,
     flux: float,
     carry: CalCarry,
-) -> Generator[Effect, None, FrequencyResult]:
+) -> ScriptGenerator[FrequencyResult]:
     """Locate the qubit resonance so this flux point can use a resonant drive.
 
     Use yield from in a workflow. flux is a finite device setpoint. carry is
@@ -361,7 +361,7 @@ def calibrate_rabi(
     carry: CalCarry,
     t1_estimate_us: float,
     point_index: int,
-) -> Generator[Effect, None, RabiResult]:
+) -> ScriptGenerator[RabiResult]:
     """Measure Rabi oscillations to calibrate pi and pi/2 pulse durations here.
 
     frequency must be the current point's result, never a prior frequency.
@@ -475,7 +475,7 @@ def calibrate_readout(
     rabi: RabiResult,
     carry: CalCarry,
     t1_estimate_us: float,
-) -> Generator[Effect, None, ReadoutResult]:
+) -> ScriptGenerator[ReadoutResult]:
     """Scan readout frequency and gain to maximize discrimination after Rabi.
 
     An accepted rabi implies a current accepted frequency; its frequency_mhz

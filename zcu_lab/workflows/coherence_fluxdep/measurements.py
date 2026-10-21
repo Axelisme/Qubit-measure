@@ -1,13 +1,13 @@
 """Concrete lifetime acquisition, acceptance and independent delay histories."""
 
-from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from zcu_tools.experiment.workflows import Effect, Failed, WorkflowEnv
+from zcu_tools.core.script_protocol import ScriptGenerator
+from zcu_tools.experiment.workflows import Failed, WorkflowEnv
 from zcu_tools.plotting.plots import LinePlot
 
 from zcu_lab.workflows.coherence_fluxdep.acquire import run_t2ramsey
@@ -120,7 +120,7 @@ def measure_t1(
     tun: T1Tunables,
     cal: CalibratedPi2,
     guess_us: float,
-) -> Generator[Effect, None, LifetimeResult]:
+) -> ScriptGenerator[LifetimeResult]:
     """Measure energy relaxation to estimate T1 independently of dephasing.
 
     plan supplies fixed routing/grid resolution/snapshot, tun supplies native
@@ -161,7 +161,7 @@ def measure_ramsey(
     tun: T2RamseyTunables,
     cal: CalibratedPi2,
     guess_us: float,
-) -> Generator[Effect, None, LifetimeResult]:
+) -> ScriptGenerator[LifetimeResult]:
     """Measure Ramsey fringes to estimate dephasing without an echo pulse.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun
@@ -201,7 +201,7 @@ def measure_echo(
     tun: T2EchoTunables,
     cal: CalibratedPi2,
     guess_us: float,
-) -> Generator[Effect, None, LifetimeResult]:
+) -> ScriptGenerator[LifetimeResult]:
     """Measure Hahn-echo decay to estimate coherence after refocusing slow noise.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun

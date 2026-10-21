@@ -18,6 +18,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.recipe import RecipeDefinition
+from zcu_tools.mcp.measure.recipe_execution import RecipeExecution, RecipeExecutions
 from zcu_tools.mcp.measure.session import (
     MeasureMcpSession,
     PortIsOpenFn,
@@ -111,6 +112,19 @@ class MeasureClient:
 
     def call(self, name: str, arguments: dict[str, Any]) -> Any:
         return self.tools[name]["handler"](arguments)
+
+
+def start_legacy_execution(
+    executions: RecipeExecutions,
+    tools: MeasureToolContext,
+    recipe: str,
+    arguments: Mapping[str, object],
+) -> RecipeExecution:
+    """Start a legacy recipe and fail if the registry selects the script host."""
+    execution = executions.start(tools, recipe, arguments)
+    if not isinstance(execution, RecipeExecution):
+        raise AssertionError("Expected a legacy RecipeExecution")
+    return execution
 
 
 def full_execution_reply(client: MeasureClient, reply: ToolReply) -> ToolReply:
