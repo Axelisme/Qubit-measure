@@ -21,6 +21,51 @@ def _model():
     )
 
 
+@pytest.mark.parametrize("cavities", [1, 2])
+def test_flat_cache_miss_and_hit_own_complete_moments_for_each_cavity_count(cavities):
+    base = _model()
+    model = replace(
+        base,
+        frequencies_ghz=base.frequencies_ghz[:, :cavities],
+        kappa_internal_per_ns=base.kappa_internal_per_ns[:cavities],
+        kappa_external_per_ns=base.kappa_external_per_ns[:cavities],
+        mismatch_phase_rad=np.zeros(cavities),
+    )
+    pulses = (
+        adc.ReadoutPulse(2, 14, 0.3j, 6.01, 0.2),
+        adc.ReadoutPulse(4, 11, 0.15, 6.04, -0.3),
+    )
+    initial = np.array([0.2 + 0.1j, -0.3j])[:cavities]
+    expected = adc.cavity_field_average(
+        model, pulses, 5, 20, initial_field=initial, initial_time_ns=5
+    )
+    cache = adc.CavityAverageCache()
+    first = cache.average(
+        model, pulses, 5, 20, initial_field=initial, initial_time_ns=5
+    )
+    np.testing.assert_array_equal(first.photons, expected.photons)
+    np.testing.assert_array_equal(first.field_products, expected.field_products)
+    assert cache.misses == 1 and cache.hits == 0
+    first.photons[:] = -1
+    first.field_products[:] = -1
+    hit = cache.average(model, pulses, 5, 20, initial_field=initial, initial_time_ns=5)
+    np.testing.assert_array_equal(hit.photons, expected.photons)
+    np.testing.assert_array_equal(hit.field_products, expected.field_products)
+    assert cache.misses == 1 and cache.hits == 1
+    assert not np.shares_memory(first.photons, hit.photons)
+    assert not np.shares_memory(first.field_products, hit.field_products)
+    hit.photons[:] = -2
+    hit.field_products[:] = -2
+    again = cache.average(
+        model, pulses, 5, 20, initial_field=initial, initial_time_ns=5
+    )
+    np.testing.assert_array_equal(again.photons, expected.photons)
+    np.testing.assert_array_equal(again.field_products, expected.field_products)
+    assert cache.misses == 1 and cache.hits == 2
+    assert not np.shares_memory(hit.photons, again.photons)
+    assert not np.shares_memory(hit.field_products, again.field_products)
+
+
 @pytest.mark.parametrize("variant", range(12))
 def test_flat_cache_owns_exact_moments_for_complete_inputs(variant):
     cache_type = getattr(adc, "CavityAverageCache", None)

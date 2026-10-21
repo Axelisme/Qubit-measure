@@ -7,6 +7,7 @@ import pytest
 from zcu_tools.simulate.evolution import (
     Engine,
     EnvelopeSpec,
+    FluxExpansion,
     FluxSchedule,
     FluxWaveform,
     ModelSource,
@@ -26,6 +27,7 @@ def test_sparse_tracks_pack_in_input_order_with_half_open_support(continuous):
         lambda level: replace(
             model, level=level, drives=drives if level == (0,) else drives[::-1]
         ),
+        FluxExpansion(np.diag(model.energies_ghz).astype(complex), ()),
     )
     shaped = EnvelopeSpec(
         "sampled",
@@ -96,7 +98,7 @@ def test_sparse_tracks_pack_in_input_order_with_half_open_support(continuous):
         elif playing:
             assert family != "flux_dop853"
         else:
-            assert family == "t4"
+            assert family == ("adiabatic_map" if changing else "t4")
         for slot, t in enumerate(playing):
             local = start - t.start_ns[point]
             local_end = end - t.start_ns[point]
