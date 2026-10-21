@@ -155,8 +155,8 @@ class MuxOnetoneFindAdapter(
 
         ctx is the result's fixed Run/Load environment, not the current Form.
         Missing capture or unbound mux starts with an empty editable list; fill
-        names before Analyze. If any captured frequency is null, the list is
-        also empty: enter names in increasing dip-frequency order instead of
+        names before Analyze. If any captured frequency is unset or null, the
+        list is also empty: enter names in increasing dip-frequency order instead of
         guessing the component identity. Malformed bindings/frequencies raise.
         result is unused because names are not stored in raw cfg.
         """
@@ -179,7 +179,7 @@ class MuxOnetoneFindAdapter(
         options.resonators = names
         options.validate()
         captured_frequencies = {
-            name: parameters.value(f"{name}.freq") for name in names
+            name: parameters.lookup(f"{name}.freq").value for name in names
         }
         frequencies = {
             name: _captured_frequency(value, name)
