@@ -28,7 +28,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
 )
 from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
-from zcu_tools.gui.session.services.build import build_session_services
+from zcu_tools.gui.session.services.build import SessionServices, build_session_services
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
@@ -53,6 +53,8 @@ from .startup import StartupService
 from .tab import TabService
 from .tab_control import TabControlFacet
 from .tab_form import TabFormResources, TabFormSources
+from .workflow_borrower import WorkflowBorrower as WorkflowBorrower
+from .workflow_control import WorkflowControlFacet
 from .workspace import WorkspaceService
 
 if TYPE_CHECKING:
@@ -92,12 +94,19 @@ class AppServices:
     A single OperationRunner (the kind-agnostic lifecycle mechanism, ADR-0066)
     is shared by run / analyze / post-analyze / device-setup operations.
 
+    session retains the original SessionServices bundle for embedded borrowers.
+    workflow is the shared headless workflow registry and command facet; it uses
+    that same session runner, progress and hardware lease. Borrowers must release
+    their own subscriptions, not drain or disconnect this bundle.
+
     soc_control is the non-null session control facet for the shared SoC dialog.
     Use it on the GUI owner thread for connection commands, cached preferences,
     configuration reads and outcome subscriptions. Unlike soc_connection, the
     owning connection service, this facet exposes only the dialog's narrow port.
     """
 
+    session: SessionServices
+    workflow: WorkflowControlFacet
     startup: StartupService
     startup_context: StartupContext
     experiment_access: ExperimentAccess
@@ -319,6 +328,8 @@ def build_app_services(  # noqa: PLR0913
         cache_root=Path(user_cache_dir("zcu_tools", "zcu_tools")) / "gui",
     )
     return AppServices(
+        session=session,
+        workflow=WorkflowControlFacet(state, session, owner_scheduler),
         startup=startup,
         startup_context=startup_context,
         experiment_access=access,

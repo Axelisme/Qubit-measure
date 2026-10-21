@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -55,6 +55,16 @@ Without a selected script, it opens the shared Setup dialog.
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/soc/context/device/predictor/progress domains.
+
+`AppServices.session` and read-only `Controller.session_services` expose that
+same session bundle to embedded borrowers. `Controller.workflow_control()`
+provides the headless workflow tab registry, captured forms, native run control
+and retained figure/record queries. GUI panes and remote callers use this same
+owner. Workflow runs borrow the session RUN lease, runner and progress. Closing
+an idle workflow tab releases only its presentation. Panes dispose their own
+subscriptions, editors and timers before deleting children; they never drain
+or disconnect the shared session. Native Ask is not connected yet. Its answer
+continuation must use the retained operation worker and lease, not the UI loop.
 
 The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
 result entries and working points; SoC connects the board and displays soccfg
