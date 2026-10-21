@@ -89,8 +89,10 @@ class ComponentTreeWidget(QWidget):
     """Inspect and edit components and general extensions through ContextControlPort.
 
     The widget owns presentation only. The tree has Field, Value, Unit and
-    Metadata columns. Metadata shows a row's opaque caller mapping as one-line
-    flow YAML with a block YAML tooltip on each field row, including group
+    Metadata columns. Columns can be resized by dragging their headers; Metadata
+    fills spare width, and refresh preserves column widths. Metadata shows a
+    row's opaque caller mapping as one-line flow YAML with a block YAML tooltip
+    on each field row, including group
     and unset rows, blank when absent or empty; no key is interpreted. Each component row shows its kind; its children follow
     component_field_specs(kind), so unset fields stay visible as an italic
     gray "(unset)" and nested models expand into child rows. Document data
@@ -198,7 +200,6 @@ class ComponentTreeWidget(QWidget):
                 )
         if selected in items:
             self._tree.setCurrentItem(items[selected])
-        self._tree.resizeColumnToContents(_FIELD)
 
     def open_add_dialog(self) -> AddComponentDialog:
         """Open the Add component dialog for the current destination and return it.
@@ -293,10 +294,12 @@ class ComponentTreeWidget(QWidget):
         shortcut.activated.connect(self._edit_current)
         header = tree.header()
         assert header is not None
-        header.setStretchLastSection(False)
-        header.setSectionResizeMode(_VALUE, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(_UNIT, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(_METADATA, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        # Seed widths only once so document rebuilds retain the user's sizing.
+        tree.setColumnWidth(_FIELD, 220)
+        tree.setColumnWidth(_VALUE, 240)
+        tree.setColumnWidth(_UNIT, 80)
         return tree
 
     def _render_general_ext(

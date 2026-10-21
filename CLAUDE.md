@@ -126,6 +126,8 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 
 ### 文件規範
 
+使用者面向的文件（README、guide、教學、docstring）每句寫操作會發生什麼或會產生什麼狀態，不用品質形容詞代替輸入、動作與結果。
+
 #### Module README
 
 Module `README.md` 專指 `lib/` 與 `tests/` 子目錄中的高層 cheat-sheet。只在取得新的高層知識時更新；發現 note 過時則告知使用者並更新。內容限於高層概念、架構與重要決策，實作細節留在程式碼或其他文件。使用現在式，並刷新 `**Last updated:** YYYY-MM-DD`；日期可附主題或 Phase，不寫 commit hash。

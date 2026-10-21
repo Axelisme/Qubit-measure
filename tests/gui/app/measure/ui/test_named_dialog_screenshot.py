@@ -46,7 +46,6 @@ def test_arb_waveform_named_dialog_captures_only_while_open(qapp) -> None:
         dialog_refs=DialogRefStore(),
         templates=lambda: {},
         dialog_presenter=RecordingDialogPresenter(),
-        alias_presets=None,
     )
 
     with pytest.raises(RuntimeError, match="not currently open"):
@@ -209,7 +208,6 @@ def test_inspect_uses_composition_templates_and_the_named_arb_dialog(
         dialog_refs=DialogRefStore(),
         templates=lambda: registry.templates,
         dialog_presenter=RecordingDialogPresenter(),
-        alias_presets=None,
     )
     try:
         dialogs.open(DialogName.INSPECT)
