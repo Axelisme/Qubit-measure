@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-21, dominant-branch cavity memory
+**Last updated:** 2026-10-21, acquire-lifetime ADC memo
 
 **讀者：** framework-dev。固定座標 FTF 數值模型、路由與快取契約。
 
@@ -99,6 +99,10 @@ Every conditional branch begins with the same inherited field at that span's
 absolute start time. ADC owns propagation and second-moment integration. This
 single-branch memory is semiclassical and does not describe quantum cavity-state
 entanglement. Experiment composes it with evolution's continued DC densities.
+An optional caller-owned `CavityAverageCache` supplies exact flat span averages.
+`CavityDrive` only selects the ADC entry point and forwards physical inputs; it
+owns neither cache keys nor storage policy. Final fields and branch selection
+remain uncached.
 
 ## Readout and Floquet paths
 

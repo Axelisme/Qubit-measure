@@ -259,6 +259,7 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
             "proposed": expected,
         },
     ]
+    expected_preview = [row | {"note": None} for row in expected_preview]
     assert preview["items"] == expected_preview
     assert preview["unavailable_reasons"] == []
     dispatch_handler(
@@ -333,6 +334,38 @@ def test_sample_omission_reason_is_projected_without_a_sample(
     )
     assert len(reasons) == 1
     assert reason in reasons[0]
+
+
+def test_preview_displays_adapter_note_and_current_manual_selection(
+    tmp_path: Path,
+) -> None:
+    _entry, context = context_at(tmp_path)
+    original = proposals.ParameterWriteback("general.ext.fit", "fit", 5.0)
+    original.selected = False
+    original.note = "Fit needs manual review"
+    service = WritebackService(
+        ContextControlFacet(context=context), arb_names=lambda: ()
+    )
+    draft = service.create_draft(
+        [original],
+        parameters=context.read_context(),
+        experiment_name="test/review",
+    )
+    harness = WritebackHarness(context, service, draft)
+    params = {"tab_id": "tab", "subtab_id": "analysis"}
+    preview = dispatch_handler(harness, "tab.writeback_preview", params)
+    rows = TypeAdapter(list[dict[str, object]]).validate_python(preview["items"])
+    assert rows[0]["selected"] is False
+    assert rows[0]["note"] == "Fit needs manual review"
+    dispatch_handler(
+        harness, "tab.writeback_set", params | {"id": "param-1", "selected": True}
+    )
+    selected = dispatch_handler(harness, "tab.writeback_preview", params)
+    assert selected["items"] == [rows[0] | {"selected": True}]
+    dispatch_handler(harness, "tab.writeback_apply", params)
+    applied = dispatch_handler(harness, "tab.writeback_preview", params)
+    assert applied["items"] == [rows[0] | {"selected": True, "current": 5.0}]
+    assert not original.selected
 
 
 def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) -> None:

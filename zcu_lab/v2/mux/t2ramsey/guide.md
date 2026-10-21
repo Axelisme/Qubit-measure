@@ -75,6 +75,15 @@ It uses source carrier + actual detune - fitted fringe rate in MHz.
 NaN actual detune suppresses only the frequency correction.
 Review phase/rate conventions, uncertainty and captured destination before applying.
 
+Frequency writeback changes the qubit calibration, not the existing x90/x180
+library pulses. Recalibrate the pulses at the new frequency, for example with
+Rabi or zigzag, then save and select new numeric modules with the recalibrated
+gains and lengths. Changing only frequency does not calibrate the pulses.
+Calibration writeback, New from a template and `ml_edit` can create modules.
+Template expressions read calibration at creation, not on later Runs.
+Reset downstream tabs after changing module selections. Historical Run/Load
+sources retain their original pulses.
+
 ## Results and saved sources
 
 Run draws one `measurement_i` figure per participant, without a shared overlay.

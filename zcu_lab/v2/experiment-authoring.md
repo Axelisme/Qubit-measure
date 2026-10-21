@@ -164,23 +164,27 @@ NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，�
 
 `twotone.rabi` 的 AmpRabi／LenRabi 核心以 RunContext 執行量測，回傳純 Result。同步 analyze 接 explicit RunRecord 與各自的 typed AnalyzeOptions，回傳數值 Analysis，接受 cfg=None。量測與分析分別發布 `measurement`／`fit` 具名圖；caller 負責 finish／release。LenRabi 保留 const／flat_top 的板端 sweep 與 arb waveform 的 host scan、跨 rounds 平均及部分成果。Notebook callers 透過 NotebookAdapter 保存 run 與 analysis records。
 
-### Mux qubit host zip acquisition
+### Mux qubit zip acquisition
 
 `mux.twotone_spectrum.MuxFreqExp` 與 `mux.amp_rabi.MuxAmpRabiExp` 提供無 GUI 的 `run(config, *, context)`。
 完整 `tones: list[MuxToneCfg]` 保留 readout 原始順序。Prepare 在 numeric 邊界一次選出 active indices，
 產生各 drive 自己的量化座標 `(K,P)` 與 nominal `point_pulses (P,K)`。Inactive tone 不限制掃描點數。
 Freq 的座標是 MHz，Amp Rabi 是 normalized gain。不同範圍按 index zip，不展開 Cartesian product。
 
-兩個 run 各自在函式本體逐點建立 program，直接組成 reset、
-`Join(Pulse(...), ...)` 與 active `MuxReadout`，不經共用 acquisition helper 選擇或隱藏序列。
+兩個 run 各自在函式本體直接組成 reset、`Join(Pulse(...), ...)` 與 active
+`MuxReadout`，不經共用 acquisition helper 選擇或隱藏序列。
 可共用的 `MuxPulseScan` 準備工作只產生已驗證的座標與 pulses，不 acquire。
-每點 compile 一次。所有 branch 同時開始，短 branch 完成後等待；readout 接在最長 branch 之後。
+Freq 的各 drive 用 `sweep2param("point", tone.sweep)` 共用同一硬體 loop，只 compile 一次。
+Readout DAC tones 與 ADC 頻率保持固定。Freq 座標按硬體 start/span/step 量化，
+不逐點獨立 round。Amp Rabi 仍每點 compile 一次。
+所有 branch 同時開始，短 branch 完成後等待；readout 接在最長 branch 之後。
 沒有末端 padding，也沒有第二次 compile 或自訂 Module。
 既有 Pulse 與 Join 擁有 native timing，不改 pulse 的 pre/post delay。
 
 `SignalBuffer` 以 `(P,K)` 儲存，讓 Schedule 每步寫入整個 tone vector，回傳時轉為 `(K,P)`。
 Program 擁有 reps/rounds 平均；取資料時只經初始化後的 `MuxReadout.collect_iq` 取得平均 IQ。
-Round hook 保留目前點已完成 rounds 的平均。取消後，未寫入點仍是 NaN。RunContext 的
+Freq 的 round hook 保留全 sweep 已完成 rounds 的平均；第一個 round 未完成時保留 NaN。
+Amp Rabi 的 round hook 保留目前點已完成 rounds 的平均，取消後未寫入點仍是 NaN。RunContext 的
 `cancel_signal.raise_if_error()` 區分 acquisition failure 與正常取消；有 partial data 不代表成功。
 Plots 以原始 index 命名 `measurement_i`，每條曲線用自己的座標，不靠 label 去重。
 Caller 負責 finish/release、組成含完整 cfg 的 RunRecord，以及保存 completion 狀態。

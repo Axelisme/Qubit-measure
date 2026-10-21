@@ -5,7 +5,12 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.adc import ReadoutPulse, cavity_field_average, cavity_fields
+from zcu_tools.simulate.adc import (
+    CavityAverageCache,
+    ReadoutPulse,
+    cavity_field_average,
+    cavity_fields,
+)
 
 from .model import JointModel, readout_model
 from .parameters import Resonator
@@ -44,6 +49,9 @@ class CavityDrive:
     mean vacuum; explicit initial memory retains ringdown. Multiple pulses
     add fields coherently, including ringdown. Population rates never mix the
     fixed state branches. This object performs no density evolution or sampling.
+    cache optionally supplies a caller-owned CavityAverageCache shared across
+    serialized span queries. None disables reuse. This drive only forwards it
+    to ADC; the caller owns its capacity and clear/exception lifetime.
     """
 
     def __init__(
@@ -51,10 +59,13 @@ class CavityDrive:
         joint: JointModel,
         resonators: tuple[Resonator, Resonator],
         pulses: tuple[ReadoutPulse, ...],
+        *,
+        cache: CavityAverageCache | None = None,
     ) -> None:
         self._model = readout_model(joint, resonators)
         self._chi = self._model.frequencies_ghz - [r.frequency_ghz for r in resonators]
         self._pulses = pulses
+        self._cache = cache
 
     def response(self, times_ns: RealArray) -> CavityResponse:
         """Evaluate at a finite nonempty increasing emitted-ns vector.
@@ -144,7 +155,8 @@ class CavityDrive:
         Invalid intervals/envelopes raise ValueError; solver or convergence
         failures raise RuntimeError. Output has no time axis.
         """
-        average = cavity_field_average(
+        solve = self._cache.average if self._cache is not None else cavity_field_average
+        average = solve(
             self._model,
             self._pulses,
             start_ns,
