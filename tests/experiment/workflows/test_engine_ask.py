@@ -61,13 +61,9 @@ def test_pending_answer_type_is_readonly_and_absent_outside_ask(rig: Rig) -> Non
     assert rig.engine.pending_answer_type("run") is None
     rig.engine.execute("run")
     before = rig.kinds()
-    assert rig.engine.pending_answer_type("run") is Decision
-    assert (
-        rig.engine.pending_answer_type("run").model_json_schema()["properties"][
-            "value"
-        ]["type"]
-        == "integer"
-    )
+    answer_type = rig.engine.pending_answer_type("run")
+    assert answer_type is Decision
+    assert answer_type.model_json_schema()["properties"]["value"]["type"] == "integer"
     assert received == []
     assert rig.kinds() == before
     with pytest.raises(RunMismatch):
@@ -97,7 +93,8 @@ def test_parse_answer_validates_without_resuming_and_preserves_retry(rig: Rig) -
     answer = rig.engine.parse_answer("run", {"value": 7})
     assert answer == Decision(value=7)
     assert received == []
-    assert rig.engine.status().lifecycle == "paused"
+    status = rig.engine.status()
+    assert status is not None and status.lifecycle == "paused"
     assert rig.kinds() == before
     rig.engine.answer("run", answer)
     assert received == [Decision(value=7)]

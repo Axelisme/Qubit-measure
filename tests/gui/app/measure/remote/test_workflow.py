@@ -28,7 +28,7 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._qt_waits import qt_until
-from tests.gui.app.measure._workflow_ask import AskAuthor
+from tests.gui.app.measure._workflow_ask import AskAuthor, Decision
 from tests.mcp.measure._support import make_client
 
 from ._form_rpc import FormRpc, ImmediateScheduler
@@ -144,7 +144,9 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
         if status is not None and status.lifecycle == "paused":
             paused_delivery.set()
 
-    unsubscribe = lambda: None
+    def unsubscribe():
+        pass
+
     try:
         tab = client.call("workflow_open", {"name": "asking"})["tab_id"]
         unsubscribe = controller.workflow_control().subscribe(observe_delivery)
@@ -185,7 +187,7 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
             client.call("wait", {"op": started["handle"], "timeout": 0})["status"]
             == "finished"
         )
-        assert author.deliveries[0][0].value == 29
+        assert author.deliveries[0][0] == Decision(value=29)
         assert (
             client.call("workflow_status", {"run_id": "ask-mcp"})["pending_question"]
             is None

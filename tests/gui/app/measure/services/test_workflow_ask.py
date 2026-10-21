@@ -111,7 +111,7 @@ def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path
 
 
 def test_invalid_json_answer_is_rejected_without_consuming_question(asking):
-    control, harness, author, tab, token = asking
+    control, harness, author, _tab, token = asking
     with pytest.raises(ValidationError, match="Choose"):
         control.answer("question-run", {"value": "not an integer"})
     assert harness.background.work is None
