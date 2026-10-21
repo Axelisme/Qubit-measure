@@ -148,7 +148,7 @@ class CavityAverageCache:
         model fixes joint-state order and ns/GHz units. pulses are ordered
         coherent ReadoutPulse inputs, with absolute supports and local phases.
         Finite absolute emitted endpoints require end_ns > start_ns >=
-        initial_time_ns. initial_field is a finite complex (2,) shared field in
+        initial_time_ns. initial_field is a finite complex (cavity,) shared field in
         sqrt(photons) in model's reference at initial_time_ns (finite nonnegative
         ns). None means vacuum; the default origin is zero. History, cross-state
         and cross-carrier products and ringdown follow cavity_field_average.
@@ -179,8 +179,9 @@ class CavityAverageCache:
             self.hits += 1
             products = products.copy()
             n = len(model.state_labels)
+            c = model.cavity_count
             photons = (
-                products.reshape(2 * n, 2 * n).diagonal().real.reshape(n, 2).copy()
+                products.reshape(c * n, c * n).diagonal().real.reshape(n, c).copy()
             )
             return CavityFieldAverage(photons, products)
         self.misses += 1
