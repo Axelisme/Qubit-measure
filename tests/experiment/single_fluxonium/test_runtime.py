@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import AcquireRequest, PulseEnvelope, RoundRequest
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    PulseEnvelope,
+    ReadoutWindow,
+    RoundRequest,
+)
 from zcu_tools.device import DeviceManager, FakeDevice
 
 from ._inputs import settings, template
@@ -21,7 +26,7 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def source_environment() -> Iterator[
+def source_environment() -> Generator[
     tuple[SingleFluxoniumSource, FakeDevice, SingleFluxoniumSettings]
 ]:
     runtime = importlib.import_module("zcu_tools.experiment.single_fluxonium.runtime")
@@ -100,3 +105,38 @@ def test_unconnected_acquisition_fails_without_claiming_a_round_result() -> None
             source.open_acquire(request)
         with pytest.raises(NotImplementedError, match="single-cavity readout"):
             source.execute(RoundRequest(request, source.snapshot(), 0))
+
+
+def test_builder_binds_control_generators_and_live_dc_without_enabling_readout() -> (
+    None
+):
+    runtime = importlib.import_module("zcu_tools.experiment.single_fluxonium.runtime")
+    config = settings()
+    environment = runtime.single_fluxonium(config)
+    compiled = replace(template(), points=np.array([0, 1], dtype=np.int64))
+    request = AcquireRequest(
+        "integrated",
+        (1, 2),
+        0,
+        (ReadoutWindow(0, 0, 4, 1000, (0.018,)),),
+        123,
+        0,
+        "test",
+        point_dims=(2,),
+        point_names=("sweep",),
+        templates=(compiled,),
+    )
+    try:
+        device = environment.create_device("FakeDevice", config.dc_bias.source.name)
+        assert device.get_info().value_unit == "A"
+        assert device.get_info().value == config.dc_bias.source.initial
+        device.set_value(0.2)
+        snapshot = environment.soc.binding.capture_snapshot()
+        assert snapshot.values == ((config.dc_bias.source.name, 0.2),)
+        # Admission checks source wiring only; it does not execute an acquire.
+        environment.soc.install_request(request)
+        with pytest.raises(NotImplementedError, match="single-cavity readout"):
+            environment.soc.binding.execute(RoundRequest(request, snapshot, 0))
+    finally:
+        environment.soc.release_request()
+        environment.devices.close_all_devices()
