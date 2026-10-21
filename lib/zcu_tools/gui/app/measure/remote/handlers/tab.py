@@ -434,7 +434,9 @@ def h_tab_edit_cfg(
     except FormInputRejected as exc:
         from ..form_errors import input_rejected_to_remote
 
-        raise input_rejected_to_remote(exc) from exc
+        raise input_rejected_to_remote(
+            exc, path_hints=edit_path_hints(resource)
+        ) from exc
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     except ValueError as exc:
