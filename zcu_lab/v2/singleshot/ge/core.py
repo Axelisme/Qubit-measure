@@ -41,6 +41,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
+from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
 from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
 
 # ------------------------------------------------------------
@@ -217,6 +218,20 @@ class GEAnalyzeOptions:
 
 @dataclass(frozen=True)
 class GEAnalysis:
+    """Prepared-label assignment and model-based GE calibration estimates.
+
+    initial_state maps probe off/on to predominantly g/e preparation rows, not
+    pure states. fidelity is the empirical equal-weight prepared-label assignment
+    score at the contrast-maximizing histogram edge, not latent pure-state readout
+    fidelity. theta rotates IQ by exp(1j*theta), in radians; threshold is the
+    selected edge in rotated ADC units. ge_s and g_center/e_center are fitted
+    width and original-frame complex centers in normalized ADC units.
+    init_pops is the fitted (2,2) g/e population matrix for the preparation rows.
+    fit_quality describes those histogram fits, or None when unavailable.
+    Poor histogram residuals make populations and the population-corrected post
+    confusion matrix unreliable even when empirical assignment is high.
+    """
+
     initial_state: Literal["ground", "excited"]
     fidelity: float
     theta: float
@@ -352,7 +367,10 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             relax_delay=cfg.relax_delay,
         )
 
-        signals_buffer = SignalBuffer((2, cfg.shots))
+        signals_buffer = SignalBuffer(
+            (2, cfg.shots),
+            on_update=lambda data: draw_ge_scatter(context.plots, "measurement", data),
+        )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
                 modules = step.cfg.modules
@@ -377,6 +395,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                     step.set_stop()
                     break
                 signals_buffer[step].set(raw_shots_to_signal(program))
+        signals_buffer.trigger_update(flush=True)
         signals = signals_buffer.array
 
         # Keep acquisition order; physical G/E mapping belongs to analysis.
@@ -398,8 +417,12 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
 
         source contains probe-off/on IQ shaped (2, N), in normalized ADC units.
         options.initial_state maps the rows to physical G/E. Return fitted
-        centers, width, initial populations and readout fidelity; publish the
-        distribution fit to plots as figure_name. cfg=None is supported.
+        centers, width, model populations and empirical prepared-label assignment
+        fidelity, which includes preparation mixing and is not pure-state readout
+        fidelity. Poor histogram fit quality makes model populations and post
+        population correction unreliable. Publish raw g/e IQ scatter to plots
+        as figure_name, including on numerical failure. Histogram fitting stays
+        internal. cfg=None is supported.
 
         Rotation/classification, histogram fitting, fitted population/center
         validation and fidelity calculations wrap ValueError, RuntimeError,
@@ -411,6 +434,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
         if options.backend not in ("pca", "center"):
             raise ValueError(f"Unknown backend: {options.backend}")
+        if figure_name in plots:
+            raise ValueError(f"Figure already exists: {figure_name}")
+        draw_ge_scatter(
+            plots, figure_name, signals, labels=("g preparation", "e preparation")
+        )
         fidelity, init_pops, fit = singleshot_ge_analysis(
             signals,
             angle=options.angle,
@@ -420,8 +448,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                 align_t1=options.align_t1,
                 length_ratio=options.length_ratio,
             ),
-            plots=plots,
-            figure_name=figure_name,
+            plots=None,
         )
         analysis = GEAnalysis(
             initial_state=options.initial_state,
@@ -452,6 +479,10 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         primary supplies physical G/E mapping and fitted populations/centers.
         options sets the radius policy, in the same IQ units. Return the
         classification diagnostic and publish it as figure_name in plots.
+        Classification uses nearest-center regions and radius, not the primary
+        histogram threshold. Solving the fitted preparation matrix removes its
+        inferred mixing; poor primary histogram fits make this correction
+        unreliable. It is not the empirical prepared-label assignment score.
         cfg=None is supported.
 
         Radius optimization, classification and confusion-matrix solving wrap

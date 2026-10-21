@@ -1,13 +1,13 @@
 """Concrete lifetime acquisition, acceptance and independent delay histories."""
 
-from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from zcu_tools.experiment.workflows import Effect, Failed, WorkflowEnv
+from zcu_tools.core.script_protocol import ScriptGenerator
+from zcu_tools.experiment.workflows import Cancelled, Failed, WorkflowEnv
 from zcu_tools.plotting.plots import LinePlot
 
 from zcu_lab.workflows.coherence_fluxdep.acquire import run_t2ramsey
@@ -120,7 +120,7 @@ def measure_t1(
     tun: T1Tunables,
     cal: CalibratedPi2,
     guess_us: float,
-) -> Generator[Effect, None, LifetimeResult]:
+) -> ScriptGenerator[LifetimeResult]:
     """Measure energy relaxation to estimate T1 independently of dephasing.
 
     plan supplies fixed routing/grid resolution/snapshot, tun supplies native
@@ -136,7 +136,7 @@ def measure_t1(
         t1_cfg(plan, tun, cal, guess_us),
         live=lambda axes, samples: plot.update(axes[0], samples.real),
     )
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return LifetimeResult("t1", "failed", outcome.reason, None, None, None)
     # Save every completed trace before fitting and applying acceptance gates.
     save_t1(outcome, env.iteration_dir / "t1.h5", snapshot=plan.snapshot)
@@ -161,7 +161,7 @@ def measure_ramsey(
     tun: T2RamseyTunables,
     cal: CalibratedPi2,
     guess_us: float,
-) -> Generator[Effect, None, LifetimeResult]:
+) -> ScriptGenerator[LifetimeResult]:
     """Measure Ramsey fringes to estimate dephasing without an echo pulse.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun
@@ -181,7 +181,7 @@ def measure_ramsey(
         t2ramsey_cfg(plan, tun, cal, guess_us),
         live=lambda axes, samples: plot.update(axes[0], samples.real),
     )
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return LifetimeResult("t2ramsey", "failed", outcome.reason, None, None, None)
     # Save every completed trace before fitting and applying acceptance gates.
     save_t2ramsey(outcome, env.iteration_dir / "t2ramsey.h5", snapshot=plan.snapshot)
@@ -201,7 +201,7 @@ def measure_echo(
     tun: T2EchoTunables,
     cal: CalibratedPi2,
     guess_us: float,
-) -> Generator[Effect, None, LifetimeResult]:
+) -> ScriptGenerator[LifetimeResult]:
     """Measure Hahn-echo decay to estimate coherence after refocusing slow noise.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun
@@ -219,7 +219,7 @@ def measure_echo(
         t2echo_cfg(plan, tun, cal, guess_us),
         live=lambda axes, samples: plot.update(axes[0], samples.real),
     )
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return LifetimeResult("t2echo", "failed", outcome.reason, None, None, None)
     # Save every completed trace before fitting and applying acceptance gates.
     save_t2echo(outcome, env.iteration_dir / "t2echo.h5", snapshot=plan.snapshot)

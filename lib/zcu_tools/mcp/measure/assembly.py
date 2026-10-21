@@ -16,11 +16,14 @@ from zcu_tools.mcp.measure import (
     tools_writeback,
 )
 from zcu_tools.mcp.measure.recipe import RecipeDefinition
+from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
 def build_measure_tools(
-    context: MeasureToolContext, *, recipes: Sequence[RecipeDefinition]
+    context: MeasureToolContext,
+    *,
+    recipes: Sequence[RecipeDefinition | RecipeDeclaration],
 ) -> ToolTable:
     """Bind fixed tools and explicitly injected recipes, never catalog-generated tools.
 

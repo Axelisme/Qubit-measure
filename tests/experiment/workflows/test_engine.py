@@ -9,12 +9,12 @@ from threading import Event
 
 import pytest
 from pydantic import ValidationError
+from zcu_tools.core.script_protocol import ScriptRequest
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.workflows import (
     Actor,
     Done,
-    Effect,
     Engine,
     EnginePorts,
     InitEnv,
@@ -806,7 +806,7 @@ def test_commit_journal_failure_does_not_publish_record_or_next_state(rig: Rig) 
 
 
 def test_unknown_yield_fails_at_effect_boundary_with_authoring_hint(rig: Rig) -> None:
-    class UnknownEffect(Effect):
+    class UnknownEffect(ScriptRequest):
         def __init__(self) -> None:
             pass
 
@@ -819,5 +819,5 @@ def test_unknown_yield_fails_at_effect_boundary_with_authoring_hint(rig: Rig) ->
     rig.start(step)
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"
-    assert "yield from env.<effect>" in str(status.reason)
+    assert "Wait or Ask" in str(status.reason)
     assert status.committed_seq == 0

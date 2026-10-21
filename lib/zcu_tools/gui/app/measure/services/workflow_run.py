@@ -47,7 +47,13 @@ class _Run[F: FormModel, C]:
 
     binding: TunablesHost[F, C]
     phase: Literal[
-        "starting", "producing", "paused", "resuming", "finishing", "terminal"
+        "starting",
+        "producing",
+        "paused",
+        "resuming",
+        "draining",
+        "finishing",
+        "terminal",
     ] = "starting"
     stop: StopSignal = field(default_factory=StopSignal)
     token: int | None = None
@@ -140,7 +146,7 @@ class WorkflowController[F: FormModel, C]:
         """Read whether admission, producer or terminal cleanup is still pending.
 
         False after paused owner delivery, even though operation_id is retained.
-        Stop/close must wait for pending work; paused Stop cleans up synchronously.
+        Stop/close must wait for pending work, including paused Ask worker drain.
         """
         run = self._run
         return run is not None and run.phase not in {"paused", "terminal"}
@@ -237,8 +243,19 @@ class WorkflowController[F: FormModel, C]:
         ):
             if run.native_error is None:
                 run.native_error = error
-            if run.phase == "paused" and status.lifecycle == "failed":
-                self._finish(run, error)
+            if run.phase == "paused":
+                if status.lifecycle == "stopping":
+                    try:
+                        self._drain(run, run.binding.run_id)
+                    except Exception as submit_error:
+                        # Preserve the control I/O error. Submission is secondary
+                        # and ownership stays live for a later Stop/close retry.
+                        error.add_note(
+                            f"Workflow failure drain submit failed: {submit_error}"
+                        )
+                        logger.exception("Workflow failure drain could not submit")
+                else:
+                    self._finish(run, error)
 
     def _finish(self, run: _Run[F, C], error: Exception | None) -> None:
         if run.phase in {"finishing", "terminal"}:
@@ -360,13 +377,36 @@ class WorkflowController[F: FormModel, C]:
             run.phase = "producing"
         return token
 
+    def _drain(self, run: _Run[F, C], run_id: str) -> None:
+        """Queue paused Stop cleanup under retained ownership; allow submit retry."""
+        engine = run.engine
+        if engine is None or run.token is None or run.settle is None:
+            raise RuntimeError("Drain requires retained Engine and Runner ownership")
+        run.phase = "draining"
+        try:
+            self._runner.continue_operation(
+                run.token,
+                work=lambda: engine.drain(run_id),
+                run_in_pool=False,
+                on_terminal=lambda bg, settle: self._delivered(run, bg, settle),
+                settle=run.settle,
+            )
+        except Exception:
+            # No producer exists after rejected submission. Stop/close can retry;
+            # settlement and lease remain live until an actual terminal delivery.
+            run.phase = "paused"
+            raise
+
     def stop(self, run_id: str) -> RunStatus | None:
-        """Request explicit-target Stop; finish idle paused/failed runs once.
+        """Request explicit-target Stop; queue retained Ask cleanup on a worker.
 
         Stale/absent targets raise RunMismatch. Before acceptance, set Stop and
         return None. Pending work retains ownership until delivery/unwind. An
-        idle paused run stops and cleans up synchronously. Terminal calls do not
-        repeat notification. Native failures propagate; no hardware rollback.
+        idle paused run without a producer can finish synchronously. A retained
+        Ask queues Engine.drain under the same token, settlement and RUN lease;
+        no author code runs here. Drain submit errors retain ownership and permit
+        Stop/close retry. Terminal calls do not repeat notification. Native
+        failures propagate; no hardware rollback.
         """
         with self._lock:
             self.require_run_id(run_id)
@@ -382,7 +422,10 @@ class WorkflowController[F: FormModel, C]:
                 self._record_native_failure(run, error)
                 raise
             if run.phase == "paused":
-                self._finish(run, None)
+                if stopped.lifecycle == "stopping":
+                    self._drain(run, run_id)
+                else:
+                    self._finish(run, None)
             return stopped
 
     def apply_tunables(

@@ -13,6 +13,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 from zcu_tools.gui.app.measure.remote.guide_types import AdapterGuideView
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
+from zcu_tools.mcp.measure.recipe import RecipeDefinition
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_operation import wait
@@ -257,6 +258,8 @@ def recipe_guide(
     )
     if definition is None:
         raise ValueError(f"unknown recipe: {recipe!r}")
+    if not isinstance(definition, RecipeDefinition):
+        raise ValueError("Script recipes do not declare a single adapter guide")
     ctx = ctx.bound(require_connected=True)
     reply = ctx.send_gui_rpc("adapter.guide", {"adapter_name": definition.adapter_name})
     return {

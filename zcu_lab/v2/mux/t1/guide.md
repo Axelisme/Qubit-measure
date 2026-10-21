@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run mux T1 from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## GUI setup
 
@@ -26,6 +26,23 @@ appear on the Tones row. Select that element and correct it to enable Run.
 Reps, rounds and recovery delay are shared. Recovery initially uses five times
 the largest captured T1, with the default for missing T1 values. A stored invalid
 T1 leaves recovery blank for correction.
+
+## FTF cost example
+
+A two-participant offline Run used 8 requested delays from 0.02 to 0.16 us,
+0.02 us const drive pulses, 100 reps, 1 round and 0.1 us recovery.
+The recorded Run action took 2.006 s, about 0.25 s per joint delay point.
+This window only checks execution. It does not constrain a physical T1.
+
+The timer includes the ComponentDriver button action, terminal wait and
+screenshots. It is not acquisition-only time and excludes Analyze and Save.
+Do not compare it with timings from other slots or experiments as a speed test.
+Long-delay T1 scans can cost much more than this short example because the
+simulated evolution window changes. Delay point count and range, drive duration,
+participants, reset, recovery and readout windows all affect cost.
+Reps and rounds repeat acquisitions on hardware. FTF compilation and cached
+evolution can dominate instead of scaling with reps. Time a short scan that
+includes the intended longest delay before budgeting the full scan.
 
 ## Measurement and analysis
 
@@ -52,10 +69,9 @@ Review the model, uncertainty and captured destination before Apply.
 
 ## Results and saved sources
 
-Run draws a combined `measurement` figure.
-All lines use the common requested-delay axis.
-Legends show the original index and source name in Participants order.
-Individual `measurement_i` figures remain available.
+Run draws one `measurement_i` figure per participant, without a shared overlay.
+Each figure uses the common requested-delay axis.
+The index `i` is the original tone position in the saved configuration.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
