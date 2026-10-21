@@ -54,7 +54,7 @@ def _init(env: InitEnv[None], plan: NativePlan) -> int:
 
 @workflow("synthetic", plan=NativePlan, tunables=NativeTunables, init=_init)
 def _waiting(
-    env: WorkflowEnv[None], plan: NativePlan, tunables: NativeTunables, state: int
+    env: WorkflowEnv[None], plan: NativePlan, tun: NativeTunables, state: int
 ) -> Step[int, int]:
     # Public wait effect lets Pause and Stop end the segment without elapsed-time success.
     yield from env.wait_until(env.started_at + timedelta(days=1))
@@ -115,6 +115,10 @@ def _shot(driver: ComponentDriver, root: Path, step: str) -> None:
     driver.screenshot(root / f"{step}.png")
 
 
+def _text(driver: ComponentDriver, name: str) -> str:
+    return next(w.text for w in driver.visible().widgets if w.object_name == name)
+
+
 def _open(driver: ComponentDriver) -> None:
     driver.select_menu("New Tab ▾", ("synthetic",))
 
@@ -137,18 +141,18 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     _shot(driver, tmp_path, "03-first-tab")
     assert driver.tabs("synthetic (1)").current == "synthetic (1)"
     assert driver.tabs("Plan").captions == ("Plan", "Tunables", "Ask")
-    driver.enter_text(value="7", object_name="form.input.cycles")
+    driver.enter_text("Cycles", "7")
     _shot(driver, tmp_path, "04-plan-edited")
     _open(driver)
     _shot(driver, tmp_path, "05-second-tab")
     assert driver.tabs("synthetic (2)").captions == ("synthetic (1)", "synthetic (2)")
-    assert driver.text_input(object_name="form.input.cycles").text == "1"
+    assert _text(driver, "form.input.cycles") == "1"
     driver.select_tab("synthetic (1)")
     _shot(driver, tmp_path, "06-independent-plan")
-    assert driver.text_input(object_name="form.input.cycles").text == "7"
+    assert _text(driver, "form.input.cycles") == "7"
     driver.select_tab("Tunables")
     _shot(driver, tmp_path, "07-tunables")
-    assert driver.text_input(object_name="form.input.gain").text == "0.25"
+    assert _text(driver, "form.input.gain") == "0.25"
     driver.select_tab("Ask")
     _shot(driver, tmp_path, "08-ask")
     assert driver.observe(object_name="workflow.ask").text == "No question pending."
@@ -197,7 +201,7 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     _shot(driver, tmp_path, "08-paused-close-refused")
     assert driver.tabs("synthetic (1)").captions == ("synthetic (1)", "synthetic (2)")
     driver.select_tab("Tunables")
-    driver.enter_text(value="0.5", object_name="form.input.gain")
+    driver.enter_text("Gain", "0.5")
     driver.click("Apply")
     _shot(driver, tmp_path, "09-tunables-applied")
     assert driver.observe(object_name="workflow.message").text == "Applied revision 1"
