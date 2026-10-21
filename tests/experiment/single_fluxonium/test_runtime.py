@@ -98,16 +98,7 @@ def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> N
         source.model_facts(first)
 
 
-def test_unconnected_acquisition_fails_without_claiming_a_round_result() -> None:
-    request = AcquireRequest("integrated", (1,), 0, (), 123, 0, "test")
-    with source_environment() as (source, _, _):
-        with pytest.raises(NotImplementedError, match="single-cavity readout"):
-            source.open_acquire(request)
-        with pytest.raises(NotImplementedError, match="single-cavity readout"):
-            source.execute(RoundRequest(request, source.snapshot(), 0))
-
-
-def test_builder_binds_control_generators_and_live_dc_without_enabling_readout() -> (
+def test_builder_binds_control_generators_and_live_dc_with_single_cavity_readout() -> (
     None
 ):
     runtime = importlib.import_module("zcu_tools.experiment.single_fluxonium.runtime")
@@ -121,7 +112,7 @@ def test_builder_binds_control_generators_and_live_dc_without_enabling_readout()
         (ReadoutWindow(0, 0, 4, 1000, (0.018,)),),
         123,
         0,
-        "test",
+        f"PCG64/SeedSequence-v2/numpy-{np.__version__}",
         point_dims=(2,),
         point_names=("sweep",),
         templates=(compiled,),
@@ -136,8 +127,14 @@ def test_builder_binds_control_generators_and_live_dc_without_enabling_readout()
         # Admission checks source wiring only; it does not execute an acquire.
         assert {gen for gen, _ in environment.soc.routes} == {0, 1, 2}
         environment.soc.install_request(request)
-        with pytest.raises(NotImplementedError, match="single-cavity readout"):
-            environment.soc.binding.execute(RoundRequest(request, snapshot, 0))
+        from zcu_tools.program.v2.simulation import IntegratedRound
+
+        result = environment.soc.binding.execute(RoundRequest(request, snapshot, 0))
+        if not isinstance(result, IntegratedRound):
+            raise AssertionError("builder must deliver a physical integrated round")
+        np.testing.assert_array_equal(
+            result.statistics.state_counts.sum(axis=-1), [1, 1]
+        )
     finally:
         environment.soc.release_request()
         environment.devices.close_all_devices()

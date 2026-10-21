@@ -10,15 +10,30 @@ from pathlib import Path
 import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
-from zcu_tools.core.simulation import AcquireRequest, ReadoutSlot, ReadoutWindow, RoundRequest, RoundSignals, TimelineTemplate
-from zcu_tools.device import DeviceManager
-from zcu_tools.experiment.single_fluxonium.runtime import SingleFluxoniumSource, single_fluxonium
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    AcquisitionMode,
+    ReadoutSlot,
+    ReadoutWindow,
+    RoundRequest,
+    RoundSignals,
+    TimelineTemplate,
+)
+from zcu_tools.experiment.single_fluxonium.runtime import (
+    SingleFluxoniumSource,
+    single_fluxonium,
+)
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
-from zcu_tools.resources.simulation_replay import ReplayAcquire, read_replay, replay_paths, save_replay
+from zcu_tools.resources.simulation_replay import (
+    ReplayAcquire,
+    read_replay,
+    replay_paths,
+    save_replay,
+)
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 
 from ._inputs import settings, slot
@@ -35,33 +50,63 @@ def physical_settings():
     return parse_single_fluxonium(values)
 
 
-def request_for(source, experiment="onetone", mode="integrated", reps=100_000):
+def request_for(
+    source, experiment="onetone", mode: AcquisitionMode = "integrated", reps=100_000
+):
     facts = source.model_facts(source.snapshot())
     frequency = float(np.diff(facts.model.energies_ghz[:2])[0]) * 1000
-    ends = np.array([40.0, 60.0]) if experiment in ("t1", "fastflux_t1") else np.full(2, 40.0)
+    ends = (
+        np.array([40.0, 60.0])
+        if experiment in ("t1", "fastflux_t1")
+        else np.full(2, 40.0)
+    )
     pulses = []
     if experiment != "onetone":
-        drive = slot(1, 0, 32, frequency_mhz=frequency, gain=1.0)
+        drive = slot(1, 0, 32, frequency_mhz=frequency, phase_deg=0.0, gain=1.0)
         if experiment == "rabi":
             drive.gain[:] = [0, 1]
         if experiment == "twotone":
             drive.frequency_mhz[:] = [frequency, frequency + 500]
         pulses.append(drive)
     if experiment == "fastflux_t1":
-        pulses.append(slot(2, 32, 8, gain=0.01))
-    readout = replace(slot(0, 40, 24, frequency_mhz=7000, gain=0.1), start_us=ends / 1000)
+        pulses.append(slot(2, 32, 8, frequency_mhz=0.0, phase_deg=0.0, gain=0.01))
+    readout = replace(
+        slot(0, 40, 24, frequency_mhz=7000.0, phase_deg=0.0, gain=0.1),
+        start_us=ends / 1000,
+    )
     pulses.append(readout)
-    window = ReadoutSlot(0, 8, 1000, ends[:, None] / 1000 + 0.002,
-                         np.full((2, 1), 7000.0), np.zeros((2, 1)), np.zeros((2, 1), dtype=np.int64))
-    compiled = TimelineTemplate(np.array([0, 1], dtype=np.int64), tuple(pulses), (window,), (ends + 24) / 1000)
-    return AcquireRequest(mode, (reps, 2), 0, (ReadoutWindow(0, 0, 8, 1000, (0.042,)),),
-                          123, 0, f"PCG64/SeedSequence-v2/numpy-{np.__version__}",
-                          point_dims=(2,), point_names=("sweep",), reps=reps, templates=(compiled,))
+    window = ReadoutSlot(
+        0,
+        8,
+        1000,
+        ends[:, None] / 1000 + 0.002,
+        np.full((2, 1), 7000.0),
+        np.zeros((2, 1)),
+        np.zeros((2, 1), dtype=np.int64),
+    )
+    compiled = TimelineTemplate(
+        np.array([0, 1], dtype=np.int64), tuple(pulses), (window,), (ends + 24) / 1000
+    )
+    return AcquireRequest(
+        mode,
+        (reps, 2),
+        0,
+        (ReadoutWindow(0, 0, 8, 1000, (0.042,)),),
+        123,
+        0,
+        f"PCG64/SeedSequence-v2/numpy-{np.__version__}",
+        point_dims=(2,),
+        point_names=("sweep",),
+        reps=reps,
+        templates=(compiled,),
+    )
 
 
 def expect_integrated(result):
     if not isinstance(result, IntegratedRound):
-        raise AssertionError("integrated source must deliver statistics and deferred raw")
+        raise AssertionError(
+            "integrated source must deliver statistics and deferred raw"
+        )
     return result
 
 
@@ -69,44 +114,113 @@ def independent_populations(source, request, point):
     """Direct fixed-coordinate Lindblad ODE, independent of evolution dispatch."""
     facts = source.model_facts(source.snapshot())
     model = facts.source.model((0,))
-    energy = model.energies_ghz
     rho0 = facts.source.initial_density
     charge = model.drives[0]
     template = request.templates[0]
     end = template.events[-1].start_us[point] * 1000
-    rate = model.rates_per_ns
-    outgoing = rate.sum(axis=0)
-    decay = (outgoing[:, None] + outgoing[None, :]) / 2 + model.dephasing_per_ns
-    def derivative(time, flattened):
-        rho = flattened.reshape(rho0.shape)
-        hamiltonian = np.diag(energy).astype(complex)
-        for event in template.events:
-            if event.gen_ch != 1 or not event.start_us[point] * 1000 <= time < (event.start_us[point] + event.duration_us[point]) * 1000:
-                continue
-            angle = 2 * np.pi * event.frequency_mhz[point] / 1000 * time + np.deg2rad(event.phase_deg[point])
-            hamiltonian += event.gain[point] * (np.cos(angle) * charge.in_phase_ghz + np.sin(angle) * charge.quadrature_ghz)
-        result = -2j * np.pi * (hamiltonian @ rho - rho @ hamiltonian) - decay * rho
-        result[np.diag_indices_from(result)] += rate @ rho.diagonal()
-        return result.ravel()
-    solution = solve_ivp(derivative, (0, end), rho0.ravel(), method="DOP853", rtol=1e-9, atol=1e-11)
-    assert solution.success
-    return solution.y[:, -1].reshape(rho0.shape).diagonal().real
+    boundaries = sorted(
+        {
+            0.0,
+            end,
+            *(
+                float(value)
+                for event in template.events
+                if event.gen_ch != 0
+                for value in (
+                    event.start_us[point] * 1000,
+                    (event.start_us[point] + event.duration_us[point]) * 1000,
+                )
+                if 0 < value < end
+            ),
+        }
+    )
+    state = rho0.ravel()
+    for start, stop in zip(boundaries[:-1], boundaries[1:], strict=True):
+        active = [
+            event
+            for event in template.events
+            if event.gen_ch != 0
+            and event.start_us[point] * 1000
+            <= (start + stop) / 2
+            < (event.start_us[point] + event.duration_us[point]) * 1000
+        ]
+        flux = facts.model.dc_flux + sum(
+            event.gain[point] * source.settings.flux_line.flux_phi0_per_gain
+            for event in active
+            if event.gen_ch == 2
+        )
+        level = int(round((flux - facts.model.dc_flux) / 1e-3))
+        bath = facts.source.model((level,))
+        transform = model.eigenvectors.conj().T @ bath.eigenvectors
+        h0 = (
+            model.eigenvectors.conj().T
+            @ facts.model.hamiltonian(flux)
+            @ model.eigenvectors
+        )
+        rate = bath.rates_per_ns
+        outgoing = rate.sum(axis=0)
+        decay = (outgoing[:, None] + outgoing[None, :]) / 2 + bath.dephasing_per_ns
+
+        interval = (h0, active, transform, decay, rate)
+
+        def derivative(time, flattened, interval=interval):
+            h0, active, transform, decay, rate = interval
+            rho = flattened.reshape(rho0.shape)
+            hamiltonian = h0.copy()
+            for event in active:
+                if event.gen_ch != 1:
+                    continue
+                angle = 2 * np.pi * event.frequency_mhz[
+                    point
+                ] / 1000 * time + np.deg2rad(event.phase_deg[point])
+                hamiltonian += event.gain[point] * (
+                    np.cos(angle) * charge.in_phase_ghz
+                    + np.sin(angle) * charge.quadrature_ghz
+                )
+            local = transform.conj().T @ rho @ transform
+            dissipated = -decay * local
+            dissipated[np.diag_indices_from(local)] += rate @ local.diagonal()
+            result = (
+                -2j * np.pi * (hamiltonian @ rho - rho @ hamiltonian)
+                + transform @ dissipated @ transform.conj().T
+            )
+            return result.ravel()
+
+        solution = solve_ivp(
+            derivative, (start, stop), state, method="DOP853", rtol=1e-9, atol=1e-11
+        )
+        assert solution.success
+        state = solution.y[:, -1]
+    return state.reshape(rho0.shape).diagonal().real
 
 
-@pytest.mark.parametrize("experiment", ["onetone", "twotone", "rabi", "t1", "fastflux_t1"])
+@pytest.mark.parametrize(
+    "experiment", ["onetone", "twotone", "rabi", "t1", "fastflux_t1"]
+)
 def test_representative_single_points_match_population_oracle(experiment):
-    env = single_fluxonium(physical_settings())
-    source = SingleFluxoniumSource(physical_settings(), env.devices)
+    config = physical_settings()
+    if experiment == "fastflux_t1":
+        config = config.model_copy(
+            update={
+                "flux_line": config.flux_line.model_copy(
+                    update={"tau_ns": 0.0, "delay_ns": 0.0}
+                )
+            }
+        )
+    env = single_fluxonium(config)
+    source = SingleFluxoniumSource(config, env.devices)
     try:
         request = request_for(source, experiment)
         try:
-            result = expect_integrated(source.execute(RoundRequest(request, source.snapshot(), 0)))
+            result = expect_integrated(
+                source.execute(RoundRequest(request, source.snapshot(), 0))
+            )
         except NotImplementedError:
-            pytest.fail("single-cavity execute must evolve and sample a real integrated round")
+            pytest.fail(
+                "single-cavity execute must evolve and sample a real integrated round"
+            )
         populations = result.statistics.state_counts / request.reps
         for point in range(2):
-            # The tiny fast-flux pulse is a composition smoke, not an independent
-            # continuous-ramp accuracy test (owned by evolution).
             expected = independent_populations(source, request, point)
             np.testing.assert_allclose(populations[point], expected, atol=0.015, rtol=0)
         sums = result.statistics.channels[0].conditional_sums
@@ -119,6 +233,17 @@ def test_representative_single_points_match_population_oracle(experiment):
             assert populations[0, 1] > populations[1, 1] + 0.1
         if experiment in ("t1", "fastflux_t1"):
             assert populations[1, 1] < populations[0, 1]
+        if experiment == "fastflux_t1":
+            dc_only = replace(
+                request.templates[0],
+                events=tuple(
+                    event for event in request.templates[0].events if event.gen_ch != 2
+                ),
+            )
+            ignored = independent_populations(
+                source, replace(request, templates=(dc_only,)), 0
+            )
+            assert abs(populations[0, 1] - ignored[1]) > 0.015
     finally:
         source.close()
         env.devices.close_all_devices()
@@ -137,7 +262,9 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
         try:
             result = source.execute(RoundRequest(request, snapshot, 2))
         except NotImplementedError:
-            pytest.fail("single-cavity execute must produce replayable physical signals")
+            pytest.fail(
+                "single-cavity execute must produce replayable physical signals"
+            )
         if isinstance(result, IntegratedRound):
             expected = result.raw.materialize(request.reps, request.avg_level)
         else:
@@ -146,7 +273,10 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
         assert len(paths) == 1
         later = source.execute(RoundRequest(request, snapshot, 3))
         if isinstance(later, IntegratedRound):
-            assert not np.array_equal(later.statistics.channels[0].sums, result.statistics.channels[0].sums)
+            assert not np.array_equal(
+                later.statistics.channels[0].sums,
+                expect_integrated(result).statistics.channels[0].sums,
+            )
     finally:
         source.close()
         env.devices.close_all_devices()
@@ -154,16 +284,25 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
         for ch, raw in result.raw.materialize(request.reps, request.avg_level).items():
             np.testing.assert_array_equal(raw, expected[ch])
     replayed = replay.replay_round(paths[0])
-    actual = replayed.raw.materialize(request.reps, request.avg_level) if isinstance(replayed, IntegratedRound) else {c.channel: c.iq for c in replayed.channels}
+    actual = (
+        replayed.raw.materialize(request.reps, request.avg_level)
+        if isinstance(replayed, IntegratedRound)
+        else {c.channel: c.iq for c in replayed.channels}
+    )
     for ch in expected:
         np.testing.assert_array_equal(actual[ch], expected[ch])
     if isinstance(result, IntegratedRound):
-        np.testing.assert_array_equal(replayed.statistics.channels[0].sums, result.statistics.channels[0].sums)
+        np.testing.assert_array_equal(
+            expect_integrated(replayed).statistics.channels[0].sums,
+            result.statistics.channels[0].sums,
+        )
     else:
         assert isinstance(result, RoundSignals)
         assert result.channels[0].iq.shape == (16, 1, 8, 2)
     saved = read_replay(paths[0])
-    incompatible = saved.acquire.model_copy(update={"versions": (("backend", "obsolete"),)})
+    incompatible = saved.acquire.model_copy(
+        update={"versions": (("backend", "obsolete"),)}
+    )
     path = save_replay(tmp_path / "obsolete", incompatible, saved.round.snapshot, 2)
     with pytest.raises(ValueError, match="version mismatch"):
         replay.replay_round(path)
@@ -172,13 +311,29 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
 def test_program_acquire_raw_decimated_and_live_round_refresh():
     env = single_fluxonium(physical_settings())
     try:
-        readout = PulseReadoutCfg(gen_ch=0, ro_ch=0, nqz=1, freq=7000, gain=0.1,
-                                 waveform=ConstWaveformCfg(length=0.024), ro_length=0.016, trig_offset=0.002)
-        pulse = PulseCfg(ch=1, nqz=1, freq=580, gain=0.2, waveform=ConstWaveformCfg(length=0.032))
-        program = ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=8, rounds=2), modules=[pulse.build("mw"), readout.build("ro")])
+        readout = PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=0,
+            nqz=1,
+            freq=7000,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.024),
+            ro_length=0.016,
+            trig_offset=0.002,
+        )
+        pulse = PulseCfg(
+            ch=1, nqz=1, freq=580, gain=0.2, waveform=ConstWaveformCfg(length=0.032)
+        )
+        program = ModularProgramV2(
+            env.soccfg,
+            ProgramV2Cfg(reps=8, rounds=2),
+            modules=[pulse.build("mw"), readout.build("ro")],
+        )
         bias = env.create_device("FakeDevice", physical_settings().dc_bias.source.name)
+
         def change_bias(*_args, **_kwargs):
             bias.set_value(0.2)
+
         try:
             average = program.acquire(env.soc, progress=False, round_hook=change_bias)
         except NotImplementedError:
@@ -194,9 +349,47 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
         raw = program.get_raw()
         assert raw is not None
         trace = np.asarray(traces[0])
-        np.testing.assert_allclose(np.asarray(raw[0]).reshape(-1, 2), trace.reshape(-1, trace.shape[-2], 2).sum(axis=1), atol=(trace.shape[-2] + 1) / 2, rtol=0)
+        np.testing.assert_allclose(
+            np.asarray(raw[0]).reshape(-1, 2),
+            trace.reshape(-1, trace.shape[-2], 2).sum(axis=1),
+            atol=(trace.shape[-2] + 1) / 2,
+            rtol=0,
+        )
     finally:
         env.devices.close_all_devices()
+
+
+@pytest.mark.parametrize("target", ["single", "ftf"])
+def test_replay_rejects_other_backend_settings_before_numeric_work(
+    tmp_path: Path, target
+):
+    from zcu_tools.core.simulation import EnvironmentSnapshot
+    from zcu_tools.experiment.ftf import replay as ftf_replay
+    from zcu_tools.experiment.single_fluxonium import replay as single_replay
+    from zcu_tools.resources.ftf import parse_ftf
+
+    from tests.resources._ftf_data import ftf_document
+
+    wrong = parse_ftf(ftf_document()) if target == "single" else physical_settings()
+    replay = single_replay if target == "single" else ftf_replay
+    fixed = ReplayAcquire(
+        settings=wrong,
+        request=AcquireRequest("integrated", (1,), 0, (), 123, 0, "test"),
+        versions=replay.replay_versions(),
+    )
+    path = save_replay(tmp_path, fixed, EnvironmentSnapshot("wrong", "wrong"), 0)
+    try:
+        replay.replay_round(path)
+    except AttributeError:
+        pytest.fail("single replay must expose a round execution interface")
+    except ValueError as error:
+        assert (
+            "single-fluxonium replay requires single-fluxonium settings"
+            if target == "single"
+            else "FTF replay requires FTF settings"
+        ) in str(error)
+    else:
+        pytest.fail("replay must reject settings belonging to another backend")
 
 
 def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
@@ -205,9 +398,13 @@ def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
     try:
         request = request_for(source, reps=1)
         original = request.templates[0]
-        earlier = slot(0, 0, 8, frequency_mhz=7000, gain=0.1)
-        request = replace(request, templates=(replace(original, events=(earlier, *original.events)),))
-        with pytest.raises(ValueError, match="only terminal readout|terminal readout only"):
+        earlier = slot(0, 0, 8, frequency_mhz=7000.0, phase_deg=0.0, gain=0.1)
+        request = replace(
+            request, templates=(replace(original, events=(earlier, *original.events)),)
+        )
+        with pytest.raises(
+            ValueError, match="only terminal readout|terminal readout only"
+        ):
             source.execute(RoundRequest(request, source.snapshot(), 0))
     finally:
         source.close()
