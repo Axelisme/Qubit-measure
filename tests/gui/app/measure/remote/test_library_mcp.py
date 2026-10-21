@@ -165,6 +165,27 @@ def role_socket(qapp, tmp_path, component_registry):
         fx.stop()
 
 
+@pytest.mark.parametrize("name", ["mux_ro", "R1.mux_ro", "R1.invalid.mux_ro"])
+def test_ml_create_reports_name_format_without_writing(role_socket, name):
+    fx, sock = role_socket
+    before = fx.ctrl.read_context().library.document()
+    reply = call(
+        sock,
+        "context.ml_create_from_role",
+        {
+            "role_id": "mux:blank",
+            "name": name,
+            "edits": [{"path": ["tones"], "value": MUX_TONES}],
+        },
+    )
+    assert reply["ok"] is False, reply
+    error = reply["error"]
+    assert error["code"] == "invalid_params"
+    assert "component.partition.name" in error["message"]
+    assert all(partition in error["message"] for partition in ("pulses", "readout", "reset"))
+    assert fx.ctrl.read_context().library.document() == before
+
+
 def test_ml_create_from_role_applies_edits_before_validation(role_socket):
     fx, sock = role_socket
     reply = call(
