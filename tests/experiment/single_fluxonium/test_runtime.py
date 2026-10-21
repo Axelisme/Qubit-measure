@@ -134,6 +134,7 @@ def test_builder_binds_control_generators_and_live_dc_without_enabling_readout()
         snapshot = environment.soc.binding.capture_snapshot()
         assert snapshot.values == ((config.dc_bias.source.name, 0.2),)
         # Admission checks source wiring only; it does not execute an acquire.
+        assert {gen for gen, _ in environment.soc.routes} == {0, 1, 2}
         environment.soc.install_request(request)
         with pytest.raises(NotImplementedError, match="single-cavity readout"):
             environment.soc.binding.execute(RoundRequest(request, snapshot, 0))
