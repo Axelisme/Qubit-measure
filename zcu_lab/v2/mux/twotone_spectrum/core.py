@@ -192,7 +192,8 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
         Optional reset precedes each point. Drives start together, without end-alignment
         padding, and readout follows the longest drive. Return actual MHz and
         average complex IQ arrays of shape (participants, points), with original
-        tone indices. Live plots show each spectrum and their combined magnitudes.
+        tone indices. Live plots show one spectrum per tone in measurement_i,
+        titled with its original index and name.
         Drive frequencies share one hardware loop; readout frequencies stay fixed.
         Cancellation keeps completed-round averages across the sweep, or NaN
         when no round completed.
