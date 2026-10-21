@@ -13,6 +13,7 @@ from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -155,6 +156,27 @@ def _tree(widget: ComponentTreeWidget) -> QTreeWidget:
     tree = widget.findChild(QTreeWidget, "component_tree")
     assert tree is not None
     return tree
+
+
+def test_column_widths_are_interactive_and_survive_tree_rebuild(qapp, component_widget):
+    widget, _control = component_widget
+    assert widget.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
+    header = _tree(widget).header()
+    assert header is not None
+    assert [header.sectionResizeMode(i) for i in range(4)] == [
+        QHeaderView.ResizeMode.Interactive
+    ] * 4
+    assert header.stretchLastSection()
+
+    widths = (300, 280, 100, 320)
+    for column, width in enumerate(widths):
+        header.resizeSection(column, width)
+    qapp.processEvents()
+    assert tuple(header.sectionSize(i) for i in range(4)) == widths
+
+    widget.refresh()
+    qapp.processEvents()
+    assert tuple(header.sectionSize(i) for i in range(4)) == widths
 
 
 def _row(widget: ComponentTreeWidget, *path: str) -> QTreeWidgetItem:
