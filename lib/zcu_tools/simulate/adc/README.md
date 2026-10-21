@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-21, bounded flat-average ownership
+**Last updated:** 2026-10-22, joint-Fock contracts and validation limits
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -215,3 +215,30 @@ Gaussian arrays as `round_statistics`, and retains no noisy results or identitie
 The public `round_statistics` still validates arbitrary inputs by building a plan
 for that call. FTF retains plans with noiseless preparations; no RNG draws or
 deferred raw materialization move into preparation.
+
+## Joint-Fock validation limits
+
+The independent [evolution joint-Fock prototype](../evolution/README.md#joint-fock-prototype)
+requires an explicit request. It does not feed ADC or change Engine's flat or
+shaped routes. The conservative two-state path uses analytic one-jump prefill,
+a sampled-pointer cutoff with one extra excitation, and fixed CSR RK4 steps
+no larger than 1 ns. Its selected population and qubit-line-centre comparisons
+agree with the saved reference within their local statistical gates.
+Those gates do not bound errors at other coordinates. Fitted cavity-centre
+differences remain diagnostics, not acceptance criteria or accuracy bounds.
+
+An explicit `JointFockDiagnostic` selects numeric physical-vacuum, finite-pi,
+prefill and probe preparation with two or four retained levels. Its
+caller-selected `step_ns` can permit local diagnostics where the default 1-ns
+step produces nonfinite densities. Local two-level step convergence does not
+validate a full map, and the four-level sample has no separate step-halving
+study. Comparisons with the analytic path change both preparation and cutoff
+selection, so they do not isolate dynamic-level truncation error.
+
+The sampled coherent cutoff rule is not a complete-density error bound.
+A generator norm times the step only bounds scaled eigenvalue magnitudes;
+it is not an RK4 amplification factor or a stability or accuracy proof.
+Fixed RK4 does not guarantee positivity for arbitrary inputs. The prototype
+preserves finite population and density defects without clipping or repair.
+Nonfinite evolution fails without an automatic step reduction, retry or
+solver substitution. It remains opt-in, not a production acquisition backend.

@@ -20,6 +20,17 @@ from .engine import (
     merge_path_diagnostics,
     segment_spans,
 )
+from .joint_fock import (
+    JointFockDiagnostic,
+    JointFockRequest,
+    JointFockResult,
+    joint_fock_spectrum,
+)
+from .kernels.multitone_rwa import (
+    RWACoefficients,
+    interaction_hamiltonian,
+    rwa_coefficients,
+)
 from .model import DriveSource, NumericModel
 from .secular import (
     FluxExpansion,
