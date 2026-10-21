@@ -74,6 +74,16 @@ ordering. Drain timeout preserves resources and raises for retry. Callback and
 driver failures are logged without skipping the remaining cleanup. Boards remain
 caller-owned and have no required close method.
 
+The runtime's `MeasureGuiBehavior.close()` delegates to its owner-thread
+`dispose()`. After successful `finish_close()`, it stops the remote adapter and
+calls `MainWindow.dispose()` to release view subscriptions and destroy the Qt
+tree before QApplication/Python exit. Partial assembly retains the window for
+this same cleanup. A drain timeout leaves the window and adapter intact for
+retry. View disposal finishes hidden named dialogs through `QDialog.done()` so
+their owners release subscriptions, detaches tabs, then explicitly delivers the
+window's DeferredDelete even when the main event loop has already returned.
+Successful disposal is idempotent; closing/hiding a window alone is not disposal.
+
 [`StartupContext`](startup_context.py) exposes typed soc, device, setup, context
 and tab commands. Public signatures, thread restrictions and failure semantics
 live with these facets rather than a separate script API list.
