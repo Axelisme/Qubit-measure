@@ -1,10 +1,14 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
+
+## Shared script driver
+
+`script_driver.ScriptDriver` 非阻塞地驅動 `core.script_protocol` generator，供 workflow 與 recipe host 共用。Host 更新 operation delivery 後呼叫 `advance()`，或以 `answer()` 回答 pending question。Driver 只在 yield 邊界交付 Signal；cancel 關閉 generator，operation 的取消與 drain 仍由 host 負責。公開 docstrings 定義狀態、錯誤傳播及單一 owner 呼叫順序。
 
 ## Explicit simulation environments
 

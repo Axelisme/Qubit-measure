@@ -1,0 +1,209 @@
+"""Non-blocking, single-owner driving for workflow and recipe generators."""
+
+from collections import deque
+from collections.abc import Callable
+from typing import Literal
+
+from zcu_tools.core.script_protocol import (
+    Answer,
+    Ask,
+    Question,
+    ScriptGenerator,
+    ScriptRequest,
+    Signal,
+    Wait,
+)
+
+type ScriptStatus = Literal[
+    "running", "waiting", "paused", "completed", "cancelled", "failed"
+]
+"""Running is ready to drive; waiting needs operation delivery; paused needs an answer.
+
+Completed, cancelled and failed are terminal and never resume the generator.
+"""
+
+
+def _answer_type(question: Question[Answer]) -> type[Answer]:
+    # Authored subclasses have empty args; their parameterized base retains A.
+    for base in type(question).__mro__:
+        if not issubclass(base, Question):
+            continue
+        metadata = base.__pydantic_generic_metadata__
+        if metadata["origin"] is not Question:
+            continue
+        args = metadata["args"]
+        if args and isinstance(args[0], type) and issubclass(args[0], Answer):
+            return args[0]
+    raise TypeError("Question must declare Question[AnswerSubclass] before answering")
+
+
+class ScriptDriver[R]:
+    """Own one ScriptGenerator and drive it through request-owned delivery.
+
+    Construction does not execute the generator. Call advance() to run until a
+    pending Wait, unanswered Ask or terminal state. A host starts operations and
+    updates op.delivery, then calls advance(); the driver never blocks or starts
+    work. Every generator resume sends None, never an operation result or answer.
+
+    Use one owner thread and serialize calls. signal() may also be called by
+    executing script code or the signal callback; it only queues notifications.
+    Other driving calls must not re-enter. Signals take effect at yielded Wait
+    or Ask boundaries, including a currently suspended request. Non-cancel signals
+    go to on_signal in FIFO order; that host callback owns pause/stop/tunables
+    policy and validation. It must not drive this driver recursively. No script
+    inbox or exception injection exists.
+
+    Cancel closes the generator at a boundary, running its finally blocks. The
+    host must separately cancel and drain any operation; closing never changes
+    op.delivery. A script's GeneratorExit also means cancelled. Normal return
+    means completed, even after a failed or cancelled operation delivery. Other
+    exceptions mean failed, remain available as error and propagate to the host.
+    A close error likewise means failed rather than successful cancellation.
+    """
+
+    def __init__(
+        self,
+        generator: ScriptGenerator[R],
+        *,
+        on_signal: Callable[[Signal], None] | None = None,
+    ) -> None:
+        """Take ownership of generator; on_signal handles non-cancel controls.
+
+        Without on_signal, submitting a non-cancel signal raises ValueError.
+        Operation handles and their resources remain owned by the host.
+        """
+        self._generator = generator
+        self._on_signal = on_signal
+        self._signals: deque[Signal] = deque()
+        self._status: ScriptStatus = "running"
+        self._pending: ScriptRequest | None = None
+        self._result: R | None = None
+        self._error: Exception | None = None
+        self._driving = False
+
+    @property
+    def status(self) -> ScriptStatus:
+        """Return running, waiting, paused, completed, cancelled or failed."""
+        return self._status
+
+    @property
+    def pending_request(self) -> ScriptRequest | None:
+        """Return the suspended Wait/Ask, or None before yielding or at terminal."""
+        return self._pending
+
+    @property
+    def pending_question(self) -> Question[Answer] | None:
+        """Return the authored unanswered question while paused, otherwise None."""
+        return self._pending.question if isinstance(self._pending, Ask) else None
+
+    @property
+    def result(self) -> R | None:
+        """Return the original generator return object on completion, else None.
+
+        A None return is distinguished from no return by status == 'completed'.
+        """
+        return self._result
+
+    @property
+    def error(self) -> Exception | None:
+        """Return the original driving/cleanup exception on failure, else None."""
+        return self._error
+
+    def signal(self, signal: Signal) -> None:
+        """Queue a control for the next yield boundary without running code.
+
+        Raise RuntimeError after termination, or ValueError for a non-cancel
+        signal when no host callback was supplied. Cancel does not require one.
+        """
+        if self._status in ("completed", "cancelled", "failed"):
+            raise RuntimeError("Cannot signal a terminal script")
+        if signal.kind != "cancel" and self._on_signal is None:
+            raise ValueError("Non-cancel signals require an on_signal host callback")
+        self._signals.append(signal)
+
+    def answer(self, answer: Answer) -> None:
+        """Validate an Answer instance, deliver it to the pending Ask and drive.
+
+        The declared Question[A] determines the required model, including its
+        subclasses. A wrong model or unparameterized question raises TypeError
+        without delivering or resuming; the driver remains paused. No pending
+        question raises RuntimeError. After valid delivery, advance() semantics
+        apply, including queued cancellation before the next resume.
+        """
+        if self._driving:
+            raise RuntimeError("Cannot answer while driving a script")
+        request = self._pending
+        if not isinstance(request, Ask):
+            raise RuntimeError("No pending question to answer")
+        expected = _answer_type(request.question)
+        if not isinstance(answer, expected):
+            raise TypeError(f"Answer must be an instance of {expected.__name__}")
+        request.delivery = answer
+        self.advance()
+
+    def advance(self) -> None:
+        """Run until undelivered Wait/Ask or terminal; repeat pending polls safely.
+
+        Drain queued signals only after a yield. Ready requests resume with None.
+        Terminal calls do nothing. Re-entry raises RuntimeError. Unsupported
+        yielded requests raise TypeError and fail the script. Script and callback
+        exceptions are recorded as failed and re-raised without wrapping.
+        """
+        if self._driving:
+            raise RuntimeError("Cannot re-enter script driving")
+        if self._status in ("completed", "cancelled", "failed"):
+            return
+        self._driving = True
+        try:
+            self._drive()
+        except GeneratorExit:
+            self._finish("cancelled")
+        except Exception as error:
+            self._error = error
+            self._finish("failed")
+            raise
+        finally:
+            self._driving = False
+
+    def _finish(self, status: ScriptStatus) -> None:
+        self._status = status
+        self._pending = None
+        self._signals.clear()
+
+    def _dispatch_signals(self) -> None:
+        while self._signals:
+            signal = self._signals.popleft()
+            if signal.kind == "cancel":
+                self._generator.close()
+                self._finish("cancelled")
+                return
+            if self._on_signal is not None:
+                self._on_signal(signal)
+
+    def _drive(self) -> None:
+        while True:
+            if self._pending is not None:
+                self._dispatch_signals()
+                if self._status == "cancelled" or not self._ready():
+                    return
+            self._status = "running"
+            try:
+                request = next(self._generator)
+            except StopIteration as done:
+                self._result = done.value
+                self._finish("completed")
+                return
+            if not isinstance(request, (Wait, Ask)):
+                self._generator.close()
+                raise TypeError("Script must yield Wait or Ask requests")
+            self._pending = request
+
+    def _ready(self) -> bool:
+        request = self._pending
+        if isinstance(request, Wait) and request.op.delivery is None:
+            self._status = "waiting"
+            return False
+        if isinstance(request, Ask) and request.delivery is None:
+            self._status = "paused"
+            return False
+        return True

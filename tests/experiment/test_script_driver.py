@@ -102,11 +102,13 @@ def test_unparameterized_question_cannot_be_answered() -> None:
     from zcu_tools.core.script_protocol import Answer, Ask, Question
     from zcu_tools.experiment.script_driver import ScriptDriver
 
-    class Unspecified(Question):
-        evidence: str
+    # Deliberately model an authored Question without its required Answer parameter.
+    Unspecified = type(
+        "Unspecified", (Question,), {"__annotations__": {"evidence": str}}
+    )
 
     def script() -> Generator[ScriptRequest, None, None]:
-        yield Ask(Unspecified(evidence="missing answer contract"))
+        yield Ask(Unspecified.model_validate({"evidence": "missing answer contract"}))
 
     driver = ScriptDriver(script())
     driver.advance()
