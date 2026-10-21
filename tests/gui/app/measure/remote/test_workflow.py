@@ -3,6 +3,7 @@
 import base64
 
 import pytest
+from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import (
@@ -50,9 +51,10 @@ def step(
     if state:
         return Done()
     env.plots.subplots("trend")
-    env.plots.draw(
-        "trend", lambda figure: figure.axes[0].plot([0, 1], [plan.value, tun.value])
-    )
+    def draw(figure: Figure) -> None:
+        figure.axes[0].plot([0, 1], [plan.value, tun.value])
+
+    env.plots.draw("trend", draw)
     yield from env.wait_until(env.started_at)
     return Next(tun.value, 1)
 
