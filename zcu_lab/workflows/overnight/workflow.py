@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
+    Cancelled,
     Done,
     Failed,
     InitEnv,
@@ -241,12 +242,12 @@ def overnight[C](
     )
     t1 = yield from env.run(run_t1, t1_cfg)
     t1_file = None
-    if not isinstance(t1, Failed):
+    if not isinstance(t1, (Failed, Cancelled)):
         save_t1(t1, env.iteration_dir / "t1.h5", snapshot=plan.snapshot)
         t1_file = "t1.h5"
     t1_summary = (
         (None, None, t1.reason)
-        if isinstance(t1, Failed)
+        if isinstance(t1, (Failed, Cancelled))
         else _summary(analyze_t1(t1.result), tun, "T1")
     )
     # Acquire zero-detune Echo even if the T1 member failed.
@@ -271,12 +272,12 @@ def overnight[C](
     )
     t2 = yield from env.run(run_t2echo, t2_cfg)
     t2_file = None
-    if not isinstance(t2, Failed):
+    if not isinstance(t2, (Failed, Cancelled)):
         save_t2echo(t2, env.iteration_dir / "t2echo.h5", snapshot=plan.snapshot)
         t2_file = "t2echo.h5"
     t2_summary = (
         (None, None, t2.reason)
-        if isinstance(t2, Failed)
+        if isinstance(t2, (Failed, Cancelled))
         else _summary(analyze_t2echo(t2.result), tun, "T2 Echo")
     )
     # Publish the complete pair and update the workflow-owned trend.

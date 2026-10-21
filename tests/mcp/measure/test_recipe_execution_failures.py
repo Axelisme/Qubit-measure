@@ -20,6 +20,7 @@ from ._recipe_execution_support import (
     wait_for_event,
 )
 from ._recipe_support import LookbackGui, recipe_client
+from ._support import start_legacy_execution
 
 
 @pytest.mark.parametrize("closed", [False, True])
@@ -38,7 +39,7 @@ def test_finish_early_rejects_terminal_pending_run(tmp_path, closed: bool):
         recipe_client(tmp_path, respond) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         if closed:
             wait_for_event(gui.awaited)
             execution.close()
@@ -88,7 +89,7 @@ def test_unyielded_run_start_failure_retains_fixed_conditions(tmp_path, uncertai
                     "message": "cfg changed",
                 },
             }
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         reply = completed(execution)
         assert reply.data["status"] == "failed"
         assert cfg_value(gui.publication, "rounds") == 8
@@ -125,7 +126,7 @@ def test_pre_run_cfg_failure_retains_prepared_or_requested_locator(tmp_path, reu
         recipe_client(tmp_path, invalid) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         reply = completed(execution)
         assert reply.data["status"] == "failed"
         assert reply.data["tab"] == "t"
@@ -192,7 +193,7 @@ def test_failed_run_control_intent_is_scoped_for_the_next_run(tmp_path, control:
         recipe_client(tmp_path, respond) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         wait_for_event(gui.awaited)
         if control == "cancel":
             execution.cancel()
@@ -234,7 +235,7 @@ def test_stop_intent_does_not_relabel_failed_native_run(tmp_path, control):
         recipe_client(tmp_path, respond) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         wait_for_event(gui.awaited)
         if control == "cancel":
             execution.cancel()
@@ -266,7 +267,7 @@ def test_close_question_runs_finally_once_without_delivering_answer(tmp_path):
         recipe_client(tmp_path, AnalysisRecipeGui()) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         assert handoff(execution).data["status"] == "awaiting_answer"
         execution.close()
         execution.join()
@@ -328,7 +329,7 @@ def test_second_save_replaces_report_or_retains_transport_failure(tmp_path, unce
         recipe_client(tmp_path, respond) as client,
         registry(client.context, recipe_definition) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         reply = completed(execution)
         sent = list(client.transport.sent)
         snapshot = execution.snapshot()
@@ -379,7 +380,7 @@ def test_worker_start_failure_returns_a_queryable_terminal_record(
         registry(client.context, definition(sample)) as executions,
     ):
         monkeypatch.setattr("threading.Thread.start", fail_start)
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         reply = execution.wait(0)
         assert reply.data["status"] == "failed" and reply.is_error
         assert reply.data["error"]["reason"] == "recipe_worker_start_failed"
@@ -401,7 +402,7 @@ def test_generator_close_failure_is_isolated_with_a_terminal_record(tmp_path):
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        execution = executions.start(client.context, "sample", {})
+        execution = start_legacy_execution(executions, client.context, "sample", {})
         wait_for_event(gui.awaited)
         execution.close()
         execution.join()

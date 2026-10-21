@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
+    Cancelled,
     Done,
     Failed,
     InitEnv,
@@ -289,7 +290,7 @@ def mist_fluxdep(
         mist_cfg(plan, tun, cal),
         live=lambda axes, samples: plot.update(axes[0], mist_signal2real(samples)),
     )
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return Next(
             MISTPoint(
                 index, flux, frequency, rabi, readout, False, outcome.reason, None
