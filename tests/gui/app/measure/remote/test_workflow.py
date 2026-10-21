@@ -1,6 +1,7 @@
 """Workflow RPC uses the shared headless facet, not the selected GUI pane."""
 
 import base64
+from threading import Event
 
 import pytest
 from matplotlib.figure import Figure
@@ -136,18 +137,21 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
         return reply["result"]
 
     client = make_client(tmp_path, respond)
+    paused_delivery = Event()
+
+    def observe_delivery():
+        status = controller.workflow_control().status("ask-mcp")
+        if status is not None and status.lifecycle == "paused":
+            paused_delivery.set()
+
+    unsubscribe = lambda: None
     try:
         tab = client.call("workflow_open", {"name": "asking"})["tab_id"]
+        unsubscribe = controller.workflow_control().subscribe(observe_delivery)
         started = client.call("workflow_start", {"tab_id": tab, "run_id": "ask-mcp"})
-        # A submitted finite segment reaches the native Ask and returns.
-        qt_until(
-            lambda: (
-                controller.workflow_control().status("ask-mcp") is not None
-                and controller.workflow_control().status("ask-mcp").lifecycle
-                == "paused"
-            ),
-            label="MCP Ask",
-        )
+        # No intervening facet mutations: Start notifies with status=None, then
+        # the submitted finite segment notifies paused only on owner delivery.
+        qt_until(paused_delivery.is_set, label="MCP Ask owner delivery")
         status = client.call("workflow_status", {"run_id": "ask-mcp"})
         question = status.get("pending_question")
         assert question is not None, "Status must expose the native question envelope"
@@ -187,6 +191,7 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
             is None
         )
     finally:
+        unsubscribe()
         client.context.session.close()
 
 
