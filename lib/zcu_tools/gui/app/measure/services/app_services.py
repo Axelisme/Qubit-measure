@@ -329,7 +329,7 @@ def build_app_services(  # noqa: PLR0913
     )
     return AppServices(
         session=session,
-        workflow=WorkflowControlFacet(state, session, owner_scheduler),
+        workflow=WorkflowControlFacet(state, session),
         startup=startup,
         startup_context=startup_context,
         experiment_access=access,

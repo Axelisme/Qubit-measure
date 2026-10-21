@@ -164,7 +164,7 @@ class CleanupController(Controller):
             project_root=str(root),
             progress_transport=DirectProgressTransport(),
         )
-        self.workflow = CleanupFacet(state, self.session_services, self.owner_scheduler)
+        self.workflow = CleanupFacet(state, self.session_services)
         self.workflow.cleanups = []
         self.workflow.closed = []
 

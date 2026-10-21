@@ -41,7 +41,7 @@ def _entry(
 METHODS: tuple[RemoteMethodEntry, ...] = (
     _entry(
         "open",
-        "Open independent headless drafts for an explicit workflow name. Returns tab_id/name/tab snapshot; no focus or toggle change.",
+        "Open independent headless drafts for an explicit workflow name. Returns tab_id/name/tab snapshot. No GUI mode or selection prerequisite; a mounted GUI selects the new tab and switches to Workflow mode.",
         (required_string("name"),),
     ),
     _entry(

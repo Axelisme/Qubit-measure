@@ -62,7 +62,7 @@ Choosers use non-native presentation so Qt can detect them. Dialogs do not
 subscribe to authority or recheck holder after choices. Measure Setup, Inspect,
 Device and ARB windows receive read-only state on open and on control transfers.
 Local restores editing without overriding busy/valid gates.
-Only Measure Run and device Stop reclaim
+Only Measure experiment, embedded workflow and device Stop reclaim
 locked Local before requesting cancellation. Main windows dispose their own
 watch on final teardown; domain sessions and background drains retain their
 existing lifetimes. See [ADR-0070](../../../docs/adr/0070-control-identity.md).

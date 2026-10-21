@@ -40,9 +40,10 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 ## Workflow namespace
 
 `workflow.open/close/start/status/form/describe_form/edit_form/tunables/pause/resume/stop/records/figures/figure/answer`
-call the same headless `WorkflowControlFacet` as Qt panes. Commands never switch
-GUI mode or select a tab. `tab_id` names an opened draft owner; `run_id` names a
-native run. Status without run_id lists catalog names and all opened tab
+call the same headless `WorkflowControlFacet` as Qt panes. Commands do not require
+any GUI mode or selected tab. When the GUI mounts a newly opened owner, it selects
+the new tab and switches to Workflow mode. `tab_id` names an opened draft owner;
+`run_id` names a native run. Status without run_id lists catalog names and all opened tab
 snapshots. Start/Resume operation_id uses the existing measure operation owner;
 submission does not prove native acceptance. MCP exposes the same operation as
 an opaque handle for wait.

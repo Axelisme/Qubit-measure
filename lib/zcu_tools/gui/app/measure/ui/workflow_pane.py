@@ -228,7 +228,7 @@ class WorkflowPane(QWidget):
             and lifecycle == "paused"
             and snapshot.pending_question is None
         )
-        self._buttons["Stop"].setEnabled(writable and snapshot.busy)
+        self._buttons["Stop"].setEnabled(snapshot.busy)
         self._apply.setEnabled(
             writable and accepted and lifecycle in {"running", "paused"}
         )
@@ -314,6 +314,8 @@ class WorkflowPane(QWidget):
         elif command == "Resume":
             self._control.resume(run_id)
         elif command == "Stop":
+            if self._ctrl.control_identity.status().holder != "gui":
+                self._ctrl.control_identity.reclaim_local()
             self._control.stop(run_id)
         elif command == "Answer":
             answer = TypeAdapter(JsonValue).validate_json(self._answer_input.text())

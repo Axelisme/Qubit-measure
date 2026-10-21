@@ -25,7 +25,6 @@ from zcu_tools.gui.form import (
     FormWritePath,
 )
 from zcu_tools.gui.plotting.figure_export import render_figure_png
-from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.plotting.plots import PlotHost, Plots
@@ -89,12 +88,10 @@ class WorkflowControlFacet:
         self,
         state: SessionState,
         services: SessionServices,
-        owner: OwnerScheduler,
     ) -> None:
-        """Borrow one existing session/state pair and its owner scheduler."""
+        """Borrow one existing session/state pair."""
         self._state = state
         self._services = services
-        self._owner = owner
         self._factories: dict[str, Callable[[], WorkflowTabPort]] = {}
         self._tabs: dict[str, WorkflowTabPort] = {}
         self._next_id = 0
@@ -241,7 +238,11 @@ class WorkflowControlFacet:
         return result
 
     def stop(self, run_id: str) -> RunStatus | None:
-        """Request Stop; pending work releases ownership only on owner delivery."""
+        """Request Stop; pending work releases ownership only on owner delivery.
+
+        Control I/O failure ends as failed teardown, not cancellation. The original
+        error propagates; worker drain runs author cleanup before terminal delivery.
+        """
         result = self._run_tab(run_id).run.stop(run_id)
         self._notify()
         return result

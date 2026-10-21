@@ -54,7 +54,7 @@ def make_control(tmp_path):
 
     board = white_noise()
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
-    control = facet_type(harness.state, harness.services, harness.owner)
+    control = facet_type(harness.state, harness.services)
 
     def init(env: InitEnv[None], plan: Native) -> int:
         return 0

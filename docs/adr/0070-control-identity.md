@@ -62,7 +62,7 @@ Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 hol
 
 Measure 的無需回答錯誤通知採 non-modal，保留 lifetime、訊息與 traceback，讓 agent 在通知可見時繼續操作。需要選擇的 confirmation、file chooser 與 writeback 編輯保持 modal 保護。Shared dialog lifetime helper 的預設政策與其他 app 不變。
 
-Measure 量測 Stop 與 device operation Stop 在 Remote 仍可按。按下先收回成 Local 鎖定，再請求取消。Stop 是僅有的自動收回入口，取消不代表硬體已停止。Remote 關主窗先確認，拒絕不開始 teardown，接受沿既有 shutdown／cancel／cleanup 契約，不另加 reclaim。Fluxdep 沒有硬體緊急 Stop。
+Measure 量測 Stop 與 device operation Stop 在 Remote 仍可按。按下先收回成 Local 鎖定，再請求取消。嵌入 measure GUI 的 workflow Stop 同此規則（2026-10-22 advisor 代裁，待使用者確認）。Stop 是僅有的自動收回入口，取消不代表硬體已停止。Remote 關主窗先確認，拒絕不開始 teardown，接受沿既有 shutdown／cancel／cleanup 契約，不另加 reclaim。Fluxdep 沒有硬體緊急 Stop。
 
 ## Cfg 與 operation
 
@@ -78,6 +78,6 @@ Operation 不綁啟動者身份。控制權轉移或斷線不取消已接受 Run
 
 單一 holder 省去 per-connection seen guard、guard dependencies、observation rollback 及 cfg ref／revision admission。它不保證 holder 已讀最新資料，也不防止同名 owner 連線互相覆蓋。Source 自動 publication 屬於 holder 操作的結果，不再加 observation 保護。
 
-直接編輯就接管會讓滾輪或誤點搶走控制權，所以除了兩種 Stop，只接受明確按燈收回。離線 holder 不自動 release，使用者可按燈收回，其他 owner 可明確 acquire。GUI 不啟動 agent，agent prompt／notify 接口不提供；MCP 的 recipe `answer` 仍只回答已捕捉的提問。
+直接編輯就接管會讓滾輪或誤點搶走控制權，所以除了上述 Stop，只接受明確按燈收回。離線 holder 不自動 release，使用者可按燈收回，其他 owner 可明確 acquire。GUI 不啟動 agent，agent prompt／notify 接口不提供；MCP 的 recipe `answer` 仍只回答已捕捉的提問。
 
 GUI owner 邊界見 [[0067]]，wire、authentication 與錯誤投影見 [[0068]]。本篇不新增硬體操作授權、不改 lease 或 shutdown 安全承諾。

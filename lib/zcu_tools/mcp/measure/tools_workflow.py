@@ -81,7 +81,7 @@ def build_workflow_tools(ctx: MeasureToolContext) -> ToolTable:
         "workflow_open": _tool(
             ctx,
             "workflow.open",
-            "Open independent drafts for an explicit workflow name; returns tab_id/name/tab snapshot. Does not change GUI mode or selection.",
+            "Open independent drafts for an explicit workflow name; returns tab_id/name/tab snapshot. No GUI mode or selection prerequisite; a mounted GUI selects the new tab and switches to Workflow mode.",
             {"name": _STRING},
             ("name",),
         ),

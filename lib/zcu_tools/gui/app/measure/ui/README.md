@@ -24,6 +24,8 @@ The shared RUN lease locks competing panes and Setup/SoC submissions.
 
 `WorkflowPane` renders the facet's Plan and Tunables drafts with `FormEditor`.
 It forwards Refresh, Start, Pause, Resume, Stop and Apply to the facet.
+Busy Stop remains enabled under Remote control and reclaims locked Local before
+calling the same facet. Pause, Resume, Answer and tunables retain the holder gate.
 The services own source capture, lowering, accepted tunables and run lifetime.
 Ask displays the authored question and driver-owned answer schema, with a JSON
 answer field. A new question selects Ask; the status badge returns there from

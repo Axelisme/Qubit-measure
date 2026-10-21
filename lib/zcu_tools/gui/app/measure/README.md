@@ -147,8 +147,11 @@ Stop and Apply use the same runner, operation and RUN lease as experiment tabs.
 Pending and paused runs refuse tab close. Closing the last idle workflow tab
 does not drain services or disconnect hardware.
 
-Qt workflow panes display these owners and forward commands. Measure remote
-calls the same facet without a pane, toggle or selected-tab dependency. Form
+Qt workflow panes display these owners and forward commands. A busy workflow's
+local Stop remains available under Remote control. It reclaims locked Local before
+requesting Stop through the same facet; other mutations still require the holder.
+Measure remote calls the same facet without a pane, toggle or selected-tab
+dependency. Form
 `observe_form` prepares one call-local candidate using the owner's fixed env;
 metadata and values come from that candidate, with no native lowering or commit.
 None Start batches use parsed shared drafts. Explicit batches use fresh captured
@@ -165,7 +168,8 @@ answer and waiting/submitted/answered/cancelled presentation state. Qt panes and
 RPC/MCP status read the same facts regardless of the command's entry point.
 Submitted does not mean accepted; rejected native models retain no answer input.
 Stop is pure control; a retained Ask drains on the worker, including after control
-I/O failure. Only terminal owner delivery settles the operation and releases RUN.
+I/O failure. Control I/O failure ends as failed teardown, not cancellation.
+Only terminal owner delivery settles the operation and releases RUN.
 Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 ## Sources and workflow

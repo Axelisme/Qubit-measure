@@ -35,7 +35,7 @@ def asking(tmp_path):
     board = white_noise()
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
     author = AskAuthor()
-    control = WorkflowControlFacet(harness.state, harness.services, harness.owner)
+    control = WorkflowControlFacet(harness.state, harness.services)
     control.configure((author.attachment(),))
     tab = control.open("asking")
     token = control.start(tab, "question-run")

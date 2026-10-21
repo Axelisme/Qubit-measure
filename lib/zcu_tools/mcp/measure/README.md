@@ -218,8 +218,8 @@ uv run --directory <lane> --no-sync -- pytest -q -n0 tests/mcp/measure/test_reci
 ## Workflow tools
 
 Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開命名。
-所有命令都忽略 GUI toggle 與目前選中的 tab，沒有 workflow 模式切換 RPC。
-名稱必須明填，不預選實驗室 workflow。
+所有命令都不以 GUI toggle 或目前選中的 tab 作為 target，沒有 workflow 模式切換 RPC。
+名稱必須明填，不預選實驗室 workflow。GUI 掛載新開的 owner 時會選中新 tab，並切到 Workflow 模式。
 
 | 工具 | 輸入與結果 |
 | --- | --- |
