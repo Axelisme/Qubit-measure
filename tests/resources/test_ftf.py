@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from zcu_tools.resources.ftf import parse_ftf
+from zcu_tools.resources.ftf import load_ftf, parse_ftf
 
-from tests.resources._ftf_data import ftf_document
+from tests.resources._ftf_data import dual_readout_document, ftf_document
 
 
 def test_singular_receiver_spectral_density_is_legal() -> None:
@@ -263,20 +263,139 @@ def test_mismatch_invalid_values_report_resonator_field_path(
         parse_ftf(document)
 
 
-@pytest.mark.parametrize("channels", [(4, 1), (1,)])
-def test_mux_settings_accept_explicit_kind_and_receiver_list(channels):
-    from tests.resources._ftf_data import mux_document
-
+@pytest.mark.parametrize("channels", [None, (4, 1), (1,), tuple(range(1, 9))])
+def test_dual_readout_yaml_loads_with_optional_mux(
+    tmp_path: Path, channels: tuple[int, ...] | None
+) -> None:
+    document = ftf_document() if channels is None else dual_readout_document(channels)
+    path = tmp_path / "readout.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
     try:
-        config = parse_ftf(mux_document(channels))
+        settings = load_ftf(path)
     except ValueError as error:
-        pytest.fail(f"explicit mux receiver list must parse: {error}")
-    assert config.readout.drive.kind == "mux"
-    assert tuple(r.ro_ch for r in config.readout.receivers) == channels
+        pytest.fail(f"pulse with optional independent mux must load: {error}")
+    assert settings.readout.adc.ro_ch == 0
+    mux = settings.readout.mux
+    if channels is None:
+        assert mux is None, "omitting mux must disable only the mux path"
+    else:
+        assert mux is not None, "mux must retain its binding"
+        assert mux.gen_ch == 1
+        assert mux.input_per_gain == -2.0
+        assert tuple(receiver.ro_ch for receiver in mux.adc) == channels
+        assert parse_ftf(settings.model_dump(mode="json")) == settings
 
 
-def test_mux_settings_reject_duplicate_receiver_channel():
-    from tests.resources._ftf_data import mux_document
+@pytest.mark.parametrize("kind", ["pulse", "mux", None])
+def test_removed_readout_kind_reports_migration_error(
+    tmp_path: Path, kind: object
+) -> None:
+    document = ftf_document()
+    _set_field(document, "readout.drive.kind", kind)
+    path = tmp_path / "old.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"readout\.drive\.kind:.*removed"):
+        load_ftf(path)
 
-    with pytest.raises(ValueError, match="duplicate.*receiver|receiver.*duplicate"):
-        parse_ftf(mux_document((1, 1)))
+
+@pytest.mark.parametrize(
+    "path,value,error_path",
+    [
+        ("readout.mux.gen_ch", 0, "readout.mux.gen_ch"),
+        ("readout.mux.gen_ch", 2, "drive_lines.mw.gen_ch"),
+        ("drive_lines.mw.gen_ch", 0, "drive_lines.mw.gen_ch"),
+        ("readout.mux.adc", [], "readout.mux.adc"),
+        (
+            "readout.mux.adc",
+            [
+                {
+                    "ro_ch": ch,
+                    "gain": 1.0,
+                    "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                }
+                for ch in range(1, 10)
+            ],
+            "readout.mux.adc",
+        ),
+        (
+            "readout.mux.adc",
+            [{"ro_ch": 1, "gain": 1.0, "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]]}]
+            * 2,
+            "readout.mux.adc",
+        ),
+        (
+            "readout.mux.adc",
+            [{"ro_ch": 0, "gain": 1.0, "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]]}],
+            "readout.mux.adc",
+        ),
+        ("readout.adc", [], "readout.adc"),
+        ("readout.mux.input_per_gain", float("inf"), "readout.mux.input_per_gain"),
+        (
+            "readout.mux.adc",
+            [{"ro_ch": 1, "gain": 1.0, "noise_psd_adc2_ns": [[1.0, 2.0], [2.0, 1.0]]}],
+            "readout.mux.adc.0.noise_psd_adc2_ns",
+        ),
+    ],
+)
+def test_dual_readout_invalid_bindings_report_field_path(
+    path: str, value: object, error_path: str
+) -> None:
+    document = dual_readout_document()
+    try:
+        parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"valid dual-readout must parse before invalid binding: {error}")
+    _set_field(document, path, value)
+    with pytest.raises(ValueError, match=error_path.replace(".", r"\.")):
+        parse_ftf(document)
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, True, "1"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "readout.drive.gen_ch",
+        "readout.mux.gen_ch",
+        "drive_lines.mw.gen_ch",
+        "readout.adc.ro_ch",
+        "readout.mux.adc",
+    ],
+)
+def test_dual_readout_channel_indices_require_nonnegative_integers(
+    path: str, value: object
+) -> None:
+    document = dual_readout_document()
+    try:
+        parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"valid dual-readout must parse before invalid index: {error}")
+    error_path = path
+    if path.endswith(".adc"):
+        value = [
+            {"ro_ch": value, "gain": 1.0, "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]]}
+        ]
+        error_path += ".0.ro_ch"
+    _set_field(document, path, value)
+    with pytest.raises(ValueError, match=error_path.replace(".", r"\.")):
+        parse_ftf(document)
+
+
+def test_dual_readout_channel_indices_have_no_fixed_upper_bound() -> None:
+    document = dual_readout_document((100, 200))
+    for path, value in [
+        ("readout.drive.gen_ch", 100),
+        ("readout.mux.gen_ch", 200),
+        ("drive_lines.mw.gen_ch", 300),
+        ("readout.adc.ro_ch", 300),
+    ]:
+        _set_field(document, path, value)
+    try:
+        settings = parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"legal high indices must not be hardware-limited: {error}")
+    assert settings.readout.drive.gen_ch == 100
+    assert settings.drive_lines["mw"].gen_ch == 300
+    assert settings.readout.adc.ro_ch == 300
+    assert settings.readout.mux is not None
+    assert settings.readout.mux.gen_ch == 200
+    assert tuple(r.ro_ch for r in settings.readout.mux.adc) == (100, 200)
