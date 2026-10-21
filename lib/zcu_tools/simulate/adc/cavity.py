@@ -41,13 +41,16 @@ def cavity_fields(
     Receiver delay, gain, offset, noise and mismatch scattering phases do not
     change intracavity fields. Output owns its complex128 storage. Invalid
     coordinates or envelope values raise ValueError; solver failure raises
-    RuntimeError. The field solver uses rtol=1e-9 and atol=1e-11.
+    RuntimeError. All-flat pulse tuples use singular-safe ConstantLine
+    propagators. Shaped tuples use the field ODE with rtol=1e-9 and atol=1e-11.
     """
     times = readonly_array(times_ns, "cavity times")
     if times.ndim != 1 or not len(times) or np.any(np.diff(times) <= 0):
         raise ValueError("cavity times must be nonempty and strictly increasing")
     initial = _initial_field(initial_field)
     _validate_origin(initial_time_ns, float(times[0]))
+    if pulses and all(pulse.envelope is None for pulse in pulses):
+        return _flat_fields(model, pulses, times, initial, initial_time_ns)
     fields = _memory_fields(model, times, initial, initial_time_ns)
     for pulse in pulses:
         # Integrate near this carrier, then restore the caller's pulse-local
@@ -211,6 +214,54 @@ def _boundaries(
         count = max(1, int(np.ceil((right - left) * kappa)))
         points.extend(np.linspace(left, right, count + 1)[1:])
     return np.array(points)
+
+
+def _flat_fields(
+    model: ReadoutModel,
+    pulses: tuple[ReadoutPulse, ...],
+    times: RealArray,
+    initial: NDArray[np.complex128],
+    origin: float,
+) -> NDArray[np.complex128]:
+    # Work near the carrier to avoid exponentiating the absolute GHz rotation.
+    near = replace(model, reference_frequency_ghz=pulses[0].frequency_ghz)
+    delta = near.reference_frequency_ghz - model.reference_frequency_ghz
+    pulses = tuple(
+        replace(pulse, phase_rad=pulse.phase_rad + 2 * np.pi * delta * pulse.start_ns)
+        for pulse in pulses
+    )
+    a, v = line_parameters(near)
+    n = len(model.state_labels)
+    line = ConstantLine(np.zeros((n, n)), a, v, v.astype(np.complex128))
+    boundaries = np.unique(
+        np.concatenate((_boundaries(pulses, origin, float(times[-1])), times))
+    )
+    fields = np.tile(initial * np.exp(2j * np.pi * delta * origin), (n, 1))
+    output = np.empty((len(times), n, 2), dtype=np.complex128)
+    cursor = 0
+    if times[0] == origin:
+        output[0] = fields
+        cursor = 1
+    for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
+        active = tuple(
+            pulse for pulse in pulses if pulse.start_ns <= left < pulse.end_ns
+        )
+        incidents = np.array(
+            [pulse.incident(left, near.reference_frequency_ghz) for pulse in active],
+            dtype=np.complex128,
+        )
+        omegas = np.array(
+            [
+                2 * np.pi * (pulse.frequency_ghz - near.reference_frequency_ghz)
+                for pulse in active
+            ]
+        )
+        fields = line.coherent_step(fields, incidents, omegas, float(right - left))
+        if cursor < len(times) and right == times[cursor]:
+            output[cursor] = fields
+            cursor += 1
+    output *= np.exp(-2j * np.pi * delta * times)[:, None, None]
+    return output
 
 
 def _flat_average(
