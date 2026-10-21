@@ -7,8 +7,9 @@ WIRE_VERSION; it reports GUI_VERSION without comparing it.
 from __future__ import annotations
 
 # Workflow commands share the measure session and headless tab owners.
-WIRE_VERSION = 112
+# Writeback previews include adapter-authored initial selection and notes.
+WIRE_VERSION = 113
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 145
+GUI_VERSION = 146
