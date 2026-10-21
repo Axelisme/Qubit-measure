@@ -30,36 +30,52 @@ def cavity():
     return joint, resonators, pulse, drive_type
 
 
-@pytest.mark.parametrize("branch", [0, 1, None], ids=["ground", "prepared", "tie-lowest-energy"])
+@pytest.mark.parametrize(
+    "branch", [0, 1, None], ids=["ground", "prepared", "tie-lowest-energy"]
+)
 def test_cavity_advance_inherits_main_branch_and_keeps_ringdown(cavity, branch):
     from zcu_tools.simulate.adc import cavity_field_average, cavity_fields
 
     joint, resonators, pulse, _ = cavity
     drive = ftf.CavityDrive(joint, resonators, (pulse,))
-    assert callable(getattr(drive, "advance", None)), "FTF must carry the main branch field between spans"
+    assert callable(getattr(drive, "advance", None)), (
+        "FTF must carry the main branch field between spans"
+    )
     model = ftf.readout_model(joint, resonators)
     count = len(model.state_labels)
     populations = np.zeros(count)
     if branch is None:
-        populations[:2] = .5
+        populations[:2] = 0.5
         selected = 0
     else:
-        populations[branch] = 1.
+        populations[branch] = 1.0
         selected = branch
-    inherited = np.array([.2 + .3j, -.1j])
-    average, final = drive.advance(10., 25., populations, inherited)
-    fields = cavity_fields(model, (pulse,), np.array([10., 25.]), initial_field=inherited)
-    expected = cavity_field_average(model, (pulse,), 10., 25., initial_field=inherited)
+    inherited = np.array([0.2 + 0.3j, -0.1j])
+    average, final = drive.advance(10.0, 25.0, populations, inherited)
+    fields = cavity_fields(
+        model, (pulse,), np.array([10.0, 25.0]), initial_field=inherited, initial_time_ns=10.0
+    )
+    expected = cavity_field_average(
+        model, (pulse,), 10.0, 25.0, initial_field=inherited, initial_time_ns=10.0
+    )
     np.testing.assert_allclose(average.photons, expected.photons, atol=1e-12)
-    np.testing.assert_allclose(average.stark_shift_ghz, (average.chi_ghz * expected.photons).sum(axis=-1), atol=1e-12)
+    np.testing.assert_allclose(
+        average.stark_shift_ghz,
+        (average.chi_ghz * expected.photons).sum(axis=-1),
+        atol=1e-12,
+    )
     np.testing.assert_allclose(final, fields[-1, selected], atol=1e-12)
     assert np.max(np.abs(fields[-1, 0] - fields[-1, 1])) > 1e-7
-    ringdown, next_final = drive.advance(25., 40., populations, final)
-    expected_ringdown = cavity_fields(model, (), np.array([25., 40.]), initial_field=final)
+    ringdown, next_final = drive.advance(25.0, 40.0, populations, final)
+    expected_ringdown = cavity_fields(
+        model, (), np.array([25.0, 40.0]), initial_field=final, initial_time_ns=25.0
+    )
     np.testing.assert_allclose(next_final, expected_ringdown[-1, selected], atol=1e-11)
     assert np.max(ringdown.photons) > 0
     # Restarting each branch from vacuum would erase this entire span.
-    np.testing.assert_array_equal(ftf.CavityDrive(joint, resonators, ()).average(25., 40.).photons, 0)
+    np.testing.assert_array_equal(
+        ftf.CavityDrive(joint, resonators, ()).average(25.0, 40.0).photons, 0
+    )
 
 
 def test_cavity_response_uses_joint_pulls_and_coherent_shared_line_fields(cavity):
