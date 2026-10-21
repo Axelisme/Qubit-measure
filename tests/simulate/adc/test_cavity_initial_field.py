@@ -60,7 +60,7 @@ def test_flat_cache_owns_exact_moments_for_complete_inputs(variant):
         # A repeated eigenvalue with rank-one damping exercises defective A.
         model = replace(
             model,
-            frequencies_ghz=np.tile([6.01, 6.01 + 0.01 / np.pi], (2, 1)),
+            frequencies_ghz=np.tile([6.01, 6.01 + 0.02 / np.pi], (2, 1)),
             kappa_internal_per_ns=np.zeros(2),
             kappa_external_per_ns=np.full(2, 0.04),
         )
