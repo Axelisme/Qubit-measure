@@ -6,6 +6,7 @@ from pathlib import Path
 from zcu_tools.core.simulation import RoundRequest, RoundSignals
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.resources.simulation_replay import read_replay
 from zcu_tools.simulate.evolution import SEGMENT_NUMERIC_VERSION
 
@@ -43,6 +44,8 @@ def replay_round(path: Path) -> IntegratedRound | RoundSignals:
 
     inputs = read_replay(path)
     acquire, record = inputs.acquire, inputs.round
+    if not isinstance(acquire.settings, FTFSettings):
+        raise ValueError("FTF replay requires FTF settings")
     if acquire.versions != replay_versions():
         raise ValueError("private replay backend/model/RNG/numeric version mismatch")
     if record.numeric_manifest is not None or acquire.library_path is not None:

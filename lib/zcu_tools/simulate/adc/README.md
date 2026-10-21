@@ -4,8 +4,18 @@
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
-`cavity_fields` returns complex fields in fixed joint-state order, without
-population mixing or receiver calibration. Its optional complex `(2,)`
+`ReadoutModel` supports 1 or 2 cavities on a shared transmission line.
+`cavity_count` comes from the frequency array's second axis. Other counts raise
+`ValueError` at model construction. Frequencies have shape `(state,cavity)`;
+internal/external decay rates and scattering phases have shape `(cavity,)`.
+The two-cavity default `mismatch_phase_rad=zeros(2)` is unchanged. One-cavity
+callers must supply a one-element phase array, including `np.zeros(1)` for zero
+mismatch. Receiver I/Q offset and noise covariance remain `(2,)` and `(2,2)`.
+The scalar path propagator is exact; two-cavity paths retain the existing 2x2
+closed form. Constant, sampled and opaque drives share these model dimensions.
+
+`cavity_fields` returns complex `(time,state,cavity)` fields in fixed joint-state
+order, without population mixing or receiver calibration. Its optional complex `(cavity,)`
 `initial_field` supplies the same field to every state at `initial_time_ns`.
 `cavity_field_average` accepts the same pair of inputs. Both use sqrt(photons)
 in the model's rotating reference at that absolute emitted time. The initial
@@ -62,7 +72,7 @@ exp(−2πi*f_abs*τ) at the absolute carrier, without counting τ twice. Onset,
 ringup, ringdown and envelopes all arrive late; offset/noise do not. Pulse phase
 retains its documented rotating-coordinate convention.
 
-`ReadoutModel.mismatch_phase_rad` is a finite two-element array, default zeros.
+`ReadoutModel.mismatch_phase_rad` is a finite array with one phase per cavity.
 Each element multiplies only that resonator's scattered field by exp(−i*phi)
 before conjugation, giving the hanger model's +phi sign in microwave IQ. The
 reciprocal shared-line generator and transition rates are unchanged. This is a
@@ -148,12 +158,12 @@ shared Schur bases. Ringdown subtracts the delayed step response;
 ill-conditioned driven blocks retain the full matrix-exponential propagation.
 The field routes do not assume diagonalizable rate matrices. No route changes
 the evolution populations.
-Its lossless numeric cache key includes delay and both mismatch phases.
+Its lossless numeric cache key includes delay and every cavity's mismatch phase.
 `ADC.sample` and `sample_windows` draw continuous-time Markov paths
 using the directional rates. The initial population origin is the earliest
 incident pulse start, or zero with no pulses.
 The path continues through ringdown to the latest emitted sample, including gaps
-between windows. Jumps retain both resonators' fields and reciprocal shared-line
+between windows. Jumps retain every resonator's field and reciprocal shared-line
 damping. Vacuum baselines support flat, piecewise-linear and opaque envelopes;
 no ODE is solved per shot. Delay, mismatch and receiver calibration follow the
 same conventions as conditional responses. Windows share one path per shot and

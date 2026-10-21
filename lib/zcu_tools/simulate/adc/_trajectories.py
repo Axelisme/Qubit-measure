@@ -13,9 +13,9 @@ ComplexArray = NDArray[np.complex128]
 
 
 def line_parameters(model: ReadoutModel) -> tuple[ComplexArray, RealArray]:
-    """Return fixed-branch line blocks (state,2,2), 1/ns, and input coupling.
+    """Return fixed-branch line blocks (state,cavity,cavity), 1/ns, and input coupling.
 
-    Coupling is (2,) sqrt(1/ns). Population rates and receiver calibration do
+    Coupling is (cavity,) sqrt(1/ns). Population rates and receiver calibration do
     not enter these vacuum-field equations.
     """
     v = np.sqrt(model.kappa_external_per_ns / 2)
@@ -92,7 +92,7 @@ class PathFields:
         for left, right in zip(corners[:-1], corners[1:], strict=True):
             count = max(1, int(np.ceil((right - left) * kappa)))
             points.extend(np.linspace(left, right, count + 1)[1:])
-        fields = np.zeros((len(self._a), 2), dtype=np.complex128)
+        fields = np.zeros((len(self._a), self.model.cavity_count), dtype=np.complex128)
         fastest = max(
             float(
                 np.max(
@@ -111,7 +111,7 @@ class PathFields:
                 stop: float = float(np.nextafter(right, left)),
             ) -> ComplexArray:
                 t = min(t, stop)
-                field = flat.reshape((-1, 2))
+                field = flat.reshape((-1, self.model.cavity_count))
                 incident = pulse.incident(t, self.model.reference_frequency_ghz)
                 return (
                     -np.einsum("sru,su->sr", self._a, field) + self._v * incident
@@ -134,7 +134,7 @@ class PathFields:
             ):
                 raise RuntimeError(f"readout path baseline failed: {solution.message}")
             self._segments.append((left, right, solution.sol))
-            fields = solution.y[:, -1].reshape((-1, 2))
+            fields = solution.y[:, -1].reshape((-1, self.model.cavity_count))
 
     def baseline(self, times: RealArray) -> ComplexArray:
         """Evaluate vacuum fields at emitted ns, shaped (time,state,cavity).
@@ -142,11 +142,13 @@ class PathFields:
         times is a finite vector within the prepared time support. No sampling
         occurs; earlier lookback times return zero. Output owns its storage.
         """
-        fields = np.zeros((len(times), len(self._a), 2), dtype=np.complex128)
+        fields = np.zeros(
+            (len(times), len(self._a), self.model.cavity_count), dtype=np.complex128
+        )
         for left, right, evaluate in self._segments:
             selected = (times > left) & (times <= right)
             if np.any(selected):
                 fields[selected] = evaluate(times[selected]).T.reshape(
-                    (-1, len(self._a), 2)
+                    (-1, len(self._a), self.model.cavity_count)
                 )
         return fields

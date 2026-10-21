@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.plotting import FigureContainer
     from zcu_tools.gui.session.ports import OwnerScheduler
+    from zcu_tools.plotting.figures import FigureCollection
     from zcu_tools.plotting.plots import Plots
 
     from .analyze import ActiveInteractive, AnalyzeService
@@ -43,6 +44,17 @@ if TYPE_CHECKING:
 
 class RunAnalyzeRenderHost(Protocol):
     """Render surface needed by run/analyze operations (per-pane, S2)."""
+
+    def present_figures(
+        self, tab_id: str, pane: str, figures: FigureCollection
+    ) -> None:
+        """On the Qt owner, borrow original names after each canvas attachment.
+
+        Keep only presentation references until pane clear/replacement. Do not
+        change collection membership or release Figures. Presentation failures
+        propagate to the producer; a closed tab is a no-op.
+        """
+        ...
 
     def make_run_container(self, tab_id: str) -> FigureContainer | None: ...
 
@@ -223,7 +235,9 @@ class RunAnalyzeControlFacet:
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None
         return self._run.start_run(
-            inputs, plots=self._new_plots(live_container), origin=origin
+            inputs,
+            plots=self._new_plots(live_container, tab_id=tab_id, pane="run"),
+            origin=origin,
         )
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
@@ -311,7 +325,9 @@ class RunAnalyzeControlFacet:
             host.make_analysis_container(tab_id) if host is not None else None
         )
         return self._analyze.start_analyze(
-            tab_id, analyze_params_instance, plots=self._new_plots(figure_container)
+            tab_id,
+            analyze_params_instance,
+            plots=self._new_plots(figure_container, tab_id=tab_id, pane="analysis"),
         )
 
     def _start_interactive_analyze(
@@ -399,19 +415,32 @@ class RunAnalyzeControlFacet:
         return self._post_analyze.start_post_analyze(
             tab_id,
             post_analyze_params_instance,
-            plots=self._new_plots(figure_container),
+            plots=self._new_plots(
+                figure_container, tab_id=tab_id, pane="post_analysis"
+            ),
         )
 
-    def _new_plots(self, container: FigureContainer | None) -> Plots:
-        from zcu_tools.gui.plotting.explicit import QtPlotHost
+    def _new_plots(
+        self,
+        container: FigureContainer | None,
+        *,
+        tab_id: str = "",
+        pane: str = "",
+    ) -> Plots:
+        from zcu_tools.gui.app.measure.driven.figure_presentation import MeasurePlotHost
         from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-        host = (
-            NonPresentingHost()
-            if container is None
-            else QtPlotHost(container, self._owner_scheduler)
+        view = self._render_host()
+        if container is None or view is None:
+            return Plots(NonPresentingHost())
+        plots = Plots(
+            MeasurePlotHost(
+                container,
+                self._owner_scheduler,
+                lambda: view.present_figures(tab_id, pane, plots),
+            )
         )
-        return Plots(host)
+        return plots
 
     def _ensure_tab_idle(self, tab_id: str) -> None:
         self._access.require_available()

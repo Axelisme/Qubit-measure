@@ -34,6 +34,7 @@ from zcu_tools.core.simulation import (
 )
 
 from .ftf import FTFSettings
+from .single_fluxonium import SingleFluxoniumSettings
 
 
 class _NumericJSON(BaseModel):
@@ -221,7 +222,8 @@ class ReplayAcquire(BaseModel):
     """Fixed private acquire inputs shared by independently replayable rounds.
 
     version: exact private schema version 1; no compatibility reader. settings:
-    full immutable FTF resource values, including model/calibration/solver/seed.
+    full immutable FTF or single-fluxonium resource values, selected by their
+    format literal, including model/calibration/solver/seed.
     request: detached quantized controls, owned complex envelopes, windows/layout
     and RNG identity. versions: ordered (component, exact version) pairs supplied
     by the backend, checked by replay execution. library_path: explicit absolute
@@ -230,7 +232,7 @@ class ReplayAcquire(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
     version: Literal[1] = 1
-    settings: FTFSettings
+    settings: FTFSettings | SingleFluxoniumSettings
     request: _ReplayRequest
     versions: tuple[tuple[str, str], ...]
     library_path: Path | None = None

@@ -1,0 +1,32 @@
+# Entry working values and wiring, separate from physical simulation settings.
+# No calibrated module library or pulse sequence is supplied.
+format: zcu.entry-template
+format_version: "1.0"
+components:
+  Q1:
+    kind: qubit/fluxonium
+    EJ: 4.0 # GHz
+    EC: 1.0
+    EL: 1.0
+    freq: null # Bias-dependent; this is not a frequency calibration.
+    resonator: R1
+    flux_source: flux_bias
+    flux_unit: A
+    wiring:
+      ch: 1
+      lo_flux_ch: 2
+  R1:
+    kind: resonator
+    freq: 7000.0 # MHz
+    wiring:
+      ch: 0
+      ro_ch: 0
+  flux_bias:
+    kind: device/current_source
+aliases:
+  format: zcu.aliases
+  format_version: "1.0"
+  aliases:
+    qubit: Q1
+    resonator: $qubit.resonator
+    flux_dev: $qubit.flux_source

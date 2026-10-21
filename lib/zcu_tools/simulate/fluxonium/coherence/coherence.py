@@ -20,20 +20,34 @@ def calculate_eff_t1_with(
     Temp: float,
     fluxonium: Fluxonium,
     esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
+    *,
+    transition: tuple[int, int] = (1, 0),
     **other_noise_options,
 ) -> float:
-    """Return effective 1→0 T1 in ns, setting ``fluxonium.flux`` to ``flux``.
+    """Return effective transition T1 in ns, setting fluxonium.flux to flux.
 
-    ``Temp`` is K and ``flux`` is Φ/Φ₀. Channel names or tuples contain scqubits names and
-    per-channel options. Optional ``esys`` reuses eigenpairs at this flux.
-    Other options pass to scqubits; ``total`` defaults to True (both directions).
+    Temp is K and flux is absolute Phi/Phi0. noise_channels contains scqubits
+    channel names or (name, options) pairs; optional esys reuses eigenpairs in
+    this circuit's oscillator basis at this flux. transition=(initial,final)
+    selects distinct nonnegative level indices (default 1→0). Other options
+    pass to scqubits; total defaults True (both directions), False requests only
+    initial→final. No extra 2*pi conversion occurs. Invalid transition raises
+    ValueError; unsupported channels/options and numerical errors propagate.
     """
+    if (
+        len(transition) != 2
+        or any(type(index) is not int or index < 0 for index in transition)
+        or transition[0] == transition[1]
+    ):
+        raise ValueError("transition requires distinct nonnegative integer levels")
     fluxonium.flux = flux
     with scq_t1_default_warning(enabled=False):
         # With energy/h in GHz, scqubits already returns physical ns (ADR-0071).
         return fluxonium.t1_effective(
             noise_channels=noise_channels,
-            common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
+            common_noise_options=dict(
+                i=transition[0], j=transition[1], T=Temp, **other_noise_options
+            ),
             esys=esys,
         )
 

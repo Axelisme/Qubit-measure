@@ -19,6 +19,7 @@ from ._dop853_data import (
     pack_models,
 )
 from ._dop853_intervals import playback_time
+from ._flux_expansion import TERM_KINDS, PackedExpansion, flux_hamiltonian
 from ._workload_facts import packed_segments
 
 
@@ -27,13 +28,6 @@ class FluxDOP853Plan:
     """Global-row chain IDs fixed by dispatch for this evolve."""
 
     chain: NDArray[np.int64]
-
-
-class _Expansion(NamedTuple):
-    static: NDArray[np.complex128]
-    matrices: NDArray[np.complex128]
-    loops: NDArray[np.int64]
-    kinds: NDArray[np.int64]
 
 
 class _Waveform(NamedTuple):
@@ -45,14 +39,14 @@ class _Waveform(NamedTuple):
 class _FluxData(NamedTuple):
     models: Models
     segments: Segments
-    expansion: _Expansion
+    expansion: PackedExpansion
     waveform: _Waveform
     energy_shifts: NDArray[np.float64]
 
 
 class _FluxContext(NamedTuple):
     drive: Context
-    expansion: _Expansion
+    expansion: PackedExpansion
     waveform: _Waveform
     energy_shifts: NDArray[np.float64]
 
@@ -60,7 +54,7 @@ class _FluxContext(NamedTuple):
 @dataclass(frozen=True)
 class _Prepared:
     source: ModelSource
-    expansion: _Expansion
+    expansion: PackedExpansion
     key_count: int
 
     @property
@@ -68,15 +62,16 @@ class _Prepared:
         return sum(array.nbytes for array in self.expansion)
 
 
-def _pack_expansion(expansion: FluxExpansion) -> _Expansion:
-    kinds = ("cos_2pi", "sin_2pi", "cos_pi", "sin_pi")
-    packed = _Expansion(
+def _pack_expansion(expansion: FluxExpansion) -> PackedExpansion:
+    packed = PackedExpansion(
         expansion.static,
         np.array(
             [term.matrix for term in expansion.terms], dtype=np.complex128
         ).reshape((-1, *expansion.static.shape)),
         np.array([term.loop for term in expansion.terms], dtype=np.int64),
-        np.array([kinds.index(term.kind) for term in expansion.terms], dtype=np.int64),
+        np.array(
+            [TERM_KINDS.index(term.kind) for term in expansion.terms], dtype=np.int64
+        ),
     )
     for array in packed:
         array.setflags(write=False)
@@ -94,16 +89,9 @@ def _rhs(time, state, context):
     absolute = playback_time(
         time, interval.flux_start, interval.flux_end, interval.duration
     )
-    fixed_h = expansion.static.copy()
-    for term in range(len(expansion.loops)):
-        loop = expansion.loops[term]
-        flux = np.interp(
-            absolute, waveform.times[begin:end], waveform.flux[begin:end, loop]
-        )
-        kind = expansion.kinds[term]
-        angle = np.pi * flux * (2 if kind < 2 else 1)
-        value = np.cos(angle) if kind % 2 == 0 else np.sin(angle)
-        fixed_h += value * expansion.matrices[term]
+    fixed_h = flux_hamiltonian(
+        expansion, waveform.times[begin:end], waveform.flux[begin:end], absolute
+    )
     basis = models.basis[model]
     h = hamiltonian(time, drive)
     for i in range(size):
