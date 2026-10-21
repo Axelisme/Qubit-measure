@@ -166,7 +166,7 @@ NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，�
 
 ### Mux qubit host zip acquisition
 
-`mux.freq.MuxFreqExp` 與 `mux.amp_rabi.MuxAmpRabiExp` 提供無 GUI 的 `run(config, *, context)`。
+`mux.twotone_spectrum.MuxFreqExp` 與 `mux.amp_rabi.MuxAmpRabiExp` 提供無 GUI 的 `run(config, *, context)`。
 完整 `tones: list[MuxToneCfg]` 保留 readout 原始順序。Prepare 在 numeric 邊界一次選出 active indices，
 產生各 drive 自己的量化座標 `(K,P)` 與 nominal `point_pulses (P,K)`。Inactive tone 不限制掃描點數。
 Freq 的座標是 MHz，Amp Rabi 是 normalized gain。不同範圍按 index zip，不展開 Cartesian product。
@@ -186,7 +186,7 @@ Plots 以原始 index 命名 `measurement_i`，每條曲線用自己的座標，
 Caller 負責 finish/release、組成含完整 cfg 的 RunRecord，以及保存 completion 狀態。
 
 兩個 leaf 的分析與 native save/load 都讀 explicit source，不從目前 cfg 補歷史輸入。
-公開入口與單位見 [Mux freq](mux/freq/guide.md) 及 [Mux Amp Rabi](mux/amp_rabi/guide.md)。
+公開入口與單位見 [Mux two-tone spectrum](mux/twotone_spectrum/guide.md) 及 [Mux Amp Rabi](mux/amp_rabi/guide.md)。
 
 ### TwoTone pulse calibration records
 
