@@ -261,11 +261,12 @@ class MainWindow(QMainWindow):
         close callbacks/hardware cleanup. This does not perform domain shutdown
         or ask close-policy questions. It also works before show or after exec;
         targeted DeferredDelete delivery cannot rely on another event-loop turn.
-        Repeated calls, including deleteLater after disposal, are harmless.
+        Cleanup failures propagate; retain the window and retry disposal.
+        Completed workflow cleanup callbacks are not repeated on retry.
+        Successful disposal is idempotent, including later deleteLater calls.
         """
         if self._disposed:
             return
-        self._disposed = True
         self.dispose_control_watches()
         for dialog in self.findChildren(RunLoadDialog):
             dialog.reject()
@@ -280,6 +281,7 @@ class MainWindow(QMainWindow):
             self.remote_control_service = None
         self.deleteLater()
         QCoreApplication.sendPostedEvents(self, QEvent.Type.DeferredDelete)
+        self._disposed = True
 
     def deleteLater(self) -> None:
         """Retire watches before scheduling deletion, including repeated calls."""
