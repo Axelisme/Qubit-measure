@@ -24,8 +24,12 @@ def right_page(tab: QWidget, pane: str) -> QWidget:
     """Locate a right page by the gallery, selector label or placeholder widget kind."""
     if pane == "data":
         return gallery(tab)
-    if pane in ("analysis", "post_analysis"):
-        label = "Analysis figure" if pane == "analysis" else "Post-analysis figure"
+    if pane in ("run", "analysis", "post_analysis"):
+        label = {
+            "run": "Run figure",
+            "analysis": "Analysis figure",
+            "post_analysis": "Post-analysis figure",
+        }[pane]
         selectors = [
             w for w in tab.findChildren(QComboBox) if w.accessibleName() == label
         ]
@@ -33,7 +37,7 @@ def right_page(tab: QWidget, pane: str) -> QWidget:
         parent = selectors[0].parentWidget()
         assert parent is not None
         return parent
-    kind = QStackedWidget if pane == "run" else QLabel
+    kind = QLabel
     stack = right_stack(tab)
     pages = [stack.widget(i) for i in range(stack.count())]
     matches = [page for page in pages if isinstance(page, kind)]

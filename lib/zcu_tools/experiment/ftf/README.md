@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-21, acquire-lifetime ADC memo
 
 **讀者：** lab-author。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -295,6 +295,12 @@ Each cavity-driven preparation retains all span reuse keys. Cache hits check
 every key through `Engine.reuse`. Evolution's `merge_path_diagnostics` combines
 span work and unions class membership by caller point index, so each point counts
 once per class across the acquire.
+
+One ADC `CavityAverageCache` serves the cavity span composition of an acquire.
+All g/e points share its 64 MiB budget through serialized calls. ADC owns keys,
+arrays and admission; `CavityDrive` only forwards the owner. Composition clears
+all resident content on return or exception. Neither Engine nor the long-lived
+source retains this owner. Shaped inputs and final branch fields stay uncached.
 
 A Stark shift that reverses state-energy order raises a point/segment-specific
 error because it exceeds the dispersive model's validity. States are not reordered.
