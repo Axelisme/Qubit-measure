@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-21，DeviceManager registry/setup 與 close 測試歸位、sim 模擬引擎選集、跨平台 GUI cache 隔離與 experiment device 測試邊界
+**Last updated:** 2026-10-21
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -288,7 +288,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 `tests/device/` 在 driver 與 Info 的公開接縫驗證單位、模式、安全限制、取消與錯誤傳播。實驗角色 helpers 由 zcu_lab 擁有，不由框架測試匯入。Cfg assembly tests 驗證角色到名稱的 mapping，且不讀硬體。用到 device 的合成 cfg 在自身宣告該欄位，不依賴 framework base 的 default。
 
-GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guard 沒有可觀測的 driver 接縫，不在這些案例加入硬體讀取計數。Run 與 Notebook owner tests 驗證 acquisition 前讀全部 connected drivers 一次、讀取失敗拒 Run，以及固定 metadata 經 Save 後的讀回。DeviceInfo label 逆向投影與實驗自動 setup 的專用案例已退休，手動設定與 manager 的有效 owner tests 保留。
+GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guard 沒有可觀測的 driver 接縫，不在這些案例加入硬體讀取計數。Run 與 Notebook owner tests 驗證 acquisition 前讀全部 connected drivers 一次、讀取失敗拒 Run，以及固定 metadata 經 Save 後的讀回。手動設定與 manager 的測試分別由 `tests/device/` 與下方的 Device manager tests 擁有。
 
 ### Device manager tests
 

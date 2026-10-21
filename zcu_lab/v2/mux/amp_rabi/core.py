@@ -50,18 +50,11 @@ calibration caller for pulse-copy and pi-product proposals.
 
 Calling and ownership
 ---------------------
-The caller supplies RunContext with compatible soc/soccfg, caller-owned Plots
-and a fresh StopSignal. After run, call context.cancel_signal.raise_if_error(),
-then inspect is_set() to distinguish cancellation from completion. Acquisition
-failures retain their cause even when partial data is available. Configuration,
-quantization and build errors propagate directly. The caller finishes/releases
-plots and cleans up devices. Run preserves the input cfg and leaves saving to
-the caller.
+For context, plots, stop/error handling and record/persistence ownership, see
+lib/zcu_tools/experiment/README.md, section "實驗介面與資料", and
+lib/zcu_tools/experiment/v2/runtime/README.md, section "Stop 與 Retry".
 
-Wrap cfg and result in RunRecord for analysis and save_run(source, path,
-metadata=...). load_run(path) restores that explicit historical source. Analysis
-does not consult the current Form or library. The caller records complete,
-partial or stopped status from the operation outcome rather than IQ availability.
+Analysis uses the explicit historical source, not the current Form or library.
 The numerical core leaves component bindings and writeback to its caller.
 
 Example with validated cfg, RunContext and fresh analysis_plots::

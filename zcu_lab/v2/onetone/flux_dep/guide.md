@@ -12,7 +12,7 @@ Opening a tab or pressing Reset takes a fixed copy of the current parameters and
 
 The flux sweep starts with 101 points from 1.1 × `$qubit.flux_int` − 0.1 × `$qubit.flux_half` to 1.1 × `$qubit.flux_half` − 0.1 × `$qubit.flux_int`, in the selected device unit. Missing or invalid required sources leave the affected fields empty and Invalid, blocking the run until valid values are supplied. For first bring-up before calibration, enter safe, user-approved frequency and flux bounds.
 
-The sweet-spot picker reads `$qubit.flux_half` and `$qubit.flux_int` from the saved parameters. Missing or null values use the picker's default line positions. Choose sweet spots from the measured map.
+The sweet-spot picker reads `$qubit.flux_half` and `$qubit.flux_int` from the selected Run or Load parameter source. Missing or null values use the picker's default line positions. Choose sweet spots from the measured map.
 
 ## Readout module
 
@@ -20,7 +20,11 @@ The readout starts as a fresh inline pulse with a `const` waveform. Configure it
 
 ## Calibration updates
 
-After the run, drag two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then click Done. This is an interactive pick based on operator or agent judgement of the measured map. The preview proposes `qubit.flux_half`, `qubit.flux_int`, and `qubit.flux_period` = 2 × |`qubit.flux_int` − `qubit.flux_half`| for the qubit bound when the tab was opened or reset. Review the figure before applying these updates.
+Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
+
+For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Reset aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available. Existing proposals stay attached to their captured destination when point or focus changes.
+
+After the run, drag two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then click Done. This is an interactive pick based on operator or agent judgement of the measured map. The preview proposes `qubit.flux_half`, `qubit.flux_int`, and `qubit.flux_period` = 2 × |`qubit.flux_int` − `qubit.flux_half`| for the source qubit when that source is available. Review the figure before applying these updates.
 
 ## MCP recipe
 

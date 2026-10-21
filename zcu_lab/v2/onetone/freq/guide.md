@@ -20,9 +20,13 @@ The readout starts as a fresh inline pulse with a `const` waveform. Configure it
 
 ## Calibration updates
 
-Analysis proposes fitted values for `resonator.freq`, `resonator.kappa`, and `resonator.ext.theta0` for the resonator bound when the tab was opened or reset. When the run includes pulse-readout settings, analysis also proposes a `resonator.readout.readout_rf` library module based on those settings. It changes the pulse/readout frequency and preserves gain, lengths, channels, and trigger timing.
+Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
 
-When saved parameters are available, an update to the `$qubit.module.readout` slot follows the module proposal. The slot value is the resolved `$resonator.readout.readout_rf` path from those same saved parameters. Apply both the module and slot updates to select that library readout for downstream experiments. Scalar and module proposals are also available for runs made without saved parameters.
+For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Reset aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available. Existing proposals stay attached to their captured destination when point or focus changes.
+
+Analysis proposes fitted values for `resonator.freq`, `resonator.kappa`, and `resonator.ext.theta0`. The selected result's parameter source identifies the destination resonator when that source is available. When the run includes pulse-readout settings, analysis also proposes a `resonator.readout.readout_rf` library module based on those settings. It changes the pulse/readout frequency and preserves gain, lengths, channels, and trigger timing.
+
+When the selected result has a parameter source, an update to the `$qubit.module.readout` slot follows the module proposal. The slot value is the resolved `$resonator.readout.readout_rf` path from that same source. Apply both the module and slot updates to select that library readout for downstream experiments. Scalar and module proposals are also available for runs made without saved parameters.
 
 The `resonator.ext.edelay` proposal keeps delay and route together. It requires an identifiable absolute branch or a trusted prior calibration or manual seed.
 

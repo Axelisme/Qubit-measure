@@ -20,7 +20,11 @@ Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.r
 
 ## Typical writeback
 
-Writeback targets `$qubit.ext.readout_cal` for the qubit selected at Open/Reset. Primary analysis proposes `fidelity`, `sigma`, `g_center` and `e_center`. Post-Analysis proposes `radius` and `confusion_matrix`. The centres are complex IQ coordinates and the confusion matrix is a nested list. Existing proposals stay attached to that qubit when point or focus changes.
+Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
+
+For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Reset aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available.
+
+Writeback targets `$qubit.ext.readout_cal` for the source qubit when that source is available. Primary analysis proposes `fidelity`, `sigma`, `g_center` and `e_center`. Post-Analysis proposes `radius` and `confusion_matrix`. The centres are complex IQ coordinates and the confusion matrix is a nested list. Existing proposals stay attached to that qubit when point or focus changes.
 
 ## Recommended
 
