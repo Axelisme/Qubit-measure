@@ -100,6 +100,8 @@ def test_load_data_preselects_current_experiment_and_allows_all(
     ui = ComponentDriver(history_window)
     ui.select_tab("scan")
     ui.screenshot(tmp_path / "01-scan-tab.png")
+    ui.select_tab("Data")
+    ui.screenshot(tmp_path / "01-scan-data.png")
 
     def inspect_dialog(dialog: RunLoadDialog) -> None:
         chooser = ComponentDriver(dialog)
@@ -133,6 +135,8 @@ def test_load_data_without_current_experiment_keeps_all(
     ui = ComponentDriver(history_window)
     ui.select_tab("missing")
     ui.screenshot(tmp_path / "01-missing-tab.png")
+    ui.select_tab("Data")
+    ui.screenshot(tmp_path / "01-missing-data.png")
 
     def inspect_dialog(dialog: RunLoadDialog) -> None:
         chooser = ComponentDriver(dialog)
