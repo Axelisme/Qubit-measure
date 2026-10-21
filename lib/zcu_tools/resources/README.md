@@ -2,7 +2,9 @@
 
 **Last updated:** 2026-10-21，Single-fluxonium settings 與共用 simulation YAML/schema
 
-`resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
+**讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
+
+`resources/` 組織實驗工作資源的命名、讀寫與交換。資料檔格式與讀寫由 [datafile](../datafile/README.md) 擁有。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
 - `predictor_file.py` 擁有 `zcu.predictor` v1 JSON 的具名讀寫。它依模型名稱使用 simulate 的 nullable 參數型別，驗證欄名、有限數值與來源 metadata。`validate_predictor_file(PredictorFile)` 提供不做 I/O 的候選驗證，與 load/save 共用表示規則，供 dry-run 使用。完整性與物理約束由 `params.build_predictor()` 驗證。它不讀 component、alias 或舊 `params.json`。
@@ -22,7 +24,7 @@
 - [`parameters.py`](parameters.py) 的 `open_parameters(path, MyValues)` 開啟 caller 自定值 model 的獨立參數文件。它重用 DocumentStore，不要求 entry、kind、registry、雙 roots、general 或 ledger。
 - [`entry/`](entry/README.md) 組合條目身分、setup 範本與獨立完整的 point。每個視圖綁自己的 DocumentStore，建立 point 時複製 seed。
 
-SyncFile 與舊 CSV SampleTable 已退休。現行樣本歷史使用 JSONL，舊 CSV 的離線讀取與轉換由 root [`migrations/`](../../../migrations/README.md) 提供。
+樣本歷史使用 JSONL，舊 CSV 的離線讀取與轉換由 root [`migrations/`](../../../migrations/README.md) 提供。
 
 離線 legacy 轉換、evidence 與可續跑 publication 由 root [`migrations/storage_migration/`](../../../migrations/storage_migration/README.md) 擁有。Caller 注入具體 mapping 與 native 驗證。`lib` 不 import `migrations`。
 
@@ -54,7 +56,7 @@ Caller 從 `zcu_tools.resources.parameters` import `open_parameters`，提供既
 
 ## Scope 差別
 
-各 owner 的 scope、schema、commit 與失敗政策分開，不共用 ResourceManager：
+各 owner 各自管理 scope、schema、commit 與失敗政策：
 
 - `ResultEntry` 只以 Result 構成條目，Database root 只設定輸出位置。Create／open 不檢查或建立 Database，首次 Save 才建立所需目錄。Rename 只移動 Result，舊 Database 輸出不動。Setup 是範本，point 是獨立的完整參數文件；ModuleLibrary 與 point 同目錄。
 - `ModuleLibrary` 綁定一個 point 的 module 與 waveform 文件。參數與 point 身分由 `entry/` 管理。
@@ -66,7 +68,7 @@ Caller 從 `zcu_tools.resources.parameters` import `open_parameters`，提供既
 
 DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快照，不開放多檔 prepare／restore／publish 接縫。非空 commit 同時寫回 model 的讀檔轉換，以 normalized tree 比較衝突，再把差異套回 raw YAML，保留未改節點。一般讀取與空 edit 不 normalize 寫檔。只有明確啟用政策的 ModuleLibrary 遇壞條目時，會在同鎖內先完整備份再清理主檔，見 [context owner](context/README.md) 與 ADR-0063。Entry 的 setup 與 point 不共用條目鎖或交易。
 
-`zcu_tools.resources` root 不 re-export 任何名稱；caller 從各 owner 的 module 或子 package import。
+Caller 從各 owner 的 module 或子 package import。
 
 ## 閱讀入口
 

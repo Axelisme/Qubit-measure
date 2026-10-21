@@ -5,6 +5,8 @@ description: 透過 fluxdep-gui MCP 對既有 flux spectra 做聯合分析，判
 
 # Run Fluxdep GUI
 
+**讀者：** agent。透過 fluxdep-gui MCP 判讀、擬合與匯出既有通量頻譜。
+
 人與 agent 共駕同一個 GUI。這個流程不操作儀器，原始資料只讀。命令、參數範圍與 transition 定義在工具描述裡。`<repo>` 是分析 session 的 repo cwd。
 
 判讀或沉澱經驗前，先讀 `<repo>/measure_knowledge/README.md`。

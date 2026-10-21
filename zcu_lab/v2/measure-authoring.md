@@ -1,6 +1,23 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-15，持久 Spec writeback 與共用 entry Form
+**Last updated:** 2026-10-21
+
+**讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、operator guide 與校準 writeback。
+
+使用者入口見 [tutorial](../tutorial/README.md)。
+
+## 目錄
+
+- [目錄佈局](#目錄佈局)
+- [實驗重載](#實驗重載)
+- [Form 與固定來源](#form-與固定來源)
+- [執行與分析契約](#執行與分析契約)
+- [Operator guide 格式](#operator-guide-格式)
+- [Readout 分析與 writeback](#readout-分析與-writeback)
+- [校準初值政策](#校準初值政策)
+- [Operator workflow guide 約束](#operator-workflow-guide-約束)
+- [JPA 校準 family](#jpa-校準-familyjpa)
+- [Reset 校準實驗群](#reset-校準實驗群twotonereset)
 
 `zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
 
@@ -17,21 +34,25 @@
 Form 從 core 型別推導形狀；tree 只宣告初值、Slot／Template、鎖定與隱藏。
 完整作者契約見 [ADR-0073](../../docs/adr/0073-measure-form-derivation.md)。
 
-通用 source loader 位於 `gui/app/measure/catalog_loader.py`，由 launcher 宣告來源與重載範圍。
-它支援明確的多個 source package，回傳尚未發布的 Registry。框架契約見
-[Experiment reload](../../lib/zcu_tools/gui/app/measure/README.md#experiment-reload)。組合根重載 `zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports。它保留 `zcu_lab.templates`、`_support` 下的 measure／singleshot 支援家族，以及所有框架 identity。Notebook 的 flux picker helper 引用 core 型別，隨 core 重載。`BaseAdapter` 位於重載範圍之外。新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。
+## 實驗重載
 
-Loader 在 GUI 關閉全部 tabs、排除進行中操作後才清除 owned import cache，從已檢查的 source
-建立新 modules，並驗證 candidate registry。它不重啟硬體，也不交易回滾任意 import side effect；
-可重載程式在 import 時不得啟動 thread、操作硬體或註冊外部 callback。此功能不是 notebook
-autoreload，亦不支援保留舊 tabs 執行舊版本。延後 import 使用清除舊 bytecode 後的正常 Python
-載入；操作中持續編輯尚未 import 的檔案不提供版本隔離保證。
+新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。組合根重載
+`zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports 與引用 core 型別的 Notebook flux picker。
+`zcu_lab.templates`、`_support` 下的 measure／singleshot 支援家族，以及框架 identity 保留。
+修改這些固定依賴後要重啟 GUI。
 
-Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 import，不使用常駐 import guard
-或 AST 規則禁止這種寫法。重載結束後的 deferred/dynamic import 可能載入新固定依賴，或造成
-新舊程式混用；此時不保證攔截、報錯或辨識靜默失敗，使用者可重啟 GUI 回到乾淨的載入狀態。
-已捕捉到的錯誤仍正常回報，不主動吞掉例外。這項取捨只放寬依賴完整性保證，不放寬 tab
-關閉確認、RAM snapshot/retry、操作排他或 shutdown lifecycle 的契約。
+Reload 會先確認關閉全部 tabs 並排除進行中操作，不重啟硬體，也不保留舊 tabs 執行舊版本。
+Import 時不得啟動 thread、操作硬體或註冊外部 callback，任意 import side effect 不會交易回滾。
+Loader 的來源檢查與 registry 建構見 [source loader 公開契約](../../lib/zcu_tools/gui/app/measure/catalog_loader.py)，
+RAM snapshot、retry 與 tab 恢復由 [framework reload owner](../../lib/zcu_tools/gui/app/measure/README.md#experiment-reload) 負責。
+
+函式內 import 仍可使用，但 Reload 不是 notebook autoreload，也不保證延後載入的版本隔離。
+操作中持續編輯尚未 import 的檔案，或重載後使用 deferred/dynamic import，可能混用新舊程式。
+框架不保證攔截、報錯或辨識這類靜默失敗。遇到這種情況，重啟 GUI 回到乾淨的載入狀態。
+已捕捉到的錯誤仍正常回報。這項依賴完整性的限制不放寬 tab 關閉確認、RAM snapshot/retry、
+操作排他或 shutdown lifecycle 的契約。
+
+## Form 與固定來源
 
 每個實驗的 `gui.py` 是其 GUI policy 的修改入口。至少被兩個 adapter 共用的 mechanics 或已定案初值政策才放進 private `_support/measure/`。單一實驗的初值政策留在 `form.py`。
 
@@ -40,8 +61,10 @@ BaseAdapter 每次 `guide()` 讀 UTF-8 檔案，回 `AdapterGuide(markdown, reso
 只有需要純 preflight 的實驗才覆寫 `validate_run_request(req, cfg)`。框架把 Form 輸出原樣
 交給這個 hook 與 Run，不重新驗型別或 lower。Run 不重新讀目前的 point、library 或 alias。
 
-Make_form 只在 Open／Reset 執行。`ctx.has(ref)` 用固定來源選 Slot 或 Template，
-缺參照回 False，來源故障 raise。字串是 literal，Expr 才是運算式。
+Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refresh 也重建 Form 定義，
+但保留 authored input、explicit selections 與已解析初值，不重新套 defaults。
+`ctx.has(ref)` 用固定來源選 Slot 或 Template，缺參照回 False，來源故障 raise。
+字串是 literal，Expr 才是運算式。
 初值 expression 在建立 input 時求成 direct 值；使用者輸入的 expression 保留原文。
 必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
@@ -63,13 +86,31 @@ sampling_mode 與 homophasal。Linear 輸出 homophasal=None。Homophasal 的必
 Core 用具名裝置欄位，例如 flux_dev、jpa_flux_dev。Form 的 AliasName("flux_dev") 在 Open／Reset
 選 direct 名稱，core 只以 context.devices 查 driver。Flux_unit 獨立保存，recipe 不改單位政策。
 
-`BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
-`exp.load(Path(filepath))`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
-參數、非 canonical/manual save、grouped data，或需要額外 metadata 才能安全分析/writeback 的
-adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。
-adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
-直接回報原始錯誤。`BaseAdapter.load` 只讀取結果，不修改 tab cfg；GUI
-`LoadService.load_result` 保留 tab input 與固定來源，不從 loaded RunRecord.cfg 回填表單。Adapters 用 RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
+## 執行與分析契約
+
+GUI Load 由 `LoadService.load_result` 讀取 native data，核對 adapter 的 `experiment_tag`，
+再呼叫 `restore(stored)`。`BaseAdapter.restore` 預設建構 `exp_cls()` 並委派
+`from_stored(stored)`，回傳含 record 與 cfg_issue 的 `RestoredRun`。Single 與 grouped spec
+共用此入口。需要 constructor 參數或自訂結果形式時，adapter 實作 `restore`；不支援 Load
+則宣告 `load_data=False`。Hook 不做 I/O、不讀目前表單、不重捕 history，也不提供 legacy fallback。
+有效 native data 的 typed cfg 不相容時可保留資料與 cfg_issue；缺 cfg envelope 或壞資料仍拒絕。
+失敗在替換結果前回報，既有結果不變。
+
+Load 保留 tab input 與表單固定來源，不從 loaded RunRecord.cfg 回填。分析與 WB 另使用檔案
+history 的固定來源，同 entry 有 point 時讀取該 point 的現存持久值，並非重建未保存的歷史參數版本。
+跨 entry、EMPTY 或無 point 時來源為 None，仍可純計算，不回退目前 aliases。Save storage
+獨立固定於 Load request。Adapters 用 RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。
+OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
+
+GUI Save 呼叫 `data_item(key, result, *, comment)` 與
+`analysis_item(key, result, parameters, *, pane)` 取得保存內容，不呼叫 adapter load/save。
+Base 的 data producer 以明確 RunRecord 與 `exp_cls().persistence_spec()` 準備 DataItem；
+opaque 自訂結果須覆寫 producer。Analysis producer 只取已提交輸出與當次歷史輸入，不取編輯草稿。
+這些 hooks 不讀 live context、不選路徑或格式，也不寫檔。缺 cfg 不以目前表單補值，
+準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析。檔案寫入由 framework 保存流程負責。
+確切簽名見 [adapter protocol](../../lib/zcu_tools/gui/app/measure/adapter/protocol.py) 與
+[ArtifactHandover](../../lib/zcu_tools/gui/app/measure/artifacts/handover.py)；native／Labber 格式與
+部分失敗政策見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；
@@ -101,14 +142,16 @@ opaque draft，adapter不接觸Writeback implementation。
 不重跑fit、不重算stability，也不直接apply proposal。
 
 `singleshot/amp_rabi` 與 `singleshot/reset_check` 的 `g_center`、`e_center`、`radius` 是正式 experiment cfg
-欄位，預設 expression 指向 md 的 `g_center`、`e_center`、`ge_radius`。
-缺值保持 invalid；operator 可改用 direct complex／float 值。Run 凍結已解析的
-cfg 校正值，沿用 BaseAdapter.run；RunRecord.cfg 保留本次使用的值。
+欄位，Form 初值 expression 指向 `$qubit.ext.readout_cal` 的 `g_center`、`e_center`、`radius`。
+缺值保持 invalid；operator 可改用 direct complex／float 值。Run 使用已解析的
+cfg 校正值，由各 adapter 呼叫 core，再把同次 cfg 與純 Result 配成 RunRecord。
 兩者都沿用可調整的 Reps／Rounds；Amp Rabi 串接各 round 的 raw IQ，reset-check 平均各 round 的 populations。
 
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 此選擇不屬於量測cfg，不改變len Rabi的raw-IQ acquisition。
 `singleshot/amp_rabi`共用Len Rabi的raw-IQ joint fit，固定無衰減／零相位，提供Initial State與相同的IQ校準writeback。
+
+## Operator guide 格式
 
 Adapter guide 是 prose，不是 machine contract。內容放在實驗同目錄的 UTF-8 Markdown 檔，
 章節可自由安排。Adapter 明確宣告檔案，不依 class 名稱推導路徑：
@@ -130,17 +173,29 @@ GUI 以 CommonMark 加表格顯示內容，不解析 HTML。外部連結交給�
 行內 `$...$`、行內或獨立成段的 `$$...$$` 使用 matplotlib mathtext，不能解析時保留原文。
 Alias 引用一律寫成 code span，例如 `$qubit.freq`、`$qubit.module.readout`。
 其他字面 `$` 寫成 `\$`。Code span、code block 與連結網址內的 `$` 保留原文。
-本機圖片以相對於 guide 目錄的路徑引用，例如
-`![Pulse sequence](pulse.png)`。GUI 支援 PNG／JPG，過寬圖片縮到分頁寬度，
-不載入網路圖片或 SVG。MCP 只回 Markdown 原文與資源目錄的絕對路徑，不讀圖或附圖。
+本機圖片以相對於 guide 目錄的路徑引用。以下是語法示意，`pulse.png` 必須由作者放在 guide 同目錄：
+
+```markdown
+![Pulse sequence](pulse.png)
+```
+
+GUI 支援 PNG／JPG，過寬圖片縮到分頁寬度，不載入網路圖片或 SVG。
+MCP 只回 Markdown 原文與資源目錄的絕對路徑，不讀圖或附圖。
 Agent 需要圖片時自行讀取該目錄；遠端 agent 可能無法存取 GUI 主機上的路徑。
 
-撰寫 guide 時注意兩項限制：
+網址使用 angle brackets 或 Markdown link 語法，例如：
 
-- 網址寫成 `<https://...>` 或 `[文字](網址)`。GUI 不把裸網址當成連結，裸網址內的 `$...$` 會被當成數學式。
-- GUI 只把外部連結交給系統瀏覽器；相對的 `.md` 連結不解析。
+```markdown
+<https://example.org/>
+[外部文件](https://example.org/)
+```
+
+GUI 不把裸網址當成連結，裸網址內的 `$...$` 會被當成數學式。
+GUI 只把外部連結交給系統瀏覽器，相對的 `.md` 連結不解析。
 
 Wheel 收錄 `zcu_lab` 下的 Markdown、PNG 與 JPG。新增或刪除實驗時同步維護 guide 與資源。
+
+## Readout 分析與 writeback
 
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。

@@ -157,6 +157,30 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     assert child(view, QLabel, "form.value.delay").text() == "= 0.333"
 
 
+def test_committed_number_text_keeps_the_typed_digits(build: Build) -> None:
+    class PlainForm(FormModel):
+        plain: float = 2.0
+        count: int = 2
+
+    view, state = build(PlainForm, None)
+    plain = child(view, QLineEdit, "form.input.plain")
+    # An idle commit of "11" stores 11.0 but leaves "11" under the cursor, so
+    # typing on yields "115", not "11.05".
+    commit_text(plain, "11")
+    assert state.input.data["plain"] == 11.0
+    assert plain.text() == "11"
+    commit_text(plain, "115")
+    assert state.input.data["plain"] == 115.0
+    assert plain.text() == "115"
+    # A different external value still redraws the text.
+    state.write({("plain",): 4.0}, FormEnv())
+    assert plain.text() == "4.0"
+    count = child(view, QLineEdit, "form.input.count")
+    commit_text(count, "11")
+    assert state.input.data["count"] == 11
+    assert count.text() == "11"
+
+
 def test_one_value_literal_is_read_only_text_without_modes(build: Build) -> None:
     class LockForm(FormModel):
         reps: Literal[1000] = 1000
@@ -203,11 +227,13 @@ def test_hidden_field_is_not_drawn_but_kept_and_validated(build: Build) -> None:
 
 def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
     class TagForm(FormModel):
-        choice: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
-            default_factory=Alpha
+        choice: Annotated[
+            Alpha | Beta, Field(discriminator="kind"), Display(collapsed=False)
+        ] = Field(default_factory=Alpha)
+        alone: Annotated[Alpha, Display(collapsed=False)] = Field(default_factory=Alpha)
+        sweep: Annotated[LinRange, Display(collapsed=False)] = Field(
+            default_factory=LinRange
         )
-        alone: Alpha = Field(default_factory=Alpha)
-        sweep: LinRange = Field(default_factory=LinRange)
 
     view, _state = build(TagForm, None)
     assert row_names(view, "alone.kind") == []
@@ -223,12 +249,20 @@ def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
 
 def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
     class TitleForm(FormModel):
-        ro_cfg: Section = Field(default_factory=Section)
-        labelled: Annotated[Section, Display(label="Readout")] = Field(
+        ro_cfg: Annotated[Section, Display(collapsed=False)] = Field(
             default_factory=Section
         )
-        drive: Annotated[DriveRef | DriveInline, Field(discriminator="kind")]
-        choice: Annotated[Alpha | Beta, Field(discriminator="kind")]
+        labelled: Annotated[Section, Display(label="Readout", collapsed=False)] = Field(
+            default_factory=Section
+        )
+        drive: Annotated[
+            DriveRef | DriveInline,
+            Field(discriminator="kind"),
+            Display(collapsed=False),
+        ]
+        choice: Annotated[
+            Alpha | Beta, Field(discriminator="kind"), Display(collapsed=False)
+        ]
 
     view, state = build(
         TitleForm,
@@ -274,7 +308,7 @@ class Packed(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["packed"] = "packed"
-    payload: Body = Field(default_factory=Body)
+    payload: Annotated[Body, Display(collapsed=False)] = Field(default_factory=Body)
 
 
 class Bare(BaseModel):
@@ -291,7 +325,7 @@ class Nullable(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["optional"] = "optional"
-    payload: Body | None = None
+    payload: Annotated[Body | None, Display(collapsed=False)] = None
 
 
 class Nested(BaseModel):
@@ -300,9 +334,9 @@ class Nested(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["nested"] = "nested"
-    payload: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
-        default_factory=Packed
-    )
+    payload: Annotated[
+        Packed | Bare, Field(discriminator="kind"), Display(collapsed=False)
+    ] = Field(default_factory=Packed)
 
 
 class Pair(BaseModel):
@@ -311,7 +345,7 @@ class Pair(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["pair"] = "pair"
-    payload: Body = Field(default_factory=Body)
+    payload: Annotated[Body, Display(collapsed=False)] = Field(default_factory=Body)
     note: float = 0.0
 
 
@@ -319,9 +353,9 @@ def test_an_option_holding_one_ordinary_model_draws_that_models_rows(
     build: Build,
 ) -> None:
     class FlattenForm(FormModel):
-        choice: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
-            default_factory=Packed
-        )
+        choice: Annotated[
+            Packed | Bare, Field(discriminator="kind"), Display(collapsed=False)
+        ] = Field(default_factory=Packed)
 
     view, state = build(FlattenForm, None)
 
@@ -362,15 +396,15 @@ def test_an_option_whose_lone_field_is_nullable_or_selectable_keeps_its_row(
     build: Build,
 ) -> None:
     class KeepForm(FormModel):
-        optional: Annotated[Nullable | Bare, Field(discriminator="kind")] = Field(
-            default_factory=Nullable
-        )
-        nested: Annotated[Nested | Bare, Field(discriminator="kind")] = Field(
-            default_factory=Nested
-        )
-        pair: Annotated[Pair | Bare, Field(discriminator="kind")] = Field(
-            default_factory=Pair
-        )
+        optional: Annotated[
+            Nullable | Bare, Field(discriminator="kind"), Display(collapsed=False)
+        ] = Field(default_factory=Nullable)
+        nested: Annotated[
+            Nested | Bare, Field(discriminator="kind"), Display(collapsed=False)
+        ] = Field(default_factory=Nested)
+        pair: Annotated[
+            Pair | Bare, Field(discriminator="kind"), Display(collapsed=False)
+        ] = Field(default_factory=Pair)
 
     view, _state = build(KeepForm, None)
 

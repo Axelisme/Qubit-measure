@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Iterator
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 import pytest
 from pydantic import Field, model_validator
@@ -16,7 +16,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QWidget,
 )
-from zcu_tools.gui.form import FormEnv, FormModel, FormState
+from zcu_tools.gui.form import Display, FormEnv, FormModel, FormState
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
@@ -50,7 +50,7 @@ class PresentationForm(FormModel):
     nqz: Literal[1, 2] = 2
     enabled: bool = True
     samples: tuple[float, ...] = (1.0,)
-    inner: Inner = Field(default_factory=Inner)
+    inner: Annotated[Inner, Display(collapsed=False)] = Field(default_factory=Inner)
     after: float = 5.0
 
 

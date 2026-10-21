@@ -1,6 +1,8 @@
 # 色散分析數值核心
 
-**Last updated:** 2026-10-18, shared electrical-delay alignment interface
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。色散前處理、sample score 與候選參數搜尋契約。
 
 `analysis.dispersive` 擁有 one-tone 數值前處理結果、electrical-delay 局部精修、sample-point score 與候選參數搜尋。`compute_preprocess` 接受 flux 軸、GHz 頻率軸與形狀為 `(n_flux, n_freq)` 的複數訊號。它回傳 `PreprocessResult`，包含逐列正規化 phase difference、原始座標、逐列及中位 delay、峰值頻率中位數與 smoothing signature。`auto_tune` 接受正規化影像、sample flux、當前參數和 bounds，回傳 GHz 的候選 `(g, bare_rf)`；它不接受或寫入 fit。
 

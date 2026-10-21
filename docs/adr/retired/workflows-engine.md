@@ -1,8 +1,8 @@
-> 狀態：已退役（2026-10-14）。具名 workflow 的執行契約由 [0062](../0062-experiment-workflow.md) 接替；本篇與 0062 有矛盾之處以 0062 為準。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: draft
----
+> 狀態：retired（2026-10-14）。具名 workflow 的執行契約由 [0062](../0062-experiment-workflow.md) 接替；本篇與 0062 有矛盾之處以 0062 為準。以下保留歷史正文。
 
 # 具名 workflows 與可丟棄的步驟執行
 
@@ -26,7 +26,7 @@ overnight 也需要校準、單次實驗、間隔等待與存檔，但不需要 
 | `mcp.workflows` | RPC client、工具與 image 投影 | engine、Figure、硬體 session |
 | `datafile` 與 experiment persistence | 單次 cfg／Result 的格式、schema 與 writer | workflow 路徑、迭代提交 |
 
-位置沿用 [模組定位](module-boundaries.md)。組合根注入使用者 catalog，不讓 framework import `zcu_lab`。
+位置沿用 [模組定位](../0072-module-boundaries.md)。組合根注入使用者 catalog，不讓 framework import `zcu_lab`。
 
 ### Workflow 與 experiment
 

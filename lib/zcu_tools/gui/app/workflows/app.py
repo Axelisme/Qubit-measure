@@ -80,9 +80,10 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         no catalog and an empty initial table. An explicit mapping must contain
         "default" (possibly empty), or raise ValueError. Invalid table syntax,
         duplicates or forward links raise InvalidInputError. The public
-        alias_presets field retains the complete catalog for dialog composition;
-        no file location or reload is retained. Assembly uses default rows for
-        entries without saved aliases; saved empty and nonempty tables win.
+        alias_presets field retains the caller's catalog; no file location or
+        reload is retained. Assembly uses default rows as the memory-only initial
+        table before an entry opens. Opening an entry clears it; selecting a
+        point loads only that point's table.
         Presets never declare workflow roles or choose connected devices.
 
         Empty project_root means the launch cwd. clean skips reading the previous

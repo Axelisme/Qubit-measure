@@ -1,6 +1,8 @@
 # zcu_tools.core — shared stateless contracts
 
-**Last updated:** 2026-10-20，RoundStatistics 純資料與 program-owned raw source
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。跨模組共用的無狀態資料與格式契約。
 
 `core` 提供 resources 與 program 共用的無狀態契約。Repo 內只依賴 utils，不持有 GUI、資源 scope 或硬體。
 
@@ -10,4 +12,4 @@
 - `simulation` defines immutable numeric acquire/round requests, snapshots, pulse events, readout windows and joint ADC signals. Templates store per-point event/readout arrays without expanding repetitions; `materialize_point` expands one diagnostic timeline. Integrated round statistics contain only counts, conditional moments and totals. They contain no callback or raw generator. Environments separately supply program-owned RawShots; raw and direct totals have independent realizations with the same expectation. `SamplingIdentity` owns the common local PCG64 seed/stream format. Times are us, frequencies MHz, phase degrees and gain normalized. It has no driver, Module or GUI dependency. Ownership and shapes are documented in [program simulation](../program/v2/simulation/README.md).
 - `waveform_format` 擁有 NPZ samples、opaque JSON recipe、codec 與單一格式錯誤。它不讀寫檔案，也不解讀公式。
 - Resources 負責 formula 語意、資產命名及檔案生命週期。Program 與 sim 播放 path 指定的 samples。
-- `cfg_model` 與頂層 `format_version.py` 尚未搬入 core。搬遷排在 waveform 接線後。
+- 配置模型由 `cfg_model` 擁有，格式版本由頂層 `format_version.py` 擁有。

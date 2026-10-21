@@ -1,6 +1,18 @@
 # Qubit measurement context
 
+**讀者：** lab-author、framework-dev、agent。查閱量測流程、參數容器與資料交接的共用詞彙。
+
 本詞彙表定義 ZCU-Tools 的量測流程、參數容器、保存資料與分析交接用語。
+
+## 架構角色
+
+**Owner**:
+對某份狀態、資源或行為具有寫入與生命週期決定權的模組或服務。其他模組透過 owner 的命令、查詢或已提交的 domain fact 合作，見 [ADR-0067](adr/0067-gui-application.md)。
+_Avoid_: shared state, helper that also writes
+
+**Adapter**:
+實驗核心與前端之間的接合層；GUI 與 Notebook 各自包裝核心，見 [ADR-0069](adr/0069-experiment-core-and-frontends.md)。GUI adapter 依框架契約宣告能力並提供執行、分析與保存內容；能力宣告是靜態的，當次 readiness 與硬體權限另行判定，見 [ADR-0067](adr/0067-gui-application.md)。
+_Avoid_: experiment wrapper, GUI plugin
 
 ## 參數與環境
 
@@ -109,6 +121,14 @@ _Avoid_: file suffix, member name
 **Grouped Experiment Dataset**:
 同一個 Experiment Result 的多個 Data Variables 所形成的資料群。Labber 的 grouped 表示是此資料群的衍生輸出。
 _Avoid_: multi-file workaround, sidecar artifact
+
+**RunRecord**:
+配對單次量測的 nullable typed cfg 與實驗專屬 Result 的資料紀錄。載入舊資料時 cfg 不相容可為 None，量測資料仍可使用；紀錄只含資料，硬體 handle 與呈現資源另存，見 [experiment](../lib/zcu_tools/experiment/README.md) 與 [ADR-0069](adr/0069-experiment-core-and-frontends.md)。
+_Avoid_: result file, run handle
+
+**Writeback**:
+把分析成果以 Parameter、Module 或 Sample proposal 提交回固定來源的流程。選定 Apply 依序提交提案，失敗時保留成功前綴，見 [ADR-0008](adr/0008-cfg-editor-session.md) 與 [ADR-0067](adr/0067-gui-application.md)。保存量測資料檔是另一個流程。
+_Avoid_: save, auto-apply, calibration sync
 
 ## 分析與 waveform
 

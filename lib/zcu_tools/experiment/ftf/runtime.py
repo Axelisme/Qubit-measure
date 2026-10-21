@@ -4,7 +4,6 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import prod
 from pathlib import Path
-from threading import Event
 
 import numpy as np
 from numpy.typing import NDArray
@@ -47,6 +46,7 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 
+from .cavity import evolve_plans
 from .preparation import EnvelopeEncoder, PreparationCache, preparation_key
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
@@ -78,6 +78,7 @@ class _Prepared:
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
     raw: PreparedRawShots
+    reuse_keys: tuple[bytes, ...]
 
 
 class FTFAcquire:
@@ -188,7 +189,10 @@ class FTFAcquire:
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
         prepared = owner.preparation_cache.get(key)
-        if prepared is None or not owner.engine.reuse(facts.source, key):
+        if prepared is None or not all(
+            owner.engine.reuse(facts.source, reuse_key)
+            for reuse_key in prepared.reuse_keys
+        ):
             # Evolution replays inventory and reprices immutable policy facts.
             # Only a changed selection or evicted facts requires a fresh solve.
             prepared = self._prepare(snapshot, index, key=key, previous=prepared)
@@ -219,12 +223,13 @@ class FTFAcquire:
             )
             for template in acquire.templates
         )
-        evolved = owner.engine.evolve(
-            plans[0].source,
-            tuple(plan.batch for plan in plans),
-            cancel=Event(),
+        evolved, reuse_keys = evolve_plans(
+            owner.engine,
+            plans,
+            facts,
+            owner.settings,
+            key=key,
             telemetry=owner.telemetry is not None,
-            reuse_key=key,
         )
         if owner.telemetry is not None:
             self.routing.append(evolved.paths)
@@ -317,6 +322,7 @@ class FTFAcquire:
             evolved.paths.for_reuse(telemetry=False),
             sampler,
             raw,
+            reuse_keys,
         )
 
 

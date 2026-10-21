@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-10-21，n 維 flux 線路與多指數長尾
 
+**讀者：** framework-dev。數值模擬工具與各子模組的責任邊界。
+
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.

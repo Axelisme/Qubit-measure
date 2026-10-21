@@ -45,10 +45,12 @@ class LazyForm(RebuildingForm):
     stable: float = 5.0
     folded: Annotated[Inner, Display(collapsed=True)] = Field(default_factory=Inner)
     advanced: Annotated[float, Display(group="Advanced")] = 3.0
-    branch: Annotated[First | Second, Field(discriminator="kind")] = Field(
-        default_factory=First
+    branch: Annotated[
+        First | Second, Field(discriminator="kind"), Display(collapsed=False)
+    ] = Field(default_factory=First)
+    optional: Annotated[Inner | None, Display(collapsed=False)] = Field(
+        default_factory=Inner
     )
-    optional: Inner | None = Field(default_factory=Inner)
 
 
 @pytest.fixture
@@ -61,7 +63,7 @@ def view(
             LazyForm,
             {
                 "stable": 5.0,
-                "folded": {"value": -1.0},
+                "folded": {"value": 1.0},
                 "advanced": 3.0,
                 "branch": {"kind": "first", "one": 1.0},
                 "optional": {"value": 1.0},

@@ -4,7 +4,7 @@ status: superseded
 
 # Cfg 資源公開契約與同步發布
 
-**狀態：** 已結案，由 [ADR-0065](../0065-cfg-editing.md)、[ADR-0008](../0008-cfg-editor-session.md) 與 [ADR-0073](../0073-measure-form-derivation.md) 接替。Measure tab、Library 與 writeback 共用 Form 核心。舊 Spec／Value resource、Custom 繼承、逐引用 capture codec 與 Unavailable 模型已退休。以下保留歷史提案與當時的驗收邊界，不是待實作清單。
+**狀態：** superseded，由 [ADR-0065](../0065-cfg-editing.md)、[ADR-0008](../0008-cfg-editor-session.md) 與 [ADR-0073](../0073-measure-form-derivation.md) 接替。Measure tab、Library 與 writeback 共用 Form 核心。舊 Spec／Value resource、Custom 繼承、逐引用 capture codec 與 Unavailable 模型已退休。以下保留歷史提案與當時的驗收邊界，不是待實作清單。
 
 ## 問題
 

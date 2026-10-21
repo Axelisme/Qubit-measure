@@ -30,6 +30,8 @@ Measure 的 caller 已另有背景 drain。`Controller.close(timeout_ms=5000)` �
 
 這個 measure-specific drain 不取代 begin_shutdown 的取消協調，不處理硬體斷線或 RF 安全，也不表示 shared shutdown driver、其他 app 或 GUI device/factory teardown 已全部完成。Autofluxdep 的 running-run 強制關閉是 app 明示選項，不是 generic runner 的預設。
 
+2026-10-21 註：autofluxdep 已移除，上一段的 Autofluxdep 選項是歷史行為。Measure 的現行關閉與資源清理見 [measure owner](../../lib/zcu_tools/gui/app/measure/README.md)；這不表示它承接 Autofluxdep 的強制關閉選項。
+
 已註冊 device 的 manager close API 由 registry 協調 disconnect；registry claim 防止同一 driver identity 被兩個 manager close 同時處理，driver 自己仍須守住 mutating operation 與單次 I/O 的同步。`drop_device` 只移除登記，不是 disconnect。Notebook 由建立 ResourceManager 的 owner 在所管理的 device sessions 成功 disconnect 後才關閉 factory；manager close 的部分失敗保留未完成資源與錯誤供明確處置，不把嘗試過 close 當成成功，也不保證重試一定成功。Notebook 的已實作順序與 registry failure contract 見 [device owner](../../lib/zcu_tools/device/README.md)；GUI DeviceService 目前仍直接 close/drop，不能宣稱已全部走 manager close API 或已具備對應 factory teardown，核准目標與轉正條件見 [operation draft](draft/operation-lifecycle-boundaries.md)。GUI State 擁有對外可觀察的 device cache，registry 保存 driver identity，cache 不是即時硬體狀態的證明。
 
 Disconnect 只處理 connection/session，不隱含 RF off、歸零、reset 或自動 retry。它也不保證設備在斷線後保持原狀。硬體安全狀態需要 app／experiment 明示的操作與證據，不能從 settled handle、closed session 或 shutdown timeout 推導。

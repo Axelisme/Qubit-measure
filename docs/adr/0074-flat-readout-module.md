@@ -59,6 +59,8 @@ FixedElements 的無 participants 模式只固定目前 inline 清單的槽位�
 使用者於 2026-10-20 對從 group 產生可逐欄編輯的固定清單回覆：「可以」。
 本次取代 JSON leaf 候選，不擴充 InputPolicy，不新增持久 identity，也不提供硬體安全保證。
 
+2026-10-21 註：目前的表單設計採用固定 model-list 與逐欄編輯，JSON leaf 是已被取代的候選。
+
 ### Owner 不變，caller 不重建舊配置
 
 `cfg_model` 擁有 Spec、cfg 驗證、引用展開與參數設定。

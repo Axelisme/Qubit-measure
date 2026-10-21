@@ -1,8 +1,12 @@
-> 狀態：已退役（2026-09-29）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。以下保留歷史正文。
+---
+status: retired
+---
+
+> 狀態：retired（2026-09-29）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。以下保留歷史正文。
 
 # ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view
 
-**狀態：** accepted
+**狀態：** retired
 **關聯：** [[0059]]（RPC channel）、[[0067]]（interactive plugin session）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0066]]（Stop feedback）、[[0063]]（刪改名不掃描參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context

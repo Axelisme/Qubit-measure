@@ -1,8 +1,10 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-18, shared electrical-delay alignment interface
+**Last updated:** 2026-10-21
 
-`singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics，不讀 cfg 或建立圖。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
+**讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
+
+`singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics。Cfg 讀取與繪圖由實驗 caller 負責。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
 ## fitting helpers
 
@@ -12,10 +14,10 @@ Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表�
 自動初猜先將下降座標轉成上升順序，讓 FFT 的頻率篩選及 decay 初值使用正的
 座標跨度；參數仍以原始座標定義，呼叫者不需翻轉傳入的資料。
 
-`compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。三個 array 參數只接受 float64，缺失 covariance 可用 None，不做 dtype conversion。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。dtype、形狀或名稱誤用直接 ValueError。它不重新 fit，也不決定 calibration 或 accept 是否有效。
+`compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。三個 array 參數必須已是 float64，缺失 covariance 可用 None。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。dtype、形狀或名稱誤用直接 ValueError。它只評估既有 fit；calibration 與 accept 的有效性由 caller 決定。
 
-`analysis.fitting.shared` 是多 trace shared/fixed fitting 的唯一 public authority；不提供
-positional shared-index compatibility。它的 least-squares path 讓每條
+`analysis.fitting.shared` 是多 trace shared/fixed fitting 的唯一 public authority，
+shared parameter 以名稱識別。它的 least-squares path 讓每條
 `FitTrace` 以名稱宣告 local/shared parameter identity；caller 透過唯一一組
 `ParameterSpec` 集中宣告 initial value、fixed state 與 limits。Module 在進入
 optimizer 前拒絕未知或重複名稱、無效 limits 與不一致資料形狀，並把 iminuit
@@ -25,8 +27,7 @@ object 完全藏在 Interface 後方。
 correlation、選定 profile intervals 與 validity、EDM、covariance accuracy、call-limit
 等 diagnostics。Fixed parameter 保留 zero covariance row/column；least-squares
 covariance 依 reduced chi-square scaling，維持既有 `curve_fit(absolute_sigma=False)`
-慣例。Backend 無效但仍能形成 result 時由 diagnostics 表達，不由 caller 解析
-iminuit state。`fit_ge_decay(..., share_t1=True)` 是第一個 tracer：g/e trace 共用同一
+慣例。Backend 無效但仍能形成 result 時由 diagnostics 表達，caller 從 result 讀取這些 diagnostics。`fit_ge_decay(..., share_t1=True)` 讓 g/e trace 共用同一
 `t1` identity，並由 global covariance 投影既有 T1 error result。
 
 Singleshot readout-transition family 提供固定 histogram edges 的 integrated-bin conditional
@@ -36,7 +37,7 @@ conditional family 建立 multinomial NLL 及 derived confusion matrix，不以 
 Minuit continuation、backend validity、候選選擇與 fallback，以及 circle-classification calibration。
 實驗 caller 只為 backend valid 且中心、半徑與 confusion matrix 有限的結果產生 calibration
 寫回項目。Len Rabi 的 `core.analyze` 委派 fitting，從 cfg 取出 readout 長度，並把數值與
-圖尺寸交給 `plotting.singleshot_rabi` 建圖。Fitting 不決定實驗寫回，也不建立 Figure。
+圖尺寸交給 `plotting.singleshot_rabi` 建圖。實驗 caller 決定寫回，plotting 建立 Figure。
 
 Dual transition-rate fitting以六個stable rate names共享跨dataset identity，兩組initial
 g/e populations維持dataset-qualified local identity。`DualTransitionRateFitResult`直接持有
@@ -45,7 +46,7 @@ foundation提供的單一global covariance與diagnostics；singleshot、tone/swe
 callers不解包positional per-trace covariance。
 
 `analysis.fitting.base.fit_func` 保留既有 `curve_fit` 失敗時回退 `init_p` 的
-contract，但會發出 `RuntimeWarning`，讓 caller 不再把 fallback 靜默當成成功擬合。
+contract，但會發出 `RuntimeWarning`，讓 caller 能辨識 fallback 與成功擬合。
 固定參數只在至少一個參數非 `None` 時啟用。
 `FitParameters` 描述既有的兩種容器：正常 optimizer 回傳 ndarray，fixed 或 fallback
 回傳 list。`FitResult` 將此 parameter vector 與 covariance 配對。直接透傳的 wrappers
@@ -87,8 +88,8 @@ joint refinement 中調整，不變成固定參數。Plot 的 IQ/circle/phase �
 background 後的 corrected domain。`a0` 是 fitted `f_r` 處的 complex scale；
 `g` 不改變 phase，`c` 在 `f_r` 的 phase 與一階 slope 均為零。
 Optimizer 的 non-finite、active-bound 或失敗結果會 warning 並回退 sequential result。
-Magnitude plot 只在本次啟用 amplitude background fitting 時顯示 envelope 與 `g`。
-Phase curvature 也只在啟用時顯示 `c`；停用時不把固定零值當成擬合結果。
+Magnitude plot 只在啟用 amplitude background fitting 時顯示 envelope 與 `g`。
+Phase curvature 也只在啟用時顯示 `c`；停用時 `c` 為固定零值。
 
 Resonance rational initializer 是 internal helper，不是 public fitting facade，也不估
 absolute electrical-delay branch。Caller 先用 route-scoped delay contract 移除 delay；
@@ -101,4 +102,4 @@ Hanger complex fit 的 acceptance 與 derived internal quality factor 分開：�
 不為正，fit 仍可保留，但 `Qi=None`、`qi_status="model_incompatible"`；physical
 結果回傳 finite `Qi` 和 `qi_status="physical"`。Caller 不把 `None` 格式化為數字。
 
-GE histogram fitting 使用 `p_avg ∈ [0, 1]` 允許兩種 readout-transition 方向，以固定數值方向與多組初值維持 g/e label symmetry。Population 以 total occupancy / conditional fraction 參數化，保證非負且總和不超過一；fixed population 與 covariance 皆轉回公開物理座標。GE 使用 strict optimizer，不沿用通用 fit_func 的初值 fallback；`Align T1` 真正固定 shared length ratio，零 ratio 也是可用的固定模型。
+GE histogram fitting 使用 `p_avg ∈ [0, 1]` 允許兩種 readout-transition 方向，以固定數值方向與多組初值維持 g/e label symmetry。Population 以 total occupancy / conditional fraction 參數化，保證非負且總和不超過一；fixed population 與 covariance 皆轉回公開物理座標。GE 使用 strict optimizer，optimizer 失敗直接回報錯誤；`Align T1` 真正固定 shared length ratio，零 ratio 也是可用的固定模型。

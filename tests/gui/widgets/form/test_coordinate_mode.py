@@ -27,7 +27,9 @@ def coordinate_editor(qapp):
     editor.show()
     qapp.processEvents()
     try:
-        yield editor, ComponentDriver(editor)
+        driver = ComponentDriver(editor)
+        driver.click(object_name="form.fold.sweep")
+        yield editor, driver
     finally:
         editor.close()
         editor.deleteLater()

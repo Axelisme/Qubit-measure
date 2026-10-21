@@ -1,6 +1,8 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-20，獨立 SoC 入口與 Setup／SoC run lock；具名 WorkflowComposition、point-local aliases、driver factory 注入、共用遞迴還原、FormInput JSON 與完整 native tunables Apply
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Workflow GUI 的註冊、表單、執行與繪圖分工。
 
 ## 註冊與組裝
 
@@ -60,4 +62,4 @@ Records RPC 直接投影 Engine facts。具名圖與 PNG 使用同一 retained P
 
 框架測試在 `tests/gui/app/workflows/` 與 `tests/mcp/workflows/` 使用最小合成註冊清單，不依賴 lab 實驗。Workflow 行為比對在 GUI 的模擬模式完成；宿主不擁有科學 trend 資料或更新時機。
 
-Saved run conversion 由使用者 workflow 的獨立工具負責，GUI/RPC/MCP 不提供 export commands。生命週期、保存與前端分工見 ADR-0062、ADR-0063、ADR-0067、ADR-0068。
+Saved run conversion 由使用者 workflow 的獨立工具負責。生命週期、保存與前端分工見 ADR-0062、ADR-0063、ADR-0067、ADR-0068。

@@ -1,15 +1,31 @@
 # v2 experiments
 
-**Last updated:** 2026-10-20，readout slot 引用初值
+**Last updated:** 2026-10-21
 
-ZigZag 的 `run()` 直接列出 pulse 序列，使用 register loop。
-公開 `build_zigzag_modules` 保留給離線編譯，另行列出相同序列。
+**讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-`twotone/time_domain/detune.actual_detune` 集中 Ramsey／Echo 的 actual MHz 計算。Native run 與 workflow callback 共用四個 caller，不各自複製 time／phase rounding 公式。Ramsey 必填 time_scaler=1.0，Echo 必填 0.5，保留兩half-delay的原量化。它使用既有 typed SweepCfg／QickConfig，零 nominal detune 回0.0，其他值保留原 quantization／NumPy failure 語意。不改 fitter、閾值、round_zcu 或 sweep2array。
+先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
+
+## Reading routes
+
+- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
+  - 四分支 [conditional spectroscopy](ftf/conditional_spectroscopy/guide.md)、[relative-phase × duration constructive phase](ftf/constructive_phase/guide.md) 與 [common-frequency × duration Rabi chevron](ftf/chevron/guide.md) 提供雙線校準圖與分析。
+  - [CZ common-amplitude](ftf/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
+  - [Conditional phase](ftf/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
+  - [Local-Z](ftf/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
+- [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
+- [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
+- [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
+- [Measure support](_support/measure/README.md) 提供共享 domain mechanics。
+- [Framework runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 擁有 Schedule、buffer、acquire 與 stop lifecycle。
+
+## 套件邊界
 
 每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 是可選的 measure-gui adapter。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
+
+## Mux readout 與表單初值
 
 `mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
@@ -94,6 +110,11 @@ Numeric core 不保存 writeback destination，也不發 proposal。
 
 Helpers 對其他 device 種類報 TypeError，driver 錯誤原樣傳播。FakeDevice 維持單一 value，不新增 RF 欄位、protocol 或 registry；模擬頻率與功率仍寫同一值。
 
+## 序列與量化入口
+
+- [ZigZag core](twotone/zigzag/core.py) 的 `run()` 明列 register loop 的 pulse 序列，`build_zigzag_modules` 提供離線編譯序列。
+- [Actual detune](twotone/time_domain/detune.py) 的公開 docstring 說明 Ramsey／Echo 的 time_scaler、MHz 計算與原生量化失敗語意。
+
 ## Layout
 
 ```text
@@ -110,18 +131,5 @@ zcu_lab/
 `_support/resonator.py` 集中單 tone 與 mux 的模型 fitting／畫圖 mechanics 及 route prior 解析，不 import GUI。各 caller 保留選擇、失敗隔離與 writeback 政策。Core 不經 `_support/measure/` 取得這些 mechanics。
 
 `definitions.register_all` 明列 measure adapters，從 caller 的 Registry 取得 `templates.TEMPLATES` 持久範本，填入 startup 的 library catalog。組合根以 `Registry(templates=TEMPLATES)` 注入一次，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。修改固定依賴需要重啟。
-
-## Reading routes
-
-- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈 smoke 已完成，不代表物理校準或 fidelity 已驗收。
-  - 四分支 [conditional spectroscopy](ftf/conditional_spectroscopy/guide.md)、[relative-phase × duration constructive phase](ftf/constructive_phase/guide.md) 與 [common-frequency × duration Rabi chevron](ftf/chevron/guide.md) 提供雙線校準圖與分析。
-  - [CZ common-amplitude](ftf/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
-  - [Conditional phase](ftf/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
-  - [Local-Z](ftf/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
-- [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
-- [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
-- [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
-- [Measure support](_support/measure/README.md) 提供共享 domain mechanics。
-- [Framework runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 擁有 Schedule、buffer、acquire 與 stop lifecycle。
 
 框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開接縫，不 import `zcu_lab`。本套件的實驗定義不寫個別測試，也不以 lab registry 選取測試材料。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。Core-only caller 明確 import `core`；GUI callers 明確選擇其附件。

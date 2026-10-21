@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import warnings
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass, field, replace
@@ -20,7 +21,7 @@ from numpy.typing import NDArray
 
 from ._envelope import sample_values
 from ._parallel import execution_pool, native_limit
-from ._validation import integers, owned, shape
+from ._validation import density, integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
@@ -168,6 +169,16 @@ class TimelineBatch:
         span order. Each span must exactly match a segment_spans result; shifts
         never introduce boundaries. Unlisted spans have zero shift. Empty outer
         tuple means no shifts. State order is the physical flux model basis.
+    start_ns: optional finite float64 (n,) absolute ns, paired with
+        initial_densities. Each value must be 0 or a final segment_spans boundary
+        no later than end_ns. Planning retains the common origin; only spans in
+        [start_ns,end_ns] evolve. Invalid starts raise ValueError naming point
+        and value. None starts every point at zero using ModelSource's density.
+    initial_densities: optional complex128 (n,M,M) DC-energy-basis densities in
+        point order, paired with start_ns. Each obeys ModelSource's existing
+        finite, square, Hermitian, trace-one and positive density invariants,
+        without normalization or clipping. M must match the source at evolve.
+        Unpaired fields or invalid shapes/invariants raise ValueError.
     Arrays own read-only copies. Invalid boundaries/spans fail at construction.
 
     Raises:
@@ -182,6 +193,8 @@ class TimelineBatch:
     flux_waveform: FluxWaveform | None = None
     segment_boundaries: tuple[tuple[float, ...], ...] = ()
     segment_shifts: tuple[tuple[SegmentShift, ...], ...] = ()
+    start_ns: NDArray[np.float64] | None = None
+    initial_densities: NDArray[np.complex128] | None = None
 
     def __post_init__(self) -> None:
         points = integers(self.points, "point indices")
@@ -206,6 +219,34 @@ class TimelineBatch:
         object.__setattr__(self, "points", points)
         object.__setattr__(self, "end_ns", end)
         self._validate_segments()
+        self._validate_continuation()
+
+    def _validate_continuation(self) -> None:
+        if (self.start_ns is None) != (self.initial_densities is None):
+            raise ValueError("start_ns and initial_densities must be supplied together")
+        if self.start_ns is None or self.initial_densities is None:
+            return
+        starts = np.array(self.start_ns, dtype=np.float64, copy=True)
+        shape(starts, self.points.shape, "start_ns")
+        for index, spans in enumerate(segment_spans(self)):
+            value = starts[index]
+            boundaries = {0.0, *(t for span in spans for t in span)}
+            if (
+                not np.isfinite(value)
+                or value not in boundaries
+                or value > self.end_ns[index]
+            ):
+                raise ValueError(f"point {self.points[index]} invalid start_ns {value}")
+        initial = owned(self.initial_densities, np.complex128, "initial densities")
+        if initial.ndim != 3 or len(initial) != len(self.points):
+            raise ValueError("initial densities shape must be (n,M,M)")
+        if initial.shape[1] == 0 or initial.shape[1] != initial.shape[2]:
+            raise ValueError("initial densities shape must be (n,M,M)")
+        for matrix in initial:
+            density(matrix)
+        starts.setflags(write=False)
+        object.__setattr__(self, "start_ns", starts)
+        object.__setattr__(self, "initial_densities", initial)
 
     def _validate_segments(self) -> None:
         boundaries = tuple(
@@ -296,6 +337,13 @@ class PathDiagnostics:
     routing: Mapping[str, FamilyRouting] = field(default_factory=dict)
     frontend_cpu_s: float = 0.0
     """Calling-thread geometry and WorkPlan CPU; zero when telemetry is off."""
+    point_members: Mapping[str, tuple[int, ...]] = field(default_factory=dict)
+    """Class -> increasing unique nonnegative TimelineBatch.points indices.
+
+    Keys equal points_by_class keys and each tuple's length equals its count.
+    Engine fills caller point IDs, not internal timeline offsets. The mapping
+    and member tuples own immutable copies. Invalid membership raises ValueError.
+    """
 
     def for_reuse(self, *, telemetry: bool) -> PathDiagnostics:
         """Preserve routes but report no kernel calls for an exact-result hit.
@@ -334,6 +382,22 @@ class PathDiagnostics:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "routing", MappingProxyType(dict(self.routing)))
+        members = {key: tuple(values) for key, values in self.point_members.items()}
+        if members.keys() != self.points_by_class.keys():
+            raise ValueError("point membership keys must match points_by_class")
+        for name, values in members.items():
+            if (
+                len(values) != self.points_by_class[name]
+                or any(
+                    not np.issubdtype(type(value), np.integer) or value < 0
+                    for value in values
+                )
+                or any(a >= b for a, b in zip(values[:-1], values[1:], strict=True))
+            ):
+                raise ValueError(
+                    "point members must be increasing unique indices matching counts"
+                )
+        object.__setattr__(self, "point_members", MappingProxyType(members))
         if not np.isfinite(self.max_trace_error) or self.max_trace_error < 0:
             raise ValueError("max_trace_error must be finite and nonnegative")
         for name, counts in (
@@ -347,6 +411,63 @@ class PathDiagnostics:
             if name == "exceeded_by_kernel":
                 copied = {key: value for key, value in copied.items() if value > 0}
             object.__setattr__(self, name, MappingProxyType(copied))
+
+
+def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
+    """Merge author-only evolve/span diagnostics without double-counting points.
+
+    parts is a sequence of validated PathDiagnostics. Per-class point_members
+    are unioned and sorted; points_by_class is the resulting distinct count.
+    segments_by_kernel, exceeded_by_kernel and frontend_cpu_s are summed.
+    max_trace_error is the maximum, or zero for empty parts. Routing sums each
+    family's rows, CPU times, hits, rejections, costs, builds and admission rows;
+    estimated_cpu_s is None if any contributing family estimate is unknown.
+    Reuse-hit diagnostics participate exactly as returned, without adding hits
+    or replacing their counts. Empty parts returns empty PathDiagnostics.
+    Inputs are unchanged; the result owns immutable mappings and member tuples.
+    """
+    segments: Counter[str] = Counter()
+    exceeded: Counter[str] = Counter()
+    members: dict[str, set[int]] = {}
+    routing: dict[str, list[FamilyRouting]] = {}
+    for part in parts:
+        segments.update(part.segments_by_kernel)
+        exceeded.update(part.exceeded_by_kernel)
+        for name, indices in part.point_members.items():
+            members.setdefault(name, set()).update(indices)
+        for name, report in part.routing.items():
+            routing.setdefault(name, []).append(report)
+    return PathDiagnostics(
+        segments,
+        {name: len(indices) for name, indices in members.items()},
+        exceeded,
+        max((part.max_trace_error for part in parts), default=0.0),
+        {name: _merge_family(reports) for name, reports in routing.items()},
+        sum(part.frontend_cpu_s for part in parts),
+        {name: tuple(sorted(indices)) for name, indices in members.items()},
+    )
+
+
+def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
+    return FamilyRouting(
+        rows=sum(part.rows for part in parts),
+        prepare_cpu_s=sum(part.prepare_cpu_s for part in parts),
+        apply_cpu_s=sum(part.apply_cpu_s for part in parts),
+        cache_hits=sum(part.cache_hits for part in parts),
+        rejected_rows=sum(part.rejected_rows for part in parts),
+        estimated_cost=sum(part.estimated_cost for part in parts),
+        estimated_cpu_s=(
+            sum(
+                part.estimated_cpu_s
+                for part in parts
+                if part.estimated_cpu_s is not None
+            )
+            if all(part.estimated_cpu_s is not None for part in parts)
+            else None
+        ),
+        prepare_builds=sum(part.prepare_builds for part in parts),
+        admission_rows=sum(part.admission_rows for part in parts),
+    )
 
 
 @dataclass(frozen=True)

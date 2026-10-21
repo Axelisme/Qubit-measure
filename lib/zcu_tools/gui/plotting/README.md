@@ -1,8 +1,10 @@
 # GUI plotting
 
-**Last updated:** 2026-10-20，container inspection 邊界
+**Last updated:** 2026-10-21
 
-此目錄提供 explicit Matplotlib／Qt 接入，不決定各 app 的 figure 接受或保存政策。
+**讀者：** framework-dev。Matplotlib／Qt 圖形呈現、更新與釋放契約。
+
+此目錄提供 explicit Matplotlib／Qt 接入。各 app 決定 figure 的接受與保存政策。
 根 package 延遲載入 Qt 與 Matplotlib 匯出。Runtime 在 QApplication 建立後初始化
 host、shutdown guard 與 mathtext lock／prewarm，不切換 process-wide backend。
 
@@ -28,7 +30,7 @@ Figure-to-container registry，不讀取容器內部 layout，並透過 GUI-thre
 ## Thread 與 rendering 邊界
 
 Host 必須先在 GUI thread 初始化。Runtime 與 FigureContainer 建構都確保此條件。
-Worker 不直接操作 Qt widget；liveplot update 透過 host owner 執行。
+Qt widget 操作與 liveplot update 都透過 host owner 在 GUI thread 執行。
 Shared mathtext lock／prewarm 保護字型解析，不代表任意 Matplotlib 操作都 thread-safe。
 
 各 app 的互動 widget 也可以在主執行緒自持 FigureCanvasQTAgg。

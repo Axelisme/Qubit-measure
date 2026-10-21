@@ -14,6 +14,7 @@ from sys import getsizeof
 import numpy as np
 from numpy.typing import NDArray
 
+from ._validation import shape
 from .engine import EvolutionResult, TimelineBatch
 from .kernel import KernelContext, SegmentTable
 from .secular import ModelSource
@@ -39,6 +40,20 @@ class _InputDigest:
         self.text(value.dtype.str)
         self.text(str(value.shape))
         self.value.update(value.tobytes(order="C"))
+
+    def continuation(self, batch: TimelineBatch, state_shape: tuple[int, ...]) -> None:
+        """Validate source dimensions and hash the paired absolute/DC inputs."""
+        if batch.start_ns is None or batch.initial_densities is None:
+            self.text("source initial density")
+        else:
+            shape(
+                batch.initial_densities,
+                (len(batch.points), *state_shape),
+                "initial densities",
+            )
+            self.text("point-aligned continuation")
+            self.array(batch.start_ns)
+            self.array(batch.initial_densities)
 
 
 def input_key(
@@ -75,6 +90,7 @@ def input_key(
     for batch in batches:
         digest.array(batch.points)
         digest.array(batch.end_ns)
+        digest.continuation(batch, source.initial_density.shape)
         for times in batch.segment_boundaries:
             digest.array(np.asarray(times, dtype=np.float64))
         digest.text("segment shifts")

@@ -2,7 +2,9 @@
 
 **Last updated:** 2026-10-21，共用中性 readout waveform planning
 
-`experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 只提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
+**讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
+
+`experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
 ## Explicit simulation environments
 
@@ -68,15 +70,15 @@ physical models, evolution and sampling.
   使用 flux 的實驗 cfg 必填 `flux_unit`，值為 A、V 或 native，core 不提供隱含 default。
   Run 不預查 cfg.dev 名稱是否存在。Core 實際取 `context.devices[cfg.dev[role]]` 時，缺名即報錯並指名 device，不設定未使用的 device。Cfg 格式與必填 unit 的驗證仍保留。
   `ConfigBase` 提供欄位驗證、`with_updates` 和 `to_dict`；native restore 集中處理歷史 cfg 不相容的 warning 與 cfg=None。
-- `cfg_assembler.py` 提供 `ExperimentScalar` 與 `ExperimentCfgValue`，描述 Run 接縫的 mapping 值型別。GUI Form 在 accept 前完成 module materialization 與 sweep 轉換；BaseAdapter 使用 Form 的 core cfg 型別驗證 accept 的 dump，不再重組 module 或 sweep。Notebook caller 直接提供 typed cfg。
-- `config.py` 目前提供繪圖尺寸 `figsize`；它不是 cfg model，也不執行 cfg 組裝。
-- `utils/` 提供 cfg 到 datafile comment codec 的 mapping 與單一 sweep 格式整理。Comment envelope 的 JSON 編解碼與 Labber reader 的 labels／units／shape／numeric container 驗證由 datafile 擁有；experiment 保留 typed cfg validation、memory units 與 generated coordinate 語意。儀器角色與單位政策由使用者套件的 helpers 擁有。Sweep helper 使用 program/v2 的 `SweepCfg`。`experiment.utils.make_sweep` 是 core 與 Notebook 共用的 sweep 建構入口；Notebook 不擁有此框架能力。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化、SNR 和 tracker 工具分開。
+- `cfg_assembler.py` 提供 `ExperimentScalar` 與 `ExperimentCfgValue`，描述 Run 接縫的 mapping 值型別。GUI Form 在 accept 前完成 module materialization 與 sweep 轉換；BaseAdapter 使用 Form 的 core cfg 型別驗證 accept 的 dump。Notebook caller 直接提供 typed cfg。
+- `config.py` 提供繪圖尺寸 `figsize`；cfg model 與組裝由各自 owner 負責。
+- `utils/` 提供 cfg 到 datafile comment codec 的 mapping 與單一 sweep 格式整理。Comment envelope 的 JSON 編解碼與 Labber reader 的 labels／units／shape／numeric container 驗證由 datafile 擁有；experiment 保留 typed cfg validation、memory units 與 generated coordinate 語意。儀器角色與單位政策由使用者套件的 helpers 擁有。Sweep helper 使用 program/v2 的 `SweepCfg`。`experiment.utils.make_sweep` 是 core 與 Notebook 共用的 sweep 建構入口。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化、SNR 和 tracker 工具分開。
 
 ## Device 操作邊界
 
-DeviceInfo 描述設定與讀回結果，不提供實驗角色的控制命令。Device driver 提供儀器本身的操作，不知道 flux 或 RF 角色。使用者套件選 driver、明示單位與操作用途；具體 helpers 位於 `zcu_lab/v2/_support/device.py`，見 [lab v2 說明](../../../zcu_lab/v2/README.md#實驗角色與-device-操作)。
+DeviceInfo 描述設定與讀回結果。Device driver 提供儀器本身的操作，flux 或 RF 角色由使用者套件定義。使用者套件選 driver、明示單位與操作用途；具體 helpers 位於 `zcu_lab/v2/_support/device.py`，見 [lab v2 說明](../../../zcu_lab/v2/README.md#實驗角色與-device-操作)。
 
-Workflow 的同步 `get_device_cfg(name)` 與完整 cfg `setup_device(name, cfg)` 由宿主提供。使用者工具組合讀取、單位檢查與欄位修改。Framework 不合併部分 cfg，也不新增通用 value＋unit effect。Measure MCP 的 partial `device_setup` 是另一個有界工具，見 ADR-0068。
+Workflow 的同步 `get_device_cfg(name)` 與完整 cfg `setup_device(name, cfg)` 由宿主提供。使用者工具組合讀取、單位檢查與欄位修改。Framework 轉交完整 cfg；部分欄位的合併與 value／unit 處理由使用者工具負責。Measure MCP 的 partial `device_setup` 是另一個有界工具，見 ADR-0068。
 
 ## 子模組入口
 

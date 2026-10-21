@@ -202,8 +202,11 @@ class PredictorDialog(QDialog):
             ),
         )
 
+        # Matching minima and stretch split available width evenly, rather than
+        # letting the controls' larger sizeHint squeeze the curves on opening.
+        self._curve_tabs.setMinimumWidth(480)
         root_layout.addWidget(self._curve_tabs, stretch=1)
-        root_layout.addWidget(controls_widget, stretch=0)
+        root_layout.addWidget(controls_widget, stretch=1)
 
         self._initialize_trial(params)
 

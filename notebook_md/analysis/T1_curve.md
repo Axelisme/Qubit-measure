@@ -26,6 +26,8 @@ jupyter:
 
 # T1 Curve
 
+**Readers:** operator, lab-author. Fit T1 samples with capacitive, quasiparticle, inductive and Purcell relaxation channels.
+
 Model:
 
 `1/T1_eff = 1/T1_capacitive + 1/T1_quasiparticle + 1/T1_inductive + 1/T1_Purcell`.

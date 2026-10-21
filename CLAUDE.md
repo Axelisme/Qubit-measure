@@ -1,5 +1,7 @@
 # Repository agent instructions
 
+**讀者：** agent。依任務選定角色，遵循量測或開發工作的授權、操作與驗證規則。
+
 ## 先判定角色
 
 開始工作前選定一個角色：
@@ -14,7 +16,7 @@
 
 MEASUREMENT agent 是在目標與 policy 內自主工作的實驗協作者：
 
-1. 讀取 [.agents/skills/run-measure-gui/SKILL.md](.agents/skills/run-measure-gui/SKILL.md)。第一次操作前讀取 `measure-gui` MCP server instructions，開始或恢復時核對 GUI 現況。
+1. 讀取 [.agents/skills/measure-task/SKILL.md](.agents/skills/measure-task/SKILL.md)。操作 GUI 前讀取 [.agents/skills/run-measure-gui/SKILL.md](.agents/skills/run-measure-gui/SKILL.md)。
 2. 透過 `measure-gui` MCP 操作 GUI 與儀器。遵守適用的硬體限制與當次授權，不以分析腳本旁路控制硬體。
 3. 任務以 cwd 為準，目標、policy、戰略與進度存於 `.agent_state/measurement-tasks/<task-id>/`。可重用經驗存於 `measure_knowledge/`，依 skill 初始化缺失入口；共享 symlink 由使用者管理。
 4. 可使用原生檔案、搜尋與 Git 工具維護上述內容，並建立或執行離線分析腳本。Python 使用 `uv run --directory <repo> --no-sync -- <command>`，沿用 repo 環境，不自行安裝依賴。一次性腳本與衍生輸出留在任務目錄，保留原始資料。
@@ -125,6 +127,19 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 受管理 lane 的 Python 指令繼續遵循第 3 節。完成回報列出無法執行或依風險略過的檢查及原因。
 
 ### 文件規範
+
+使用者面向的文件（README、guide、教學、docstring）每句寫操作會發生什麼或會產生什麼狀態，不用品質形容詞代替輸入、動作與結果。
+
+#### 讀者宣告
+
+每份 tracked markdown 文件第一段的第一行宣告讀者與用途，格式固定：`**讀者：** <讀者>。<一句用途>`，英文文件用 `**Readers:** <readers>. <purpose>`。讀者取 operator（在 GUI／MCP 做量測的人）、lab-author（擴充 `zcu_lab/` 的人）、framework-dev（維護 `lib/`、`tests/`、`tools/` 的人）、agent（coding 或 measurement agent）之一或組合。ADR 與討論快照不逐篇宣告，由 `docs/adr/README.md` 與 `docs/discussions/INDEX.md` 各宣告一次。
+
+套用例：
+- `zcu_lab/v2/mux/freq/guide.md` 第一行：`**Readers:** operator, agent. How to run the mux qubit frequency sweep from the GUI or MCP and read its results.`
+- module README：`**讀者：** framework-dev。session 層的 owner、接縫與重要決策速查。`（放在 `**Last updated:**` 行之後）
+- `zcu_lab/tutorial/01-components.md`：`**讀者：** lab-author。三步新增自己的 component。`
+
+檢查腳本判定：非 ADR、非討論的 markdown 第一段含 `**讀者：**` 或 `**Readers:**` 且讀者詞在四個之內。
 
 #### Module README
 

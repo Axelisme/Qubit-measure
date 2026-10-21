@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-10-21
 
+**讀者：** lab-author。FTF 環境的組裝、數值接線與 acquisition 設定。
+
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, uses each source name as its explicit FakeDevice address,
@@ -13,6 +15,22 @@ with adjacent `ftf.yaml`, a working copy of the tracked `default.yaml`.
 The Notebook walkthrough is `notebook_md/single_qubit.md`; it calls the same public
 builder with an explicit YAML path. Neither caller uses an environment wrapper.
 欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
+
+## Contents
+
+- [Round pacing](#round-pacing)
+- [Routing telemetry](#routing-telemetry)
+- [Numeric source](#numeric-source)
+  - [Workers and engine budget](#workers-and-engine-budget)
+  - [Physical facts and readout cache](#physical-facts-and-readout-cache)
+- [Startup preparation](#startup-preparation)
+- [Acquisition and numeric composition](#acquisition-and-numeric-composition)
+  - [Preparation reuse](#preparation-reuse)
+  - [Control conversion](#control-conversion)
+  - [Cavity drives](#cavity-drives)
+  - [Readout and sampling](#readout-and-sampling)
+  - [Physical applicability](#physical-applicability)
+  - [Private replay](#private-replay)
 
 ## Round pacing
 
@@ -81,6 +99,9 @@ limits without restoring startup values. Source identities survive session
 registry disconnects and name changes. Reconnection retrieves the original
 class-retained driver, preserving V/A units and current values.
 `execute` consumes detached templates.
+
+### Workers and engine budget
+
 The segment engine's fast algorithms are the default numeric path.
 One source owns one `Engine`, whose 2 GiB resident/pending prepare budget survives across
 acquires. This shared byte budget counts retained model-only payload arrays, not total
@@ -97,6 +118,9 @@ Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
 `FTFSource.close()` clears preparations, model-source cumulative gate usage and the engine cache. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
+
+### Physical facts and readout cache
+
 The source retains at most one snapshot's `FTFModelFacts` across acquires.
 The exact key includes full settings, the entire snapshot and backend/numeric
 revisions. Facts own the joint projection, Gibbs/source, DC eigen/bath memo and
@@ -157,6 +181,8 @@ real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 
 ## Acquisition and numeric composition
 
+### Preparation reuse
+
 `open_acquire(request)` starts a session for a fixed request. Its
 `sample_round(snapshot, index)` reuses the preceding round's density and
 conditional response when the snapshot is equal. Every round draws a new stream.
@@ -203,6 +229,8 @@ envelopes too. Every round still captures a live snapshot and samples the
 original stream. The binding serializes calls;
 direct author callers must do the same.
 
+### Control conversion
+
 `plan_template` accepts optional matching `FTFModelFacts` for shared physical
 inputs; standalone calls build their own facts. `FTFSource.model_facts` supplies
 the source-owned latest facts and rejects calls after close.
@@ -230,6 +258,8 @@ large-amplitude flux controls, filtering or flux-tail paths. Version 2 settings
 group physical values, named DC/drive lines, readout and numerics. Version 1 is
 not accepted.
 
+### Cavity drives
+
 Nonterminal pulses on the readout generator are cavity drives. At each point,
 the latest active readout-channel block starts the terminal readout. Every earlier
 readout-channel pulse must end by that start, and the first ADC trigger must not
@@ -244,21 +274,34 @@ Differences between state-conditioned outgoing fields cause photon-shot-noise
 dephasing, including shared-line interference and independent internal losses.
 These driven contributions are separate from residual thermal-photon dephasing.
 
-FTF queries evolution's final spans and averages the Stark energy shifts and
-driven dephasing rates over each span. Fields retain ringdown after pulse
-switch-off. The averages enter evolution as neutral `SegmentShift` values;
-evolution owns segmentation and propagation, not the cavity field equations.
-Within a span, evolution uses these averages rather than the instantaneous field.
+FTF queries evolution's final spans, then advances density and cavity memory
+sequentially. All state-conditioned fields start each span from the previous
+main branch's final field. The first span starts from vacuum. The main branch
+has the largest population in the span-start DC density; exact ties select the
+lowest energy. Each span supplies ADC's `initial_field` and absolute
+`initial_time_ns`; the first supplies zero at 0 ns. Fields retain ringdown after
+pulse switch-off. Selecting one
+branch for a superposition is a semiclassical approximation, not a description
+of quantum cavity-state entanglement.
 
-Each state-conditioned cavity field evolves independently from vacuum at t=0.
-The probe does not inherit the cavity field of the prepared qubit branch.
-This approximation gives the same cavity centre for CKP's g/e preparation branches
-and does not support preparation-resolved chi calibration.
+FTF averages Stark energy shifts and driven dephasing over each span and passes
+neutral `SegmentShift` values to evolution. Evolution propagates only that span
+from the preceding output density, without normalizing or clipping it. Absolute
+control coordinates, carrier phases and pulse-local envelopes keep their common
+origin. Within a span, evolution uses the averages rather than instantaneous
+fields. Undriven templates retain their original single-evolve path.
+
+Each cavity-driven preparation retains all span reuse keys. Cache hits check
+every key through `Engine.reuse`. Evolution's `merge_path_diagnostics` combines
+span work and unions class membership by caller point index, so each point counts
+once per class across the acquire.
 
 A Stark shift that reverses state-energy order raises a point/segment-specific
 error because it exceeds the dispersive model's validity. States are not reordered.
 The linear dispersive cavity model has no measurement-induced state transitions
 and does not model MIST onset.
+
+### Readout and sampling
 
 Readout uses the DC model and populations in its energy basis. FTF explicitly
 calls ADC's `normalize_populations` once after `batch_populations`, before
@@ -326,6 +369,8 @@ index share one sampled joint state; receiver noise is independent. There is no
 extra tone axis: each declared ADC has its own raw-shot array. Output follows
 program ADC declaration order, which is mux tone order, not sorted channel index.
 
+### Physical applicability
+
 The model assumes weak dispersive readout, independent weak-coupling Markov
 secular baths and exponential echo-characteristic dephasing. Truncations and
 numerical tolerances remain user choices. Direct conditional means include
@@ -334,14 +379,17 @@ receiver noise and the integrated rounding term.
 Physical raw and traces additionally resolve continuous jump times and cavity
 memory. They need only agree with direct means in expectation, not realization.
 
+### Private replay
+
 `private_replay=absolute_directory` opts into checked private input archives.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v12`. Integrated raw and decimated traces resolve
+The backend is `ftf-segment-v13`. Integrated raw and decimated traces resolve
 continuous CTMC jump times and cavity memory, with one physical path per shot
-shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v11`
-and earlier backends fail explicitly because they predate cavity-drive evolution.
+shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v12`
+and earlier backends fail explicitly because they predate segment-boundary cavity
+field inheritance.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal
