@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，mux readout slot 引用與 ringup 初值
+**Last updated:** 2026-10-21，未設 kappa 的 mux ringup 初值
 
 # Measure domain support
 
@@ -13,9 +13,10 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
 Group tones 的 freq 取捕捉的 resonator.freq，gain 初值為 0.1，ro_ch 依 group 順序從 0 起算，label 初值為 resonator 名稱。
 `mux_readout_initial` 有 captured readout 時回傳 Slot ref，使用 library 完整 tones 與 scalar 設定。沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源，再加 group tones。
-`mux/onetone` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。Helper 從固定 capture 取完整 group 的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
+`mux/onetone` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。Helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
+缺 leaf 或 null 的 kappa 不參與最小值。全未設時不加等待，trig_offset 保留來源的 time-of-flight offset。
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
-每個成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
+每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
 Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
 Label 不是 identity。這些初值不保證硬體安全，操作員仍須核對接線。缺少必要欄位仍擋 Run。

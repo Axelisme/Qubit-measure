@@ -55,7 +55,7 @@ Helper 只能完成單一步驟，例如選一次 library，不能包住整個�
 `session.open_tab(...)`、`tab.use_library(...)`、`tab.set_fields(...)`、
 `yield from tab.run_step()`、`yield from run.analyze_step("primary")` 與
 `yield from ask(run.propose_writeback())`。接受答案後才 `tab.accept()`。
-完整的短例與保存步驟見 [recipe 撰寫慣例](../recipes/mux-guide.md#authoring-readable-experiments-and-recipes)。
+完整操作流程與保存步驟見 [mux_amp_rabi 函式本體](../recipes/mux_amp_rabi.py#L26)。
 
 ### 3. Docstring 說明量測、序列與結果
 

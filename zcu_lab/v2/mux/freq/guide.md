@@ -105,8 +105,8 @@ outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
 `MuxFreqAdapter` in `gui.py` connects the core to explicit Run/Load sources.
 Its native generated Form is registered as `mux/freq`.
 The registered MCP recipe is `mux_freq`. See the
-[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
-source-bound reporting and explicit writeback decisions.
+[mux recipe guide](../../../recipes/mux-guide.md#mux_freq)
+for typed overrides, origins, source-bound reporting and explicit writeback decisions.
 
 Its summary lists each acquired tone's original `position`, source `name`, fit
 values and fit-quality diagnostics, or a failure reason. Rows follow

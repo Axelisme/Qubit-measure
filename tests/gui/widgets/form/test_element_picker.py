@@ -3,13 +3,57 @@
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import Annotated
 
 from qtpy.QtWidgets import QApplication
-from zcu_tools.gui.form import FormEnv, FormState
+from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
+from zcu_tools.gui.form_adapter import FixedElements, FixedElementsForm
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import ComponentDriver
 from tests.gui.form_adapter._fixed_models import named_form, named_input
+
+
+def test_picker_shows_four_editable_fields_when_the_list_expands(
+    qapp: QApplication, tmp_path: Path
+):
+    class Tone(FormModel):
+        name: Annotated[str, Display(readonly=True)]
+        freq: float
+        gain: float
+        phase: float
+
+    class Tones(FixedElementsForm):
+        tones: Annotated[list[Tone], Display(element_label="name")]
+
+    Tones.fixed_elements = (FixedElements(("tones",)),)
+    state = FormState(
+        FormInput(
+            Tones, {"tones": [{"name": "Q1", "freq": 100, "gain": 0.2, "phase": 0}]}
+        )
+    )
+    editor = FormEditor(state, FormEnv())
+    editor.resize(640, 340)
+    editor.show()
+    qapp.processEvents()
+    driver = ComponentDriver(editor)
+    try:
+        driver.click(object_name="form.fold.tones")
+        driver.screenshot(tmp_path / "01-four-fields.png")
+        visible = {item.object_name: item for item in driver.visible().widgets}
+        for field in ("name", "freq", "gain", "phase"):
+            assert f"form.input.tones.0.{field}" in visible
+        driver.enter_text(object_name="form.input.tones.0.freq", value="125")
+        driver.screenshot(tmp_path / "02-edited-frequency.png")
+        assert driver.observe(object_name="form.input.tones.0.freq").text == "125.0"
+        driver.click(object_name="form.fold.tones")
+        driver.screenshot(tmp_path / "03-list-collapsed.png")
+        assert not driver.observe(object_name="form.input.tones.0.freq").visible
+        driver.click(object_name="form.fold.tones")
+        driver.screenshot(tmp_path / "04-list-reopened.png")
+        assert driver.observe(object_name="form.input.tones.0.freq").text == "125.0"
+    finally:
+        editor.close()
 
 
 def test_native_indexed_module_and_sweep_navigation_keeps_visible_drafts(
@@ -27,12 +71,15 @@ def test_native_indexed_module_and_sweep_navigation_keeps_visible_drafts(
     driver = ComponentDriver(editor)
     try:
         driver.click(object_name="form.fold.tones")
-        driver.click(object_name="form.fold.tones.0")
+        assert any(
+            item.object_name == "form.input.tones.0.drive"
+            for item in driver.visible().widgets
+        )
         driver.click(object_name="form.fold.tones.0.sweep")
         driver.screenshot(tmp_path / "01-native-open.png")
         assert driver.observe(object_name="form.picker.tones").text == "0: A"
         driver.choose_option(object_name="form.picker.tones", value="1: B")
-        driver.click(object_name="form.fold.tones.1")
+        assert driver.observe(object_name="form.input.tones.1.drive").visible
         driver.click(object_name="form.fold.tones.1.sweep")
         driver.invoke_context_action(
             object_name="form.input.tones.1.drive", action="Convert to inline"
@@ -99,16 +146,19 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
 
     try:
         driver.click(object_name="form.fold.tones")
-        driver.click(object_name="form.fold.tones.0")
         snapshot("01-open")
+        assert any(
+            item.object_name == "form.input.tones.0.gain"
+            for item in driver.visible().widgets
+        )
         assert driver.observe(object_name="form.picker.tones").text == "0: A"
         driver.enter_text(
             object_name="form.input.tones.0.gain", value="uncommitted", commit=False
         )
         snapshot("02-uncommitted")
         driver.choose_option(object_name="form.picker.tones", value="1: B")
-        driver.click(object_name="form.fold.tones.1")
         snapshot("03-second-element")
+        assert driver.observe(object_name="form.input.tones.1.gain").visible
         assert driver.observe(object_name="form.input.tones.1.gain").text == "2"
         assert driver.observe(object_name="form.input.participants").text == '["B"]'
         driver.choose_option(object_name="form.picker.tones", value="0: A")
@@ -157,8 +207,6 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
 def test_readonly_refusal_is_visible_and_navigation_still_works(
     qapp: QApplication, tmp_path: Path
 ):
-    from typing import Annotated
-
     from pydantic import create_model
     from zcu_tools.gui import form as core
     from zcu_tools.gui import form_adapter as owner
@@ -197,8 +245,11 @@ def test_readonly_refusal_is_visible_and_navigation_still_works(
     driver = ComponentDriver(editor)
     try:
         driver.click(object_name="form.fold.tones")
-        driver.click(object_name="form.fold.tones.0")
         driver.screenshot(tmp_path / "01-owner-open.png")
+        assert any(
+            item.object_name == "form.input.tones.0.gain"
+            for item in driver.visible().widgets
+        )
         driver.invoke_context_action(
             object_name="form.fold.tones",
             action="Clear elements",
@@ -208,7 +259,7 @@ def test_readonly_refusal_is_visible_and_navigation_still_works(
         assert "Readonly" in driver.observe(object_name="form.row.tones").tooltip
         assert driver.observe(object_name="form.picker.tones").text == "0: A"
         driver.choose_option(object_name="form.picker.tones", value="1: B")
-        driver.click(object_name="form.fold.tones.1")
+        assert driver.observe(object_name="form.input.tones.1.gain").visible
         driver.enter_text(object_name="form.input.tones.1.gain", value="4")
         driver.enter_text(object_name="form.input.participants", value='["Q4"]')
         driver.screenshot(tmp_path / "04-owner-invalid-participant.png")
