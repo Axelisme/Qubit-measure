@@ -78,15 +78,7 @@ class WorkflowPane(QWidget):
         self._add_form_page("tunables", "Tunables")
         self._add_ask_page()
         column.addWidget(self._subtabs, 1)
-        self._message = QLabel(left)
-        self._message.setObjectName("workflow.message")
-        self._message.setWordWrap(True)
-        make_label_selectable(self._message)
-        column.addWidget(self._message)
-        self._status = QLabel("idle", left)
-        self._status.setObjectName("workflow.status")
-        make_label_selectable(self._status)
-        column.addWidget(self._status)
+        self._add_feedback(left, column)
         actions = QHBoxLayout()
         self._buttons: dict[str, QPushButton] = {}
         for caption in ("Refresh", "Start", "Pause", "Resume", "Stop"):
@@ -109,6 +101,18 @@ class WorkflowPane(QWidget):
         self._borrower.add_cleanup(self._control.subscribe(self.refresh))
         self._borrower.add_cleanup(self._dispose_editors)
         self.refresh()
+
+    def _add_feedback(self, parent: QWidget, column: QVBoxLayout) -> None:
+        self._owner_error: str | None = None
+        self._message = QLabel(parent)
+        self._message.setObjectName("workflow.message")
+        self._message.setWordWrap(True)
+        make_label_selectable(self._message)
+        column.addWidget(self._message)
+        self._status = QLabel("idle", parent)
+        self._status.setObjectName("workflow.status")
+        make_label_selectable(self._status)
+        column.addWidget(self._status)
 
     def _add_ask_page(self) -> None:
         page = QWidget(self._subtabs)
@@ -230,6 +234,11 @@ class WorkflowPane(QWidget):
         )
         if snapshot.error is not None:
             self._message.setText(snapshot.error)
+        elif (
+            self._owner_error is not None and self._message.text() == self._owner_error
+        ):
+            self._message.clear()
+        self._owner_error = snapshot.error
         self._project_question(snapshot)
 
     def _project_question(self, snapshot: WorkflowTabSnapshot) -> None:
