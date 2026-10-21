@@ -31,6 +31,7 @@ from .quality import FitQuality, QualityIssue, compute_fit_quality
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
 from .resonance import HangerModel, TransmissionModel, get_proper_model
+from .sampling import FringeSamplingQuality, assess_fringe_sampling
 from .shared import (
     FitDiagnostics,
     FitTrace,

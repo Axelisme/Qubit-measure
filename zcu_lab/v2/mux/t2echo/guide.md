@@ -44,7 +44,11 @@ balance. Analysis uses the common requested total delay.
 The final x90 phase includes each tone's detune times that total delay.
 Native timing can differ by a few ticks.
 
-Fit method defaults to decay; select fringe explicitly for an oscillatory fit.
+Fit method defaults to decay. Zero source detune forces decay, even if fringe
+is selected. Select fringe for nonzero source detune to fit an oscillation;
+explicit decay remains available. Analysis uses the saved cfg detune, or finite
+saved actual detune when cfg is absent. A fringe request without either source
+reports a missing-detune error rather than guessing.
 The original first point is omitted before finite-IQ filtering.
 A fringe fit needs six remaining points; decay needs four.
 Fringe phase is fixed at zero unless Fit phase is enabled.

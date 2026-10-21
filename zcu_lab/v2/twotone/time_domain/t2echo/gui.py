@@ -40,7 +40,7 @@ T2EchoRunResult: TypeAlias = RunRecord[T2EchoCfg, T2EchoResult]
 @dataclass
 class T2EchoAnalyzeParams:
     fit_method: Annotated[Literal["fringe", "decay"], ParamMeta(label="Fit method")] = (
-        "fringe"
+        "decay"
     )
     fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = (
         False

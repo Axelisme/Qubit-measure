@@ -46,6 +46,12 @@ A fringe fit needs six finite points and decay needs four.
 Fixed fringe phase uses the nearest-zero 0/180-degree policy; Fit phase frees it.
 Decay uses the same model regardless of Fit phase.
 T2* and error are in us; fringe rate and error are in MHz.
+Sampling quality uses the largest gap between acquired delays and the larger
+absolute fitted or actual detune. At least ten samples per cycle and a complete
+cycle in the scan window are required for adequate sampling. Fewer samples per
+cycle are undersampled. A shorter window, zero frequency or no delay gap is
+unavailable. Decay fits have no fringe sampling quality. Adequate describes the
+supplied frequencies; it does not rule out unknown higher-frequency aliases.
 
 Actual detune retains the hardware phase-wrap convention, including for signed
 detunes. Check the scan range before treating it as a signed frequency correction.

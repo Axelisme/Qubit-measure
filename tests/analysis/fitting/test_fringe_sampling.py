@@ -60,7 +60,9 @@ def test_sampling_density_uses_largest_gap_and_known_frequency_lower_bound(
 def test_full_period_needs_ten_samples_per_cycle(
     frequency: float, expected: float | None, samples: float, status: str
 ) -> None:
-    quality = fitting.assess_fringe_sampling(np.arange(11) * 0.125, frequency, expected)
+    quality = fitting.assess_fringe_sampling(
+        np.arange(11, dtype=np.float64) * 0.125, frequency, expected
+    )
     assert quality.samples_per_cycle == pytest.approx(samples)
     assert quality.status == status
     assert quality.reason is None
@@ -70,7 +72,9 @@ def test_full_period_needs_ten_samples_per_cycle(
 def test_incomplete_period_is_unavailable_regardless_of_total_point_count(
     point_count: int,
 ) -> None:
-    quality = fitting.assess_fringe_sampling(np.arange(point_count) * 0.03125, 0.5)
+    quality = fitting.assess_fringe_sampling(
+        np.arange(point_count, dtype=np.float64) * 0.03125, 0.5
+    )
     assert quality.max_gap_us == 0.03125
     assert quality.samples_per_cycle == 64.0
     assert quality.status == "unavailable"

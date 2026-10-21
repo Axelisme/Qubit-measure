@@ -314,6 +314,9 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         fit_phase frees its phase instead of choosing 0/180 degrees from the
         nearest-zero signal. Return T2* (us), fringe rate (MHz), uncertainties
         and fit quality, or a failure reason, for each original tone index.
+        Sampling quality uses acquired delays and finite actual_detunes as known
+        alias-risk lower bounds. Unknown actual detune leaves a fitted-rate-only
+        assessment, which cannot exclude aliasing.
         Draw fit_i in plots; invalid sources raise.
         """
         # 1. Validate the saved source before opening per-tone fit figures.
@@ -337,7 +340,15 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                     zero = real[np.argmin(np.abs(trace.times))]
                     phase = 0.0 if zero > 0.5 * (np.max(real) + np.min(real)) else 180.0
                 outcome, fitted = fit_coherence_trace(
-                    trace, real, fit_fringe=options.fit_fringe, phase=phase
+                    trace,
+                    real,
+                    fit_fringe=options.fit_fringe,
+                    phase=phase,
+                    expected_frequency_mhz=(
+                        float(source.result.actual_detunes[row])
+                        if np.isfinite(source.result.actual_detunes[row])
+                        else None
+                    ),
                 )
             except (
                 ValueError,

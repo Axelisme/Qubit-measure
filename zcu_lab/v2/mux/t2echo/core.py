@@ -84,7 +84,10 @@ Acquisition failures retain their cause even with partial IQ. Validation, build
 and native conversion errors propagate directly.
 
 Analysis accepts explicit RunRecord, including cfg=None. Options reuse
-`T2EchoAnalyzeOptions`: fit_method defaults to decay, or select fringe explicitly.
+`T2EchoAnalyzeOptions`: fit_method defaults to decay. Fringe requires nonzero
+source detune: use cfg when present, otherwise finite saved actual detune.
+Zero detune forces decay even when fringe was requested. Unknown detune fails
+fringe analysis with a source diagnostic; explicit decay remains available.
 The original first point is omitted before per-tone missing-IQ filtering.
 Fixed fringe phase is zero; fit_phase=True frees it. Decay ignores fit_phase.
 Fringe needs six remaining points and decay four. The existing fitters and
@@ -358,7 +361,10 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
         """Fit each source tone's Echo decay or fringes against requested delay.
 
         source is a Run/Load record, with optional cfg. options.fit_method selects
-        decay or fringe; fit_phase frees the fringe phase (otherwise zero).
+        decay or fringe; zero source detune forces decay. Gating uses cfg detune
+        when present, otherwise finite saved actual_detunes. Unknown detune fails
+        a requested fringe fit with a missing-source reason, not a guessed model.
+        Explicit decay needs no detune. fit_phase frees fringe phase (otherwise zero).
         Omit the first point and missing IQ. Return per-tone T2E in us, fringe
         rate in MHz, uncertainties and fit quality, or a fit failure reason.
         Publish fit_i plots; invalid sources or fit methods raise.
@@ -367,7 +373,6 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
         if options.fit_method not in ("fringe", "decay"):
             raise ValueError(f"Unknown fit_method: {options.fit_method}")
         validate_coherence_result(source.result)
-        fit_fringe = options.fit_method == "fringe"
         outcomes: list[MuxCoherenceFit | MuxFitFailure] = []
         for row, raw_index in enumerate(source.result.tone_indices):
             trace = prepare_coherence_trace(
@@ -377,6 +382,19 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
             ax.set(xlabel="Requested delay (us)", ylabel="Signal real (a.u.)")
             fig.suptitle(f"echo tone {trace.index}")
             try:
+                # Source detune, not a fitted oscillation, determines fringe eligibility.
+                fit_fringe = options.fit_method == "fringe"
+                if fit_fringe:
+                    detune = (
+                        source.cfg.tones[trace.index].detune
+                        if source.cfg is not None
+                        else float(source.result.actual_detunes[row])
+                    )
+                    if not np.isfinite(detune):
+                        raise ValueError(
+                            "Echo fringe fit requires source detune: cfg or saved finite actual_detune"
+                        )
+                    fit_fringe = detune != 0.0
                 real = project_coherence_trace(
                     trace, minimum_points=6 if fit_fringe else 4
                 )
@@ -384,7 +402,11 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 # 2. Echo fringes start at zero phase unless phase is fitted freely.
                 phase = None if options.fit_phase else 0.0
                 outcome, fitted = fit_coherence_trace(
-                    trace, real, fit_fringe=fit_fringe, phase=phase
+                    trace,
+                    real,
+                    fit_fringe=fit_fringe,
+                    phase=phase,
+                    expected_frequency_mhz=None,
                 )
             except (
                 ValueError,
