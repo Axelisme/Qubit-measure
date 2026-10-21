@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.control_identity import ControlIdentity
+from zcu_tools.plotting.figures import FigureCollection
 
 from tests.gui.app.measure._form_fakes import (
     LookupCfg,
@@ -737,6 +738,12 @@ def test_render_host_routes_to_correct_pane_container(qapp):
     log: list[str] = []
 
     class FakeHost:
+        def present_figures(
+            self, tab_id: str, pane: str, figures: FigureCollection
+        ) -> None:
+            # This test only observes container routing, not figure presentation.
+            pass
+
         def interactive_presentation(self, tab_id: str) -> None:
             return None
 
