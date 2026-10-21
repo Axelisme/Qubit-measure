@@ -1,23 +1,33 @@
 ## Behavior
 
-Single-shot T1-with-tone, probe-gain sweep: at each probe gain it sweeps the wait-plus-probe length from both |g> and |e> initial states (Branch), classifies each shot in-program against the |g>/|e> centres, fits the dual transition rates per gain, and renders the 3×3 rate landscape over (gain, time). Runs on real hardware.
+**Readers:** operator, agent. How to map single-shot T1 transition rates versus probe gain from the GUI or MCP and interpret the results.
 
-## Expects (parameter context)
+Single-shot T1-with-tone, probe-gain sweep: at each probe gain it sweeps the wait-plus-probe length from both |g> and |e> initial states (Branch), classifies each shot during acquisition against the |g>/|e> centres, fits the dual transition rates per gain, and renders the 3×3 rate landscape over (gain, time). Runs on real hardware.
 
-Open and Reset capture the current aliases, parameters and library. Relax delay starts at 5*T1; length stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis. Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Other missing required sources remain Invalid.
+## Parameter sources
 
-The tone time scale uses historical t1_with_tone, then ordinary T1, then 30 us. Only missing/null sources advance to the next choice; stored invalid tone T1 leaves stop empty. Natural relaxation always uses ordinary T1.
+Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; length stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
 
-T1-derived defaults use the fixed Open/Reset capture. A missing/null T1 or absent capture uses 30 us, so the 5*T1 wait starts at 150 us. Stored invalid T1 leaves derived required fields empty while the Form opens. Alias/path/source failures propagate. Defaults remain editable, are not written back as calibration, and do not shorten automatically for active reset.
+Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
 
-## Expects (ModuleLibrary)
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
-Pi pulse uses `$qubit.module.x180` or pi_pulse. Probe starts from res_probe. Reset is optional; readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
+The tone time scale uses the stored `$qubit.ext.t1_with_tone`, then ordinary T1, then 30 us. Missing or null sources advance to the next choice. An invalid stored tone T1 leaves the required stop empty for correction. Natural relaxation always uses ordinary T1.
+
+T1-derived defaults use the Open/Reset snapshot. A missing or null T1, or an unavailable snapshot, uses 30 us, so the 5*T1 wait starts at 150 us. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+
+These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
+
+## Module slots
+
+Pi pulse uses `$qubit.module.x180` or pi_pulse. Probe starts from res_probe. Reset is optional; readout uses `$qubit.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Reset snapshot.
 
 ## Typical writeback
 
-No writeback — the rate landscape is read off the grid by eye.
+This is a diagnostic only. Read the rate landscape from the grid; calibration parameters stay unchanged.
 
 ## Recommended
 
-Set calibration cfg directly or seed it with 'singleshot/ge'. Keep the gain sweep coarse (the inner length sweep multiplies the run time). Provide '`$qubit.ext.ac_stark_coeff`' for a photon-number x-axis. 'uniform=True' (default) uses a linear length sweep; set False to cluster points along the expected exponential decay while preserving the configured window and count.
+Set the classification calibration directly or seed it with 'singleshot/ge'. Keep the gain sweep coarse (the inner length sweep multiplies the run time). Provide '`$qubit.ext.ac_stark_coeff`' for a photon-number x-axis. 'uniform=True' (default) uses a linear length sweep; set False to cluster points along the expected exponential decay while preserving the configured window and count.
+
+**Last updated:** 2026-10-21
