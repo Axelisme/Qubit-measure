@@ -40,7 +40,8 @@ class CavityDrive:
     joint and resonators supply the existing joint-state pulls and shared-line
     linewidths. pulses use absolute ns/GHz and pulse-local phases in the neutral
     readout model's zero-GHz reference, as in FTFTemplatePlan.cavity_drives.
-    No gain conversion occurs here. Empty pulses mean vacuum; multiple pulses
+    No gain conversion occurs here. Empty pulses with omitted initial inputs
+    mean vacuum; explicit initial memory retains ringdown. Multiple pulses
     add fields coherently, including ringdown. Population rates never mix the
     fixed state branches. This object performs no density evolution or sampling.
     """
@@ -77,17 +78,80 @@ class CavityDrive:
             dephasing,
         )
 
-    def average(self, start_ns: float, end_ns: float) -> CavityResponse:
+    def advance(
+        self,
+        start_ns: float,
+        end_ns: float,
+        populations: RealArray,
+        initial_field: NDArray[np.complex128],
+    ) -> tuple[CavityResponse, NDArray[np.complex128]]:
+        """Average one span and return its selected branch's final complex field.
+
+        start_ns/end_ns are finite absolute emitted ns with end > start.
+        populations is a finite real (state,) vector in increasing DC-energy
+        order at the span start. Its maximum selects the main branch; exact ties
+        select the lowest energy (first state). No normalization or clipping
+        occurs. initial_field is a finite complex (2,) shared by all branches at
+        start_ns, in sqrt(photons) in the zero-GHz readout reference. Pulse-local
+        phases/envelopes retain their original absolute supports. Only this span
+        is propagated, including ringdown after pulse switch-off.
+
+        Returns the span-averaged CavityResponse and an owned complex (2,) final
+        main-branch field for the next span. This dominant-branch construction is
+        semiclassical, not a representation of quantum cavity-state entanglement.
+        Invalid coordinates, shapes, populations or fields raise ValueError;
+        ADC propagation/convergence failures raise RuntimeError.
+        """
+        values = np.asarray(populations, dtype=np.float64)
+        if values.shape != (len(self._chi),) or not np.isfinite(values).all():
+            raise ValueError("cavity populations must be a finite (state,) vector")
+        average = self.average(
+            start_ns,
+            end_ns,
+            initial_field=initial_field,
+            initial_time_ns=start_ns,
+        )
+        fields = cavity_fields(
+            self._model,
+            self._pulses,
+            np.array([start_ns, end_ns]),
+            initial_field=initial_field,
+            initial_time_ns=start_ns,
+        )
+        return average, fields[-1, int(np.argmax(values))].copy()
+
+    def average(
+        self,
+        start_ns: float,
+        end_ns: float,
+        *,
+        initial_field: NDArray[np.complex128] | None = None,
+        initial_time_ns: float = 0.0,
+    ) -> CavityResponse:
         """Average photons, Stark shifts and decay rates over a positive interval.
 
         Endpoints are finite absolute emitted ns, with end_ns > start_ns. ADC
         retains full pulse history, including ringdown, and integrates same-time
-        quadratic fields, not squared time-averaged fields. Flat inputs use
+        quadratic fields, not squared time-averaged fields. initial_field is an
+        optional finite complex (2,) shared by all branches at initial_time_ns
+        in sqrt(photons), in the zero-GHz readout reference. None means zero.
+        initial_time_ns is finite nonnegative absolute ns, default 0, in the
+        pulse's original time reference. Only history after that time propagates;
+        pulse-local phases/envelopes remain unchanged. start_ns before this time
+        raises ValueError naming both times. Omitting both initial inputs retains
+        vacuum history from t=0. Flat inputs use
         analytic integrals; shaped inputs retain rtol=1e-7, atol=1e-13 quadrature.
         Invalid intervals/envelopes raise ValueError; solver or convergence
         failures raise RuntimeError. Output has no time axis.
         """
-        average = cavity_field_average(self._model, self._pulses, start_ns, end_ns)
+        average = cavity_field_average(
+            self._model,
+            self._pulses,
+            start_ns,
+            end_ns,
+            initial_field=initial_field,
+            initial_time_ns=initial_time_ns,
+        )
         products = average.field_products
         n = len(self._chi)
         same = products[np.arange(n), :, np.arange(n), :]

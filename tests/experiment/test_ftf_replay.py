@@ -87,6 +87,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
         "ftf-segment-v7",
         "ftf-segment-v10",
         "ftf-segment-v11",
+        "ftf-segment-v12",
     ],
 )
 def test_replay_rejects_archive_from_obsolete_numeric_backend(
