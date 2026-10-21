@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-22, explicit-step joint-Fock diagnostics
+**Last updated:** 2026-10-22, joint-Fock contracts and validation limits
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -219,50 +219,26 @@ deferred raw materialization move into preparation.
 ## Joint-Fock validation limits
 
 The independent [evolution joint-Fock prototype](../evolution/README.md#joint-fock-prototype)
-does not feed ADC or change Engine's flat/shaped routes. One two-cavity FTF
-parameter set was evaluated over 25 resonator carriers, 51 qubit carriers and
-two preparations, for 2,550 Pe values. Each resonator carrier starts from
-physical vacuum, with a finite 1-us nominal-pi branch, 1.5-us cavity prefill,
-and a 4-us weak square probe with locally reset carrier phase. The analytic
-two-state path uses sampled-pointer Poisson tail <=1e-3 plus one excitation
-and CSR RK4 steps <=1 ns. It selected N2 for 17 rows and N3 for eight rows.
+requires an explicit request. It does not feed ADC or change Engine's flat or
+shaped routes. The conservative two-state path uses analytic one-jump prefill,
+a sampled-pointer cutoff with one extra excitation, and fixed CSR RK4 steps
+no larger than 1 ns. Its selected population and qubit-line-centre comparisons
+agree with the saved reference within their local statistical gates.
+Those gates do not bound errors at other coordinates. Fitted cavity-centre
+differences remain diagnostics, not acceptance criteria or accuracy bounds.
 
-The six specified Pe comparisons passed their individual 4,096-shot standard
-deviations, with maximum error 0.00547735 sigma. Six qubit-line centres at three
-specified resonator carriers passed the saved Run's residual-scaled standard
-errors, with maximum displacement 0.0587280 SE. These are local gates, not new
-bounds on the remaining rows. The complete candidate map's fitted cavity-centre
-differences from the saved reference are -0.00000809 MHz for ground,
--0.00014071 MHz for nominal-pi, and -0.00013262 MHz for their difference.
-Cavity-centre differences are diagnostics without an acceptance gate.
+An explicit `JointFockDiagnostic` selects numeric physical-vacuum, finite-pi,
+prefill and probe preparation with two or four retained levels. Its
+caller-selected `step_ns` can permit local diagnostics where the default 1-ns
+step produces nonfinite densities. Local two-level step convergence does not
+validate a full map, and the four-level sample has no separate step-halving
+study. Comparisons with the analytic path change both preparation and cutoff
+selection, so they do not isolate dynamic-level truncation error.
 
-One warmed public-entry call took 173.867 s wall and 171.883 s CPU on one
-P-core with single-threaded BLAS. This includes cutoff selection, preparation,
-probe propagation and output density diagnostics. It excludes imports, data
-reads, synthetic warmup, serialization, fitting and plotting. The historical
-129.426-s estimate extrapolates three rows, so this is not a paired speedup.
-
-The original numeric-preparation diagnostics retaining [0,2] and [0,1,2,3]
-both fail with nonfinite prefill density at the default 1-ns RK4 step. Explicit
-`JointFockDiagnostic.step_ns=0.25` completes the same six-Pe small sample at
-one resonator carrier and three qubit carriers. For numeric [0,2], halving the
-step again to 0.125 ns changes Pe by at most 6.55e-15. This is local step
-convergence evidence, not a full-map or total-error bound. The analytic main
-path and its single production timing remain unchanged.
-
-At 0.25 ns the four-level sample completes with cutoff N6. Its physical-state-2
-Pe differs from numeric [0,2] by at most 4.22e-9 and from the saved analytic
-sample by at most 2.80e-5. Both numeric projections use physical-vacuum,
-finite-pi, prefill and probe propagation, with virtual sums computed before
-projection. Their cutoff scan includes the initial vacuum and selects N6;
-the analytic sample selects N3 and uses one-jump preparation. These comparisons
-do not isolate pure dynamic-level truncation error. The four-level sample has
-no separate step-halving study and does not validate an entire four-level map.
-
-The observed four-level prefill generator has an infinity norm of 4.19032
-per ns, which upper-bounds its eigenvalue magnitudes. Multiplying by its actual
-0.25-ns step gives 1.04758. This is not an actual eigenvalue or RK4 amplification factor,
-and does not prove stability or accuracy. No population clipping, density
-repair or solver substitution is applied. The sampled coherent cutoff rule is
-not a complete-density error bound, and fixed RK4 does not guarantee positivity
-for arbitrary inputs.
+The sampled coherent cutoff rule is not a complete-density error bound.
+A generator norm times the step only bounds scaled eigenvalue magnitudes;
+it is not an RK4 amplification factor or a stability or accuracy proof.
+Fixed RK4 does not guarantee positivity for arbitrary inputs. The prototype
+preserves finite population and density defects without clipping or repair.
+Nonfinite evolution fails without an automatic step reduction, retry or
+solver substitution. It remains opt-in, not a production acquisition backend.

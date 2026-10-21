@@ -164,7 +164,8 @@ class JointFockResult:
     populations: (rf, preparation, qf, state), with preparation ground then
         finite-pi. State order follows state_indices. Values are cavity partial
         traces, with no normalization or clipping.
-    cutoffs: one total cavity excitation N per rf, after conservative N+1.
+    cutoffs: tuple of positive integer total cavity excitations N, one per rf,
+        after conservative N+1.
     trace_error, hermitian_error, min_eigenvalue, edge_population: real arrays
         (rf, preparation, qf) of final joint density trace-minus-one magnitude,
         maximum Hermitian defect, minimum Hermitianized eigenvalue, and
@@ -177,8 +178,19 @@ class JointFockResult:
         edge population of the normalized finite coherent vector representing
         physical cavity vacuum. The two-state path does not propagate this
         vacuum; it constructs analytic prefill directly.
-    state_indices: physical state labels, (0,2) for the analytic main path or
-        diagnostic.retained_indices for the explicit diagnostic.
+    state_indices: integer physical state labels, exactly (0,2) or (0,1,2,3),
+        matching the state axis. The analytic main path uses (0,2).
+
+    Construction owns read-only float64 copies of all arrays. The rf and qf
+    axes are nonempty, and the preparation axis has length two. All arrays
+    must be finite and have the shapes above. Trace and Hermitian defect
+    magnitudes and sampled pointer means must be nonnegative. Invalid shapes,
+    numeric invariants or cutoff/state inventories raise ValueError.
+
+    Population sums, population signs, edge populations and minimum eigenvalues
+    are not constrained. Finite RK4 defects remain observable, even for negative
+    populations or nonpositive densities. Construction never clips, normalizes
+    or repairs observations.
     """
 
     populations: RealArray
@@ -193,6 +205,55 @@ class JointFockResult:
     vacuum_trace_error: RealArray
     vacuum_edge_population: RealArray
     state_indices: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        populations = _owned(self.populations, "populations")
+        if (
+            populations.ndim != 4
+            or populations.shape[0] == 0
+            or populations.shape[1] != 2
+            or populations.shape[2] == 0
+        ):
+            raise ValueError(
+                "populations must have shape (nonempty rf, 2, nonempty qf, state)"
+            )
+        if (
+            self.state_indices not in ((0, 2), (0, 1, 2, 3))
+            or any(type(index) is not int for index in self.state_indices)
+            or populations.shape[3] != len(self.state_indices)
+        ):
+            raise ValueError(
+                "state_indices must be (0,2) or (0,1,2,3) matching populations"
+            )
+        rf, _, qf, _ = populations.shape
+        if len(self.cutoffs) != rf or any(
+            type(cutoff) is not int or cutoff < 1 for cutoff in self.cutoffs
+        ):
+            raise ValueError("cutoffs must contain one positive integer per rf")
+        object.__setattr__(self, "populations", populations)
+        for name, shape in (
+            ("trace_error", (rf, 2, qf)),
+            ("hermitian_error", (rf, 2, qf)),
+            ("min_eigenvalue", (rf, 2, qf)),
+            ("edge_population", (rf, 2, qf)),
+            ("sampled_pointer_means", (rf, 3)),
+            ("initial_trace_error", (rf, 2)),
+            ("initial_edge_population", (rf, 2)),
+            ("vacuum_trace_error", (rf,)),
+            ("vacuum_edge_population", (rf,)),
+        ):
+            value = _owned(getattr(self, name), name)
+            if value.shape != shape:
+                raise ValueError(f"{name} must have shape {shape}")
+            if name in (
+                "trace_error",
+                "hermitian_error",
+                "sampled_pointer_means",
+                "initial_trace_error",
+                "vacuum_trace_error",
+            ) and np.any(value < 0):
+                raise ValueError(f"{name} must be nonnegative")
+            object.__setattr__(self, name, value)
 
 
 def _owned(value: RealArray, name: str) -> RealArray:

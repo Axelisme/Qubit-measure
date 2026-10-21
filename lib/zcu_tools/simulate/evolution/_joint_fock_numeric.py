@@ -5,6 +5,8 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy import sparse
 
+from .kernels._secular import relaxation_decay
+
 RealArray = NDArray[np.float64]
 ComplexArray = NDArray[np.complex128]
 Basis = tuple[tuple[int, int], ...]
@@ -133,8 +135,7 @@ def intrinsic_bath(
     rates: RealArray, pure: RealArray, cavity_size: int
 ) -> sparse.csr_matrix:
     """Restrict rates before computing exits; no outside-level sink is invented."""
-    exits = rates.sum(axis=0)
-    decay = (exits[:, None] + exits[None, :]) / 2 + pure
+    decay = relaxation_decay(rates) + pure
     expanded = np.repeat(np.repeat(decay, cavity_size, axis=0), cavity_size, axis=1)
     result = sparse.csr_matrix(sparse.diags(-expanded.ravel(order="F"), dtype=complex))
     identity = sparse.csr_matrix(np.eye(cavity_size))
