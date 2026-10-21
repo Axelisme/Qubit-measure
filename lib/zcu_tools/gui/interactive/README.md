@@ -1,6 +1,8 @@
 # Shared interactive analysis
 
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。共用互動分析的 state、Undo 與命令契約。
 
 This Qt-free module owns detached state, owner-loop publication, subscriptions,
 single-level undo, typed actions and command declarations for GUI applications.

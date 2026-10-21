@@ -1,5 +1,7 @@
 # `zcu_lab.workflows` 使用者 workflow
 
+**讀者：** lab-author。查閱 coherence、MIST 與 overnight workflow 的校準、分析和保存契約。
+
 **Last updated:** 2026-10-13，workflow 自有流程、繪圖與工具
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、state 與 point record。

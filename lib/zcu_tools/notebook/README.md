@@ -1,6 +1,8 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-15，native load 與 Labber export 分離
+**Last updated:** 2026-10-21
+
+**讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -18,9 +20,9 @@ _ = exp.analyze(T1Exp.Options(skip=3))
 saved = exp.save(destination, unique=True)
 ```
 
-Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.PostOptions(...)`，不必再匯入各自的 Options 型別。NotebookExperiment 不轉送核心屬性，所以不是 `exp.Options(...)`。
+Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.PostOptions(...)`。Options 由核心實驗類別提供。
 
-每次包裝產生獨立的 `NotebookExperiment[CoreT]`，不在環境入口共用 records。建構不查裝置、不連線、不 setup。Run 需要 soc、soccfg 與 manager，無裝置時明確提供空 DeviceManager。每次 run 從綁定的 manager 取得一次 driver mapping，該次執行固定使用；同一 manager 的 registry 更新在下一次 run 生效。重新賦值 Notebook 變數不會重綁入口，換用另一組環境時由 caller 重建。
+每次包裝產生獨立的 `NotebookExperiment[CoreT]` 與 records。建構只綁定呼叫端提供的環境；裝置操作在 Run 或明確命令時執行。Run 需要 soc、soccfg 與 manager，無裝置時明確提供空 DeviceManager。每次 run 從綁定的 manager 取得一次 driver mapping，該次執行固定使用；同一 manager 的 registry 更新在下一次 run 生效。重新賦值 Notebook 變數不會重綁入口，換用另一組環境時由 caller 重建。
 
 `NotebookAdapter()(core)` 可離線 load／analyze。同步 analyze 的 options 仍必傳，只有 source 可以省略。`analyze(options, *, source=None)` 與 `save(destination, *, source=None, ...)` 預設最近成功 run／load 的 last_run，沒有 record 就拒絕。處理歷史資料時顯式傳 source；分析歷史來源不改 last_run，也不改下一次 save 的預設來源。Save 只處理本機路徑，unique=True 才選新檔名並回傳實際 Path；cfg 要求與禁止覆寫由核心 saver 守住。
 
@@ -34,8 +36,8 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 流程先追加一筆 typed accepted 事件，再依 parameter → module → waveform → samples 及各 mapping 的迭代順序逐項提交。項目失敗拋出 `WritebackApplyError`，帶 accepted `event_id`、成功前綴項數 `applied` 與原始 `__cause__`，並停止後項。已成功前項及事件保留，不提供跨項回復、retry 或恢復流程。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
 
-Notebook 不讀 entry 的 GUI `aliases.yaml`，也不使用 Measure 的 alias preset。
-Caller 明確提供自己的 bindings，RoleView 保留顯式 kind／via 契約。
+Caller 明確提供 Notebook 自己的 bindings，RoleView 保留顯式 kind／via 契約。
+GUI 的 `aliases.yaml` 與 Measure alias preset 由 GUI 使用。
 GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 
 ## 工作家族
@@ -43,7 +45,7 @@ GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 - [`adapter.py`](adapter.py)：共用環境綁定、每實驗 records 與操作收尾。每次 run 新建 RunContext、Plots 與 StopSignal，同步分析另建 Plots。入口借用 drivers，不管理其連線生命週期。
 - [fluxdep](analysis/fluxdep/README.md)：通量依賴光譜的資料處理、擬合、圖表與互動選點。`fitting.py` 保留 `fit_spectrum` 與組合搜尋、診斷圖的 `search_in_database` 入口；數值搜尋由 analysis 擁有。
 - [t1_curve](analysis/t1_curve/README.md) 與 [t2_curve](analysis/t2_curve/README.md)：各自保留 Notebook 的曲線分析、擬合與分階段工作流程。模型選擇與保存條件見各自的 README。
-- [fit_tools](analysis/fit_tools/README.md)：支援 Notebook 分析中的校正、資料接合、loss、weights 與溫度模型；不把這些能力一概視為共用分析核心。
+- [fit_tools](analysis/fit_tools/README.md)：提供 Notebook 分析專用的校正、資料接合、loss、weights 與溫度模型。
 - [design](analysis/design/README.md)：評估模型參數、設計需求與候選組合，並分析 HFSS sweep 資料。
 - [mist](analysis/mist/tool.py)：提供能量摺疊、不連續處理與碰撞遮罩的計算工具。
 - [circuit_design](circuit_design/README.md)：提供 Qiskit Metal 電路幾何元件；相關 Notebook 展示電路建構及設計檔輸出。
@@ -55,7 +57,11 @@ GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 
 ## 共用責任與目前邊界
 
-Cfg 組裝使用 `experiment.cfg_assembler` 的 CfgEnv 與 make_cfg。Cfg.dev 只保存角色到 device 名稱的對應，使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Caller 必須明示 unit，不提供隱含 default。Run 不預查 cfg.dev 名稱是否存在，cfg 格式與必填 unit 的驗證仍保留。Core 實際以 `context.devices[cfg.dev[role]]` 選 driver 時，缺名即報錯並指名 device。Core 使用實驗層 helpers 設 flux／RF／output，不把 DeviceInfo 當設定命令，也不對未使用的 device 套 setup patch。單位換算由 caller 負責，RF helpers 接 Hz／dBm。RunContext 不提供 setters。CfgEnv 不執行 setup、不解析 md expression，也不關閉資源。切換參數／library 來源後由 caller 重建 CfgEnv。Run 不重做 make_cfg、不刷新 cfg、不重連或自動補裝置；make_cfg 的裝置讀取不能當成 Run snapshot。
+Caller 直接建立實驗的 typed cfg，再傳給 `NotebookExperiment.run(cfg)`。`experiment.cfg_assembler` 只提供 Run mapping 的共用值型別 `ExperimentScalar` 與 `ExperimentCfgValue`。需要 library 成品時，caller 可從固定 `LibrarySnapshot` 查詢；切換參數或 library 來源後，由 caller 重新捕捉所需 snapshot 並重建 cfg。GUI 的 schema／expression lowering 由 GUI 表單處理，Notebook 入口直接使用 caller 提供的 cfg。
+
+Cfg.dev 只保存角色到 device 名稱的對應，使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Caller 必須明示 unit，不提供隱含 default。Run 不預查 cfg.dev 名稱是否存在，cfg 格式與必填 unit 的驗證仍保留。Core 實際以 `context.devices[cfg.dev[role]]` 選 driver 時，缺名即報錯並指名 device。Core 透過實驗自己的 helpers 設 flux／RF／output，不把 DeviceInfo 當設定命令，也不對未使用的 device 套 setup patch。單位換算由 caller 負責，RF helpers 接 Hz／dBm。RunContext 不提供 setters。
+
+Caller 負責明確的 setup 與資源關閉。Run 不重新組裝或刷新 cfg、不重連或自動補裝置。建立 cfg 時的裝置讀取不能當成 Run snapshot。
 
 Notebook Run 在使用者的程序內同步執行，資源由 caller 擁有。入口只借用 drivers，不新增 lease、lock 或 registry。Driver mapping 只固定名稱到 instance，不是資源 lease。Hardware lease 後的 snapshot 時機只適用 GUI。
 

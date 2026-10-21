@@ -1,6 +1,8 @@
 # `zcu_tools.plotting` — 繪圖能力家族
 
-**Last updated:** 2026-10-13 — singleshot charts
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。共用繪圖能力、liveplot 與診斷圖的分工。
 
 本目錄收納具獨立定位或真實跨入口需求的共用繪圖能力。`liveplot/` 提供即時更新的 plotter、segment 與 frontend-neutral backend 契約，供 standalone caller 與明確 axes 的共用繪圖使用；詳見 [liveplot/README.md](liveplot/README.md)。
 

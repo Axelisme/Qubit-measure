@@ -1,8 +1,12 @@
-> 狀態：已退役（2026-09-29）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。以下保留歷史正文。
+---
+status: retired
+---
+
+> 狀態：retired（2026-09-29）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。以下保留歷史正文。
 
 # ADR-0059：measure-gui MCP 的 RPC channel——由 live GUI 提供 method catalog
 
-**狀態：** accepted
+**狀態：** retired
 **關聯：** [[0060]]（特化 tool）；[[0002]]（version guard / operation handle）、[[0013]]（remote adapter 為第二個 View）、[[0014]]（共用 transport 與 app policy 邊界）、[[0047]]（tool error 契約）。
 
 ## Context

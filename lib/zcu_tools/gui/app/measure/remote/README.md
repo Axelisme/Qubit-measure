@@ -1,6 +1,8 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-20，launch-only startup、來源 Refresh、錯誤歸因與 Predictor entry-local filenames
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -63,11 +65,11 @@ parameter errors retain their existing predictor reasons in `method_entries`.
 
 `tab.run_cfg_command(tab_id, path, name)` 呼叫目前 active path 公開的 Form command。Path 是既有 canonical model-field 字串陣列。Description 的掛載欄位 commands 帶 name、label、target 與 inputs，sweep 指令掛在 sweep row 而非座標或採樣葉欄位；remote 只投影，不求值或換算。成功回 input／values／errors，失敗不改 input。Unknown command 回 invalid_params/form_errors，inactive path 回 invalid_params/form_path。控制身份、busy、lifetime 與 mutation guard 沿既有 resource.run_command。任意 provider/declaration ValueError 不被重分類為 command rejection。
 
-方法列在 live catalog，由既有 rpc_call 呼叫，不增加 MCP tool。to_inline 專用入口保持原契約。
+方法列在 live catalog，由 `rpc_call` 呼叫。to_inline 專用入口保持原契約。
 
 ## Recipe 欄位
 
-`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 typed array，str 是欄位名，int 是原始 model-list 位置。兩者經共同 Form owner 操作，不保留 dotted-string reader。Unknown、越界或非 index 的數字字串保留完整請求路徑，回 form_path。
+`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 typed array，str 是欄位名，int 是原始 model-list 位置。兩者經共同 Form owner 解析 typed paths。Unknown、越界或非 index 的數字字串保留完整請求路徑，回 form_path。
 
 `tab.read_elements(path)` 在一次 readonly owner turn 回傳全部元素的 index、name、canonical path、authored input、可用 preview values 與定向 errors。Values 使用完整 canonical typed paths，不是 lowered native cfg。完整 Form errors 另列在最外層，包含 participants 錯誤。某個元素 invalid 不會隱藏其他元素。RPC 只序列化 owner 的 aggregate，不逐元素 describe/read 拼接，不改 picker、focus、capture 或草稿。Busy 與 observer reads 仍可用。可選 `fields` 是元素相對 logical typed paths，例如 `[["drive", "gain"], ["sweep", "start"]]`。每個 row 的 `fields` 按請求順序回同一 owner turn 的 RecipeFieldObservation，包含 FixedElements identity、ref source、value_status 與 errors。省略 fields 保留原 aggregate。錯誤 carrier/path 沿既有 Form 錯誤投影。
 
@@ -80,16 +82,15 @@ Handler 將 LogicalEditError 投影為 invalid_params 與原 reason，保留 pat
 ## Startup scripts
 
 The launch composition selects one trusted `startup(ctx)` Python file. With no
-startup option, measure runs `zcu_lab/startup.py`; `--script` replaces that default.
+startup option, measure runs the framework's `default_startup.py`; `--script` replaces that default.
 `--clean` runs neither and conflicts with `--script`. Custom code must import and
 call the default itself if needed. MCP `connect(script=...)` forwards the choice
 only when launching a new GUI. Explicit script options are refused on attach,
 and attaching never reruns startup. See [ADR-0064](../../../../../../docs/adr/0064-process-startup.md).
 
-GUI, session and MCP do not load simulation environments. The
+Startup scripts own environment construction. The
 [FTF startup example](../../../../../../zcu_lab/simulation_envs/FTF/README.md)
 builds and installs resources through the same public facets as other scripts.
-`--simulate` and `simulation.initialize` have no compatibility entry point.
 RPC readiness does not mean background startup has completed; Run remains locked
 until its terminal delivery. Unhandled startup failures retain completed work
 and report the script path and line.
@@ -140,9 +141,8 @@ owner-thread state, version tables, controller objects or Qt widgets.
 
 ## Completion and provenance
 
-Reads return current owner projections; they do not establish a per-connection
-mutation baseline. Holder admission replaces seen maps and resource-version
-comparison. Domain guards, result provenance, busy checks and lifetime still
+Reads return current owner projections. Holder admission checks current
+control identity at dispatch. Domain guards, result provenance, busy checks and lifetime still
 apply. RPCs are forwarded once, without hidden refresh, retry or rollback.
 Timeout or response failure may follow an accepted mutation.
 

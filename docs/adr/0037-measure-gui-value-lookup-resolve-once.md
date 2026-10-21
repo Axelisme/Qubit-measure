@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # ADR-0037 — Session value lookup 與 resolve-once 輸入
 
 **狀態：** accepted。

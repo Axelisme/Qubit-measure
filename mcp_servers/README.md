@@ -1,5 +1,7 @@
 # mcp_servers
 
+**讀者：** framework-dev、agent。啟動並維護注入實驗室定義的 MCP 組合根。
+
 **Last updated:** 2026-10-13
 
 這裡放 agent 使用的 repo 組合根，使用工作站 Python 3.13 GUI/MCP profile。

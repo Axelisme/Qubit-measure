@@ -1,4 +1,10 @@
+---
+status: accepted
+---
+
 # 0072 — 模組定位與依賴邊界
+
+**狀態：** accepted。
 
 ## 脈絡
 
@@ -63,6 +69,8 @@
 GUI／Notebook 共用的模擬參數檔與 startup 範例放在 `zcu_lab/simulation_envs/`，不放在 Notebook 文件目錄。FTF 沒有離線建庫入口。GUI 以 caller 選定的路徑執行可信 startup 腳本，不自動探索這個目錄；Notebook 可直接呼叫公開 `experiment.ftf.ftf(...)`。C14 與 C16 繼續禁止框架反向 import 使用者定義。
 
 2026-10-16，使用者要求：「比如components我希望除了基礎原件，其他的都是獨立的子模塊檔。」對上述拆分與環境搬移確認：「可以移到zcu_lab/simulation_envs/中嗎？2同意」。
+
+Kickstart 腳本放在 `zcu_lab/kickstart/<env>/`，只建 entry、元件參數與 alias，不連 SoC 與 device。每個 startup 腳本（模擬環境與 kickstart）各自擁有同目錄的 `entry-template.yaml`，腳本之間不共用範本：改一份範本只影響用該腳本新建的 entry。2026-10-21，使用者裁決：「3我希望startup腳本間獨立，而不是過早共用template」；目錄名：「既然都叫kickstart了，那我認為可以將envs/FTF改成kickstart/FTF」。
 
 ### Library 分組與 module slot
 
@@ -191,7 +199,7 @@ ResultScopeManager、project CLI 與 RPC 投影，保留既有 chip／qubit 資�
 
 `zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers`、`scripts` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
 
-債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。舊 cfg_editing → gui.cfg 例外隨兩個模組退休而移除，不是可仿照的依賴。`ignore_imports` 只減不增。
+債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。`ignore_imports` 只減不增。
 
 ## 債務
 
@@ -201,8 +209,6 @@ ResultScopeManager、project CLI 與 RPC 投影，保留既有 chip／qubit 資�
 | `notebook/analysis` | 通用分析移到 `analysis`；實驗專屬 helpers 已由 `zcu_lab` 附件擁有 | 尚未搬移 |
 | `utils` 的 `shot_classification`、`tomography` | 移到 `analysis` | 尚未搬移 |
 | `analysis/fluxdep/io.py` 直接用 h5py | 檔案讀寫移到 `datafile` | 尚未搬移 |
-
-已清除的債務不再列出：`simulate → resources`、`resources → program`、`experiment/base.py` 的 Labber 格式處理（已改用 `datafile`）、`utils/datasaver/`、`mcp → gui.logging_setup`。
 
 ## 後果
 

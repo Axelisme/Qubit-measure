@@ -1,9 +1,10 @@
 """Real input events switch logarithmic integer-list representations."""
 
 from pathlib import Path
+from typing import Annotated
 
 from zcu_tools import cfg_model
-from zcu_tools.gui.form import FormEnv, FormState
+from zcu_tools.gui.form import Display, FormEnv, FormState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -11,7 +12,7 @@ from tests.gui._user_input import ComponentDriver
 
 
 class IntegerPlan(cfg_model.ConfigBase):
-    depths: list[int]
+    depths: Annotated[list[int], Display(collapsed=False)]
 
 
 def test_log_list_real_input_and_actual_point_count(qapp, tmp_path: Path):

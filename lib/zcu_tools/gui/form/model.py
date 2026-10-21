@@ -171,7 +171,8 @@ class Display:
     label overrides the field title (a model section's default title is its
     field name, e.g. ro_cfg -> "Ro cfg"). description explains the input; unit
     is its display unit and placeholder is an input hint. None leaves each
-    item unspecified. collapsed is an initial fold hint only for model fields.
+    item unspecified. Model sections start folded; collapsed=False starts them
+    expanded.
     decimals is how many digits a float field shows after the decimal point,
     rounded with trailing zeros trimmed; None shows the full value. It never
     rounds input. A negative count raises ValueError here; describe raises
@@ -199,7 +200,7 @@ class Display:
     description: str | None = None
     unit: str | None = None
     placeholder: str | None = None
-    collapsed: bool = False
+    collapsed: bool = True
     decimals: int | None = None
     hidden: bool = False
     group: str | None = None

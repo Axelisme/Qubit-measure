@@ -1,12 +1,12 @@
-> 狀態：已退役（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [ADR-0063](../0063-persistence-ownership.md)。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [ADR-0063](../0063-persistence-ownership.md)。以下保留歷史正文。
 
 # Device 狀態下放 State（SSOT）+ DeviceService 純 driver/worker + persistence 為 State 投影
 
-**狀態：** accepted。實作於 Phase 96–98（gui2）。
+**狀態：** retired。實作於 Phase 96–98（gui2）。
 
 ## 脈絡
 

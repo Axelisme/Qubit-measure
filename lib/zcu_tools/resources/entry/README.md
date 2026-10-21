@@ -1,6 +1,8 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-20，Result-only entry 與完整 run_id 前綴輸出
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
 `ResultEntry` 只以 `result/<name>/` 構成條目。Caller 明確傳入 Result root 與 Database 輸出 root，Database 不參與條目的存在判定。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -12,9 +14,9 @@
 
 ## Setup 與 point alias 表
 
-Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<entry>/points/<label>/aliases.yaml`，與 `point.yaml`、`module_cfg.yaml` 並列。各表獨立，既有 point 缺檔不複製 setup，也不回退到 setup。
+Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<entry>/points/<label>/aliases.yaml`，與 `point.yaml`、`module_cfg.yaml` 並列。各表獨立，既有 point 缺檔時使用空表。
 
-`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 setup；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，不寫檔。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Point 的 `point.yaml` 與 `module_cfg.yaml` 必須存在，否則讀寫都報 FileNotFoundError。Alias I/O 不解析或修改這兩份參數文件。
+`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 setup；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，磁碟保持原狀。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Point 的 `point.yaml` 與 `module_cfg.yaml` 必須存在，否則讀寫都報 FileNotFoundError。Alias I/O 只讀寫選定的 alias 表，兩份參數文件保持原狀。
 
 `aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。格式、結構、非字串值與 I/O 錯誤直接回報，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
 
@@ -22,7 +24,7 @@ Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<
 
 ## 可攜 entry 範本
 
-`load_entry_template(path)` 讀取 `format: zcu.entry-template`、`format_version: "1.0"`，接受 major 1 的 forward minor。它回傳具名 `EntryTemplate`，包含有序的 `components` model mapping 與 `EntryAliases`。Caller 必須先註冊 component models。Reader 不建立 entry，不產生 UUID 或時間，不載入 module library。
+`load_entry_template(path)` 讀取 `format: zcu.entry-template`、`format_version: "1.0"`，接受 major 1 的 forward minor。它回傳具名 `EntryTemplate`，包含有序的 `components` model mapping 與 `EntryAliases`。Caller 必須先註冊 component models。Reader 只讀範本，entry、UUID、時間與 module library 由建立資源的 caller 管理。
 
 範本必須有 `components` mapping 與 `aliases`。Components 沿用 point 的名稱、kind 與原 model 欄位驗證。`aliases` 是完整嵌套的 `zcu.aliases` 1.x document，內含 `format`、`format_version` 與 `aliases` mapping。Reader 在讀檔時拒絕錯誤 header、kind、欄位與非字串 alias bindings。Alias 語法、backward links 與解析仍由 GUI Session 的 AliasTable 擁有。
 
@@ -30,7 +32,7 @@ Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<
 
 Setup 是元件範本。Point 自帶 kind、元件、metadata 與 general。General 的固定欄位只有 entry_id、created_at、description 與 ext。Setup 的 entry_id 是條目身分；point 可保留 seed 的 entry_id，但它不代表 point 身分。Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux，ext 沿既有 YAML 值契約保存原值，不提供 flux 專用型別、驗證或單位換算。`new_point` 整份複製建立當下的來源 YAML，再更新 created_at。不傳 clone_from 時來源是 setup.yaml，包含 general.ext、metadata 與可接受的 forward-minor 未知欄位，並建立只有標頭的 module_cfg。傳 clone_from 時來源是已發布的 point.yaml，module_cfg 沿既有 library clone 契約處理。New point 的 description=None 保留 seed／clone 描述，字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Setup 與 point 的修改、引用與快照互不影響。
 
-`SetupView` 與 `PointView` 各綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 需逐筆交易，不承諾整批 all-or-nothing。
+`SetupView` 與 `PointView` 各綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 時逐筆提交，每筆各自成功或失敗。
 
 Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(document, path)` 提供隔離的 typed 讀取、綁定文件位置與 logical YAML 值，不讀檔或執行 model hooks。Snapshot 也接受 EditView，複製尚未提交的 draft。Document_value 只讀實際元件或 general 路徑，不展開角色，區分 explicit null 與缺值。`document_meta(document, path)` 回傳本文件該路徑的隔離 opaque metadata，不查值是否存在。`document_unit(document, path)` 只讀固定欄位既有的靜態 schema unit，包含尚未 set 的 optional leaf。直接指向已宣告欄位時，list、mapping 或 null 值不影響 label。Ext、mapping/list 內的子路徑、缺失路徑或無 metadata 的欄位沒有單位。查詢不讀 leaf 值、不執行 schema callback、不推導可變單位，也不換算值。`resolve_path(document, path, roles=..., reserved_names=...)` 只展開已捕捉角色的首段，不檢查後續 leaf 或 library key。Role、component、general 欄位和 expression 保留名稱碰撞時明確報錯，general 欄位必須使用 general namespace。這些能力不加成 view method，保留 snapshot、path 等合法元件名稱。
 
@@ -46,9 +48,9 @@ PointView 的公開 constructor 必須提供 result_root、source 與 entry_id�
 
 ## 元件與定義
 
-框架不保存具體 kind 或內建角色清單。`component_registry` 是空的共用 ComponentRegistry，`role_registry` 指向它的 roles。Caller 顯式註冊 model、RoleSpec、shorthand 與預設焦點的 kind patterns。Lib 不 import 定義模組，依賴方向由 ADR-0063 與 import contracts 固定。Import 本身不註冊，重複 bootstrap 報錯。
+具體 kind 與角色清單由 caller 註冊。`component_registry` 是空的共用 ComponentRegistry，`role_registry` 指向它的 roles。Caller 顯式註冊 model、RoleSpec、shorthand 與預設焦點的 kind patterns。Caller 從組合根載入定義模組並執行註冊，依賴方向由 ADR-0063 與 import contracts 固定。重複 bootstrap 報錯。
 
-Registry 只做 kind 查表與 ComponentSchema 子類檢查。重複 kind 報 ValueError，非法 model 報 TypeError，未知 kind 報 UnknownKindError 並附相近名稱。失敗不占用名稱，unregister 後可明確替換。`kinds()` 回傳隔離的註冊順序 tuple，不驗證 model 或執行 factory。
+Registry 只做 kind 查表與 ComponentSchema 子類檢查。重複 kind 報 ValueError，非法 model 報 TypeError，未知 kind 報 UnknownKindError 並附相近名稱。失敗時 registry 保持原狀，unregister 後可明確替換。`kinds()` 回傳隔離的註冊順序 tuple，不驗證 model 或執行 factory。
 
 ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、extra 策略、defaults、field validators、model validators 與 post-init hooks。Ext、wiring 與 module 都不是框架特例。Forbid model 的錯字由 Pydantic 拒絕，allow model 的額外欄位可讀寫及 set／meta。沒有值且 default 為 None 的欄位讀取報 AttributeError。
 
@@ -74,7 +76,7 @@ Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version
 
 ## Records ledger
 
-`ResultEntry.ledger` 綁定條目的 UUID 與 records 目錄。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。它不推導 run，也不產生 acquire、save 或 accept 領域事件。Caller 提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
+`ResultEntry.ledger` 綁定條目的 UUID 與 records 目錄。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。Caller 建立 acquire、save 或 accept 領域事件，提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
 
 Acquired 只保存 run 身分、tab、experiment、point、roles 與事件時間，不另存 cfg 摘要。Cfg 正本隨 native run data 保存。
 

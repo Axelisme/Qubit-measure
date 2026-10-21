@@ -10,7 +10,7 @@ status: accepted
 
 GUI 使用者與 agent 寫入同一份 application state。若每條連線維護 seen map、宣告 resource dependencies、比對 cfg revision，caller 就得在每次寫入前建立完整觀察。這仍沒有告訴使用者現在誰在控制。
 
-Measure 與 fluxdep 使用單一 holder。非 holder 不能送業務命令，holder 不必再以版本比對證明資料沒有被另一個控制身份修改。GUI 指示燈顯示控制身份，使用者明確收回或解鎖。Dispersive 與 autofluxdep 的 remote 仍只讀，不接入這套控制身份。
+Measure 與 fluxdep 使用單一 holder。非 holder 不能送業務命令，holder 不必再以版本比對證明資料沒有被另一個控制身份修改。GUI 指示燈顯示控制身份，使用者明確收回或解鎖。Dispersive 的 remote 仍只讀，不接入這套控制身份。
 
 ## Owner 與身份
 

@@ -16,6 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from zcu_tools.gui.app.measure import default_startup
 from zcu_tools.gui.launcher import (
     add_runtime_cli_options,
     runtime_options_from_args,
@@ -128,19 +129,16 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
     from zcu_tools.gui.runtime import launch_gui_runtime
 
-    from zcu_lab import load_alias_presets
-
     return launch_gui_runtime(
         MeasureGuiBehavior,
         runtime_options_from_args(args, log_root=REPO_ROOT),
         extra_logging_namespaces=("zcu_lab",),
         registry_factory=_build_measure_catalogs,
-        alias_presets=load_alias_presets(),
         clean=args.clean,
         startup_script=select_startup_script(
             clean=args.clean,
             script=args.script,
-            default_script=REPO_ROOT / "zcu_lab" / "startup.py",
+            default_script=Path(default_startup.__file__),
         ),
         project_root=str(args.project_root),
     )

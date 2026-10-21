@@ -1,6 +1,8 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-10-13 — numerical tools and independent fitting imports
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
 `zcu_tools.analysis` 放置不依賴 notebook widget 或 Qt widget 的分析核心。各 notebook
 與 GUI 套件只負責把使用者事件、圖表容器、與 workflow 狀態轉成這裡的純函式或互動狀態機呼叫。

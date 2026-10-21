@@ -26,6 +26,8 @@ jupyter:
 
 # T2 Curve
 
+**Readers:** operator, lab-author. Fit T2 echo samples with T1, flux-noise and photon-shot-noise contributions.
+
 Model:
 
 `1/T2e = 1/(2*T1) + sqrt(ln 2) * A_phi * |domega01/dPhi| + n_th * kappa * chi^2/(kappa^2 + chi^2)`.
