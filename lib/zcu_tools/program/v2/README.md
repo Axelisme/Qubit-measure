@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-20，readout configuration for frequency word decoding；fixed mux profile 與 frontend lowering
+**Last updated:** 2026-10-21
 
 ## Testing & Type Checking Conventions
 
@@ -11,7 +11,7 @@
 - **MagicMock Scope**: Keep `MagicMock` for non-program collaborators, child-module spy hooks, and deliberate error-injection tests. Do not use it as the default stand-in for a program object when the test is asserting emitted program behavior.
 - **Offline acquisition**: `make_mock_soccfg(n_gens, n_readouts)` builds only a compile profile. Explicit environments use `SimulationSoc` and `SimulationBinding`; ordinary acquisition tests may inject a deterministic transport. `ProgramTrace` records emission and does not replace real acquire coverage.
 - **QICK External Types**: `QickParam` runtime objects expose methods/attributes (`is_sweep`, `minval`, `maxval`, `start`, `spans`, `to_array`) that can be missing from third-party stubs. Program code narrows through `program.v2.utils.is_qick_param()` / `QickParamLike` instead of local `cast()` calls, so every use has a runtime guard.
-- **Cfg Contracts**: `AbsModuleCfg` and `AbsWaveformCfg` are abstract contracts. Concrete cfg classes implement both `build()` and `set_param()`; unknown parameter names raise `ValueError` rather than being ignored. `tests/program/v2/modules/test_set_param_contract.py` is the cross-family audit for this fail-fast rule.
+- **Cfg Contracts**: `AbsModuleCfg` and `AbsWaveformCfg` are abstract contracts. Concrete cfg classes implement both `build()` and `set_param()`; unknown parameter names raise `ValueError` rather than being ignored. [`tests/cfg_model/test_set_param_contract.py`](../../../../tests/cfg_model/test_set_param_contract.py) is the cross-family audit for this fail-fast rule.
 
 ## Fixed offline profile
 

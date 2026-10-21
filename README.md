@@ -13,7 +13,7 @@ ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI�
 uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
 ```
 
-板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 `start_server.ipynb`；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘使用者 GUI 與資料處理入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。Workflow 模擬使用 workflows GUI 的模擬模式。
+板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 [`scripts/start_server.ipynb`](scripts/start_server.ipynb)；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘使用者 GUI 與資料處理入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。Workflow 模擬使用 workflows GUI 的模擬模式。
 
 ## 從哪裡讀起
 

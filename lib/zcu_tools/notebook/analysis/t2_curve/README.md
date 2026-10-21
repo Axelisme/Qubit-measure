@@ -1,6 +1,6 @@
 # `t2_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-19，分階段流程的資料準備與呈現分工
+**Last updated:** 2026-10-21
 
 Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us`、`t1_err_us`、`t2e_us`、`t2e_err_us` 與 `t2r_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
@@ -50,7 +50,7 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 ## 典型使用流程
 
-1. 用和 `T1_curve.md` 相同的 f01 correction 取得 sample flux（derived rows、observed f01 finite 才校正；missing f01 用 model 頻率），再做 analysis-local integer alignment，並用 flux calibration plot 檢查 raw/corrected flux 是否只做就近校準。
+1. 用和 [`notebook_md/analysis/T1_curve.md`](../../../../../notebook_md/analysis/T1_curve.md) 相同的 f01 correction 取得 sample flux（derived rows、observed f01 finite 才校正；missing f01 用 model 頻率），再做 analysis-local integer alignment，並用 flux calibration plot 檢查 raw/corrected flux 是否只做就近校準。
 2. 選定 T2 fit window，例如 `0.49 <= flux <= 0.53`，並設定 `MeasurementErrorPolicy` / `FluxResidualWeighting`。
 3. 對 fit sample 計算 `domega/dflux` 與 dispersive `chi/2pi`；`NaN` error 留在 fit window 中，由 fit layer 補 effective error。
 4. 先用 `analyze_flux_noise_limit(...)` 與 `analyze_photon_shot_noise_limit(...)` 分別看單機制上限/初值。

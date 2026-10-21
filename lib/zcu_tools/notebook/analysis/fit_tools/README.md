@@ -1,6 +1,6 @@
 # `fit_tools` 模塊重點文檔
 
-**Last updated:** 2026-10-11 — JSONL sample consumers
+**Last updated:** 2026-10-21
 
 `fit_tools` 放跨 T1/T2 分析都會用到的純計算工具。它不包含任何 T1/T2 物理機制模型；機制模型留在各自的 `t1_curve` / `t2_curve` 模塊。
 
@@ -45,4 +45,4 @@
 
 - 公共模組只處理資料軸、sample canonicalization、誤差與 residual 權重，不知道 `Q_cap`、`A_phi`、`n_th` 等物理參數。
 - T1/T2 各自負責把物理模型轉成 residual，然後呼叫這裡的 helper 做 shared weighting。
-- JSONL 樣本合併與 target-frame 映射屬於 `sample_merge.py`；`T1_curve.md` / `T2_curve.md` 只讀已 canonicalized 的 sample 表，再做 analysis-window 內的小範圍 point-wise f01 correction。
+- JSONL 樣本合併與 target-frame 映射屬於 `sample_merge.py`；[`notebook_md/analysis/T1_curve.md`](../../../../../notebook_md/analysis/T1_curve.md) / [`notebook_md/analysis/T2_curve.md`](../../../../../notebook_md/analysis/T2_curve.md) 只讀已 canonicalized 的 sample 表，再做 analysis-window 內的小範圍 point-wise f01 correction。

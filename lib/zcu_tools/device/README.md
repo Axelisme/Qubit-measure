@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-20，儀器角色 helpers 由使用者套件擁有
+**Last updated:** 2026-10-21
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -331,7 +331,6 @@ snapshot = manager.get_all_info()
 
 - `lib/zcu_tools/device/base.py` — `BaseDeviceInfo`（Pydantic ConfigBase）, `BaseDevice`
 - `lib/zcu_tools/device/manager.py` — `DeviceManager`
-- `lib/zcu_tools/device/cancel_scope.py` — device setup ambient cancel scope
 - `lib/zcu_tools/device/__init__.py` — `DeviceInfo` Union TypeAlias 與對外匯出
 - `lib/zcu_tools/device/yoko.py` — `YOKOGS200Info`, `YOKOGS200`
 - `lib/zcu_tools/device/sgs100a.py` — `RohdeSchwarzSGS100AInfo`, `RohdeSchwarzSGS100A`

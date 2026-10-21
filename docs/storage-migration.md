@@ -509,8 +509,6 @@ print(report)
 
 `mAs/fpts/data` 格式曾使用兩種軸向。若兩條軸長度不同，shape 為 `[len(mAs), len(fpts)]` 就直接使用，反過來就轉置。現行 `signals` 的第一維是 device，第二維是 frequency。平方矩陣缺歷史版本證據時不能猜軸向，整個 group 先留 companion，報 permanent-pending 並指出缺少版本證據。其他 group 照常轉換。中繼格式的 `flx_half/flx_int/flx_period` 改名為 `flux_half/flux_int/flux_period`，已有的 `dev_values/fluxs/freqs/signals` 直接沿用。非字串 `type` 留 companion，不捏造 OneTone／TwoTone。
 
-公式與欄位的依據是 repo Git 的實際讀寫程式。`3904bec70:lib/zcu_tools/analysis/fluxdep/persistence.py` 寫讀 `mA_c/period/mAs/fpts/data`。`187e2d75a:notebook_md/analysis/fluxdep_fit.md` 使用 `mA_e=mA_c+0.5*period`。`8d08978c2:lib/zcu_tools/simulate/__init__.py` 定義上述 fluxs 公式。`646fb3e33:lib/zcu_tools/analysis/fluxdep/processing.py` 的舊陣列是 frequency-major，`8d08978c2:lib/zcu_tools/notebook/persistance.py` 是 device-major。`664019b8d` 把 `flx_*` 改為 `flux_*`。
-
 正式檔交給現有 owner，不手寫其 HDF5 layout：
 
 ```python

@@ -26,7 +26,7 @@ overnight 也需要校準、單次實驗、間隔等待與存檔，但不需要 
 | `mcp.workflows` | RPC client、工具與 image 投影 | engine、Figure、硬體 session |
 | `datafile` 與 experiment persistence | 單次 cfg／Result 的格式、schema 與 writer | workflow 路徑、迭代提交 |
 
-位置沿用 [模組定位](module-boundaries.md)。組合根注入使用者 catalog，不讓 framework import `zcu_lab`。
+位置沿用 [模組定位](../0072-module-boundaries.md)。組合根注入使用者 catalog，不讓 framework import `zcu_lab`。
 
 ### Workflow 與 experiment
 
