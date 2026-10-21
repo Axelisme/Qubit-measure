@@ -85,9 +85,8 @@ recovery delay and the delay-scan axis are shared, not per-qubit controls.
 
 `actual` reports the selected tone fields for the complete list, including
 nonparticipants. Each recipe section below lists its reported conditions.
-Shared fields appear when the recipe has recorded a source for them. A fully
-explicit shared sweep is omitted from `actual`; a mixed sweep retains all its
-reported values.
+Shared fields appear when the recipe has recorded a source for them. This includes
+fully explicit shared sweeps.
 
 Origins describe this recipe call:
 
