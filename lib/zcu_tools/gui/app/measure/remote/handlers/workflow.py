@@ -7,7 +7,7 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import JsonValue, TypeAdapter
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from zcu_tools.experiment.workflows import Actor, InvalidRunState, RunMismatch
 from zcu_tools.gui.app.measure.services.workflow_control import (
@@ -71,6 +71,7 @@ def _snapshot(tab: WorkflowTabSnapshot) -> dict[str, object]:
         "status": project_status(tab.status),
         "busy": tab.busy,
         "error": tab.error,
+        "pending_question": tab.pending_question,
     }
 
 
@@ -338,12 +339,23 @@ def h_workflow_figure(
 def h_workflow_answer(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Forward params.run_id/answer JSON to the facet; currently return its None stub."""
+    """Submit params.run_id/answer on the retained operation; return its pending receipt.
+
+    Engine/driver JSON validation errors become invalid_params/answer_validation.
+    The owner, not this adapter, owns answer typing and lifecycle rules.
+    """
     run_id = str(params["run_id"])
     if "answer" not in params:
         raise RemoteError(ErrorCode.INVALID_PARAMS, "answer is required")
     answer = TypeAdapter(JsonValue).validate_python(params["answer"])
     with _workflow_errors():
         tab = _run(adapter.workflow_control, run_id)
-        response = adapter.workflow_control.answer(run_id, answer)
-    return {"tab_id": tab.tab_id, "run_id": run_id, "answer": response}
+        try:
+            operation = adapter.workflow_control.answer(run_id, answer)
+        except (ValidationError, TypeError) as exc:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                str(exc),
+                reason="answer_validation",
+            ) from exc
+    return {"tab_id": tab.tab_id, "run_id": run_id, "operation_id": operation}

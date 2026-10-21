@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 from pydantic import BaseModel, JsonValue
 
+from zcu_tools.core.script_protocol import Answer
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -39,6 +40,19 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
 logger = logging.getLogger(__name__)
+
+
+class PendingQuestion(TypedDict):
+    """Detached Ask envelope for GUI and wire consumers.
+
+    question_type is the authored class name. question contains only authored
+    fields. answer_schema is the driver's declared Answer model JSON schema.
+    None, rather than an empty envelope, denotes no currently answerable Ask.
+    """
+
+    question_type: str
+    question: dict[str, JsonValue]
+    answer_schema: dict[str, JsonValue]
 
 
 @dataclass
@@ -281,9 +295,23 @@ class WorkflowController[F: FormModel, C]:
     def _delivered(self, run: _Run[F, C], bg: BgResult, settle: SettleFn) -> None:
         run.settle = settle
         status = None if run.engine is None else run.engine.status()
-        if bg.ok and status is not None and status.lifecycle == "paused":
+        if status is not None and status.lifecycle == "paused":
+            # Rejected native Answer models never reserved a segment. Keep the
+            # original operation answerable, and deliver the validation error.
             run.phase = "paused"
-            self._notify(status, None)
+            self._notify(status, bg.error)
+        elif status is not None and status.lifecycle == "stopping":
+            # Stop or control I/O failure can precede continuation admission.
+            # The retained generator still needs worker drain before settlement.
+            run.native_error = run.native_error or bg.error
+            run.phase = "paused"
+            try:
+                self._drain(run, run.binding.run_id)
+            except Exception as error:
+                # Rejected drain submission is not a terminal author delivery.
+                # Keep settlement/lease live so Stop or close can retry.
+                logger.exception("Workflow continuation drain could not submit")
+                self._notify(status, run.native_error or error)
         else:
             self._finish(run, bg.error)
 
@@ -372,6 +400,86 @@ class WorkflowController[F: FormModel, C]:
                 self._finish(run, None)
             else:
                 run.phase = "paused"
+            raise
+        if run.phase == "resuming":
+            run.phase = "producing"
+        return token
+
+    def pending_question(self, run_id: str) -> PendingQuestion | None:
+        """Project a delivered, answerable Ask through Engine's public read seam.
+
+        No author code runs. Pending acceptance/continuation returns None;
+        stale run_id raises RunMismatch. Schema inference belongs to the driver.
+        """
+        with self._lock:
+            self.require_run_id(run_id)
+            run = self._run
+            if run is None or run.engine is None or run.phase != "paused":
+                return None
+            question = run.engine.pending_question(run_id)
+            answer_type = run.engine.pending_answer_type(run_id)
+            if question is None or answer_type is None:
+                return None
+            return PendingQuestion(
+                question_type=type(question).__name__,
+                question=question.model_dump(mode="json"),
+                answer_schema=answer_type.model_json_schema(),
+            )
+
+    def answer(self, run_id: str, answer: Answer | JsonValue) -> int:
+        """Submit Engine.answer on a worker with the original token and lease.
+
+        Answer models are validated by the engine worker; wrong-model TypeError
+        is delivered as a recoverable paused error. JSON objects first pass the
+        engine's pure parse_answer; invalid fields raise ValidationError without
+        submission. Other JSON carriers raise TypeError. Stale targets raise
+        RunMismatch; pending, non-Ask and duplicate submissions raise
+        InvalidRunState. Submit failure preserves paused ownership for retry.
+        The returned token is pending, not completion or accepted delivery.
+        """
+        with self._lock:
+            self.require_run_id(run_id)
+            run = self._run
+            status = self.status()
+            if (
+                run is None
+                or run.engine is None
+                or run.phase != "paused"
+                or run.engine.pending_question(run_id) is None
+            ):
+                raise InvalidRunState(
+                    "answer", "running" if status is None else status.lifecycle
+                )
+            engine = run.engine
+            if not isinstance(answer, Answer):
+                if not isinstance(answer, dict):
+                    raise TypeError(
+                        "Workflow answer must be a JSON object or Answer model"
+                    )
+                answer = engine.parse_answer(run_id, answer)
+            if run.token is None or run.settle is None:
+                raise RuntimeError("Answer requires retained Runner ownership")
+            run.phase = "resuming"
+            validated = answer
+
+        def work() -> RunStatus | None:
+            with self._lock:
+                if run.stop.is_set():
+                    return engine.status()
+            return engine.answer(run_id, validated)
+
+        try:
+            token = self._runner.continue_operation(
+                run.token,
+                work=work,
+                run_in_pool=False,
+                on_terminal=lambda bg, settle: self._delivered(run, bg, settle),
+                settle=run.settle,
+            )
+        except Exception:
+            run.phase = "paused"
+            if run.stop.is_set():
+                self._drain(run, run_id)
             raise
         if run.phase == "resuming":
             run.phase = "producing"

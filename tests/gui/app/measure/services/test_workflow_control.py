@@ -118,7 +118,6 @@ def test_start_records_tunables_and_stale_run_targets_use_same_headless_owner(tm
     assert len(control.records("first")) == 1
     assert control.figures("first") == ()
     assert control.pending_question("first") is None
-    assert control.answer("first", {"value": 3}) is None
     with pytest.raises(RunMismatch):
         control.stop("not-this-run")
     assert control.close(tab)

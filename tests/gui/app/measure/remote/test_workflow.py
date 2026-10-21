@@ -269,9 +269,6 @@ def test_workflow_start_observes_draft_or_explicit_fresh_defaults_and_keeps_term
     assert result(rpc, "workflow.figures", run_id="native")["names"] == ["trend"]
     png = result(rpc, "workflow.figure", run_id="native", name="trend")
     assert base64.b64decode(png["png_b64"]).startswith(b"\x89PNG")
-    assert (
-        result(rpc, "workflow.answer", run_id="native", answer=True)["answer"] is None
-    )
 
 
 @pytest.mark.parametrize(

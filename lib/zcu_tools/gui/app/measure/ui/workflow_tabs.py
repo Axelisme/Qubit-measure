@@ -130,6 +130,8 @@ class WorkflowTabs(QTabWidget):
         self.badge.setVisible(active is not None)
         if active is not None:
             status = "pending" if active.status is None else active.status.lifecycle
+            if active.pending_question is not None:
+                status = "等待回答"
             self.badge.setText(
                 f"{self._labels.get(active.tab_id, active.name)}: {status}"
             )
@@ -142,6 +144,7 @@ class WorkflowTabs(QTabWidget):
         if pane is not None:
             self._activate()
             self.setCurrentWidget(pane)
+            pane.focus_question()
 
     def _close_requested(self, index: int) -> None:
         if not self._writable:

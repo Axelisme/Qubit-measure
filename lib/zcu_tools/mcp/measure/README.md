@@ -235,7 +235,7 @@ Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開�
 | `workflow_records` | `run_id` 與可選 `since=0`，回 commit_seq 嚴格大於 since 的 native records。 |
 | `workflow_figures` | `run_id`，只回 names，不 render。 |
 | `workflow_figure` | `run_id/name`，回識別與 validated PNG image content，text 不保留 base64。 |
-| `workflow_answer` | `run_id/answer`，answer 是 JSON。目前 native Ask 尚未接合，回 None，不捏造問題。 |
+| `workflow_answer` | `run_id/answer`，answer 是符合 status 中 `pending_question.answer_schema` 的 JSON object。回 Start 的同一 pending handle，不宣稱已完成。 |
 
 Batch 是 `[{"path": ["field", 0, "leaf"], "value": ...}]`，路徑是 canonical
 欄位名與原始 list index。Form owner 決定 branch、expression、有效值與錯誤。
@@ -248,9 +248,12 @@ Start 省略/null batch 使用 shared GUI draft。明填 batch，包括 []，使
 工具表是固定手寫，沿 live catalog 的 timeout、權限及 session operation mapping。
 錯誤保留 code/message/reason/data，不重試、不回滾。Readonly 可查詢與 preview，
 mutation 仍受 holder、busy 與 RUN lease 限制。Terminal records/figures 可繼續讀取。
-Native Ask 由後續引擎接合完成。真正 answer 與 execute 一樣會同步推進 generator，
-所以 facet 必須排 worker，保留同一 RUN lease、operation 與 terminal delivery。
-UI owner thread 不可 inline 續跑，也不另外呼叫 Resume 來冒充 Answer。
+Status 的 `pending_question` 是固定 `{question_type, question, answer_schema}`
+envelope；只有 `question` 含 authored fields，沒有問題時為 null。Schema 與 JSON
+轉換由 Engine/driver 擁有。錯欄位保留 paused 問題，回 `invalid_params/answer_validation`。
+Answer 與 execute 一樣會同步推進 generator，facet 將它排到 worker，保留同一
+RUN lease、operation 與 terminal delivery。UI owner thread 不 inline 續跑，也不
+另外呼叫 Resume。Stop 的 retained Ask drain 同樣在 worker，終局交付才釋放 RUN。
 
 ## 分析、互動與寫回
 

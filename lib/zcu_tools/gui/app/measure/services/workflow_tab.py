@@ -7,6 +7,7 @@ from pydantic import JsonValue
 from pydantic_core import PydanticCustomError
 from qick import QickConfig
 
+from zcu_tools.core.script_protocol import Answer
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
@@ -31,7 +32,7 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from .workflow_attachment import Attachment
 from .workflow_devices import SessionDevices
-from .workflow_run import WorkflowController
+from .workflow_run import PendingQuestion, WorkflowController
 
 FormKind = Literal["plan", "tunables"]
 type FormBatch = Mapping[FormWritePath, JsonValue]
@@ -51,6 +52,8 @@ class WorkflowRunPort(Protocol):
     def pause(self, run_id: str) -> RunStatus: ...
     def resume(self, run_id: str) -> int: ...
     def stop(self, run_id: str) -> RunStatus | None: ...
+    def pending_question(self, run_id: str) -> PendingQuestion | None: ...
+    def answer(self, run_id: str, answer: Answer | JsonValue) -> int: ...
     def apply_tunables(
         self,
         run_id: str,

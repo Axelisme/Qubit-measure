@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from pydantic import JsonValue
 
+from zcu_tools.core.script_protocol import Answer
 from zcu_tools.experiment.workflows import (
     Actor,
     CommittedRecord,
@@ -30,6 +31,7 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.plotting.plots import PlotHost, Plots
 
 from .workflow_attachment import Attachment
+from .workflow_run import PendingQuestion
 from .workflow_tab import FormBatch, FormKind, WorkflowTab, WorkflowTabPort
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,8 @@ class WorkflowTabSnapshot:
 
     status is native acceptance, not submission. busy includes pending owner
     delivery and paused lease ownership. error is the last producer failure text,
-    or None when no failure was delivered.
+    or None when no failure was delivered. pending_question is the detached
+    answerable Ask envelope, or None outside a delivered unanswered Ask pause.
     """
 
     tab_id: str
@@ -51,6 +54,7 @@ class WorkflowTabSnapshot:
     status: RunStatus | None
     busy: bool
     error: str | None
+    pending_question: PendingQuestion | None = None
 
 
 @dataclass(frozen=True)
@@ -75,7 +79,8 @@ class WorkflowControlFacet:
     run_id; tab/form commands target tab_id. Unknown names/tabs raise KeyError,
     stale runs raise RunMismatch. Subscribers observe registry/delivery changes
     on-owner and must unsubscribe before destroying children. This facet never
-    closes hardware or drains the caller's session. No Ask engine exists yet.
+    closes hardware or drains the caller's session. Ask continuations use the
+    retained worker/operation; this owner never executes author code inline.
     """
 
     def __init__(
@@ -155,6 +160,9 @@ class WorkflowControlFacet:
                 tab.run.status(),
                 tab.busy,
                 tab.error,
+                None
+                if tab.run.run_id is None
+                else tab.run.pending_question(tab.run.run_id),
             )
             for key, tab in self._tabs.items()
         )
@@ -341,18 +349,24 @@ class WorkflowControlFacet:
             raise RuntimeError("Run plots have been released")
         return render_figure_png(tab.plots[name])
 
-    def pending_question(self, run_id: str) -> None:
-        """Validate run target and return None until the native Ask seam exists."""
-        self._run_tab(run_id)
+    def pending_question(self, run_id: str) -> PendingQuestion | None:
+        """Read a detached question/type/schema envelope, or None outside Ask.
 
-    def answer(self, run_id: str, answer: JsonValue) -> None:
-        """Validate target and return None while native Ask is not installed.
-
-        Future native Engine.answer is a synchronous execution segment, not a
-        cheap control call. Submit it through WorkflowController continuation
-        with the retained RUN lease and terminal owner delivery, like resume.
-        Never execute its generator on the UI owner thread. Native TypeError
-        must retain paused ownership; validation belongs to the engine.
+        Only delivered Ask pauses are answerable. Reads do not consume questions,
+        execute author code or change selection. Stale targets raise RunMismatch.
         """
-        self._run_tab(run_id)
-        del answer
+        return self._run_tab(run_id).run.pending_question(run_id)
+
+    def answer(self, run_id: str, answer: Answer | JsonValue) -> int:
+        """Submit an Ask answer under the original operation token and RUN lease.
+
+        JSON objects pass Engine.parse_answer before submission; invalid fields
+        raise ValidationError. Native Answer models pass Engine.answer on the
+        worker. Wrong-model TypeError is a recoverable paused delivery, not a
+        terminal failure. Duplicate/in-flight/non-Ask calls raise InvalidRunState;
+        stale targets raise RunMismatch. Return the same pending token as Start.
+        Author code never runs on this owner thread. No Resume/Execute follows.
+        """
+        result = self._run_tab(run_id).run.answer(run_id, answer)
+        self._notify()
+        return result

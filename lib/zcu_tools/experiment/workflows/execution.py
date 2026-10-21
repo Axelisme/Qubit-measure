@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime
 from threading import RLock
@@ -724,6 +725,18 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         if self._lifecycle != "paused" or self._executing or self._driver is None:
             return None
         return deepcopy(self._driver.pending_question)
+
+    def pending_answer_type(self) -> type[Answer] | None:
+        """Delegate declared type inference only while a settled Ask is pending."""
+        if self.pending_question() is None or self._driver is None:
+            return None
+        return self._driver.pending_answer_type()
+
+    def parse_answer(self, mapping: Mapping[str, object]) -> Answer:
+        """Delegate wire validation without driving or consuming the pending Ask."""
+        if self.pending_question() is None or self._driver is None:
+            raise RuntimeError("No pending question to answer")
+        return self._driver.parse_answer(mapping)
 
     def status(self) -> RunStatus:
         """Return detached lifecycle/sequence/revision/display observations."""

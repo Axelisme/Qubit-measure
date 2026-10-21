@@ -63,8 +63,8 @@ and retained figure/record queries. GUI panes and remote callers use this same
 owner. Workflow runs borrow the session RUN lease, runner and progress. Closing
 an idle workflow tab releases only its presentation. Panes dispose their own
 subscriptions, editors and timers before deleting children; they never drain
-or disconnect the shared session. Native Ask is not connected yet. Its answer
-continuation must use the retained operation worker and lease, not the UI loop.
+or disconnect the shared session. Native Ask answers and cancellation drain
+continue on the retained operation worker and lease, never on the UI loop.
 
 The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
 result entries and working points; SoC connects the board and displays soccfg
@@ -154,10 +154,14 @@ metadata and values come from that candidate, with no native lowering or commit.
 None Start batches use parsed shared drafts. Explicit batches use fresh captured
 defaults. Tunables Apply with an empty batch submits the current shared draft.
 
-`pending_question` and `answer` currently validate the run and return None.
-Native Ask integration follows separately. A real answer is a synchronous engine
-segment and must run in the worker with the retained RUN lease, original
-operation and terminal delivery; the UI owner must not continue the generator.
+`pending_question` returns the detached `{question_type, question, answer_schema}`
+envelope only after an Ask pause reaches owner delivery. Authored fields stay
+inside `question`. Engine/driver own schema inference and JSON answer validation.
+`answer` returns the original pending operation token and schedules Engine.answer
+on the worker, without Resume/Execute. Wrong native Answer models deliver a
+recoverable error while retaining the paused question, operation and RUN lease.
+Stop is pure control; a retained Ask drains on the worker, including after control
+I/O failure. Only terminal owner delivery settles the operation and releases RUN.
 Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 ## Sources and workflow

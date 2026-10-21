@@ -87,8 +87,9 @@ Pane 關閉先取得 owner 同意，再釋放自己的訂閱、timer 與 childre
 保留 pane。最後一個 workflow pane 關閉也不 disconnect 硬體或 drain session。
 純 figure widgets 留在 UI，native Plots 的生命週期由 headless owner 管理。
 
-目前 facet 的 pending_question/answer 回 None，後續接合 native Ask。
-真正 Engine.answer 會同步跑到下一個 paused 或 terminal，必須在 worker 執行。
+Facet 的 pending_question 提供固定 question_type/question/answer_schema envelope，
+問題 authored fields 只在 question 內。Engine/driver 擁有 schema 推導與答案轉換。
+Engine.answer 同步跑到下一個 paused 或 terminal，因此在 worker 執行。
 Facet 保留原 operation、RUN lease 與 terminal delivery，不在 UI owner thread
 續跑，也不將 Answer 拆成另一次 Resume。錯型答案由 engine 拒絕並保持 paused，
 facet 不複製驗型別或狀態規則。這維持 [[0066]] 的執行與終局責任。

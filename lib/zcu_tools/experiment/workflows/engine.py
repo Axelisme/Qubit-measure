@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from threading import RLock
 from typing import Protocol
 
@@ -38,6 +39,8 @@ class _RunView(Protocol):
     def reserve_answer(self, answer: Answer) -> None: ...
     def execute(self, answer: Answer | None = None) -> RunStatus: ...
     def pending_question(self) -> Question[Answer] | None: ...
+    def pending_answer_type(self) -> type[Answer] | None: ...
+    def parse_answer(self, mapping: Mapping[str, object]) -> Answer: ...
     def pause(self) -> RunStatus: ...
     def resume(self) -> RunStatus: ...
     def stop(self) -> RunStatus: ...
@@ -136,6 +139,27 @@ class Engine[C]:
         """
         with self._lock:
             return self._current(run_id).pending_question()
+
+    def pending_answer_type(self, run_id: str) -> type[Answer] | None:
+        """Read the settled Ask's declared Answer model, or None outside Ask.
+
+        The driver owns generic inference. This lock-protected read never
+        delivers or resumes; stale run_id raises RunMismatch. Hosts may project
+        the returned model's JSON schema without inferring Question parameters.
+        """
+        with self._lock:
+            return self._current(run_id).pending_answer_type()
+
+    def parse_answer(self, run_id: str, mapping: Mapping[str, object]) -> Answer:
+        """Validate wire fields through the settled Ask driver, without delivery.
+
+        Return the declared Answer model. Invalid fields raise ValidationError
+        titled with the Question type; no pending Ask raises RuntimeError and
+        stale run_id raises RunMismatch. No journal or lifecycle change occurs.
+        Schedule answer(run_id, result) separately on the retained worker.
+        """
+        with self._lock:
+            return self._current(run_id).parse_answer(mapping)
 
     def answer(self, run_id: str, answer: Answer) -> RunStatus:
         """Validate and execute an Ask continuation on this worker thread.

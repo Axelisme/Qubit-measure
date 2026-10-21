@@ -60,9 +60,12 @@ returns form_errors with path/message rows. Unexpected producer failures retain
 controller_error. No retry or rollback follows an error or transport timeout.
 Figures and committed records remain readable after terminal delivery. Names
 and status do not render; figure returns png_b64 for validated MCP image delivery.
-Answer currently returns None until native Ask is integrated. Real answer
-execution belongs in the worker under the existing RUN lease and terminal
-operation delivery, not the RPC/UI owner thread.
+Status includes `pending_question`, a `{question_type, question, answer_schema}`
+envelope or null outside a delivered Ask pause. Answer returns the original
+pending `operation_id`. Engine/driver validate JSON fields; rejection projects
+`invalid_params/answer_validation` without consuming the question. Execution
+continues on the worker under the existing RUN lease and terminal operation
+delivery, not the RPC/UI owner thread.
 
 ## Predictor sources
 

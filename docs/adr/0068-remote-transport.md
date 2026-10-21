@@ -115,12 +115,14 @@ Figures 使用同一 retained Plots，status 與 names 不 render。Figure 在 o
 以 shared renderer 產生 PNG，MCP 驗證 PNG 並附 image content，不在文字中保留
 base64，也不建立 preview 檔。Terminal records/figures 保留到 replacement 或 close。
 
-目前 workflow_answer 經 facet 回 None，native Ask 接合另行完成。這不是永久的
-空回答契約。真正 Engine.answer 是同步 execution segment，必須由 facet 排到
-worker，保留同一 operation／RUN lease 與 terminal delivery。RPC/UI owner thread
-不可 inline 推進 generator，也不可先回答再另呼叫 Resume。Engine 擁有答案
-驗型別與狀態規則，錯型保持 paused；adapter 只投影錯誤。這避免一次回答在
-owner thread 執行後續量測，並維持 [[0066]] 的 operation settlement。
+Workflow status 提供 pending_question 的 question_type/question/answer_schema
+固定 envelope；authored fields 只在 question 內。Engine/driver 擁有答案 schema
+與 JSON 轉換。Workflow answer 回原 operation_id，MCP 映射成 Start 的同一 pending
+handle。Engine.answer 是同步 execution segment，由 facet 排到 worker，保留同一
+operation／RUN lease 與 terminal delivery。RPC/UI owner thread 不 inline 推進
+generator，也不先回答再另呼叫 Resume。錯型保持 paused，不寫 Resumed；adapter
+只投影錯誤。Stop 純控制，retained Ask 另排 worker drain；控制 I/O 失敗仍 raise
+並完成 worker 收尾。終局 owner delivery 才釋放 RUN。這維持 [[0066]] 的 settlement。
 
 ## 事件與錯誤
 

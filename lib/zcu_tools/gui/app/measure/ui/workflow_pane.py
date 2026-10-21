@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from pydantic import JsonValue, TypeAdapter
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -63,6 +66,8 @@ class WorkflowPane(QWidget):
         self._states: dict[FormKind, FormState[FormModel]] = {}
         self._envs: dict[FormKind, FormEnv] = {}
         self._editing: dict[FormKind, bool] = {}
+        self._ask_pending = False
+        self._question_run_id: str | None = None
         self._pages: dict[FormKind, QVBoxLayout] = {}
         layout = QVBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -108,11 +113,32 @@ class WorkflowPane(QWidget):
     def _add_ask_page(self) -> None:
         page = QWidget(self._subtabs)
         layout = QVBoxLayout(page)
-        label = QLabel("No question pending.", page)
-        label.setObjectName("workflow.ask")
-        label.setWordWrap(True)
-        make_label_selectable(label)
-        layout.addWidget(label)
+        self._ask_page = page
+        self._question_label = QLabel("No question pending.", page)
+        self._question_label.setObjectName("workflow.ask")
+        self._question_label.setWordWrap(True)
+        make_label_selectable(self._question_label)
+        layout.addWidget(self._question_label)
+        self._answer_schema = QLabel(page)
+        self._answer_schema.setObjectName("workflow.answer_schema")
+        self._answer_schema.setWordWrap(True)
+        make_label_selectable(self._answer_schema)
+        layout.addWidget(self._answer_schema)
+        layout.addWidget(QLabel("Answer JSON", page))
+        self._answer_input = QLineEdit(page)
+        self._answer_input.setObjectName("workflow.answer")
+        self._answer_input.setPlaceholderText(
+            "Enter an object matching the answer schema"
+        )
+        layout.addWidget(self._answer_input)
+        self._answer_button = QPushButton("Answer", page)
+        self._answer_button.clicked.connect(lambda: self._command("Answer"))
+        layout.addWidget(self._answer_button)
+        self._answer_status = QLabel(page)
+        self._answer_status.setObjectName("workflow.answer_status")
+        self._answer_status.setWordWrap(True)
+        make_label_selectable(self._answer_status)
+        layout.addWidget(self._answer_status)
         layout.addStretch()
         self._subtabs.addTab(page, "Ask")
 
@@ -193,7 +219,10 @@ class WorkflowPane(QWidget):
             writable and accepted and lifecycle == "running"
         )
         self._buttons["Resume"].setEnabled(
-            writable and accepted and lifecycle == "paused"
+            writable
+            and accepted
+            and lifecycle == "paused"
+            and snapshot.pending_question is None
         )
         self._buttons["Stop"].setEnabled(writable and snapshot.busy)
         self._apply.setEnabled(
@@ -201,10 +230,35 @@ class WorkflowPane(QWidget):
         )
         if snapshot.error is not None:
             self._message.setText(snapshot.error)
-        # Native Ask is not available yet. In particular, no UI-thread engine
-        # continuation or fake question/answer semantics belong in this adapter.
-        if snapshot.run_id is not None:
-            self._control.pending_question(snapshot.run_id)
+        self._project_question(snapshot, lifecycle)
+
+    def _project_question(self, snapshot: WorkflowTabSnapshot, lifecycle: str) -> None:
+        question = snapshot.pending_question
+        if question is not None:
+            if not self._ask_pending or self._question_run_id != snapshot.run_id:
+                self._question_run_id = snapshot.run_id
+                self._question_label.setText(
+                    f"{question['question_type']}\n"
+                    + json.dumps(question["question"], ensure_ascii=False, indent=2)
+                )
+                self._answer_schema.setText(
+                    "Answer schema: "
+                    + json.dumps(question["answer_schema"], ensure_ascii=False)
+                )
+                self._answer_input.setText("{}")
+                self._answer_status.setText("等待回答")
+                self._subtabs.setCurrentWidget(self._ask_page)
+        elif self._ask_pending and lifecycle in {"stopping", "stopped", "failed"}:
+            self._answer_status.setText("提問已取消")
+        self._ask_pending = question is not None
+        enabled = self._writable and self._ask_pending
+        self._answer_input.setEnabled(enabled)
+        self._answer_button.setEnabled(enabled)
+
+    def focus_question(self) -> None:
+        """Show the pending Ask after badge navigation, without submitting anything."""
+        if self._ask_pending:
+            self._subtabs.setCurrentWidget(self._ask_page)
 
     def _command(self, command: str) -> None:
         try:
@@ -239,6 +293,11 @@ class WorkflowPane(QWidget):
             self._control.resume(run_id)
         elif command == "Stop":
             self._control.stop(run_id)
+        elif command == "Answer":
+            answer = TypeAdapter(JsonValue).validate_json(self._answer_input.text())
+            self._control.answer(run_id, answer)
+            self._answer_status.setText("已回答")
+            self._message.setText("")
         elif command == "Apply":
             result = self._control.apply_tunables(
                 run_id,

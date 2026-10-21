@@ -124,10 +124,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     _entry(
         "answer",
-        "Answer through the same headless facet. Currently returns None while native Ask is absent. Future synchronous answer segments must use the worker, retained RUN lease and same terminal delivery, never inline on UI owner.",
+        "Submit an answer matching workflow.status pending_question.answer_schema. Returns the original pending operation_id; the worker retains the same RUN lease through terminal owner delivery. Invalid answers preserve the paused question.",
         (
             _RUN,
             ParamSpec("answer", JsonType.JSON, required=False, omit_when_missing=True),
         ),
+        operation=True,
     ),
 )
