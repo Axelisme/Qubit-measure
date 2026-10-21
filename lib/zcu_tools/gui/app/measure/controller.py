@@ -101,6 +101,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
+    from zcu_tools.gui.session.services.build import SessionServices
     from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
     from zcu_tools.plotting.figures import FigureCollection
@@ -111,6 +112,7 @@ if TYPE_CHECKING:
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.tab_control import TabControlPort
     from .services.tab_form import TabFormResources
+    from .services.workflow_control import WorkflowControlFacet
     from .writeback import WritebackControlPort, WritebackPane
 
 
@@ -625,6 +627,15 @@ class Controller(SessionControllerMixin):
     def cfg_resources(self) -> TabFormResources:
         """Return the tab Form owner pool; lookup rejects retired tab identities."""
         return self._tab_forms
+
+    @property
+    def session_services(self) -> SessionServices:
+        """Borrow the existing session bundle on the owner thread; never drain it."""
+        return self._services.session
+
+    def workflow_control(self) -> WorkflowControlFacet:
+        """Return the shared headless workflow commands and tab/query registry."""
+        return self._services.workflow
 
     @property
     def tab_control(self) -> TabControlPort:

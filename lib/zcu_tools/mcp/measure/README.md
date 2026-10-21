@@ -215,6 +215,49 @@ destination 或寫回授權。
 uv run --directory <lane> --no-sync -- pytest -q -n0 tests/mcp/measure/test_recipe_dynamic_reporting.py
 ```
 
+## Workflow tools
+
+Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開命名。
+所有命令都不以 GUI toggle 或目前選中的 tab 作為 target，沒有 workflow 模式切換 RPC。
+名稱必須明填，不預選實驗室 workflow。GUI 掛載新開的 owner 時會選中新 tab，並切到 Workflow 模式。
+
+| 工具 | 輸入與結果 |
+| --- | --- |
+| `workflow_open` | `name`，回 `tab_id/name/tab` snapshot，可同名多開。 |
+| `workflow_close` | `tab_id`，回 `tab_id/closed`。Busy 回 false，不替 caller Stop。 |
+| `workflow_status` | 可選 `run_id`。明填回 native status 與 tab 識別，省略/null 回 names 與全部 opened tabs。 |
+| `workflow_start` | `tab_id/run_id`，可選 `plan/tunables` batches。回 pending `handle`，用既有 `wait(op=handle)` 觀察終局。 |
+| `workflow_pause/resume/stop` | 明填 native `run_id`。Pause 保留 lease，Resume 重用原 run 與 handle，Stop 等 terminal delivery。 |
+| `workflow_form` | `tab_id/form`，form 是 plan 或 tunables。可選 batch 只 preview，回 input/values/errors。 |
+| `workflow_describe_form` | 同上另給 typed `path`，root 是 []。只加同一 candidate 的單層 metadata，不回整棵 schema。 |
+| `workflow_edit_form` | `tab_id/form/batch`，修改 owner 的 shared draft，回更新後觀察。 |
+| `workflow_tunables` | `run_id/batch`，經 owner Apply，回 native revision/values。空 batch 提交當前 draft。 |
+| `workflow_records` | `run_id` 與可選 `since=0`，回 commit_seq 嚴格大於 since 的 native records。 |
+| `workflow_figures` | `run_id`，只回 names，不 render。 |
+| `workflow_figure` | `run_id/name`，回識別與 validated PNG image content，text 不保留 base64。 |
+| `workflow_answer` | `run_id/answer`，answer 是符合 status 中 `pending_question.answer_schema` 的 JSON object。回 Start 的同一 pending handle，不宣稱已完成。 |
+
+Batch 是 `[{"path": ["field", 0, "leaf"], "value": ...}]`，路徑是 canonical
+欄位名與原始 list index。Form owner 決定 branch、expression、有效值與錯誤。
+MCP 不計算 defaults、不做 lowering，也不另建 Engine、run registry 或 holder 規則。
+
+Start 省略/null batch 使用 shared GUI draft。明填 batch，包括 []，使用 owner
+當次 fresh captured defaults 加 edits。Form preview 的 [] 則讀當前 parsed draft，
+不重算 defaults。Tunables Apply 的 [] 提交當前 draft，不把它重設為 defaults。
+
+工具表是固定手寫，沿 live catalog 的 timeout、權限及 session operation mapping。
+錯誤保留 code/message/reason/data，不重試、不回滾。Readonly 可查詢與 preview，
+mutation 仍受 holder、busy 與 RUN lease 限制。Terminal records/figures 可繼續讀取。
+Status 的 `pending_question` 是固定 `{question_type, question, answer_schema}`
+envelope；只有 `question` 含 authored fields，沒有問題時為 null。Schema 與 JSON
+轉換由 Engine/driver 擁有。Status 的 `last_exchange` 保留最近問題 envelope、接受的
+answer 或 null，以及 waiting/submitted/answered/cancelled。它與 GUI 共用 headless
+owner；submitted 不是已接受，錯型答案不記入 answer。錯欄位保留 paused 問題，
+回 `invalid_params/answer_validation`。
+Answer 與 execute 一樣會同步推進 generator，facet 將它排到 worker，保留同一
+RUN lease、operation 與 terminal delivery。UI owner thread 不 inline 續跑，也不
+另外呼叫 Resume。Stop 的 retained Ask drain 同樣在 worker，終局交付才釋放 RUN。
+
 ## 分析、互動與寫回
 
 Recipe 以 `yield from ask(run.propose_writeback())` 提出 completed capture 的寫回候選，交還控制權並等待回答。`answer(recipe, decision)` 的 recipe 是 execution ID，decision 為 accepted 或 skipped；它只回答，不寫入也不授權。普通 `tab.accept(items)` 寫 GUI 當前 draft。摘要的 `question_items`／`question_preview` 是 active question，`writeback.receipts` 則列出實際寫入與失敗前綴；兩者不能互相冒充。Query 只讀 local capture。Session close 喚醒並收束 generator finally。

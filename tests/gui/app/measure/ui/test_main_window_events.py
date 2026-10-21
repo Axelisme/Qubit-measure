@@ -563,7 +563,7 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     window._tab_widgets["tab-a"] = tab_a  # pyright: ignore[reportArgumentType, reportPrivateUsage]
     # tolerated: The injected tab fixture supplies only the run-marker interaction surface exercised here.
     window._tab_widgets["tab-b"] = tab_b  # pyright: ignore[reportArgumentType, reportPrivateUsage]
-    tabs = window.findChild(QTabWidget)
+    tabs = window.findChild(QTabWidget, "experiment.tabs")
     assert tabs is not None
     tabs.addTab(tab_a, "A")
     tabs.addTab(tab_b, "B")

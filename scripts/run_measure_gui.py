@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure import default_startup
 from zcu_tools.gui.launcher import (
@@ -22,6 +23,9 @@ from zcu_tools.gui.launcher import (
     runtime_options_from_args,
     select_startup_script,
 )
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
 
 # Code, catalogs and logs stay anchored at the repo, not the data project.
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -122,6 +126,13 @@ def _build_measure_catalogs():
     return registry, loader
 
 
+def _configure_workflows(control: WorkflowControlFacet) -> None:
+    """Inject the caller's native workflow attachments after runtime setup."""
+    from zcu_lab.workflows.registry import build_registry
+
+    control.configure(build_registry())
+
+
 def main(argv: list[str] | None = None) -> int:
     """Launch the GUI; invalid project roots exit before GUI or lab assembly."""
     args = _parse_args(sys.argv[1:] if argv is None else argv)
@@ -134,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_options_from_args(args, log_root=REPO_ROOT),
         extra_logging_namespaces=("zcu_lab",),
         registry_factory=_build_measure_catalogs,
+        configure_workflows=_configure_workflows,
         clean=args.clean,
         startup_script=select_startup_script(
             clean=args.clean,

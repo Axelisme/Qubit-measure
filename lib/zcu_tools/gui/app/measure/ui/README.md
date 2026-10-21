@@ -15,6 +15,30 @@ Error notifications are non-modal; confirmations, choosers and writeback editing
 keep their modal protection. See the [Measure README](../README.md)
 for pane ownership and operation lifecycles.
 
+`MainWindow` uses one toggle to show experiment tabs or workflow tabs in the
+same stacked area. New Tab lists registrations for the displayed kind.
+`WorkflowTabs` subscribes to the shared workflow facet, so remote opens mount
+panes without going through a GUI selection command. Same-name tabs keep
+monotonic display numbers. The status badge returns to the active workflow.
+The shared RUN lease locks competing panes and Setup/SoC submissions.
+
+`WorkflowPane` renders the facet's Plan and Tunables drafts with `FormEditor`.
+It forwards Refresh, Start, Pause, Resume, Stop and Apply to the facet.
+Busy Stop remains enabled under Remote control and reclaims locked Local before
+calling the same facet. Pause, Resume, Answer and tunables retain the holder gate.
+The services own source capture, lowering, accepted tunables and run lifetime.
+Ask displays the authored question and driver-owned answer schema, with a JSON
+answer field. A new question selects Ask; the status badge returns there from
+other tabs. Answer submits to the retained worker. The pane preserves the last
+exchange from the owner's `last_exchange`, including answers submitted through
+facet/RPC/MCP. Only accepted answers display 「已回答」; pending submissions display
+「回答已提交」. Cancelled questions display 「提問已取消」 and disable old answers.
+`WorkflowFigures` owns only
+named canvas presentation through `QtPlotHost`. A refused close keeps the pane.
+After accepted close, the view detaches its subscriptions and editors and stops
+its redraw timers before deleting children. Closing the last pane does not drain
+or disconnect the session.
+
 `ExpTabWidget` owns the left forms and ledgers, commands, subscriptions,
 progress and splitter width. Its concrete owned child `ExperimentFigureArea`
 owns the right-side canvases, named figure selectors and caches, interactive

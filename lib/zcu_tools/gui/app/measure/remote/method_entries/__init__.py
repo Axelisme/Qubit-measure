@@ -15,6 +15,7 @@ from .run_save import METHODS as RUN_SAVE_METHODS
 from .state_project import METHODS as STATE_PROJECT_METHODS
 from .tab import METHODS as TAB_METHODS
 from .view import METHODS as VIEW_METHODS
+from .workflow import METHODS as WORKFLOW_METHODS
 from .writeback import METHODS as WRITEBACK_METHODS
 
 METHOD_ENTRIES: tuple[RemoteMethodEntry, ...] = (
@@ -31,4 +32,5 @@ METHOD_ENTRIES: tuple[RemoteMethodEntry, ...] = (
     *VIEW_METHODS,
     *PREDICTOR_METHODS,
     *WRITEBACK_METHODS,
+    *WORKFLOW_METHODS,
 )

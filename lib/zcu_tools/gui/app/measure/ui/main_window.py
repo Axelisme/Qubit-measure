@@ -23,6 +23,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPushButton,
     QStackedWidget,
     QStatusBar,
     QTabWidget,
@@ -62,6 +63,7 @@ from .main_window_events import MainWindowEventCoordinator
 from .main_window_tab_list import configure_tab_bar
 from .main_window_toolbar import MainWindowToolbar
 from .run_load_dialog import RunLoadDialog
+from .workflow_tabs import WorkflowTabs
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,9 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self._ctrl = controller
+        self._workflow_mode = False
+        self._workflow_busy = False
+        self._writable = True
         self._tab_widgets: dict[str, ExpTabWidget] = {}
         self._cfg_status_message: str | None = None
         self._tab_actions: TabActions = _MainWindowTabActions(self)
@@ -183,13 +188,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(self._build_context_bar())
 
         # --- tab widget ---
-        self._tabs = QTabWidget()
-        configure_tab_bar(self._tabs)
-        tab_bar = self._tabs.tabBar()
-        assert tab_bar is not None
-        tab_bar.tabMoved.connect(self._on_tab_moved)
-        self._tabs.tabCloseRequested.connect(self._on_tab_close_requested)
-        self._tabs.currentChanged.connect(self._on_current_tab_changed)
+        self._tabs = self._build_experiment_tabs()
         # While no experiment tab is open, the area tells the user the next step.
         self._empty_hint = QLabel("")
         self._empty_hint.setObjectName("empty_tabs_hint")
@@ -204,6 +203,7 @@ class MainWindow(QMainWindow):
         # --- status bar ---
         self._status_bar = self._build_status_bar()
         self.setStatusBar(self._status_bar)
+        self._install_workflow_views()
 
         self._events.bind(self._ctrl.get_bus())
         self._control_indicator = ControlIndicator(self._ctrl.control_identity, self)
@@ -240,16 +240,19 @@ class MainWindow(QMainWindow):
         """Idempotently retire authority projections before owner-thread teardown.
 
         This only releases view watches; it does not cancel domain operations.
+        Workflow cleanup failures propagate without retiring the window, so the
+        caller can retry before scheduling Qt deletion.
         """
         if self._control_disposed:
             return
-        self._control_disposed = True
+        self._workflow_tabs.dispose()
         self._dispose_control()
         if self._shutdown_application is not None:
             self._shutdown_application.aboutToQuit.disconnect(
                 self.dispose_control_watches
             )
             self._shutdown_application = None
+        self._control_disposed = True
 
     def dispose(self) -> None:
         """Release view subscriptions and destroy this window and its children.
@@ -258,11 +261,12 @@ class MainWindow(QMainWindow):
         close callbacks/hardware cleanup. This does not perform domain shutdown
         or ask close-policy questions. It also works before show or after exec;
         targeted DeferredDelete delivery cannot rely on another event-loop turn.
-        Repeated calls, including deleteLater after disposal, are harmless.
+        Cleanup failures propagate; retain the window and retry disposal.
+        Completed workflow cleanup callbacks are not repeated on retry.
+        Successful disposal is idempotent, including later deleteLater calls.
         """
         if self._disposed:
             return
-        self._disposed = True
         self.dispose_control_watches()
         for dialog in self.findChildren(RunLoadDialog):
             dialog.reject()
@@ -277,6 +281,7 @@ class MainWindow(QMainWindow):
             self.remote_control_service = None
         self.deleteLater()
         QCoreApplication.sendPostedEvents(self, QEvent.Type.DeferredDelete)
+        self._disposed = True
 
     def deleteLater(self) -> None:
         """Retire watches before scheduling deletion, including repeated calls."""
@@ -294,14 +299,16 @@ class MainWindow(QMainWindow):
         """Project Local write availability to this window and all mounted views."""
         self._writable = writable
         self._toolbar.set_writable(writable=writable)
+        self._workflow_tabs.set_writable(writable=writable)
+        workflow_busy = any(s.busy for s in self._ctrl.workflow_control().tabs())
         self._dialog_registry.set_running(
-            running=self._ctrl.get_running_tab_id() is not None
+            running=self._ctrl.get_running_tab_id() is not None or workflow_busy
         )
         self._dialog_registry.set_writable(writable=writable)
         self._tabs.setTabsClosable(writable)
         self._tabs.setMovable(writable)
         for tab in self._tab_widgets.values():
-            tab.set_writable(writable=writable)
+            tab.set_writable(writable=writable and not workflow_busy)
 
     def _build_status_bar(self) -> QStatusBar:
         """Create the status bar and its selectable message label (``Ready``)."""
@@ -352,6 +359,7 @@ class MainWindow(QMainWindow):
         # Attach before currentChanged projects the displayed cfg diagnostic.
         tab_w.set_writable(
             writable=self._ctrl.control_identity.status().holder == "gui"
+            and not any(s.busy for s in self._ctrl.workflow_control().tabs())
         )
         tab_w.attach(snapshot, self._tab_actions)
         self._tab_widgets[tab_id] = tab_w
@@ -519,7 +527,10 @@ class MainWindow(QMainWindow):
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
-        self._dialog_registry.set_running(running=running_tab_id is not None)
+        workflow_busy = any(s.busy for s in self._ctrl.workflow_control().tabs())
+        self._dialog_registry.set_running(
+            running=running_tab_id is not None or workflow_busy
+        )
         self._refresh_tab_activity_markers(running_tab_id)
         self._toolbar.set_new_tab_enabled(enabled=True)
         for tab_id, tab_w in self._tab_widgets.items():
@@ -578,6 +589,9 @@ class MainWindow(QMainWindow):
         self._refresh_empty_hint()
 
     def _refresh_empty_hint(self) -> None:
+        if self._workflow_mode:
+            self._tab_area.setCurrentWidget(self._workflow_tabs)
+            return
         if self._tabs.count() > 0:
             self._tab_area.setCurrentWidget(self._tabs)
             return
@@ -743,7 +757,64 @@ class MainWindow(QMainWindow):
     # Internal event handlers
     # ------------------------------------------------------------------
 
+    def _build_experiment_tabs(self) -> QTabWidget:
+        tabs = QTabWidget()
+        tabs.setObjectName("experiment.tabs")
+        configure_tab_bar(tabs)
+        tab_bar = tabs.tabBar()
+        assert tab_bar is not None
+        tab_bar.tabMoved.connect(self._on_tab_moved)
+        tabs.tabCloseRequested.connect(self._on_tab_close_requested)
+        tabs.currentChanged.connect(self._on_current_tab_changed)
+        return tabs
+
+    def _install_workflow_views(self) -> None:
+        self._workflow_toggle = self._build_workflow_toggle()
+        self._workflow_tabs = self._build_workflow_tabs()
+        self._workflow_tabs.synchronize()
+
+    def _build_workflow_toggle(self) -> QPushButton:
+        button = QPushButton("Workflow tabs", self)
+        button.setObjectName("workflow.toggle")
+        button.clicked.connect(self._toggle_workflows)
+        self._toolbar.layout.insertWidget(1, button)
+        return button
+
+    def _build_workflow_tabs(self) -> WorkflowTabs:
+        tabs = WorkflowTabs(
+            self._ctrl,
+            self._show_workflows,
+            self._refresh_workflow_lock,
+            self._tab_area,
+        )
+        self._tab_area.addWidget(tabs)
+        self._status_bar.addPermanentWidget(tabs.badge)
+        return tabs
+
+    def _toggle_workflows(self) -> None:
+        self._workflow_mode = not self._workflow_mode
+        self._workflow_toggle.setText(
+            "Experiment tabs" if self._workflow_mode else "Workflow tabs"
+        )
+        self._refresh_empty_hint()
+
+    def _show_workflows(self) -> None:
+        if not self._workflow_mode:
+            self._toggle_workflows()
+
+    def _refresh_workflow_lock(self) -> None:
+        busy = any(s.busy for s in self._ctrl.workflow_control().tabs())
+        if busy != self._workflow_busy:
+            self._workflow_busy = busy
+            for tab in self._tab_widgets.values():
+                tab.set_writable(writable=self._writable and not busy)
+        self._dialog_registry.set_running(
+            running=self._ctrl.get_running_tab_id() is not None or busy
+        )
+
     def list_adapter_names(self) -> list[str]:
+        if self._workflow_mode:
+            return list(self._ctrl.workflow_control().names())
         return self._ctrl.get_adapter_names()
 
     def create_tab(self, adapter_name: str) -> None:
@@ -752,6 +823,13 @@ class MainWindow(QMainWindow):
         Unbound aliases permit creation with Invalid cfg. Role resolution
         failures are shown through the presenter; other failures propagate.
         """
+        if self._workflow_mode:
+            try:
+                self._ctrl.workflow_control().open(adapter_name)
+            except Exception as error:
+                logger.exception("Cannot open workflow tab: %s", adapter_name)
+                self.show_error_dialog("Cannot create workflow tab", str(error))
+            return
         try:
             self._ctrl.new_tab(adapter_name)
         except RoleResolutionError as exc:
@@ -1126,6 +1204,7 @@ class MainWindow(QMainWindow):
             return
         self._dialog_registry.set_running(
             running=self._ctrl.get_running_tab_id() is not None
+            or any(s.busy for s in self._ctrl.workflow_control().tabs())
         )
         self._dialog_registry.open(name, writable=self._writable)
 

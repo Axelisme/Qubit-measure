@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 coherence、MIST 與 overnight workflow 的校準、分析和保存契約。
 
-**Last updated:** 2026-10-13，workflow 自有流程、繪圖與工具
+**Last updated:** 2026-10-22，measure 宿主與測試定位
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、state 與 point record。
 Engine 擁有迭代、輸入副本、取消、revision 與提交。`registry.build_registry` 回傳 workflow 與表單的註冊清單，scripts 組合根將它交給 lib 宿主；import 不啟動量測。
@@ -103,7 +103,7 @@ Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位
 
 核心只透過 env.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
 Live 與 summary 只建立 enabled lifetime 的圖。圖形副作用不放進 carry。
-GUI forms、單一 Controller、固定 capture、U7 與 S4 分工見 [forms](forms.md)。
-行為比對使用 workflows GUI 的模擬模式，不另用 agent 專用模擬腳本。模擬仍須使用隔離的 project 與保存目的地，不連接硬體。
+GUI forms、measure headless owner、固定 capture、U7 與 S4 分工見 [forms](forms.md)。
+行為比對使用 measure GUI 的 workflow tabs 與離線來源，不另用 agent 專用模擬腳本。模擬仍須使用隔離的 project 與保存目的地，不連接硬體。
 
-Framework 測試使用合成 workflow：`tests/experiment/workflows/` 驗通用 Engine，`tests/gui/app/workflows/` 與 `tests/mcp/workflows/` 驗宿主、RPC 與 MCP 接縫。不測本套件的科學流程或預設值，刪掉 `zcu_lab/` 後整套 pytest 仍須通過。
+Framework 測試使用合成 workflow：`tests/experiment/workflows/` 驗通用 Engine，`tests/gui/app/measure/services/`、`tests/gui/app/measure/remote/` 與 `tests/mcp/measure/` 驗宿主、RPC 與 MCP 接縫。不測本套件的科學流程或預設值，刪掉 `zcu_lab/` 後整套 pytest 仍須通過。

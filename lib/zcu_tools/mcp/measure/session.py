@@ -748,7 +748,9 @@ class MeasureMcpSession:
             result = dict(result)
             handle = self._expose_operation(result.pop("operation_id"))
             key = pattern.format(
-                tab_id=params.get("tab_id", ""), name=params.get("name", "")
+                tab_id=params.get("tab_id", ""),
+                name=params.get("name", ""),
+                run_id=params.get("run_id", ""),
             )
             self._operation_handles[key] = handle
             result["handle"] = handle

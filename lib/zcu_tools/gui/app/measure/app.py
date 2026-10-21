@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.registry import Registry
+    from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
@@ -60,9 +61,14 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         startup_script: Path | None = None,
         project_root: str | None = None,
         alias_presets: AliasPresets | None = None,
+        configure_workflows: Callable[[WorkflowControlFacet], None] | None = None,
     ) -> None:
         """Build caller catalogs and retain complete alias data for assembly.
 
+        ``configure_workflows`` installs caller-owned workflow registrations on
+        the shared facet before widgets mount. None leaves an empty catalog.
+        The callback retains native generic pairing without erasing its context.
+        It must not open tabs or acquire hardware; failures abort assembly.
         ``registry_factory`` returns the registry (including templates) and reload loader
         after runtime setup. ``clean`` skips saved Qt layout and startup scripts.
         ``startup_script`` is the already-selected trusted Python path, or None
@@ -94,6 +100,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         self._startup_script = startup_script
         self._project_root = project_root
         self.alias_presets: AliasPresets | None = alias_presets
+        self._configure_workflows = configure_workflows
         self._assembled = False
         self._controller: Controller | None = None
         self._window: MainWindow | None = None
@@ -235,6 +242,8 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
 
         self._controller = ctrl
         try:
+            if self._configure_workflows is not None:
+                self._configure_workflows(ctrl.workflow_control())
             window = MainWindow(
                 ctrl,
                 templates=lambda: registry.templates,

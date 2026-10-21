@@ -6,7 +6,7 @@ status: accepted
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-20，獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
+**Last updated:** 2026-10-22，workflow 嵌入 measure 與 headless owner；獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
 
 ## 問題與決策
 
@@ -16,7 +16,7 @@ GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner �
 
 ## Session、狀態與協作
 
-`gui.session` 供 Measure 和 Workflows 共用 context、SoC、device、操作機制與 dialog 所需的窄 control facets。兩個 app 各自組裝 `SessionServices`，注入背景執行與 operation gate；app 決定自己的 RUN policy、workflow 和呈現。
+`gui.session` 提供 context、SoC、device、操作機制與 dialog 所需的窄 control facets。Measure 的 experiment 與 workflow tabs 使用同一份 `SessionServices`，共用背景執行、operation gate 與 RUN lease。Session 不決定 workflow 或 tab 呈現。
 
 `SessionServices.runner` 與 `SessionServices.progress` 保留 build 輸入的同一 instances。同 session 的 Measure Run、Analyze、PostAnalyze 與 operation control 從 bundle 取用，不另傳一份 infrastructure。Composition root 仍建立並注入基礎物件，operation policy、exclusion 和 owner-thread delivery 不變。Session 不反向 import 具體 app。
 
@@ -61,6 +61,41 @@ Device 活動狀態由 driver 在 `device_operation` 中記錄，只有是否在
 State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由 Qt queued signal 或 headless queue 實作；這個規則不等同於要求 core 依賴 Qt 主線程。操作的取消、handle 與 terminal settle 由 Operation owner 決定，本篇不複製生命週期規則。
 
 建立一條依賴時，先辨認互動：查詢走可用的狀態或 read contract，命令呼叫負責該行為的 owner，對已提交變化的反應訂閱 domain fact。Command 可以是單向的 owning-service 合作；不把「service 絕不互調」當成禁令，也不為每條邊建立 Protocol。窄 port 用在跨 owner 或 shared／app 邊界有隔離需求的地方。Port 和 EventBus 不會自動消除循環，仍要檢查誰發起、誰寫入、誰反應。組裝決定注入哪些模組；有界流程的 coordinator 可決定觸發、順序與分支，但仍透過 owner 的 commands／queries 工作，不直接取得它的寫入權威。Startup／mock setup 與 pane 反應是不同流程，不合成萬用 coordinator。
+
+## Workflow 嵌入 measure
+
+Workflow 由 measure 的同一程序與 session 承載。中央 tab 區以一個 toggle 在
+Experiment tabs 與 Workflow tabs 間切換。一 tab 一個 opened workflow owner，
+同名可多開，各自持有 Plan、Tunables 與 run。RUN lease 限制一次只跑一個
+experiment 或 workflow；pending、running 與 paused 的 workflow tab 不可關閉。
+
+使用者於 2026-10-21 裁定：「顯示的tab widget在正常實驗模式就是目前的adapter，在workflow模式下就是每個workflow，你認為如何？」同日確認：「我會希望能支援多個workflow tab」「當然lease會限制只能一次只能跑一個tab/workflow」。
+
+Ask 是每個 workflow tab 左欄的獨立 sub-tab，與 Plan、Tunables 並列。
+等待回答時選到 Ask，狀態列徽章可切回該 workflow tab。回答或 Stop 後保留
+最近一次問答。使用者於 2026-10-22 裁定：「23沒問題，ask請獨立一個subtab而不是取代tunable。再來，ABCD的切換方式都很糟，我只要一個按鈕來toggle即可。」
+
+`services.WorkflowControlFacet` 管 tab registry 與 native run_id routing。
+Headless tab owner 保留 form capture、Start lowering、tunables binding、run 與 lease。
+Qt pane 是 driving adapter，只建 widgets、顯示 owner 投影與轉發命令。
+MCP 直接呼叫同一 facet，不經 pane 或 toggle。讓 service 透過 pane 執行 Start
+會倒置本篇的 owner 方向，也會迫使 headless MCP 先建立 UI，因此不採用。
+`AppServices.session` 與 `Controller.session_services` 公開同一 session bundle，
+不從 bus subscriber 或私有 runner 找資源。Session 不反向依賴 app，C2 保護此方向。
+
+Pane 關閉先取得 owner 同意，再釋放自己的訂閱、timer 與 children。被拒絕時
+保留 pane。最後一個 workflow pane 關閉也不 disconnect 硬體或 drain session。
+純 figure widgets 留在 UI，native Plots 的生命週期由 headless owner 管理。
+
+Facet 的 pending_question 提供固定 question_type/question/answer_schema envelope，
+問題 authored fields 只在 question 內。Engine/driver 擁有 schema 推導與答案轉換。
+Engine.answer 同步跑到下一個 paused 或 terminal，因此在 worker 執行。
+Facet 保留原 operation、RUN lease 與 terminal delivery，不在 UI owner thread
+續跑，也不將 Answer 拆成另一次 Resume。Headless run owner 保留最近一次問題、
+成功接受的答案與提交／已回答／取消的顯示事實。Pane 與 RPC/MCP status 共用投影，
+不因命令入口而顯示不同問答。未接受的錯型輸入不記為已回答。
+錯型答案由 engine 拒絕並保持 paused，
+facet 不複製驗型別或狀態規則。這維持 [[0066]] 的執行與終局責任。
 
 ## 動態資源與儀器 adapters
 
@@ -143,9 +178,9 @@ Worker 可回傳資料，由主執行緒繪圖，也可透過 explicit host 的 
 
 `gui.catalog_loader.SourceCatalogLoader[CatalogT]` 擁有 bounded source inventory、prepare/load、fixed-source restart，以及共用 SourcePackage、PreparedCatalogReload 和 CatalogReloadError。App 提供 typed catalog builder，負責宣告 validation、active admission、發布和 recovery；shared loader 不依賴 measure Registry 或具體 workflow。Measure 保留原 loader 簽名的 registration adapter與原 recovery/UI。
 
-Workflows 的 app-owned catalog 配對目前 native step、plan／knobs form models、converters 和 seed，並由附件建立 panels。Registry 僅驗宣告與名字，不新增 lookup。Owner-thread reload 在 pending/running/paused 時拒絕，不進入 prepare/import。成功保留 compatible parsed drafts、替換附件，不重建 session/services/controller/hardware。失敗保留 RAM draft 與舊 panels，但 Start 必須等成功 retry。Fixed source 改變要求重啟。Bounded import 可能已有 Python 副作用，不宣稱 rollback，也不以舊 catalog fallback 啟動。
+Workflow 附件配對 native step、plan／knobs form models、converters 和 seed。Caller 將清單交給 headless facet，facet 驗名稱唯一。替換註冊清單前必須關閉全部 workflow owners，不保留獨立 workflows app 的 panel reload／持久 input 殼。Experiment 的既有 reload 不因此取得 workflow 草稿的寫入權威。
 
-新 Start 使用目前附件，在固定 capture 中轉換 forms，建立 detached native plan、tunables、seed 與 exact run roots，再提交給同一 Controller。Controller 持有該 run 的 tunables binding 與固定 Start capture，reload 不從新 catalog 或目前 draft 重建它。Saved run 的轉換依 [[0062]] 由獨立工具讀取 manifest 和 iteration records，GUI／Controller 不保留 export binding。這些接線不新增 RPC listing、wire schema 或 Registry lookup。
+新 Start 使用目前附件，在固定 capture 中轉換 forms，建立 detached native plan、tunables、seed 與 exact run roots，再提交給同一 Controller。Headless owner 持有該 run 的 tunables binding 與固定 Start capture，不從新 catalog 或目前 draft 重建它。Saved run 的轉換依 [[0062]] 由獨立工具讀取 manifest 和 iteration records，GUI／Controller 不保留 export binding。這些接線不新增 RPC listing、wire schema 或 Registry lookup。
 
 ## 取捨與相鄰文件
 

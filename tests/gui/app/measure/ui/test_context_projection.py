@@ -73,7 +73,7 @@ def test_existing_tab_tracks_unselected_and_active_source(
         _set_window_colours(window, "white", "black")
         window.refresh_context_panel()
         tab_id = ctrl.tab_control.new_tab("fake")
-        tabs = window.findChild(QTabWidget)
+        tabs = window.findChild(QTabWidget, "experiment.tabs")
         assert tabs is not None
         title = tabs.tabText(0)
         cfg = ctrl.cfg_resources.lookup(tab_id)
@@ -145,7 +145,7 @@ def test_empty_tab_area_shows_next_step_hint_until_a_tab_opens(
     qapp.processEvents()
     try:
         hint = window.findChild(QLabel, "empty_tabs_hint")
-        tabs = window.findChild(QTabWidget)
+        tabs = window.findChild(QTabWidget, "experiment.tabs")
         assert hint is not None and tabs is not None
         assert hint.isVisibleTo(window) and not tabs.isVisibleTo(window)
         without_entry = hint.text()

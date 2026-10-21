@@ -56,6 +56,16 @@ ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/soc/context/device/predictor/progress domains.
 
+`AppServices.session` and read-only `Controller.session_services` expose that
+same session bundle to embedded borrowers. `Controller.workflow_control()`
+provides the headless workflow tab registry, captured forms, native run control
+and retained figure/record queries. GUI panes and remote callers use this same
+owner. Workflow runs borrow the session RUN lease, runner and progress. Closing
+an idle workflow tab releases only its presentation. Panes dispose their own
+subscriptions, editors and timers before deleting children; they never drain
+or disconnect the shared session. Native Ask answers and cancellation drain
+continue on the retained operation worker and lease, never on the UI loop.
+
 The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
 result entries and working points; SoC connects the board and displays soccfg
 through `Controller.soc_control`. The named `soc` window supports remote screenshots.
@@ -122,6 +132,45 @@ Templates use caller-authored `Template.bindings`.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.
+
+## Workflow hosting
+
+`Controller.session_services` exposes the existing session bundle. Workflow
+attachments import from `services.workflow_attachment`; the caller supplies the
+registration list to `WorkflowControlFacet.configure`. Framework code never
+imports the lab registry.
+
+`Controller.workflow_control()` returns the headless facet. Each `open(name)`
+creates independent plan/tunables drafts, including repeated names. `tab_id`
+addresses a draft owner; `run_id` addresses its native run. Start, Pause, Resume,
+Stop and Apply use the same runner, operation and RUN lease as experiment tabs.
+Pending and paused runs refuse tab close. Closing the last idle workflow tab
+does not drain services or disconnect hardware.
+
+Qt workflow panes display these owners and forward commands. A busy workflow's
+local Stop remains available under Remote control. It reclaims locked Local before
+requesting Stop through the same facet; other mutations still require the holder.
+Measure remote calls the same facet without a pane, toggle or selected-tab
+dependency. Form
+`observe_form` prepares one call-local candidate using the owner's fixed env;
+metadata and values come from that candidate, with no native lowering or commit.
+None Start batches use parsed shared drafts. Explicit batches use fresh captured
+defaults. Tunables Apply with an empty batch submits the current shared draft.
+
+`pending_question` returns the detached `{question_type, question, answer_schema}`
+envelope only after an Ask pause reaches owner delivery. Authored fields stay
+inside `question`. Engine/driver own schema inference and JSON answer validation.
+`answer` returns the original pending operation token and schedules Engine.answer
+on the worker, without Resume/Execute. Wrong native Answer models deliver a
+recoverable error while retaining the paused question, operation and RUN lease.
+The headless owner retains `last_exchange` with the latest question, accepted
+answer and waiting/submitted/answered/cancelled presentation state. Qt panes and
+RPC/MCP status read the same facts regardless of the command's entry point.
+Submitted does not mean accepted; rejected native models retain no answer input.
+Stop is pure control; a retained Ask drains on the worker, including after control
+I/O failure. Control I/O failure ends as failed teardown, not cancellation.
+Only terminal owner delivery settles the operation and releases RUN.
+Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 ## Sources and workflow
 

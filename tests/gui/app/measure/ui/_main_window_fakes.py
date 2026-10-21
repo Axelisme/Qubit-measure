@@ -52,7 +52,7 @@ def mock_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
 
 def experiment_tabs(window: MainWindow) -> QTabWidget:
     """Return the window's experiment tabs, asserting the widget exists."""
-    tabs = window.findChild(QTabWidget)
+    tabs = window.findChild(QTabWidget, "experiment.tabs")
     assert tabs is not None
     return tabs
 

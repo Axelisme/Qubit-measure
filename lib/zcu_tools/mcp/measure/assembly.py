@@ -12,6 +12,7 @@ from zcu_tools.mcp.measure import (
     tools_run_analyze,
     tools_setup,
     tools_tab,
+    tools_workflow,
     tools_writeback,
 )
 from zcu_tools.mcp.measure.recipe import RecipeDefinition
@@ -42,6 +43,7 @@ def build_measure_tools(
         tools_writeback.build_writeback_tools(context),
         tools_recipes.build_recipe_tools(context, recipes=recipes),
         tools_setup.build_setup_tools(context),
+        tools_workflow.build_workflow_tools(context),
     ):
         for name, entry in source.items():
             if name in tools:

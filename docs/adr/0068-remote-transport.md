@@ -14,9 +14,9 @@ Recipe 自動推導的 owner、generator 協作及取消結果見 [[0075]]；MCP
 
 ## 分層與連線
 
-使用者在 2026-10-13 裁定：「mcp跑的腳本不要放scripts，這個資料夾是給用戶使用的。」因此 `scripts/` 只放使用者自己執行的入口。使用者選址「C」，即 repo root 的新資料夾 `mcp_servers/`，agent 的 measure／workflows MCP 組合根放在這裡。Workflows 入口的裁定是「留」，保留入口並搬到 `mcp_servers/workflows.py`。組合根同時知道 lab 定義與 framework，放在 lib 會反向依賴使用者套件，放在 `zcu_lab` 則混入框架啟動責任。`tools/` 只放 repo 品質檢查。Fluxdep、dispersive 無需 lab 注入，維持 lib 的 `server.py`。Repo 的三份 MCP client 設定使用同一組入口，各自保留既有啟動與曝光政策。Agent 驗證 workflow 使用 workflows GUI 的模擬模式，不維護獨立模擬腳本。
+使用者在 2026-10-13 裁定：「mcp跑的腳本不要放scripts，這個資料夾是給用戶使用的。」因此 `scripts/` 只放使用者自己執行的入口。使用者選址「C」，即 repo root 的新資料夾 `mcp_servers/`，agent 的 measure MCP 組合根放在這裡。Workflow 工具由同一 measure server 提供，不保留獨立 workflow server。組合根同時知道 lab 定義與 framework，放在 lib 會反向依賴使用者套件，放在 `zcu_lab` 則混入框架啟動責任。`tools/` 只放 repo 品質檢查。Fluxdep、dispersive 無需 lab 注入，維持 lib 的 `server.py`。Repo 的三份 MCP client 設定使用同一組入口，各自保留既有啟動與曝光政策。Workflow 離線驗證使用 measure headless owner、RPC 與 MCP 的合成定義，不維護第二個 app 或獨立模擬腳本。
 
-`gui.remote` 提供 NDJSON framing、request／reply、握手、per-client queue、backpressure 和 lazy push endpoint。`mcp.core.bridge` 持有 agent 程序的 GUI socket、連線與可選的 GUI subprocess；`mcp.core.stdio_server` 提供 stdio MCP 機制。四個 app 使用共用 GUI remote 機制，但各自註冊 wire method、驗證與 event serializer。共用 `RemoteControlServiceBase` 在 owner dispatch 統一檢查控制身份。Measure 與 fluxdep 注入同一 application authority，method 預設要求 holder，明確 readonly methods 允許 observer。控制轉移、固定 socket 身份及 GUI 停用見 [[0070]]。Measure 另外擁有 operation tracking、診斷、writeback pane mapping 和 editor 清理。Fluxdep 透過同一 Controller 提供 pipeline commands、app-owned search 與四種 interactive Session。Interactive state／PNG 是同次 committed capture 的投影；身份與 terminal receipts 由 app owner 和 wire projection 決定。Fluxdep MCP 組裝 GUI 的 RPC method，以 agent 的決策點提供手寫工具；GUI declarations 提供可重用的參數 schema，不生成逐 method 工具。RPC 回完整資料，MCP 回計數、範圍、差量及原生失效原因，決策點另呼叫 render method 附 MCP image content。Lifecycle 與 PNG integrity producer 與現存 MCP callers 共用，server exit 只 disconnect；不重試、不回滾或另建 operation registry。MCP→GUI remote consumption 由 C13 約束。Dispersive 的 remote 接口仍只讀。Workflows 的 remote 呼叫同一泛型 WorkflowWindow／Controller，提供 native run 控制、表單、records 與 PNG，不另建 Engine。共用機制接收 app 注入的 metadata 和 owner scheduler，不決定實驗或資源政策。精確封套、上限、版本與 method 說明見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
+`gui.remote` 提供 NDJSON framing、request／reply、握手、per-client queue、backpressure 和 lazy push endpoint。`mcp.core.bridge` 持有 agent 程序的 GUI socket、連線與可選的 GUI subprocess；`mcp.core.stdio_server` 提供 stdio MCP 機制。三個 app 使用共用 GUI remote 機制，但各自註冊 wire method、驗證與 event serializer。共用 `RemoteControlServiceBase` 在 owner dispatch 統一檢查控制身份。Measure 與 fluxdep 注入同一 application authority，method 預設要求 holder，明確 readonly methods 允許 observer。控制轉移、固定 socket 身份及 GUI 停用見 [[0070]]。Measure 另外擁有 operation tracking、診斷、writeback pane mapping 和 editor 清理。Fluxdep 透過同一 Controller 提供 pipeline commands、app-owned search 與四種 interactive Session。Interactive state／PNG 是同次 committed capture 的投影；身份與 terminal receipts 由 app owner 和 wire projection 決定。Fluxdep MCP 組裝 GUI 的 RPC method，以 agent 的決策點提供手寫工具；GUI declarations 提供可重用的參數 schema，不生成逐 method 工具。RPC 回完整資料，MCP 回計數、範圍、差量及原生失效原因，決策點另呼叫 render method 附 MCP image content。Lifecycle 與 PNG integrity producer 與現存 MCP callers 共用，server exit 只 disconnect；不重試、不回滾或另建 operation registry。MCP→GUI remote consumption 由 C13 約束。Dispersive 的 remote 接口仍只讀。Measure 的 workflow namespace 呼叫同一 headless WorkflowControlFacet，提供 native run 控制、表單、records 與 PNG，不經 UI pane 或另建 Engine。共用機制接收 app 注入的 metadata 和 owner scheduler，不決定實驗或資源政策。精確封套、上限、版本與 method 說明見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
 
 2026-10-12 使用者裁決 RPC 與 MCP 的分工：「前者(MCP)面向agent，設計上要考慮agent使用負擔，後者(RPC)是控制接口，設計上要簡單基礎通用。前者透過組裝後者來兼顧雙方需求」。Fluxdep 工具直接表達階段意圖，open、context id 與 search token 只在單次組裝內使用。
 
@@ -72,27 +72,57 @@ Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數�
 
 `context.snapshot` 從同一次公開 capture 回 native target、point、library 與有序 aliases。Alias rows 保留 authored value 與 resolved 名稱，單列解析失敗附 error；它不是歷史 Run 的參數版本。Parameter／library／alias 變更事件提示重讀這份 snapshot。既有 tab 使用 Open／Refresh／Reset 的固定來源。需明確 Refresh 才在保留 input 下取新來源，Reset 則重算 defaults；來源事件不自動刷新。Caller 使用 native snapshot，不使用舊 md／ml getters。Optional summaries 保留 dict tree 與 scalar，摘要 array／list leaves。Path 優先選取完整的單一值；這些投影不授權寫入。完整與部分讀取都使用同一固定 capture，精確投影見 remote owner README。
 
-## Workflows 的同一 run
+## Workflow 使用同一 measure owner
 
-`scripts/run_workflows_gui.py` 經共用 runtime 組裝獨立 app，宿主 owner 在 `zcu_tools.gui.app.workflows.app`。Scripts 將 `zcu_lab.workflows.registry` 的有序註冊清單與 bounded source loader 交給泛型宿主。App 建立一份 EMPTY session，將同一份 SessionServices 交給 WorkflowWindow。Window constructor 為 `(state, services, owner, *, registrations, loader=None, on_close=None, parent=None)`，runner 與 progress 取自 services。`parent=None` 時 Window 為 top-level，指定 QWidget 時嵌入該 Qt parent。GUI 和 RPC 使用同一 Window 與固定 WorkflowController。
+Workflow 工具併入 measure MCP，固定表由 assembly/context/session 組裝，不從
+workflow catalog 生成。RPC 的 workflow namespace 使用 measure RemoteMethodEntry，
+沿同一 live catalog、holder dispatch、timeout 與 operation mapping。MCP 不保存
+第二份 Engine、draft、permission 或 defaults。C13 限制 MCP 只消費 GUI remote
+契約；C16 禁止 framework 反向載入 lab 定義。Caller 在 measure 組合根注入附件。
 
-Scripts 不注入 alias preset（2026-10-21 起 `zcu_lab/alias_presets/` 已移除）；App 的 `alias_presets` 省略時 shared `build_session_services(alias_rows=())` 以空表啟動，alias 初值由 startup 腳本對 point 寫入。Shared Setup 非 modal 開啟。共用 alias 編輯 UI 由 session Inspect 的 Aliases 頁擁有，整表 Apply 與保存見 [[0065]]。Measure MCP 直接讀寫 context，不開 dialog 或切頁；`dialog.screenshot` 只擷取已開 dialog 的目前頁。Prepare forms 用 `read_context()` 固定當次 alias 表與來源，不宣告角色或檢查 kind。π defaults 在同一 capture 用 `resolve_path('$qubit.module.x180.waveform.length')` 產生具體元件路徑 expression，不可讀時留空。Prepare 整份替換 defaults，不是 reload。啟動還原 parsed input，`--clean` 可略過讀取；不還原 native run 或連硬體。共用 framework 不反向依賴 zcu_lab，依賴方向由 C16 約束；共用 mcp.core 只消費 GUI remote 的依賴邊界由 C13 約束。
+使用者於 2026-10-21 說：「對mcp來說，……沒有模式之分，就是兩種操作，tab或workflow」。
+GUI toggle 和目前 selection 不影響 RPC/MCP 的 target。`workflow_open(name)`
+回 opened tab_id，同名可多開。Form 與 Start 使用 tab_id，native controls、
+records 和 figures 使用明填的 run_id。Status 省略 run_id 回 catalog names 與
+全部 opened tabs，不只目前 tab。確切參數與回覆見 [measure MCP](../../lib/zcu_tools/mcp/measure/README.md#workflow-tools)。
 
-`mcp_servers/workflows.py` 啟動 stdio MCP attachment。Workflow tools 由同一份 app method declarations 產生，lifecycle tools 明確 launch／connect／disconnect。MCP 不持 Engine、hardware session、operation registry 或另一份 draft。Start 用當次 defaults 加 path/value batch，不讀 GUI draft；tunables edit 則提交同一 Host 的完整當前 input。Form batch preview 只在呼叫內求值，不提交。Engine journal 只記普通值，expression 留在 FormInput，過渡期不檢查 holder 或 GUI draft revision。
+使用者於 2026-10-21 裁定：「舊的workflow gui/mcp可以移植或刪除。」因此移除
+獨立 workflows app、launcher 與 MCP server。保留第二個殼會使同一 workflow
+具有兩份 session 與不同的控制入口。Headless commands 由 measure facet 直接
+提供，不需要舊 Window，也不經 pane 的 port 反向執行 application 命令。
+Hosting 與 pane dispose 的責任見 [[0067]]。
 
-Start／Resume 回 operation receipt，不代表 native acceptance。Pause／Stop 回控制請求，不代表 producer 已停止。Caller 明填 run_id，stale target 拒絕，不重送。一個 run 從 Start 到 terminal 只有一個 operation／handle。Pause 後 worker 返回但 handle 不 settle，保留本程序 RUN lease；Resume 重用原 handle。Start／Resume 不做 all-device live read，也不在 journal 記錄 device snapshot。這是本程序互斥，不是跨程序硬體仲裁。Run 與 operation 分工見 [[0062]]、[[0066]]。
+Start 省略/null batch 使用 shared parsed draft。明填 batch，包括 []，使用
+owner 當次 fresh captured defaults 加 edits。Form batch preview 則在 owner 的
+call-local candidate 上讀當前 draft，不提交。Description 與 values 來自同一
+candidate 和固定 capture，不下載 schema tree。Tunables Apply 的 [] 提交當前
+draft，只有 native publication 成功才接受 input/base。Expression 留在 FormInput，
+journal 只記普通值。Form 與 lowered cfg 的責任見 [[0065]]。
 
-每次 `env.run` 在同一 RUN lease 下、experiment callback 前，透過 DevicePort.capture_snapshot 讀取所有 connected drivers。Host 在 worker 重用 native capture helper，不更新 GUI State。讀取失敗會使 run failed，不執行該 callback，也不以 cache 代替。缺少 devices port 時，env.run 在 callback 前拋出 `MissingCapability('devices')`；真正零 device 的 host 明確提供 `{}` snapshot。Run constructor 要求 caller 傳入已捕捉的 device_snapshot，不另讀硬體。固定 snapshot 經 Run、AcquisitionEvidence 與 RunMetadata 原樣保存到 native `/device` JSON，後續 Save 不刷新。
+Start／Resume 回 pending operation receipt，不代表 native acceptance。
+Pause／Stop 只代表控制請求，不代表 producer 已停止。Pause 保留原 operation
+與 RUN lease，Resume 重用同一 handle。終局由原 owner delivery 交付。
+Busy close 回 false，不暗中 Stop、drain 或 disconnect。這只是本程序互斥，
+不是跨程序硬體仲裁。原生 run、device capture 與保存仍依 [[0062]]、[[0063]]。
 
-Device 設定使用完整 cfg。同步 `env.get_device_cfg(name)` 在 worker live 讀 get_info，回 detached 的實際 BaseDeviceInfo 子類 model。`yield from env.setup_device(name, cfg)` 透過 selected driver.info_model 驗完整 cfg，再呼叫 `driver.setup(cfg, stop_event=cancel_signal.event)`。Env、effect 與 DevicePort 傳遞同一個 engine-owned StopSignal，native driver 接其原有的 threading.Event，不另建 signal 或 event。Journal 記 name 與 cfg。`zcu_lab.workflows.common.devices.set_flux` 組合讀 cfg、共用 check_flux_unit、model_copy 改 value 與完整 setup；framework 不認識 flux 或單位。GUI／MCP plan 的 flux_unit 必填，Fake 明填 native，YOKO 明填 A 或 V。未知或斷線 device 在實際使用時指名報錯，driver limits 與 I/O 錯誤原樣傳播，不 retry 或 clamp。
+Readonly methods 允許 observer 查 status、Form preview、records 與 figures。
+Mutation 要通過 holder、busy 與 owner 的 RUN/Form 規則。Native run mismatch、
+lifecycle、Form path 與拒絕保留 code/message/reason/data；unexpected producer
+失敗仍是 controller_error。不因 timeout、斷線或傳輸失敗重試或回滾。
 
-Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自同一 Window 的 Plots，PNG 在 owner thread 由 shared renderer 讀原生 Figure。QtPlotHost 只收合 presentation，每次 owner 同步更新 artists，final refresh 立即 flush。MCP 驗證 PNG 並附 image content，不保存 preview 檔或序列化 Figure。Status-only 不渲染，terminal 圖保留到新 Start 或成功 close。Timeout／斷線不取消 run，也不證明命令沒有副作用。
+Records 直接投影 Engine facts，since 是嚴格大於的 commit_seq cursor。
+Figures 使用同一 retained Plots，status 與 names 不 render。Figure 在 owner
+以 shared renderer 產生 PNG，MCP 驗證 PNG 並附 image content，不在文字中保留
+base64，也不建立 preview 檔。Terminal records/figures 保留到 replacement 或 close。
 
-Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<workflow名>_<run_id>/`，native acquisition 與圖在 Database 輸出位置的 `workflows/<workflow名>_<run_id>/iter/`。兩側都保留完整 run_id，workflow 名中的 `/` 轉 `_`，命名規則見 [[0063]]。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
-
-使用者在 2026-10-12 裁定：「flux device我傾向用direct mode，而不是eval mode」。此裁定只用於 workflow 的 fixed-capture／direct defaults：新 Coherence flux_dev defaults 在建立時解析 alias，讓預設值指向當次 capture 的具體裝置，不隨後續 alias 修改變動。它不是所有表單的通則，也不取消 eval mode。
-
-共用 alias preset 與 Window 的 SessionServices 組裝已接入。FormState 透過共用 evaluator 解碼所有非 discriminator 的字串 expression。Coherence 新 flux_dev defaults 在固定 capture 解析 $flux_dev，成功就用 direct literal。缺 capture 或 unbound alias 保留 expression error input，公開 form 在該欄位指名 Invalid，不阻斷 panel。其他 forms 與合法 saved input 不改，eval 仍可用。flux_unit 必填，不預驗 device membership。RunSnapshot 與 native 保存使用當次 capture，alias 修改或 Save 不重新解析。泛型宿主擁有 source reload admission 與 input 保存還原；組合根注入每次重新 import 註冊清單的 loader builder。GUI/RPC/MCP 不提供 export commands，saved run 的轉換由各 workflow 獨立工具負責，見 [[0062]]。這些功能不授權硬體或真實資料。
+Workflow status 提供 pending_question 的 question_type/question/answer_schema
+固定 envelope；authored fields 只在 question 內。Engine/driver 擁有答案 schema
+與 JSON 轉換。Workflow answer 回原 operation_id，MCP 映射成 Start 的同一 pending
+handle。Engine.answer 是同步 execution segment，由 facet 排到 worker，保留同一
+operation／RUN lease 與 terminal delivery。RPC/UI owner thread 不 inline 推進
+generator，也不先回答再另呼叫 Resume。錯型保持 paused，不寫 Resumed；adapter
+只投影錯誤。Stop 純控制，retained Ask 另排 worker drain；控制 I/O 失敗仍 raise
+並完成 worker 收尾。終局 owner delivery 才釋放 RUN。這維持 [[0066]] 的 settlement。
 
 ## 事件與錯誤
 
@@ -104,4 +134,4 @@ Application state 和明確讀取是資料來源。EventBus 產生同步的 doma
 
 ## 代價與相關文件
 
-共用 transport 讓四個 app 不必維護四套 socket 與 framing，但 app 仍要各自維護 method 和 domain policy。固定工具與 live catalog 分開維護呈現與可達 method；這比只生成一份動態工具表多一層入口，換來常用判斷點的明確工具與低頻能力的即時發現。Wire 支援 push 不強迫 LLM client 訂閱，也不承諾 replay。Cfg 使用邊界見 [[0065]]，operation、cancel 與 shutdown 見 [[0066]]，GUI 程序組裝見 [[0064]]。
+共用 transport 讓三個 app 不必維護四套 socket 與 framing，但 app 仍要各自維護 method 和 domain policy。固定工具與 live catalog 分開維護呈現與可達 method；這比只生成一份動態工具表多一層入口，換來常用判斷點的明確工具與低頻能力的即時發現。Wire 支援 push 不強迫 LLM client 訂閱，也不承諾 replay。Cfg 使用邊界見 [[0065]]，operation、cancel 與 shutdown 見 [[0066]]，GUI 程序組裝見 [[0064]]。

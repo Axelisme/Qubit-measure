@@ -5,7 +5,7 @@ from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
-from tests.gui.app.workflows._start_fakes import StartHarness
+from tests.gui.app.measure.services._workflow_harness import StartHarness
 
 
 def test_capture_uses_cached_native_models_not_live_drivers(

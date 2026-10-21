@@ -147,7 +147,7 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(
     tab_a = add_tab(window, "tab-a", has_run=True, saved=False, ctrl=ctrl)
     add_tab(window, "tab-b", has_run=False, ctrl=ctrl)
 
-    tabs = window.findChild(QTabWidget)
+    tabs = window.findChild(QTabWidget, "experiment.tabs")
     assert tabs is not None
     # Request close on tab-a at index 0 via signal
     tabs.tabCloseRequested.emit(0)
@@ -193,7 +193,7 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
     )
     add_tab(window, "tab-1", has_run=True, saved=False, ctrl=ctrl)
 
-    tabs = window.findChild(QTabWidget)
+    tabs = window.findChild(QTabWidget, "experiment.tabs")
     assert tabs is not None
     # First request
     tabs.tabCloseRequested.emit(0)

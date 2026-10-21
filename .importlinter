@@ -145,7 +145,6 @@ source_modules =
     zcu_tools.gui.owner
     zcu_tools.gui.version_table
     zcu_tools.gui.app.measure
-    zcu_tools.gui.app.workflows
 forbidden_modules =
     zcu_tools.gui.app.analysis_project
 
