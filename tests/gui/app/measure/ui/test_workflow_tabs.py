@@ -176,10 +176,7 @@ def cleanup_window(
 
 
 def _workflow_tabs(window: MainWindow) -> WorkflowTabs:
-    tabs = window.findChild(WorkflowTabs)
-    if tabs is None:
-        raise LookupError("No workflow tabs mounted")
-    return tabs
+    return window.findChild(WorkflowTabs)
 
 
 def _workflow_pane(tabs: WorkflowTabs) -> WorkflowPane:
