@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.resources.ftf import FTFSettings
+from zcu_tools.simulate.adc import CavityAverageCache
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
@@ -107,6 +108,9 @@ def evolve_plans(
     a retained result. Density validation and propagation failures pass through
     unchanged; no normalization, clipping or solver correction is performed.
     No engine model source, drive phase, envelope origin or flux is rebuilt.
+    One ADC-owned flat-average cache (at most 64 MiB) serves all g/e points in
+    this composition, serially. Return and exception paths release its contents;
+    no owner is retained by the engine or long-lived acquisition source.
     """
     if not any(any(plan.cavity_drives) for plan in plans):
         return engine.evolve(
@@ -116,6 +120,41 @@ def evolve_plans(
             telemetry=telemetry,
             reuse_key=key,
         ), (key,)
+    cache = CavityAverageCache()
+    try:
+        pair = resonators(settings)
+        timelines = [
+            _CavityTimeline(
+                plan.batch,
+                segment_spans(plan.batch),
+                tuple(
+                    CavityDrive(facts.joint, pair, pulses, cache=cache)
+                    for pulses in plan.cavity_drives
+                ),
+                np.repeat(
+                    facts.source.initial_density[None], len(plan.batch.points), axis=0
+                ),
+                np.zeros((len(plan.batch.points), 2), dtype=np.complex128),
+            )
+            for plan in plans
+            if any(plan.cavity_drives)
+        ]
+        return _evolve_cavities(
+            engine, plans, facts, timelines, key=key, telemetry=telemetry
+        )
+    finally:
+        cache.clear()
+
+
+def _evolve_cavities(
+    engine: Engine,
+    plans: tuple[FTFTemplatePlan, ...],
+    facts: FTFModelFacts,
+    timelines: list[_CavityTimeline],
+    *,
+    key: bytes,
+    telemetry: bool,
+) -> tuple[EvolutionResult, tuple[bytes, ...]]:
     plain = tuple(plan.batch for plan in plans if not any(plan.cavity_drives))
     paths = []
     reuse_keys = []
@@ -134,22 +173,6 @@ def evolve_plans(
         reuse_keys.append(plain_key)
         output_points.append(result.points)
         output_densities.append(result.densities)
-    pair = resonators(settings)
-    timelines = [
-        _CavityTimeline(
-            plan.batch,
-            segment_spans(plan.batch),
-            tuple(
-                CavityDrive(facts.joint, pair, pulses) for pulses in plan.cavity_drives
-            ),
-            np.repeat(
-                facts.source.initial_density[None], len(plan.batch.points), axis=0
-            ),
-            np.zeros((len(plan.batch.points), 2), dtype=np.complex128),
-        )
-        for plan in plans
-        if any(plan.cavity_drives)
-    ]
     points = np.concatenate([plan.batch.points for plan in plans])
     steps = max(
         (len(spans) for timeline in timelines for spans in timeline.spans), default=0

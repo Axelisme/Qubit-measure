@@ -14,7 +14,6 @@ from pydantic import (
     AfterValidator,
     Field,
     PlainSerializer,
-    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -195,18 +194,44 @@ class DriveLine(Values):
 
 
 class ReadoutSource(Values):
-    """kind: pulse (default) or mux fixed compile capability.\n\n    gen_ch: one generator serving both resonators; input_per_gain: signed
+    """One incident source serving both physical resonators.
 
-    finite incident amplitude sqrt(photons/ns) per program gain. Carrier/envelope
-    and phase come only from the program, not this configuration.
+    gen_ch: nonnegative integer generator index, with no fixed upper bound.
+    input_per_gain: signed finite incident amplitude sqrt(photons/ns) per program
+    gain. Carrier, envelope and phase come only from the program. The containing
+    readout field selects pulse or mux capability; kind has been removed.
     """
 
-    # Omitting the pulse default preserves existing settings/replay identities.
-    kind: Literal["pulse", "mux"] = Field(
-        default="pulse", exclude_if=lambda value: value == "pulse"
-    )
     gen_ch: Index
     input_per_gain: Finite
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_kind(cls, value: object) -> object:
+        """Reject the removed kind selector before accepting source fields."""
+        if isinstance(value, Mapping) and "kind" in value:
+            raise ValueError("kind: removed; configure mux separately in readout.mux")
+        return value
+
+
+class MuxReadoutSource(ReadoutSource):
+    """Independent mux source and its bound receiver calibrations.
+
+    gen_ch: nonnegative integer generator, distinct from pulse and drive lines.
+    input_per_gain: signed finite incident sqrt(photons/ns) per program gain.
+    adc: 1..8 receivers with unique nonnegative ro_ch, disjoint from pulse ADC.
+    Indices have no fixed upper bound. Program tones select receiver subsets and
+    their output order; the physical resonator pair is shared with pulse.
+    """
+
+    adc: Annotated[tuple[Receiver, ...], Field(min_length=1, max_length=8)]
+
+    @model_validator(mode="after")
+    def unique_receivers(self) -> Self:
+        """Reject duplicate receiver channels within the mux source."""
+        if len({receiver.ro_ch for receiver in self.adc}) != len(self.adc):
+            raise ValueError("adc: duplicate receiver channel")
+        return self
 
 
 class Resonator(Values):
@@ -243,46 +268,34 @@ class Resonators(Values):
 
 
 class Readout(Values):
-    """drive: shared incident field and pulse/mux compile capability.
+    """Pulse readout with an optional independent mux path.
 
-    resonators: the physical pair, independent of tone count. adc: one receiver
-    object for pulse, or a nonempty list of at most eight receivers for mux.
-    Channel indices must be unique; program tone order determines output order.
+    drive: pulse incident source. adc: its single receiver object. resonators:
+    the physical pair shared by both paths, independent of tone count. mux:
+    optional mux source with 1..8 receivers; omission/None disables only mux.
+    Generator bindings and all receiver channels must be unique across paths.
     """
 
     drive: ReadoutSource
     resonators: Resonators
-    adc: Receiver | tuple[Receiver, ...]
-
-    @field_validator("adc", mode="before")
-    @classmethod
-    def parse_receivers(cls, value: object) -> Receiver | tuple[Receiver, ...]:
-        """Select the external container before validation to retain field paths.
-
-        A record validates as one receiver, sequences as a receiver tuple. The
-        kind validator then enforces which shape is legal for this readout.
-        """
-        if isinstance(value, (Mapping, Receiver)):
-            return Receiver.model_validate(value)
-        return TypeAdapter(tuple[Receiver, ...]).validate_python(value)
+    adc: Receiver
+    mux: MuxReadoutSource | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
-    def receiver_shape(self) -> Self:
-        """Reject kind/ADC shape mismatches and duplicate mux receiver routes."""
-        if self.drive.kind == "pulse":
-            if not isinstance(self.adc, Receiver):
-                raise ValueError("adc: pulse requires one receiver object")
-        else:
-            if not isinstance(self.adc, tuple) or not 1 <= len(self.adc) <= 8:
-                raise ValueError("adc: mux requires a list of 1..8 receivers")
-            if len({receiver.ro_ch for receiver in self.adc}) != len(self.adc):
-                raise ValueError("adc: duplicate receiver channel")
+    def separate_receivers(self) -> Self:
+        """Reject receiver channels shared by the pulse and mux paths."""
+        if self.mux is not None and any(
+            receiver.ro_ch == self.adc.ro_ch for receiver in self.mux.adc
+        ):
+            raise ValueError("mux.adc: duplicate receiver channel with readout.adc")
         return self
 
     @property
     def receivers(self) -> tuple[Receiver, ...]:
-        """Return all bound receivers as an immutable tuple, including pulse."""
-        return (self.adc,) if isinstance(self.adc, Receiver) else self.adc
+        """Return all bound ADCs, pulse first followed by configured mux order."""
+        return (self.adc,) + (() if self.mux is None else self.mux.adc)
 
 
 class FluxoniumTruncation(Values):
@@ -363,8 +376,8 @@ class FTFSettings(Values):
     format='zcu.ftf', version=2 (integer only). chip supplies physical values;
     dc_bias supplies startup/live DC calibration; drive_lines binds charge
     or small-signal flux generators (omitted/empty disables). readout serves two
-    resonators with one drive and one or more ADCs. numerics supplies
-    truncations/solver/seed.
+    resonators with a pulse source/receiver and an optional mux source/receivers.
+    numerics supplies truncations/solver/seed.
     Channel counts derive from maximum configured indices plus one. Unknown
     fields, including large-amplitude flux controls and v1 aliases, are rejected.
     No model truth enters ordinary GUI/MCP metadata.

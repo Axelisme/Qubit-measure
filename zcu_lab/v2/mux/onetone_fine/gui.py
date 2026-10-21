@@ -32,12 +32,12 @@ from zcu_lab.v2._support.resonator import (
     fit_resonance,
     route_matched_delay,
 )
-from zcu_lab.v2.mux.onetone.core import (
+from zcu_lab.v2.mux.onetone_fine.core import (
     MuxOnetoneCfg,
     MuxOnetoneExp,
     MuxOnetoneResult,
 )
-from zcu_lab.v2.mux.onetone.form import make_form
+from zcu_lab.v2.mux.onetone_fine.form import make_form
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAnalyzeParams
 
 MuxOnetoneRunResult: TypeAlias = RunRecord[MuxOnetoneCfg, MuxOnetoneResult]

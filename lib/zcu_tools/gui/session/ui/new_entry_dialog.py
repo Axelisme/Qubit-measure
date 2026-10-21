@@ -82,10 +82,10 @@ class NewEntryDialog(QDialog):
 
         ctrl supplies captures and the library write; templates is the
         persistent catalog by template id; arb_waveforms lists the arb asset
-        names offered to arb data fields at each capture. The dialog supplies
-        no Template bindings, so templates must not require placeholders. Missing
-        bindings raise ValueError while building the first form or selecting
-        another template. ctrl must provide a readable working-point capture;
+        names offered to arb data fields at each capture. Template placeholders
+        bind to resolved targets of same-named aliases in that capture. Missing
+        or unresolved aliases show a binding error and disable Create; choosing
+        another template rebuilds the form. ctrl must provide a readable capture;
         FailedPreconditionError from read_context is shown in the dialog.
         Other capture and arb_waveforms provider failures
         propagate. dialog_presenter shows Create failures. A template whose
@@ -170,9 +170,21 @@ class NewEntryDialog(QDialog):
         except FailedPreconditionError as exc:
             self._show_error(str(exc))
             return
+        bindings = {
+            row.alias: row.resolved
+            for row in parameters.resolved_aliases()
+            if row.resolved is not None
+        }
+        missing = self._templates[template_id].placeholder_names() - bindings.keys()
+        if missing:
+            names = "、".join(f"{{{name}}}" for name in sorted(missing))
+            self._show_error(
+                f"template 需要綁定 {names}，請先在 Aliases 設定同名 alias"
+            )
+            return
         entry = new_library_entry(
             parameters,
-            Template(template_id),
+            Template(template_id, bindings=bindings),
             self._templates,
             arb_names=self._arb_waveforms.list_data_keys(),
         )

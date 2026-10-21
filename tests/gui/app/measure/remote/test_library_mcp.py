@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.cfg_model import ConstWaveformCfg
+from zcu_tools.cfg_model import (
+    ConstWaveformCfg,
+    MuxReadoutSpec,
+    MuxReadoutTone,
+    TemplateDef,
+)
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui.app.measure._templates import TEMPLATES
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
-from ._helpers import Fixture, mcp_client
+from ._helpers import Fixture, call, mcp_client, open_client
 
 
 @pytest.fixture()
@@ -124,6 +130,110 @@ def test_ml_get_index_and_named_cfg_are_read_only(library_client):
             },
         )
     assert sorted(waveforms(fx)) == ["Q1.waveforms.seed"]
+
+
+MUX_TONES = [{"freq": 100.0, "gain": 0.2, "ro_ch": 0}]
+
+
+@pytest.fixture()
+def component_registry():
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        yield
+        assert registry_state() == installed
+    finally:
+        restore_registry(before)
+
+
+@pytest.fixture()
+def role_socket(qapp, tmp_path, component_registry):
+    template = TemplateDef(
+        MuxReadoutSpec,
+        "Synthetic mux readout",
+        {"gen_ch": 0, "nqz": 1, "mixer_freq": 0.0, "length": 1.0, "ro_length": 1.0},
+    )
+    fx = Fixture(project_root=str(tmp_path), templates={"mux:blank": template})
+    fx.ctrl.context_control.add_component("R1", "fake/drive/a", {})
+    fx.start()
+    sock = open_client(fx.service.port)
+    try:
+        yield fx, sock
+    finally:
+        sock.close()
+        fx.stop()
+
+
+def test_ml_create_from_role_applies_edits_before_validation(role_socket):
+    fx, sock = role_socket
+    reply = call(
+        sock,
+        "context.ml_create_from_role",
+        {
+            "role_id": "mux:blank",
+            "name": "R1.readout.mux_readout",
+            "edits": [
+                {"path": ["tones"], "value": MUX_TONES},
+                {"path": ["length"], "value": {"expr": "0.25 + 0.5"}},
+            ],
+        },
+    )
+    assert reply["ok"] is True, reply
+    assert reply["result"] == {"created": "R1.readout.mux_readout"}
+    written = fx.ctrl.read_context().library.module_spec("R1.readout.mux_readout")
+    assert written.model_dump(mode="json")["tones"] == [
+        MuxReadoutTone.model_validate(tone).model_dump(mode="json")
+        for tone in MUX_TONES
+    ]
+    assert written.model_dump(mode="json")["length"] == 0.75
+
+
+@pytest.mark.parametrize(
+    ("edits", "error_path"),
+    [
+        (None, ["tones"]),
+        (
+            [
+                {"path": ["tones"], "value": MUX_TONES},
+                {"path": ["missing"], "value": 1},
+            ],
+            ["missing"],
+        ),
+        (
+            [
+                {"path": ["tones"], "value": MUX_TONES},
+                {"path": ["length"], "value": -1.0},
+            ],
+            ["length"],
+        ),
+        ([{"path": ["tones"], "value": []}], ["tones"]),
+        ([{"path": ["tones"], "value": {"freq": 100.0}}], ["tones"]),
+    ],
+    ids=[
+        "required-list-missing",
+        "unknown-path",
+        "invalid-value",
+        "invalid-form",
+        "invalid-structure",
+    ],
+)
+def test_ml_create_from_role_rejects_invalid_input_without_writing(
+    role_socket, edits, error_path
+):
+    fx, sock = role_socket
+    before = fx.ctrl.read_context().library.document()
+    params = {"role_id": "mux:blank", "name": "R1.readout.mux_readout"}
+    if edits is not None:
+        params["edits"] = edits
+    reply = call(sock, "context.ml_create_from_role", params)
+    assert reply["ok"] is False, reply
+    error = reply["error"]
+    assert error["code"] == "invalid_params"
+    assert error.get("data") is not None, error
+    assert [item["path"] for item in error["data"]["errors"]] == [error_path]
+    assert all(item["message"] for item in error["data"]["errors"])
+    assert fx.ctrl.read_context().library.document() == before
 
 
 def test_ml_roles_and_create_use_gui_role_defaults(library_client):

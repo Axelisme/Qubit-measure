@@ -1,4 +1,4 @@
-# Mux qubit frequency
+# Mux two-tone spectrum
 
 **Readers:** operator, agent. Run the mux qubit frequency sweep from the GUI or MCP and read its results.
 
@@ -6,7 +6,7 @@
 
 ## GUI setup
 
-Bind `$mux` to a MuxGroup, then open `mux/freq` from **New Tab**.
+Bind `$mux` to a MuxGroup, then open `mux/twotone_spectrum` from **New Tab**.
 The captured parameter source must contain every qubit and its matching resonator
 in readout order. Readout references the module slot `$mux.module.readout` when
 present, preserving the library's tones and scalar settings. Use a mux-family
@@ -78,7 +78,7 @@ Reset captures current parameters and rebuilds initial values.
 
 MCP field paths use original tone positions, for example
 `("tones", 0, "drive", "gain")`. The integer selects the full tone list.
-See the [mux recipe guide](../../../recipes/mux-guide.md#mux_freq) for typed overrides,
+See the [mux recipe guide](../../../recipes/mux-guide.md#mux_twotone_spectrum) for typed overrides,
 parameter origins and explicit writeback decisions.
 
-The MCP recipe is `mux_freq`.
+The MCP recipe is `mux_twotone_spectrum`.

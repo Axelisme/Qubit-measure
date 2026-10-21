@@ -70,6 +70,8 @@ GUI／Notebook 共用的模擬參數檔與 startup 範例放在 `zcu_lab/simulat
 
 2026-10-16，使用者要求：「比如components我希望除了基礎原件，其他的都是獨立的子模塊檔。」對上述拆分與環境搬移確認：「可以移到zcu_lab/simulation_envs/中嗎？2同意」。
 
+Workflow 使用的實驗在其 `zcu_lab/v2/<family>/<exp>/` 目錄內以 `workflow_helper.py` 與 `core.py` 並列，放該實驗給 workflow 用的 acquisition helper；只限 workflow 實際使用的實驗。2026-10-21 使用者裁決：「可以是獨立檔案與core並列來方便維護」、「不要每個實驗，workflow需要的實驗就好」。Recipe 以 `@recipe` 裝飾函式並由 `zcu_lab/recipes` 的顯式清單註冊，與 `@workflow` 同形；三種腳本（startup、recipe、workflow）的作者慣例見 `zcu_lab/POLICY.md`（待實作 task 補寫）。
+
 Kickstart 腳本放在 `zcu_lab/kickstart/<env>/`，只建 entry、元件參數與 alias，不連 SoC 與 device。每個 startup 腳本（模擬環境與 kickstart）各自擁有同目錄的 `entry-template.yaml`，腳本之間不共用範本：改一份範本只影響用該腳本新建的 entry。2026-10-21，使用者裁決：「3我希望startup腳本間獨立，而不是過早共用template」；目錄名：「既然都叫kickstart了，那我認為可以將envs/FTF改成kickstart/FTF」。
 
 ### Library 分組與 module slot
@@ -101,7 +103,7 @@ Framework resources、session 與 program 不擁有這些關係。既有表單�
 Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.resonators`。
 一般 mux 與 FTF 表單在 `$mux.module.readout` 存在時引用 library，保留其完整 tones 與 scalar 設定。
 Mux 缺 slot 時用 blank 範本加 group tones；FTF 八張缺 slot 用 blank 範本，rb 保持 Invalid。
-Mux/onetone 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
+Mux/onetone_fine 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
 使用者於 2026-10-20 裁定：「不只twotone，應該說除了onetone與readout optimize/mist等本身就在處理readout相關，其他實驗的readout預設值請優先使用ref。」
 Framework 不認得 group/mux 或 resonators，
 也不新增 list alias、group registry、RPC 或保存格式。

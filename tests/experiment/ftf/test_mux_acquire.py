@@ -8,6 +8,7 @@ from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
+from zcu_tools.resources.ftf.schema import MuxReadoutSource
 
 from tests.experiment._ftf_templates import settings
 from tests.resources._ftf_data import mux_document
@@ -29,13 +30,17 @@ def jumping_settings(mux):
     receiver = numeric.readout.receivers[0].model_copy(update={"gain": 1e12})
     readout = numeric.readout.model_copy(
         update={
-            "drive": numeric.readout.drive.model_copy(
-                update={"kind": "mux" if mux else "pulse"}
-            ),
-            "adc": (
-                tuple(receiver.model_copy(update={"ro_ch": ch}) for ch in (4, 1))
+            "adc": receiver,
+            "mux": (
+                MuxReadoutSource(
+                    gen_ch=1,
+                    input_per_gain=1.0,
+                    adc=tuple(
+                        receiver.model_copy(update={"ro_ch": ch}) for ch in (4, 1)
+                    ),
+                )
                 if mux
-                else receiver
+                else None
             ),
         }
     )
@@ -46,7 +51,7 @@ def jumping_program(env, mux, *, rounds=1):
     """Real QICK single/mux readout, 64 shots, identical carrier and ADC windows."""
     if mux:
         readout = MuxReadoutCfg(
-            gen_ch=0,
+            gen_ch=1,
             nqz=1,
             mixer_freq=6000.0,
             length=0.020,
@@ -152,6 +157,59 @@ def test_deferred_getter_keeps_its_round_and_does_not_advance_mean_stream(mux):
         repeat.devices.close_all_devices()
 
 
+@pytest.mark.parametrize("mux_gen, channels", [(1, (4, 1)), (7, (9, 8))])
+def test_one_environment_acquires_mux_then_pulse_without_reconfiguration(
+    mux_gen, channels
+):
+    numeric = settings().with_telemetry(enabled=False)
+    configured = parse_ftf(mux_document(channels))
+    assert configured.readout.mux is not None
+    numeric = numeric.model_copy(
+        update={
+            "readout": configured.readout.model_copy(
+                update={
+                    "mux": configured.readout.mux.model_copy(update={"gen_ch": mux_gen})
+                }
+            )
+        }
+    )
+    env = ftf(numeric, min_round_duration_s=0)
+    try:
+        mux = MuxReadoutCfg(
+            gen_ch=mux_gen,
+            nqz=1,
+            mixer_freq=6000,
+            length=0.020,
+            ro_length=0.026,
+            tones=[
+                MuxReadoutTone(ro_ch=ch, freq=6000 + 80 * i, gain=0.1)
+                for i, ch in enumerate(channels)
+            ],
+        )
+        pulse = PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=0,
+            nqz=1,
+            freq=6000,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.020),
+            ro_length=0.026,
+        )
+        for module, expected_channels in ((mux, channels), (pulse, (0,))):
+            prog = ModularProgramV2(
+                env.soccfg, ProgramV2Cfg(reps=2), modules=[module.build("readout")]
+            )
+            result = prog.acquire(env.soc, progress=False)
+            assert tuple(prog.ro_chs) == expected_channels
+            assert len(result) == len(expected_channels)
+            assert all(np.isfinite(iq).all() for iq in result)
+            shots = raw_shots(prog)
+            assert all(iq.shape == (2, 1, 2) for iq in shots)
+            assert any(np.any(iq != 0) for iq in shots)
+    finally:
+        env.devices.close_all_devices()
+
+
 @pytest.mark.parametrize("channels", [(4, 1), (1,)])
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_yaml_mux_program_produces_each_tones_raw_shots(channels, mode):
@@ -162,7 +220,7 @@ def test_yaml_mux_program_produces_each_tones_raw_shots(channels, mode):
     env = ftf(settings)
     try:
         module = MuxReadoutCfg(
-            gen_ch=0,
+            gen_ch=1,
             nqz=1,
             mixer_freq=6000.0,
             length=0.020,

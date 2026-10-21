@@ -62,7 +62,7 @@ def test_receiver_configuration_restored_to_exact_content_hits_old_solver():
         original = source.readout
         source.readout = replace(
             original,
-            receivers=tuple(replace(r, gain=2 * r.gain) for r in original.receivers),
+            pulse=replace(original.pulse, gain=2 * original.pulse.gain),
         )
         source.open_acquire(request()).sample_round(snapshot(), 0)
         assert source.readout_cache.builds == 2
