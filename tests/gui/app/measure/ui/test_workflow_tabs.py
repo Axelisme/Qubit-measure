@@ -141,7 +141,7 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     _shot(driver, tmp_path, "03-first-tab")
     assert driver.tabs("synthetic (1)").current == "synthetic (1)"
     assert driver.tabs("Plan").captions == ("Plan", "Tunables", "Ask")
-    driver.enter_text("Cycles", "7")
+    driver.enter_text(value="7", object_name="form.input.cycles")
     _shot(driver, tmp_path, "04-plan-edited")
     _open(driver)
     _shot(driver, tmp_path, "05-second-tab")
@@ -201,7 +201,7 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     _shot(driver, tmp_path, "08-paused-close-refused")
     assert driver.tabs("synthetic (1)").captions == ("synthetic (1)", "synthetic (2)")
     driver.select_tab("Tunables")
-    driver.enter_text("Gain", "0.5")
+    driver.enter_text(value="0.5", object_name="form.input.gain")
     driver.click("Apply")
     _shot(driver, tmp_path, "09-tunables-applied")
     assert driver.observe(object_name="workflow.message").text == "Applied revision 1"
