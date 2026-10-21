@@ -469,6 +469,10 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         primary supplies physical G/E mapping and fitted populations/centers.
         options sets the radius policy, in the same IQ units. Return the
         classification diagnostic and publish it as figure_name in plots.
+        Classification uses nearest-center regions and radius, not the primary
+        histogram threshold. Solving the fitted preparation matrix removes its
+        inferred mixing; poor primary histogram fits make this correction
+        unreliable. It is not the empirical prepared-label assignment score.
         cfg=None is supported.
 
         Radius optimization, classification and confusion-matrix solving wrap

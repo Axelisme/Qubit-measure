@@ -105,7 +105,9 @@ def singleshot_ge_analysis(
     ----------
     signals : NDArray
         Complex array of shape (2, N) containing measurement signals.
-        First row should contain ground state signals, second row excited state signals.
+        Rows are predominantly ground/excited preparations, not necessarily pure
+        states. The empirical equal-weight assignment score includes preparation
+        mixing and is not latent pure-state readout fidelity.
     angle : float, default=None
         if given, use this angle for rotation, ignore backend
     backend : Literal["center", "pca"], default="pca"
@@ -121,7 +123,10 @@ def singleshot_ge_analysis(
     Returns
     -------
     tuple[float, NDArray, GE_FitResult]
-        Assignment fidelity, refined preparation populations and calibration.
+        Empirical prepared-label assignment at the best histogram edge, refined
+        model populations and calibration. The threshold is in rotated ADC units.
+        Model populations and their post correction are unreliable when histogram
+        quality is poor, even if empirical assignment is high.
 
     Raises
     ------
