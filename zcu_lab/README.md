@@ -4,6 +4,8 @@
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
 
+使用者擴充入口見 [tutorial](tutorial/README.md)，程式碼規則與檢查方式見 [POLICY](POLICY.md)。
+
 `startup.py` 是 Measure composition 注入的預設腳本。它在 user cache 的 `gui/measure-session.json` 保存自己的 session 紀錄，不使用 repo config 或 cwd。啟動依序嘗試 SoC、各 device、entry／point，再開帶 authored input 的 tabs。每項失敗寫 log，device 失敗保留未連線列，entry／point 失敗就跳過 tabs，不等之後補來源。最後狀態列列出 restored／failed／skipped 數。正常關閉時，腳本在 driver 關閉前讀取當時的狀態並原子寫回。
 
 模板佔位名只由 lab 表單在 `Template.bindings` 明填，腳本不保存或恢復模板綁定。Setup 與每個 point 各有自己的 `aliases.yaml`。恢復 point 自然載入該表，這份 cache 不保存 alias、硬體設定或量測資料。`--clean` 不執行腳本，`--script` 完全取代預設腳本。
@@ -19,6 +21,8 @@
 `MuxGroupSchema` 以 `group/mux` 註冊於同一 ComponentRegistry。必填 resonators 保存 1 至 8 個有序名稱，取代 members，不留相容讀取。選填 qubits 必須等長且不重複。提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在、kind 正確，並逐項要求 qubits[i].resonator 等於 resonators[i]。錯誤指名欄位、index 與實際值。Resonators 不去重；沒有 qubits 的 onetone 保留手填 readout 與缺來源的既有政策。
 
 Scalar alias `mux=MG12` 讓 mux adapter 從固定 capture 的 `$mux.module.readout` 取得 Readout 初值。完整 tones[i] 綁定 resonators[i]。active_tones 只選擇量測哪些原始序號，不改綁定或保存 resonators。Module owner 是 group，不是第一個 resonator；重排不會改 owner。Framework 不知道 group schema，也不需要 list alias。定位與 writeback capture 邊界見 [ADR-0072](../docs/adr/0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。
+
+## Component 欄位單位
 
 元件型別別名在既有 Field 附靜態 `json_schema_extra` 單位資料。Frequency 用 MHz，Duration 用 us，Energy 用 GHz，PumpPower 用 dBm。Qubit 的 flux_half／flux_period／flux_int 依 `general.ext.flux_unit` 解讀。Global flux 原值存於 `general.ext.flux_value`。Local 的 `Q1.flux_unit` 與 JPA 的 `J1.flux_unit` 各自維持原契約。Flux 不標固定單位。未宣告單位不代表無因次。Resources 以公開路徑查詢提供固定欄位的靜態 unit。GUI 的 WB 列只用查詢結果加標籤，不換算。Ext 與 flux 類欄位不顯示單位；run context 不消費這些標記。
 
