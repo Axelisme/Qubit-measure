@@ -1,6 +1,8 @@
 # Segment evolution
 
-**Last updated:** 2026-10-20, retained-graph RWA density support and two-tone Floquet k=0 numerical ownership
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.

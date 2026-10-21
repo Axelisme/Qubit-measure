@@ -1,6 +1,8 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-20，儀器角色 helpers 由使用者套件擁有
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。儀器 driver、DeviceManager、並發與安全限制速查。
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -36,21 +38,21 @@ DeviceInfo = Union[
 
 同一個 driver 在一個 `DeviceManager` 中只接受一個名字。`register_device` 遇到已用其他名字登記的同一實例時拋出 `ValueError`，registry 保留原狀。同名登記仍發出 warning 並覆寫該名稱，可以登記原 driver 或另一個 driver。不同名稱可以各自登記不同 driver。
 
-Manager close 尚未完成時，`register_device` 拒絕登記該 driver，拋出 `DeviceCloseInProgressError`。即使原名稱已被 drop 或被另一個 driver 覆寫，也不能重新登記正在 close 的 driver。
+Manager close 尚未完成時，`register_device` 拒絕登記該 driver，拋出 `DeviceCloseInProgressError`。此限制持續到 close 完成，即使原名稱已被 drop 或被另一個 driver 覆寫。
 
 ## 活動觀察
 
-Driver 在 `device_operation` 內記錄自己的兩項活動資訊。`DeviceActivity.in_operation` 初始為 `False`，最外層操作開始後為 `True`，巢狀操作返回不會提早清除。`last_finished_monotonic` 初始為 `None`，最外層操作成功或失敗結束時更新為 `time.monotonic()` 的秒數。Busy rejection 不改活動資訊。
+Driver 在 `device_operation` 內記錄自己的兩項活動資訊。`DeviceActivity.in_operation` 初始為 `False`，最外層操作開始後為 `True`，最外層操作結束時才清除。`last_finished_monotonic` 初始為 `None`，最外層操作成功或失敗結束時更新為 `time.monotonic()` 的秒數。Busy rejection 不改活動資訊。
 
-`DeviceManager.activity_snapshot()` 回傳目前登記名字到 `DeviceActivity` 的 dict，每台一筆。`BaseDevice.activity` 提供同一種只讀觀察。這些快照不讀硬體、不等待 operation 或 I/O lock，也不呼叫活動 callback。沒有 consumer 時不累積歷史。回傳 dict 與 driver 分離，值不可修改。
+`DeviceManager.activity_snapshot()` 回傳目前登記名字到 `DeviceActivity` 的 dict，每台一筆。`BaseDevice.activity` 提供同一種只讀觀察。快照直接取樣記憶體中的當前欄位，獨立於硬體 I/O、operation lock 與 callback。快照只保存當下值。回傳 dict 與 driver 分離，值為唯讀。
 
 任意 thread 都可讀取活動快照，包括正在操作的 thread。Registry 名單在 manager 鎖內複製，活動欄位在鎖外分別取樣，不保證跨欄位或跨 driver 原子一致。時間只與同一 process 的 monotonic clock 比較，不當作 wall-clock 時間。GUI 定時讀取這些資訊作顯示，不用活動快照決定 admission、取消或 settlement。
 
 ## 實驗控制與 acquisition snapshot
 
-實驗 cfg 自行宣告 `dev`，只保存角色到 device 名稱的 mapping。`ExpCfgModel` 不宣告這個欄位。Core 在實際使用時從 `RunContext.devices[name]` 取得 driver，不預查名稱，也不對全部裝置自動 setup。
+實驗 cfg 自行宣告 `dev`，保存角色到 device 名稱的 mapping。Core 在實際使用時從 `RunContext.devices[name]` 取得 driver，明確設定所需裝置。
 
-`DeviceInfo` 描述設定與讀回結果，不提供實驗旋鈕 setters。使用者套件 `zcu_lab.v2._support.device` 的 `set_flux`、`set_rf_frequency`、`set_rf_power`、`set_output` 直接操作已選取的 driver。Flux 明示 A、V 或 native，helper 不切模式、步長或 output。同一使用者模組的 `check_flux_unit(cfg, unit)` 只比對 Info 儲存的 `value_unit`，不換算、不讀硬體、不修改 cfg。YOKO 和 Fake 以外的 Info 不支援 flux 設定。
+`DeviceInfo` 描述設定與讀回結果，driver 提供儀器操作。Flux 與 RF 等實驗角色、單位檢查與操作 helper 由使用者套件擁有。Flux helper 明示 A、V 或 native，以 Info 的 `value_unit` 檢查單位，保留目前 mode、步長與 output。YOKO 與 Fake 的 Info 支援此 flux 設定。Helper 的 owner 與使用入口見 [experiment 的 Device 操作邊界](../experiment/README.md#device-操作邊界)。
 
 GUI 在既有操作 lease 後、core 前，Notebook 在建立 caller-owned `RunContext` 後、core 前，各讀所有 connected drivers 一次。固定 snapshot 進入 `RunMetadata.device_snapshot`，Save 不刷新硬體。`DeviceManager.setup_devices` 與 GUI 手動設定仍是獨立的明確操作。
 
@@ -106,9 +108,9 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 - `_op_lock`：保護 public mutating operation（`setup`、`close`、`set_*`、`output_*`、`IQ_*`）。入口一律用 `@device_operation`，non-blocking acquire，忙碌時 fail-fast。
 - `_io_lock`：普通 `threading.Lock`，只保護 base `write` / `query` / `close` 這類單次 session transaction。driver getter / `get_info()` 不手動取得 `_io_lock`；它們只透過每一次 `query()` 間接取得短 mutex。
 
-**不變式**：同一 device 的兩個 mutating operation 不會交錯；同一 thread 的 nested setter 透過 `_op_lock` 的 RLock 重入。read-only getter 不拿 `_op_lock`，也不自行擴大 `_io_lock` 範圍，因此可在長 ramp 的 sleep 間插入讀取，也可能看到 ramp 中途狀態。這是刻意設計，讓 GUI device dialog 不會因實驗中的長 setup/ramp 卡死。
+**不變式**：同一 device 的 mutating operation 彼此互斥；同一 thread 的 nested setter 透過 `_op_lock` 的 RLock 重入。Read-only getter 只在每次 `query()` 取得短 `_io_lock`，因此可在長 ramp 的 sleep 間插入讀取，也可能看到 ramp 中途狀態。GUI device dialog 可在長 setup/ramp 期間讀回資料。
 
-**mutating operation — fail-fast 語義**：所有套 `@device_operation` 的 public mutating operation 使用 **non-blocking acquire**。若另一執行緒正持 `_op_lock`（例如 ramp 進行中），立即拋出 `DeviceBusyError`，**不排隊、不等待**。setup 是長時間操作，靜默排隊難以察覺，快速失敗讓呼叫端有機會向用戶回報衝突。
+**mutating operation — fail-fast 語義**：所有套 `@device_operation` 的 public mutating operation 使用 **non-blocking acquire**。若另一執行緒正持 `_op_lock`（例如 ramp 進行中），立即拋出 `DeviceBusyError`，由 caller 處理這次衝突。setup 是長時間操作，靜默排隊難以察覺，快速失敗讓呼叫端有機會向用戶回報衝突。
 
 **`is_busy() -> bool`**：non-blocking try-acquire `_op_lock` / 立即 release 的狀態探測，回傳 True 表示另一執行緒正在執行 mutating operation。注意兩點：(a) 這是 TOCTOU 快照，僅供顯示/診斷，**不可**用於「先查再做」控制流（控制流靠捕捉 `DeviceBusyError`）；(b) 持 `_op_lock` 的執行緒自己呼叫 `is_busy()` 會回 False（RLock 重入成功）。
 
@@ -120,13 +122,13 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 
 **為何用 RLock（不可用 plain Lock）**：公開入口在同一 thread 上**巢狀**呼叫彼此——`setup() → _setup() → set_current()/set_voltage() → set_output() → write()`、以及 `get_voltage()/get_info() → get_mode() → query()`。plain Lock 會在第二層自我死鎖；RLock 允許同 thread 重入。
 
-**鎖覆蓋範圍**：`@device_operation` 覆蓋每個子類的 public mutating 出口（不只 `setup`）。read-only getter 不使用 decorator，也不手動包 `_io_lock`。私有 helper（`_set_voltage_smart`、`_set_value_smart`、`_get_level` 等）不自行拿 `_op_lock`，因為它們只從已持 `_op_lock` 的公開方法呼叫。
+**鎖覆蓋範圍**：`@device_operation` 覆蓋每個子類的 public mutating 出口。Read-only getter 透過 `query()` 取得短 `_io_lock`。私有 helper（`_set_voltage_smart`、`_set_value_smart`、`_get_level` 等）沿用公開方法已持有的 `_op_lock`。
 
 **呼叫端行為**：GUI `gui/session/services/device.py` 的 worker 呼叫 `driver.setup()`；若拋出 `DeviceBusyError`，錯誤訊息（含 device 名與 address）直接透過 `_on_setup_failed` 呈現給用戶，不做 retry/swallow。`device/manager.py` 的 `setup_devices` 呼叫路徑同理，`DeviceBusyError` 會直接炸掉實驗（預期行為）。
 
 **manager 鎖的職責邊界**：`DeviceManager._lock` 只守 **registry dict**（哪個名字對應哪個實例）。device 操作在 manager 鎖外執行。兩條 thread 用同一名字 `get_device("flux")` 取得**同一個**實例後，mutating operation 由該 instance 的 `_op_lock` 序列化；getter 只會在實際 `query()` 時等待 `_io_lock` 的短 I/O transaction。
 
-**持鎖期間禁止 GUI 回呼**：持鎖區段內不得 emit Qt signal 或觸發 GUI 回呼（現狀本來就沒有，維持），以免鎖內等待主執行緒造成跨鎖等待。
+**GUI 回呼順序**：釋放鎖後才 emit Qt signal 或觸發 GUI 回呼，避免鎖內等待主執行緒造成跨鎖等待。
 
 ---
 
@@ -202,14 +204,14 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 **安全上限**：`YOKOGS200Info` 依 mode 驗證 `value` 不超過設定上限；GUI、RPC 更新與 saved setup 共用這項驗證。Driver 在 setup 採用上限，後續直接 setter 也遵守，超過會 `RuntimeError`。上限可依 sample 設定，不代表儀器或線路能力的自動判定。
 
-**Smart ramp**：`set_voltage` / `set_current` 不直接跳值，而是以 `_rampstep` 為實際步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-3 V, current: 1e-6 A}`。線性 stepping、progress 與 `stop_event` check 由 module-private shared ramp helper 處理；mode/output/safety guard 保留在 YOKO public setter 與 direct setter。YOKO ramp 保留起始點也下發一次的硬體 I/O/timing 行為。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
+**Smart ramp**：`set_voltage` / `set_current` 以 `_rampstep` 為實際步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-3 V, current: 1e-6 A}`。線性 stepping、progress 與 `stop_event` check 由 module-private shared ramp helper 處理；mode/output/safety guard 保留在 YOKO public setter 與 direct setter。YOKO ramp 保留起始點也下發一次的硬體 I/O/timing 行為。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
 
 **模式切換**：`set_mode(mode, rampstep=None, *, force=False)` 若當前 level 非零會擋下來，需 `force=True`。切完自動換 `_rampstep` 為新模式的預設（或呼叫端給的）。
 
 **`_setup`**（base 已完成地址/型別檢查，不需 `typeguard.check_type`）：
 
-1. 若裝置 output 為 off 而 cfg 要 on → `warnings.warn`（不自動開，怕暴衝）。
-2. **不自動切模式**：cfg mode 與當前不一致直接 `RuntimeError`，明示「切模式要手動先歸零」。
+1. 若裝置 output 為 off 而 cfg 要 on，發出 `warnings.warn` 並維持 off，避免暴衝。呼叫端須明確開啟 output。
+2. cfg mode 與當前不一致時拋出 `RuntimeError`。呼叫端須先手動歸零，再明確切換模式。
 3. 採用 cfg 的 rampstep。
 4. 照 mode 呼叫 `set_voltage` / `set_current`（smart ramp，透傳 `stop_event`）。
 
@@ -309,7 +311,7 @@ snapshot = manager.get_all_info()
    - 必要時加範圍檢查、smart ramp、安全限制；smart ramp 可重用 module-private helper，但 device-specific mode/output/safety guard 仍留在 driver shell。
    - 實作 `_setup(cfg: XxxInfo, *, progress: bool = True, stop_event: Optional[threading.Event] = None)` 與 `get_info() -> XxxInfo`。
    - 若有 ramp loop：每步前 check `stop_event and stop_event.is_set()`，中止時 `break`。
-   - **不需要** `typeguard.check_type`；base `setup()` 已完成型別/地址檢查。
+   - 由 base `setup()` 統一完成型別與地址檢查。
 4. `info_model = XxxInfo` 必須設定正確（class definition guard 先檢查，`BaseDevice.setup` 再用 `isinstance(cfg, self.info_model)` 做 runtime sanity check）；`XxxInfo.type` literal 供序列化辨別用。
 5. 在 `__init__.py` 的 `DeviceInfo` Union 加入 `XxxInfo`，並加進 `__all__`。
 6. 在使用端 `manager.register_device(name, instance)`。
@@ -319,7 +321,7 @@ snapshot = manager.get_all_info()
 ## 已知侷限 / 維護提醒
 
 - 預設 `BaseDevice._open_session()` 直接 import `pyvisa`（lazy import）；執行環境需先裝 `pyvisa` 與對應 VISA backend（NI-VISA / pyvisa-py）。`FakeDevice` override `_open_session()`，不需要 pyvisa。
-- manager 不在 destructor 關閉設備；建立者明確執行 disconnect，成功後才關閉其 ResourceManager。
+- 建立者明確執行 disconnect，成功後才關閉其 ResourceManager。Manager 的關閉時機由建立者管理。
 - `YOKOGS200.set_voltage/set_current` 在 output off 且目標值非零時會拒絕執行；呼叫端要先明確開啟 output。
 - YOKO 輸出與步長上限由 setup 設定。預設步長上限為模式預設步長的 10 倍，caller 必須按 sample 與線路條件選擇適用上限。
 - `RohdeSchwarzSGS100A` 沒有 ramp，改功率是瞬態——必要時呼叫端自行步進。

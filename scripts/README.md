@@ -1,20 +1,22 @@
 # Scripts
 
-**Last updated:** 2026-10-20，量測 GUI startup scripts
+**Last updated:** 2026-10-21
+
+**讀者：** operator。工作站 GUI、板端 server 與資料工具的啟動方式。
 
 這裡只放使用者自己執行的入口。Agent MCP 組合根在 [mcp_servers/](../mcp_servers/README.md)，repo 品質檢查在 [tools/](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
 `uv run --directory <worktree> --no-sync -- python scripts/<name>.py`。
-板端入口使用獨立的 PYNQ Python 3.8 環境，不假設工作站依賴可用。
+板端入口使用獨立的 PYNQ Python 3.8 環境，依賴須在板端安裝。
 下表只列主要用途；實際參數請用各腳本的說明或閱讀程式確認。
 
 ## GUI 與板端 server
 
-- `run_workflows_gui.py`：工作站 workflows GUI，將 `zcu_lab.workflows.registry`、alias preset 與 source loader 注入 lib 宿主。模擬驗證在這個 GUI 的模擬模式完成，不另用 agent 專用模擬腳本。控制、保存與 reload 分工見 [workflows 宿主](../lib/zcu_tools/gui/app/workflows/README.md)。
-- `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。啟動後在背景執行選定的 `startup(ctx)`；框架只保存 Qt 視窗外觀，預設在 repo `logs/gui/measure/` 建立 session log。預設啟動 loopback remote-control socket；允許外部連線的選項會改變網路曝露範圍。`--clean` 不執行任何啟動腳本。未給 `--script` 時使用 `zcu_lab/startup.py`；給了就只跑指定腳本，且不能與 `--clean` 並用。量測 GUI 可透過 QICK 連接硬體；啟動器本身只組合 GUI 與 runtime。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
-- `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑；傳入的 project 與 repo root 交給 GUI runtime。預設各開 remote-control TCP socket（預設 port 8766、8767，未指定時占用會回退到臨時 port）；GUI 的分析或存檔由各自 app 負責，啟動器不直接改寫原始資料。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
-- 三個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔；repo root 仍由入口檔的 parent 定位。
-- `start_server.py`、`start_server.ipynb`：ZCU 板端 PYNQ Python 3.8 啟動 QICK Pyro nameserver 與 proxy server。Python 腳本接收 daemon port、nameserver port、SoC 版本與網卡；它由自身位置將 repo root 加入 `sys.path`，`lib` 仍需由板端環境提供。Notebook 在 `scripts/` 執行，使用相對路徑 `../`、`../lib/` 與 `../qick/qick_lib/`。兩者均需能 import repo-root [`bitfiles`](../bitfiles/README.md) 與 [`zcu_tools.qick_remote`](../lib/zcu_tools/qick_remote/README.md)，會開網路服務並連接板端 SoC；板端需自行安裝或放置 QICK。板端部署、啟動與資產版本相容性**待核實**，尚未在硬體上測試。不要用工作站 Python 執行。
+- `run_workflows_gui.py`：工作站 workflows GUI。使用此 GUI 的模擬模式驗證 workflow。控制、保存與 reload 分工見 [workflows 宿主](../lib/zcu_tools/gui/app/workflows/README.md)。
+- `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。啟動後在背景執行選定的 `startup(ctx)`，預設在 repo `logs/gui/measure/` 建立 session log。遠端控制預設只接受本機連線，允許外部連線的選項會擴大網路曝露範圍。`--clean` 以空白 session 開啟，略過全部啟動腳本。未給 `--script` 時使用 `zcu_lab/startup.py`；給了就只跑指定腳本，且不能與 `--clean` 並用。量測 GUI 可透過 QICK 連接硬體。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
+- `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑。遠端控制預設 port 為 8766、8767，未指定 port 且預設值已占用時會選用臨時 port。分析與存檔由各自 app 執行。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
+- 三個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔。
+- `start_server.py`、`start_server.ipynb`：ZCU 板端 PYNQ Python 3.8 啟動 QICK Pyro nameserver 與 proxy server。Python 腳本接收 daemon port、nameserver port、SoC 版本與網卡；板端環境須能 import repo-root [`bitfiles`](../bitfiles/README.md) 與 [`zcu_tools.qick_remote`](../lib/zcu_tools/qick_remote/README.md)，會開網路服務並連接板端 SoC；板端需自行安裝或放置 QICK。板端部署、啟動與資產版本相容性**待核實**，尚未在硬體上測試。請使用板端 PYNQ Python 執行。
 
 ## 量測 GUI 啟動腳本
 
@@ -41,7 +43,7 @@ Entry 已存在時直接重開並選 `initial`，不覆寫。它使用一個 wor
 
 ## 資料作業
 
-- `transfer_results.py`：唯一的結果傳輸入口，取代已移除的 upload/download 腳本。首次 `setup` 用官方 rclone GUI 授權、瀏覽雲端父資料夾、按 Refresh，再回終端機核對路徑並按 Enter 保存；之後 `upload <name>`／`download <name>` 直接走非互動 CLI，agent 可透過 Bash 使用。固定版 rclone 自動下載並驗證，`status --json`、`--dry-run`、`--all`、多 entry 與跨平台命令見 [結果傳輸教學](../docs/result-transfer.md)。本地根目錄統一為 checkout 的 `result/`，傳輸命令明填 `--local-root`，使用 copy 保留目的地多出的檔案。Google 共用 OAuth client 有 2026 停用警告；實際帳號授權與其他桌面平台仍待驗證。
+- `transfer_results.py`：結果傳輸入口。首次 `setup` 用官方 rclone GUI 授權、瀏覽雲端父資料夾、按 Refresh，再回終端機核對路徑並按 Enter 保存；之後 `upload <name>`／`download <name>` 直接走非互動 CLI，agent 可透過 Bash 使用。固定版 rclone 自動下載並驗證，`status --json`、`--dry-run`、`--all`、多 entry 與跨平台命令見 [結果傳輸教學](../docs/result-transfer.md)。本地根目錄統一為 checkout 的 `result/`，傳輸命令明填 `--local-root`，使用 copy 保留目的地多出的檔案。Google 共用 OAuth client 有 2026 停用警告；實際帳號授權與其他桌面平台仍待驗證。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。
 
 ## 模擬資料庫產生

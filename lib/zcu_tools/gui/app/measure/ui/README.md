@@ -1,6 +1,8 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-21，experiment figure area ownership、具名非模態視窗、獨立 Run 與 Local authority 投影、analysis validity 與 file-backed Load 清單
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
 Views project controller snapshots and submit commands through control facets.
 They do not own result data or Save policy. `MainDialogRegistry` retains truly

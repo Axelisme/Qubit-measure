@@ -1,6 +1,8 @@
 # README - program/v2
 
-**Last updated:** 2026-10-20，readout configuration for frequency word decoding；fixed mux profile 與 frontend lowering
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。V2 program、module、readout 與 acquisition 契約。
 
 ## Testing & Type Checking Conventions
 
@@ -81,8 +83,8 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
 
 - `MyProgramV2`: Base class for experiments, wraps QICK's `AveragerProgramV2`.
 - `ModularProgramV2`: Supports pulse blocks and reusable modules.
-- Program layer 不提供 one-tone/two-tone 專用 cfg 或 program base；使用方以
-  `ProgramV2Cfg`、local module cfg 與自己的 experiment cfg 直接組合完整 contract。
+- 使用方以 `ProgramV2Cfg`、local module cfg 與自己的 experiment cfg 組合
+  one-tone／two-tone 等實驗的完整 contract。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
 ## Macro Layer
@@ -132,7 +134,7 @@ pulse_by_reg(ch, wmem_reg, ...)
 
 **dmem 共用**：`ModularProgramV2._dmem_buffer` 是全程式共享的順序 buffer，`add_dmem()` 回傳的 `offset` 是 slice 起點，`compile_datamem()` 最後轉為 `np.int32` 陣列。
 
-**dmem 傳輸邊界**：`compile_datamem()` 維持 QICK 規定的 `np.int32` array contract；`MyProgramV2` 在完整 binary program 建立後，將送往 remote SoC 的 dmem 正規化為一維 built-in `list[int]`。這讓 Python 3 client 與舊版 NumPy 的 ZCU server 不需共享 NumPy pickle 私有 module 路徑，同時保留 signed int32 與 two's-complement bit pattern。
+**dmem 傳輸邊界**：`compile_datamem()` 維持 QICK 規定的 `np.int32` array contract；`MyProgramV2` 在完整 binary program 建立後，將送往 remote SoC 的 dmem 正規化為一維 built-in `list[int]`。跨 Python／NumPy 版本的傳輸使用 built-in 容器，保留 signed int32 與 two's-complement bit pattern。
 
 ## Big-Jump Threshold
 
@@ -152,7 +154,7 @@ Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 
 
 ## Repeat（control module）n=0 短路
 
-`Repeat` 在 `n` 為整數 `0` 時，`init()` 與 `run()` 都會短路：不分配 counter register、不初始化子模組，也不展開 loop macro。`run()` 仍保留開頭的 `delay(t)`/`delay_auto(0)` 對齊時間基準，然後直接返回。
+`Repeat` 在 `n` 為整數 `0` 時，`init()` 直接返回。`run()` 只執行開頭的 `delay(t)`／`delay_auto(0)` 對齊時間基準後返回。此路徑使用零個 counter register，子模組與 loop macro 保持未初始化及未展開。
 
 ## ArbWaveform reference time axis
 

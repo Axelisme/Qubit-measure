@@ -1,6 +1,8 @@
 # QICK remote connection
 
-**Last updated:** 2026-09-27 — board package relocation
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。QICK Pyro client、板端 server 與連線分工。
 
 `zcu_tools.qick_remote` supplies the Pyro connection to a QICK SoC. Workstation callers use `make_soc_proxy` to connect; the GUI connection service owns the connection lifecycle and reports failures. This is separate from GUI remote-control transport and MCP.
 

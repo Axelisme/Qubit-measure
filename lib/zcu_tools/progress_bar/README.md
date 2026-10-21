@@ -1,6 +1,8 @@
 # progress_bar 模組重點筆記
 
-**Last updated:** 2026-07-02 - absolute progress API
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Progress bar 的 factory、更新與關閉契約。
 
 `progress_bar` 提供量測程式使用的最小 progress-bar seam。一般程式只 import
 `make_pbar`，實際 bar 由目前 ContextVar factory 決定；沒有 factory 時使用 tqdm backend。
@@ -18,6 +20,6 @@
 - `backend/tqdm.py` 是 notebook / CLI fallback，`set_progress(n)` 以
   `update(n - current_n)` 轉成 tqdm 原生增量語義。
 - GUI session 會用 `use_pbar_factory(...)` 安裝 Qt-aware worker bar；該 bar 仍實作同一個
-  `BaseProgressBar` contract，但只發送 raw progress event，不直接碰 Qt widget。
+  `BaseProgressBar` contract，發送 raw progress event，由 GUI owner 更新 Qt widget。
 - fluxdep GUI 的 search worker 也提供 `BaseProgressBar` 實作，透過 Qt signal 把 progress
   marshal 回主線程。

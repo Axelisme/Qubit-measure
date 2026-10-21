@@ -1,6 +1,8 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-10-13，recorded quality、transition 能階需求、adapter 分工、OneTone 背景正規化與 metadata reader 歸 datafile
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。通量頻譜選點、校準與資料庫搜尋的共用契約。
 
 本模塊提供 Flux-Dependence Analysis 的 notebook-neutral 數值規則。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
@@ -25,7 +27,7 @@
 GUI 的輸入驗證與 readonly 查詢共用該 reader。
 既有 `search_database` 與 `io.py` 的 HDF5 讀寫仍是待搬到 datafile 的邊界債務。
 `search_models.transition_requires_levels` 先驗類別語法，指出是否需 DB 能階數。
-非空 pairs 與動態類別（含空列表）需要 M；基本空列表與空 mapping 不需要。
+非空 pairs 與動態類別（含空列表）需要 M；基本空列表與空 mapping 可直接驗證。
 `validate_transition_levels` 與 compilation 共用類別順序，拒絕未知類別、動態 order 不在 2..M-1 與索引不在 0..M-1。
 `count_max_evals` 為 simulation 回最少能階數，包含非空 pair 最大索引 +1 與動態 order +1；空類別不增加計算量。GUI overlay 與 Notebook least-squares 都引用這個契約。
 OneTone／TwoTone detector、brush radius 與跨譜 distance 的有效範圍由各 domain 模組常數提供，驗證與 GUI command schema 引用同一來源。

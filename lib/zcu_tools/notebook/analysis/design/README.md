@@ -1,6 +1,8 @@
 # Design analysis
 
-**Last updated:** 2026-10-12 — caller-bound JSONL sample consumers
+**Last updated:** 2026-10-21
+
+**讀者：** lab-author。模型參數搜尋、設計候選與實測樣本比較工具。
 
 `add_real_sample(..., samples=entry.samples(component))` 要求 caller 明示 `JsonlSampleTable`，也接受 caller 自行綁定的表。`result_dir` 只提供 `params.json`，不推論樣本路徑或元件。函式使用該表的 `read()`，依 resolved flux 選 row，再取 `t1_us` 繪製實測值。JSONL reader 每個 run_id 只回傳最後一行，缺少 flux 的 row 需要呼叫端提供同單位的 fallback frame。HFSS sweep 仍讀 CSV。
 
