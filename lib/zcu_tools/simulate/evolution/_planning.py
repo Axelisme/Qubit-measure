@@ -18,7 +18,7 @@ class Geometry:
 
     table contains global rows and optional engine-computed prefix certificates.
     points maps timeline indices to unique caller point IDs.
-    flux_drive marks driven rows with continuous motion or quantized flux changes.
+    flux_drive marks continuous motion, plus driven quantized flux changes.
     prefix_paths maps computed prefix IDs to diagnostics adopted by timelines.
     initial_densities optionally supplies point-aligned DC input matrices; None
     uses the common source input and enables shared-prefix/input preparation.
@@ -334,7 +334,7 @@ def _batch_geometry(
     tones, columns, envelopes, flux_drive = _tone_columns(
         batch, tracks, (point, start, end, level), source, flux_point
     )
-    flux_drive |= (tones > 0) & _waveform_varies(batch, point, start, end)
+    flux_drive |= _waveform_varies(batch, point, start, end)
     port, frequency, amplitude, theta, envelope_index, offset = columns
     table = SegmentTable(
         point,

@@ -1,10 +1,17 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
 本模組擁有 parameter、module 與 sample 的 proposal、draft、service、control 與 Qt review widget。
+
+## Initial selection and notes
+
+Adapter 可省略不合適的候選，或以 proposal 的 `selected=False` 保留候選但不預選。
+`selected` 預設為 True，`note` 預設為 None。Adapter 自行判斷實驗品質，writeback 不比較品質閾值。
+Service 將 proposal 的初選與 note 複製到 draft。GUI 在目的地下面顯示 note，RPC preview 也回傳同一段文字。
+人工可改勾選並 Apply。Edit、retarget 與 Apply 保留 note，不重新判斷品質；人工勾選不表示品質合格。
 
 ## Sample 列
 

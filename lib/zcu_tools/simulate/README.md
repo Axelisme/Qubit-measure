@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-21，單腔與雙腔 ADC、n 維 flux 線路
 
 **讀者：** framework-dev。數值模擬工具與各子模組的責任邊界。
 
@@ -33,12 +33,12 @@ state labels and can be recorded independently of ADC generation. For engine\nba
 ## ADC readout
 
 Import from `zcu_tools.simulate.adc`. Construct `ReadoutModel` with joint-state
-labels, absolute resonator frequencies, two sets of resonator decay rates and a
+labels, absolute frequencies for 1 or 2 cavities, their resonator decay rates and a
 directional transition matrix indexed `[target, source]`. Supply `PopulationInput`
 with exactly the same state order. The ADC does not convert density matrices.
 
 `ADC.response` solves populations and state-conditioned first field moments for
-all initial joint states together. Two resonators share reciprocal co-located
+all initial joint states together. The resonators share reciprocal co-located
 two-port radiative damping through `v*v.T`, where `v=sqrt(kappa_external/2)`.
 The outgoing forward field is `b_in-sum(v*exp(-i*phi)*alpha)`, with each
 resonator's `mismatch_phase_rad` defaulting to zero. This retains correlations between
@@ -98,6 +98,16 @@ and parent virtual readout transitions. `spectra` owns shared scalar/array loss 
 both directions for equilibrium T1. Default Q models and caller-supplied Q,
 impedance and admittance options retain their existing definitions;
 `dephasing` owns both the shared Notebook pure-rate formulas and CP multilevel
-Markov dephasing. `lines.FilteredFlux` applies causal source delay/lowpass before
-loop mixing and retains passive tails within a shot. These tools do not read
-YAML, drivers or program Modules. `experiment.ftf` composes them for acquisition.
+Markov dephasing. These tools do not read YAML, drivers or program Modules.
+`experiment.ftf` composes them for acquisition.
+
+## Flux source lines
+
+`lines.FluxLine` maps one source to any positive number of reduced-flux loops.
+`FilteredFlux` requires a matching finite DC vector and applies each source's
+causal delay and scalar filter before loop mixing. `DistortionTerm` adds signed
+exponential weights and positive decay times to the base lowpass step response.
+A zero base time constant retains instantaneous feedthrough; an empty term tuple
+retains the original first-order response. Passive tails remain within a shot
+without a cutoff or cross-shot memory. The planner owns conversion of this
+continuous flux into evolution inputs; the line tool does not freeze readout.

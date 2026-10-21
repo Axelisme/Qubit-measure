@@ -96,6 +96,8 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         self.alias_presets: AliasPresets | None = alias_presets
         self._assembled = False
         self._controller: Controller | None = None
+        self._window: MainWindow | None = None
+        self._disposed = False
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         if self._assembled:
@@ -119,6 +121,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         )
 
         self._controller = ctrl
+        self._window = window
 
         adapter = None
         if control is not None:
@@ -138,22 +141,36 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
     def close(self, assembly: GuiAssembly | None) -> None:
-        """Drain work, then close GUI-managed drivers and unpublish the board.
+        """Runtime teardown hook; see dispose for the owner-thread contract."""
+        self.dispose(assembly)
 
-        Runtime calls on the Qt owner thread for startup failure or normal exit.
-        ``assembly=None`` uses the controller retained during assembly. Driver
-        failures are logged by Controller.close_hardware and do not prevent exit.
-        A drain timeout still raises TimeoutError; live work must not lose its
-        resources. Repeated successful calls do not retry failed driver closes.
+    def dispose(self, assembly: GuiAssembly | None = None) -> None:
+        """Drain, run callbacks/driver cleanup, then destroy the owned Qt tree.
+
+        Call on the Qt owner thread, including after exec returns or startup
+        fails. None uses the owners retained during partial assembly. A drain
+        timeout propagates without releasing the view or remote adapter; retain
+        this behavior and retry. Successful disposal is idempotent. Driver and
+        callback failures are isolated by Controller.finish_close.
         """
+        if self._disposed:
+            return
         ctrl = self._controller
+        window = self._window
         if assembly is not None:
-            if assembly.control_adapter is not None:
-                assembly.control_adapter.stop()
             if _is_controller(assembly.controller):
                 ctrl = assembly.controller
+            if _is_main_window(assembly.window):
+                window = assembly.window
         if ctrl is not None:
             ctrl.finish_close()
+        if assembly is not None and assembly.control_adapter is not None:
+            assembly.control_adapter.stop()
+        if window is not None:
+            window.dispose()
+        self._disposed = True
+        self._window = None
+        self._controller = None
 
     def before_show(self, assembly: GuiAssembly) -> None:
         from qtpy.QtWidgets import QApplication
@@ -216,14 +233,16 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             alias_presets=self.alias_presets,
         )
 
+        self._controller = ctrl
         try:
             window = MainWindow(
                 ctrl,
                 templates=lambda: registry.templates,
             )
+            self._window = window
             ctrl.add_view(window)
         except Exception:
-            ctrl.close()
+            ctrl.finish_close()
             raise
         return ctrl, window
 

@@ -10,6 +10,7 @@ from zcu_tools.simulate.evolution import (
     DriveTrack,
     Engine,
     EnvelopeSpec,
+    FluxExpansion,
     FluxSchedule,
     FluxWaveform,
     ModelSource,
@@ -22,6 +23,7 @@ from zcu_tools.simulate.evolution.kernel import (
     KernelContext,
     SegmentTable,
 )
+from zcu_tools.simulate.evolution.kernels.adiabatic_map import AdiabaticMapKernel
 from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
 from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
 from zcu_tools.simulate.evolution.kernels.t4 import T4
@@ -98,6 +100,7 @@ def evolve(src, b):
             100000,
             kernels=(
                 T4(),
+                AdiabaticMapKernel(),
                 DysonKernel(),
                 FloquetPeriodKernel(),
                 Fallback(),
@@ -108,7 +111,16 @@ def evolve(src, b):
 
 
 def test_flux_tail_identity_ignores_future_samples_but_keeps_prefix_boundary():
-    src, b = source(), batch()
+    original, b = source(), batch()
+    # This case isolates waveform identity, not flux-dependent physics.
+    # Give every bath the same eigenbasis as the constant expansion.
+    src = ModelSource(
+        original.initial_density,
+        lambda level: replace(
+            original.model(level), eigenvectors=np.eye(3, dtype=complex)
+        ),
+        FluxExpansion(np.diag(original.model((0,)).energies_ghz).astype(complex), ()),
+    )
     waveform = FluxWaveform(
         np.array([0, 4, 8]),
         np.tile([0.0, 2.0, 50.0, 60.0], 2),
@@ -117,14 +129,18 @@ def test_flux_tail_identity_ignores_future_samples_but_keeps_prefix_boundary():
     # The probe runs from 7 to 47 ns. Its prefix needs the 50 ns
     # interpolation endpoint, but cannot depend on the 60 ns sample.
     result = evolve(src, replace(b, flux_waveform=waveform))
-    assert result.paths.segments_by_kernel == {"t4": 4, "dyson": 2}
+    assert result.paths.segments_by_kernel == {"adiabatic_map": 2, "t4": 2, "dyson": 2}
 
     prefix_flux = waveform.flux.copy()
     prefix_flux[4, 0] = 1.01
     unequal_prefix = evolve(
         src, replace(b, flux_waveform=replace(waveform, flux=prefix_flux))
     )
-    assert unequal_prefix.paths.segments_by_kernel == {"t4": 4, "floquet_period": 2}
+    assert unequal_prefix.paths.segments_by_kernel == {
+        "adiabatic_map": 2,
+        "t4": 2,
+        "floquet_period": 2,
+    }
 
     # Keep the first sample after probe start in the identity even when
     # equal endpoint values happen to make the interpolated flux flat.
@@ -133,7 +149,11 @@ def test_flux_tail_identity_ignores_future_samples_but_keeps_prefix_boundary():
     unequal_boundary = evolve(
         src, replace(b, flux_waveform=replace(waveform, time_ns=boundary_times))
     )
-    assert unequal_boundary.paths.segments_by_kernel == {"t4": 4, "floquet_period": 2}
+    assert unequal_boundary.paths.segments_by_kernel == {
+        "adiabatic_map": 2,
+        "t4": 2,
+        "floquet_period": 2,
+    }
 
 
 def ordinary_probe(src, b, initial):

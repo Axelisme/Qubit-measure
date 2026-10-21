@@ -25,6 +25,7 @@ from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.plotting.plots import Plots
 
 from tests.gui._control_fakes import CallLog, call
@@ -249,6 +250,11 @@ class RecordingBus:
 
 
 class RecordingRenderHost:
+    def present_figures(
+        self, tab_id: str, pane: str, figures: FigureCollection
+    ) -> None:
+        self._log.add("host", "present_figures", tab_id, pane, figures)
+
     def interactive_presentation(self, tab_id: str) -> None:
         return None
 

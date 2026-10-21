@@ -648,6 +648,7 @@ class _Chunk:
         zero = tuple(0 for _ in range(self.table.level.shape[1]))
         self.dc = schedule.source.model(zero)
         self.level = np.zeros((len(points), len(zero)), dtype=np.int64)
+        self.continuous_basis: dict[int, NDArray[np.complex128]] = {}
         # Prefix inputs are DC-coordinate outputs of the one representative
         # solve. Adopt the latest one, so binding, apply and free baselines all
         # see exactly the same numerical input despite reuse-dependent dispatch.
@@ -663,6 +664,13 @@ class _Chunk:
 
     def _basis(self, slots: NDArray[np.int64], target: NDArray[np.int64]) -> None:
         """Convert only at apply-call boundaries, never within a DOP853 chain."""
+        for index, slot in enumerate(slots):
+            previous = self.continuous_basis.pop(int(slot), None)
+            if previous is not None:
+                model = self.schedule.source.model(tuple(int(v) for v in target[index]))
+                overlap = model.eigenvectors.conj().T @ previous
+                self.states[slot] = overlap @ self.states[slot] @ overlap.conj().T
+                self.level[slot] = target[index]
         changed = np.any(self.level[slots] != target, axis=1)
         if not changed.any():
             return
@@ -677,10 +685,32 @@ class _Chunk:
             self.states[chosen] = overlap @ self.states[chosen] @ overlap.conj().T
         self.level[slots] = target
 
+    def _continuous_boundary(
+        self, slots: NDArray[np.int64], rows: NDArray[np.int64], *, end: bool
+    ) -> None:
+        """Transport into a continuous start basis, or record its output basis."""
+        from .kernels.adiabatic_map import row_basis
+
+        source = self.schedule.source
+        for slot, row in zip(slots, rows, strict=True):
+            target = row_basis(self.table, int(row), source, end=end)
+            if not end:
+                previous = self.continuous_basis.get(int(slot))
+                if previous is None:
+                    level = tuple(int(v) for v in self.level[slot])
+                    previous = source.model(level).eigenvectors
+                overlap = target.conj().T @ previous
+                self.states[slot] = overlap @ self.states[slot] @ overlap.conj().T
+            self.continuous_basis[int(slot)] = target
+
     def _apply(self, index: int, slots: NDArray[np.int64]) -> None:
         binding = self.bindings[index]
         first = self.cursor[slots]
-        self._basis(slots, self.table.level[first])
+        continuous = binding.kernel.name == "adiabatic_map"
+        if continuous:
+            self._continuous_boundary(slots, first, end=False)
+        else:
+            self._basis(slots, self.table.level[first])
         lengths = np.ones(len(slots), dtype=np.int64)
         rows, state_slots = first, slots
         last = np.arange(len(slots))
@@ -740,6 +770,8 @@ class _Chunk:
             self.exceeded[binding.kernel.name] += count
         self.states[slots] = states[last] if chainable else states
         self.level[slots] = self.table.level[rows[last] if chainable else rows]
+        if continuous:
+            self._continuous_boundary(slots, first, end=True)
         self.cursor[slots] += lengths
 
     def _apply_local(self, slot: int) -> None:
