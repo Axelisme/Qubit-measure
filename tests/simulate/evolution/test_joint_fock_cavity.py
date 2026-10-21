@@ -5,7 +5,6 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
-
 from zcu_tools.simulate.evolution import JointFockRequest, joint_fock_spectrum
 
 
@@ -42,21 +41,31 @@ def test_driven_cavity_matches_independent_physical_frame_lindblad(cavity_reques
     port = v[0] * operators[0] + v[1] * operators[1]
     h = 1j * request.incident_per_sqrt_ns * (port.conj().T - port)
     for mode, op in enumerate((a1, a2)):
-        h += np.kron(2 * np.pi * np.diag(request.frequencies_ghz[:, mode] - 0.08), op.conj().T @ op)
+        h += np.kron(
+            2 * np.pi * np.diag(request.frequencies_ghz[:, mode] - 0.08),
+            op.conj().T @ op,
+        )
     h += np.kron(np.array([[0, 1], [1, 0]]) * request.probe_rabi_rad_per_ns / 2, ic)
-    jumps = [np.sqrt(2) * port] + [np.sqrt(k) * op for k, op in zip(request.kappa_internal_per_ns, operators, strict=True)]
+    jumps = [np.sqrt(2) * port] + [
+        np.sqrt(k) * op
+        for k, op in zip(request.kappa_internal_per_ns, operators, strict=True)
+    ]
     losses = [jump.conj().T @ jump for jump in jumps]
 
     def rhs(_time, state):
         density = state.reshape(32, 32)
         derivative = -1j * (h @ density - density @ h)
         for jump, loss in zip(jumps, losses, strict=True):
-            derivative += jump @ density @ jump.conj().T - (loss @ density + density @ loss) / 2
+            derivative += (
+                jump @ density @ jump.conj().T - (loss @ density + density @ loss) / 2
+            )
         return derivative.ravel()
 
     initial = np.zeros((32, 32), complex)
     initial[0, 0] = 1
-    reference = solve_ivp(rhs, (0, 100), initial.ravel(), method="DOP853", rtol=1e-10, atol=1e-12)
+    reference = solve_ivp(
+        rhs, (0, 100), initial.ravel(), method="DOP853", rtol=1e-10, atol=1e-12
+    )
     assert reference.success
     pe = reference.y[:, -1].reshape(32, 32).diagonal()[16:].real.sum()
     try:
@@ -75,29 +84,68 @@ def test_analytic_prefill_and_probe_keep_intrinsic_relaxation(cavity_request):
     request = cavity_request
     gamma, omega, pi_time = 0.001, np.pi / 100, 100.0
     frequency = np.sqrt(omega**2 - gamma**2 / 16)
-    pi_pe = omega**2 / (2 * omega**2 + gamma**2) * (
-        1 - np.exp(-3 * gamma * pi_time / 4) * (np.cos(frequency * pi_time) + 3 * gamma / (4 * frequency) * np.sin(frequency * pi_time))
+    pi_pe = (
+        omega**2
+        / (2 * omega**2 + gamma**2)
+        * (
+            1
+            - np.exp(-3 * gamma * pi_time / 4)
+            * (
+                np.cos(frequency * pi_time)
+                + 3 * gamma / (4 * frequency) * np.sin(frequency * pi_time)
+            )
+        )
     )
     try:
-        result = joint_fock_spectrum(replace(request, down_per_ns=gamma, gamma2_per_ns=gamma / 2, pi_duration_ns=pi_time, prefill_duration_ns=20, probe_duration_ns=50, probe_rabi_rad_per_ns=0))
+        result = joint_fock_spectrum(
+            replace(
+                request,
+                down_per_ns=gamma,
+                gamma2_per_ns=gamma / 2,
+                pi_duration_ns=pi_time,
+                prefill_duration_ns=20,
+                probe_duration_ns=50,
+                probe_rabi_rad_per_ns=0,
+            )
+        )
     except ValueError as error:
         pytest.fail(f"Driven cavity prefill is missing: {error}")
-    np.testing.assert_allclose(result.populations[0, 1, 0, 1], pi_pe * np.exp(-gamma * 70), atol=1e-10)
+    np.testing.assert_allclose(
+        result.populations[0, 1, 0, 1], pi_pe * np.exp(-gamma * 70), atol=1e-10
+    )
     np.testing.assert_allclose(result.populations[0, 0, 0, 1], 0, atol=1e-12)
 
 
 def test_rf_and_probe_schedule_isolation_and_owned_request(cavity_request):
     request = cavity_request
     frequencies = request.frequencies_ghz.copy()
-    batched = replace(request, frequencies_ghz=frequencies, resonator_carriers_ghz=np.array([0.08, 0.09, 0.08]), qubit_carriers_ghz=np.array([0.02, 0.021, 0.02]), prefill_duration_ns=30)
+    batched = replace(
+        request,
+        frequencies_ghz=frequencies,
+        resonator_carriers_ghz=np.array([0.08, 0.09, 0.08]),
+        qubit_carriers_ghz=np.array([0.02, 0.021, 0.02]),
+        prefill_duration_ns=30,
+    )
     frequencies[:] = 7  # Caller mutation must not alter the prepared request.
     try:
         result = joint_fock_spectrum(batched)
     except ValueError as error:
         pytest.fail(f"Shared cavity schedule is missing: {error}")
     np.testing.assert_array_equal(result.populations[0], result.populations[2])
-    np.testing.assert_array_equal(result.populations[:, :, 0], result.populations[:, :, 2])
+    np.testing.assert_array_equal(
+        result.populations[:, :, 0], result.populations[:, :, 2]
+    )
     for rf_index, rf in enumerate((0.08, 0.09)):
-        scalar = joint_fock_spectrum(replace(batched, resonator_carriers_ghz=np.array([rf]), qubit_carriers_ghz=np.array([0.021])))
-        np.testing.assert_allclose(result.populations[rf_index, :, 1], scalar.populations[0, :, 0], atol=1e-13)
-    assert not np.allclose(result.populations[0], result.populations[1], rtol=0, atol=1e-6)
+        scalar = joint_fock_spectrum(
+            replace(
+                batched,
+                resonator_carriers_ghz=np.array([rf]),
+                qubit_carriers_ghz=np.array([0.021]),
+            )
+        )
+        np.testing.assert_allclose(
+            result.populations[rf_index, :, 1], scalar.populations[0, :, 0], atol=1e-13
+        )
+    assert not np.allclose(
+        result.populations[0], result.populations[1], rtol=0, atol=1e-6
+    )

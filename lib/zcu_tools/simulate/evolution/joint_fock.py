@@ -4,8 +4,8 @@ from dataclasses import dataclass, fields
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import sparse
-from scipy.linalg import expm
+
+from ._joint_fock_two_level import two_level_row
 
 RealArray = NDArray[np.float64]
 ComplexArray = NDArray[np.complex128]
@@ -96,6 +96,10 @@ class JointFockResult:
         (rf, preparation, qf) of final joint density trace-minus-one magnitude,
         maximum Hermitian defect, minimum Hermitianized eigenvalue, and
         population on n1+n2=N. These are observations, not error certificates.
+    sampled_pointer_means: (rf,3) maximum sampled displaced photon means for
+        g/e/no-more-than-one-prefill-jump paths, used only for cutoff selection.
+    initial_trace_error, initial_edge_population: (rf,preparation) diagnostics
+        at probe onset before any qf propagation.
     """
 
     populations: RealArray
@@ -104,6 +108,9 @@ class JointFockResult:
     hermitian_error: RealArray
     min_eigenvalue: RealArray
     edge_population: RealArray
+    sampled_pointer_means: RealArray
+    initial_trace_error: RealArray
+    initial_edge_population: RealArray
 
 
 def _owned(value: RealArray, name: str) -> RealArray:
@@ -114,117 +121,51 @@ def _owned(value: RealArray, name: str) -> RealArray:
     return result
 
 
-def _commutator(h: sparse.csr_matrix) -> sparse.csr_matrix:
-    identity = sparse.csr_matrix(np.eye(len(h.indptr) - 1, dtype=np.complex128))
-    return sparse.csr_matrix(
-        -1j * (sparse.kron(identity, h) - sparse.kron(h.T, identity))
-    )
-
-
-def _dissipator(op: sparse.csr_matrix) -> sparse.csr_matrix:
-    identity = sparse.csr_matrix(np.eye(len(op.indptr) - 1, dtype=np.complex128))
-    square = op.conj().T @ op
-    return sparse.csr_matrix(
-        sparse.kron(op.conj(), op)
-        - (sparse.kron(identity, square) + sparse.kron(square.T, identity)) / 2
-    )
-
-
-def _nominal_pi(request: JointFockRequest) -> ComplexArray:
-    down, up, gamma = request.down_per_ns, request.up_per_ns, request.gamma2_per_ns
-    omega = request.pi_rabi_rad_per_ns
-    matrix = np.array(
-        [
-            [-up, down, 0, -omega],
-            [up, -down, 0, omega],
-            [0, 0, -gamma, 0],
-            [omega / 2, -omega / 2, 0, -gamma],
-        ]
-    )
-    pg, pe, x, y = expm(matrix * request.pi_duration_ns) @ [1.0, 0, 0, 0]
-    return np.array([[pg, x + 1j * y], [x - 1j * y, pe]])
-
-
-def _rk4(
-    generator: sparse.csr_matrix, states: ComplexArray, duration: float
-) -> ComplexArray:
-    result = states.copy()
-    steps = max(1, int(np.ceil(duration)))
-    dt = duration / steps
-    for _ in range(steps):
-        k1 = generator @ result
-        k2 = generator @ (result + dt / 2 * k1)
-        k3 = generator @ (result + dt / 2 * k2)
-        k4 = generator @ (result + dt * k3)
-        result += dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-    if not np.isfinite(result).all():
-        raise FloatingPointError("Nonfinite joint-Fock RK4 density")
-    return result
-
-
-def _vacuum_row(request: JointFockRequest) -> ComplexArray:
-    sm = sparse.csr_matrix([[0, 1], [0, 0]], dtype=complex)
-    pe = sparse.diags([0, 1], format="csr", dtype=complex)
-    z = sparse.csr_matrix(np.diag([1.0, -1.0]))
-    bath = request.down_per_ns * _dissipator(sm) + request.up_per_ns * _dissipator(
-        sm.conj().T.tocsr()
-    )
-    bath += (
-        (request.gamma2_per_ns - (request.down_per_ns + request.up_per_ns) / 2)
-        / 2
-        * _dissipator(z)
-    )
-    states = np.column_stack(
-        [np.diag([1, 0]).ravel(order="F"), _nominal_pi(request).ravel(order="F")]
-    ).astype(complex)
-    states = np.asarray(
-        expm(bath.toarray() * request.prefill_duration_ns) @ states, dtype=np.complex128
-    )
-    angle = (
-        2
-        * np.pi
-        * request.qubit_frequency_ghz
-        * (request.pi_duration_ns + request.prefill_duration_ns)
-    )
-    rotation = np.array([np.exp(0.5j * angle), np.exp(-0.5j * angle)])
-    states *= (rotation[:, None] * rotation.conj()[None, :]).ravel(order="F")[:, None]
-    outputs = []
-    for qf in request.qubit_carriers_ghz:
-        h = 2 * np.pi * (
-            request.qubit_frequency_ghz - qf
-        ) * pe + request.probe_rabi_rad_per_ns / 2 * (sm + sm.conj().T)
-        output = _rk4(
-            (bath + _commutator(h)).tocsr(), states, request.probe_duration_ns
-        )
-        outputs.append(
-            np.stack([output[:, b].reshape(2, 2, order="F") for b in range(2)])
-        )
-    return np.stack(outputs, axis=1)
-
-
 def joint_fock_spectrum(request: JointFockRequest) -> JointFockResult:
-    """Compute an explicit joint spectrum; does not select an acquisition backend.
+    """Compute an explicit joint spectrum without selecting an acquisition backend.
 
-    Takes only JointFockRequest. Returns raw final populations and density
-    diagnostics for each independent rf/preparation/qf. Constant generators use
-    fixed RK4 steps <= 1 ns; no positivity or global error bound is implied.
-    No state survives the call. Unsupported driven cavities raise ValueError.
+    Each rf starts from physical vacuum and shares its analytic prefill across
+    all probes and both preparations. A common displaced total-excitation basis
+    uses the sampled Poisson-tail<=1e-3 cutoff plus one. No-flip g/e pointers
+    use 129 samples from prefill end through probe end; prefill one-jump paths
+    use 65 jump times and 33 subsequent times. This sampled coherent heuristic
+    is not a complete-density truncation bound. Cutoffs above 20 raise ValueError.
+
+    Constant CSR generators use RK4 <=1 ns. This is not a positivity or global
+    accuracy guarantee for arbitrary frequency/drive scales. Populations and
+    diagnostics are not clipped, normalized or repaired. Singular driven
+    steady pointers raise ValueError; nonfinite propagation raises
+    FloatingPointError. No state/cache survives a call, no solver fallback
+    occurs, and acquisition, ADC and existing Engine routes are unchanged.
     """
-    if request.incident_per_sqrt_ns != 0:
-        raise ValueError("Driven joint cavities are not yet supported")
-    row = _vacuum_row(request)
-    densities = np.repeat(row[None, ...], len(request.resonator_carriers_ghz), axis=0)
-    populations = densities.diagonal(axis1=-2, axis2=-1).real.copy()
-    shape = populations.shape[:-1]
+    rows = [two_level_row(request, float(rf)) for rf in request.resonator_carriers_ghz]
+    populations, traces, hermitian, eigenvalues, edges = [], [], [], [], []
+    for row in rows:
+        density, size = row.densities, len(row.basis)
+        diagonal = density.diagonal(axis1=-2, axis2=-1).real
+        populations.append(
+            diagonal.reshape(2, len(request.qubit_carriers_ghz), 2, size).sum(axis=-1)
+        )
+        traces.append(abs(np.trace(density, axis1=-2, axis2=-1) - 1))
+        hermitian.append(
+            np.max(abs(density - density.conj().swapaxes(-1, -2)), axis=(-1, -2))
+        )
+        eigenvalues.append(
+            np.linalg.eigvalsh((density + density.conj().swapaxes(-1, -2)) / 2).min(
+                axis=-1
+            )
+        )
+        order = max(n + m for n, m in row.basis)
+        edge = np.tile([n + m == order for n, m in row.basis], 2)
+        edges.append(diagonal[..., edge].sum(axis=-1))
     return JointFockResult(
-        populations=populations,
-        cutoffs=tuple(1 for _ in request.resonator_carriers_ghz),
-        trace_error=abs(np.trace(densities, axis1=-2, axis2=-1) - 1),
-        hermitian_error=np.max(
-            abs(densities - densities.conj().swapaxes(-1, -2)), axis=(-1, -2)
-        ),
-        min_eigenvalue=np.linalg.eigvalsh(
-            (densities + densities.conj().swapaxes(-1, -2)) / 2
-        ).min(axis=-1),
-        edge_population=np.zeros(shape),
+        populations=np.array(populations),
+        cutoffs=tuple(max(n + m for n, m in row.basis) for row in rows),
+        trace_error=np.array(traces),
+        hermitian_error=np.array(hermitian),
+        min_eigenvalue=np.array(eigenvalues),
+        edge_population=np.array(edges),
+        sampled_pointer_means=np.array([row.sampled_means for row in rows]),
+        initial_trace_error=np.array([row.initial_trace_error for row in rows]),
+        initial_edge_population=np.array([row.initial_edge_population for row in rows]),
     )
