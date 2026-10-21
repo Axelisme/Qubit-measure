@@ -71,6 +71,34 @@ class Fluxonium(Values):
     aphi: Nonnegative = 0.0
 
 
+class FluxoniumDesign(Values):
+    """Complete author-supplied predictor guess, independent of model truth.
+
+    ej_ghz/ec_ghz/el_ghz are positive nominal energies in GHz. flux_unit is the
+    flux-source device's native A or V, checked against entry wiring by startup.
+    flux_half is the zero-bias half-flux device value; flux_period is the signed
+    nonzero device-value change per quantum; flux_bias is an additive device-value
+    correction. All affine inputs are finite and use flux_unit. Every field is
+    required; neither chip nor DC calibration supplies defaults.
+    """
+
+    ej_ghz: Positive
+    ec_ghz: Positive
+    el_ghz: Positive
+    flux_unit: Literal["A", "V"]
+    flux_half: Finite
+    flux_period: Finite
+    flux_bias: Finite
+
+    @field_validator("flux_period")
+    @classmethod
+    def nonzero_period(cls, value: float) -> float:
+        """Reject a zero nominal period, which cannot map device values to flux."""
+        if value == 0:
+            raise ValueError("must be nonzero")
+        return value
+
+
 class Squid(Values):
     """Fixed-theta SQUID values; no fluxonium inductive/qp mechanism.
 
@@ -453,7 +481,8 @@ class FTFSettings(Values):
     dc_bias supplies startup/live DC calibration; drive_lines binds charge
     or small-signal flux generators (omitted/empty disables). readout serves two
     resonators with a pulse source/receiver and an optional mux source/receivers.
-    numerics supplies truncations/solver/seed.
+    numerics supplies truncations/solver/seed. design optionally maps entry qubit
+    names to complete independent predictor guesses; omitted/empty creates none.
     Channel counts derive from maximum configured indices plus one. Unknown
     fields, including large-amplitude flux controls and v1 aliases, are rejected.
     No model truth enters ordinary GUI/MCP metadata.
@@ -462,6 +491,9 @@ class FTFSettings(Values):
     format: Literal["zcu.ftf"]
     version: Literal[2]
     chip: Chip
+    design: SourceMap[FluxoniumDesign] = Field(
+        default_factory=dict, validate_default=True
+    )
     dc_bias: DCBias
     drive_lines: SourceMap[DriveLine] = Field(
         default_factory=dict, validate_default=True
