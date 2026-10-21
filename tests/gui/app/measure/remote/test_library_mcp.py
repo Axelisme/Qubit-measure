@@ -8,6 +8,7 @@ from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui.app.measure._templates import TEMPLATES
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 from ._helpers import Fixture, call, mcp_client, open_client
 
@@ -130,13 +131,26 @@ MUX_TONES = [{"freq": 100.0, "gain": 0.2, "ro_ch": 0}]
 
 
 @pytest.fixture()
-def role_socket(qapp, tmp_path):
+def component_registry():
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        yield
+        assert registry_state() == installed
+    finally:
+        restore_registry(before)
+
+
+@pytest.fixture()
+def role_socket(qapp, tmp_path, component_registry):
     template = TemplateDef(
         MuxReadoutSpec,
         "Synthetic mux readout",
         {"gen_ch": 0, "nqz": 1, "mixer_freq": 0.0, "length": 1.0, "ro_length": 1.0},
     )
     fx = Fixture(project_root=str(tmp_path), templates={"mux:blank": template})
+    fx.ctrl.context_control.add_component("R1", "fake/drive/a", {})
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -153,7 +167,7 @@ def test_ml_create_from_role_applies_edits_before_validation(role_socket):
         "context.ml_create_from_role",
         {
             "role_id": "mux:blank",
-            "name": "mux_readout",
+            "name": "R1.readout.mux_readout",
             "edits": [
                 {"path": ["tones"], "value": MUX_TONES},
                 {"path": ["length"], "value": {"expr": "0.25 + 0.5"}},
@@ -161,8 +175,8 @@ def test_ml_create_from_role_applies_edits_before_validation(role_socket):
         },
     )
     assert reply["ok"] is True, reply
-    assert reply["result"] == {"created": "mux_readout"}
-    written = fx.ctrl.read_context().library.module_spec("mux_readout")
+    assert reply["result"] == {"created": "R1.readout.mux_readout"}
+    written = fx.ctrl.read_context().library.module_spec("R1.readout.mux_readout")
     assert written.model_dump(mode="json")["tones"] == [
         {"freq": 100.0, "gain": 0.2, "ro_ch": 0, "phase": 0.0, "label": ""}
     ]
@@ -196,7 +210,7 @@ def test_ml_create_from_role_rejects_invalid_input_without_writing(
 ):
     fx, sock = role_socket
     before = fx.ctrl.read_context().library.document()
-    params = {"role_id": "mux:blank", "name": "mux_readout"}
+    params = {"role_id": "mux:blank", "name": "R1.readout.mux_readout"}
     if edits is not None:
         params["edits"] = edits
     reply = call(sock, "context.ml_create_from_role", params)
