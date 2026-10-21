@@ -188,8 +188,8 @@ The adapter below owns component proposals using the captured binding.
 `MuxT1Adapter` in `gui.py` connects the core to explicit Run/Load sources.
 Its native generated Form is registered as `mux/t1`.
 The registered MCP recipe is `mux_t1`. See the
-[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
-source-bound reporting and explicit writeback decisions.
+[mux recipe guide](../../../recipes/mux-guide.md#mux_t1)
+for typed overrides, origins, source-bound reporting and explicit writeback decisions.
 
 Summary rows retain each original tone `position`, source `name`, fitted values and
 quality, or a failure reason. Q3/Q1 gives indices 2/0 in that row order. Quality
