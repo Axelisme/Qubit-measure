@@ -100,6 +100,31 @@ def test_one_program_cannot_mix_pulse_and_mux_readout_generators():
         ftf_module.plan_template(settings(), snapshot(), mixed, readout=configuration())
 
 
+@pytest.mark.parametrize("split_templates", [False, True])
+def test_open_acquire_rejects_both_readout_generators_across_the_whole_request(
+    split_templates,
+):
+    pulse = template()
+    mux = mux_template()
+    templates = (
+        (pulse, mux)
+        if split_templates
+        else (
+            replace(
+                mux,
+                events=(*pulse.events, *mux.events),
+                readouts=(*pulse.readouts, *mux.readouts),
+            ),
+        )
+    )
+    source = ftf_module.FTFSource(settings(), DeviceManager(), readout=configuration())
+    try:
+        with pytest.raises(ValueError, match=r"readout generators.*0.*1"):
+            source.open_acquire(replace(request(), templates=templates))
+    finally:
+        source.close()
+
+
 class MixedEngine(Engine):
     """Supply a nontrivial joint mixture without performing evolution."""
 
