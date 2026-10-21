@@ -48,9 +48,7 @@ def test_flat_cache_miss_and_hit_own_complete_moments_for_each_cavity_count(cavi
     assert cache.misses == 1 and cache.hits == 0
     first.photons[:] = -1
     first.field_products[:] = -1
-    hit = cache.average(
-        model, pulses, 5, 20, initial_field=initial, initial_time_ns=5
-    )
+    hit = cache.average(model, pulses, 5, 20, initial_field=initial, initial_time_ns=5)
     np.testing.assert_array_equal(hit.photons, expected.photons)
     np.testing.assert_array_equal(hit.field_products, expected.field_products)
     assert cache.misses == 1 and cache.hits == 1
