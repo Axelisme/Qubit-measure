@@ -15,7 +15,7 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
-from qtpy.QtCore import Qt, QTimer
+from qtpy.QtCore import QCoreApplication, QEvent, Qt, QTimer
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -154,6 +154,19 @@ class MainWindow(QMainWindow):
         self._initialize_close_state()
         self._reload_prompt_open = False
         self.remote_control_service: RemoteControlAdapter | None = None
+        self._disposed = False
+        self._delete_scheduled = False
+        self._dispose_control: Callable[[], None] = lambda: None
+        self._shutdown_application: QApplication | None = None
+        self._control_disposed = False
+        try:
+            self._initialize_widgets()
+        except Exception:
+            # No workers can use a view whose construction has not returned.
+            self.dispose()
+            raise
+
+    def _initialize_widgets(self) -> None:
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
         self.resize(1280, 750)
 
@@ -196,8 +209,6 @@ class MainWindow(QMainWindow):
         self._control_indicator = ControlIndicator(self._ctrl.control_identity, self)
         self._status_bar.addPermanentWidget(self._control_indicator)
         self._dispose_control = self._ctrl.control_identity.watch(self._refresh_control)
-        self._shutdown_application: QApplication | None = None
-        self._control_disposed = False
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -240,8 +251,38 @@ class MainWindow(QMainWindow):
             )
             self._shutdown_application = None
 
+    def dispose(self) -> None:
+        """Release view subscriptions and destroy this window and its children.
+
+        Owner-thread only, after the caller has drained background work and run
+        close callbacks/hardware cleanup. This does not perform domain shutdown
+        or ask close-policy questions. It also works before show or after exec;
+        targeted DeferredDelete delivery cannot rely on another event-loop turn.
+        Repeated calls, including deleteLater after disposal, are harmless.
+        """
+        if self._disposed:
+            return
+        self._disposed = True
+        self.dispose_control_watches()
+        for dialog in self.findChildren(RunLoadDialog):
+            dialog.reject()
+        self._cleanup_bus_subscriptions()
+        self._dialog_registry.dispose()
+        for tab in self._tab_widgets.values():
+            tab.detach()
+        self._tab_widgets.clear()
+        remote = self.remote_control_service
+        if remote is not None:
+            remote.stop()
+            self.remote_control_service = None
+        self.deleteLater()
+        QCoreApplication.sendPostedEvents(self, QEvent.Type.DeferredDelete)
+
     def deleteLater(self) -> None:
-        """Retire control watches before scheduling direct Python-owner deletion."""
+        """Retire watches before scheduling deletion, including repeated calls."""
+        if self._delete_scheduled:
+            return
+        self._delete_scheduled = True
         self.dispose_control_watches()
         super().deleteLater()
 
