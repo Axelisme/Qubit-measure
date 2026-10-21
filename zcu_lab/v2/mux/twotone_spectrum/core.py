@@ -15,8 +15,9 @@ does not resolve component identities.
 
 Sweep ranges may differ but every tone, including nonparticipants, must have the
 same point count. Point p pairs each active tone's p-th value, not a Cartesian
-product. Each point compiles once and executes optional common reset, Join of
-independent drive pulses, then active mux readout. Branches start together;
+product. One program sweeps drive DAC frequencies in a shared hardware loop.
+Each point executes optional common reset, Join of independent drive pulses,
+then active fixed-frequency mux readout. Branches start together;
 short branches wait for the longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
 All participants share reps, rounds, initial_delay and relax_delay.
@@ -28,8 +29,8 @@ MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
 float64 (K,P) on each drive's own rounded grid. Signals are complex128 (K,P),
 ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
 original tone indices and each tone's own coordinates, so duplicate labels retain
-distinct plots. Cancellation preserves completed points and the current point's
-completed-round average. Unacquired points remain NaN.
+distinct plots. Cancellation preserves completed-round averages across the
+whole sweep. Before the first completed round, signals remain NaN.
 
 Frequency scan and analysis
 --------------------------
@@ -83,9 +84,9 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_freq, sweep2array
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg, sweep2param
 from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
@@ -129,8 +130,9 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxPulseSc
     """Prepare each selected qubit's frequency axis and per-point drive pulses.
 
     cfg is copied and validated. soccfg supplies the board frequency grids.
-    Returned coordinates are actual MHz in participant order; point_pulses keeps
-    nominal frequencies for compilation. Sweeps advance together by point index.
+    Returned coordinates use QICK's hardware start/span/step rounding in MHz,
+    in participant order. point_pulses keeps nominal per-point pulse copies.
+    Sweeps advance together by point index.
     Invalid settings raise ValueError; frequency conversion errors propagate.
     This function does not acquire data or change cfg.
     """
@@ -142,7 +144,11 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxPulseSc
         tone = cfg.tones[index]
         drive = tone.drive
         nominal = sweep2array(tone.sweep, "none")
-        actual = round_zcu_freq(nominal, soccfg, drive.ch, mixer_freq=drive.mixer_freq)
+        actual = sweep2array(
+            tone.sweep,
+            "freq",
+            {"soccfg": soccfg, "gen_ch": drive.ch, "mixer_freq": drive.mixer_freq},
+        )
         coordinates.append(actual)
         for point, value in enumerate(nominal):
             points[point].append(drive.with_updates(freq=float(value)))
@@ -156,7 +162,7 @@ def _averaged_signal(
     for module in prog.modules:
         if isinstance(module, MuxReadout) and module.name == "readout":
             iq = module.collect_iq(prog, acquired, read_index=0)
-            return iq[:, 0] + 1j * iq[:, 1]
+            return iq[..., 0] + 1j * iq[..., 1]
     raise ValueError("Mux scan program is missing its named MuxReadout")
 
 
@@ -188,8 +194,10 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
         padding, and readout follows the longest drive. Return actual MHz and
         average complex IQ arrays of shape (participants, points), with original
         tone indices. Live plots show each spectrum and their combined magnitudes.
-        Cancellation keeps acquired averages and leaves missing points NaN;
-        call context.cancel_signal.raise_if_error() before reporting success.
+        Drive frequencies share one hardware loop; readout frequencies stay fixed.
+        Cancellation keeps completed-round averages across the sweep, or NaN
+        when no round completed.
+        Call context.cancel_signal.raise_if_error() before reporting success.
         """
         # 1. Prepare zipped frequencies and readout channels in participant order.
         cfg = MuxFreqCfg.model_validate(config.model_dump())
@@ -217,32 +225,27 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
                 "Drive frequency (MHz)",
             )
 
-        # Point-major storage lets each scan step write a whole tone vector.
+        # 3. A shared DAC register loop advances the independent frequency ranges.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
         with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
-            for pulses, step in sched.scan("point", scan.point_pulses):
-                # 3. Reset -> simultaneous drives -> readout after the longest drive.
-                builder = (
-                    step.prog_builder(context.soc, context.soccfg)
-                    .add_reset("reset", cfg.modules.reset)
-                    .add(
-                        Join(
-                            *[
-                                Pulse(f"drive_{index}", pulse)
-                                for index, pulse in zip(
-                                    scan.indices, pulses, strict=True
-                                )
-                            ]
-                        ),
-                        MuxReadout("readout", readout),
-                    )
-                )
+            drives = []
+            for index in scan.indices:
+                tone = cfg.tones[index]
+                drive = tone.drive.model_copy(deep=True)
+                drive.set_param("freq", sweep2param("point", tone.sweep))
+                drives.append(Pulse(f"drive_{index}", drive))
 
-                # 4. Average acquired rounds, preserving partial data on cancellation.
-                prog = builder.build()
-                _ = builder.run_program(
-                    prog, raw2signal_fn=partial(_averaged_signal, prog)
-                )
+            # Reset -> simultaneous drives -> fixed mux readout after the longest drive.
+            builder = (
+                sched.prog_builder(context.soc, context.soccfg)
+                .add_reset("reset", cfg.modules.reset)
+                .add(Join(*drives), MuxReadout("readout", readout))
+                .declare_sweep("point", scan.coordinates.shape[1])
+            )
+
+            # 4. Each completed round supplies the full point/tone IQ matrix.
+            prog = builder.build()
+            _ = builder.run_program(prog, raw2signal_fn=partial(_averaged_signal, prog))
 
         # Publish the final spectra and restore tone-major result storage.
         signals.trigger_update(flush=True)

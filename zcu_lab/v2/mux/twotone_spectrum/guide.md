@@ -34,6 +34,11 @@ All tones use the same point count, including nonparticipants.
 At each point, the selected drives use their corresponding frequencies together.
 The sequence is common reset, simultaneous drives, then mux readout after the
 longest drive. Pulse pre/post delays stay as configured.
+One compiled program advances all drive DAC frequencies in the same hardware
+loop. It does not scan combinations of the independent ranges. Mux readout DAC
+tones and ADC frequencies stay fixed; this scan does not sweep readout frequency.
+The saved axes use each drive's hardware-rounded start and step, which can differ
+from rounding each requested point independently.
 
 Choose the Lorentzian or sinc model. Each tone needs at least six valid points.
 Frequency, FWHM and errors are in MHz. Check model quality and uncertainty before
@@ -61,7 +66,8 @@ A missing source configuration leaves the name unavailable.
 Use Data to save measurement data and analysis artifacts.
 Load Data selects a native file or saved run and preserves current Form inputs.
 The selected source fixes the historical pulse, binding and writeback destination.
-Cancellation retains acquired data and leaves missing data as NaN.
+Cancellation retains completed-round averages for the full sweep.
+If no round completed, signals remain NaN.
 Partial data from a failed operation retains its failure status.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.
