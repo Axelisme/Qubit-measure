@@ -151,7 +151,9 @@ def test_stop_closes_suspended_invocation_and_discards_it(rig: Rig) -> None:
     assert rig.engine.records("run") == ()
 
 
-def test_answer_reserves_worker_segment_and_pause_discards_on_next_effect(rig: Rig) -> None:
+def test_answer_reserves_worker_segment_and_pause_discards_on_next_effect(
+    rig: Rig,
+) -> None:
     entered, release = Event(), Event()
     closed: list[bool] = []
 

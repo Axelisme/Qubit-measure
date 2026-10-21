@@ -11,8 +11,10 @@ from typing import Literal
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from ...core.script_protocol import Answer, Question, Signal, Wait
 from ...device import BaseDeviceInfo
 from ...progress_bar import use_pbar_factory
+from ..script_driver import ScriptDriver
 from ..stop_signal import ScheduleOutcomeError, StopSignal
 from .artifacts import IterationArtifacts, RunArtifacts
 from .declaration import WorkflowDefinition
@@ -42,6 +44,7 @@ from .models import (
     CommittedRecord,
     Completed,
     Done,
+    Effect,
     Failed,
     InvalidRunState,
     Lifecycle,
@@ -50,7 +53,6 @@ from .models import (
     RunIdentity,
     RunPaths,
     RunStatus,
-    Step,
     TunablesSnapshot,
 )
 from .ports import EnginePorts
@@ -100,6 +102,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         self._pending_error: Exception | None = None
         self._records: list[CommittedRecord] = []
         self._state: S
+        self._driver: ScriptDriver[Next[R, S] | Done | Aborted] | None = None
 
     def start(
         self,
@@ -154,11 +157,39 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             raise InvalidRunState("execute", self._lifecycle)
         self._executing = True
 
-    def execute(self) -> RunStatus:
-        """Run the segment; capture detached status before releasing reservation."""
+    def reserve_answer(self, answer: Answer) -> None:
+        """Validate before journaling/reserving a settled Ask continuation.
+
+        Caller holds the control lock. Wrong model leaves the run unchanged;
+        journal failures fail the run just as resume failures do.
+        """
+        driver = self._driver
+        if (
+            self._lifecycle != "paused"
+            or self._executing
+            or driver is None
+            or driver.pending_question is None
+        ):
+            raise InvalidRunState("answer", self._lifecycle)
+        driver.validate_answer(answer)
+        try:
+            self._artifacts.append(Resumed(self._commit_seq, self._tunables.revision))
+            self._artifacts.set_lifecycle("running")
+            self._lifecycle = "running"
+            self._executing = True
+        except Exception as error:
+            self._request_failure(error)
+            raise
+
+    def execute(self, answer: Answer | None = None) -> RunStatus:
+        """Run a reserved segment, optionally delivering its validated Answer.
+
+        Capture detached status before releasing the reservation. Answer code
+        runs under the same progress context and failure boundary as execute.
+        """
         try:
             with use_pbar_factory(self._ports.progress):
-                self._produce()
+                self._produce(answer)
         except Exception as error:
             with self._lock:
                 cause = (
@@ -175,8 +206,15 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     self._executing = False
         return status
 
-    def _produce(self) -> None:
+    def _produce(self, answer: Answer | None = None) -> None:
         try:
+            if answer is not None:
+                self._check_cancel()
+                driver = self._driver
+                if driver is None:
+                    raise RuntimeError("Answer segment has no suspended invocation")
+                driver.answer(answer)
+                self._call_step()
             if not self._settle_control():
                 if not self._initialized:
                     self._state = deepcopy(
@@ -190,12 +228,17 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     self._call_step()
                     if self._lifecycle in _TERMINAL:
                         break
+        except _DiscardStep:
+            self._close_step()
+            self._discard_iteration()
+            self._settle_control()
         except KeyboardInterrupt:
             self._host_stop()
+            self._close_step()
             self._discard_iteration()
             self._settle_control()
 
-    def _call_step(self) -> None:
+    def _start_step(self) -> None:
         with self._lock:
             captured = self._tunables.capture()
             self._call_seq = (self._call_seq or 0) + 1
@@ -221,20 +264,35 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         )
         if not isinstance(generator, GeneratorType):
             raise TypeError("Workflow step must return a generator")
+        self._driver = ScriptDriver(generator)
+
+    def _call_step(self) -> None:
+        if self._driver is None:
+            self._start_step()
+        driver = self._driver
+        if driver is None:
+            raise RuntimeError("Workflow invocation has no driver")
         try:
-            outcome = self._drive(generator)
+            outcome = self._drive(driver)
         except _DiscardStep:
             # close may run user finally blocks; their failures are not cancellation.
-            self._close_step(generator)
+            self._close_step()
             self._discard_iteration()
             return
         except BaseException:
             # Cleanup cannot replace the acquisition/analysis failure source.
             try:
-                self._close_step(generator)
+                self._close_step()
             except (Exception, KeyboardInterrupt):
                 _logger.exception("Workflow shutdown also failed")
             raise
+        if outcome is None:
+            return
+        self._driver = None
+        self._finish_step(outcome)
+
+    def _finish_step(self, outcome: Next[R, S] | Done | Aborted) -> None:
+        iteration, _ = self._current_iteration()
         if isinstance(outcome, Next):
             self._commit(outcome)
         else:
@@ -254,25 +312,49 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._artifacts.save_record(iteration, self._iteration_inputs, finished)
                 self._end(lifecycle, reason)
 
-    def _close_step(self, generator: Step[S, R]) -> None:
-        """Close a discarded producer; its cleanup errors propagate unchanged."""
-        generator.close()
+    def _close_step(self) -> None:
+        """Close a retained producer; cleanup errors propagate unchanged."""
+        driver = self._driver
+        self._driver = None
+        if driver is not None and driver.status not in (
+            "completed",
+            "cancelled",
+            "failed",
+        ):
+            driver.signal(Signal("cancel"))
+            driver.advance()
 
-    def _drive(self, generator: Step[S, R]) -> Next[R, S] | Done | Aborted:
+    def _drive(
+        self, driver: ScriptDriver[Next[R, S] | Done | Aborted]
+    ) -> Next[R, S] | Done | Aborted | None:
+        # The shared driver alone resumes generators. This host loop executes
+        # synchronous workflow operations and publishes unanswered questions.
         while True:
-            try:
-                effect = next(generator)
-            except StopIteration as finished:
-                outcome: object = finished.value
+            driver.advance()
+            if driver.status == "completed":
+                outcome = driver.result
                 if not isinstance(outcome, (Next, Done, Aborted)):
-                    raise TypeError(
-                        "Workflow step must return Next, Done, or Aborted"
-                    ) from None
+                    raise TypeError("Workflow step must return Next, Done, or Aborted")
                 return outcome
+            if driver.status == "cancelled":
+                self._host_stop()
+                raise _DiscardStep()
             self._check_cancel()
-            # Effect exits handle pure cancellation. A genuine Schedule Failed
-            # reaches workflow code even when a control request arrived with it.
-            dispatch_effect(effect, self)
+            if driver.status == "paused":
+                with self._lock:
+                    self._check_cancel()
+                    self._artifacts.append(Paused(self._call_seq, self._commit_seq))
+                    self._artifacts.set_lifecycle("paused")
+                    self._lifecycle = "paused"
+                return None
+            request = driver.pending_request
+            if not isinstance(request, Wait) or not isinstance(request.op, Effect):
+                raise TypeError(
+                    "Use yield from env.<effect>(...); unknown effect request"
+                )
+            # A genuine Schedule Failed reaches workflow code even when a control
+            # request arrived with it; dispatch retains source-aware cancellation.
+            dispatch_effect(request.op, self)
 
     def _commit(self, outcome: Next[R, S]) -> None:
         record = deepcopy(outcome.record)
@@ -339,7 +421,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             if self._lifecycle == "stopping":
                 self._end("stopped")
                 return True
-            return self._lifecycle in _TERMINAL
+            return self._lifecycle == "paused" or self._lifecycle in _TERMINAL
 
     def _new_signal(self) -> StopSignal:
         with self._lock:
@@ -482,7 +564,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
 
     def resume(self) -> RunStatus:
         """Resume only after paused segment return under the retained lease."""
-        if self._lifecycle != "paused" or self._executing:
+        if self._lifecycle != "paused" or self._executing or self._driver is not None:
             raise InvalidRunState("resume", self._lifecycle)
         try:
             self._artifacts.append(Resumed(self._commit_seq, self._tunables.revision))
@@ -502,6 +584,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 StopRequested(self._ports.clock.now(), self._call_seq)
             )
             if self._lifecycle == "paused":
+                self._lifecycle = "stopping"
+                self._close_step()
+                self._discard_iteration()
                 self._end("stopped")
             else:
                 self._artifacts.set_lifecycle("stopping")
@@ -572,6 +657,10 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             self._lifecycle = "failed"
             self._reason = f"{type(error).__name__}: {error}"
             try:
+                self._close_step()
+            except (Exception, KeyboardInterrupt):
+                _logger.exception("Workflow producer cleanup failed")
+            try:
                 self._close_displays()
             except Exception:
                 _logger.exception("Workflow progress cleanup failed")
@@ -597,6 +686,12 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._artifacts.set_lifecycle("failed", self._reason)
             except Exception:
                 _logger.exception("Cannot publish failed workflow manifest")
+
+    def pending_question(self) -> Question[Answer] | None:
+        """Return detached unanswered evidence after the paused worker settles."""
+        if self._lifecycle != "paused" or self._executing or self._driver is None:
+            return None
+        return deepcopy(self._driver.pending_question)
 
     def status(self) -> RunStatus:
         """Return detached lifecycle/sequence/revision/display observations."""

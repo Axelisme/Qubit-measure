@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
+from ...core.script_protocol import OperationResult
 from ...device import BaseDeviceInfo
 from .models import Completed, Effect, Failed
 from .run import LiveUpdate, Run
@@ -86,6 +87,7 @@ class DeviceEffect(Effect):
 class WaitEffect(Effect):
     """Internal aware-deadline request; done is true after clock return."""
 
+    name = "wait_until"
     target: datetime
     done: bool = field(default=False, init=False)
 
@@ -110,3 +112,4 @@ def dispatch_effect(effect: Effect, executor: EffectExecutor) -> None:
     if not isinstance(effect, (RunEffect, DeviceEffect, WaitEffect)):
         raise TypeError("Use yield from env.<effect>(...); unknown effect request")
     effect.execute(executor)
+    effect.delivery = OperationResult("completed", None)

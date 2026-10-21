@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
 
+from ...core.script_protocol import Answer, Ask, Question, ScriptGenerator, Wait
 from ...device import BaseDeviceInfo
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from .effects import DeviceEffect, RunEffect, WaitEffect
-from .models import Completed, Effect, Failed, MissingCapability, ProgressSnapshot
+from .models import Completed, Failed, MissingCapability, ProgressSnapshot
 from .ports import DevicePort, EnginePorts, ProgressFactory
 from .run import LiveUpdate, Run
 
@@ -156,7 +157,7 @@ class WorkflowEnv[C](InitEnv[C]):
         cfg: Cfg,
         *,
         live: LiveUpdate | None = None,
-    ) -> Generator[Effect, None, Completed[Cfg, Result] | Failed]:
+    ) -> ScriptGenerator[Completed[Cfg, Result] | Failed]:
         """Execute an experiment without saving; return its typed Completed or Failed.
 
         cfg must be a deepcopy-able dataclass or Pydantic BaseModel instance.
@@ -173,7 +174,7 @@ class WorkflowEnv[C](InitEnv[C]):
         Cancellation discards the step and never returns a cancellation value.
         """
         request = RunEffect(experiment, cfg, live)
-        yield request
+        yield Wait(request)
         if request.outcome is None:
             raise RuntimeError("Engine did not complete the run effect")
         return request.outcome
@@ -187,9 +188,7 @@ class WorkflowEnv[C](InitEnv[C]):
         """
         return self.devices.get_device_cfg(name)
 
-    def setup_device(
-        self, name: str, cfg: BaseDeviceInfo
-    ) -> Generator[Effect, None, None]:
+    def setup_device(self, name: str, cfg: BaseDeviceInfo) -> ScriptGenerator[None]:
         """Apply complete typed settings with the engine's cooperative signal.
 
         The host revalidates all fields with the selected driver's Info model.
@@ -197,20 +196,34 @@ class WorkflowEnv[C](InitEnv[C]):
         clamping occurs. Cancellation discards the entire step.
         """
         request = DeviceEffect(name, cfg)
-        yield request
+        yield Wait(request)
         if not request.done:
             raise RuntimeError("Engine did not complete the device effect")
 
-    def wait_until(self, target: datetime) -> Generator[Effect, None, None]:
+    def wait_until(self, target: datetime) -> ScriptGenerator[None]:
         """Wait for an aware deadline, returning immediately for past targets.
 
         Naive datetimes raise ValueError. Cancellation discards the entire step,
         leaving its state-derived deadline unchanged for a later Resume.
         """
         request = WaitEffect(target)
-        yield request
+        yield Wait(request)
         if not request.done:
             raise RuntimeError("Engine did not complete the wait effect")
+
+    def ask[A: Answer](self, question: Question[A]) -> ScriptGenerator[A]:
+        """Suspend this invocation until the host supplies its declared Answer.
+
+        question is an authored Question[A] instance. The engine exposes it as
+        pending_question and returns paused without closing this generator.
+        Only Engine.answer resumes it; there is no timeout or default answer.
+        The suspended invocation retains its state, files and tunables capture.
+        """
+        request = Ask(question)
+        yield request
+        if request.delivery is None:
+            raise RuntimeError("Engine did not answer the question")
+        return request.delivery
 
     @property
     def plots(self) -> Plots:

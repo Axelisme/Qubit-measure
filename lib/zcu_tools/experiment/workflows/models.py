@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from pydantic import JsonValue
 
+from zcu_tools.core.script_protocol import OperationResult, ScriptGenerator
 from zcu_tools.datafile import SoftwareProvenance
 
 type Lifecycle = Literal[
@@ -21,7 +21,12 @@ class Effect:
 
     Workflow code receives requests through ``yield from env.<effect>(...)``.
     Direct construction is rejected; the engine also rejects non-core requests.
+    name identifies the operation. delivery is None until host dispatch completes;
+    typed effect-specific outcomes remain on the concrete request.
     """
+
+    name: str
+    delivery: OperationResult[None] | None = None
 
     def __init__(self) -> None:
         raise TypeError("Use yield from env.<effect>(...), not Effect()")
@@ -55,7 +60,7 @@ class Aborted:
             raise ValueError("Aborted.reason must not be empty")
 
 
-type Step[S, R] = Generator[Effect, None, Next[R, S] | Done | Aborted]
+type Step[S, R] = ScriptGenerator[Next[R, S] | Done | Aborted]
 
 
 @dataclass(frozen=True)

@@ -7,6 +7,7 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
+from ...core.script_protocol import Answer, Question
 from .declaration import WorkflowStep, workflow_definition
 from .execution import WorkflowRun
 from .models import (
@@ -33,7 +34,9 @@ class _RunView(Protocol):
     def run_id(self) -> str: ...
 
     def reserve_execution(self) -> None: ...
-    def execute(self) -> RunStatus: ...
+    def reserve_answer(self, answer: Answer) -> None: ...
+    def execute(self, answer: Answer | None = None) -> RunStatus: ...
+    def pending_question(self) -> Question[Answer] | None: ...
     def pause(self) -> RunStatus: ...
     def resume(self) -> RunStatus: ...
     def stop(self) -> RunStatus: ...
@@ -52,6 +55,7 @@ class Engine[C]:
     start validates and persists startup, but never executes workflow code.
     execute synchronously runs a segment until paused or terminal. The host
     schedules it on a worker; Engine creates no threads and owns no connections.
+    answer is also a synchronous worker segment, never a UI-thread control.
     Control/read methods are thread-safe and return detached values. A new run
     replaces only a terminal run whose execute segment has actually returned.
     Startup validation/I/O errors propagate without replacing the previous run.
@@ -117,10 +121,39 @@ class Engine[C]:
 
         Only paused with no execute in flight is accepted. init/start time are
         unchanged. The next execute repeats the uncommitted step using the
-        latest tunables. Devices are captured only when env.run executes.
+        latest tunables. An unanswered Ask raises InvalidRunState; use answer
+        on a worker instead. Devices are captured only when env.run executes.
         """
         with self._lock:
             return self._current(run_id).resume()
+
+    def pending_question(self, run_id: str) -> Question[Answer] | None:
+        """Read detached authored evidence while an Ask worker is settled.
+
+        Return None outside an unanswered Ask pause. This never runs workflow
+        code or consumes the question. A stale run_id raises RunMismatch.
+        """
+        with self._lock:
+            return self._current(run_id).pending_question()
+
+    def answer(self, run_id: str, answer: Answer) -> RunStatus:
+        """Validate and execute an Ask continuation on this worker thread.
+
+        The host schedules this synchronous segment with the same RUN lease and
+        operation as execute; do not call it on the UI owner thread. Only a
+        settled Ask pause accepts an answer. Reserve atomically, then run until
+        the next paused or terminal state, retaining the suspended invocation
+        and its original tunables capture. No resume call is needed.
+
+        Wrong Answer model raises TypeError without delivery, journal changes or
+        leaving paused. No pending Ask or an in-flight segment raises
+        InvalidRunState; stale run_id raises RunMismatch. Workflow exceptions
+        after valid delivery return failed, as execute does.
+        """
+        with self._lock:
+            run = self._current(run_id)
+            run.reserve_answer(answer)
+        return run.execute(answer)
 
     def stop(self, run_id: str) -> RunStatus:
         """Request Stop, upgrade Pause, or end an already paused run.

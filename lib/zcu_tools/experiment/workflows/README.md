@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。具名 workflow 的執行、控制與保存契約。
 
@@ -35,6 +35,10 @@ Engine 在結果 journal append 與 flush 成功後，以同目錄 temporary 加
 RunIdentity 持有宿主傳入的 native SoftwareProvenance。Manifest 與 run_started journal 在 provenance 底下保存同一份資訊，unknown 保留 None，不以預設 False 或字串代替。
 
 Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init；每次 execute 在呼叫執行緒同步跑到 paused 或 terminal。宿主安排 worker 與 lease。核心以同一把 control lock 序列化控制、revision 與不可中斷的提交，不在 effect 執行期間持有這把鎖。Pause／Stop 不等待 effect，取消時關閉並丟棄 step generator。Next 已返回時仍先提交；Resume 使用已提交 state 與最新 tunables 重做未提交步驟。內部 typed run 保留宣告的泛型配對，Engine 只持有 detached control view。Terminal run 只有在 execute 真正返回後才能被新 run 取代。
+
+`yield from env.ask(question)` 暫停並保留當前 invocation，不關閉 generator、不提交或丟棄 iteration。Engine 使用共用 `experiment.script_driver.ScriptDriver` 推進所有 step；既有 effects 包成 `Wait`，operation delivery 與 typed outcome 由 workflow host dispatch 填入。`pending_question(run_id)` 回傳 detached 的 authored `Question[Answer]`，只有等待答案且 worker 已返回時有值。沒有 timeout 或預設答案。等待 Ask 時 `resume(run_id)` 拒絕；一般 Pause 仍丟棄步驟並由 Resume 重做。
+
+`answer(run_id, answer) -> RunStatus` 與 `execute` 都是同步 worker segment。宿主在同一 RUN lease、同一 operation 下排 worker，不在 UI owner thread 執行 answer。Engine 持 control lock 先經 driver 驗證具體 Answer model，再記 Resumed 並 reserve；錯型 raise TypeError，保持 paused 且不寫事件。驗證成功後釋放 lock，由 worker 送入答案並跑到下一次 paused 或 terminal，不需要另呼叫 Resume 或 Execute。當前 invocation 保留原 tunables capture；新 revision 只供後續 step 使用。Stop 關閉等待 Ask 的 generator 並丟棄 iteration，執行 finally 清理。
 
 `WorkflowEnv.plots` 直接提供注入的 `Plots`，跨步驟與 retry 保留同一個繪圖 lifetime。`live` 接 `LiveUpdate` 回呼，收到 buffer 維度順序的 float64 axes tuple 與 complex128 samples，包含 partial NaN。回呼同步執行，不修改或保留借用的資料；workflow 用 typed handles 投影實數，或以 draw 任意繪圖、save 保存。Run 只綁定一個 buffer，保留回呼錯誤來源，不驗證繪圖策略。宿主在 producer 停止後 finish／release，Pause 不結束 Plots。回呼簽名目前是顧問代裁，待使用者審查。`assemble_rows`／`assemble_scalars` 把稀疏結果組成 detached 顯示陣列，保留缺值與 filled mask，不插值。
 
