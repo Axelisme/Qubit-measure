@@ -1,6 +1,6 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-21，segment 主分支腔場繼承
 
 **讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
@@ -172,11 +172,21 @@ Resonator 的頻率、full-charge coupling 與 linewidth 決定物理響應。AD
 
 FTF 在 terminal readout 使用該 DC 工作點的模型與 energy-basis populations。Terminal 起點是每個 point 的 readout generator 上最晚 active block 的起點，首個 ADC trigger 不得早於它。Pulse 模式每個 point 必須恰好有一個 active terminal readout pulse。Mux 模式允許 1 至 8 個共用 terminal 起點的 tone，每個 tone 有自己的 ADC。各 ADC 可有自己的 trigger windows，同一 shot index 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。所有 tone 都進入同一條 line，每個 ADC 解調總場，不把 tone 固定對應到 r1 或 r2。
 
+### Cavity
+
 Readout generator 上的非終端脈衝是腔驅動，必須在 terminal 起點前或恰好於該起點結束。跨越 terminal 起點的脈衝會引發 `ValueError`。腔驅動使用相同的 `input_per_gain` 換算，由 `simulate.adc` 求解線性、能階相依的複數腔場。每個聯合能階 s、resonator r 的光子數是 `n[s,r] = |alpha[s,r]|²`。Stark 能量頻移是 `sum_r chi[s,r] * n[s,r]`，單位 GHz。這裡的 chi 是模型的能階相依腔頻減裸腔頻，不是另外輸入的校準值。能階分支的輸出場差異產生 photon-shot-noise 去相位，包含共用線路的干涉與各腔的 internal loss。這份驅動去相位與殘餘 thermal-photon 去相位分開計算。
 
 FTF 將腔驅動起迄加入演化切分，對每個最終 segment 使用平均 Stark 頻移與平均驅動去相位率。段內不逐時套用瞬時場。脈衝結束後保留 ringdown，不清空腔場。Readout 開始前的 charge/flux drive controls 仍會演化狀態，terminal readout 期間及之後的 drive controls 不納入讀出計算。
 
-條件腔場依 qubit 能階自 t=0 各自從真空演化。Probe 不繼承 prepared 分支的腔場。這個近似讓 CKP 的 g/e preparation 分支給出相同腔中心，因此不支援 preparation-resolved χ 校準。
+FTF 依序推進各 segment 的 density 與腔場。每段開始時，所有能階的條件場都繼承上一段主分支的段末場，再依各自能階演化。第一段從零場開始。主分支取段首 density 中 population 最大的能階，相同時取最低能量。這讓探測段保留 prepared 分支留下的腔場。疊加態只攜帶一個主分支的場是半古典近似。這個逐 segment 平均並繼承主分支場的模型，對疊加態與 finite qubit drive 不描述完整的 qubit 與腔場量子糾纏。
+
+CKP 兩個 preparation 分支的腔中心分裂由 χ/κ 決定。κ ≫ χ 時，兩分支中心趨近。這個趨勢不保證有限探測強度下的擬合中心精度。
+
+同條件的 CKP 與獨立兩能階 qubit × 兩腔 Fock 截斷 Lindblad 比較仍未通過。保存的掃描使用 1 mK、Φ=(0.44, 0.20, 0.49)Φ0、κ/(2π)=1.1 MHz、|χe−χg|≈0.418869 MHz。脈衝為名義 π 1 µs、prefill 1.5 µs、probe 4 µs，有限探測強度 ΩT=1.049885。掃描包含 25 個腔頻率、51 個 qubit 頻率與 g／e 兩種 preparation，每點 4096 reps、1 round。
+
+以 finite estimator 擬合，Run 的 e−g 腔中心差為 −23.6374 kHz，同條件獨立 Lindblad 基準為 −134.5712 kHz。兩者相差 110.934 kHz，是原定 scaled SE 5.9727 kHz 的 18.57 倍。Fock 截斷與頻率網格的收斂變化均小於 local SE 2.8627 kHz，仍未達到中心差在誤差內一致的驗收條件。此次 Lorentzian 擬合所得的有效 κ 不等於 bare κ，且對 fit window 敏感，不能保證 κ 在 fit error 內與 bare 值一致。
+
+此模型可用於半古典趨勢與量測流程驗證，不應把 finite-drive CKP 的中心精度視為完整 Lindblad 結果或校準依據。目前沒有已證明能保證通過此精度驗收的 χ/κ、驅動強度或脈衝時序數值適用界。
 
 模型假設 weak dispersive coupling，不包含 MIST 躍遷或其 onset。只施加腔驅動、沒有 qubit drive 時，這些新增頻移與去相位不改變能階 populations。若 Stark 頻移讓能量排序反轉，演化會報錯並指出 point 與 segment，不重排能階。未報錯不代表強驅動、截斷或色散近似已通過適用性驗證。
 

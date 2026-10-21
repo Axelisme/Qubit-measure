@@ -1,11 +1,18 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-21, shared initial cavity fields
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
-`cavity_fields` returns complex vacuum-start fields in fixed joint-state order,
-without population mixing or receiver calibration. `cavity_field_average`
+`cavity_fields` returns complex fields in fixed joint-state order, without
+population mixing or receiver calibration. Its optional complex `(2,)`
+`initial_field` supplies the same field to every state at `initial_time_ns`.
+`cavity_field_average` accepts the same pair of inputs. Both use sqrt(photons)
+in the model's rotating reference at that absolute emitted time. The initial
+field defaults to zero and the initial time to 0 ns. Omitting both equals
+explicit vacuum at t=0, including mid-pulse queries. Propagation uses only later
+pulse history without restarting pulse-local phase or envelope coordinates.
+Queries before the initial time fail with both times in the error. `cavity_field_average`
 returns `CavityFieldAverage`: photon occupations and same-time field products
 averaged over an emitted-time interval, including coherent carriers and full
 ringdown. Flat inputs use analytic constant-line propagation and quadratic

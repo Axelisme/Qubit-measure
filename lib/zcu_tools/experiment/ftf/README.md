@@ -274,16 +274,27 @@ Differences between state-conditioned outgoing fields cause photon-shot-noise
 dephasing, including shared-line interference and independent internal losses.
 These driven contributions are separate from residual thermal-photon dephasing.
 
-FTF queries evolution's final spans and averages the Stark energy shifts and
-driven dephasing rates over each span. Fields retain ringdown after pulse
-switch-off. The averages enter evolution as neutral `SegmentShift` values;
-evolution owns segmentation and propagation, not the cavity field equations.
-Within a span, evolution uses these averages rather than the instantaneous field.
+FTF queries evolution's final spans, then advances density and cavity memory
+sequentially. All state-conditioned fields start each span from the previous
+main branch's final field. The first span starts from vacuum. The main branch
+has the largest population in the span-start DC density; exact ties select the
+lowest energy. Each span supplies ADC's `initial_field` and absolute
+`initial_time_ns`; the first supplies zero at 0 ns. Fields retain ringdown after
+pulse switch-off. Selecting one
+branch for a superposition is a semiclassical approximation, not a description
+of quantum cavity-state entanglement.
 
-Each state-conditioned cavity field evolves independently from vacuum at t=0.
-The probe does not inherit the cavity field of the prepared qubit branch.
-This approximation gives the same cavity centre for CKP's g/e preparation branches
-and does not support preparation-resolved chi calibration.
+FTF averages Stark energy shifts and driven dephasing over each span and passes
+neutral `SegmentShift` values to evolution. Evolution propagates only that span
+from the preceding output density, without normalizing or clipping it. Absolute
+control coordinates, carrier phases and pulse-local envelopes keep their common
+origin. Within a span, evolution uses the averages rather than instantaneous
+fields. Undriven templates retain their original single-evolve path.
+
+Each cavity-driven preparation retains all span reuse keys. Cache hits check
+every key through `Engine.reuse`. Evolution's `merge_path_diagnostics` combines
+span work and unions class membership by caller point index, so each point counts
+once per class across the acquire.
 
 A Stark shift that reverses state-energy order raises a point/segment-specific
 error because it exceeds the dispersive model's validity. States are not reordered.
@@ -374,10 +385,11 @@ memory. They need only agree with direct means in expectation, not realization.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v12`. Integrated raw and decimated traces resolve
+The backend is `ftf-segment-v13`. Integrated raw and decimated traces resolve
 continuous CTMC jump times and cavity memory, with one physical path per shot
-shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v11`
-and earlier backends fail explicitly because they predate cavity-drive evolution.
+shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v12`
+and earlier backends fail explicitly because they predate segment-boundary cavity
+field inheritance.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal

@@ -39,6 +39,9 @@ class PathFields:
     the field itself. Dense baselines support arbitrary pulse envelopes without
     an ODE per shot or interpolation onto an artificial grid. Solver failures
     raise RuntimeError; invalid envelope evaluations propagate ValueError.
+    start_ns optionally limits vacuum propagation to pulse history at/after that
+    emitted-ns time, without changing pulse-local coordinates. None retains the
+    complete pulse history. This does not alter shot observers' default behavior.
     """
 
     def __init__(
@@ -48,8 +51,11 @@ class PathFields:
         times: RealArray,
         rtol: float,
         atol: float,
+        *,
+        start_ns: float | None = None,
     ) -> None:
         self.model, self.pulse, self.times = model, pulse, times
+        self._start_ns = start_ns
         self._a, self._v = line_parameters(model)
         self._scattering = self._v * np.exp(-1j * model.mismatch_phase_rad)
         self._segments: list[
@@ -59,7 +65,11 @@ class PathFields:
 
     def _prepare_baselines(self, rtol: float, atol: float) -> None:
         pulse = self.pulse
-        start = pulse.start_ns
+        start = (
+            pulse.start_ns
+            if self._start_ns is None
+            else max(pulse.start_ns, self._start_ns)
+        )
         end = max(start, float(self.times[-1]))
         corners = {start, end} | {
             float(t)
