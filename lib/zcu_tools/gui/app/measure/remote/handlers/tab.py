@@ -19,7 +19,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ..save_types import project_save_snapshot
+from ..save_types import project_raw_data_state, project_save_snapshot
 from ._common import follow_tab, render_view
 
 
@@ -124,6 +124,9 @@ def tab_operation_state(
         **project_save_snapshot(snap.artifacts, run_id=snap.run.run_id).model_dump(
             mode="json"
         ),
+        "raw_data": project_raw_data_state(
+            snap.artifacts, run_id=snap.run.acquisition_run_id
+        ).model_dump(mode="json"),
         "result_source_path": snap.run.source_path,
         # Revisions distinguish replacements even when availability and source
         # path stay unchanged. Payload arrays remain with the application owner.
@@ -418,12 +421,15 @@ def h_tab_edit_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from ..form_errors import cfg_error_to_remote
-    from ..form_observation import form_writes, observe_form
+    from ..form_observation import edit_path_hints, form_writes, observe_form
 
     tab_id = str(params["tab_id"])
     batch = form_writes(params["edits"])
     try:
         resource = adapter.cfg_lookup(tab_id)
+    except CfgPreconditionError as exc:
+        raise cfg_error_to_remote(exc) from exc
+    try:
         resource.write(batch)
     except FormInputRejected as exc:
         from ..form_errors import input_rejected_to_remote
@@ -432,8 +438,16 @@ def h_tab_edit_cfg(
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     except ValueError as exc:
+        hints = edit_path_hints(resource)
         raise RemoteError(
-            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+            ErrorCode.INVALID_PARAMS,
+            f"{exc}. Active editable paths: {hints['editable_paths']!r}. "
+            f"Selection paths: {hints['selection_paths']!r}. "
+            "Use tab.select_recipe_module for module selection with logical paths; "
+            "ref descendants require use_inline first. "
+            "Use tab.describe_cfg to inspect canonical options and paths.",
+            reason="form_errors",
+            data=dict(hints),
         ) from exc
     follow_tab(adapter, tab_id, "run")
     return dict(observe_form(resource))

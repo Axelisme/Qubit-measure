@@ -230,7 +230,11 @@ def _resolve(
     source: LogicalSource | None = None
     for index, name in enumerate(path):
         if not level.has(name):
-            raise FormPathError(path, f"Unknown logical field: {path!r}")
+            raise FormPathError(
+                path,
+                f"Unknown logical field: {path!r}; available fields at "
+                f"{path[:index]!r}: {level.names!r}",
+            )
         if source is not None:
             source = replace(source, spec_path=(*source.spec_path, name))
         position = _Position(level.field(name), path[: index + 1], source)
@@ -277,7 +281,7 @@ def _metadata(position: _Position, root: type[FormModel]) -> FormFieldDescriptio
     description = describe_field(
         position.target, roots=(root, position.target.level.model)
     )
-    return replace(description, path=position.path, name=position.path[-1])
+    return replace(description, path=position.path, name=str(position.path[-1]))
 
 
 def _children(
@@ -286,7 +290,7 @@ def _children(
     if level is None:
         return ()
     result: list[FormFieldDescription] = []
-    for name in level.model.model_fields:
+    for name in level.names:
         target = level.field(name)
         if target.pinned:
             continue
@@ -363,8 +367,22 @@ def _ordinary_level(
     level: Level,
     env: FormEnv,
     source: LogicalSource | None = None,
-) -> tuple[dict[str, FormValue], FormErrors | None]:
+) -> tuple[FormValue, FormErrors | None]:
     """Ordinary supported subtree; child references stay literal keys, not cfgs."""
+    if level.items is not None:
+        items: list[FormValue] = []
+        messages: dict[FormPath, str] = {}
+        for index in level.names:
+            child = level.field(index).children(env)
+            if child is None:
+                raise RuntimeError("Model-list element has no model structure")
+            value, errors = _ordinary_level(child, env, source)
+            items.append(value)
+            if errors:
+                messages.update(
+                    {(index, *key): text for key, text in errors.messages.items()}
+                )
+        return items, FormErrors(messages) if messages else None
     result: dict[str, FormValue] = {}
     messages: dict[FormPath, str] = {}
     for name in level.model.model_fields:
