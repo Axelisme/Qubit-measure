@@ -74,6 +74,10 @@ Keys include settings, the full snapshot, numeric/dependency versions, layout,
 all borrowed control/readout arrays and every waveform sample/time. Buffers are
 reread on each lookup. Evolution validates reuse against its own routing policy.
 Noise, counts, round identities and measured IQ are never cached.
+Reassigning `source.settings` to validated settings changes the snapshot's
+settings identity and clears preparations on the next lookup. It does not
+replace the startup driver or reset its value. Replay captures the current
+settings and validates that same identity when reconstructing the source.
 Delivered raw sources retain their own immutable inputs after another acquire,
 cache eviction or source close. Repeated materialization returns fresh arrays.
 

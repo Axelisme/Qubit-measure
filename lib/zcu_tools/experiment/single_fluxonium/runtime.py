@@ -181,7 +181,6 @@ class SingleFluxoniumSource:
         self._source_device = devices.get_all_devices().get(
             settings.dc_bias.source.name
         )
-        self._identity = sha256(settings.model_dump_json().encode()).hexdigest()
         self._facts: SingleFluxoniumFacts | None = None
         self._facts_key: (
             tuple[str, EnvironmentSnapshot, tuple[tuple[str, str], ...]] | None
@@ -212,7 +211,7 @@ class SingleFluxoniumSource:
         if not isinstance(info, FakeDeviceInfo) or info.value_unit != source.unit:
             raise ValueError("dc_bias.source.unit: fixed source unit mismatch")
         snapshot = EnvironmentSnapshot(
-            "single-fluxonium-v1", self._identity, ((source.name, info.value),)
+            "single-fluxonium-v1", self.identity, ((source.name, info.value),)
         )
         dc_flux(self.settings, snapshot)
         return snapshot
@@ -223,8 +222,8 @@ class SingleFluxoniumSource:
         snapshot follows snapshot()'s native-value contract, including limits.
         Equal keys reuse facts; changed settings, snapshot or replay/numeric
         versions clear both caches before rebuilding. Numeric/model errors
-        propagate without retaining a failed build. No evolution, ADC or sampling
-        runs. RuntimeError follows close; invalid DC raises ValueError.
+        propagate without retaining a failed build. No density evolution, ADC
+        response solve or random sampling runs. RuntimeError follows close; invalid DC raises ValueError.
         """
         self._require_open()
         key = (self.settings.model_dump_json(), snapshot, replay.replay_versions())
@@ -263,8 +262,12 @@ class SingleFluxoniumSource:
 
     @property
     def identity(self) -> str:
-        """SHA256 of startup physical settings, used to reject incompatible replay."""
-        return self._identity
+        """SHA256 of current validated settings, used by snapshot and replay.
+
+        Reassigning .settings changes this identity and invalidates preparation
+        keys on the next call. The startup driver object remains unchanged.
+        """
+        return sha256(self.settings.model_dump_json().encode()).hexdigest()
 
     def prepare(
         self, request: AcquireRequest, snapshot: EnvironmentSnapshot
