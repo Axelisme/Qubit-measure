@@ -1,3 +1,7 @@
+---
+status: draft
+---
+
 # GUI adapter capability 入口檢查
 
 **狀態：** draft，保留舊核准待實作目標；原核准日期與使用者原話未記錄。以下不是現行 application guard 保證。現行各入口的檢查見 [ADR-0067](../0067-gui-application.md)。

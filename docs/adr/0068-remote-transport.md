@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # ADR-0068 — 遠端前端、傳輸與 agent 介面
 
 **狀態：** accepted。

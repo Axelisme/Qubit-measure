@@ -19,7 +19,7 @@ status: accepted
 
 另外,多前端 presence(「另一方正在跑 T1」)的資料基礎缺失:`RunBlocksHardwareGate` 的 `_ActiveLease` 只有互斥所需的 kind/owner_id/resource_id,不知道「被誰、為何、從何時」佔用。先例:Bluesky queueserver 的 lock 附 owner name + note,read-only API 永不受鎖。
 
-偵察修正:先前計劃中的「persistence QTimer debounce 遷移」不存在——caretaker 只在 close 時 flush,core 內無 QTimer。scheduler 的初始消費者只有 rpc dispatch 一個。
+Caretaker 在 close 時 flush，core 內沒有 QTimer debounce。Scheduler 服務 RPC dispatch。
 
 ## 決策
 
