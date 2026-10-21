@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-21，n 維 flux 線路與多指數長尾
+**Last updated:** 2026-10-21，單腔與雙腔 ADC、n 維 flux 線路
 
 **讀者：** framework-dev。數值模擬工具與各子模組的責任邊界。
 
@@ -33,12 +33,12 @@ state labels and can be recorded independently of ADC generation. For engine\nba
 ## ADC readout
 
 Import from `zcu_tools.simulate.adc`. Construct `ReadoutModel` with joint-state
-labels, absolute resonator frequencies, two sets of resonator decay rates and a
+labels, absolute frequencies for 1 or 2 cavities, their resonator decay rates and a
 directional transition matrix indexed `[target, source]`. Supply `PopulationInput`
 with exactly the same state order. The ADC does not convert density matrices.
 
 `ADC.response` solves populations and state-conditioned first field moments for
-all initial joint states together. Two resonators share reciprocal co-located
+all initial joint states together. The resonators share reciprocal co-located
 two-port radiative damping through `v*v.T`, where `v=sqrt(kappa_external/2)`.
 The outgoing forward field is `b_in-sum(v*exp(-i*phi)*alpha)`, with each
 resonator's `mismatch_phase_rad` defaulting to zero. This retains correlations between

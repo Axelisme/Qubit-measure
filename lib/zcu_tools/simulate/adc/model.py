@@ -69,15 +69,16 @@ class Receiver:
 
 @dataclass(frozen=True)
 class ReadoutModel:
-    """Two reciprocal co-located resonators on one two-port transmission line.
+    """One or two reciprocal co-located resonators on one two-port line.
 
     identity: nonempty reproducible numeric model/version identifier.
     state_labels: unique joint-state names in row order of frequencies/rates;
         include retained coupler/leakage states, not only a two-state reduction.
-    frequencies_ghz: owned finite (state,2) absolute resonant frequencies in GHz.
+    frequencies_ghz: owned finite (state,cavity) absolute resonant frequencies
+        in GHz, with cavity count 1 or 2. Other cavity counts raise ValueError.
     reference_frequency_ghz: finite rotating-frame frequency in GHz; all drive,
         resonator and demod frequencies are compared explicitly against it.
-    kappa_internal_per_ns/kappa_external_per_ns: owned nonnegative (2,) photon
+    kappa_internal_per_ns/kappa_external_per_ns: owned nonnegative (cavity,) photon
         decay rates in 1/ns, not angular-frequency GHz. v=sqrt(kappa_external/2).
         Field generator A_s=diag(kappa_internal/2+2πi*(f_s-f_ref))+v v.T.
         Off-diagonal radiative damping is essential to the shared line model.
@@ -86,8 +87,10 @@ class ReadoutModel:
         probability generator Q=R-diag(sum(R,axis=0)); up/down/direct/cascade rates
         are independent, not equilibrium rates interpreted as one-way decay.
     receiver: single output delay/calibration/noise model. No QICK conversion.
-    mismatch_phase_rad: owned finite (2,) scattering phases in radians, default
-        zeros. Output is b_in-sum(v_r*exp(-i*phi_r)*alpha_r) before conjugation.
+    mismatch_phase_rad: owned finite (cavity,) scattering phases in radians.
+        The default zeros(2) preserves two-cavity callers. One-cavity callers
+        must explicitly supply a one-element array, including zeros(1).
+        Output is b_in-sum(v_r*exp(-i*phi_r)*alpha_r) before conjugation.
         Each phase rotates only its resonator's scattered field, with +phi in
         microwave IQ as in the hanger model. It does not change A_s or rates.
     Invalid dimensions, values or rates raise ValueError. Weak dispersive QND
@@ -110,12 +113,18 @@ class ReadoutModel:
             raise ValueError("readout identity and unique state labels required")
         if not np.isfinite(self.reference_frequency_ghz):
             raise ValueError("reference frequency must be finite")
+        frequencies = readonly_array(self.frequencies_ghz, "frequencies_ghz")
+        if frequencies.ndim != 2 or frequencies.shape[1] not in (1, 2):
+            raise ValueError(
+                "frequencies_ghz must have shape (state, cavity), with 1 or 2 cavities"
+            )
+        cavities = frequencies.shape[1]
         specs = (
-            ("frequencies_ghz", (n, 2), False),
-            ("kappa_internal_per_ns", (2,), True),
-            ("kappa_external_per_ns", (2,), True),
+            ("frequencies_ghz", (n, cavities), False),
+            ("kappa_internal_per_ns", (cavities,), True),
+            ("kappa_external_per_ns", (cavities,), True),
             ("rates_per_ns", (n, n), True),
-            ("mismatch_phase_rad", (2,), False),
+            ("mismatch_phase_rad", (cavities,), False),
         )
         for name, shape, nonnegative in specs:
             array = readonly_array(getattr(self, name), name)
@@ -126,6 +135,11 @@ class ReadoutModel:
             object.__setattr__(self, name, array)
         if np.any(np.diag(self.rates_per_ns) != 0):
             raise ValueError("directional rates diagonal must be zero")
+
+    @property
+    def cavity_count(self) -> int:
+        """Number of physical resonators (1 or 2), independent of receiver I/Q."""
+        return self.frequencies_ghz.shape[1]
 
 
 def readout_model_key(model: ReadoutModel) -> tuple[object, ...]:

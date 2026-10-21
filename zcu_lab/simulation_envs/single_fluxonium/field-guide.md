@@ -1,5 +1,7 @@
 # Single-fluxonium settings guide
 
+**Readers:** operator, framework-dev. Read the single-fluxonium settings' units and approximation boundaries.
+
 ## Files and wiring
 
 `default.yaml` uses `zcu.single-fluxonium` version 1.
@@ -48,12 +50,16 @@ Receiver gain maps sqrt(photons/ns) to ADC sample units.
 Offset is an I/Q pair. Noise PSD is a two-sided 2-by-2 I/Q covariance in
 ADC units squared times ns. Time of flight uses ns. Receiver phase uses degrees;
 resonator mismatch phase uses radians.
-The model has one physical cavity.
+The model has one physical cavity. The ADC owner supports 1 or 2 cavities;
+other cavity counts fail at model construction. Single-cavity ADC callers
+explicitly supply one scattering phase, including a one-element zero array
+for no mismatch. Receiver I/Q remains two-dimensional.
 
 The model owner supplies energy levels, projected operators, secular losses,
 equilibrium 0↔1 Purcell rates and residual-photon dephasing.
 The approximations assume weak dispersive coupling and Markov baths.
-No single-cavity ADC model, average IQ or single-shot traces are connected yet.
+The ADC owner supports single-cavity mean IQ and physical shot traces.
+This environment has not connected those ADC paths to acquisition yet.
 Acquire fails explicitly. MCP startup and small-scan acceptance remain pending.
 
 Solver tolerances control numerical integration, not basis convergence.
