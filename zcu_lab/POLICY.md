@@ -13,7 +13,7 @@
 ## 2. 在 recipe 寫出操作流程
 
 Recipe 函式本體直接列出開 tab、設定、Run、Analyze 與 writeback 問答，不把整段流程藏進 helper。
-檢查：從 generator 本體追到實際採用的步驟，確認取消時停止後續操作，接受 writeback 後才呼叫 `accept()`。
+檢查：從 generator 本體依序指出實際採用的步驟，確認接受 writeback 後才呼叫 `accept()`。
 來源：[recipe 操作流程](v2/experiment-authoring.md#2-在-recipe-函式本體寫出操作流程)。
 
 ## 3. Docstring 先說量測與結果
@@ -63,3 +63,15 @@ Docstring 沿用量測與元件的名稱，遇到單位、座標或資料形狀�
 Adapter、workflow、recipe 與實驗共用 helper 不新增個別 pytest，框架測試用最小合成材料驗證公開契約。
 檢查：審閱變更未為 lab 定義新增測試或逐一走訪 lab registry，實驗載入與表單錯誤由 GUI 回報。
 來源：[使用者實驗的測試](v2/experiment-authoring.md#使用者實驗的測試)。
+
+## 11. Startup 腳本與 entry-template 各自獨立
+
+每份 startup 腳本保持獨立，使用自己的 entry-template，不與其他 startup 共用範本。
+檢查：審閱腳本的 import 與範本路徑，修改某份範本不會改到另一份 startup 建立 entry 的內容。
+來源：[startup 與模擬環境的放置](../docs/adr/0072-module-boundaries.md#使用者元件與模擬環境的放置)。
+
+## 12. 文件每句寫出具體行為
+
+文件每句說明會發生什麼、產生什麼狀態或要做什麼，不用抽象評語代替機制與結果。
+檢查：逐句核對讀者能指出操作、資料或狀態，刪掉無法對應具體行為的形容詞與空泛結論。
+來源：[文件規範](../CLAUDE.md#文件規範)。
