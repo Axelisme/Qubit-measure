@@ -1,8 +1,26 @@
 # v2 experiment authoring
 
+**Last updated:** 2026-10-21
+
+**讀者：** lab-author、framework-dev、agent。撰寫實驗 core，查閱 records、資料形狀、執行與保存慣例。
+
 使用者入口見 [tutorial](../tutorial/README.md)。
 
-**Last updated:** 2026-10-19，分析政策也由各實驗 core 明示
+## 目錄
+
+- [實驗序列與 recipe 撰寫規則](#讓使用者只看一個檔案就能理解實驗)
+- [使用者實驗的測試](#使用者實驗的測試)
+- [實驗家族 records](#實驗家族-records)
+- [目錄佈局](#目錄佈局)
+- [實驗特有的分析與保存](#實驗特有的分析與保存)
+- [典型 Exp.run 範本](#典型-exprun-範本以-onetonefreqcorepy-為例)
+- [v2 cfg 組合慣例](#v2-cfg-組合慣例)
+- [Signal/Raw 處理慣例](#signalraw-處理慣例)
+- [v2 工具與實驗輔助](#v2-工具與實驗輔助)
+- [Lookback 與 Tracker](#lookback--tracker)
+- [Twotone RB 測量策略](#twotone-rb-測量策略)
+- [外部中斷支援](#外部中斷支援cancel_flag)
+- [新 experiment 檢查清單](#寫新-experiment-時的檢查清單)
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。
 
@@ -108,7 +126,9 @@ and mean complex IQ per participating tone; the fringe decay measures T2.
 
 ---
 
-## T1、singleshot GE 與 OneTone 的核心入口
+## 實驗家族 records
+
+### T1、singleshot GE 與 OneTone 的核心入口
 
 T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 的數值 Analysis 保存本次 fit_quality，普通擬合名為 fit。品質只使用 skip／mask 後的資料、已提交模型與 optimizer covariance，不重新擬合。GE 保存 joint、ground、excited 三階段，各自使用自己的資料、模型與 covariance；post 沿用 primary calibration。品質不改曲線、校正有效性或 writeback policy。
 
@@ -124,7 +144,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 的數值 Analysis 保存本次 fit_q
 
 T2Echo／T2Ramsey 的 detune 放入 typed cfg，run 回傳純 Result，analyze 使用 explicit source 與 typed options，向 Plots 發布 fit 圖。硬體 rounding 後的 true_activate_detune 是 run-only metadata；canonical axes／complex data 不包含它，load 後值為 None，不推測實際 detune。兩者分析均允許 cfg=None。
 
-## FastFlux records
+### FastFlux records
 
 FastFlux 六個核心使用 `run(config, *, context) -> Result`，不保存跨次 cfg／result。
 同步分析接收 explicit `RunRecord`、options 與 `Plots`。T1 與三個 distortion 回傳
@@ -132,7 +152,7 @@ FastFlux 六個核心使用 `run(config, *, context) -> Result`，不保存跨�
 `None`。三個 distortion 需要來源 cfg 來取得 pulse 時間，缺少時明確拒絕。共用
 NotebookAdapter 建立 records；核心保留既有 canonical axes、單位與分析公式。
 
-## TwoTone spectroscopy records
+### TwoTone spectroscopy records
 
 `twotone` 的 Freq、FreqFlux、Power 與 Dispersive 使用 explicit RunContext，run 回傳純 Result。
 Freq 與 Dispersive 同步 analyze 接 RunRecord 與各自 typed options，回傳數值 Analysis，
@@ -140,11 +160,11 @@ Freq 與 Dispersive 同步 analyze 接 RunRecord 與各自 typed options，回�
 FreqFlux 的 `fail_retry` 是 typed cfg 欄位；GUI 選線由 plugin 擁有。Notebook 使用
 NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，不由核心轉接。
 
-## TwoTone Rabi records
+### TwoTone Rabi records
 
 `twotone.rabi` 的 AmpRabi／LenRabi 核心以 RunContext 執行量測，回傳純 Result。同步 analyze 接 explicit RunRecord 與各自的 typed AnalyzeOptions，回傳數值 Analysis，接受 cfg=None。量測與分析分別發布 `measurement`／`fit` 具名圖；caller 負責 finish／release。LenRabi 保留 const／flat_top 的板端 sweep 與 arb waveform 的 host scan、跨 rounds 平均及部分成果。Notebook callers 透過 NotebookAdapter 保存 run 與 analysis records。
 
-## Mux qubit host zip acquisition
+### Mux qubit host zip acquisition
 
 `mux.freq.MuxFreqExp` 與 `mux.amp_rabi.MuxAmpRabiExp` 提供無 GUI 的 `run(config, *, context)`。
 完整 `tones: list[MuxToneCfg]` 保留 readout 原始順序。Prepare 在 numeric 邊界一次選出 active indices，
@@ -168,37 +188,37 @@ Caller 負責 finish/release、組成含完整 cfg 的 RunRecord，以及保存 
 兩個 leaf 的分析與 native save/load 都讀 explicit source，不從目前 cfg 補歷史輸入。
 公開入口與單位見 [Mux freq](mux/freq/guide.md) 及 [Mux Amp Rabi](mux/amp_rabi/guide.md)。
 
-## TwoTone pulse calibration records
+### TwoTone pulse calibration records
 
 `AcStarkExp`、`AcStarkRamseyExp`、`CKP_Exp` 的 run 使用 RunContext，回傳純 Result。AcStark 的 earlystop_snr 與 Ramsey 的 acquisition detune 歸 typed cfg。Analyze 接 explicit source 和 typed options，接受 cfg=None。AcStark 回傳 ac_coeff；Ramsey 只發布 fit 圖，分析 detune 仍可獨立指定；CKP 回傳 chi／kappa／res_freq。兩種 AcStark 使用 measurement 2D with line，CKP 在同一張 measurement 圖並排 ground／excited 熱圖；三者的分析圖都具名 fit。Caller 擁有 finish／release，NotebookAdapter 管理 Notebook 的 records 與呈現。
 
-## Twotone sequence records
+### Twotone sequence records
 
 AllXY／RB／ZigZag／ZigZagScan 使用 explicit RunContext、純 Result 與具名 measurement。AllXY 的 gate ticks／style 由 host owner 在呈現前初始化，analyze 接 AllXYAnalyzeOptions，回傳 AllXYAnalysis（相對振幅誤差、detune 參數、Bloch-z 平均偏差與 fit residual），並發布 fit 圖。RB analyze 接 None options，回傳 EPC／fidelity；ZigZagScan 接 find_range options，回傳 min_value。兩者 fit 圖另交 Plots。ZigZag 的 repeat_on 歸 typed cfg，沒有 analyze。Canonical 軸與 RB seed／recovery 演算法不變。
 
-## MIST records
+### MIST records
 
 `mist` 的 FluxDep／DriveFreq／PowerDep 核心使用 explicit RunContext，回傳純 Result。Analyze 接 explicit RunRecord，接受 cfg=None，只發布具名 fit 圖並回傳 None。FluxDepAnalyzeOptions 保留通量換算、photon 軸及第二座標刻度；PowerDepAnalyzeOptions 保留 g0／e0／ac_coeff，DriveFreq 使用 None options。FluxDep 的熱圖為原生 Matplotlib 圖，不再接收 Plotly fig／fig_kwargs；caller 從具名圖集合取得 Figure 進行原生操作。Notebook callers 使用 NotebookAdapter 與核心 typed cfg／options。
 
-## Bath reset records
+### Bath reset records
 
 Bath reset 的 FreqGain／Length／Phase 核心以 RunContext 執行，回傳純 Result。FreqGain analyze 接 smoothing options 並回傳 gain／freq；Phase 使用 None options、回傳 max_phase／min_phase；Length 使用 None options、只發布 fit。分析接受 cfg=None。四點 tomography、Length 的 host rounds 平均與 program cache、Phase 的 cosine fitting 不變。GUI 使用明確 RunRecord，數值結果與具名 fit 圖分開。
 
-## Reset tone records
+### Reset tone records
 
 Single-tone 的 Freq／Length 與 dual-tone 的 Freq／Length／Power 使用 explicit RunContext、純 Result 和 measurement／fit 具名圖。Single Freq 分析回傳 freq／fwhm，兩 Length 只發布曲線。Dual Freq／Power 接 typed smoothing options，回傳兩軸最佳頻率／gain。分析皆允許 cfg=None。Dual Freq 的 method 歸 typed cfg，預設 soft；GUI 固定 hard 並保存於來源 cfg。Soft host scan 與 hard 雙軸 sweep 保留相同 canonical 軸序，雙 pulse 長度差與 gain 掃描的背景選擇不變。
 
-## Readout optimization records
+### Readout optimization records
 
 `twotone/ro_optimize` 的 Freq／FreqGain／Length／Power 核心使用 explicit RunContext，回傳純 SNR Result。Run 保留既有 acquire kwargs forwarding 與 MomentTracker／g-e branch；Length 用 host scan，其餘用硬體 sweep。同步分析接 RunRecord、typed AnalyzeOptions 與 Plots，允許 cfg=None，回傳純最佳 frequency／gain／length，另發布 fit 圖。Smoothing、length duration normalization、power penalty 與 canonical axes 不變。Auto optimizer 使用下述 grouped record 契約。
 
-## JPA records
+### JPA records
 
 JPA Freq／Flux／Power／Check／OneToneFlux 以 explicit RunContext 執行，回傳純 Result；cfg 與資料由前端配成 RunRecord。前三者的分析接 explicit source、None options 與 Plots，回傳最佳 scalar；Check 只發布 fit 圖，OneToneFlux 不提供 analysis。Run 的 measurement 圖歸本次 Plots。Freq／Power 保留隨機內部掃描點與無連線點圖，Flux 保留 Gaussian smoothing，pump off/on check 結束時仍保持 ON。AutoOptimize 同樣接 explicit records 與 grouped persistence，num_points 的整數及最低預算驗證由 typed cfg 擁有。最佳三參數分析發布原生四 axes fit 圖；sample_params 診斷接 explicit source，發布3D圖。即時四投影使用具名 typed scatter，保留 optimizer phase 色彩。
 
 Readout AutoOpt 同樣使用 records 與 grouped persistence，num_points 屬於 typed cfg。分析回傳最佳頻率／增益／長度，四 axes 的 fit 圖獨立發布；即時 iteration／freq／gain／length 投影各自具名並由 Plots 管理呈現。
 
-## CPMG grouped records
+### CPMG grouped records
 
 CPMG 使用 explicit RunContext／RunRecord／Plots，不保留跨次結果。detune_ratio 與 earlystop_snr 屬於 run cfg，分析選項屬於 CPMGAnalyzeOptions，回傳 CPMGAnalysis 的 ns／t2s／t2errs；T2 與誤差使用 us，fit 圖另交 Plots。共用 GroupedAxesSpec 保存與載入 record；lengths role 保留每列時間座標，signals role 與既有 grouped v2 schema 不變。
 

@@ -1,5 +1,7 @@
 # Mux qubit recipes
 
+**Readers:** operator, agent. Run the seven mux qubit recipes, save results and review calibration proposals.
+
 These seven recipes measure selected qubits with simultaneous mux readout, save
 raw data and fits, and ask before applying calibration updates.
 
