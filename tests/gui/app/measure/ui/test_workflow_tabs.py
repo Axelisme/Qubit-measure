@@ -120,8 +120,9 @@ def _text(driver: ComponentDriver, name: str) -> str:
     return next(w.text for w in driver.visible().widgets if w.object_name == name)
 
 
-def _open(driver: ComponentDriver) -> None:
+def _open(driver: ComponentDriver, evidence: Path) -> None:
     driver.select_menu("New Tab ▾", ("synthetic",))
+    driver.screenshot(evidence)
 
 
 def _status(driver: ComponentDriver, text: str) -> bool:
@@ -138,14 +139,12 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     _shot(driver, tmp_path, "01-experiments")
     driver.click(object_name="workflow.toggle")
     _shot(driver, tmp_path, "02-empty-workflows")
-    _open(driver)
-    _shot(driver, tmp_path, "03-first-tab")
+    _open(driver, tmp_path / "03-first-tab.png")
     assert driver.tabs("synthetic (1)").current == "synthetic (1)"
     assert driver.tabs("Plan").captions == ("Plan", "Tunables", "Ask")
     driver.enter_text(value="7", object_name="form.input.cycles")
     _shot(driver, tmp_path, "04-plan-edited")
-    _open(driver)
-    _shot(driver, tmp_path, "05-second-tab")
+    _open(driver, tmp_path / "05-second-tab.png")
     assert driver.tabs("synthetic (2)").captions == ("synthetic (1)", "synthetic (2)")
     assert _text(driver, "form.input.cycles") == "1"
     driver.select_tab("synthetic (1)")
@@ -162,8 +161,7 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     assert driver.tabs("synthetic (2)").captions == ("synthetic (2)",)
     driver.click_tooltip("Close synthetic (2)")
     _shot(driver, tmp_path, "10-last-closed")
-    _open(driver)
-    _shot(driver, tmp_path, "11-reopened")
+    _open(driver, tmp_path / "11-reopened.png")
     assert driver.observe("Start").enabled
     driver.click(object_name="workflow.toggle")
     _shot(driver, tmp_path, "12-experiments-again")
@@ -178,10 +176,8 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     _shot(driver, tmp_path, "01-experiment")
     driver.click(object_name="workflow.toggle")
     _shot(driver, tmp_path, "01a-workflows")
-    _open(driver)
-    _shot(driver, tmp_path, "01b-first-tab")
-    _open(driver)
-    _shot(driver, tmp_path, "01c-second-tab")
+    _open(driver, tmp_path / "01b-first-tab.png")
+    _open(driver, tmp_path / "01c-second-tab.png")
     driver.select_tab("synthetic (1)")
     _shot(driver, tmp_path, "01d-selected-first")
     driver.click("Start")
