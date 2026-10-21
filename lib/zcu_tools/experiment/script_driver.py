@@ -10,6 +10,7 @@ from pydantic_core import InitErrorDetails, PydanticCustomError
 from zcu_tools.core.script_protocol import (
     Answer,
     Ask,
+    Operation,
     Question,
     ScriptGenerator,
     ScriptRequest,
@@ -69,6 +70,7 @@ class ScriptDriver[R]:
         generator: ScriptGenerator[R],
         *,
         on_signal: Callable[[Signal], None] | None = None,
+        deliver_cancelled: Callable[[Operation[object]], None],
     ) -> None:
         """Take ownership of generator; on_signal handles non-cancel controls.
 
@@ -77,6 +79,7 @@ class ScriptDriver[R]:
         """
         self._generator = generator
         self._on_signal = on_signal
+        self._deliver_cancelled = deliver_cancelled
         self._signals: deque[Signal] = deque()
         self._status: ScriptStatus = "running"
         self._pending: ScriptRequest | None = None

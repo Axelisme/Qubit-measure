@@ -224,6 +224,7 @@ class ScriptRecipeExecution:
             driver = ScriptDriver(
                 self._definition.generator(host.session, inputs),
                 on_signal=host.on_signal,
+                deliver_cancelled=host.deliver_cancelled,
             )
             with self._condition:
                 self._host = host

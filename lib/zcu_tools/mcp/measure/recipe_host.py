@@ -26,6 +26,12 @@ def _unbound_cancel(operation: Operation[object]) -> None:
     )
 
 
+def _unbound_deliver_cancelled(operation: Operation[object]) -> None:
+    raise NotImplementedError(
+        f"No recipe cancelled delivery owner is bound for {operation.name!r}"
+    )
+
+
 def _no_runs() -> tuple[RecipeRun, ...]:
     return ()
 
@@ -51,6 +57,7 @@ class RecipeHost:
     session: RecipeSession
     wait: Callable[[Operation[object], Event], None] = _unbound_wait
     cancel: Callable[[Operation[object]], None] = _unbound_cancel
+    deliver_cancelled: Callable[[Operation[object]], None] = _unbound_deliver_cancelled
     runs: Callable[[], tuple[RecipeRun, ...]] = _no_runs
     on_signal: Callable[[Signal], None] = _unsupported_signal
 

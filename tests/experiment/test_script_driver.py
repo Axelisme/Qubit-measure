@@ -22,6 +22,15 @@ class SyntheticOperation:
     delivery: OperationResult[int] | None = None
 
 
+def deliver_cancelled(operation: object) -> None:
+    """Deliver without starting work, as the synthetic operation's owner."""
+    from zcu_tools.core.script_protocol import OperationResult
+
+    if not isinstance(operation, SyntheticOperation):
+        raise TypeError("Unknown synthetic operation")
+    operation.delivery = OperationResult("cancelled", None)
+
+
 @pytest.mark.parametrize("status", ["completed", "cancelled", "failed"])
 def test_wait_delivers_terminal_outcome_and_resumes_only_with_none(
     status: OperationStatus,
@@ -39,7 +48,7 @@ def test_wait_delivers_terminal_outcome_and_resumes_only_with_none(
         resumes.append((yield Wait(op)))
         return op.delivery
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     assert driver.status == "running"
     driver.advance()
     assert driver.status == "waiting"
@@ -76,7 +85,7 @@ def test_ask_waits_without_default_and_wrong_answer_preserves_question() -> None
         resumes.append((yield request))
         return request.delivery
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
     driver.advance()
     assert driver.status == "paused"
@@ -110,7 +119,7 @@ def test_unparameterized_question_cannot_be_answered() -> None:
     def script() -> Generator[ScriptRequest, None, None]:
         yield Ask(Unspecified.model_validate({"evidence": "missing answer contract"}))
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
     with pytest.raises(TypeError, match=r"Question\[.*Answer"):
         driver.answer(Answer())
@@ -140,7 +149,7 @@ def test_inherited_question_accepts_subclass_of_declared_answer() -> None:
         yield request
         return request.delivery
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
     answer = DetailedApproval(accepted=True, reason="reviewed")
     driver.answer(answer)
@@ -161,7 +170,11 @@ def test_signal_delivery_occurs_at_yield_boundaries_in_order() -> None:
         yield Wait(op)
         events.append("resumed")
 
-    driver = ScriptDriver(script(), on_signal=lambda signal: events.append(signal.kind))
+    driver = ScriptDriver(
+        script(),
+        deliver_cancelled=deliver_cancelled,
+        on_signal=lambda signal: events.append(signal.kind),
+    )
     driver.signal(Signal("pause"))
     assert events == []
     driver.advance()
@@ -189,7 +202,7 @@ def test_cancel_closes_suspended_generator_but_host_owns_operation(
         finally:
             cleanup.append("closed")
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
     driver.signal(Signal("cancel"))
     assert cleanup == []
@@ -218,7 +231,7 @@ def test_cancel_requested_during_execution_waits_until_yield() -> None:
         finally:
             events.append("closed")
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
     assert events == ["still executing", "closed"]
     assert driver.status == "cancelled"
@@ -234,7 +247,7 @@ def test_script_failure_preserves_original_error_and_terminal_state() -> None:
         yield Wait(SyntheticOperation(delivery=OperationResult("completed", 1)))
         raise error
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     with pytest.raises(ValueError, match="authored failure") as caught:
         driver.advance()
     assert caught.value is error
@@ -250,7 +263,7 @@ def test_generator_exit_is_cancelled_not_failed() -> None:
         yield from ()
         raise GeneratorExit
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
     assert driver.status == "cancelled"
     assert driver.error is None
@@ -266,7 +279,7 @@ def test_close_failure_is_failed_and_preserves_cleanup_error() -> None:
         finally:
             raise ValueError("cleanup failed")
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
     driver.signal(Signal("cancel"))
     with pytest.raises(ValueError, match="cleanup failed") as caught:
@@ -282,7 +295,7 @@ def test_unsupported_request_fails_instead_of_suspending() -> None:
     def script() -> Generator[ScriptRequest, None, None]:
         yield ScriptRequest()
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     with pytest.raises(TypeError, match="Wait.*Ask"):
         driver.advance()
     assert driver.status == "failed"
@@ -297,7 +310,7 @@ def test_return_payload_is_not_projected_or_copied() -> None:
         yield from ()
         return report
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
     assert driver.status == "completed"
     assert driver.result is report
@@ -322,7 +335,7 @@ def test_parse_answer_only_validates_and_preserves_pending_delivery() -> None:
         yield request
         return request.delivery
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     with pytest.raises(RuntimeError, match="pending question"):
         driver.parse_answer({"accepted": True})
     driver.advance()
@@ -358,7 +371,7 @@ def test_validate_answer_does_not_deliver_or_resume() -> None:
         yield request
         return request.delivery
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     approval = Approval(accepted=True)
     with pytest.raises(RuntimeError, match="pending question"):
         driver.validate_answer(approval)
@@ -388,7 +401,7 @@ def test_pending_answer_type_is_read_only_and_clears_at_terminal() -> None:
         yield request
         return request.delivery
 
-    driver = ScriptDriver(script())
+    driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     assert driver.pending_answer_type() is None
     driver.advance()
     assert driver.pending_answer_type() is Approval

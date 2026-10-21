@@ -264,7 +264,12 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         )
         if not isinstance(generator, GeneratorType):
             raise TypeError("Workflow step must return a generator")
-        self._driver = ScriptDriver(generator)
+        self._driver = ScriptDriver(
+            generator, deliver_cancelled=self._deliver_cancelled
+        )
+
+    def _deliver_cancelled(self, operation: object) -> None:
+        raise NotImplementedError("Workflow cancelled delivery is not connected yet")
 
     def _call_step(self) -> None:
         if self._driver is None:
