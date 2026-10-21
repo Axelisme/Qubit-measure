@@ -182,7 +182,9 @@ def test_ml_create_reports_name_format_without_writing(role_socket, name):
     error = reply["error"]
     assert error["code"] == "invalid_params"
     assert "component.partition.name" in error["message"]
-    assert all(partition in error["message"] for partition in ("pulses", "readout", "reset"))
+    assert all(
+        partition in error["message"] for partition in ("pulses", "readout", "reset")
+    )
     assert fx.ctrl.read_context().library.document() == before
 
 

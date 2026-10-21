@@ -54,6 +54,7 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.context.library import library_key_kind
 
 from .adapter import AdapterGuide, SessionEnv
 from .events.completion import (
@@ -1117,6 +1118,18 @@ class Controller(SessionControllerMixin):
         if template_kind != item_kind:
             raise FailedPreconditionError(
                 f"Template {template_id!r} is a {template_kind}, not a {item_kind}."
+            )
+        try:
+            name_kind = library_key_kind(name)
+        except ValueError as exc:
+            raise InvalidInputError(
+                f"Invalid library name {name!r}; use component.partition.name. "
+                "Module partitions: pulses, readout, reset; waveform partition: waveforms."
+            ) from exc
+        if name_kind != item_kind:
+            raise InvalidInputError(
+                f"Name {name!r} must use component.partition.name for {item_kind}. "
+                "Module partitions: pulses, readout, reset; waveform partition: waveforms."
             )
         parameters = self._context_control.read_context()
         keys = (

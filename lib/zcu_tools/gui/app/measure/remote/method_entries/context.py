@@ -251,14 +251,21 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "(module/waveform) is derived from 'role_id'. One-shot: seeds the role's "
             "defaults from one fixed capture, applies optional edits, then validates "
             "and writes the Spec. Edits have the same path/value Form input shape as "
-            "context.ml_edit; expressions use {expr: text}. Supply required fields "
+            "context.ml_edit; expressions use {expr: text}. Paths address Form input, "
+            "not stored YAML: pulse waveform duration is ['waveform', 'module', 'length'], "
+            "pulse wiring is ['ch'], readout wiring is ['gen_ch'] and ['ro_ch'] "
+            "(mux ADCs are ['tones', index, 'ro_ch']). Supply required fields "
             "such as readout/mux:blank's tones via edits. Invalid paths, values or "
             "Form results return invalid_params with data.errors: [{path, message}] "
             "and leave the library unchanged. Echoes {created: name}. To change an "
             "existing entry use context.ml_edit(kind, name, edits).",
             (
                 required_string("role_id", "role id from context.ml_list_roles"),
-                required_string("name", "new ml entry name"),
+                required_string(
+                    "name",
+                    "New component.partition.name root; module partitions: pulses, "
+                    "readout, reset; waveform partition: waveforms. Example: Q1.pulses.probe",
+                ),
                 ParamSpec(
                     "edits",
                     JsonType.JSON,
