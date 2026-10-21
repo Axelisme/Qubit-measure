@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-21, point-aligned continuation, diagnostic merging, retained-graph RWA density support and two-tone Floquet k=0 numerical ownership
+**Last updated:** 2026-10-22, explicit joint-Fock numeric prototype
 
 **讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -12,6 +12,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 ## Contents
 
 - [Public entry points](#public-entry-points)
+- [Joint-Fock prototype](#joint-fock-prototype)
 - [Routing telemetry](#routing-telemetry)
 - [Decision graph](#decision-graph)
 - [Row plans and the kernel seam](#row-plans-and-the-kernel-seam)
@@ -33,6 +34,8 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Control description | `ControlPulse`, `ControlSequence`, `Envelope`, `PhaseEvent`, `quantize_ns` |
 | Fixed-coordinate model records | `NumericModel`, `DriveSource` |
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
+| Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
+| Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
 
 `Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=None)` owns a
 prepare cache and a separate exact-result memo. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
@@ -75,6 +78,40 @@ The environment explicitly converts them to populations, then calls ADC's
 normalization and sampling tools. Evolution neither imports ADC nor produces
 I/Q. ADC owns its probability tolerance and readout sums; see the
 [ADC README](../adc/README.md).
+
+## Joint-Fock prototype
+
+`joint_fock_spectrum(JointFockRequest(...))` is an independent numeric entry.
+It does not connect to acquisition or ADC, and it does not change Engine's
+flat or shaped routes. Request fields and refusal conditions are documented in
+[joint_fock.py](joint_fock.py). All units are GHz, ns and radians.
+
+The main path retains physical states [0,2] and two quantum cavity modes.
+It constructs the finite-pi and ground preparations with analytic one-jump
+prefill. It rejects upward rate times prefill duration above 1e-12.
+Each rf shares that preparation across both branches and all probe carriers.
+The common displaced cavity basis retains n1+n2<=N. Sampled coherent pointers
+select the smallest N with Poisson tail <=1e-3, then add one excitation.
+The main scan starts at prefill end because it does not propagate the earlier
+vacuum. Constant CSR generators use fixed RK4 steps no larger than 1 ns.
+
+An explicit `JointFockDiagnostic` changes preparation to numeric physical
+vacuum, finite-pi, prefill and probe. It retains [0,2] or [0,1,2,3].
+It builds RWA coefficients on the full supplied `SecularModel`, including
+virtual sums, before selecting dynamic indices. Its cutoff scan starts at t=0
+to include displaced physical vacuum. Both paths report the cutoff inventory,
+probe-start and final density diagnostics, and the finite vacuum representation's
+trace and edge population. These scans cover sampled coherent [0,2] no-flip
+and one-jump paths, not every multilevel jump history. They do not bound the
+complete density's truncation error. Differences between the paths include
+preparation and cutoff selection, so they are not pure truncation errors.
+
+The prototype does not clip populations, repair densities or retry another
+solver. Nonfinite evolution fails. Fixed-step RK4 does not certify positivity
+or accuracy at arbitrary drive and frequency scales. The small-model tests
+compare analytic Rabi and relaxation, an independent physical-frame Lindblad
+ODE and a virtual shift from a state outside the dynamic projection.
+Full-map accuracy and wall measurements are separate validation work.
 
 ## Routing telemetry
 

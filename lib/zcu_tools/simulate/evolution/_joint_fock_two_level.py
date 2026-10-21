@@ -34,12 +34,17 @@ class PointerFields:
     displacement: ComplexArray
 
 
-def pointer_fields(request: "JointFockRequest", rf: float) -> PointerFields:
+def pointer_fields(
+    request: "JointFockRequest", rf: float, *, frequencies: RealArray | None = None
+) -> PointerFields:
     """Build the physical g/e no-flip fields at one rf, in sqrt(photons)."""
     v = np.sqrt(request.kappa_external_per_ns / 2)
     damping = np.outer(v, v) + np.diag(request.kappa_internal_per_ns / 2)
     matrices = np.array(
-        [-damping - 2j * np.pi * np.diag(f - rf) for f in request.frequencies_ghz]
+        [
+            -damping - 2j * np.pi * np.diag(f - rf)
+            for f in (request.frequencies_ghz if frequencies is None else frequencies)
+        ]
     )
     steady = np.zeros((2, 2), complex)
     if request.incident_per_sqrt_ns != 0:
@@ -193,6 +198,8 @@ class FockRow:
     sampled_means: RealArray
     initial_trace_error: RealArray
     initial_edge_population: RealArray
+    vacuum_trace_error: float
+    vacuum_edge_population: float
 
 
 def two_level_row(request: "JointFockRequest", rf: float) -> FockRow:
@@ -239,10 +246,13 @@ def two_level_row(request: "JointFockRequest", rf: float) -> FockRow:
                 [output[:, b].reshape(2 * size, 2 * size, order="F") for b in (0, 1)]
             )
         )
+    vacuum = coherent(-fields.displacement, basis)
     return FockRow(
         np.stack(outputs, axis=1),
         basis,
         means,
         abs(np.trace(initial, axis1=-2, axis2=-1) - 1),
         initial.diagonal(axis1=-2, axis2=-1).real[:, edge].sum(axis=-1),
+        float(abs(np.vdot(vacuum, vacuum) - 1)),
+        float(np.sum(abs(vacuum[np.array([n + m == order for n, m in basis])]) ** 2)),
     )
