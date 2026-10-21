@@ -17,8 +17,12 @@ if TYPE_CHECKING:
 class WritebackItem(ABC):
     """Mutable proposal; stderr is its standard error in working units, or None.
 
-    The destination is a direct container path or captured role path. Selection
-    and session identity belong to the service, not the proposing adapter.
+    The destination is a direct container path or captured role path. selected
+    sets the initial checkbox state (True by default); the draft owns later
+    manual selection changes. note optionally explains the proposal or its
+    initial selection in plain text; None means no note. Adapters decide quality,
+    and editing or applying a draft does not reinterpret that note. Session
+    identity belongs to the service, not the proposing adapter.
     element optionally carries the author's original index/name from the same
     Run/Load result; None means no element identity was supplied. It is display
     metadata only and never changes target_name, destination or write permission.
@@ -36,7 +40,8 @@ class WritebackItem(ABC):
     # analyze time (never by the adapter), and decoupled from target_name so
     # retargeting does not change the id.
     session_id: str = field(default="", init=False)
-    selected: bool = field(default=True, init=False)
+    selected: bool = field(default=True, kw_only=True)
+    note: str | None = field(default=None, kw_only=True)
 
 
 @dataclass

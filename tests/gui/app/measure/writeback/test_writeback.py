@@ -9,12 +9,14 @@ from zcu_tools.cfg_model import ArbWaveformCfg, ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
+    SampleWriteback,
     WritebackEdit,
     WritebackService,
     WritebackWritten,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid, ModuleEntryForm
@@ -65,6 +67,81 @@ def session(tmp_path: Path):
         assert registry_state() == installed
     finally:
         restore_registry(before)
+
+
+@pytest.mark.parametrize("kind", ["parameter", "module", "sample"])
+def test_proposal_initial_selection_and_note_survive_manual_review(session, kind):
+    _entry, control, service = session
+    control.set_alias_rows((AliasRow("flux_dev", "bias"),))
+    proposals = {
+        "parameter": ParameterWriteback("general.ext.value", "fit", 5.0),
+        "module": ModuleWriteback(PULSE, "fit", pulse_proposal()),
+        "sample": SampleWriteback("Q1", "fit", {"freq": 5.0}),
+    }
+    original = proposals[kind]
+    original.selected = False
+    original.note = "Fit needs manual review"
+    draft = service.create_draft(
+        [original],
+        parameters=control.read_context(),
+        experiment_name="test/review",
+        run_id="review-run",
+        sample_device_alias="$flux_dev",
+        device_snapshot={"bias": {"value": 0.1, "value_unit": "V"}},
+    )
+    (item,) = service.preview_draft(draft)
+    assert not item.selected
+    assert item.note == "Fit needs manual review"
+    assert service.apply_draft(draft)["applied_ids"] == []
+    service.edit_draft(draft, item.session_id, selected=True)
+    assert item.selected
+    assert not original.selected
+    assert service.apply_draft(draft)["applied_ids"] == [item.session_id]
+    assert item.note == "Fit needs manual review"
+    assert service.get_all_applied(draft) == {item.session_id: True}
+    service.edit_draft(draft, item.session_id, selected=False)
+    assert not item.selected and item.note == "Fit needs manual review"
+    assert not original.selected and original.note == "Fit needs manual review"
+
+
+def test_default_proposal_selection_and_optional_note(session):
+    _entry, control, service = session
+    original = ParameterWriteback("general.ext.value", "legacy", 5.0)
+    draft = service.create_draft(
+        [original],
+        parameters=control.read_context(),
+        experiment_name="test/review",
+    )
+    (item,) = service.preview_draft(draft)
+    assert item.selected
+    assert getattr(item, "note", "missing") is None
+    explicit = ParameterWriteback(
+        "general.ext.other", "review", 6.0, selected=False, note="Check fit"
+    )
+    review = service.create_draft(
+        [explicit],
+        parameters=control.read_context(),
+        experiment_name="test/review",
+    )
+    (row,) = service.preview_draft(review)
+    assert not row.selected and row.note == "Check fit"
+    service.edit_draft(
+        review,
+        row.session_id,
+        proposed_value=7.0,
+        target_name="general.ext.edited",
+        selected=True,
+    )
+    assert row.note == "Check fit"
+    assert service.apply_draft(review)["applied_ids"] == ["param-1"]
+    assert control.read_context().value("general.ext.edited") == 7.0
+    assert row.note == "Check fit"
+    fresh = service.create_draft(
+        [explicit],
+        parameters=control.read_context(),
+        experiment_name="test/review",
+    )
+    assert not service.preview_draft(fresh)[0].selected
 
 
 def test_module_preview_proposes_the_spec_in_the_current_shape(session):

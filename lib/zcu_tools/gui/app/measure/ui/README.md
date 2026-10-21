@@ -39,7 +39,15 @@ cleanup together. Data activation refreshes previews before switching pages,
 then reflows the visible gallery. The tab's overridable public figure reader
 remains the preview source; each failed pane read leaves only that preview empty.
 Figure/container methods on the tab delegate to this owner. Results and Save
-policy stay with their existing owners. The existing foldable ledger and matching
+policy stay with their existing owners.
+
+Run, Analysis and Post-Analysis show up to four figures together in a two-column
+layout. Larger sets show one figure with a named selector. Data groups raster
+previews by source stage and applies the same rule within each group. The
+app-local plot host passes the operation's original named collection through the
+render-host port after canvas attachment. It does not rename figures, copy their
+collection or change FigureContainer membership. Clearing a pane retires its
+presentation borrow, not the caller's saved figures. The existing foldable ledger and matching
 form/action builders live in `experiment_ledger.py`.
 
 [ADR-0067](../../../../../../docs/adr/0067-gui-application.md#experiment-figure-area)
