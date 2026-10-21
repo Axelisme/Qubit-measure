@@ -3,7 +3,7 @@ date: 2026-10-13
 status: active
 superseded_by: null
 related:
-  - docs/adr/draft/pydantic-form-tool.md
+  - docs/adr/retired/pydantic-form-tool.md
   - docs/adr/0073-measure-form-derivation.md
   - docs/discussions/2026-10-13-measure-form-redesign.md
 basis:
@@ -15,7 +15,7 @@ basis:
 
 ## 結論
 
-決策寫在 [Pydantic 表單 ADR draft](../adr/draft/pydantic-form-tool.md) 的「選項清單與分層」。本篇記推導過程與被否決的路。
+決策寫在 [Pydantic 表單歷史 ADR](../adr/retired/pydantic-form-tool.md) 的「選項清單與分層」。本篇記推導過程與被否決的路。
 
 - 任何「從幾個選項挑一個」的欄位，input schema 都直接列出選項清單。每個選項有顯示文字、選了要寫入的值，以及物件值的子表單欄位。
 - 帶實驗語義的選項由 Form 生成器產生：module 與波形欄位的 `None`、依 kind 過濾的 library keys、每個 inline kind 一項。表單核心只提供通用的選項與指令機制，不知道 module 或 library。Widget 與 MCP 照清單畫、照清單寫，不解讀 union 結構。

@@ -2,6 +2,8 @@
 
 # Measure domain support
 
+**讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
+
 這個 private package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
 已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值，以及 mux readout 的 ringup 等待。

@@ -20,6 +20,8 @@ class Geometry:
     points maps timeline indices to unique caller point IDs.
     flux_drive marks driven rows with continuous motion or quantized flux changes.
     prefix_paths maps computed prefix IDs to diagnostics adopted by timelines.
+    initial_densities optionally supplies point-aligned DC input matrices; None
+    uses the common source input and enables shared-prefix/input preparation.
     plan(source, batches) constructs geometry without evolving a density.
     """
 
@@ -27,6 +29,7 @@ class Geometry:
     points: NDArray[np.int64]
     flux_drive: NDArray[np.bool_]
     prefix_paths: Mapping[int, PathDiagnostics] = field(default_factory=dict)
+    initial_densities: NDArray[np.complex128] | None = None
 
     @property
     def resume_rows(self) -> NDArray[np.int64]:
@@ -320,6 +323,9 @@ def _batch_geometry(
 ) -> Geometry:
     tracks = tuple(_track_geometry(track, plateau_cache) for track in batch.tracks)
     events, end, flux_point = batch_boundaries(batch, plateau_cache)
+    if batch.start_ns is not None:
+        selected = events["time"] >= batch.start_ns[events["timeline"]]
+        events, end = events[selected], end[selected]
     point, start = events["timeline"], events["time"]
     duration = end - start
     flux_events = _events(flux_point, batch.flux.start_ns)
@@ -447,11 +453,31 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
     )
     from ._prefix import certify
 
-    combined = certify(combined)
+    initial = _initial_densities(source, batches)
+    # Prefix certificates and input bindings assume a shared source density.
+    # Continuations retain model-only preparations, not that input shortcut.
+    if initial is None:
+        combined = certify(combined)
     return Geometry(
         combined,
         points,
         np.concatenate([g.flux_drive for g in geometries]),
+        initial_densities=initial,
+    )
+
+
+def _initial_densities(
+    source: ModelSource, batches: Sequence[TimelineBatch]
+) -> NDArray[np.complex128] | None:
+    if not any(batch.initial_densities is not None for batch in batches):
+        return None
+    return np.concatenate(
+        [
+            batch.initial_densities
+            if batch.initial_densities is not None
+            else np.repeat(source.initial_density[None], len(batch.points), axis=0)
+            for batch in batches
+        ]
     )
 
 

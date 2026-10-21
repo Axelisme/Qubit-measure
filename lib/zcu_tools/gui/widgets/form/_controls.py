@@ -152,18 +152,14 @@ def _input_text(field: FieldView) -> str:
 
 
 def _shows_raw(field: FieldView, text: str) -> bool:
-    """Whether text already reads as a decimals field's Direct number.
+    """Whether text already reads as the state's Direct number.
 
-    That field shows rounded text; rewriting typed text with more digits
-    would round them away under the cursor while the state keeps them.
+    Typed "11" commits as 11.0 and a decimals row shows rounded text; rewriting
+    the text under the cursor would turn "11" into "11.0" mid-typing or round
+    digits away while the state keeps them.
     """
     raw = field.raw
-    if (
-        field.decimals is None
-        or _expression(field)
-        or not isinstance(raw, int | float)
-        or isinstance(raw, bool)
-    ):
+    if _expression(field) or not isinstance(raw, int | float) or isinstance(raw, bool):
         return False
     try:
         return float(text) == raw
@@ -877,8 +873,11 @@ class FieldRow:
             if isinstance(widget, _TextInput):
                 widget.set_expression_mode(expression=expression)
             text = local.text if local else _input_text(field)
-            # Avoid resetting cursor/selection on unchanged publications.
-            if widget.text() != text and not _shows_raw(field, widget.text()):
+            # Avoid resetting cursor/selection on unchanged publications. A
+            # local draft always shows; only state redraws keep equal numbers.
+            if widget.text() != text and (
+                local is not None or not _shows_raw(field, widget.text())
+            ):
                 write_value_widget(widget, text)
         elif isinstance(widget, QCheckBox):
             write_value_widget(widget, field.raw)

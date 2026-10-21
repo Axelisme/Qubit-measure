@@ -1,6 +1,8 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-20，predictor 檔案 I/O 改由 resources 擁有
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Fluxonium 能譜、色散與 predictor 的數值工具。
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -33,7 +35,7 @@
 - `calculate_sin_phi_oper` / `calculate_sin_phi_oper_vs_flux` — `sin(αφ/2 + β)`,用於雜訊模型與特殊耦合。
 - `calculate_system_n_oper_vs_flux` — 在 **qubit+resonator 聯合 Hilbert space** 中計算 n 算子的 dressed 矩陣元,使用 `identity_wrap` 把子系統算子提升到整個空間。
 
-`*_oper_vs_flux` 依賴 scqubits 回填 `matrixelem_table`；若 scqubits 未產生矩陣元，函式會 fast-fail，而不是回傳 `None` 或讓後續 slicing 出現模糊錯誤。`calculate_system_n_oper_vs_flux` 對 sweep 中新增的 `n_oper` 也做存在性檢查，dressed index 無法標記時 raise `DressedLabelingError`，並在回傳前正規化成 `complex128` ndarray。
+`*_oper_vs_flux` 依賴 scqubits 回填 `matrixelem_table`；若 scqubits 未產生矩陣元，函式立即回報錯誤。`calculate_system_n_oper_vs_flux` 對 sweep 中新增的 `n_oper` 也做存在性檢查，dressed index 無法標記時 raise `DressedLabelingError`，並在回傳前正規化成 `complex128` ndarray。
 
 ### `dispersive.py` — 色散位移 / chi
 
@@ -42,14 +44,14 @@
 - `calculate_dispersive(params, flux, bare_rf, g)` — 回傳 `(rf|0⟩, rf|1⟩)`,由 dressed 能量差得到；scqubits 無法標記 dressed state 時 raise `DressedLabelingError`，錯誤訊息包含 bare state 與 flux。
 - `calculate_dispersive_sweep` — 通用 sweep 介面,透過使用者傳入的 `update_fn(fluxonium, param)` 更新系統。
 - `calculate_dispersive_vs_flux` — 上述的 flux-sweep 特化。
-- **`calculate_dispersive_vs_flux_fast`** — scqubits-free 的 numpy 等效,**~9x**(繞過 `ParameterSweep`)。複用 `energies.py` 的 cos/sin 預算技巧算裸 fluxonium evals+evecs,組 composite `H_res⊗I + I⊗H_qub + g(a†⊗n+a⊗n†)` 對角化,dressed (0/1,i) 用 **bare-product-state overlap argmax** 標記。**逐點對齊 `calculate_dispersive_vs_flux` 到 0.00000 MHz**(含 avoided crossing,見 `tests/simulate/fluxonium/test_dispersive_fast.py`)。labeling 撞號則 raise `DressedLabelingError`;`prediction.py` 的 engine 負責 normal-path fallback。低能態 + dispersive regime(g 小)labeling 乾淨;強耦合/密能級才可能撞。介面與舊版略不同（無 `progress`，res_dim/qub_dim 預設 4/15）。舊 `calculate_dispersive_vs_flux` 保留給 notebook 與 fallback。
+- **`calculate_dispersive_vs_flux_fast`** — scqubits-free 的 numpy 等效,**~9x**(繞過 `ParameterSweep`)。複用 `energies.py` 的 cos/sin 預算技巧算裸 fluxonium evals+evecs,組 composite `H_res⊗I + I⊗H_qub + g(a†⊗n+a⊗n†)` 對角化,dressed (0/1,i) 用 **bare-product-state overlap argmax** 標記。**逐點對齊 `calculate_dispersive_vs_flux` 到 0.00000 MHz**(含 avoided crossing,見 `tests/simulate/fluxonium/test_dispersive_fast.py`)。labeling 撞號則 raise `DressedLabelingError`;`prediction.py` 的 engine 負責 normal-path fallback。低能態 + dispersive regime(g 小)labeling 乾淨;強耦合/密能級才可能撞。res_dim/qub_dim 預設為 4/15。`calculate_dispersive_vs_flux` 供 notebook 與 fallback 使用。
   - **flux-independent operators 用 `_fluxonium_operators` @lru_cache(params,cutoff,dim)**：`cos_phi_operator`/`sin_phi_operator` 走 scipy `cosm`/`sinm`(各一次 `expm`),fresh `Fluxonium` 每次 ~84ms;memoize 後重複呼叫(GUI live tuning 拖 r_f/g、sample 單點)只跑 per-flux recombination+eigh(~1ms/flux)。回傳是 cache 自有 array,**caller 不可 mutate**(fast 路徑只讀)。numerically identical(只 memoize)。
 - `calculate_chi_sweep` / `calculate_chi_vs_flux` — 直接回傳 scqubits 的 `sweep["chi"]`(subsys1=fluxonium, subsys2=resonator)。
 - 注意 dispersive vs chi 兩組函式在 `HilbertSpace` 中 **subsys 順序相反**(dispersive 是 `[resonator, fluxonium]`,chi 是 `[fluxonium, resonator]`)。
 
 ### `coherence/` — T1 與 Purcell
 
-- `calculate_eff_t1(_with)` / `calculate_eff_t1_vs_flux(_with)` 包裝 scqubits，回傳 physical ns，不再外乘 2π。`_with` 接受既有 Fluxonium 與 eigenpairs／spectrum data，供重用本徵分解。
+- `calculate_eff_t1(_with)` / `calculate_eff_t1_vs_flux(_with)` 包裝 scqubits，回傳 physical ns。`_with` 接受既有 Fluxonium 與 eigenpairs／spectrum data，供重用本徵分解。
 - `calculate_eff_t1_fast` / `calculate_eff_t1_vs_flux_fast` 使用快取算子與批次 numpy 計算，和 slow 路徑使用相同的物理 rates，`T1 = 1/Σrate`。支援 capacitive、inductive、charge impedance、flux bias line 與 quasiparticle channels。Fast 固定 `total=True`；不支援的 channel／options 直接報錯，需要單向 rate 時使用 slow 路徑。
 - Loss spectra 由 `simulate.spectra` 提供，與 joint directional baths 共用。Coherence 仍合併兩方向，不把 equilibrium rate 當單向 jump；預設 Q 與 scalar／array、callable options 不變。
 - 絕對單位由 SI LC energy lifetime 與 raw scqubits regressions 驗證，fast／slow 相等不是唯一 oracle。半通量附近 matrix element 可能因 parity 消失，應比較接近零的 rate，不能只比較巨大 T1 的相對差。
@@ -79,7 +81,7 @@ FluxoniumParams 是可未知的具名輸入。EJ／EC／EL 用 GHz，flux_half�
 
 應用層預測器,連接實驗電流/電壓值與理論模型。
 
-- 建構: `(params, flux_half, flux_period, flux_bias)`。讀檔由 `resources.predictor_file.load_predictor_file` 處理，caller 再呼叫 `params.build_predictor()`。舊 `params.json` 需先離線遷移成 predictor 檔，不提供相容讀取。
+- 建構: `(params, flux_half, flux_period, flux_bias)`。讀檔由 `resources.predictor_file.load_predictor_file` 處理，caller 再呼叫 `params.build_predictor()`。`params.json` 資料先經離線遷移成 predictor 檔，再交給此入口讀取。
 - 座標轉換: `value_to_flux` / `flux_to_value` 委派 `FluxAffineMap`,使用
   `flux = (value + bias − flux_half)/flux_period + 0.5`。
 - `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。scalar/array 都委派到 `FluxoniumPrediction.predict_frequencies_mhz` 的批次路徑，不保留共享 mutable `Fluxonium` instance；reverse transition 仍回傳帶符號頻差。
@@ -111,7 +113,7 @@ floquet 效能要點(design search 的 snr stage 主成本即在此):
   精度敏感分析)。
 - **微擾 TLS 掃頻**(`calc_floquet_fourier_melem` / `calc_tls_resonance_map`):對已算好的
   無 TLS `fbasis_n` 做純代數後處理,以 Lorentzian 加權 `|g_tls·M_k|²` 對 E_tls 軸免費掃頻,
-  取代 `calc_branch_infos_with_tls` 的逐 E_tls 全掃(mist_tls_analysis.md 交付物 #2)。
+  此代數後處理可產生整條 E_tls 掃頻結果。
   map 的 argmax 由最強矩陣元的 pair 支配,判讀特定過程(如 e→g+TLS↑ 的 `(1,0)` pair)時
   應限縮 `branch_pairs` 而非直接取全域 argmax。Fourier 取樣會先預熱 requested time 的
   qutip propagator cache,使 cold/warm `FloquetBasis.mode(t)` 呼叫使用同一組 cached propagator；

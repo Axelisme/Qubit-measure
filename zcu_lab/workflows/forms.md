@@ -1,5 +1,7 @@
 # Workflow form attachments
 
+**讀者：** lab-author。維護 workflow 表單、cfg 轉換與宿主註冊接線。
+
 **Last updated:** 2026-10-18，plan 欄位綁定共用 converter
 
 這個 package 擁有具體 workflow 的表單、to_cfg 與校準 module 轉換，不實作通用 editor、Window 或 Engine。

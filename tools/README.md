@@ -1,5 +1,9 @@
 # tools/
 
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Repo 品質檢查的 CLI、輸出與比較機制。
+
 `tools/` 放 repo 內部的品質檢查。review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者自己執行的板端 server、GUI 啟動與資料工具。[`mcp_servers/`](../mcp_servers/README.md) 放 agent 的 MCP 組合根。
 離線 Migration CLI 位於 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行，不接量測啟動流程。執行 legacy 遷移、處理 pending／resume 或修改 component kind 前，讀 [Agent 離線遷移說明書](../docs/storage-migration.md)。
 
@@ -33,15 +37,15 @@ uv run --directory <worktree> --no-sync -- python tools/gate.py --base <lane 起
 `gate.py` 是日常入口。它依序執行：受影響檔案的 ruff import 排序與 formatter、
 `lint-imports`、然後 ratchet。
 
-**不給 `--base` 時它改報現況**，列出全樹的絕對數字：
+省略 `--base` 時回報現況，列出全樹的絕對數字：
 
 ```bash
 uv run --directory <worktree> --no-sync -- python tools/gate.py                  # 現況
 uv run --directory <worktree> --no-sync -- python tools/gate.py --with-pyright   # 加上 pyright
 ```
 
-「這棵樹現在欠多少」和「這次改動有沒有加重」是兩個問題，所以給兩個答案。沒有 base 時不會
-默默退回 `merge-base HEAD main`。在長命分支上，自動選用該基準可能掃入大量無關變更。
+「這棵樹現在欠多少」和「這次改動有沒有加重」是兩個問題，所以給兩個答案。相對比較必須明填 base。
+在長命分支上，自動選用 `merge-base HEAD main` 可能掃入大量無關變更。
 
 ```text
 --base <ref>     判定基準。省略則改報現況
@@ -161,25 +165,19 @@ JSON 的 `detectors.radon.findings` 保存 path、line，以及 details 中的 n
 A 為 CC 1–5、B 為 6–10、C 為 11–20、D 為 21–30、E 為 31–40、F 為 41 以上。
 這些是閱讀與重構線索，不是拆函式指令，不引入 MI 品質總分。
 
-新增 detector 後 snapshot schema 為 2，舊 schema 1 需以目前方法重新量測，不自動補零。
+Snapshot 使用 schema 2；schema 1 需以目前方法重新量測。
 Radon distribution 版本隨既有 method.distributions 保存；方法或選用狀態不同仍拒絕比較。
 `compare` 保持違規計數比較，**不比較 CC 分數升降，也不配對函式改名或搬移**。
 
-## ratchet 是審查訊號
+## Ratchet 比較與 exit code
 
 `check_ratchet.py` 把八項檢查對照 base，逐個檔案及規則列出計數上升。
 detector 名稱為 `ruff`、`pyright`、`radon`、`file-size`、`path-correspondence`、
 `test-structure`、`capabilities` 與 `suppressions`。
-驗收看是否新增實質問題，不要求所有指標都不能增加。每項上升都要歸類，交付時列出
-path、detector／rule、before／after、分類及理由。無法判定時交 advisor，不自行忽略。
-
-- 非實質上升可接受，但要列出。例如搬移原有程式碼讓診斷換路徑，或 formatter 拆行、
-  rename 改變計數。需要來源證據證明只是原有診斷的移動，不能只因檔名變了就當成搬遷。
-- 實質問題必須修正或說明。例如新程式碼帶來型別錯誤、未處理的錯誤路徑、
-  為了過檢查新增 suppression／cast，或新的跨模組 private 依賴。
-
-這是 advisor 對「實質問題」的判讀，使用者可更正。`lint-imports` 與 pytest collection
-仍是硬性檢查，不受計數分類影響。行為測試仍需另外執行。
+交付時逐項列出上升的 path、detector／rule、before／after、分類及理由。
+實質問題、搬檔診斷與既有超標項的審查判準見
+[程式碼品質](../docs/code-quality.md#審查裁決)。`lint-imports` 與 pytest collection
+各自保留硬性檢查結果，行為測試另行執行。
 
 File-size 對每個檔案只計是否超過 1000 行。超過計 1，否則計 0，不比較 raw 行數增長。
 1135 → 1137 是 1 → 1，不新增 regression；998 → 1003 與新檔 1001 行都是 0 → 1。
@@ -242,7 +240,7 @@ Pyright 版本，以及目前 Python 的 implementation 與版本。任一成分
 快取以原子替換寫入，損壞或讀取失敗的檔案視為未命中並重新計算。
 刪除該目錄即可清除全部快取。
 
-Full receipt 新增 `pyright_base`，值為 `cache` 或 `computed`。命中時跳過 base 的
+Full receipt 的 `pyright_base` 值為 `cache` 或 `computed`。命中時跳過 base 的
 Pyright；若沒有其他 detector 或設定差異需要 base，也跳過 base tree 展開。
 Candidate 仍每次執行 Pyright。Changed-files 模式不使用快取，行為不變。
 快取沿用 `uv.lock` 描述的環境，不偵測同一 lock 下已安裝依賴的原地修改。
@@ -334,26 +332,20 @@ Ruff 候選規則調查使用 `--extend-select` 保留原規則；`RUF100` 的�
 抑制清理前確認適用的完整規則集合。Broad catch 的 logging 可以通過 lint，但是否能恢復、
 失敗狀態是否保留，仍由 code-quality policy 的人工審查判斷。
 
-## 為什麼要計量逃生口
+## Suppression 計量
 
-其他檢查都只數違規，所以「消音」比「修好」便宜：`# noqa: C901` 讓違規歸零且不留痕跡，
-ratchet 會把它讀成進步。
+`check_suppressions.py` 計量 `# noqa`、`# type: ignore`、`# pyright: ignore`、
+`cast()`、per-file-ignore，以及 `pyproject.toml` 中停用的規則。它固定 exit 0，
+判定由 ratchet 與人工審查完成。例如 `# noqa: C901` 會降低 Ruff 診斷數，
+suppression 計數則讓這項改動保持可見。
 
-`check_suppressions.py` 數的是消音動作本身——`# noqa`、`# type: ignore`、`# pyright: ignore`、
-`cast()`、per-file-ignore，以及在 `pyproject.toml` 裡被關掉的規則。經過 ratchet，消音變成拿一個
-計數換另一個計數，總數不落。它自己永遠 exit 0，不判定任何事。
+保留 suppression 的條件、指定 rule 與原地理由見
+[既有容忍項](../docs/code-quality.md#既有容忍項先嘗試修除理由留在原地)。
+`check_test_capabilities.py` 的 marker 記錄測試需要的能力，適用契約見
+[tests README](../tests/README.md)。
 
-**它不禁止抑制。** 抑制有時是對的：`pyproject.toml` 關掉的 `reportUnknown*` 規則，
-診斷幾乎都來自無型別的第三方套件（qick、pyvisa、scqubits、qtpy），不是本 repo 的程式。禁止只會把人推去寫
-不需要抑制的更差的程式碼。計量的作用是讓那筆交易在 review 時看得見。
-
-同樣的理由，`check_test_capabilities.py` 的 marker 命名的是**能力**而不是「我可以慢」的許可：
-標錯了測試會變成錯的，而不是被豁免。時間門檻量的是症狀且可以用 marker 交易掉；能力量的是原因。
-
-這套東西的邊界也在這裡：**機械 gate 無法防逃逸，只能讓逃逸留下可數的痕跡。** 堵得住的洞，
-都是因為規避動作本身留下了東西（一個註解、一個設定條目、一個 import）。留不下痕跡的規避
-——把 `_foo` 改名成 `foo` 讓 `reportUnusedFunction` 不發作、把 5000 行拆成五個 999 行——
-只能靠 reviewer。
+計量涵蓋可辨識的註解、設定與 import。Reviewer 仍需審閱改名與拆檔的目的，
+例如把 `_foo` 改名以避開 `reportUnusedFunction`，或把 5000 行拆成五個 999 行的檔案。
 
 ## 判讀一次測試執行
 

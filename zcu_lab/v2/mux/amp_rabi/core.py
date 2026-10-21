@@ -1,4 +1,73 @@
-"""Acquisition, analysis and persistence for zipped mux amplitude Rabi."""
+"""Acquisition, analysis and persistence for zipped mux amplitude Rabi.
+
+Technical reference for lab authors and framework developers.
+MuxAmpRabiExp.run(config, *, context) sweeps participant gains simultaneously.
+
+Configuration and timing
+------------------------
+The full tones list matches the complete MuxReadoutCfg in count and order.
+Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+a nonempty, unique list of existing names. Q3/Q1 selects original indices [2, 0]
+from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
+including nonparticipants, on independent generators distinct from readout.
+The caller supplies the complete qubit/resonator bindings; numeric cfg validation
+does not resolve component identities.
+
+Sweep ranges may differ but every tone, including nonparticipants, must have the
+same point count. Point p pairs each active tone's p-th value, not a Cartesian
+product. Each point compiles once and executes optional common reset, Join of
+independent drive pulses, then active mux readout. Branches start together;
+short branches wait for the longest branch at that point. Pre/post delays stay
+unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
+All participants share reps, rounds, initial_delay and relax_delay.
+Program modules perform native conversion and averaging.
+
+Results and cancellation
+------------------------
+MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
+float64 (K,P) on each drive's own rounded grid. Signals are complex128 (K,P),
+ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
+original tone indices and each tone's own coordinates, so duplicate labels retain
+distinct plots. Cancellation preserves completed points and the current point's
+completed-round average. Unacquired points remain NaN.
+
+Amplitude scan and analysis
+--------------------------
+MuxAmpRabiCfg.modules contains optional common reset and full mux readout.
+Sweep bounds are normalized gains within [-1, 1]. prepare_amplitude_scan copies
+cfg and builds per-drive actual gain grids.
+
+Analysis uses the single-qubit undamped Rabi fitter and zero-gain phase policy.
+Options.skip removes leading zipped points before finite-IQ filtering. Each
+curve needs six remaining points. Each original index returns MuxAmpRabiFit or
+MuxFitFailure with a reason, and a fit_i figure. Pi/pi2 gains and errors use
+normalized gain units. FitQuality describes the numerical fit; a finite fit
+alone does not establish calibration quality.
+
+Native persistence retains the full cfg, original indices, independent gain axes
+and complex IQ. The source pulse and its scalar length remain available to a
+calibration caller for pulse-copy and pi-product proposals.
+
+Calling and ownership
+---------------------
+For context, plots, stop/error handling and record/persistence ownership, see
+lib/zcu_tools/experiment/README.md, section "實驗介面與資料", and
+lib/zcu_tools/experiment/v2/runtime/README.md, section "Stop 與 Retry".
+
+Analysis uses the explicit historical source, not the current Form or library.
+The numerical core leaves component bindings and writeback to its caller.
+
+Example with validated cfg, RunContext and fresh analysis_plots::
+
+    from zcu_tools.experiment.records import RunRecord
+    from zcu_lab.v2.mux.amp_rabi import MuxAmpRabiExp
+
+    core = MuxAmpRabiExp()
+    result = core.run(cfg, context=context)
+    context.cancel_signal.raise_if_error()
+    source = RunRecord(cfg=cfg, result=result)
+    outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
+"""
 
 from __future__ import annotations
 

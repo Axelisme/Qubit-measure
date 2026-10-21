@@ -17,6 +17,7 @@ from .engine import (
     EvolutionResult,
     PathDiagnostics,
     TimelineBatch,
+    merge_path_diagnostics,
     segment_spans,
 )
 from .model import DriveSource, NumericModel

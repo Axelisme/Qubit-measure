@@ -4,6 +4,10 @@ status: accepted
 
 # ADR-0065 — Cfg 編輯模型與使用邊界
 
+## 局部取代範圍
+
+本篇關於普通切換補 fresh defaults、數值葉 command 改 parent，以及僅保存 input 並丟棄不相容葉的規則，由 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 局部取代。欄位轉換與保存還原以該篇為準，其餘 owner 邊界不變。
+
 ## 問題與決策
 
 Qt、remote 與 Run 必須使用同一份 tab cfg。若 widget 持有唯一可編輯的樹，headless caller 就依賴 view 的存在。若 Run 重新解析 live source，caller 看到的值與實際執行值可能不同。

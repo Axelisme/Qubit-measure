@@ -1,8 +1,10 @@
 # `zcu_tools.experiment.v2`
 
-**Last updated:** 2026-10-08，hardware grids 與移除舊 Autofluxdep
+**Last updated:** 2026-10-21
 
-本 package 提供 program/v2 實驗使用的通用 runtime 與工具，不擁有具體實驗、cfg defaults、fit policy 或前端附件。共同實驗介面、records、Result 保存映射與 cfg 組裝見[父層 README](../README.md)。
+**讀者：** framework-dev。實驗 runtime、硬體量化與共用工具入口。
+
+本 package 提供 program/v2 實驗使用的通用 runtime 與工具。具體實驗、cfg defaults、fit policy 與前端附件由 caller 擁有。共同實驗介面、records、Result 保存映射與 cfg 組裝見[父層 README](../README.md)。
 
 ## Runtime
 

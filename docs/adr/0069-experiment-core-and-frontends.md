@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # ADR-0069 — 實驗核心、前端包裝與具名圖形產物
 
 **狀態：** accepted。

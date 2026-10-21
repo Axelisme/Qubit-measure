@@ -5,6 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.experiment.ftf import (
+    FTFMuxReadoutConfig,
     FTFReadoutConfig,
     FTFReceiverConfig,
     plan_template,
@@ -24,6 +25,7 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
     pulses = tuple(
         replace(
             base.events[0],
+            gen_ch=1,
             start_us=start,
             duration_us=np.full(2, 1.0),
             frequency_mhz=np.full(2, frequency),
@@ -37,7 +39,8 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
     windows = tuple(
         replace(
             base.readouts[0],
-            channel=tone,
+            channel=tone + 1,
+            generator_channels=np.ones((2, 1), dtype=np.int64),
             trigger_us=(start + 0.05115327380952381)[:, None],
             frequency_mhz=np.full((2, 1), frequency),
             phase_deg=np.full((2, 1), 11.0),
@@ -47,14 +50,18 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
         for tone, frequency in enumerate(frequencies)
     )
     config = FTFReadoutConfig(
-        "mux",
-        tuple(
-            FTFReceiverConfig(
-                ro_ch=tone,
-                gain=100,
-                noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
-            )
-            for tone in range(2)
+        pulse=FTFReceiverConfig(0, 100, ((0.0, 0.0), (0.0, 0.0))),
+        mux=FTFMuxReadoutConfig(
+            gen_ch=1,
+            input_per_gain=1.0,
+            receivers=tuple(
+                FTFReceiverConfig(
+                    ro_ch=tone + 1,
+                    gain=100,
+                    noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
+                )
+                for tone in range(2)
+            ),
         ),
     )
     return plan_template(

@@ -1,5 +1,7 @@
 # 用 startup script 建立 entry 與 alias
 
+**讀者：** lab-author、agent。指定 startup 腳本，建立 entry、point 與 alias 表。
+
 讀完本篇，你能指定一份 startup script，建立自己的 entry，並讓表單透過 alias 讀取目前 point 的元件。先使用 [FTF kickstart](../kickstart/FTF/README.md)。這份腳本不連線 SoC 或 device，也不建立模擬環境。
 
 ## 先分清 startup 與 entry
@@ -35,7 +37,7 @@ connect(
 
 這是 MCP tool 呼叫，不是可以直接 import 的 Python 函式。把 `script` 換成 repo 中腳本的絕對路徑。`launch="new"` 要求啟動新 GUI；attach 不重跑 startup，attach 時提供 `script` 或 `project_root` 會報錯。Connect 回覆只表示 RPC 已就緒，不保證背景 startup 已完成。選項與 attach 限制見 [MCP startup scripts](../../lib/zcu_tools/mcp/measure/README.md#startup-scripts)。
 
-`--script` 完全取代預設 `zcu_lab/startup.py`，不先還原上次 session。`--clean` 不執行任何 startup，不能與 `--script` 同用。預設腳本的保存與關閉行為見 [保存與關閉](../../docs/adr/0064-process-startup.md#保存與關閉)。
+`--script` 完全取代框架的預設腳本 `lib/zcu_tools/gui/app/measure/default_startup.py`，不先還原上次 session；要還原時在自訂腳本內 `from zcu_tools.gui.app.measure.default_startup import startup` 並呼叫它。`--clean` 不執行任何 startup，不能與 `--script` 同用。預設腳本的保存與關閉行為見 [保存與關閉](../../docs/adr/0064-process-startup.md#保存與關閉)。
 
 ## 修改自己的 entry-template
 

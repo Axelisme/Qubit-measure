@@ -24,6 +24,8 @@ jupyter:
     version: 3.13.2
 ---
 
+**Readers:** lab-author. Scan fluxonium design parameters and compare dispersive shifts, coherence estimates and readout constraints.
+
 ```python
 %load_ext autoreload
 import os

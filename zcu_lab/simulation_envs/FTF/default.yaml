@@ -29,9 +29,9 @@ chip:
     q_ind: 100000000.0
     xqp: 0.0000002
     aphi: 0.000002
-  g_f1_coupler_ghz: 0.570
-  g_f2_coupler_ghz: 0.560
-  g_f1_f2_ghz: 0.125
+  g_f1_coupler_ghz: 0.157
+  g_f2_coupler_ghz: 0.156
+  g_f1_f2_ghz: 0.055
   temperature_k: 0.05
 
 dc_bias:
@@ -58,7 +58,6 @@ dc_bias:
       initial: 0.0
       ramp_step: 0.000001
       flux_per_unit: { f1: -1, coupler: 2, f2: 122.0 }
-
 
 drive_lines:
   # Illustrative simulation assumptions, not measured line calibrations.
@@ -105,6 +104,22 @@ readout:
     offset_adc: [0.0, 0.0] # I, Q
     # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
     noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+  mux:
+    gen_ch: 1
+    input_per_gain: 10.0 # sqrt(photons/ns)/gain
+    adc:
+      - ro_ch: 1
+        gain: 100.0
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+      - ro_ch: 2
+        gain: 100.0
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
 
 numerics:
   # Increase native/local/global dimensions independently to check convergence.

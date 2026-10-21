@@ -1,6 +1,8 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-21，Setup／SoC Run lock 與共用視窗控制權
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -12,9 +14,8 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
 - [`adapter/`](adapter/protocol.py)：framework-facing contract、request/result/analyze params、
   adapter validation 與 protocol signature 所需的 session vocabulary。Writeback 型別由
   `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久
-  ModuleSpec，不帶 editor identity。
-- [`services/`](services/app_services.py)：app service layer。Service 依賴 ports，不直接 import sibling service
-  implementation；package `__init__` 只做 lazy public re-export。
+  ModuleSpec。
+- [`services/`](services/app_services.py)：app service layer。Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
 - [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
@@ -30,7 +31,7 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
   framework contract 分開命名。
 
 resources.entry executor 與 remote handler／wire types 留在各自 owner。
-Artifact 與 Writeback 不直接互相 import，由 app composition 協調。
+App composition 協調 Artifact 與 Writeback。
 `measure-artifacts-no-writeback` 與 `measure-writeback-no-artifacts` contracts 約束兩個方向，
 允許共用 State／events／context。
 
@@ -41,12 +42,12 @@ Artifact 與 Writeback 不直接互相 import，由 app composition 協調。
 persistence caretaker, and the app-local `RemoteControlAdapter`
 without loading board environments or owning process policy such as logging, rendering initialization,
 `QApplication`, control option construction, or exit-code handling. The
-standalone launcher is the process entrypoint; this module does not expose a
-second `run_app` path. The launcher selects one trusted `startup(ctx)` script.
+standalone launcher is the sole process entrypoint. It selects one trusted
+`startup(ctx)` script.
 `--clean` skips all scripts and conflicts with `--script`. Otherwise an explicit
-script replaces the composition-supplied `zcu_lab/startup.py` Path; custom code
-must import and call the default itself if needed. The framework never imports
-the lab to select it. After showing the window,
+script replaces the composition-supplied `default_startup.py` Path; custom code
+imports `zcu_tools.gui.app.measure.default_startup.startup` and calls it if
+needed. The framework never imports the lab to select it. After showing the window,
 `after_show` queues the selected script for background execution on the Qt loop.
 Without a selected script, it opens the shared Setup dialog.
 
@@ -100,15 +101,14 @@ logs, without a duplicate item dialog. Manual GUI device failures still notify.
 Unhandled script errors report the script path and line while retaining completed work.
 The framework does not load lab environments or own script cache formats.
 
-The [default lab script](../../../../../zcu_lab/startup.py) owns
+The framework-owned [default script](default_startup.py) owns
 `measure-session.json` under `ctx.cache_root`. It attempts SoC, devices,
 entry/point, then tabs with input only when entry/point opened successfully.
 Each failure is logged; failed devices are remembered when possible, and skipped
 tabs are not retried after later source selection. Its on-close callback captures
 then-current state. Aliases are not in that cache. Selecting a point loads its
 `points/<label>/aliases.yaml`; Inspect Apply saves that point's table.
-Templates use only caller-authored `Template.bindings`.
-The session and startup script do not supply or persist template defaults.
+Templates use caller-authored `Template.bindings`.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.

@@ -1,5 +1,7 @@
 # 為實驗加入 MCP recipe
 
+**讀者：** lab-author、agent。為已註冊的實驗新增 MCP recipe，串接 Run、保存與 preview。
+
 Recipe 把 GUI 操作串成一個 MCP 流程，量測仍由 adapter 執行。
 這篇接續 [實驗與表單](03-experiment.md)，為 `twotone/power_map` 加入 `power_map` recipe。
 先確認 adapter 已列在 GUI New Tab，且 `guide.md` 能讀取。

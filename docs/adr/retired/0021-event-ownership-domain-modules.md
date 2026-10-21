@@ -1,4 +1,8 @@
-> 狀態：已退役（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md)。以下保留歷史正文。
+---
+status: retired
+---
+
+> 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md)。以下保留歷史正文。
 
 # ADR-0021 — Event Ownership: Domain Modules Own Enum + Payloads
 

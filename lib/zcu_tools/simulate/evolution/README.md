@@ -1,11 +1,24 @@
 # Segment evolution
 
-**Last updated:** 2026-10-20, retained-graph RWA density support and two-tone Floquet k=0 numerical ownership
+**Last updated:** 2026-10-21, point-aligned continuation, diagnostic merging, retained-graph RWA density support and two-tone Floquet k=0 numerical ownership
+
+**讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
 [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md) records this
 boundary and the decision to keep algorithm knowledge in dispatch.
+
+## Contents
+
+- [Public entry points](#public-entry-points)
+- [Routing telemetry](#routing-telemetry)
+- [Decision graph](#decision-graph)
+- [Row plans and the kernel seam](#row-plans-and-the-kernel-seam)
+- [WorkPlan and cache ownership](#workplan-and-cache-ownership)
+- [Algorithm ownership and reuse](#algorithm-ownership-and-reuse)
+- [Accuracy, failures and lifecycle](#accuracy-failures-and-lifecycle)
+- [Research records](#research-records)
 
 ## Public entry points
 
@@ -42,6 +55,20 @@ must match one queried span exactly; missing spans have zero shift. Shifts do
 not add boundaries, rotate bases or change physical `FluxLevel` values. Model,
 prepare, result and gate-usage identities include shift content. Without shifts,
 the original model source, initial state and reuse semantics remain unchanged.
+
+`TimelineBatch.start_ns` and `initial_densities` optionally continue each point
+from an existing DC-energy-basis density. Supply both or neither. Starts must
+be zero or final-span boundaries no later than `end_ns`. The engine plans with
+the common origin and propagates only `[start_ns,end_ns]`, without replaying the
+prefix or restarting carrier phases and envelopes. The full boundary query
+still covers `[0,end_ns]`. Batch construction retains the existing density
+invariants without repair. Continuation inputs participate in result and
+acquire digests, not model-only prepare identities.
+
+`PathDiagnostics.point_members` records each class's increasing unique caller
+point IDs. `merge_path_diagnostics(parts)` unions these memberships, sums work
+and CPU, and takes the maximum trace error. Reuse diagnostics participate as
+returned. These diagnostics remain author-only, separate from acquisition data.
 
 `EvolutionResult` contains densities at readout start in the DC eigenbasis.
 The environment explicitly converts them to populations, then calls ADC's

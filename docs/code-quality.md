@@ -1,6 +1,8 @@
 # 程式碼品質
 
-本文件定義實作與 review 的品質判準。通過機械檢查是必要證據，不代表設計容易理解。
+**讀者：** framework-dev、agent。查閱實作及 review 的品質判準。
+
+通過機械檢查是必要證據，不代表設計容易理解。
 操作、測試與驗證流程以 [AGENTS.md](../AGENTS.md) 為準；工具使用方式見
 [tools/README.md](../tools/README.md)。本文件不授權擴大任務範圍或改變既有架構。
 
@@ -87,33 +89,41 @@ File-size／radon／capability 保留項用 `# tolerated(<metric>): <reason>`，
 Ruff 的 RUF100 與 Pyright 的 reportUnnecessaryTypeIgnoreComment 檢查過期 suppression。
 過期項要移除或收窄，不能關閉檢查或新增 suppression 掩蓋。
 
-### 測試證明行為，而非陪伴實作
+### 測試驗證可觀察契約
 
-在模組接縫與對外契約驗證框架的可觀察行為。Notebook helper 與共用分析工具可測其公開契約，不以 caller 數量或目錄層級判定可測性。保留介面後方的內部實作自由，不直接測私有函式。
+在模組接縫（seam）與對外契約（contract）驗證框架的可觀察行為。Notebook helper 與共用分析工具的公開契約也在測試範圍內，可測性取決於行為契約。測試從公開介面呼叫並觀察結果，讓介面後方的私有函式與實作結構可以獨立調整。
 
-`zcu_lab` 的 adapter、workflow 與 recipes 是實驗定義，不寫個別實驗測試。框架測試使用最小合成 workflow／adapter，不 import `zcu_lab`。Review 檢查 tests 沒有 import `zcu_lab`，必要時以 grep 輔助。不暫移目錄跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。若測試只因實驗定義改動而失敗，刪除該測試，不固定實驗預設值來修它。
+`zcu_lab` 的 adapter、workflow 與 recipes 是實驗定義，以直接審閱確認。框架測試用最小合成 workflow／adapter 驗證註冊、執行與結果交接，測試依賴限於框架與合成定義。Review 確認 tests 的 import 與此邊界一致，必要時以 grep 輔助。Pytest 在正常目錄布局下執行，維持 `zcu_lab` 目錄原位。測試的實驗輸入固定來自合成定義，`ZCU_LAB` 環境變數與 import hook 維持既有狀態。只因實驗定義改動而失敗的測試應刪除，讓實驗預設值由實驗定義自行維護。
 
-Notebook 的主要探索流程、腳本的主要行為、文件、設定與靜態資料以直接審閱處理，不為定位或內容新增測試，也不在測試內啟獨立程序。舊測試不自動構成較寬鬆的先例。
+程式入口採 humble shell，將行為放在可 import 的函式中。腳本行為測試在同一個 process 呼叫這些函式或 `main(argv)`。執行外部工具，或驗證 exit status、載入、跨 process lock 等 process 邊界時，才啟動獨立程序。測試平行化由測試 CLI 安排。
+
+Notebook 的主要探索流程、文件措辭、設定值、靜態資料及其定位以直接審閱確認。測試範圍維持上述行為契約，既有案例也依此判準檢視。移除邏輯時，同步移除只服務該邏輯的測試。
 
 依 [AGENTS.md](../AGENTS.md) 的測試契約選驗證方式；新增或搬遷案例時依
 [tests/README.md](../tests/README.md) 找 owner、fixture 與搬遷驗收。Review 額外回答：
 如果本次行為被拿掉或寫錯，哪個測試會失敗？斷言應能區分正確結果與相關的錯誤結果。
 
-替身保留被測行為，只替換不屬於這次驗證的協作者。若測試把目標邏輯也 mock 掉，改回經由
-interface 驗證結果。只有呼叫順序本身屬於契約時，才把順序當作驗收條件。
+替身只替換驗證範圍外的協作者，被測邏輯仍經由公開 interface 執行。只有呼叫順序本身屬於契約時，才把順序當作驗收條件。
 
-Production 可以提供中性的注入接口，即使目前只有測試替換它。中性接口同時符合四點：以模組自己的概念
-表達（時鐘、對話框呈現、儀器驅動建立），不暴露內部結構；預設值就是 production 行為；替換它只改變外部
-效果，不改變被測邏輯；型別與 docstring 說明該傳什麼。只為了讓測試伸進內部而開的接口不屬於此類，例如
-回傳私有狀態，或讓測試替換被測邏輯本身。外部邊界（Qt modal dialog、時鐘、環境變數、`subprocess`、網路）沒有既有注入點時，
-測試用 pytest `monkeypatch` 替換；`monkeypatch.setenv`、`monkeypatch.chdir` 這類環境隔離一律可用。
-協作者已有公開注入點時走注入。不 patch 被測模組自己的函式或私有 helper，也不用 `vars(obj)` 之類的
-寫法讀寫私有狀態；需要這樣做時，把驗證點移到公開介面。
+Production 可以提供中性的注入接口，即使目前只有測試替換它。中性接口同時符合四點：
 
-例如，驗證量測取消應檢查約定的終止狀態與資源釋放，而不是固定私有 helper 的呼叫次數。
-測試行數、mock 數量、coverage 或有無 `assert` 都不能單獨證明測試有效。
+- 以模組自己的概念表達，例如時鐘、對話框呈現或儀器驅動建立，內部結構維持封裝。
+- 預設值就是 production 行為。
+- 替換它只改變外部效果，被測邏輯照常執行。
+- 型別與 docstring 說明該傳什麼。
 
-宿主的最高測試接縫是註冊介面：合成 workflow 經 caller 註冊清單交給宿主，再從 Window、RPC 或 MCP 觀察結果。共用 registry、reload、分析與匯出機制由各框架 owner 驗證，不逐一走過 lab 實驗清單。實驗錯誤由 GUI 啟動或載入時直接回報。這個邊界與使用者裁決見 [模組定位 ADR](adr/0072-module-boundaries.md#分層)。
+協作者已有公開注入點時，測試經由該介面替換協作者。Qt modal dialog、時鐘、環境變數、
+`subprocess`、網路等外部邊界缺少既有注入點時，可用 pytest `monkeypatch` 替換。
+`monkeypatch.setenv`、`monkeypatch.chdir` 這類環境隔離一律可用。
+被測模組自己的函式與私有 helper 保持原樣，私有狀態只經公開介面改變及觀察。
+若案例需要 patch 目標函式或透過 `vars(obj)` 讀寫私有狀態，將驗證點移到公開介面。
+
+例如，驗證量測取消時，斷言約定的終止狀態與資源釋放。測試是否有效取決於斷言能否識別相關錯誤，
+測試行數、mock 數量、coverage 與 `assert` 數量只提供輔助資訊。
+
+宿主的最高測試接縫是註冊介面。合成 workflow 經 caller 註冊清單交給宿主，再從 Window、RPC 或 MCP 觀察結果。
+共用 registry、reload、分析與匯出機制由各框架 owner 使用合成定義驗證。Lab 實驗錯誤由 GUI 啟動或載入時直接回報。
+這個邊界與使用者裁決見 [模組定位 ADR](adr/0072-module-boundaries.md#分層)。
 
 ### 讓變更可以獨立審查
 

@@ -1,10 +1,24 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-21，腔驅動模型與 CKP 適用範圍
+**Last updated:** 2026-10-21，segment 主分支腔場繼承
+
+**讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
 樣板的 circuit energies、couplings 與 resonator frequencies 採用《FTF Architecture for Quantum Computing》第 5 章 Table 5.1 的 Device A。DC、微波、接收器與數值設定包含本機手動調整值，不能當作其他晶片的校準結果。樣板可執行，不代表截斷已收斂或模型適用於所有工作點。
+
+## 目錄
+
+- [先分清楚三種設定](#先分清楚三種設定)
+- [文件結構與共通規則](#文件結構與共通規則)
+- [Chip：物理電路與耦合](#chip物理電路與耦合)
+- [DC bias：live 電源與靜態磁通掃描](#dc-biaslive-電源與靜態磁通掃描)
+- [Drive lines：charge 與小訊號 flux 校準](#drive-linescharge-與小訊號-flux-校準)
+- [Readout：drive → 物理 resonators → ADC](#readoutdrive--物理-resonators--adc)
+- [Numerics：native、local、system 與 solver](#numericsnativelocalsystem-與-solver)
+- [Generator、ADC 與 entry 接線對照](#generatoradc-與-entry-接線對照)
+- [採用 v2 與調參順序](#採用-v2-與調參順序)
 
 ## 先分清楚三種設定
 
@@ -12,9 +26,9 @@
 - `dc_bias`、`drive_lines`、`readout` 描述 live DC 電源、charge/flux 接線與讀出訊號路徑。DC 電源設定靜態磁通工作點，drive line 透過所選 operator 驅動迴路。
 - `numerics` 決定基底維度、系統保留維度、solver 精度與亂數種子。它不描述晶片性質。
 
-FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小訊號 flux drive 與 readout。Flux drive 使用固定 DC 工作點的一階線性算符，不是 gate 內逐時重算 H(Phi(t)) 的大振幅 fast-flux 路徑。V2 沒有 `flux_lines`，即使填 `{}` 也會按未知欄位拒絕。未綁定 generator 沿用既有拒絕行為。
+FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小訊號 flux drive 與 readout。Flux drive 使用固定 DC 工作點的一階線性算符。這個近似適用於小訊號驅動，不支援 gate 內逐時重算 H(Phi(t)) 的大振幅 fast-flux。Loader 將 `flux_lines` 視為未知欄位，即使填 `{}` 也會拒絕。使用未綁定的 generator 也會失敗。
 
-共享 `simulate` 引擎仍保留 flux schedule、source-line filter 與 flux-tail Dyson 能力，FTF 不使用這些控制。不要把 `chip` 的 flux-noise 或 flux-line loss 參數當成 flux-pulse 接線。
+`chip` 的 flux-noise 與 flux-line loss 參數描述物理雜訊與耗散。FTF 的 flux-pulse 接線由 `drive_lines` 宣告。共享 `simulate` 引擎另有 flux schedule、source-line filter 與 flux-tail Dyson 能力，這些控制在 FTF 中停用。
 
 ## 文件結構與共通規則
 
@@ -27,7 +41,7 @@ dc_bias: # Static offsets and live DC devices.
   # ...
 drive_lines: # Named charge/flux drive lines; may be omitted or empty.
   # ...
-readout: # Shared drive, two physical resonators and bound ADC receivers.
+readout: # Pulse drive/ADC, two physical resonators and optional mux drive/ADCs.
   # ...
 numerics: # Basis sizes, solver accuracy and root RNG seed.
   # ...
@@ -42,7 +56,7 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `chip` | 物理電路 record，見下一節 | 必填 |
 | `dc_bias` | 靜態磁通 offset 與具名電源 record | 必填 |
 | `drive_lines` | 名稱到 charge/flux drive line 的 map | 可省略或填 `{}`，都停用 drive 控制；不可填 `null` |
-| `readout` | `drive`、`resonators`、`adc` | 必填，一個 drive、兩個 resonator；pulse 使用一個 ADC object，mux 使用 receiver list |
+| `readout` | `drive`、`resonators`、`adc` 與可選 `mux` | 必填，pulse drive／ADC object 與兩個 resonator 皆必填；mux 段另含 generator、刻度與 receiver list |
 | `numerics` | `truncation`、`solver` 與可選 `seed` | 必填 |
 
 `dc_bias.sources` 與 `drive_lines` 的 map key 是非空字串名稱。前者成為 live device 名稱，後者識別微波線，兩類名稱不可重複。`f1_bias`、`coupler_bias`、`f2_bias`、`f1_charge`、`f2_charge` 是樣板選用的名稱，不是新增的 YAML 欄位。
@@ -152,32 +166,56 @@ Flux operator 在每 round 的 live DC 工作點用解析導數求值，經固�
 
 ## Readout：drive → 物理 resonators → ADC
 
-訊號路徑是 `readout.drive` 的 incident field 進入兩個物理 resonators 共用的 reciprocal、co-located two-port line，再由 `readout.adc` 轉成接收樣本。兩個 resonator 不是兩個 ADC，也不是兩條獨立 readout drive。
+Pulse 路徑由 `readout.drive` 提供 incident field，再由 `readout.adc` 轉成接收樣本。Mux 路徑由 `readout.mux` 提供 incident tones，再由 `readout.mux.adc` 的 receivers 接收。兩條路徑共用 `readout.resonators` 的兩個物理 resonators 與 reciprocal、co-located two-port line，不各建一份腔模型。
+
+設定含 mux 段時，同一個 environment 可先後執行 pulse 與 mux program，不需更換 YAML 或重建環境。一個 program 只能選一種 readout 路徑。同時使用兩個 readout generator 會報錯並指出兩個 generator。ADC windows 必須使用所選路徑的 receivers。
 
 Resonator 的頻率、full-charge coupling 與 linewidth 決定物理響應。ADC 的 gain、phase、offset 與 noise 決定接收模型。把 ADC gain 調大不會改變 resonator photon number、物理 linewidth 或另外設定的 ADC noise PSD。
 
 FTF 在 terminal readout 使用該 DC 工作點的模型與 energy-basis populations。Terminal 起點是每個 point 的 readout generator 上最晚 active block 的起點，首個 ADC trigger 不得早於它。Pulse 模式每個 point 必須恰好有一個 active terminal readout pulse。Mux 模式允許 1 至 8 個共用 terminal 起點的 tone，每個 tone 有自己的 ADC。各 ADC 可有自己的 trigger windows，同一 shot index 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。所有 tone 都進入同一條 line，每個 ADC 解調總場，不把 tone 固定對應到 r1 或 r2。
 
+### Cavity
+
 Readout generator 上的非終端脈衝是腔驅動，必須在 terminal 起點前或恰好於該起點結束。跨越 terminal 起點的脈衝會引發 `ValueError`。腔驅動使用相同的 `input_per_gain` 換算，由 `simulate.adc` 求解線性、能階相依的複數腔場。每個聯合能階 s、resonator r 的光子數是 `n[s,r] = |alpha[s,r]|²`。Stark 能量頻移是 `sum_r chi[s,r] * n[s,r]`，單位 GHz。這裡的 chi 是模型的能階相依腔頻減裸腔頻，不是另外輸入的校準值。能階分支的輸出場差異產生 photon-shot-noise 去相位，包含共用線路的干涉與各腔的 internal loss。這份驅動去相位與殘餘 thermal-photon 去相位分開計算。
 
 FTF 將腔驅動起迄加入演化切分，對每個最終 segment 使用平均 Stark 頻移與平均驅動去相位率。段內不逐時套用瞬時場。脈衝結束後保留 ringdown，不清空腔場。Readout 開始前的 charge/flux drive controls 仍會演化狀態，terminal readout 期間及之後的 drive controls 不納入讀出計算。
 
-條件腔場依 qubit 能階自 t=0 各自從真空演化。Probe 不繼承 prepared 分支的腔場。這個近似讓 CKP 的 g/e preparation 分支給出相同腔中心，因此不支援 preparation-resolved χ 校準。
+FTF 依序推進各 segment 的 density 與腔場。每段開始時，所有能階的條件場都繼承上一段主分支的段末場，再依各自能階演化。第一段從零場開始。主分支取段首 density 中 population 最大的能階，相同時取最低能量。這讓探測段保留 prepared 分支留下的腔場。疊加態只攜帶一個主分支的場是半古典近似。這個逐 segment 平均並繼承主分支場的模型，對疊加態與 finite qubit drive 不描述完整的 qubit 與腔場量子糾纏。
+
+CKP 兩個 preparation 分支的腔中心分裂由 χ/κ 決定。κ ≫ χ 時，兩分支中心趨近。這個趨勢不保證有限探測強度下的擬合中心精度。
+
+同條件的 CKP 與獨立兩能階 qubit × 兩腔 Fock 截斷 Lindblad 比較仍未通過。保存的掃描使用 1 mK、Φ=(0.44, 0.20, 0.49)Φ0、κ/(2π)=1.1 MHz、|χe−χg|≈0.418869 MHz。脈衝為名義 π 1 µs、prefill 1.5 µs、probe 4 µs，有限探測強度 ΩT=1.049885。掃描包含 25 個腔頻率、51 個 qubit 頻率與 g／e 兩種 preparation，每點 4096 reps、1 round。
+
+以 finite estimator 擬合，Run 的 e−g 腔中心差為 −23.6374 kHz，同條件獨立 Lindblad 基準為 −134.5712 kHz。兩者相差 110.934 kHz，是原定 scaled SE 5.9727 kHz 的 18.57 倍。Fock 截斷與頻率網格的收斂變化均小於 local SE 2.8627 kHz，仍未達到中心差在誤差內一致的驗收條件。此次 Lorentzian 擬合所得的有效 κ 不等於 bare κ，且對 fit window 敏感，不能保證 κ 在 fit error 內與 bare 值一致。
+
+此模型可用於半古典趨勢與量測流程驗證，不應把 finite-drive CKP 的中心精度視為完整 Lindblad 結果或校準依據。目前沒有已證明能保證通過此精度驗收的 χ/κ、驅動強度或脈衝時序數值適用界。
 
 模型假設 weak dispersive coupling，不包含 MIST 躍遷或其 onset。只施加腔驅動、沒有 qubit drive 時，這些新增頻移與去相位不改變能階 populations。若 Stark 頻移讓能量排序反轉，演化會報錯並指出 point 與 segment，不重排能階。未報錯不代表強驅動、截斷或色散近似已通過適用性驗證。
 
-### Drive
+### Pulse drive
 
-`readout.drive.kind` 只接受 `pulse` 或 `mux`，省略為 `pulse`。Pulse 使用既有 v6 generator／v2 ADC profile，mux 使用固定 mixmux8／PFBv4 profile。這是離線編譯能力，不代表連接真機，也不提供 clock override。
+`readout.drive` 固定提供 pulse readout，使用 v6 generator／v2 ADC profile。`readout.drive.kind` 已移除，保留此欄位會在載入時報錯。Mux 改用獨立的 `readout.mux` 段，不在 drive 上切換 kind。
 
-`readout.drive` 的兩個欄位都必填。
+`readout.drive` 的兩個欄位都必填。樣板使用 gen0。
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
-| `gen_ch` | 共用 readout generator | 無單位，整數 ≥ 0，不可與任一 drive line 重複 | 必填 |
+| `gen_ch` | Pulse readout generator | 無單位，整數 ≥ 0，不可與 mux generator 或任一 drive line 重複 | 必填 |
 | `input_per_gain` | Program gain 到 incident amplitude 的轉換 | sqrt(photons/ns)/gain，有限 signed 數，可為 0 | 必填，沒有猜測值 |
 
 Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入射場的刻度，不是 ADC gain。
+
+### Mux drive 與 receivers
+
+`readout.mux` 可省略或設為 `null`，兩者都只關閉 mux，不影響 pulse 路徑。提供 object 時必須填齊下列三個欄位，欄位本身不接受 `null`。Mux 使用固定 mixmux8 generator／PFBv4 ADC profile。這些 profile 只提供離線編譯能力，不代表連接真機，也不提供 clock override。
+
+| 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
+| --- | --- | --- | --- |
+| `gen_ch` | Mux readout generator | 無單位，整數 ≥ 0，不可與 pulse generator 或任一 drive line 重複 | Mux 段內必填 |
+| `input_per_gain` | 每個 program tone gain 到 incident amplitude 的轉換 | sqrt(photons/ns)/gain，有限 signed 數，可為 0 | Mux 段內必填，不繼承 pulse 刻度 |
+| `adc` | 可供 program tones 選用的 receivers | 1 至 8 個 receiver object 的 list，`ro_ch` 不重複且不得占用 pulse ADC | Mux 段內必填，單 receiver 也用 list |
+
+樣板使用 mux gen1、ADC1 與 ADC2，與 pulse gen0／ADC0 同時存在。Program 可選 mux receivers 的子集，輸出順序沿 program tones，不沿 YAML receiver list。各 receiver 的欄位與單位見下方 ADC 段。
 
 ### Resonators
 
@@ -198,25 +236,32 @@ Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入�
 
 ### ADC
 
-`kind: pulse` 時，`readout.adc` 是一個 object。`kind: mux` 時，它是 1 至 8 個 receiver object 的 list，ro_ch 必須唯一，只有一個 tone 也使用 list。以下欄位對每個 receiver 都適用。
+`readout.adc` 固定是一個 pulse receiver object。`readout.mux.adc` 才是 mux receiver list。以下結構讓兩條路徑同時存在。
 
 ```yaml
 readout:
-  drive: {kind: mux, gen_ch: 0, input_per_gain: 10.0}
+  drive: {gen_ch: 0, input_per_gain: 10.0}
   resonators: # Preserve the existing physical r1/r2 values.
     # ...
   adc:
-    - ro_ch: 0
-      gain: 100.0
-      noise_psd_adc2_ns: [[1.0, 0.0], [0.0, 1.0]]
-    - ro_ch: 1
-      gain: 100.0
-      noise_psd_adc2_ns: [[1.0, 0.0], [0.0, 1.0]]
+    ro_ch: 0
+    gain: 100.0
+    noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+  mux:
+    gen_ch: 1
+    input_per_gain: 10.0
+    adc:
+      - ro_ch: 1
+        gain: 100.0
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
+      - ro_ch: 2
+        gain: 100.0
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
 ```
 
-這是 readout 結構示意，不是完整設定。Tone 的頻率、gain、phase、播放長度與 ADC window 仍由 program 的 MuxReadoutCfg 提供。YAML list 的順序不改輸出順序，raw 與 acquire 結果沿 program tone 的宣告順序排列。
+這是結構示意，不是完整設定。物理 resonators 與 receiver 的延遲等值請保留 [default.yaml](default.yaml) 的設定。Tone 的頻率、gain、phase、播放長度與 ADC window 仍由 program 的 `MuxReadoutCfg` 提供。Raw 與 acquire 結果沿 program tone 的宣告順序排列。
 
-`readout.adc` 描述唯一接收通道，不描述物理 resonator。
+每個 receiver 描述一個接收通道，不描述物理 resonator。下表同時適用於 pulse object 與每筆 mux receiver。
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
@@ -274,13 +319,14 @@ FTF 預設走分段引擎的快速算法，不是所有演化都逐步執行 DOP
 所有 channel index 都從 0 開始。數量不是綁定條數，而是最大索引加一：
 
 ```text
-generator_count = max(readout.drive.gen_ch, all drive_lines.gen_ch) + 1
-readout_count = readout.adc.ro_ch + 1
+generator_count = max(pulse generator, all drive-line generators,
+                      mux generator if configured) + 1
+readout_count = max(pulse ADC, all mux receivers if configured) + 1
 ```
 
 `gen_ch` 與 `ro_ch` 屬於不同索引空間，可以同為 0。每個 generator 只能綁一條 charge、flux 或 readout line；共用線上的兩個元件共用同一個綁定，不是再綁兩次。Clock、DDS、firmware channel type 與 memory limits 使用固定 mock QICK capability profile，YAML 不提供 `channels` 或改 profile 的欄位。索引通過 schema 不代表任意 pulse 都符合該 profile。
 
-樣板保留 readout gen0、f1_charge gen2、f2_charge gen3，所以推導出 4 個 generator 與 1 個 readout。Gen1 是未綁定空洞，不能拿來播放另一條控制線，也不表示保留了 flux-pulse 能力。使用未綁定 generator 仍按既有行為拒絕。
+樣板使用 pulse gen0、mux gen1、f1_charge gen2、f2_charge gen3，推導出 4 個 generator。Pulse ADC0 加上 mux ADC1 與 ADC2，推導出 3 個 readout。這是樣板接線，不是 engine 的固定通道上限；schema 接受非負整數索引，runtime 依最大索引建立 mock SoC。使用未綁定 generator 仍按既有行為拒絕。
 
 [Entry 範本](entry-template.yaml) 的具體對照如下，entry 路徑以 `components` 下的元件為起點。
 
@@ -291,13 +337,25 @@ readout_count = readout.adc.ro_ch + 1
 | F2 live DC | `dc_bias.sources.f2_bias`，`unit: A` | `Q2.flux_source: f2_bias`，`Q2.flux_unit: A` |
 | F1 charge line | `drive_lines.f1_charge.gen_ch: 2` | `Q1.wiring.ch: 2` |
 | F2 charge line | `drive_lines.f2_charge.gen_ch: 3` | `Q2.wiring.ch: 3` |
-| Shared readout drive | `readout.drive.gen_ch: 0` | `R1.wiring.ch: 0`、`R2.wiring.ch: 0` |
-| Shared ADC | `readout.adc.ro_ch: 0` | `R1.wiring.ro_ch: 0`、`R2.wiring.ro_ch: 0` |
+| Pulse readout drive | `readout.drive.gen_ch: 0` | `R1.wiring.ch: 0`、`R2.wiring.ch: 0` |
+| Pulse ADC | `readout.adc.ro_ch: 0` | `R1.wiring.ro_ch: 0`、`R2.wiring.ro_ch: 0` |
+| Mux readout drive | `readout.mux.gen_ch: 1` | `$mux.module.readout` 指向的 library 模組 `gen_ch: 1` |
+| Mux R1 receiver | `readout.mux.adc[0].ro_ch: 1` | 同模組 `tones[0].ro_ch: 1`，對應 `MG12.resonators[0]: R1` |
+| Mux R2 receiver | `readout.mux.adc[1].ro_ch: 2` | 同模組 `tones[1].ro_ch: 2`，對應 `MG12.resonators[1]: R2` |
 | Resonator 身分 | `readout.resonators.r1`、`.r2` | `R1`、`R2`；`Q1.resonator: R1`、`Q2.resonator: R2` |
+
+兩份 entry 範本保留 R1／R2 的 pulse wiring，不附 mux module 或 library key。Entry template 只攜帶元件與 aliases；`module.readout` 是既有 library key，不接受內嵌 readout 設定。
+
+1. 在 Library 建立 `readout/mux` 模組。設 `gen_ch: 1`，依 R1／R2 順序填兩筆 tones，`ro_ch` 分別為 1／2，初始 `freq` 可用 7190／7080 MHz。填入有效的 `nqz`、`mixer_freq`、各 tone gain／phase、共用 `length`、`ro_length` 與 `trig_offset`。時間欄位使用 us，receiver 的 YAML 延遲使用 ns，不可直接照抄數字。
+2. 在 Inspect 把該 library key 填入 `MG12.module.readout`。Startup 已把 `mux` alias 指向 MG12，不需更改 R1／R2 的 pulse wiring。
+3. Open 或 Reset `mux/freq` 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，不能直接視為已接線。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
+4. Open 或 Reset `mux/onetone` 時，表單複製模組 scalar 設定，但按 group 重新產生 tones，`ro_ch` 初值是 0／1。每次都要核對並改為 R1→1、R2→2，再確認 frequency、gain 與 timing。此表單不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
 
 Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_source` 就替它填快速 flux channel。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
 
-FTF YAML 和 entry 是兩份獨立文件，loader 不自動互改或互相比對。修改 source 名稱、unit、gen_ch 或 ro_ch 時，必須同步修改使用中的 entry 引用與 wiring。修改 energies 時也要同步 entry 的 EJ/EC/EL 或 EJmax/EC/d。樣板 `r1/r2.frequency_ghz` 是 7.19/7.08 GHz，entry 的 R1/R2.freq 是 7190/7080 MHz。Qubit frequency 隨 bias 改變，entry 保留 `null`，不能直接拿 EJ 當 transition frequency。
+FTF YAML 和 entry 是兩份獨立文件，loader 不自動互改或互相比對。修改 source 名稱、unit、gen_ch 或 ro_ch 時，必須同步修改使用中的 entry 引用與 wiring。
+
+模擬 entry 範本省略 EJ/EC/EL、EJmax/EC/d 與 R1／R2.freq，物理模型仍從 FTF YAML 讀取這些值。Kickstart entry 範本另有示意 energies，單位為 GHz，並預填 R1／R2.freq 為 7190／7080 MHz，對應 `default.yaml` 的 `r1/r2.frequency_ghz` 7.19／7.08 GHz。若使用中的 entry 有這些欄位，修改模型後須自行核對或更新，loader 不會同步。兩份範本的 qubit frequency 都保留 `null`；該頻率隨 bias 改變，不能直接拿 EJ 當 transition frequency。
 
 ## 採用 v2 與調參順序
 

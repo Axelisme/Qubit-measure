@@ -4,7 +4,6 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import prod
 from pathlib import Path
-from threading import Event
 
 import numpy as np
 from numpy.typing import NDArray
@@ -47,6 +46,7 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 
+from .cavity import evolve_plans
 from .preparation import EnvelopeEncoder, PreparationCache, preparation_key
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
@@ -78,6 +78,7 @@ class _Prepared:
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
     raw: PreparedRawShots
+    reuse_keys: tuple[bytes, ...]
 
 
 class FTFAcquire:
@@ -188,7 +189,10 @@ class FTFAcquire:
             self.request, owner.readout, encoder=owner.envelope_encoder
         )
         prepared = owner.preparation_cache.get(key)
-        if prepared is None or not owner.engine.reuse(facts.source, key):
+        if prepared is None or not all(
+            owner.engine.reuse(facts.source, reuse_key)
+            for reuse_key in prepared.reuse_keys
+        ):
             # Evolution replays inventory and reprices immutable policy facts.
             # Only a changed selection or evicted facts requires a fresh solve.
             prepared = self._prepare(snapshot, index, key=key, previous=prepared)
@@ -219,12 +223,13 @@ class FTFAcquire:
             )
             for template in acquire.templates
         )
-        evolved = owner.engine.evolve(
-            plans[0].source,
-            tuple(plan.batch for plan in plans),
-            cancel=Event(),
+        evolved, reuse_keys = evolve_plans(
+            owner.engine,
+            plans,
+            facts,
+            owner.settings,
+            key=key,
             telemetry=owner.telemetry is not None,
-            reuse_key=key,
         )
         if owner.telemetry is not None:
             self.routing.append(evolved.paths)
@@ -317,6 +322,7 @@ class FTFAcquire:
             evolved.paths.for_reuse(telemetry=False),
             sampler,
             raw,
+            reuse_keys,
         )
 
 
@@ -454,6 +460,9 @@ class FTFSource:
         Requires nonempty C1 templates and the current RNG stream version. Legacy
         execution timelines are not consumed. ValueError rejects unsupported
         inputs before the engine runs; a closed source raises RuntimeError.
+        Active pulse and mux readout generators are mutually exclusive across
+        all request templates. Mixing them raises ValueError naming both indices.
+        Separate requests may select different readout paths.
         """
         if self._closed:
             raise RuntimeError("FTF source is closed")
@@ -461,6 +470,15 @@ class FTFSource:
             raise ValueError("FTF requires timeline templates")
         if request.rng_version != f"PCG64/SeedSequence-v2/numpy-{np.__version__}":
             raise ValueError("FTF RNG version mismatch")
+        self.readout.validate_generators(
+            self.settings.readout.drive.gen_ch,
+            {
+                event.gen_ch
+                for template in request.templates
+                for event in template.events
+                if np.any(event.active)
+            },
+        )
         if self._session is not None:
             self._session.invalidate()
         self._session = FTFAcquire(self, request)
@@ -527,8 +545,11 @@ def ftf(
 
     Startup creates fixed V/A FakeDevices and applies initial values once. The
     returned manager owns cleanup; builder failures close all devices and preserve
-    both original and cleanup errors. Channels use make_mock_soccfg's supported
-    profile, never arbitrary firmware overrides. Host receives no model truth.
+    both original and cleanup errors. The mock profile includes pulse and optional
+    mux readout plus all drive lines. Generator/ADC counts are the maximum configured
+    indices plus one; mux uses its own generator and receiver profile. One environment
+    supports separate pulse and mux acquires without reconfiguration. Channels never
+    accept arbitrary firmware overrides. Host receives no model truth.
     private_replay explicitly enables author-only checked input archives at an
     absolute directory. Replay recomputes with checked numeric and RNG versions;
     no U table or exact density record is consulted. One engine persists across
@@ -587,18 +608,21 @@ def ftf(
             private_replay=private_replay,
             telemetry=telemetry,
         )
+        readout = coordinator.readout
+        mux = readout.mux
         gens = (
             settings.readout.drive.gen_ch,
             *(s.gen_ch for s in settings.drive_lines.values()),
+            *((mux.gen_ch,) if mux is not None else ()),
         )
-        readout = coordinator.readout
-        receivers = tuple(r.ro_ch for r in readout.receivers)
-        if readout.kind == "mux":
+        mux_receivers = () if mux is None else tuple(r.ro_ch for r in mux.receivers)
+        receivers = (readout.pulse.ro_ch, *mux_receivers)
+        if mux is not None:
             soccfg = make_mux_mock_soccfg(
                 max(gens) + 1,
                 max(receivers) + 1,
-                gen_ch=settings.readout.drive.gen_ch,
-                ro_chs=receivers,
+                gen_ch=mux.gen_ch,
+                ro_chs=mux_receivers,
             )
         else:
             soccfg = make_mock_soccfg(max(gens) + 1, max(receivers) + 1)
