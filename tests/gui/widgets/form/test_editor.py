@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.gui.form import (
+    Display,
     FormEnv,
     FormErrors,
     FormInput,
@@ -87,10 +88,12 @@ class SampleForm(RebuildingForm):
     amplitude: complex = 1 + 0j
     samples: tuple[float, ...] = (1.0,)
     offsets: dict[str, float] = Field(default_factory=dict)
-    branch: Annotated[StaticBranch | AlternateBranch, Field(discriminator="kind")] = (
-        Field(default_factory=StaticBranch)
-    )
-    section: Section | None = None
+    branch: Annotated[
+        StaticBranch | AlternateBranch,
+        Field(discriminator="kind"),
+        Display(collapsed=False),
+    ] = Field(default_factory=StaticBranch)
+    section: Annotated[Section | None, Display(collapsed=False)] = None
     mode: Literal["alpha", "beta"] = "alpha"
 
     @classmethod

@@ -24,6 +24,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import (
+    Display,
     FormCommandResult,
     FormEnv,
     FormErrors,
@@ -44,6 +45,7 @@ from zcu_tools.resources.context.library import (
 )
 
 from tests.gui._form_converters import RebuildingForm
+from tests.gui._user_input import ComponentDriver
 from tests.gui.widgets.form._field_errors import field_error
 
 type Editor = FormEditor[FormModel]
@@ -226,6 +228,10 @@ def test_choosing_an_option_selects_its_value_once_and_draws_its_fields(
     )
 
     choose(child(editor, QComboBox, "form.input.waveform"), "Inline: gauss")
+    editor.resize(760, 1000)
+    editor.show()
+    QApplication.processEvents()
+    ComponentDriver(editor).click(object_name="form.fold.waveform")
 
     gauss: JsonValue = {"kind": "inline", "module": {"style": "gauss"}}
     assert selections == [(("waveform",), gauss)]
@@ -274,8 +280,8 @@ def test_unmatched_input_shows_the_current_value_as_missing_and_keeps_state(
 class ModuleCore(ConfigBase):
     """A nullable single-kind module and a nullable multi-kind module."""
 
-    pulse: PulseCfg | None = None
-    reset: ResetCfg | None = None
+    pulse: Annotated[PulseCfg | None, Display(collapsed=False)] = None
+    reset: Annotated[ResetCfg | None, Display(collapsed=False)] = None
 
 
 def test_nullable_modules_offer_none_keys_and_inline_kinds_without_enabled(
@@ -322,7 +328,7 @@ def test_default_none_module_selection_via_component_events(
     from tests.gui._user_input import ComponentDriver
 
     class EventCore(ConfigBase):
-        pulse: PulseCfg | None = None
+        pulse: Annotated[PulseCfg | None, Display(collapsed=False)] = None
 
     env = module_env()
     form = form_adapter.Form(EventCore, {})
@@ -428,7 +434,7 @@ class ShapeForm(RebuildingForm):
 
     branch_models = {("shape",): (Flat, Ramp)}
 
-    shape: Annotated[Flat | Ramp, Field(discriminator="kind")]
+    shape: Annotated[Flat | Ramp, Field(discriminator="kind"), Display(collapsed=False)]
 
 
 def test_tagged_union_dropdown_draws_the_selected_branch_and_starts_new_ones_fresh(
@@ -475,7 +481,9 @@ class NumericForm(RebuildingForm):
 
     branch_models = {("branch",): (One, Three)}
 
-    branch: Annotated[One | Three, Field(discriminator="kind")]
+    branch: Annotated[
+        One | Three, Field(discriminator="kind"), Display(collapsed=False)
+    ]
 
 
 def test_numeric_tags_are_written_as_typed_option_values(build: Build) -> None:
@@ -508,7 +516,9 @@ class AliasShapeForm(RebuildingForm):
 
     branch_models = {("shape",): (AliasFlat, Ramp)}
 
-    shape: Annotated[AliasFlat | Ramp, Field(discriminator="kind")]
+    shape: Annotated[
+        AliasFlat | Ramp, Field(discriminator="kind"), Display(collapsed=False)
+    ]
 
 
 def test_an_alias_tag_is_its_own_option_with_its_branch_fields(build: Build) -> None:
@@ -555,7 +565,9 @@ class NumericAliasForm(RebuildingForm):
 
     branch_models = {("branch",): (AliasOne, Three)}
 
-    branch: Annotated[AliasOne | Three, Field(discriminator="kind")]
+    branch: Annotated[
+        AliasOne | Three, Field(discriminator="kind"), Display(collapsed=False)
+    ]
 
 
 def test_a_numeric_alias_tag_is_a_typed_option_with_its_branch_fields(
@@ -603,6 +615,10 @@ def test_a_key_option_lists_its_commands_and_runs_them_on_the_state(
     ]
 
     command(editor, "waveform", "to_inline").trigger()
+    editor.resize(760, 1000)
+    editor.show()
+    QApplication.processEvents()
+    ComponentDriver(editor).click(object_name="form.fold.waveform")
 
     assert state.input.data["waveform"] == {
         "kind": "inline",
@@ -661,7 +677,7 @@ def test_host_command_route_receives_the_command_and_its_rejection_shows(
 class FixedShapeForm(FormModel):
     """One fixed option value, with editable children and an explicit command."""
 
-    shape: Flat
+    shape: Annotated[Flat, Display(collapsed=False)]
 
     @classmethod
     def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
@@ -760,7 +776,7 @@ def test_generated_nested_copy_and_fresh_selection_via_component_events(
     from tests.gui._user_input import ComponentDriver
 
     class EventCore(ConfigBase):
-        pulse: PulseCfg | None = None
+        pulse: Annotated[PulseCfg | None, Display(collapsed=False)] = None
         note: str = "$literal-name"
 
     env = FormEnv(
@@ -816,6 +832,7 @@ def test_generated_nested_copy_and_fresh_selection_via_component_events(
     driver.invoke_context_action(
         object_name="form.input.pulse.module.waveform", action="Convert to inline"
     )
+    driver.click(object_name="form.fold.pulse.module.waveform")
     driver.screenshot(tmp_path / "03-child-inline.png")
     assert (
         driver.observe(object_name="form.input.pulse.module.waveform").text

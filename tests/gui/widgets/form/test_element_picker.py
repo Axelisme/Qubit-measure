@@ -26,12 +26,18 @@ def test_native_indexed_module_and_sweep_navigation_keeps_visible_drafts(
     qapp.processEvents()
     driver = ComponentDriver(editor)
     try:
+        driver.click(object_name="form.fold.tones")
+        driver.click(object_name="form.fold.tones.0")
+        driver.click(object_name="form.fold.tones.0.sweep")
         driver.screenshot(tmp_path / "01-native-open.png")
         assert driver.observe(object_name="form.picker.tones").text == "0: A"
         driver.choose_option(object_name="form.picker.tones", value="1: B")
+        driver.click(object_name="form.fold.tones.1")
+        driver.click(object_name="form.fold.tones.1.sweep")
         driver.invoke_context_action(
             object_name="form.input.tones.1.drive", action="Convert to inline"
         )
+        driver.click(object_name="form.fold.tones.1.drive")
         driver.enter_text(
             object_name="form.input.tones.1.drive.module.gain", value="broken"
         )
@@ -92,6 +98,8 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
         )
 
     try:
+        driver.click(object_name="form.fold.tones")
+        driver.click(object_name="form.fold.tones.0")
         snapshot("01-open")
         assert driver.observe(object_name="form.picker.tones").text == "0: A"
         driver.enter_text(
@@ -99,6 +107,7 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
         )
         snapshot("02-uncommitted")
         driver.choose_option(object_name="form.picker.tones", value="1: B")
+        driver.click(object_name="form.fold.tones.1")
         snapshot("03-second-element")
         assert driver.observe(object_name="form.input.tones.1.gain").text == "2"
         assert driver.observe(object_name="form.input.participants").text == '["B"]'
@@ -187,6 +196,8 @@ def test_readonly_refusal_is_visible_and_navigation_still_works(
     qapp.processEvents()
     driver = ComponentDriver(editor)
     try:
+        driver.click(object_name="form.fold.tones")
+        driver.click(object_name="form.fold.tones.0")
         driver.screenshot(tmp_path / "01-owner-open.png")
         driver.invoke_context_action(
             object_name="form.fold.tones",
@@ -197,6 +208,7 @@ def test_readonly_refusal_is_visible_and_navigation_still_works(
         assert "Readonly" in driver.observe(object_name="form.row.tones").tooltip
         assert driver.observe(object_name="form.picker.tones").text == "0: A"
         driver.choose_option(object_name="form.picker.tones", value="1: B")
+        driver.click(object_name="form.fold.tones.1")
         driver.enter_text(object_name="form.input.tones.1.gain", value="4")
         driver.enter_text(object_name="form.input.participants", value='["Q4"]')
         driver.screenshot(tmp_path / "04-owner-invalid-participant.png")

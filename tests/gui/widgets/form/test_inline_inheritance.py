@@ -102,6 +102,8 @@ def test_module_and_nested_waveform_switch_show_inherited_values(
     driver = inheritance_host
     waveform = "form.input.selection.module.waveform"
     length = waveform + ".module.length"
+    driver.click(object_name="form.fold.selection")
+    driver.click(object_name="form.fold.selection.module.waveform")
     snapshot(driver, tmp_path, "01-pulse-gauss")
     driver.choose_option(object_name=waveform, value="Inline: drag")
     snapshot(driver, tmp_path, "02-drag")

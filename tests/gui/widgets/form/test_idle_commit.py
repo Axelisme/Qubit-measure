@@ -33,7 +33,9 @@ class IdleForm(FormModel):
     expression: float = 2.0
     amplitude: complex = 1 + 0j
     child: Annotated[Child, Display(collapsed=False)] = Field(default_factory=Child)
-    optional: Child | None = Field(default_factory=Child)
+    optional: Annotated[Child | None, Display(collapsed=False)] = Field(
+        default_factory=Child
+    )
     choice: Literal["first", "second"] = "first"
 
 
