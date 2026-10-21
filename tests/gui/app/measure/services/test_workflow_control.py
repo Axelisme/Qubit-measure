@@ -14,7 +14,11 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.app.measure.services import app_services
 from zcu_tools.gui.form import FormErrors, FormModel
-from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    PointCreateRequest,
+    PointUseRequest,
+)
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry
 
@@ -197,3 +201,42 @@ def test_pause_resume_stop_share_one_operation_and_keep_tunables_binding(tmp_pat
     status = control.status("pausing-run")
     assert status is not None and status.lifecycle == "stopped"
     assert control.close(tab)
+
+
+def test_prepare_forms_recaptures_after_terminal_without_losing_authored_draft(
+    tmp_path,
+):
+    control, harness = make_control(tmp_path)
+    tab = control.open("synthetic")
+    control.start(tab, "captured")
+    harness.complete_segment()
+    control.write_form(tab, "tunables", {("value",): 19})
+    old = control.form_env(tab, "tunables")
+    harness.services.context.new_point(
+        PointCreateRequest(
+            "next", description="new source", origin=CommandOrigin("gui")
+        )
+    )
+    harness.services.context.use_point(PointUseRequest("next"))
+    assert control.form_env(tab, "tunables") is old
+    control.prepare_forms(tab)
+    refreshed = control.form_env(tab, "tunables")
+    assert refreshed is not old
+    assert refreshed.parameters is not None
+    assert refreshed.parameters.capture_storage().point == "next"
+    assert control.form_state(tab, "tunables").input.data["value"] == 19
+    assert control.tunables("captured").values == {"value": 3}
+
+
+def test_invalid_start_batch_returns_errors_without_accepting_draft(tmp_path):
+    control, harness = make_control(tmp_path)
+    tab = control.open("synthetic")
+    control.write_form(tab, "plan", {("value",): 17})
+    try:
+        result = control.start(tab, "invalid", plan_batch={("unknown",): 1})
+    except ValueError as error:
+        result = error
+    assert isinstance(result, FormErrors)
+    assert control.form_state(tab, "plan").input.data["value"] == 17
+    assert control.tabs()[0].run_id is None
+    assert harness.background.work is None
