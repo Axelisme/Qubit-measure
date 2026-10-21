@@ -237,7 +237,7 @@ def test_workflow_readonly_connection_can_preview_but_cannot_edit(workflow_rpc):
     rejected = rpc.call(
         "workflow.edit_form", {"tab_id": tab, "form": "plan", "batch": []}
     )
-    assert rejected["error"]["reason"] == "readonly_connection"
+    assert rejected["error"]["reason"] == "not_holder"
     assert controller.workflow_control().form_state(tab, "plan").input.data == {
         "value": 3
     }
