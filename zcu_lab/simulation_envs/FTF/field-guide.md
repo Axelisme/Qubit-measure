@@ -1,6 +1,6 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-21，segment 主分支腔場繼承
+**Last updated:** 2026-10-22，獨立 design 頻率初猜
 
 **讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
@@ -10,9 +10,10 @@
 
 ## 目錄
 
-- [先分清楚三種設定](#先分清楚三種設定)
+- [先分清楚設定用途](#先分清楚設定用途)
 - [文件結構與共通規則](#文件結構與共通規則)
 - [Chip：物理電路與耦合](#chip物理電路與耦合)
+- [Design：設計初猜](#design設計初猜)
 - [DC bias：live 電源與靜態磁通掃描](#dc-biaslive-電源與靜態磁通掃描)
 - [Drive lines：charge 與小訊號 flux 校準](#drive-linescharge-與小訊號-flux-校準)
 - [Readout：drive → 物理 resonators → ADC](#readoutdrive--物理-resonators--adc)
@@ -20,10 +21,11 @@
 - [Generator、ADC 與 entry 接線對照](#generatoradc-與-entry-接線對照)
 - [採用 v2 與調參順序](#採用-v2-與調參順序)
 
-## 先分清楚三種設定
+## 先分清楚設定用途
 
 - `chip` 描述 F1、coupler、F2 的物理參數。Flux noise 與耗散也是物理模型的一部分。
 - `dc_bias`、`drive_lines`、`readout` 描述 live DC 電源、charge/flux 接線與讀出訊號路徑。DC 電源設定靜態磁通工作點，drive line 透過所選 operator 驅動迴路。
+- 可選的 `design` 保存環境作者填的設計初猜，與物理真值分開，不參與模擬演化。
 - `numerics` 決定基底維度、系統保留維度、solver 精度與亂數種子。它不描述晶片性質。
 
 FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小訊號 flux drive 與 readout。Flux drive 使用固定 DC 工作點的一階線性算符。這個近似適用於小訊號驅動，不支援 gate 內逐時重算 H(Phi(t)) 的大振幅 fast-flux。Loader 將 `flux_lines` 視為未知欄位，即使填 `{}` 也會拒絕。使用未綁定的 generator 也會失敗。
@@ -36,6 +38,8 @@ FTF 支援 DC bias、不同 round 間的靜態磁通掃描、charge drive、小�
 format: zcu.ftf
 version: 2
 chip: # Physical circuits and couplings.
+  # ...
+design: # Optional independent predictor guesses, keyed by entry qubit name.
   # ...
 dc_bias: # Static offsets and live DC devices.
   # ...
@@ -54,6 +58,7 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `format` | 格式識別字串，只接受 `zcu.ftf`，無單位 | 必填 |
 | `version` | 格式版本，只接受整數 `2`，無單位 | 必填；v1 不相容，字串 `"2"` 也不接受 |
 | `chip` | 物理電路 record，見下一節 | 必填 |
+| `design` | entry qubit 名稱到完整標稱值的 map | 可省略或填 `{}`，不建立 predictor；不可填 `null` |
 | `dc_bias` | 靜態磁通 offset 與具名電源 record | 必填 |
 | `drive_lines` | 名稱到 charge/flux drive line 的 map | 可省略或填 `{}`，都停用 drive 控制；不可填 `null` |
 | `readout` | `drive`、`resonators`、`adc` 與可選 `mux` | 必填，pulse drive／ADC object 與兩個 resonator 皆必填；mux 段另含 generator、刻度與 receiver list |
@@ -119,6 +124,31 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `temperature_k` | 共通 bath temperature | 有限數，K，≥ 0 | 必填 |
 
 耦合係數乘 `n_i * n_j` 的完整 charge operators，沒有依工作點的 `n01` 再正規化。填入 transition-level 的 g01 而不換算，會改變模型。
+
+## Design：設計初猜
+
+`design` 是作者填的設計初猜，不是真值或量測校準結果。不要從 `chip` 或
+`dc_bias` 複製或推算初猜。每個 key 使用 entry-template 的 fluxonium qubit 名稱，
+樣板為 `Q1`、`Q2`，不是 `f1`、`f2`。每筆須填齊以下欄位，載入不補值。
+
+| 欄位 | 意義與單位 | 合法內容 |
+| --- | --- | --- |
+| `ej_ghz`、`ec_ghz`、`el_ghz` | 標稱 Josephson、charging、inductive energies，GHz | 有限正值 |
+| `flux_unit` | 該 qubit 的 `flux_source` device 原生單位 | `A` 或 `V`，須與 device 一致 |
+| `flux_half` | 零 bias 時半磁通量子對應的 device value，單位同 `flux_unit` | 有限數 |
+| `flux_period` | 每個磁通量子的 signed device-value 差，單位同 `flux_unit` | 有限非零數，可為負 |
+| `flux_bias` | 加到 device value 的標稱偏移修正，單位同 `flux_unit` | 有限數，無修正也須明填 `0` |
+
+Predictor 使用既有換算
+`Phi/Phi0 = (device_value + flux_bias - flux_half) / flux_period + 0.5`。
+Startup 不做換算，只把以上標稱值交給 `FluxoniumParams` 與 `PredictorFile`。
+它以 resources writer 建立 entry 的 `predictors/<qubit>.json`，不覆寫已有檔案。
+未知 qubit 或 device 單位不符在 startup 報錯，缺欄位在 `ftf()` 載入時報完整 field path。
+
+省略 `design` 或填空 map 不影響環境組裝。Startup 顯示
+「design 未提供，未建立 predictor」，不從真值建立 fallback，也不刪除舊檔。
+MCP 透過 `predictor.list_files` 找檔，再用 `predictor.predict` 查初猜。
+樣板的 `device_value=1.2e-3` 表示 1.2 mA，不是 reduced flux。
 
 ## DC bias：live 電源與靜態磁通掃描
 

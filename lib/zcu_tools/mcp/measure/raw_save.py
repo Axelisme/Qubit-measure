@@ -57,6 +57,19 @@ class SaveReport:
 
 
 @dataclass(frozen=True)
+class RawDataState:
+    """Owner-observed raw persistence for one fixed Run/Load.
+
+    run_id is native acquisition identity even before saving, or None without
+    metadata. saved is the owner's fully Saved measurement_data flag. Neither
+    analysis artifacts nor a non-null run_id imply that raw was saved.
+    """
+
+    run_id: str | None
+    saved: bool
+
+
+@dataclass(frozen=True)
 class RawSaveRequest:
     """A fixed native source and caller-owned dispatch admission.
 
