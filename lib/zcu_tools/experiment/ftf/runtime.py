@@ -527,8 +527,11 @@ def ftf(
 
     Startup creates fixed V/A FakeDevices and applies initial values once. The
     returned manager owns cleanup; builder failures close all devices and preserve
-    both original and cleanup errors. Channels use make_mock_soccfg's supported
-    profile, never arbitrary firmware overrides. Host receives no model truth.
+    both original and cleanup errors. The mock profile includes pulse and optional
+    mux readout plus all drive lines. Generator/ADC counts are the maximum configured
+    indices plus one; mux uses its own generator and receiver profile. One environment
+    supports separate pulse and mux acquires without reconfiguration. Channels never
+    accept arbitrary firmware overrides. Host receives no model truth.
     private_replay explicitly enables author-only checked input archives at an
     absolute directory. Replay recomputes with checked numeric and RNG versions;
     no U table or exact density record is consulted. One engine persists across
@@ -589,22 +592,19 @@ def ftf(
         )
         readout = coordinator.readout
         mux = readout.mux
-        readout_gen = settings.readout.drive.gen_ch if mux is None else mux.gen_ch
         gens = (
-            readout_gen,
+            settings.readout.drive.gen_ch,
             *(s.gen_ch for s in settings.drive_lines.values()),
+            *((mux.gen_ch,) if mux is not None else ()),
         )
-        receivers = (
-            (readout.pulse.ro_ch,)
-            if mux is None
-            else tuple(r.ro_ch for r in mux.receivers)
-        )
+        mux_receivers = () if mux is None else tuple(r.ro_ch for r in mux.receivers)
+        receivers = (readout.pulse.ro_ch, *mux_receivers)
         if mux is not None:
             soccfg = make_mux_mock_soccfg(
                 max(gens) + 1,
                 max(receivers) + 1,
                 gen_ch=mux.gen_ch,
-                ro_chs=receivers,
+                ro_chs=mux_receivers,
             )
         else:
             soccfg = make_mock_soccfg(max(gens) + 1, max(receivers) + 1)

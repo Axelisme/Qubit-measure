@@ -125,12 +125,19 @@ class _ReadoutPath:
     multiplexed: bool
 
 
-def _readout_path(settings: FTFSettings, config: FTFReadoutConfig) -> _ReadoutPath:
-    """Select the configured readout capability."""
-    if config.mux is not None:
-        return _ReadoutPath(
-            config.mux.gen_ch, config.mux.input_per_gain, config.mux.receivers, True
-        )
+def _readout_path(
+    settings: FTFSettings, config: FTFReadoutConfig, template: TimelineTemplate
+) -> _ReadoutPath:
+    """Select capabilities from active event generators, rejecting mixed paths."""
+    pulse_gen = settings.readout.drive.gen_ch
+    generators = {event.gen_ch for event in template.events if np.any(event.active)}
+    mux = config.mux
+    if mux is not None and mux.gen_ch in generators:
+        if pulse_gen in generators:
+            raise ValueError(
+                f"FTF program mixes readout generators {pulse_gen} and {mux.gen_ch}"
+            )
+        return _ReadoutPath(mux.gen_ch, mux.input_per_gain, mux.receivers, True)
     return _ReadoutPath(
         settings.readout.drive.gen_ch,
         settings.readout.drive.input_per_gain,
@@ -191,7 +198,7 @@ def _timeline_batch(
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
     drives = []
     for event in template.events:
-        if event.gen_ch == path.gen_ch:
+        if event.gen_ch == path.gen_ch or not np.any(event.active):
             continue
         if event.gen_ch not in microwave:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
@@ -448,6 +455,9 @@ def plan_template(
     match the complete settings, snapshot and numeric revision or raises ValueError.
     None builds physical inputs for this call. Receiver/carrier/content data are
     always constructed from the current template and readout configuration.
+    Event generators select pulse or mux capabilities. Using both configured
+    readout generators in one template raises ValueError naming both channels.
+    Readout windows must belong to that path's receivers and generator.
     Mux permits simultaneous coherent tones with independent ADC grids. Program
     common-origin carrier phases convert to pulse-local phases in the first
     carrier's model reference frame; ADC demodulation remains absolute-time.
@@ -456,7 +466,7 @@ def plan_template(
     detach once per active point/slot. No per-point evolution planner is called.
     """
     config = readout_configuration(settings) if readout is None else readout
-    path = _readout_path(settings, config)
+    path = _readout_path(settings, config, template)
     receivers = {receiver.ro_ch: receiver for receiver in path.receivers}
     if not template.readouts:
         raise ValueError("FTF requires at least one bound receiver")
