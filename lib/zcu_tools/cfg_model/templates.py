@@ -12,17 +12,22 @@ from .template_nodes import Expr, Slot, TemplateSeed
 from .waveform import WaveformSpec
 
 
-def _validate_placeholders(text: str) -> None:
+def _placeholder_names(text: str) -> frozenset[str]:
+    """Validate placeholder syntax and collect names, including format specs."""
+    names: set[str] = set()
     try:
         for _, name, spec, conversion in Formatter().parse(text):
             if name is not None and not name.isidentifier():
                 raise ValueError(f"Expected a plain placeholder name, got {name!r}")
             if conversion not in (None, "s", "r", "a"):
                 raise ValueError(f"Invalid conversion {conversion!r}")
+            if name is not None:
+                names.add(name)
             if spec:
-                _validate_placeholders(spec)
+                names.update(_placeholder_names(spec))
     except ValueError as exc:
         raise ValueError(f"Invalid template placeholder in {text!r}: {exc}") from exc
+    return frozenset(names)
 
 
 def expand_path(
@@ -39,7 +44,7 @@ def expand_path(
     supported. Missing bindings, traversal fields or malformed placeholders
     raise ValueError naming the path and offending placeholder.
     """
-    _validate_placeholders(path)
+    _placeholder_names(path)
     try:
         return path.format_map(bindings or {})
     except (KeyError, IndexError, ValueError) as exc:
@@ -76,13 +81,26 @@ class TemplateDef:
         ):
             raise TypeError("Template module must be a concrete persistent Spec type")
         object.__setattr__(self, "seeds", MappingProxyType(dict(self.seeds)))
+        # Construction and queries share the same seed traversal and syntax checks.
+        self.placeholder_names()
+
+    def placeholder_names(self) -> frozenset[str]:
+        """Return the binding names needed by expanded_seeds, without expansion.
+
+        Names come from string seeds, Expr bodies and Slot paths, including
+        nested format specs. Escaped braces and consumer-specific Slot options
+        contribute no names. This does not resolve aliases, read sources or
+        modify the definition. Invalid placeholder syntax raises ValueError.
+        """
+        names: set[str] = set()
         for seed in self.seeds.values():
             if isinstance(seed, Expr):
-                _validate_placeholders(seed.text)
+                names.update(_placeholder_names(seed.text))
             elif isinstance(seed, Slot):
-                _validate_placeholders(seed.path)
+                names.update(_placeholder_names(seed.path))
             elif isinstance(seed, str):
-                _validate_placeholders(seed)
+                names.update(_placeholder_names(seed))
+        return frozenset(names)
 
     def expanded_seeds(
         self,

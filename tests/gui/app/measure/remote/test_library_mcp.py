@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.cfg_model import ConstWaveformCfg, MuxReadoutSpec, TemplateDef
+from zcu_tools.cfg_model import (
+    ConstWaveformCfg,
+    MuxReadoutSpec,
+    MuxReadoutTone,
+    TemplateDef,
+)
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -178,7 +183,8 @@ def test_ml_create_from_role_applies_edits_before_validation(role_socket):
     assert reply["result"] == {"created": "R1.readout.mux_readout"}
     written = fx.ctrl.read_context().library.module_spec("R1.readout.mux_readout")
     assert written.model_dump(mode="json")["tones"] == [
-        {"freq": 100.0, "gain": 0.2, "ro_ch": 0, "phase": 0.0, "label": ""}
+        MuxReadoutTone.model_validate(tone).model_dump(mode="json")
+        for tone in MUX_TONES
     ]
     assert written.model_dump(mode="json")["length"] == 0.75
 

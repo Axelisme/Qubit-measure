@@ -29,7 +29,6 @@ from zcu_tools.gui.session.library_entry import (
     WaveformEntryForm,
     library_entry_kind,
     new_library_entry,
-    template_placeholders,
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -176,7 +175,7 @@ class NewEntryDialog(QDialog):
             for row in parameters.resolved_aliases()
             if row.resolved is not None
         }
-        missing = template_placeholders(self._templates[template_id]) - bindings.keys()
+        missing = self._templates[template_id].placeholder_names() - bindings.keys()
         if missing:
             names = "、".join(f"{{{name}}}" for name in sorted(missing))
             self._show_error(
