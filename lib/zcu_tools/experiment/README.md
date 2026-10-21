@@ -8,7 +8,7 @@
 
 ## Shared script driver
 
-`script_driver.ScriptDriver` 非阻塞地驅動 `core.script_protocol` generator，供 workflow 與 recipe host 共用。Host 更新 operation delivery 後呼叫 `advance()`，或以 `answer()` 回答 pending question。Driver 只在 yield 邊界交付 Signal；cancel 關閉 generator，operation 的取消與 drain 仍由 host 負責。公開 docstrings 定義狀態、錯誤傳播及單一 owner 呼叫順序。
+`script_driver.ScriptDriver` 非阻塞地驅動 `core.script_protocol` generator，供 workflow 與 recipe host 共用。Host 更新 operation delivery 後呼叫 `advance()`，或以 `answer()` 回答 pending question。Driver 只在 yield 邊界交付 Signal。Cancel 交回作者收尾，不關閉 generator。Host 先取消並 drain 正在進行的 operation，再保留其真實 delivery。Ask 取消後以 None resume。取消後的新 Wait 交給必填的 owner callback `deliver_cancelled`，不啟動工作；新 Ask 立即回 None。作者 return 後 status 為 cancelled，result 保留原回傳值；收尾拋錯為 failed。只有宿主 teardown 或丟棄 invocation 時才呼叫 `close()`，執行 finally 但不保證 yield 得到回應。公開 docstrings 定義單一 worker owner 的呼叫順序。
 
 ## Explicit simulation environments
 

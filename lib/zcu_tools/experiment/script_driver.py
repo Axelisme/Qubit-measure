@@ -23,7 +23,8 @@ type ScriptStatus = Literal[
 ]
 """Running is ready to drive; waiting needs operation delivery; paused needs an answer.
 
-Completed, cancelled and failed are terminal and never resume the generator.
+Completed, cancelled and failed are terminal for driving. Teardown may still
+close a failed producer suspended by a host callback error.
 """
 
 
@@ -57,12 +58,16 @@ class ScriptDriver[R]:
     policy and validation. It must not drive this driver recursively. No script
     inbox or exception injection exists.
 
-    Cancel closes the generator at a boundary, running its finally blocks. The
-    host must separately cancel and drain any operation; closing never changes
-    op.delivery. A script's GeneratorExit also means cancelled. Normal return
-    means completed, even after a failed or cancelled operation delivery. Other
-    exceptions mean failed, remain available as error and propagate to the host.
-    A close error likewise means failed rather than successful cancellation.
+    Cancel resumes the author at a boundary. The host first cancels and drains
+    an active Wait, preserving its real delivery, including partial or a completed
+    race. Ask resumes with delivery=None. After cancel, every new Wait goes once
+    to deliver_cancelled instead of starting work; every new Ask resumes None.
+    That callback must supply a cancelled delivery without re-entering the driver.
+    A missing or non-cancelled delivery raises RuntimeError. Return after cancel
+    means cancelled and retains the authored result. An operation's cancelled
+    delivery alone does not cancel the script. Other exceptions mean failed,
+    remain available as error and propagate. close() is for host teardown only;
+    it runs finally blocks without promising responses to further yields.
     """
 
     def __init__(
@@ -76,6 +81,8 @@ class ScriptDriver[R]:
 
         Without on_signal, submitting a non-cancel signal raises ValueError.
         Operation handles and their resources remain owned by the host.
+        deliver_cancelled fills an unstarted operation's cancelled delivery on
+        this worker. It must not start work, block or re-enter this driver.
         """
         self._generator = generator
         self._on_signal = on_signal
@@ -86,6 +93,8 @@ class ScriptDriver[R]:
         self._result: R | None = None
         self._error: Exception | None = None
         self._driving = False
+        self._cancelled = False
+        self._new_request = False
 
     @property
     def status(self) -> ScriptStatus:
@@ -104,9 +113,10 @@ class ScriptDriver[R]:
 
     @property
     def result(self) -> R | None:
-        """Return the original generator return object on completion, else None.
+        """Return the original generator return object after return, else None.
 
-        A None return is distinguished from no return by status == 'completed'.
+        Completed and cooperatively cancelled scripts both retain their return.
+        Teardown close and a None return both have result=None.
         """
         return self._result
 
@@ -224,6 +234,31 @@ class ScriptDriver[R]:
         finally:
             self._driving = False
 
+    def close(self) -> None:
+        """Abandon the generator on its worker during host teardown.
+
+        This is not cooperative cancel: finally runs, but yielded requests receive
+        no delivery. A generator that yields while closing raises RuntimeError.
+        Cleanup failures are recorded as failed and re-raised. A failed driver
+        stays failed after teardown. Completed or cancelled calls do nothing;
+        re-entry raises RuntimeError. The host must
+        cancel and drain any active operation before closing.
+        """
+        if self._driving:
+            raise RuntimeError("Cannot close while driving a script")
+        if self._status in ("completed", "cancelled"):
+            return
+        self._driving = True
+        try:
+            self._generator.close()
+            self._finish("failed" if self._status == "failed" else "cancelled")
+        except Exception as error:
+            self._error = error
+            self._finish("failed")
+            raise
+        finally:
+            self._driving = False
+
     def _finish(self, status: ScriptStatus) -> None:
         self._status = status
         self._pending = None
@@ -233,36 +268,51 @@ class ScriptDriver[R]:
         while self._signals:
             signal = self._signals.popleft()
             if signal.kind == "cancel":
-                self._generator.close()
-                self._finish("cancelled")
-                return
-            if self._on_signal is not None:
+                self._cancelled = True
+            elif self._on_signal is not None:
                 self._on_signal(signal)
 
     def _drive(self) -> None:
         while True:
             if self._pending is not None:
                 self._dispatch_signals()
-                if self._status == "cancelled" or not self._ready():
+                request = self._pending
+                if self._cancelled:
+                    if isinstance(request, Ask):
+                        request.delivery = None
+                    elif self._new_request and isinstance(request, Wait):
+                        self._deliver_cancelled(request.op)
+                        delivery = request.op.delivery
+                        if delivery is None or delivery.status != "cancelled":
+                            raise RuntimeError(
+                                "Owner must supply cancelled operation delivery"
+                            )
+                self._new_request = False
+                if not self._ready():
                     return
             self._status = "running"
             try:
                 request = next(self._generator)
             except StopIteration as done:
                 self._result = done.value
-                self._finish("completed")
+                self._finish("cancelled" if self._cancelled else "completed")
                 return
             if not isinstance(request, (Wait, Ask)):
                 self._generator.close()
                 raise TypeError("Script must yield Wait or Ask requests")
             self._pending = request
+            self._new_request = True
 
     def _ready(self) -> bool:
         request = self._pending
         if isinstance(request, Wait) and request.op.delivery is None:
             self._status = "waiting"
             return False
-        if isinstance(request, Ask) and request.delivery is None:
+        if (
+            isinstance(request, Ask)
+            and request.delivery is None
+            and not self._cancelled
+        ):
             self._status = "paused"
             return False
         return True

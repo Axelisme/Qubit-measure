@@ -89,6 +89,18 @@ class Failed:
 
 
 @dataclass(frozen=True)
+class Cancelled:
+    """An unstarted acquisition cancelled during author-owned cleanup.
+
+    run_id is the owning Engine workflow run ID, not an experiment ID.
+    reason is always 'cancelled'; cancellation is not an error or Failed.
+    """
+
+    run_id: str
+    reason: Literal["cancelled"] = "cancelled"
+
+
+@dataclass(frozen=True)
 class Actor:
     """Identity of a tunables editor.
 

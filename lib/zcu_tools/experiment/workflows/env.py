@@ -12,7 +12,7 @@ from ...device import BaseDeviceInfo
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from .effects import DeviceEffect, RunEffect, WaitEffect
-from .models import Completed, Failed, MissingCapability, ProgressSnapshot
+from .models import Cancelled, Completed, Failed, MissingCapability, ProgressSnapshot
 from .ports import DevicePort, EnginePorts, ProgressFactory
 from .run import LiveUpdate, Run
 
@@ -98,7 +98,8 @@ class WorkflowEnv[C](InitEnv[C]):
     soc/devices are read-only accessors for author-owned availability checks.
     Hardware operations should still use effects to retain journal and cancellation
     behavior; the framework trusts authors and does not enforce that restriction.
-    Use yield from for every effect; the engine discards the generator on cancel.
+    Use yield from for every effect. Legacy Pause discards the invocation;
+    stopping a retained Ask resumes None for author-owned cancellation cleanup.
     """
 
     def __init__(
@@ -157,8 +158,8 @@ class WorkflowEnv[C](InitEnv[C]):
         cfg: Cfg,
         *,
         live: LiveUpdate | None = None,
-    ) -> ScriptGenerator[Completed[Cfg, Result] | Failed]:
-        """Execute an experiment without saving; return its typed Completed or Failed.
+    ) -> ScriptGenerator[Completed[Cfg, Result] | Failed | Cancelled]:
+        """Execute without saving; return Completed, Failed or Cancelled.
 
         cfg must be a deepcopy-able dataclass or Pydantic BaseModel instance.
         Completed means acquisition succeeded, not that files were saved.
@@ -171,7 +172,9 @@ class WorkflowEnv[C](InitEnv[C]):
         device operations; the engine does not inspect cfg.dev or apply settings.
         Outer, live, and deepcopy errors propagate; Schedule failures
         return Failed without data.
-        Cancellation discards the step and never returns a cancellation value.
+        Legacy Pause/Stop during an acquisition discards the invocation. During
+        retained Ask cancellation cleanup, no new acquisition starts and this
+        returns Cancelled with the owning workflow run ID.
         """
         request = RunEffect(experiment, cfg, live)
         yield Wait(request)
@@ -193,36 +196,43 @@ class WorkflowEnv[C](InitEnv[C]):
 
         The host revalidates all fields with the selected driver's Info model.
         Limits, validation and I/O failures propagate; no conversion, retries or
-        clamping occurs. Cancellation discards the entire step.
+        clamping occurs. Legacy Pause/Stop discards the invocation. After a
+        retained Ask is cancelled, this returns None without touching devices.
         """
         request = DeviceEffect(name, cfg)
         yield Wait(request)
+        if request.delivery is not None and request.delivery.status == "cancelled":
+            return
         if not request.done:
             raise RuntimeError("Engine did not complete the device effect")
 
     def wait_until(self, target: datetime) -> ScriptGenerator[None]:
         """Wait for an aware deadline, returning immediately for past targets.
 
-        Naive datetimes raise ValueError. Cancellation discards the entire step,
-        leaving its state-derived deadline unchanged for a later Resume.
+        Naive datetimes raise ValueError. Legacy Pause discards the invocation,
+        leaving its state-derived deadline unchanged for Resume. After retained
+        Ask cancellation this returns None without waiting.
         """
         request = WaitEffect(target)
         yield Wait(request)
+        if request.delivery is not None and request.delivery.status == "cancelled":
+            return
         if not request.done:
             raise RuntimeError("Engine did not complete the wait effect")
 
-    def ask[A: Answer](self, question: Question[A]) -> ScriptGenerator[A]:
+    def ask[A: Answer](self, question: Question[A]) -> ScriptGenerator[A | None]:
         """Suspend this invocation until the host supplies its declared Answer.
 
         question is an authored Question[A] instance. The engine exposes it as
         pending_question and returns paused without closing this generator.
-        Only Engine.answer resumes it; there is no timeout or default answer.
-        The suspended invocation retains its state, files and tunables capture.
+        Engine.answer resumes it with A; worker Engine.drain resumes it with
+        None after Stop. Authors must branch on None for cancellation. Later
+        questions during cancellation also return None without waiting. There
+        is no timeout or default answer. The suspended invocation retains its
+        state, files and tunables capture.
         """
         request = Ask(question)
         yield request
-        if request.delivery is None:
-            raise RuntimeError("Engine did not answer the question")
         return request.delivery
 
     @property

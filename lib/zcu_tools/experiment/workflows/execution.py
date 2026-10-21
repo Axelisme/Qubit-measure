@@ -11,14 +11,14 @@ from typing import Literal
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from ...core.script_protocol import Answer, Question, Signal, Wait
+from ...core.script_protocol import Answer, Operation, Question, Signal, Wait
 from ...device import BaseDeviceInfo
 from ...progress_bar import use_pbar_factory
 from ..script_driver import ScriptDriver
 from ..stop_signal import ScheduleOutcomeError, StopSignal
 from .artifacts import IterationArtifacts, RunArtifacts
 from .declaration import WorkflowDefinition
-from .effects import RunEffect, dispatch_effect
+from .effects import RunEffect, deliver_cancelled, dispatch_effect
 from .encoding import encode_record
 from .env import Displays, InitEnv, WorkflowEnv
 from .journal import (
@@ -157,6 +157,12 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             raise InvalidRunState("execute", self._lifecycle)
         self._executing = True
 
+    def reserve_drain(self) -> None:
+        """Reserve a stopping run; caller holds Engine's control lock."""
+        if self._lifecycle != "stopping":
+            raise InvalidRunState("drain", self._lifecycle)
+        self.reserve_execution()
+
     def reserve_answer(self, answer: Answer) -> None:
         """Validate before journaling/reserving a settled Ask continuation.
 
@@ -189,14 +195,18 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         """
         try:
             with use_pbar_factory(self._ports.progress):
+                with self._lock:
+                    pending_error = self._pending_error
+                if pending_error is not None:
+                    raise pending_error
                 self._produce(answer)
         except Exception as error:
             with self._lock:
                 cause = (
                     self._pending_error if self._pending_error is not None else error
                 )
-                _logger.error("Workflow segment failed", exc_info=cause)
-                self._fail(cause)
+            _logger.error("Workflow segment failed", exc_info=cause)
+            self._fail(cause)
         finally:
             with self._lock:
                 try:
@@ -208,6 +218,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
 
     def _produce(self, answer: Answer | None = None) -> None:
         try:
+            if self._lifecycle == "stopping" and self._driver is not None:
+                self._cancel_or_close_step()
+                self._discard_iteration()
             if answer is not None:
                 self._check_cancel()
                 driver = self._driver
@@ -229,7 +242,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     if self._lifecycle in _TERMINAL:
                         break
         except _DiscardStep:
-            self._close_step()
+            self._cancel_or_close_step()
             self._discard_iteration()
             self._settle_control()
         except KeyboardInterrupt:
@@ -268,8 +281,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             generator, deliver_cancelled=self._deliver_cancelled
         )
 
-    def _deliver_cancelled(self, operation: object) -> None:
-        raise NotImplementedError("Workflow cancelled delivery is not connected yet")
+    def _deliver_cancelled(self, operation: Operation[object]) -> None:
+        deliver_cancelled(operation, self.run_id)
 
     def _call_step(self) -> None:
         if self._driver is None:
@@ -280,8 +293,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         try:
             outcome = self._drive(driver)
         except _DiscardStep:
-            # close may run user finally blocks; their failures are not cancellation.
-            self._close_step()
+            # Author cleanup failures are not successful cancellation.
+            self._cancel_or_close_step()
             self._discard_iteration()
             return
         except BaseException:
@@ -321,13 +334,25 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         """Close a retained producer; cleanup errors propagate unchanged."""
         driver = self._driver
         self._driver = None
-        if driver is not None and driver.status not in (
-            "completed",
-            "cancelled",
-            "failed",
+        if driver is not None and driver.status not in ("completed", "cancelled"):
+            driver.close()
+
+    def _cancel_or_close_step(self) -> None:
+        driver = self._driver
+        if (
+            self._lifecycle == "stopping"
+            and driver is not None
+            and driver.pending_question is not None
         ):
+            # A retained Ask is resumed only here, outside the control lock.
             driver.signal(Signal("cancel"))
             driver.advance()
+            if driver.status != "cancelled":
+                raise RuntimeError("Cancelled workflow cleanup did not reach terminal")
+            self._driver = None
+        else:
+            # Legacy Pause/effect discard abandons the invocation, not its result.
+            self._close_step()
 
     def _drive(
         self, driver: ScriptDriver[Next[R, S] | Done | Aborted]
@@ -581,23 +606,21 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         return self.status()
 
     def stop(self) -> RunStatus:
-        """Publish one Stop request; paused runs can end without a producer."""
+        """Publish Stop only; a retained paused producer waits for worker drain."""
         if self._lifecycle in _TERMINAL or self._lifecycle == "stopping":
             return self.status()
         try:
             self._artifacts.append(
                 StopRequested(self._ports.clock.now(), self._call_seq)
             )
-            if self._lifecycle == "paused":
-                self._lifecycle = "stopping"
-                self._close_step()
+            was_paused = self._lifecycle == "paused"
+            self._artifacts.set_lifecycle("stopping")
+            self._lifecycle = "stopping"
+            if self._signal is not None:
+                self._signal.set()
+            if was_paused and self._driver is None:
                 self._discard_iteration()
                 self._end("stopped")
-            else:
-                self._artifacts.set_lifecycle("stopping")
-                self._lifecycle = "stopping"
-                if self._signal is not None:
-                    self._signal.set()
         except Exception as error:
             self._request_failure(error)
             raise
@@ -628,7 +651,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         _logger.error("Workflow control failed", exc_info=error)
         if self._pending_error is None:
             self._pending_error = error
-        if self._executing:
+        if self._executing or self._driver is not None:
+            # Retained author code is torn down by a worker, never this control.
             self._lifecycle = "stopping"
             self._reason = f"{type(error).__name__}: {error}"
             if self._signal is not None:
@@ -661,10 +685,13 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             # Diagnostic/cleanup failures never replace the primary run cause.
             self._lifecycle = "failed"
             self._reason = f"{type(error).__name__}: {error}"
-            try:
-                self._close_step()
-            except (Exception, KeyboardInterrupt):
-                _logger.exception("Workflow producer cleanup failed")
+        # Cleanup may call public controls from another thread. Never hold the
+        # control lock across generator.close or any authored finally block.
+        try:
+            self._close_step()
+        except (Exception, KeyboardInterrupt):
+            _logger.exception("Workflow producer cleanup failed")
+        with self._lock:
             try:
                 self._close_displays()
             except Exception:

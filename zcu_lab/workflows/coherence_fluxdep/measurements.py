@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.core.script_protocol import ScriptGenerator
-from zcu_tools.experiment.workflows import Failed, WorkflowEnv
+from zcu_tools.experiment.workflows import Cancelled, Failed, WorkflowEnv
 from zcu_tools.plotting.plots import LinePlot
 
 from zcu_lab.workflows.coherence_fluxdep.acquire import run_t2ramsey
@@ -136,7 +136,7 @@ def measure_t1(
         t1_cfg(plan, tun, cal, guess_us),
         live=lambda axes, samples: plot.update(axes[0], samples.real),
     )
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return LifetimeResult("t1", "failed", outcome.reason, None, None, None)
     # Save every completed trace before fitting and applying acceptance gates.
     save_t1(outcome, env.iteration_dir / "t1.h5", snapshot=plan.snapshot)
@@ -181,7 +181,7 @@ def measure_ramsey(
         t2ramsey_cfg(plan, tun, cal, guess_us),
         live=lambda axes, samples: plot.update(axes[0], samples.real),
     )
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return LifetimeResult("t2ramsey", "failed", outcome.reason, None, None, None)
     # Save every completed trace before fitting and applying acceptance gates.
     save_t2ramsey(outcome, env.iteration_dir / "t2ramsey.h5", snapshot=plan.snapshot)
@@ -219,7 +219,7 @@ def measure_echo(
         t2echo_cfg(plan, tun, cal, guess_us),
         live=lambda axes, samples: plot.update(axes[0], samples.real),
     )
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return LifetimeResult("t2echo", "failed", outcome.reason, None, None, None)
     # Save every completed trace before fitting and applying acceptance gates.
     save_t2echo(outcome, env.iteration_dir / "t2echo.h5", snapshot=plan.snapshot)

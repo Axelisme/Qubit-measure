@@ -34,6 +34,7 @@ class _RunView(Protocol):
     def run_id(self) -> str: ...
 
     def reserve_execution(self) -> None: ...
+    def reserve_drain(self) -> None: ...
     def reserve_answer(self, answer: Answer) -> None: ...
     def execute(self, answer: Answer | None = None) -> RunStatus: ...
     def pending_question(self) -> Question[Answer] | None: ...
@@ -55,7 +56,7 @@ class Engine[C]:
     start validates and persists startup, but never executes workflow code.
     execute synchronously runs a segment until paused or terminal. The host
     schedules it on a worker; Engine creates no threads and owns no connections.
-    answer is also a synchronous worker segment, never a UI-thread control.
+    answer and drain are synchronous worker segments, never UI-thread controls.
     Control/read methods are thread-safe and return detached values. A new run
     replaces only a terminal run whose execute segment has actually returned.
     Startup validation/I/O errors propagate without replacing the previous run.
@@ -155,12 +156,34 @@ class Engine[C]:
             run.reserve_answer(answer)
         return run.execute(answer)
 
+    def drain(self, run_id: str) -> RunStatus:
+        """Settle Stop on this worker under the original operation and RUN lease.
+
+        Call after stop returns stopping and the previous worker has delivered.
+        This synchronous segment resumes a retained Ask with None, delivers
+        cancellation to subsequent requests and runs author cleanup to terminal.
+        It never starts new operations. Return stopped, or failed after a
+        control I/O or cleanup error. Only stopping with no in-flight segment
+        accepts drain; other
+        states raise InvalidRunState. A stale run_id raises RunMismatch. Never
+        run this method on the UI owner thread. Retain ownership until its
+        worker returns and the host delivers the terminal outcome.
+        """
+        with self._lock:
+            run = self._current(run_id)
+            run.reserve_drain()
+        return run.execute()
+
     def stop(self, run_id: str) -> RunStatus:
-        """Request Stop, upgrade Pause, or end an already paused run.
+        """Request Stop without advancing a generator or running author code.
 
         This does not wait for an in-flight effect. Stop wins over Pause;
         repeated stopping/stopped and other terminal calls do not add events
-        or relabel done/aborted/failed. No implicit hardware cleanup occurs.
+        or relabel done/aborted/failed. A retained paused Ask becomes stopping;
+        the host must schedule drain on a worker under the same operation and
+        RUN lease. A paused invocation with no retained producer may end here.
+        Control I/O errors still raise; retained author teardown then needs
+        worker drain and ends failed. No implicit hardware cleanup occurs.
         """
         with self._lock:
             return self._current(run_id).stop()

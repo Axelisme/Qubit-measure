@@ -343,7 +343,7 @@ def test_generator_exit_is_cancelled_not_failed() -> None:
 
 
 def test_close_failure_is_failed_and_preserves_cleanup_error() -> None:
-    from zcu_tools.core.script_protocol import Signal, Wait
+    from zcu_tools.core.script_protocol import Wait
     from zcu_tools.experiment.script_driver import ScriptDriver
 
     def script() -> Generator[ScriptRequest, None, None]:
@@ -354,9 +354,8 @@ def test_close_failure_is_failed_and_preserves_cleanup_error() -> None:
 
     driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
-    driver.signal(Signal("cancel"))
     with pytest.raises(ValueError, match="cleanup failed") as caught:
-        driver.advance()
+        driver.close()
     assert driver.status == "failed"
     assert driver.error is caught.value
 

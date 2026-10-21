@@ -11,7 +11,7 @@ from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.core.script_protocol import ScriptGenerator
 from zcu_tools.datafile import RunSnapshot
-from zcu_tools.experiment.workflows import Failed, WorkflowEnv
+from zcu_tools.experiment.workflows import Cancelled, Failed, WorkflowEnv
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
 
@@ -323,7 +323,7 @@ def calibrate_frequency(
                 axes[0], np.stack((np.abs(samples), np.full_like(samples.real, np.nan)))
             ),
         )
-        if isinstance(outcome, Failed):
+        if isinstance(outcome, (Failed, Cancelled)):
             status, reason = "failed", outcome.reason
             continue
         # Save every completed attempt, then fit and accept its resonance.
@@ -410,7 +410,7 @@ def calibrate_rabi(
         ),
     )
     outcome = yield from env.run(run_len_rabi, cfg)
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return RabiResult("failed", outcome.reason, f01, None, None, None)
     # Save before fitting, so rejected fits retain their native trace.
     save_rabi(outcome, env.iteration_dir / "rabi.h5", snapshot=inputs.snapshot)
@@ -524,7 +524,7 @@ def calibrate_readout(
         ),
     )
     outcome = yield from env.run(run_ro_landscape, cfg)
-    if isinstance(outcome, Failed):
+    if isinstance(outcome, (Failed, Cancelled)):
         return ReadoutResult("failed", outcome.reason, None, None, None)
     # Save the landscape and choose its best point meeting the SNR threshold.
     save_readout(outcome, env.iteration_dir / "readout.h5", snapshot=inputs.snapshot)

@@ -48,7 +48,10 @@ class RecipeHost:
     it must populate operation.delivery and drain terminal work before returning,
     including when cancellation is set. cancel may run on the controlling thread
     concurrently with wait and must request cancellation, not fabricate delivery.
-    runs returns ordered acquisition facts, never save receipts. on_signal handles
+    deliver_cancelled runs on the worker for each new Wait after script cancel;
+    it fills cancelled delivery without starting work. It is distinct from cancel,
+    which only requests cancellation of already active work. runs returns ordered
+    acquisition facts, never save receipts. on_signal handles
     non-cancel controls at yield boundaries on the worker, without re-entering it.
     Default callbacks reject unbound operations and controls; runs is empty.
     This seam hides operation ownership and lets synthetic hosts avoid GUI I/O.

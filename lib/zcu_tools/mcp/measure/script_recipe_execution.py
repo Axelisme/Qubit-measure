@@ -76,8 +76,9 @@ class ScriptRecipeExecution:
 
     Inputs validate before host_factory binds a session. Only this worker drives
     authored code. Public control/answer calls serialize through the condition;
-    invalid answers never reserve or resume. close requests cancellation and join
-    drains the worker, including the host-owned pending operation. No timeout
+    invalid answers never reserve or resume. cancel drains active work then
+    resumes author-owned cleanup; close abandons it for host teardown. join drains
+    the worker, including the host-owned pending operation. No timeout
     supplies a default answer or cancels work.
     """
 
@@ -97,6 +98,7 @@ class ScriptRecipeExecution:
         self._driver: ScriptDriver[BaseModel | None] | None = None
         self._condition = Condition()
         self._cancelled = Event()
+        self._closed = Event()
         self._active: Operation[object] | None = None
         self._answer: Answer | None = None
         self._progress = ScriptRecipeSnapshot(f"recipe-{uuid4()}", definition.name)
@@ -159,7 +161,7 @@ class ScriptRecipeExecution:
         return self.wait(300.0)
 
     def cancel(self) -> ToolReply:
-        """Request cancel once; the host drains work before generator close.
+        """Request cancel once; drain active work before resuming author cleanup.
 
         Terminal executions are unchanged. The reply records intent, not a
         fabricated terminal result. Host cancellation errors propagate.
@@ -183,8 +185,14 @@ class ScriptRecipeExecution:
         raise ValueError("Script recipe finish_early is not bound")
 
     def close(self) -> None:
-        """Stop continuation and request cancellation; call join to drain it."""
-        self.cancel()
+        """Abandon author continuation for teardown; call join to drain it.
+
+        Active work is cancelled and drained before worker-owned driver.close.
+        Finally runs without promising a response to any further yield.
+        """
+        with self._condition:
+            self._closed.set()
+            self.cancel()
 
     def join(self) -> None:
         """Drain the worker; never join recursively from authored code."""
@@ -252,16 +260,20 @@ class ScriptRecipeExecution:
         # A host failure happens outside driver.advance; close only after the
         # host's wait has drained, before publishing terminal/admitting new work.
         driver = self._driver
-        if driver is None or driver.status in SCRIPT_TERMINAL:
+        if driver is None or driver.status in ("completed", "cancelled"):
             return
         try:
-            driver.signal(Signal("cancel"))
-            driver.advance()
+            driver.close()
         except Exception as cleanup_error:
             logger.exception("Script cleanup also failed")
             error.add_note(f"Script cleanup failed: {cleanup_error}")
 
     def _drive(self, driver: ScriptDriver[BaseModel | None], host: RecipeHost) -> None:
+        if self._closed.is_set():
+            driver.close()
+            return
+        if self._cancelled.is_set():
+            driver.signal(Signal("cancel"))
         driver.advance()
         while driver.status not in SCRIPT_TERMINAL:
             self._publish(driver)
@@ -290,9 +302,12 @@ class ScriptRecipeExecution:
                 if answer is not None and not self._cancelled.is_set():
                     driver.answer(answer)
                     continue
-            if self._cancelled.is_set():
-                driver.signal(Signal("cancel"))
-            driver.advance()
+            if self._closed.is_set():
+                driver.close()
+            else:
+                if self._cancelled.is_set():
+                    driver.signal(Signal("cancel"))
+                driver.advance()
 
     def _fail(self, error: Exception) -> None:
         host = self._host

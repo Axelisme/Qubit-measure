@@ -62,6 +62,8 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 `script_recipe_execution.py` 以共用 `experiment.script_driver.ScriptDriver` 驅動新宣告。`recipe_host.py` 綁定 session、operation 的 wait／cancel／drain 與 acquisition history。未綁定的操作明確失敗，不建立 GUI 或硬體連線。Status 的 pending question 分開保留 authored evidence、Question 名稱與 Answer schema。`answer(execution, answer)` 依該 schema 驗證具名模型後續跑，舊 `answer(recipe, decision)` 契約不變。
 
+新 `RecipeDeclaration` path 的 cancel 由作者收尾。正在進行的 Wait 先經 host.cancel 與 terminal drain，再以真實 operation.delivery resume，保留 partial 或 completed race。Ask 取消以 delivery=None resume。取消後的新 Wait 只呼叫 `RecipeHost.deliver_cancelled` 填 cancelled delivery，不啟動工作；新 Ask 立即以 None resume。作者 return 後 `RecipeOutcome.status` 為 cancelled，report 保留回傳值；收尾拋錯則為 failed。Session／host teardown 才呼叫 driver.close，finally 會跑，但不保證後續 yield 得到回應。舊 `RecipeDefinition` path 的取消契約不變。
+
 `recipe.py` 是正式 author import surface，保留 Session 準備與 definition，直接 re-export 同一個 RecipeTab class 及原有契約與 handles。`recipe_tab.py` 擁有 RecipeTab 的欄位編輯與 Run 準備。`recipe_contracts.py` 擁有共用 input schema、資料 carriers、missing-parameter、writeback 收據與 detached snapshots，供 input codec、writeback 與 handles 直接引用。`recipe_handles.py` 擁有 Run／analysis／question handles、共用 binding state 與 yield-from envelope，集中 completion、保存、取消及 lifetime 協調。含 RecipeRun annotation 的 step result 與 RecipeRun 留在同一 owner。
 
 Recipe helper 分成「工作步驟」與「交還控制權」。工作步驟以 `result = yield from tab.run_step()` 等待 Run。作者取出 `run = result.run`，檢查取消與空 handle 後，以 `analysis = yield from run.analyze_step("primary")` 等待分析。兩者分別回傳 `RunStepResult` 與 `AnalysisStepResult`，欄位為 run／analysis 與 status。Run status 為 completed、finished_early 或 cancelled；分析為 completed 或 cancelled。Cancelled Run 可保留 partial handle，未送出 Run 時 run 為 None；cancelled analysis 的 analysis 為 None。作者檢查 status，自行收尾並 return，不以例外代表取消。

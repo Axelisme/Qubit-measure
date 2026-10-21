@@ -101,6 +101,7 @@ class Ask[A: Answer](ScriptRequest):
     question contains authored evidence and declares the Answer model A.
     delivery is None until the host validates and supplies an A instance.
     Helpers return that instance after the host advances them with None.
+    After a cancelled question resumes, delivery=None denotes cancellation.
     Asking never performs the action described by an accepted answer.
     """
 

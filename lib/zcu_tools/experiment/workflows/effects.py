@@ -9,7 +9,7 @@ from typing import Protocol
 
 from ...core.script_protocol import OperationResult
 from ...device import BaseDeviceInfo
-from .models import Completed, Effect, Failed
+from .models import Cancelled, Completed, Effect, Failed
 from .run import LiveUpdate, Run
 
 
@@ -17,7 +17,8 @@ class EffectExecutor(Protocol):
     """Execute effects without exposing heterogeneous response types to callers.
 
     The engine implements this seam. Methods return only after the operation
-    settles; cancellation discards the step instead of delivering a response.
+    settles. Legacy Pause/Stop may discard the invocation; cancellation of a
+    retained Ask continuation delivers named cancellation without new work.
     Exceptions propagate to the engine's source-aware failure boundary.
     """
 
@@ -46,7 +47,7 @@ class RunEffect[Cfg, Result](Effect):
     """Internal request; experiment/cfg/live match env.run.
 
     name identifies the callback in failure diagnostics.
-    outcome is absent until successful dispatch, then Completed or Failed.
+    outcome is absent until dispatch, then Completed, Failed or Cancelled.
     The generator retains this exact request to retrieve its typed response.
     """
 
@@ -54,7 +55,9 @@ class RunEffect[Cfg, Result](Effect):
     cfg: Cfg
     live: LiveUpdate | None
     name: str = field(init=False)
-    outcome: Completed[Cfg, Result] | Failed | None = field(default=None, init=False)
+    outcome: Completed[Cfg, Result] | Failed | Cancelled | None = field(
+        default=None, init=False
+    )
 
     def __post_init__(self) -> None:
         name = getattr(self.experiment, "__name__", None)
@@ -101,6 +104,20 @@ class WaitEffect(Effect):
             raise RuntimeError("Wait effect has already completed")
         executor.wait_until(self.target)
         self.done = True
+
+
+def deliver_cancelled(operation: object, run_id: str) -> None:
+    """Deliver cancellation for a core effect without executing its operation.
+
+    run_id identifies the owning workflow run. RunEffect receives Cancelled;
+    device/wait helpers receive cancelled delivery and return None. Unknown
+    operation types raise TypeError, as normal dispatch does.
+    """
+    if not isinstance(operation, (RunEffect, DeviceEffect, WaitEffect)):
+        raise TypeError("Use yield from env.<effect>(...); unknown effect request")
+    if isinstance(operation, RunEffect):
+        operation.outcome = Cancelled(run_id)
+    operation.delivery = OperationResult("cancelled", None)
 
 
 def dispatch_effect(effect: Effect, executor: EffectExecutor) -> None:
