@@ -20,7 +20,9 @@ Workflow 作者可在步驟開頭檢查所需的 soc、devices 或 context 並 f
 
 裝置 limits 留在儀器 driver，不另外建立 workflow 宿主 limits policy。這讓各前端使用同一份領域檢查，而不是只有 workflow 被保護。Driver 失敗向外傳播，不 retry 或 clamp。使用者於 2026-10-08 說明：「儀器driver hardcode檢查，這樣最有保證且符合領域認知集中」，並確認既有 device 不需改動：「目前的device就已經可以了，為什麼要改device?」。
 
-Generator 協作、recipe 的取消結果與尚未落實的 workflow agent yield 見 [[0075]]。Engine 的 effect yield 不是 agent 問答入口。
+Generator 協作、recipe 的取消結果與 workflow 的 agent yield 見 [[0075]]。2026-10-21 使用者裁定 Engine 底層改用與 recipe 共用的 `Wait`／`Ask`／`Signal` 協定，現有 `RunEffect`、`DeviceEffect`、`WaitEffect` 與 `env.run`／`env.setup_device`／`env.wait_until` 成為協定上的糖；`Ask` 使 run 進入 paused 並掛上問題，answer 經 Resume 送回；內建 Signal（cancel、finish_early、pause、stop、tunables apply）由 Engine 在 yield 邊界處理，腳本第一版不讀 inbox。原話：「Engine底層應該也要用Ask/Wait模式，其他都是糖」。一 run 一 operation、Pause／Resume、tunables revision、records 與 journal 不變。已採用、待實作；推導見 [三角色協定](../discussions/2026-10-21-three-role-protocol.md)。
+
+同日裁定 workflow 的執行基底維持 helper：只有 workflow 使用的實驗在其目錄內加 `workflow_helper.py` 與 `core.py` 並列，放該實驗給 workflow 用的 acquisition helper，pulse sequence 允許與 core 重複定義；workflow 不經 adapter Form、core.run 或 adapter analysis，共用 cfg model、`signal2real`、fit kernel 與 result 型別，分析政策與接受門檻自持。原話：「sequence重複定義兩次沒有什麼不好的。core一次，旁邊的檔案，可能叫workflow_helper.py一次」；「不要每個實驗，workflow需要的實驗就好」。承載改由 measure-gui 嵌入 `WorkflowWindow`，見 [[0075]] 與 [Workflow 定位與承載](../discussions/2026-10-21-workflow-positioning-and-hosting.md)。
 
 ## 表單 input 與 Engine 普通值
 

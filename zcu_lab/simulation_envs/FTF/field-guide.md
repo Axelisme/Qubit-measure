@@ -348,8 +348,8 @@ readout_count = max(pulse ADC, all mux receivers if configured) + 1
 
 1. 在 Library 建立 `readout/mux` 模組。設 `gen_ch: 1`，依 R1／R2 順序填兩筆 tones，`ro_ch` 分別為 1／2，初始 `freq` 可用 7190／7080 MHz。填入有效的 `nqz`、`mixer_freq`、各 tone gain／phase、共用 `length`、`ro_length` 與 `trig_offset`。時間欄位使用 us，receiver 的 YAML 延遲使用 ns，不可直接照抄數字。
 2. 在 Inspect 把該 library key 填入 `MG12.module.readout`。Startup 已把 `mux` alias 指向 MG12，不需更改 R1／R2 的 pulse wiring。
-3. Open 或 Reset `mux/freq` 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，不能直接視為已接線。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
-4. Open 或 Reset `mux/onetone` 時，表單複製模組 scalar 設定，但按 group 重新產生 tones，`ro_ch` 初值是 0／1。每次都要核對並改為 R1→1、R2→2，再確認 frequency、gain 與 timing。此表單不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
+3. Open 或 Reset `mux/twotone_spectrum` 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，不能直接視為已接線。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
+4. Open 或 Reset `mux/onetone_fine` 時，表單複製模組 scalar 設定，但按 group 重新產生 tones，`ro_ch` 初值是 0／1。每次都要核對並改為 R1→1、R2→2，再確認 frequency、gain 與 timing。此表單不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
 
 Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_source` 就替它填快速 flux channel。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
 

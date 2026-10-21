@@ -41,6 +41,15 @@ Recipe 作者以兩種 `yield from` helper 區分目的。`tab.run_step()` 與 `
 
 L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 workflow 決定在哪裡交還控制權。一次執行跨越多次實驗，交接可出現在實驗之間或之內。現行 `yield from env.<effect>` 是交給 Engine 的工作請求，不是交給 agent 的提問，也不表示 workflow 已提供 `ask`。
 
+2026-10-21 使用者修正 L2 與 L3 的定位與協作模型（推導見 [Recipe 接口重設計](../discussions/2026-10-21-recipe-interface-redesign.md)、[三角色協定](../discussions/2026-10-21-three-role-protocol.md)、[Workflow 定位與承載](../discussions/2026-10-21-workflow-positioning-and-hosting.md)；介面以實作 task 落檔為準）：
+
+- Recipe 是操作 GUI tab 的腳本，可開多個 tab、串多個實驗；「參數少、單次實驗」不再是定位。原話：「recipe是一組操作gui的定位，其實不只能跑一次實驗，是可以做到類似workflow的行為的」。Recipe 與 workflow 的區別在執行基底（GUI tab 對 Engine）與誰持有迴圈，兩者都是腳本，輸入都以 pydantic `FormModel` 宣告，由框架投影成 GUI Form 或 MCP schema。原話：「該統一的是使用者與作者的認知與慣例」。
+- 三角色協定：agent、腳本、runtime。腳本等 runtime 是 `Wait(op)`，腳本等 agent 是 `Ask(question)`，agent 主動通知腳本是 `Signal(kind, payload)`。Recipe 驅動器與 workflow Engine 底層共用這份協定，`tab.run()`、`env.run()` 等都是糖。原話：「我心智模型是三個角色：agent/recipe/runtime，recipe等agent就是Ask，recipe等runtime就是Wait。agent主動送訊息給recipe就是signal之類的」；「Engine底層應該也要用Ask/Wait模式，其他都是糖」。
+- Recipe 執行分兩層：驅動引擎與實驗語義解耦，只處理 yield 流程；便利層提供 `run`／`analyze`／`ask_writeback` 等語法。原話：「recipe執行要分兩層，一層是驅動引擎，與實驗語義解耦，只負責處理yield的流程。另外一層利用前者，提供run/analysis/ask_writeback等便利語法」。Recipe inputs 的欄位由作者定義意義，框架不設帶 overrides 的基底。原話：「overrides不該出現在base class中，超過負責的範疇了」。
+- Workflow 由 measure-gui 承載（同程序、同 session、同 RUN lease、同 MCP server），步驟不經 measure tab 執行。原話：「我也傾向B+D」（B 嵌入 measure-gui）。
+
+上述取代本節「Recipe 作者以兩種 `yield from` helper 區分目的」一段的 `run_step`／`analyze_step`／`ask` 具名契約，以及「L3 workflow 的核准方向」一段中「現行 `yield from env.<effect>` 是交給 Engine 的工作請求」的描述；新契約由實作 task 寫回本篇與 measure MCP README。
+
 跨實驗整合分析與 workflow 同屬 L3，但不由 workflow 決定 yield。Fluxdep 是獨立、可選的分析 app，不併入 measure 或 workflows。Agent 在資料可用性、對齊、採樣、躍遷假設、驗收與剔除六個決策點介入，各步可以重做。程式處理前置條件、計算與發布；agent 判讀證據並選下一步。人與 agent 共駕同一份 application state，寫入由 [[0070]] 的 holder 控制。
 
 上層不重做下層的工作。Recipe 經由 L1 的 owner 操作 GUI。Workflow 經實驗 runtime 執行並自行保存，分工見 [[0062]]。跨實驗分析讀取下層已保存的資料。

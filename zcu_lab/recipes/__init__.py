@@ -9,12 +9,12 @@ from .mist_drive_frequency import DEFINITION as MIST_DRIVE_FREQUENCY
 from .mist_flux_dep import DEFINITION as MIST_FLUX_DEP
 from .mist_power_trace import DEFINITION as MIST_POWER_TRACE
 from .mux_amp_rabi import DEFINITION as MUX_AMP_RABI
-from .mux_freq import DEFINITION as MUX_FREQ
 from .mux_len_rabi import DEFINITION as MUX_LEN_RABI
 from .mux_singleshot_ge import DEFINITION as MUX_SINGLESHOT_GE
 from .mux_t1 import DEFINITION as MUX_T1
 from .mux_t2echo import DEFINITION as MUX_T2ECHO
 from .mux_t2ramsey import DEFINITION as MUX_T2RAMSEY
+from .mux_twotone_spectrum import DEFINITION as MUX_TWOTONE_SPECTRUM
 from .onetone_spectrum import DEFINITION as ONETONE_SPECTRUM
 from .onetone_spectrum_over_flux import DEFINITION as ONETONE_FLUX
 from .onetone_spectrum_over_power import DEFINITION as ONETONE_POWER
@@ -41,7 +41,7 @@ RECIPES: tuple[RecipeDefinition, ...] = (
     TIME_RABI,
     TWOTONE_SPECTRUM,
     MIST_FLUX_DEP,
-    MUX_FREQ,
+    MUX_TWOTONE_SPECTRUM,
     MUX_AMP_RABI,
     MUX_LEN_RABI,
     MUX_T1,

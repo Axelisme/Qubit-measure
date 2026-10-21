@@ -25,7 +25,7 @@ input; they do not infer a new scan range.
 
 Choose the recipe for the measurement:
 
-- [Qubit frequency](#mux_freq) scans drive frequency.
+- [Qubit two-tone spectrum](#mux_twotone_spectrum) scans drive frequency.
 - [Amplitude Rabi](#mux_amp_rabi) scans drive gain.
 - [Length Rabi](#mux_len_rabi) scans drive duration.
 - [T1](#mux_t1) measures energy relaxation.
@@ -117,9 +117,9 @@ native analysis summary. Saved results keep the measured configuration and
 names. Later Form edits, Reset or alias changes do not rewrite earlier reports.
 Load Data changes the analysis source without changing current Form inputs.
 
-## mux_freq
+## mux_twotone_spectrum
 
-`mux_freq` opens `mux/freq`. It scans each participant's drive frequency and fits
+`mux_twotone_spectrum` opens `mux/twotone_spectrum`. It scans each participant's drive frequency and fits
 its spectrum to estimate the qubit frequency and linewidth. Drives start
 together at each scan point; mux readout waits for the longest drive.
 
@@ -138,7 +138,7 @@ The recipe saves raw data and Primary analysis before asking about Apply.
 Candidates update each successful qubit's `freq` and `kappa` and add a frequency
 sample at the captured bias. Review the destination, peak, linewidth and errors
 using the [Save and Apply procedure](#save-review-and-apply).
-[The frequency guide](../v2/mux/freq/guide.md) describes the GUI controls.
+[The frequency guide](../v2/mux/twotone_spectrum/guide.md) describes the GUI controls.
 
 ## mux_amp_rabi
 
