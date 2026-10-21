@@ -42,3 +42,19 @@ def test_plan_preserves_complete_timeline_and_filtered_flux() -> None:
     detached = planner.plan_template(settings(), snapshot(), original)
     original.events[0].gain[:] = 0.9
     np.testing.assert_array_equal(detached.batch.tracks[0].amplitude, [-0.2, -0.2])
+
+
+def test_ideal_flux_platforms_use_levels_without_artificial_ramps() -> None:
+    planner = importlib.import_module("zcu_tools.experiment.single_fluxonium.template")
+    config = settings()
+    config = config.model_copy(update={"flux_line": config.flux_line.model_copy(update={"tau_ns": 0})})
+    original = template()
+    flux_event = replace(original.events[1], active=np.array([True, False]))
+    original = replace(original, events=(original.events[0], flux_event, original.events[2]))
+    plan = planner.plan_template(config, snapshot(), original)
+    assert plan.batch.flux_waveform is None
+    flux = plan.batch.flux
+    np.testing.assert_array_equal(flux.offsets, [0, 3, 4])
+    np.testing.assert_array_equal(flux.start_ns, [0, 2, 10, 0])
+    np.testing.assert_array_equal(flux.level[:, 0], [0, 100, 0, 0])
+
