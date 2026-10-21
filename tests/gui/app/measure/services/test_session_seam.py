@@ -35,7 +35,11 @@ def test_app_bundle_retains_shared_session(qapp, tmp_path):
 
 def test_controller_exposes_read_only_live_session(qapp, tmp_path):
     controller = Controller(
-        State(SessionEnv(parameters=None, soc=None, soccfg=None)), Registry(), None, BaseEventBus(), project_root=str(tmp_path)
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        Registry(),
+        None,
+        BaseEventBus(),
+        project_root=str(tmp_path),
     )
     try:
         session = controller.session_services
@@ -44,6 +48,6 @@ def test_controller_exposes_read_only_live_session(qapp, tmp_path):
         assert session.device_control is controller.device_control
         assert session.progress_control is controller.progress_control
         with pytest.raises(AttributeError):
-            controller.session_services = session
+            setattr(controller, "session_services", session)
     finally:
         controller.close()

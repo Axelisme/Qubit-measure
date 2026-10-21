@@ -11,7 +11,9 @@ def test_dispose_stops_owned_timer_and_subscriptions_once():
     bus = BaseEventBus()
     calls = []
     borrower = borrower_type()
-    subscription = bus.subscribe(SocChangedPayload, lambda payload: calls.append("event"))
+    subscription = bus.subscribe(
+        SocChangedPayload, lambda payload: calls.append("event")
+    )
     borrower.add_cleanup(subscription.unsubscribe)
     borrower.add_cleanup(lambda: calls.append("timer stopped"))
     bus.emit(SocChangedPayload(soc=None, soccfg=None))
