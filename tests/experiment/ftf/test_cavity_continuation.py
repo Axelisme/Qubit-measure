@@ -87,6 +87,27 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(shape
         source.close()
 
 
+def test_mixed_acquire_keeps_undriven_templates_on_the_single_evolve_path():
+    engine = ObservingEngine()
+    source = FTFSource(settings().with_telemetry(enabled=False), DeviceManager(), engine=engine)
+    base = template()
+    earlier = replace(base.events[-1], start_us=np.zeros(2), duration_us=np.full(2, .002), envelopes=(None,))
+    driven = replace(base, events=(earlier, *base.events))
+    undriven = replace(base, points=np.array([2, 3]))
+    acquire = replace(request(templates=(driven, undriven)), point_dims=(4,), loop_dims=(3, 4))
+    try:
+        source.open_acquire(acquire).sample_round(snapshot(), 0)
+        plain_batches = [batch for _, batches, _ in engine.calls for batch in batches if 2 in batch.points]
+        assert len(plain_batches) == 1, "undriven templates retain one full evolution even in mixed acquires"
+        assert plain_batches[0].start_ns is None
+        assert plain_batches[0].initial_densities is None
+        assert source.evaluations[0].paths.points_by_class
+        for name, members in source.evaluations[0].paths.point_members.items():
+            assert source.evaluations[0].paths.points_by_class[name] == len(members)
+    finally:
+        source.close()
+
+
 def test_no_cavity_acquire_keeps_single_evolve_without_continuation():
     engine = ObservingEngine()
     source = FTFSource(settings().with_telemetry(enabled=False), DeviceManager(), engine=engine)
