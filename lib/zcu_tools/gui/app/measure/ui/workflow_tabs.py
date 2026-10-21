@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QTabBar, QTabWidget, QToolButton, QWidget
 
-from zcu_tools.gui.event_bus import EventSubscriptions
+from zcu_tools.gui.app.measure.services.workflow_borrower import WorkflowBorrower
 from zcu_tools.gui.session.events import GateChangedPayload
 
 from .workflow_pane import WorkflowPane
@@ -45,7 +45,9 @@ class WorkflowTabs(QTabWidget):
         self._activate = activate
         self._lock_changed = lock_changed
         self._writable = True
-        self._disposed = False
+        self._retiring = False
+        self._borrower = WorkflowBorrower()
+        self._borrower.add_cleanup(self._dispose_panes)
         self._panes: dict[str, WorkflowPane] = {}
         self._labels: dict[str, str] = {}
         self._numbers: dict[str, int] = {}
@@ -56,10 +58,11 @@ class WorkflowTabs(QTabWidget):
         self.badge.hide()
         self.badge.clicked.connect(self._navigate)
         self.tabCloseRequested.connect(self._close_requested)
-        self._unsubscribe = self._control.subscribe(self._sync)
-        self._subscriptions = EventSubscriptions()
-        self._subscriptions.subscribe(
-            controller.get_bus(), GateChangedPayload, self._gate_changed
+        self._borrower.add_cleanup(self._control.subscribe(self._sync))
+        bus = controller.get_bus()
+        bus.subscribe(GateChangedPayload, self._gate_changed)
+        self._borrower.add_cleanup(
+            lambda: bus.unsubscribe(GateChangedPayload, self._gate_changed)
         )
         # Engine acceptance is off-owner and has no separate status event. Poll
         # only its read-only status; terminal delivery still comes via subscribe.
@@ -67,6 +70,7 @@ class WorkflowTabs(QTabWidget):
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._refresh)
         self._timer.start()
+        self._borrower.add_cleanup(self._timer.stop)
 
     def synchronize(self) -> None:
         """Mount tabs that were opened before this view was constructed."""
@@ -77,14 +81,15 @@ class WorkflowTabs(QTabWidget):
         self._lock_changed()
 
     def _sync(self) -> None:
-        if self._disposed:
+        if self._retiring:
             return
         snapshots = self._control.tabs()
         live = {s.tab_id for s in snapshots}
         for tab_id in tuple(self._panes):
             if tab_id not in live:
-                pane = self._panes.pop(tab_id)
+                pane = self._panes[tab_id]
                 pane.dispose()
+                del self._panes[tab_id]
                 self.removeTab(self.indexOf(pane))
                 self._labels.pop(tab_id)
                 pane.deleteLater()
@@ -117,7 +122,7 @@ class WorkflowTabs(QTabWidget):
         self._lock_changed()
 
     def _refresh(self) -> None:
-        if self._disposed:
+        if self._retiring:
             return
         snapshots = self._control.tabs()
         active = next((s for s in snapshots if s.busy), None)
@@ -148,9 +153,13 @@ class WorkflowTabs(QTabWidget):
         if tab_id is None:
             return
         try:
-            self._control.close(tab_id)
+            if any(s.tab_id == tab_id for s in self._control.tabs()):
+                self._control.close(tab_id)
+            else:
+                # The owner already closed; retry only the retained view cleanup.
+                self._sync()
         except Exception:
-            # Release failures retain both owner and pane for retry.
+            # Owner release or view cleanup failures retain the pane for retry.
             logger.exception("Workflow tab close failed: %s", tab_id)
 
     def set_writable(self, *, writable: bool) -> None:
@@ -160,12 +169,14 @@ class WorkflowTabs(QTabWidget):
         self._refresh()
 
     def dispose(self) -> None:
-        """Stop the poll and detach all view subscriptions after producer drain."""
-        if self._disposed:
-            return
-        self._disposed = True
-        self._timer.stop()
-        self._unsubscribe()
-        self._subscriptions.unsubscribe_all()
+        """Retire view callbacks after producer drain, retrying failed cleanup.
+
+        Failures propagate. Keep this widget and its children until a later call
+        succeeds; completed cleanup callbacks are not executed again.
+        """
+        self._retiring = True
+        self._borrower.dispose()
+
+    def _dispose_panes(self) -> None:
         for pane in self._panes.values():
             pane.dispose()

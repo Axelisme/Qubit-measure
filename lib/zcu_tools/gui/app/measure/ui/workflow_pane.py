@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.experiment.workflows import Actor
+from zcu_tools.gui.app.measure.services.workflow_borrower import WorkflowBorrower
 from zcu_tools.gui.app.measure.services.workflow_control import (
     WorkflowTabSnapshot,
 )
@@ -55,7 +56,9 @@ class WorkflowPane(QWidget):
         self._control = controller.workflow_control()
         self._tab_id = tab_id
         self._writable = True
-        self._disposed = False
+        self._retiring = False
+        self._borrower = WorkflowBorrower()
+        self._editor_borrowers: dict[FormKind, WorkflowBorrower] = {}
         self._editors: dict[FormKind, FormEditor[FormModel]] = {}
         self._states: dict[FormKind, FormState[FormModel]] = {}
         self._envs: dict[FormKind, FormEnv] = {}
@@ -96,8 +99,10 @@ class WorkflowPane(QWidget):
         splitter.addWidget(self._figures)
         splitter.setSizes([420, 780])
         layout.addWidget(splitter)
+        self._borrower.add_cleanup(self._figures.dispose)
         self._control.set_plot_host(tab_id, self._figures)
-        self._unsubscribe = self._control.subscribe(self.refresh)
+        self._borrower.add_cleanup(self._control.subscribe(self.refresh))
+        self._borrower.add_cleanup(self._dispose_editors)
         self.refresh()
 
     def _add_ask_page(self) -> None:
@@ -133,11 +138,14 @@ class WorkflowPane(QWidget):
         editor = self._editors.get(kind)
         if editor is None or self._states.get(kind) is not state:
             if editor is not None:
-                editor.detach()
+                self._editor_borrowers[kind].dispose()
                 self._pages[kind].removeWidget(editor)
                 editor.hide()
                 editor.deleteLater()
             editor = FormEditor(state, env, self)
+            lifetime = WorkflowBorrower()
+            lifetime.add_cleanup(editor.detach)
+            self._editor_borrowers[kind] = lifetime
             self._pages[kind].addWidget(editor)
             self._editors[kind] = editor
             self._states[kind] = state
@@ -156,7 +164,7 @@ class WorkflowPane(QWidget):
 
     def refresh(self) -> None:
         """Read native status and current draft identity; never execute engine work."""
-        if self._disposed:
+        if self._retiring:
             return
         snapshot = next(
             (s for s in self._control.tabs() if s.tab_id == self._tab_id), None
@@ -245,16 +253,17 @@ class WorkflowPane(QWidget):
         else:
             raise ValueError(f"Unknown workflow command: {command}")
 
+    def _dispose_editors(self) -> None:
+        for lifetime in self._editor_borrowers.values():
+            lifetime.dispose()
+
     def dispose(self) -> None:
         """Detach owner/editor subscriptions and redraw timers before Qt deletion.
 
         The caller must first close the facet tab or drain its producer. This
         does not stop work, close hardware or drain the shared session.
+        Failure propagates and retains pending cleanup for a later dispose call;
+        the caller must keep Qt children alive until disposal succeeds.
         """
-        if self._disposed:
-            return
-        self._disposed = True
-        self._unsubscribe()
-        for editor in self._editors.values():
-            editor.detach()
-        self._figures.dispose()
+        self._retiring = True
+        self._borrower.dispose()

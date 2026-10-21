@@ -229,17 +229,19 @@ class MainWindow(QMainWindow):
         """Idempotently retire authority projections before owner-thread teardown.
 
         This only releases view watches; it does not cancel domain operations.
+        Workflow cleanup failures propagate without retiring the window, so the
+        caller can retry before scheduling Qt deletion.
         """
         if self._control_disposed:
             return
-        self._control_disposed = True
-        self._dispose_control()
         self._workflow_tabs.dispose()
+        self._dispose_control()
         if self._shutdown_application is not None:
             self._shutdown_application.aboutToQuit.disconnect(
                 self.dispose_control_watches
             )
             self._shutdown_application = None
+        self._control_disposed = True
 
     def deleteLater(self) -> None:
         """Retire control watches before scheduling direct Python-owner deletion."""
