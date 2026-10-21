@@ -10,7 +10,6 @@ from functools import partial
 from typing import Annotated
 
 import numpy as np
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import StrictInt, ValidationInfo, field_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -187,27 +186,22 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
         active_readout = base_readout.with_updates(
             tones=[base_readout.tones[index] for index in indices]
         )
-        labels = [
-            base_readout.tones[index].label or f"tone {index}" for index in indices
+        # 2. Give each selected spectrum its own figure and original tone identity.
+        viewers = [
+            context.plots.liveplot_1d(
+                f"measurement_{index}",
+                "Nominal frequency offset (MHz)",
+                "Magnitude (a.u.)",
+                title=f"{index}: {base_readout.tones[index].label or f'tone {index}'}",
+            )
+            for index in indices
         ]
 
-        # 2. Plot each selected spectrum against the shared nominal offset axis.
-        def configure_axes(axes: Axes) -> None:
-            for line, label in zip(axes.lines, labels, strict=True):
-                line.set_label(label)
-            axes.legend()
+        def update(data: NDArray[np.complex128]) -> None:
+            for column, viewer in enumerate(viewers):
+                viewer.update(dfs, np.abs(data[:, column]))
 
-        viewer = context.plots.liveplot_1d(
-            "measurement",
-            "Nominal frequency offset (MHz)",
-            "Magnitude (a.u.)",
-            num_lines=len(tone_indices),
-            configure_axes=configure_axes,
-        )
-        signals_buffer = SignalBuffer(
-            (len(dfs), len(tone_indices)),
-            on_update=lambda data: viewer.update(dfs, np.abs(data).T),
-        )
+        signals_buffer = SignalBuffer((len(dfs), len(tone_indices)), on_update=update)
 
         # 3. Rebuild reset -> mux readout at each offset, always from the base tones.
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:

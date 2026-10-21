@@ -16,6 +16,11 @@ Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表�
 
 `compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。三個 array 參數必須已是 float64，缺失 covariance 可用 None。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。dtype、形狀或名稱誤用直接 ValueError。它只評估既有 fit；calibration 與 accept 的有效性由 caller 決定。
 
+`assess_fringe_sampling` 以實際擬合的 delay 座標、擬合頻率及可選的已知頻率下界回傳
+`FringeSamplingQuality`。它用排序去重後的最大 delay gap 計算每週期點數；至少十點且
+掃描窗包含完整週期才為 adequate。不足十點為 undersampled，沒有 gap、零頻率或不足
+完整週期為 unavailable。它不重算 fit，也不把低頻 alias 當成排除 alias 的證據。
+
 `analysis.fitting.shared` 是多 trace shared/fixed fitting 的唯一 public authority，
 shared parameter 以名稱識別。它的 least-squares path 讓每條
 `FitTrace` 以名稱宣告 local/shared parameter identity；caller 透過唯一一組

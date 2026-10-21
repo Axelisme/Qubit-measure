@@ -12,6 +12,16 @@ qubit and resonator lists. Each qubit must refer to its matching resonator.
 Connect the SoC and any devices needed for the measurement in an authorized
 acquisition environment. Recipes do not establish those connections.
 
+A frequency writeback changes `Q*.freq`, not an existing pulse library module.
+After accepting a frequency correction, recalibrate the pulse at the new
+frequency, for example with Rabi or zigzag. Check the recalibrated gain and
+length, save the new numeric pulse module and select it for later experiments.
+Changing only the pulse frequency does not calibrate its gain or length.
+Pulse modules can come from calibration writeback, New with a template, or
+`ml_edit`. Library entries store numbers; creation-time expressions do not stay
+bound to future calibration changes. Reset downstream tabs to capture the new
+module selection. Historical Run/Load sources retain their original pulses.
+
 Check the group's readout module, drive channels and power before running.
 When `$mux.module.readout` is present, the Form uses that library module.
 Without it, the Form starts with an inline mux template and group tones.
@@ -122,6 +132,8 @@ Load Data changes the analysis source without changing current Form inputs.
 `mux_twotone_spectrum` opens `mux/twotone_spectrum`. It scans each participant's drive frequency and fits
 its spectrum to estimate the qubit frequency and linewidth. Drives start
 together at each scan point; mux readout waits for the longest drive.
+Drive DAC frequencies advance in one shared hardware loop while mux readout
+tones and ADC frequencies stay fixed.
 
 Choose each `tones[i].drive`. Use typed overrides to set MHz bounds at
 `tones[i].sweep.start` and `stop`, and the point count at `tones[i].sweep.n`. Every tone's sweep must have the same point

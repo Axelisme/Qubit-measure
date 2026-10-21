@@ -1,5 +1,7 @@
 # Mux onetone find
 
+**讀者：** operator、agent。從 GUI 或 MCP 粗掃 mux resonator 頻率，審閱凹陷與寫回候選。
+
 用一個 mux tone 掃過指定的絕對頻率範圍，找出多個 resonator 的粗略頻率。每點只播放選定 tone，並使用該 tone 的 ADC。其他 tones 不播放。這一步只提議各 resonator 的 `freq`，不建立 readout module，也不估計 linewidth 或 electrical delay。
 
 ## 準備與輸入
@@ -12,6 +14,22 @@
 6. 設定 Reps、Rounds 與 Relax delay。確認所有必要欄位有效後才按 Run。來源修改後要按 Reset 才重新捕捉初值，Reset 會重建目前 draft。
 
 沒有 mux 綁定時，可手填完整 readout 後量測。分析時必須手填 resonator 名稱。沒有 Run／Load capture 的結果仍可找凹陷，但不能提議寫回。
+
+## FTF 成本例
+
+一次離線 Run 用原始 tone 0 掃 7060 至 7210 MHz，共 301 點，50 reps、1 round。
+Readout 長 2 us，ADC 積分窗 1.5 us，recovery 為 1 us，其他 tone 不播放。
+Native 記錄的 started_at 至 finished_at 相差 63.147 s，約每點 0.21 s。
+這是 Run 生命週期 wall time，包含設定、編譯與 acquisition，不是純 acquisition。
+它不含 Analyze、保存或 UI 截圖，不能與 driver action 秒數或不同 slot 的 Run 作效能比較。
+此歷史 Run 的 CPU affinity 未記錄，數字只供估量級。
+
+這裡一個點是一個所選 tone 的絕對頻率，不是 resonator 數量乘以點數。
+點數、頻率範圍、readout 長度、積分窗及 recovery 會改變成本。
+硬體會隨 reps、rounds 增加重複 acquisition。
+FTF 的編譯與快取可能主導時間，不能假設成本與 reps 成正比。
+先用目標設定做短 Run 估成本，再增加找凹陷所需的點數。
+這個成本例不取代凹陷辨識、頻率量化檢查或後續 fine scan 校準。
 
 ## Run 與停止
 

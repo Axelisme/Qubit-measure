@@ -34,7 +34,12 @@ from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.mux_results import captured_qubits, indexed_summary
 from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2.singleshot.ge.core import GEAnalyzeOptions, GEPostAnalyzeOptions
-from zcu_lab.v2.singleshot.ge.gui import GEAnalyzeParams, GEPostAnalyzeParams
+from zcu_lab.v2.singleshot.ge.gui import (
+    GEAnalyzeParams,
+    GEPostAnalyzeParams,
+    ge_calibration_review_note,
+    ge_post_review_note,
+)
 
 from .analysis import (
     MuxGEAnalysis,
@@ -182,6 +187,8 @@ class MuxGEAdapter(
         Resolve destinations only from this Run/Load capture; no capture means
         no proposals. Validate the binding against any source cfg. Preserve GE's
         calibration validity gate. Failed/partial rows contribute no items.
+        GE model-review gates control initial selection with a note; manual draft
+        changes remain possible. Low joint r2 is not calibration evidence.
         """
         snapshot = req.run_result.cfg
         names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
@@ -197,11 +204,12 @@ class MuxGEAdapter(
                 continue
             primary = outcome.primary
             primary.validate_calibration()
+            note = ge_calibration_review_note(primary)
             qubit = qubits[outcome.index]
             row_items: list[WritebackItem] = []
             for field, value, description in (
-                ("fidelity", primary.fidelity, "Single-shot assignment fidelity"),
-                ("sigma", primary.ge_s, "Single-shot IQ cluster width (s)"),
+                ("fidelity", primary.fidelity, "Prepared-label assignment fidelity"),
+                ("sigma", primary.ge_s, "Single-shot IQ cluster width (ADC units)"),
                 ("g_center", primary.g_center, "Single-shot ground IQ center"),
                 ("e_center", primary.e_center, "Single-shot excited IQ center"),
             ):
@@ -210,6 +218,8 @@ class MuxGEAdapter(
                         target_name=f"{qubit}.ext.readout_cal.{field}",
                         description=description,
                         proposed_value=value,
+                        selected=note is None,
+                        note=note,
                     )
                 )
             for item in row_items:
@@ -227,7 +237,9 @@ class MuxGEAdapter(
 
         Missing capture returns no items. Invalid binding or wrong post result
         raises; failed/partial rows contribute nothing. Targets retain GE's 3x3
-        diagnostic policy. No current Form/library lookup or Apply occurs here.
+        diagnostic policy. Preselection requires primary GE review gates and a
+        finite post condition number <=10. Failed gates keep candidates with notes
+        for manual selection. No current Form/library lookup or Apply occurs here.
         """
         result = req.post_analyze_result
         if not isinstance(result, MuxGEPostAnalyzeResult):
@@ -238,13 +250,19 @@ class MuxGEAdapter(
         if qubits is None:
             return []
         items: list[WritebackItem] = []
-        for row, outcome in enumerate(result.outcomes):
+        for row, (outcome, primary) in enumerate(
+            zip(result.outcomes, req.analyze_result.outcomes, strict=True)
+        ):
             if (
                 isinstance(outcome, MuxFitFailure)
+                or isinstance(primary, MuxFitFailure)
                 or not np.isfinite(req.run_result.result.signals[row]).all()
             ):
                 continue
             qubit = qubits[outcome.index]
+            note = ge_post_review_note(
+                primary.primary, outcome.post.confusion.condition_number
+            )
             row_items: list[WritebackItem] = []
             row_items.extend(
                 [
@@ -252,11 +270,15 @@ class MuxGEAdapter(
                         target_name=f"{qubit}.ext.readout_cal.radius",
                         description="Single-shot classification radius",
                         proposed_value=outcome.post.confusion.radius,
+                        selected=note is None,
+                        note=note,
                     ),
                     ParameterWriteback(
                         target_name=f"{qubit}.ext.readout_cal.confusion_matrix",
                         description="Single-shot 3x3 confusion matrix",
                         proposed_value=outcome.post.confusion.matrix.tolist(),
+                        selected=note is None,
+                        note=note,
                     ),
                 ]
             )
