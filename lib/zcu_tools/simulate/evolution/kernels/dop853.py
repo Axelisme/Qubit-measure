@@ -7,7 +7,6 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
 from ._dop853 import tolerances
@@ -16,9 +15,11 @@ from ._dop853_data import (
     Context,
     Models,
     Segments,
+    drive_amplitude,
     fill_hamiltonian,
     pack_models,
 )
+from ._dop853_intervals import playback_time
 from ._workload_facts import packed_segments
 
 
@@ -36,7 +37,7 @@ class _Data(NamedTuple):
 
 
 class _LabContext(NamedTuple):
-    # Mutable scratch belongs to one row, not to the model-only preparation.
+    # Mutable scratch belongs to one interval, not to the model-only preparation.
     drive: Context
     hamiltonian: NDArray[np.complex128]
     product: NDArray[np.complex128]
@@ -77,17 +78,17 @@ def _rhs(time, state, context):
 
 
 @njit(nogil=True, cache=True)
-def _context(data, row, model):
+def _context(data, row, model, interval):
     models, segments = data
-    return Context(models, segments, row, model)
+    return Context(models, segments, row, model, interval)
 
 
 @njit(nogil=True, cache=True)
-def _lab_context(data, row, model):
+def _lab_context(data, row, model, interval):
     size = data.models.energies.shape[1]
     h = np.empty((size, size), dtype=np.complex128)
     return _LabContext(
-        _context(data, row, model), h, np.empty_like(h), np.empty_like(h)
+        _context(data, row, model, interval), h, np.empty_like(h), np.empty_like(h)
     )
 
 
@@ -100,23 +101,15 @@ def _run(data, row_models, states, controls):
 
 @njit(nogil=True, cache=True, inline="always")
 def _tone_hamiltonian(time, context, tone):
-    models, segments, row, model = context
-    envelope = segments.envelope[row, tone]
-    begin, end = segments.sample_offsets[envelope : envelope + 2]
-    amplitude = sample_value(
-        time + segments.offset[row, tone],
-        segments.sample_time[begin:end],
-        segments.samples[begin:end],
-    )
-    phase = segments.theta[row, tone] + 2 * np.pi * segments.frequency[row, tone] * time
-    z = segments.gain[row, tone] * amplitude * np.exp(1j * phase)
+    models, segments, row, model, _ = context
+    z = drive_amplitude(time, context, tone)
     port = segments.port[row, tone]
     return z.real * models.x[model, port] + z.imag * models.y[model, port]
 
 
 @njit(nogil=True, cache=True)
 def _interaction_rhs(time, state, context):
-    models, segments, row, model = context
+    models, segments, row, model, interval = context
     size = models.energies.shape[1]
     rho = state.reshape(size, size)
     # Build only the drives: subtracting H0 from a full Hamiltonian would
@@ -128,7 +121,10 @@ def _interaction_rhs(time, state, context):
             h += _tone_hamiltonian(time, context, tone)
     else:
         h = np.zeros((size, size), dtype=np.complex128)
-    phases = np.exp(2j * np.pi * models.energies[model] * time)
+    row_time = playback_time(
+        time, interval.row_start, interval.row_end, interval.duration
+    )
+    phases = np.exp(2j * np.pi * models.energies[model] * row_time)
     for i in range(size):
         for j in range(size):
             h[i, j] *= phases[i] * phases[j].conjugate()
@@ -283,18 +279,19 @@ class DOP853Kernel:
         endpoint in its own model eigenbasis. Later input slots are ignored.
         A basis overlap is applied on model changes within a chain. Across
         calls, the engine supplies the next input in the next model's basis.
-        Each row starts from a deterministic 0.1 ns step seed and adapts up to
-        the smallest spacing between envelope knots inside the row's local
-        envelope window. Samples outside that window and all flux waveform
-        samples are ignored. Constant envelopes have no sampling ceiling.
+        Each active envelope knot stops integration and restarts a deterministic
+        0.1 ns step seed. A narrow interval limits only its own steps.
+        Pulse-local sample endpoints and row-local carrier phases are retained.
+        Samples outside the row's envelope window and all flux waveform samples
+        are ignored. Constant envelopes add no internal stops.
         Independent rows use sigma(t)=exp(+i*2*pi*H0*t) rho(t)
         exp(-i*2*pi*H0*t), integrating the full transformed drive and unchanged
         secular dissipator, then return to model eigenbasis. Each row keeps its
         own adaptive step controller and original normalized RMS error norm,
         independent of the other rows in the call. There is no gain grouping or
-        pooled RMS. Tolerances, seed and active-knot ceiling are unchanged. This
-        is local control, not a new end-to-end error bound. No adaptive history
-        carries between rows or calls, so row order and worker/apply partition
+        pooled RMS. Each interval uses the complete row's tolerances; this is
+        local control, not a new end-to-end error bound. No adaptive history
+        carries between intervals, rows or calls, so row order and worker/apply partition
         do not change an independent row's numerical path, including mixed
         IP/lab calls. Every row in a touching chain retains the lab-frame
         runner, with local tolerances capped by budget divided by accumulated
