@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-20，predictor 檔案 I/O 改由 resources 擁有
+**Last updated:** 2026-10-21，單 fluxonium 固定 DC 投影模型
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -18,6 +18,27 @@
 ---
 
 ## 子模塊一覽
+
+### `model.py` — 單 fluxonium 演化與讀出模型
+
+`SingleFluxoniumModel` 在 DC 磁通選定最低 retained 能階，將 oscillator 算符一次投影到
+固定空間。`hamiltonian`、`eigensystem`、`charge_operator` 與 `FluxExpansion` 共用這個座標；
+動態磁通不重新截斷 native 空間。`model_source` 提供 Gibbs 初態與各量化磁通的
+`SecularModel`，直接交給 `simulate.evolution`，不替引擎選 kernel。
+
+`FluxoniumNoise` 以常數 Q、quasiparticle fraction 與 echo flux noise 描述獨立 loss。
+Directional rates 重用既有 coherence helper 的 `total=False`，不把 equilibrium T1 當成
+單向 jump。`DispersiveResonator` 的 linewidth 是 photon decay rate ns⁻¹；模型為既有
+Purcell helper 轉成 κ/(2π) GHz。Purcell 只作用於 0↔1，以 detailed balance 分配既有
+雙向總率，不新增高能階 loss。殘餘熱光子的 pure dephasing 使用既有 dephasing 工具。
+`readout_frequencies_ghz` 回傳 DC 狀態順序的絕對 dressed 腔頻，不負責 ADC 校正。
+
+`operators.py` 提供 cutoff-aware `calculate_eigensystem` 與
+`calculate_oscillator_operators`。後者回傳原生 H_LC、帶 EJ 的 cos/sin 算符與完整 charge；
+它們不含固定 DC 的投影。Native cutoff 與 retained 能階數控制不同誤差，caller 必須各自
+驗證。EJ/EC/EL=4/1/1 GHz、cutoff=40、DC=0.5 的固定投影，在 [0.5,0.7] Φ₀ 範圍，
+保留 21 態可使最低三個絕對能量對 native 對角化的最大誤差低於 10 kHz。
+這不是更高能階或更遠磁通的精度保證。
 
 ### `energies.py` — 能譜
 
