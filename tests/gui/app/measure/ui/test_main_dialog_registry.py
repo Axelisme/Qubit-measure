@@ -29,7 +29,6 @@ class _FactoryRegistry(MainDialogRegistry):
             dialog_refs=self.refs,
             templates=lambda: {},
             dialog_presenter=RecordingDialogPresenter(),
-            alias_presets=None,
         )
         self._factory = factory
 
@@ -77,7 +76,6 @@ def test_arb_writability_is_applied_when_opened(qapp) -> None:
         dialog_refs=DialogRefStore(),
         templates=lambda: {},
         dialog_presenter=RecordingDialogPresenter(),
-        alias_presets=None,
     )
     try:
         for writable in (False, True):

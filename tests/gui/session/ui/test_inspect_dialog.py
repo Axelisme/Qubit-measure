@@ -153,7 +153,6 @@ def _open(
         arb_waveforms=_ArbNames(),
         open_arb_waveforms=lambda: session.arb_opened.append(True),
         dialog_presenter=presenter,
-        alias_presets=None,
     )
     session.dialogs.append(dialog)
     tabs = dialog.findChild(QTabWidget)
@@ -709,7 +708,6 @@ def test_a_synthetic_host_opens_the_shared_arb_dialog(
         arb_waveforms=services.arb_waveform,
         open_arb_waveforms=open_entry,
         dialog_presenter=RecordingDialogPresenter(),
-        alias_presets=None,
         parent=host,
     )
     try:
