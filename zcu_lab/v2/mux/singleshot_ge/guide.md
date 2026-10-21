@@ -73,6 +73,13 @@ calibration. A numerical fit alone is not evidence that the model is adequate.
 
 ## Writeback
 
+Primary candidates are initially selected only when joint r2 is at least 0.9,
+normalized residual RMS at most 0.1 and relative width error at most 0.5.
+Post radius/confusion also require a finite condition number at most 10.
+Required missing/nonfinite metrics or their invalid issues leave candidates
+unselected with notes. Unrelated fixed-zero parameter issues do not reject them.
+You may select a candidate manually after inspecting the model and raw IQ.
+
 A successful, finite primary row must pass the GE calibration validity check.
 Its candidates update `ext.readout_cal.fidelity`, `sigma`, `g_center` and
 `e_center` on the captured qubit.

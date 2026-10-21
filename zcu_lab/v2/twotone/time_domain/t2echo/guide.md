@@ -16,6 +16,11 @@ Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout 
 
 ## Typical writeback
 
+Initial T2/sample selection requires positive finite T2, r2 at least 0.9,
+normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
+Failed or unavailable checks leave candidates unselected with explanatory notes.
+You may select them manually after reviewing the source and fit.
+
 Proposes fitted qubit.t2e (us) to the captured qubit and working point, including loaded data with IQ only. Frequency and module slots stay unchanged. Proposals keep the qubit and working point captured for this result even after focus changes. An independent t2e_us/t2e_err_us sample uses the captured Run bias when device evidence is available.
 
 ## Recommended

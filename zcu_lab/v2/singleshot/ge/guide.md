@@ -37,6 +37,13 @@ using centers, width or the confusion matrix.
 
 ## Typical writeback
 
+Primary candidates are initially selected only when joint r2 is at least 0.9,
+normalized residual RMS at most 0.1 and relative width error at most 0.5.
+Post radius/confusion also require a finite condition number at most 10.
+Required missing/nonfinite metrics or their invalid issues leave candidates
+unselected with notes. Unrelated fixed-zero parameter issues do not reject them.
+You may select a candidate manually after inspecting the model and raw IQ.
+
 Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
 
 For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Reset aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available.

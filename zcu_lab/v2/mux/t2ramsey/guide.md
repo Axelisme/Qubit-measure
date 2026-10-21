@@ -59,6 +59,15 @@ A nonzero nominal detune with no positive rounded delay can yield NaN actual det
 
 ## Writeback
 
+Initial T2/sample selection requires positive finite T2, r2 at least 0.9,
+normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
+Frequency candidates also require adequate sampling, at least 10 points per full
+fringe cycle, and relative frequency error at most 0.5. Zero fitted frequency has
+no relative error and is not initially selected. Mux Ramsey primarily shows the
+decay/T2 trend; a frequency candidate is not precision-detuning evidence.
+Failed or unavailable checks leave candidates unselected with explanatory notes.
+You may select them manually after reviewing the source and fit.
+
 Each qualifying tone proposes `<qubit>.t2r` in us and a T2R sample at captured bias.
 A frequency candidate additionally requires source configuration, a fringe fit,
 finite source carrier, finite actual detune and finite fitted fringe rate.

@@ -58,6 +58,11 @@ Review fit quality and pulse calibration before accepting the estimate.
 
 ## Writeback
 
+Initial T2/sample selection requires positive finite T2, r2 at least 0.9,
+normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
+Failed or unavailable checks leave candidates unselected with explanatory notes.
+You may select them manually after reviewing the source and fit.
+
 Each qualifying tone proposes its captured qubit's `t2e` in us and a T2E sample
 at captured bias. Echo candidates update coherence only.
 An unavailable actual detune still allows an otherwise usable T2E fit.
