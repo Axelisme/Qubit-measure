@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from threading import Event
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -108,11 +109,14 @@ def _host_window(
     window.refresh_context_panel()
     window.show()
     qapp.processEvents()
+    destroyed = Event()
+    window.destroyed.connect(destroyed.set)
     try:
         yield ctrl, window
     finally:
         ctrl.close()
-        window.deleteLater()
+        if not destroyed.is_set():
+            window.deleteLater()
         qapp.processEvents()
 
 
@@ -241,6 +245,25 @@ def test_window_dispose_retries_workflow_cleanup(cleanup_window):
     window.dispose_control_watches()
     assert all(c.successes == 1 for c in control.cleanups)
     assert cleanup.attempts == 2
+
+
+def test_full_window_dispose_retries_cleanup_then_destroys_tree(cleanup_window):
+    control, window = cleanup_window
+    control.open("synthetic")
+    cleanup = control.cleanups[-1]
+    cleanup.failures_left = 1
+    destroyed = Event()
+    window.destroyed.connect(destroyed.set)
+
+    with pytest.raises(RuntimeError, match="subscription release failed"):
+        window.dispose()
+    assert not destroyed.is_set()
+    assert [c.successes for c in control.cleanups] == [1, 1, 0]
+
+    window.dispose()
+    assert [c.successes for c in control.cleanups] == [1, 1, 1]
+    assert [c.attempts for c in control.cleanups] == [1, 1, 2]
+    assert destroyed.is_set()
 
 
 def _ready(driver: ComponentDriver) -> None:
