@@ -1,8 +1,8 @@
-> 狀態：已退役（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [measure README](../../../lib/zcu_tools/gui/app/measure/README.md)。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [measure README](../../../lib/zcu_tools/gui/app/measure/README.md)。以下保留歷史正文。
 
 # ADR-0048 — Domain event facts and coordinator-owned View reactions
 

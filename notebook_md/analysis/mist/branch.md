@@ -1,5 +1,7 @@
 # Branch populations from a result entry
 
+**Readers:** operator, lab-author. Calculate and export branch populations from an existing result entry and typed fits.
+
 This is an offline analysis example. It reads an existing new-format entry, typed `params.json` fits, and one point. It does not connect to instruments or accept values into the point. Run it only on a caller-selected analysis copy of the data.
 
 ## Definitions and entry

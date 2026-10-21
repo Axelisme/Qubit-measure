@@ -3,7 +3,7 @@ date: 2026-10-18
 status: active
 superseded_by: null
 related:
-  - docs/adr/0077-numerical-plans-and-replay.md
+  - docs/adr/retired/0077-numerical-plans-and-replay.md
   - docs/discussions/2026-10-18-dyson-input-reuse.md
   - docs/discussions/2026-10-18-two-tone-floquet.md
   - lib/zcu_tools/simulate/evolution/README.md
@@ -22,7 +22,7 @@ constant planner 的 accuracy 通過，但 whole-acquire performance admission �
 
 stage model 能解釋算法成本，不能取代整個 acquire 的 wall gate。短 acquire 的 planning、cover、guards 與 admission 固定成本，足以吃掉數值部分的收益。
 
-本文保存 main `f152eff67` 時已存在但未啟用的 planner 試驗。它不規定後續重構要保留哪些類別或 API。架構裁決由 [ADR-0077](../adr/0077-numerical-plans-and-replay.md)擁有。
+本文保存 main `f152eff67` 時已存在但未啟用的 planner 試驗。它不規定後續重構要保留哪些類別或 API。架構裁決由 [ADR-0077](../adr/retired/0077-numerical-plans-and-replay.md)擁有。
 
 ## 問題
 

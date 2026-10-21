@@ -1,6 +1,8 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-10-11 — JSONL sample consumers
+**Last updated:** 2026-10-21
+
+**讀者：** lab-author。通量頻譜的擬合、資料處理與互動標註工具。
 
 `FreqFluxDependVisualizer.plot_sample_points()` 接受 JSONL reader 的 DataFrame，以 `freq_mhz` 換算 GHz，再由共用 resolver 解析 flux。它不讀檔，也不對舊量測欄位名加 alias。
 

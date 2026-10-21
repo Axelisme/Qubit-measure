@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-10-21, shared initial cavity fields
 
+**讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
+
 `cavity_fields` returns complex fields in fixed joint-state order, without
 population mixing or receiver calibration. Its optional complex `(2,)`
 `initial_field` supplies the same field to every state at `initial_time_ns`.

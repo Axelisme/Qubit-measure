@@ -13,6 +13,8 @@ jupyter:
 
 # FTF acquisition with a shared environment
 
+**Readers:** operator, lab-author. Run a finite FTF acquisition with a shared simulated environment and change DC bias between rounds.
+
 This notebook uses the F1-SQUID-F2 environment with a finite charge-drive pulse, terminal readout and live DC bias changes between software rounds. It does not connect to hardware or save into a result directory. FTF supports static DC bias, charge drive and linearized small-signal flux drive. It does not implement large-amplitude fast-flux pulses.
 
 ## Load the environment

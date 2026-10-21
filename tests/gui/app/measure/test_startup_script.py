@@ -12,6 +12,7 @@ import pytest
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui import launcher
+from zcu_tools.gui.app.measure import default_startup
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -108,6 +109,16 @@ def run_script(ctrl: Controller, path: Path) -> None:
     )
     outcome = ctrl.operation_control.await_operation(token, 0).outcome
     assert outcome is not None and outcome.status == "finished", outcome
+
+
+def test_framework_default_script_is_selectable_and_defines_startup():
+    default = Path(default_startup.__file__)
+    assert default.is_file()
+    assert callable(default_startup.startup)
+    assert (
+        launcher.select_startup_script(clean=False, script=None, default_script=default)
+        == default
+    )
 
 
 def test_script_selection_uses_only_default_custom_or_clean(tmp_path):

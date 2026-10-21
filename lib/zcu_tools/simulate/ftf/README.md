@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-10-21, dominant-branch cavity memory
 
+**讀者：** framework-dev。固定座標 FTF 數值模型、路由與快取契約。
+
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their
 product space with all g1c/g2c/g12 terms, then selects the lowest M joint states.

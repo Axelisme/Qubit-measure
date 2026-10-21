@@ -1,4 +1,8 @@
-> 狀態：已退役（2026-09-27）。跨模組設計由 [ADR-0066](../0066-operation-lifecycle.md) 接替; 局部 port／事件契約見 [`gui/session/README.md`](../../../lib/zcu_tools/gui/session/README.md)。以下保留歷史正文。
+---
+status: retired
+---
+
+> 狀態：retired（2026-09-27）。跨模組設計由 [ADR-0066](../0066-operation-lifecycle.md) 接替; 局部 port／事件契約見 [`gui/session/README.md`](../../../lib/zcu_tools/gui/session/README.md)。以下保留歷史正文。
 
 # ADR-0025 — 跨線程互動 channel（單一有序事件流取代多-channel combine）
 

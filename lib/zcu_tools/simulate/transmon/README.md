@@ -1,6 +1,8 @@
 # SQUID transmon simulation
 
-**Last updated:** 2026-10-12，explicit predictor input failures
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。SQUID transmon predictor 的輸入、查詢與失敗契約。
 
 `TransmonParams` holds EJmax and EC in GHz, junction asymmetry d in [0, 1],
 and flux_half, flux_period, flux_bias in native device units. None means unknown.

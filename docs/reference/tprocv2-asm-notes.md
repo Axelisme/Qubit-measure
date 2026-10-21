@@ -1,9 +1,29 @@
 # tProc v2 ASM 指令集與暫存器速查筆記
 
+**讀者：** framework-dev、agent。查閱 QICK tProc v2 指令、暫存器與編譯時的硬體限制。
+
+**Last updated:** 2026-10-21
+
 > 來源：`qick/tprocv2_assembler.py` + `qick/asm_v2.py`
 > tProc v2 指令寬度為 72 bits，每條指令佔一個 program memory word（WAIT 例外，展開為 2 words）。
 
 ---
+
+## 目錄
+
+- [一、硬體指令（Hardware Instructions）](#一硬體指令hardware-instructions)
+- [二、ALU 運算列表](#二alu-運算列表)
+- [三、條件跳轉列表（`-if(COND)`）](#三條件跳轉列表-ifcond)
+- [四、暫存器系統](#四暫存器系統)
+- [五、記憶體系統](#五記憶體系統)
+- [六、指令修飾符（modifier）彙整](#六指令修飾符modifier彙整)
+- [七、組合語言雜項](#七組合語言雜項)
+- [八、硬體迴圈加速（Hardware Loop）](#八硬體迴圈加速hardware-loop)
+- [九、時序系統重點](#九時序系統重點)
+- [十、Wave Memory 參數限制](#十wave-memory-參數限制)
+- [十一、資料暫存器（`rN`）使用注意](#十一資料暫存器rn使用注意)
+- [十二、程式編譯兩階段流程](#十二程式編譯兩階段流程)
+- [十三、最佳化與相依性注意事項](#十三最佳化與相依性注意事項)
 
 ## 一、硬體指令（Hardware Instructions）
 

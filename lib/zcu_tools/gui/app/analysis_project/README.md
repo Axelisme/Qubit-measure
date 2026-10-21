@@ -1,6 +1,8 @@
 # Analysis project support
 
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。兩個分析 GUI 共用的 project model 與路徑分工。
 
 `gui.app.analysis_project` 是 fluxdep 與 dispersive 共用的過渡 owner。
 它保留兩個分析 app 的 chip／qubit 資料流，不是量測 session 的 entry model。

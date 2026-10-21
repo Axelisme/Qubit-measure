@@ -1,12 +1,12 @@
-> 狀態：已退役（2026-09-29）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。0052 未落實的 GUI 收合目標見 [draft](../draft/remote-event-coalescing.md)。以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-29）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。0052 未落實的 GUI 收合目標見 [draft](../draft/remote-event-coalescing.md)。以下保留歷史正文。
 
 # 0052 — Event meta 與多前端 attribution
 
-**狀態:** accepted(2026-07-11)。
+**狀態:** retired(2026-07-11)。
 **關聯:** [[0067]]（domain facts 與前端邊界）、[[0047]]（錯誤投影）、[[0049]]（subscriber-aware push）。
 
 ## 背景

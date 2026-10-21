@@ -26,6 +26,8 @@ jupyter:
 
 # Effective Temperature
 
+**Readers:** operator, lab-author. Estimate output-referred thermal noise and effective temperature for a passive attenuator chain.
+
 This notebook estimates output-referred thermal noise from a passive attenuator chain.
 
 ```python

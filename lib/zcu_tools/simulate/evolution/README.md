@@ -2,10 +2,23 @@
 
 **Last updated:** 2026-10-21, point-aligned continuation, diagnostic merging, retained-graph RWA density support and two-tone Floquet k=0 numerical ownership
 
+**讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
+
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
 [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md) records this
 boundary and the decision to keep algorithm knowledge in dispatch.
+
+## Contents
+
+- [Public entry points](#public-entry-points)
+- [Routing telemetry](#routing-telemetry)
+- [Decision graph](#decision-graph)
+- [Row plans and the kernel seam](#row-plans-and-the-kernel-seam)
+- [WorkPlan and cache ownership](#workplan-and-cache-ownership)
+- [Algorithm ownership and reuse](#algorithm-ownership-and-reuse)
+- [Accuracy, failures and lifecycle](#accuracy-failures-and-lifecycle)
+- [Research records](#research-records)
 
 ## Public entry points
 

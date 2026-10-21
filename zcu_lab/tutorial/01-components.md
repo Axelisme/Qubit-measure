@@ -1,5 +1,7 @@
 # 新增 component
 
+**讀者：** lab-author、agent。新增 coupler kind，讓 entry 與表單讀取它的校準值。
+
 這篇教學新增一個 `coupler` kind，讓 entry 保存它的校準值，並讓表單以 `$coupler.freq` 讀取頻率。Kind 是 schema 的註冊名稱，`C1` 則是某個 entry 內的元件名稱。新增 kind 不會替實驗加上 pulse 序列，也不會讓模擬環境自動支援它。
 
 ## 1. 宣告欄位

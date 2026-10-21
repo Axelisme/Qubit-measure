@@ -1,4 +1,10 @@
+---
+status: accepted
+---
+
 # ADR-0001 — Domain guard 與 OperationLease 分離
+
+**狀態：** accepted。
 
 ## 現況
 

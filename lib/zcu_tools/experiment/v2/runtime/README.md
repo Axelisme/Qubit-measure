@@ -1,6 +1,8 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-20，program builder owner；SignalBuffer 終局更新交付
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -21,14 +23,13 @@ acquire。`ResultTree` 提供 structured `BufferProtocol`，可交給同一個
   writable view。
 - `SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 `on_update`。
 - `trigger_update()` 用於沒有新資料寫入、但 caller 想強制刷新 liveplot 的等待期。
-- `flush_pending_update()` 立即交付被節流、尚未呈現的更新。若 callback 已經完成，這個方法不重複呼叫它。顯式 `trigger_update(flush=True)` 則仍會強制刷新。
+- `flush_pending_update()` 立即交付被節流、尚未呈現的更新。若 callback 已經完成，這個方法直接返回。顯式 `trigger_update(flush=True)` 則仍會強制刷新。
 
 ### `BufferProtocol`
 
 `BufferProtocol` 是 `Schedule` 對 buffer 的唯一要求：buffer 提供 `data` 以及
 `trigger_update(step, flush=False)`。`SignalBuffer` 實作這個 protocol；`ResultTree`
-提供 structured result buffer。`Schedule` 不直接宣告 result tree /
-update callback；child-local `SignalBuffer` 寫入時同步更新 root buffer 的 `data` 中對應
+提供 structured result buffer。Result tree 與 update callback 由 buffer 宣告；child-local `SignalBuffer` 寫入時同步更新 root buffer 的 `data` 中對應
 path，並觸發該 buffer 的 update hook。
 
 ### `ResultTree`
@@ -49,7 +50,7 @@ path，並觸發該 buffer 的 update hook。
 - per-measurement cache：`measurement_result(name)` 只 merge 該 measurement；更新某個
   measurement 時只 invalidates 該 measurement cache。
 
-一般 `SignalBuffer` experiment 不使用 ResultTree，public `on_update(data)` 行為不變。
+一般 `SignalBuffer` experiment 直接使用 public `on_update(data)` callback。
 
 ### `Schedule`
 
@@ -90,9 +91,9 @@ with Schedule(cfg, signals_buffer) as sched:
 - `sched.batch({key: callable})` 執行 replayable child callable；child 取得獨立
   deepcopy cfg 與同一個 typed env。batch child 出現一般例外或 `KeyboardInterrupt`
   時會標記 `Schedule.outcome`、停止後續 child，並回傳已完成 child 的 partial
-  result；batch 本身不做 per-child retry。
+  result；per-child retry 由 caller 編排。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
-  依 owner path 自動寫入對應 slot，不需要 `into=` 參數。
+  依 owner path 自動寫入對應 slot。
 - `with Schedule(cfg, result_buffer, stop=context.cancel_signal) as sched` 可編排任何實作 `BufferProtocol` 的 result
   tree；root result buffer 目前最多一個，多 root buffer 會 fast-fail。
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
@@ -117,7 +118,7 @@ with Schedule(cfg, signals_buffer) as sched:
 - `build_and_acquire()` 是 `build()` 後立刻 `run_program(...)` 的 convenience。
 - Decimated trace 使用獨立方法：`run_program_decimated(program)` 與
   `build_and_acquire_decimated()`。
-- `build_and_acquire(...)` / `run_program(...)` 不接受 `reps` / `rounds`；builder
+- `build_and_acquire(...)` / `run_program(...)` 使用 cfg 中的 `reps` / `rounds`；builder
   建出的 program 讀取 cfg-owned `program.cfg_model.reps` / `rounds`。
 - `prog_builder(..., cfg=...)` 可覆寫 program cfg；未指定時繼承 owner cfg。若 cfg 已是
   `ProgramV2Cfg` instance 則原樣 deepcopy；若是 mapping / object，builder 只抽取
@@ -137,8 +138,7 @@ with Schedule(cfg, signals_buffer) as sched:
 ## Stop 與 Retry
 
 - `StopSignal` 是唯一 stop token，定義於 `experiment.stop_signal`。Caller 每次 run 建立一個，
-  必須透過 `Schedule(..., stop=context.cancel_signal)` 顯式傳入。Runtime 不查 ambient
-  scope，也不補建隱式 token。
+  必須透過 `Schedule(..., stop=context.cancel_signal)` 顯式傳入。Runtime 使用這個明確 token。
 - `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 shared signal 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   acquire-local composite `cancel_flag` 傳給 program acquire：它讀取 `StopSignal` 的 external
@@ -178,7 +178,6 @@ SignalBuffer 寫入通知、manual update 與 flush。
 `test_schedule_lifecycle.py` 覆蓋 context 使用邊界、shared stop token、host body 中斷的
 partial/NaN 保存、其他 exception 傳播與 repeat stop。Runtime 案例重用 `_flow_cfg.py` 的
 cfg builder，共用 recording fake 放在 `_flow_fakes.py`，由最近的 conftest 還原每個案例的
-mutable fake state。案例仍經公開 Schedule／buffer／StopSignal 接縫驗證，不直接測 outcome 的內部 helper。
+mutable fake state。案例經公開 Schedule／buffer／StopSignal 接縫驗證。
 `test_result_tree.py` 覆蓋 ResultTree node set、child buffer、subscription、flush 與
-ordinary SignalBuffer regression。單一實驗模組只保留 runtime
-整合型檢查，不再為每個資料型 experiment 建獨立 runner 測試。
+ordinary SignalBuffer regression。Runtime 整合行為由最小合成實驗驗證。

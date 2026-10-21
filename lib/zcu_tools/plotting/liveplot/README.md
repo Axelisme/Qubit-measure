@@ -1,6 +1,8 @@
 # `zcu_tools.plotting.liveplot` 模組重點筆記
 
-**Last updated:** 2026-10-09, 自由繪圖與模板失效
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Standalone live plotter、segment 與 backend 契約。
 
 此模組提供 standalone live plotters 與只接受 Axes 的 segments。Standalone plotter 以 typed `update()` 更新 segment，再透過 active backend 刷新 figure。Operation-owned Plots 使用 explicit axes 與 host，不透過 standalone backend 呈現。家族定位見 [plotting/README.md](../README.md)。
 
@@ -26,7 +28,7 @@
    - `BaseSegmentLivePlot`：共用容器與生命週期邏輯。
      - 管理 `segments`、`fig/axs`、`auto_close`、`disable`、`existed_axes`。
      - `__enter__` 會呼叫每個 segment 的 `init_ax()`。
-     - `clear()` 呼叫所有 segment 的 `clear()` 後，立即重新呼叫 `init_ax()`，確保 `update()` 之後仍可再次呼叫（不會因為 artist 為 None 而 raise）。
+     - `clear()` 呼叫所有 segment 的 `clear()` 後，立即重新呼叫 `init_ax()`，重建 artists 供下次 `update()` 使用。
      - `__exit__` 若 `auto_close=True` 且 plotter 持有 figure，則呼叫 backend 的 `close_figure(fig)`。
      - 使用 `existed_axes` 時 `fig=None`（figure 由外部宿主持有，如 `MultiLivePlot` 的 sub-plotter）。此時 `__enter__` / `clear` **不**自行 `refresh()`（守 `fig is not None`）——刷新由持有 figure 的宿主負責。直接呼叫 `refresh()` 仍會 raise（誤用保護：自有 figure 的 plotter 才該自刷）。
      - `disable=True` 時會 early-return，`clear / refresh / update` 都是 no-op。
