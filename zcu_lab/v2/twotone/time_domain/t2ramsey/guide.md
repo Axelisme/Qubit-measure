@@ -18,6 +18,16 @@ Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout 
 
 Proposes fitted qubit.t2r (us) to the captured qubit and working point. A fringe fit with acquired run settings and known realized detune also proposes qubit.freq (MHz): source pi/2 frequency + realized detune - fitted fringe detune. A pure decay fit, or loaded data with unknown acquisition detune, proposes only qubit.t2r. Module slots stay unchanged. Proposals keep the qubit and working point captured for this result even after focus changes. An independent t2r_us/t2r_err_us sample uses the captured Run bias when device evidence is available.
 
+A frequency correction updates `qubit.freq`, not the existing pi/2 library
+pulse. Recalibrate the pulse at the new frequency, for example with Rabi or
+zigzag, and check its gain and length before saving and selecting a new module.
+Changing only its frequency does not produce a calibrated pulse.
+Calibration writeback, New from a template and `ml_edit` can create numeric
+library modules. Template expressions read calibration when the module is
+created; saved modules do not follow later frequency changes.
+Reset downstream tabs after selecting the new module to capture it.
+Historical Run/Load sources keep their original pulses.
+
 ## Recommended
 
 Fit phase offset is enabled by default to fit a free fringe phase. Disable it to fix the phase at 0/180 degrees using the near-zero-delay signal. This option applies to fringe fits only. Set the 'Detune ratio (fringes/step)' input to a small deliberate offset (default 0.05). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the second pi/2 pulse phase is detune_ratio / sweep step, so the Ramsey signal oscillates at that detuning. The analysis 'Fit fringe' option (on by default, matching the nonzero default ratio) fits the fringe frequency to read back the true qubit-frequency offset and write qubit.freq. Set the ratio to 0 and turn 'Fit fringe' off for a pure decay fit when driving on resonance. A delay sweep reaching a few T2* captures enough fringe periods and decay.

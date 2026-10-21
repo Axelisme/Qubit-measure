@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run mux Ramsey from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## GUI setup
 
@@ -27,6 +27,24 @@ Reps, rounds and recovery delay are shared. Recovery initially uses five times
 the largest captured T1, with the default for missing T1 values. A stored invalid
 T1 leaves recovery blank for correction.
 
+## FTF cost example
+
+A two-participant offline Run used 16 delays from 0 to 3.75 us, 0.5 MHz
+nominal detune on both tones, 0.5 us const x90 pulses, 300 reps and 1 round.
+Recovery was 1007.509 us; readout and ADC integration were 2 and 1.5 us.
+Recorded RPC Run wall time was 19.095 s, about 1.19 s per joint delay point.
+It includes first simulation compilation and Run completion waiting, not just
+acquisition. Analyze and Save are outside that timer.
+
+This is one startup/cache state, not a cold benchmark for every Run.
+Do not compare it with other slots or experiments as a speed test.
+Delay point count and range, detune, pulse lengths, participants, reset,
+recovery and readout windows affect cost. Hardware repeats acquisitions for
+reps and rounds. FTF compilation and cached evolution can dominate, so reps
+do not imply proportional wall time. Budget from a short Run with the intended
+delay window. This example had about 7.96 samples per cycle and was undersampled.
+Its short-scan fit is not calibration evidence.
+
 ## Measurement and analysis
 
 Use fixed x90 drives and an individual detune in MHz for each tone.
@@ -46,12 +64,58 @@ A fringe fit needs six finite points and decay needs four.
 Fixed fringe phase uses the nearest-zero 0/180-degree policy; Fit phase frees it.
 Decay uses the same model regardless of Fit phase.
 T2* and error are in us; fringe rate and error are in MHz.
+Sampling quality uses the largest gap between acquired delays and the larger
+absolute fitted or actual detune. At least ten samples per cycle and a complete
+cycle in the scan window are required for adequate sampling. Fewer samples per
+cycle are undersampled. A shorter window, zero frequency or no delay gap is
+unavailable. Decay fits have no fringe sampling quality. Adequate describes the
+supplied frequencies; it does not rule out unknown higher-frequency aliases.
 
 Actual detune retains the hardware phase-wrap convention, including for signed
 detunes. Check the scan range before treating it as a signed frequency correction.
 A nonzero nominal detune with no positive rounded delay can yield NaN actual detune.
 
+## Multi-tone readout control
+
+Changing Participants changes both the active drives and the emitted readout
+tones. A Q1-only Run versus Q1/Q2 therefore does not isolate the effect of Q2
+drive. A second readout tone can contaminate raw IQ and produce apparent decay
+or fringes before analysis.
+
+For a readout control, keep Participants, all drive pulses, ADC channels and
+timing unchanged. Set only the second readout tone gain to zero, keeping its
+ADC declared. Compare raw IQ and magnitude with the original Run.
+Changing Participants to Q1-only is a separate reference, not this control.
+If testing Q2 drive separately, zero its drive gains without changing pulse
+lengths, then change only RO2 gain in the next comparison.
+
+Do not apply fitted frequency or T2 directly from a contaminated trace, even
+when a fit converges or a candidate starts selected. Inspect raw IQ, sampling,
+residuals and uncertainty, then review each candidate before Apply.
+These controls do not change the readout phase, integration window or simulation
+policy. In normal hardware use, avoid measuring coupled qubits simultaneously
+when choosing a mux group. The offline diagnostic deliberately measured a
+coupled Q1/Q2 pair; it does not establish that every mux group has this distortion.
+
+In the offline control, Q2 drive gains were already zero. Disabling only RO2
+raised the Q1 fringe fit r2 from 0.632 to 0.953.
+That identifies readout contamination in that configuration, not a calibrated
+change in T2. The scan had only 16 points over 3.75 us.
+Use mux Ramsey mainly for decay/T2 trends, not precise detuning.
+Prefer reviewing decay candidates; treat frequency candidates conservatively.
+Adequate sampling and automatic initial selection do not prove the absence
+of cross-tone contamination.
+
 ## Writeback
+
+Initial T2/sample selection requires positive finite T2, r2 at least 0.9,
+normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
+Frequency candidates also require adequate sampling, at least 10 points per full
+fringe cycle, and relative frequency error at most 0.5. Zero fitted frequency has
+no relative error and is not initially selected. Mux Ramsey primarily shows the
+decay/T2 trend; a frequency candidate is not precision-detuning evidence.
+Failed or unavailable checks leave candidates unselected with explanatory notes.
+You may select them manually after reviewing the source and fit.
 
 Each qualifying tone proposes `<qubit>.t2r` in us and a T2R sample at captured bias.
 A frequency candidate additionally requires source configuration, a fringe fit,
@@ -60,12 +124,20 @@ It uses source carrier + actual detune - fitted fringe rate in MHz.
 NaN actual detune suppresses only the frequency correction.
 Review phase/rate conventions, uncertainty and captured destination before applying.
 
+Frequency writeback changes the qubit calibration, not the existing x90/x180
+library pulses. Recalibrate the pulses at the new frequency, for example with
+Rabi or zigzag, then save and select new numeric modules with the recalibrated
+gains and lengths. Changing only frequency does not calibrate the pulses.
+Calibration writeback, New from a template and `ml_edit` can create modules.
+Template expressions read calibration at creation, not on later Runs.
+Reset downstream tabs after changing module selections. Historical Run/Load
+sources retain their original pulses.
+
 ## Results and saved sources
 
-Run draws a combined `measurement` figure.
-All lines use the common requested-delay axis.
-Legends show the original index and source name in Participants order.
-Individual `measurement_i` figures remain available.
+Run draws one `measurement_i` figure per participant, without a shared overlay.
+Each figure uses the common requested-delay axis.
+The index `i` is the original tone position in the saved configuration.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.

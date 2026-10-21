@@ -11,10 +11,28 @@ from zcu_tools.experiment.utils.single_shot import ge
 from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
 from zcu_tools.experiment.utils.single_shot.ge.base import (
     GEFitOptions,
+    calc_fidelity,
     fitting_ge_and_plot,
     hist,
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+
+@pytest.mark.parametrize("swap_rows", [False, True])
+@pytest.mark.parametrize("reflect_axis", [False, True])
+def test_assignment_fidelity_scores_the_selected_histogram_edge(
+    swap_rows, reflect_axis
+):
+    ground = np.array([0.8, 0.1, 0.1])
+    excited = np.array([0.1, 0.1, 0.8])
+    if swap_rows:
+        ground, excited = excited, ground
+    if reflect_axis:
+        ground, excited = ground[::-1], excited[::-1]
+    fidelity, threshold = calc_fidelity(ground, excited, np.array([0.0, 1.0, 2.0, 3.0]))
+    # Either interior edge separates 80% of one preparation from 90% of the other.
+    assert fidelity == pytest.approx(0.85)
+    assert threshold in (1.0, 2.0)
 
 
 @pytest.mark.parametrize("title", [None, "Prepared populations"])
@@ -179,6 +197,37 @@ def test_ge_analysis_degenerate_iq_has_named_numerical_error_with_cause(selectio
             (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError),
         )
         assert raised.value.__cause__ is not raised.value
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+@pytest.mark.parametrize(
+    "selection", [{"backend": "pca"}, {"backend": "center"}, {"angle": 0.0}]
+)
+def test_ge_analysis_fit_only_retains_calibration_and_quality(selection):
+    from scipy.special import ndtri
+
+    noise = 0.25 * ndtri((np.arange(1000) + 0.5) / 1000)
+    quadrature = 0.1j * np.sin(np.arange(1000))
+    signals = np.asarray([-1 + noise + quadrature, 1 + noise + quadrature])
+    options = GEFitOptions(length_ratio=0.0)
+    plots = Plots(NonPresentingHost())
+    try:
+        expected_fidelity, expected_populations, expected_fit = singleshot_ge_analysis(
+            signals, plots=plots, options=options, **selection
+        )
+        fidelity, populations, fit = singleshot_ge_analysis(
+            signals, plots=None, options=options, **selection
+        )
+
+        assert fidelity == expected_fidelity
+        np.testing.assert_array_equal(populations, expected_populations)
+        assert fit == expected_fit
+        assert fit["g_center"].real == pytest.approx(-1.0, abs=0.03)
+        assert fit["e_center"].real == pytest.approx(1.0, abs=0.03)
+        assert set(fit["fit_quality"]) == {"joint", "ground", "excited"}
+        assert len(plots["fit"].axes) == 4
     finally:
         plots.finish(present=False)
         plots.release()
