@@ -45,7 +45,11 @@ def _pulses(kind):
     if kind == "flat":
         envelope = None
     elif kind == "opaque":
-        envelope = lambda t: complex(np.interp(t, knots, values))
+
+        def opaque(t):
+            return complex(np.interp(t, knots, values))
+
+        envelope = opaque
     return (
         adc.ReadoutPulse(1.0, 21.0, 0.3j, 6.01, 0.2, envelope=envelope),
         adc.ReadoutPulse(1.0, 29.0, 0.2, 6.015, -0.3),
@@ -77,9 +81,10 @@ def _reference_fields(model, pulses, times, initial=0j, origin=0.0):
     current = np.full(len(generator), initial, dtype=complex)
     fields[times == origin] = current
     for left, right in zip(corners[:-1], corners[1:], strict=True):
+        stop = np.nextafter(right, left)
 
-        def rhs(t, field):
-            t = min(t, np.nextafter(right, left))
+        def rhs(t, field, stop=stop):
+            t = min(t, stop)
             incident = sum(p.incident(t, model.reference_frequency_ghz) for p in pulses)
             return -generator * field + coupling * incident
 
@@ -150,7 +155,13 @@ def test_one_cavity_conditional_mean_and_decimated_traces_follow_scalar_line(kin
         round_index=0,
     )
     np.testing.assert_array_equal(statistics.state_counts, [[0, 100, 0]])
-    assert statistics.channels[0].shot_covariance.shape == (1, 2, 2, 2)
+    channel = statistics.channels[0]
+    assert channel.shot_covariance.shape == (2, 2)
+    assert channel.sums.shape == (1, 2, 2)
+    stderr = np.sqrt((channel.shot_covariance.diagonal() + 1 / 12) / 100)
+    assert np.all(
+        np.abs(channel.sums[0] / 100 - integrated.sums[0, :, 1]) <= 6 * stderr
+    )
 
 
 @pytest.mark.parametrize("kind", ["flat", "sampled", "opaque"])
