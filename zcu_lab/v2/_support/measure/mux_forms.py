@@ -33,10 +33,12 @@ def mux_readout_initial(
     source raises ValueError; alias/source faults propagate.
 
     wait_for_ringup opts spectroscopy into an editable Open/Reset timing seed.
-    Require every member's kappa to be finite and positive in MHz, otherwise
-    raise ValueError (alias/source faults propagate). Add 5/(2*pi*min(kappa)) us
-    to the captured scalar trigger offset, or the blank template's zero offset.
-    A minimum kappa of 1 MHz adds approximately 0.795775 us. Preserve ro_length
+    Ignore absent/null member kappas; all unset leaves trig_offset equal to
+    the source time-of-flight offset. Otherwise require each set kappa to be
+    finite and positive in MHz, or raise ValueError (alias/source faults
+    propagate). Add 5/(2*pi*min(set kappas)) us to the captured scalar trigger
+    offset, or the blank template's zero offset. A minimum kappa of 1 MHz adds
+    approximately 0.795775 us. Preserve ro_length
     and seed length=max(original length, trig_offset+ro_length) in us.
     This spectroscopy exception uses a detached slot copy when available and
     replaces tones from the group on both paths. Open/Reset leaves editable
@@ -83,6 +85,8 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
     for index, resonator in enumerate(group.resonators):
         source = parameters.lookup_point(f"{resonator}.kappa")
         kappa = source.value
+        if not source.present or kappa is None:
+            continue
         if (
             isinstance(kappa, bool)
             or not isinstance(kappa, (int, float))
@@ -94,7 +98,7 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
                 "kappa must be finite and positive in MHz"
             )
         kappas.append(kappa)
-    wait_us = 5 / (2 * pi * min(kappas))
+    wait_us = 5 / (2 * pi * min(kappas)) if kappas else 0.0
     if ctx.has("$mux.module.readout"):
         readout = parameters.library.module_spec(
             parameters.library_key("$mux.module.readout")

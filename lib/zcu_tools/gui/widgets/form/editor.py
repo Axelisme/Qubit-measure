@@ -43,6 +43,7 @@ class _Level:
     path: FormWritePath
     widget: QWidget
     layout: QVBoxLayout
+    elements: bool = False  # Direct children of a list with an element picker.
     rows: dict[FormWritePath, FieldRow] = field(default_factory=dict)
     children: dict[FormWritePath, _Level] = field(default_factory=dict)
     groups: dict[str, tuple[GroupBlock, _Level]] = field(default_factory=dict)
@@ -216,8 +217,9 @@ class FormEditor[F: FormModel](QWidget):
     and their uncommitted text without writing state. Changing an option or
     nullable activation replaces only that subtree, not unrelated rows.
     A FixedList has form.picker.<path>, a navigation-only QComboBox listing
-    "index: name". It draws the picked element below the list row and keeps
-    other elements mounted but hidden. Switching never writes state or commits
+    "index: name". It draws the picked element's fields directly below the list
+    row, without an element title or extra indentation. Field labels and full
+    indexed paths stay unchanged. Other elements remain mounted but hidden. Switching never writes state or commits
     hidden text, and preserves drafts and parse errors. The list row marks
     hidden errors with their element name in its tooltip. Participants remain
     a separate JSON list input. Other sequences and typed mappings use JSON
@@ -598,6 +600,7 @@ class FormEditor[F: FormModel](QWidget):
                     self._model_expanded,
                     RowActions(command=self._run_command, select=self._select),
                 )
+                row.configure_body(element=level.elements)
                 row.connect_fold(self._fold_changed)
                 row.connect_pick(self._pick_changed)
                 level.rows[field.path] = row
@@ -656,7 +659,7 @@ class FormEditor[F: FormModel](QWidget):
         if child is None:
             if row.group.isHidden():
                 return
-            child = _Level(path, row.group, row.rows)
+            child = _Level(path, row.group, row.rows, elements=row.picker is not None)
             level.children[path] = child
         fields = self._require_state().describe(path, self._require_env()).children
         row.set_children_available(available=any(not field.hidden for field in fields))
@@ -827,8 +830,11 @@ class FormEditor[F: FormModel](QWidget):
         for length in range(len(path), 0, -1):
             prefix = path[:length]
             for candidate in self._rows:
-                if candidate == prefix and self._rows[candidate].widget.isVisibleTo(
-                    self._content
+                row = self._rows[candidate]
+                if (
+                    candidate == prefix
+                    and not row.label.isHidden()
+                    and row.widget.isVisibleTo(self._content)
                 ):
                     return candidate
         return None
