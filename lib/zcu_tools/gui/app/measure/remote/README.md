@@ -82,7 +82,7 @@ Handler 將 LogicalEditError 投影為 invalid_params 與原 reason，保留 pat
 ## Startup scripts
 
 The launch composition selects one trusted `startup(ctx)` Python file. With no
-startup option, measure runs `zcu_lab/startup.py`; `--script` replaces that default.
+startup option, measure runs the framework's `default_startup.py`; `--script` replaces that default.
 `--clean` runs neither and conflicts with `--script`. Custom code must import and
 call the default itself if needed. MCP `connect(script=...)` forwards the choice
 only when launching a new GUI. Explicit script options are refused on attach,

@@ -45,9 +45,9 @@ without loading board environments or owning process policy such as logging, ren
 standalone launcher is the sole process entrypoint. It selects one trusted
 `startup(ctx)` script.
 `--clean` skips all scripts and conflicts with `--script`. Otherwise an explicit
-script replaces the composition-supplied `zcu_lab/startup.py` Path; custom code
-must import and call the default itself if needed. The framework never imports
-the lab to select it. After showing the window,
+script replaces the composition-supplied `default_startup.py` Path; custom code
+imports `zcu_tools.gui.app.measure.default_startup.startup` and calls it if
+needed. The framework never imports the lab to select it. After showing the window,
 `after_show` queues the selected script for background execution on the Qt loop.
 Without a selected script, it opens the shared Setup dialog.
 
@@ -101,7 +101,7 @@ logs, without a duplicate item dialog. Manual GUI device failures still notify.
 Unhandled script errors report the script path and line while retaining completed work.
 The framework does not load lab environments or own script cache formats.
 
-The [default lab script](../../../../../zcu_lab/startup.py) owns
+The framework-owned [default script](default_startup.py) owns
 `measure-session.json` under `ctx.cache_root`. It attempts SoC, devices,
 entry/point, then tabs with input only when entry/point opened successfully.
 Each failure is logged; failed devices are remembered when possible, and skipped

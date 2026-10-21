@@ -8,7 +8,7 @@
 
 使用者擴充入口見 [tutorial](tutorial/README.md)，程式碼規則與檢查方式見 [POLICY](POLICY.md)。
 
-`startup.py` 擁有預設 session 保存與重開政策，Measure 組合根負責注入腳本。用 `--script` 指定自己的腳本，或用 `--clean` 略過腳本，兩者互斥。啟動與關閉的失敗處理見 [ADR-0064](../docs/adr/0064-process-startup.md#保存與關閉)，建立 entry 與 alias 的步驟見 [startup 教學](tutorial/02-startup-and-entry.md)。
+預設的 session 還原腳本屬於框架，位於 `lib/zcu_tools/gui/app/measure/default_startup.py`，行為見 [ADR-0064](../docs/adr/0064-process-startup.md#保存與關閉)。這裡只放使用者自己的 startup 腳本（`simulation_envs/`、`kickstart/`）；自訂腳本要先還原上次 session 時，import 並呼叫 `zcu_tools.gui.app.measure.default_startup.startup`。`--clean` 略過全部腳本，`--script` 完全取代預設腳本，兩者互斥。建立 entry 與 alias 的步驟見 [startup 教學](tutorial/02-startup-and-entry.md)。
 
 `v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬參數檔與 startup 範例，不提供離線建庫入口。
 

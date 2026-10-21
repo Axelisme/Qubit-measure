@@ -1,4 +1,7 @@
-"""Default lab session policy, independent of the framework's layout cache.
+"""Default measure session policy, independent of the framework's layout cache.
+
+The framework owns this script; user startup scripts live under zcu_lab and
+may import and call startup(ctx) from here.
 
 Only this script owns measure-session.json under ctx.cache_root. Aliases remain
 point-local in points/<label>/aliases.yaml and return when that point is selected.
@@ -16,6 +19,7 @@ from tempfile import NamedTemporaryFile
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
 from zcu_tools.gui.app.measure.services.tab_input import TabInput
 from zcu_tools.gui.app.measure.startup_context import StartupContext
 

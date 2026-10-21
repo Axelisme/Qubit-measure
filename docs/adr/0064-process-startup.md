@@ -18,6 +18,8 @@ App 宣告固定的 process requirements，並提供 app-specific composition。
 
 Runtime 提供 app lifecycle 接點並控制啟動順序。App 在接點內觸發自己的 startup workflow，透過既有 owner interface 執行。Composition 決定建立與注入哪些模組，startup 不接管 State、service 或 registry 的寫入權威。Dialog 與 control port 不接收 app phase，啟動與手動開啟使用同一個 Setup dialog。這不要求每個流程另建 Coordinator class。
 
+預設 session 還原腳本屬於框架，位於 `lib/zcu_tools/gui/app/measure/default_startup.py`；`zcu_lab/` 只放使用者自己的 startup 腳本。使用者於 2026-10-21 裁定：「這位置不對，預設startup腳本應該是放在lib裡框架層才對，不是讓用戶改的。」
+
 Runtime 在 Qt application 建立後初始化 explicit plot host、shutdown callback 與繪圖鎖，不切換 process-wide Matplotlib backend。Plotting owner 維護 host 與 rendering 機制。Transport 擁有連線機制，app 擁有 remote capabilities 與 policy。停止 socket 或結束 Qt event loop 不代表 domain operation 已完成清理；operation 的取消與資源釋放由其 owner 負責。
 
 ## Measure 啟動腳本
@@ -25,7 +27,7 @@ Runtime 在 Qt application 建立後初始化 explicit plot host、shutdown call
 Measure launcher 選擇一份可信 Python 檔，檔案定義 `startup(ctx)`。選擇規則如下：
 
 - `--clean` 不執行任何腳本，包括預設腳本。它與 `--script` 互斥，同時給時報錯。
-- 沒給這兩個選項時，執行 `zcu_lab/startup.py`。
+- 沒給這兩個選項時，執行框架的 `lib/zcu_tools/gui/app/measure/default_startup.py`。
 - 給 `--script <path.py>` 時，只執行該腳本。自訂腳本若要預設行為，自己 import 並呼叫預設 `startup`，框架不自動串接。
 
 Composition 將選好的 `Path` 注入 `MeasureGuiBehavior`。Lib 不 import zcu_lab，沿用 [[0072]] 的 C16 `framework-no-user` contract。框架沒有 simulation environment loader 或 `--simulate` 相容入口。腳本可以安裝模擬資源，也可以連線硬體、建立元件或開啟 tabs。`--clean` 也略過已保存的 Qt 外觀；無腳本時 app 開啟一般 Setup dialog。
@@ -40,7 +42,7 @@ Composition 將選好的 `Path` 注入 `MeasureGuiBehavior`。Lib 不 import zcu
 
 Framework 只保存 `measure_layout_v1.json` 的視窗尺寸與左面板寬度。SoC、devices、entry／point、tabs 與輸入的重開政策由腳本決定，框架不保存、還原或遷移領域 session。RAM 的 `WorkspaceTab`／`WorkspaceSnapshot` 供 workspace 重建與實驗 reload 使用，不是磁碟 schema。
 
-預設 `zcu_lab/startup.py` 擁有 user cache 根目錄下的 `measure-session.json`。它依序嘗試上次 SoC、各 device、entry／point，只有 entry／point 成功後才重開 tabs 並還原 input。Device 連線失敗時嘗試 remember 為未連線列。每項失敗記 log 並繼續，最後狀態列顯示一行摘要；略過的 tab 不會在稍後選來源時自動重試。腳本以 `on_close` 讀取當時 live state 並保存自己的檔案，不保存硬體設定或量測結果。
+預設 `default_startup.py` 擁有 user cache 根目錄下的 `measure-session.json`。它依序嘗試上次 SoC、各 device、entry／point，只有 entry／point 成功後才重開 tabs 並還原 input。Device 連線失敗時嘗試 remember 為未連線列。每項失敗記 log 並繼續，最後狀態列顯示一行摘要；略過的 tab 不會在稍後選來源時自動重試。腳本以 `on_close` 讀取當時 live state 並保存自己的檔案，不保存硬體設定或量測結果。
 
 Setup 與每個 point 各自保存 alias。選 point 載入其 `points/<label>/aliases.yaml`，Inspect Apply 寫回目前 point。預設腳本不另存、不恢復 alias，也不建立第二份 alias 權威。模擬腳本先建立 point，再以 `ctx.context.apply_alias_rows` 初始化其表。使用者於 2026-10-20 說明：「startup寫入在預設不會出現，simulation場景用來初始化alias內容用的」。
 
@@ -56,4 +58,4 @@ SoC 由 caller 擁有，不假設通用 close 方法。Device 只有成功 regis
 
 目前四個 standalone launcher（measure、workflows、fluxdep、dispersive）透過共用 runtime 啟動。`gui/runtime.py` 建立或取得 `QApplication`，呼叫 app assembly 與 lifecycle hooks，並在正常退出路徑停止 remote adapter。這只證明 standalone 入口的流程，不承諾嵌入既有 Qt host 時的 event loop 所有權，也不承諾 assembly、plotting 或 adapter 啟動途中失敗時完整清理。Runtime 不管理外部 agent session、Python profiles 或板端服務。
 
-`GuiRuntimeSpec`、behavior hook、launch options 與 rendering 接線見 [`gui/README.md`](../../lib/zcu_tools/gui/README.md)。Measure 的公開 facets 與局部契約見 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)、[`startup_context.py`](../../lib/zcu_tools/gui/app/measure/startup_context.py) 及 [預設腳本](../../zcu_lab/startup.py)。
+`GuiRuntimeSpec`、behavior hook、launch options 與 rendering 接線見 [`gui/README.md`](../../lib/zcu_tools/gui/README.md)。Measure 的公開 facets 與局部契約見 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)、[`startup_context.py`](../../lib/zcu_tools/gui/app/measure/startup_context.py) 及 [預設腳本](../../lib/zcu_tools/gui/app/measure/default_startup.py)。
