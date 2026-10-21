@@ -2,6 +2,7 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from threading import Event, get_ident
 
 import pytest
@@ -144,6 +145,20 @@ def test_invalid_json_answer_is_rejected_without_consuming_question(asking):
     assert len(author.deliveries) == 1
 
 
+@contextmanager
+def failed_journal_write(tmp_path):
+    """Make the next journal append fail at the filesystem boundary, then restore it."""
+    journal = next(tmp_path.rglob("journal.jsonl"))
+    contents = journal.read_bytes()
+    journal.unlink()
+    journal.mkdir()
+    try:
+        yield
+    finally:
+        journal.rmdir()
+        journal.write_bytes(contents)
+
+
 @pytest.mark.parametrize("io_failure", [False, True])
 def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
     asking, tmp_path, io_failure
@@ -153,16 +168,8 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
     assert lease
     assert control.pending_question("question-run") is not None
     if io_failure:
-        journal = next(tmp_path.rglob("journal.jsonl"))
-        contents = journal.read_bytes()
-        journal.unlink()
-        journal.mkdir()
-        try:
-            with pytest.raises(DIRECTORY_OPEN_ERROR):
-                control.stop("question-run")
-        finally:
-            journal.rmdir()
-            journal.write_bytes(contents)
+        with failed_journal_write(tmp_path), pytest.raises(DIRECTORY_OPEN_ERROR):
+            control.stop("question-run")
     else:
         assert control.stop("question-run").lifecycle == "stopping"
     assert author.deliveries == [], "Stop is pure control, not author cleanup"
