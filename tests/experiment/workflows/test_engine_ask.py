@@ -1,0 +1,221 @@
+"""Public Engine question suspension, worker delivery and cancellation contracts."""
+
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event
+
+import pytest
+from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.experiment.workflows import (
+    Actor,
+    Done,
+    InvalidRunState,
+    Next,
+    RunMismatch,
+    Step,
+    WorkflowEnv,
+)
+
+from ._engine_fakes import START, Plan, Rig, State, Tunables
+
+
+class Decision(Answer):
+    """The synthetic operator's chosen point value."""
+
+    value: int
+
+
+class OtherAnswer(Answer):
+    """An unrelated model, even though its fields match Decision."""
+
+    value: int
+
+
+class Choose(Question[Decision]):
+    """Evidence identifying the point awaiting a decision."""
+
+    point: int
+
+
+@pytest.fixture
+def rig(tmp_path: Path) -> Rig:
+    return Rig(tmp_path)
+
+
+def test_answer_continues_same_invocation_with_original_capture(rig: Rig) -> None:
+    entered: list[tuple[int, Path]] = []
+    observed: list[tuple[int, int]] = []
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index == 1:
+            return Done()
+        entered.append((tun.value, env.iteration_dir))
+        yield from env.wait_until(START)
+        decision = yield from env.ask(Choose(point=state.index))
+        observed.append((decision.value, tun.value))
+        yield from env.wait_until(START)
+        state.index += 1
+        return Next(decision.value, state)
+
+    rig.start(step)
+    paused = rig.engine.execute("run")
+    assert (paused.lifecycle, paused.call_seq, paused.committed_seq) == ("paused", 1, 0)
+    question = rig.engine.pending_question("run")
+    assert question == Choose(point=0)
+    assert rig.engine.pending_question("run") == question
+    assert rig.engine.records("run") == ()
+    assert not (entered[0][1] / "record.json").exists()
+    with pytest.raises(InvalidRunState):
+        rig.engine.resume("run")
+    with pytest.raises(InvalidRunState):
+        rig.engine.execute("run")
+    rig.engine.update_tunables(
+        "run", Tunables(value=9), expected_revision=0, actor=Actor("agent", "test")
+    )
+    final = rig.engine.answer("run", Decision(value=23))
+    assert final.lifecycle == "done"
+    assert observed == [(23, 1)]
+    assert len(entered) == 1
+    assert rig.initialized == [START]
+    records = rig.engine.records("run")
+    assert [(record.call_seq, record.revision) for record in records] == [(1, 0)]
+    assert rig.engine.pending_question("run") is None
+    assert "step_discarded" not in rig.kinds()
+
+
+def test_wrong_answer_preserves_question_and_allows_retry(rig: Rig) -> None:
+    received: list[Decision] = []
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        received.append((yield from env.ask(Choose(point=4))))
+        return Done()
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "paused"
+    before = rig.kinds()
+    with pytest.raises(TypeError, match="Decision"):
+        rig.engine.answer("run", OtherAnswer(value=7))
+    assert rig.engine.pending_question("run") == Choose(point=4)
+    assert rig.kinds() == before
+    assert received == []
+    assert rig.engine.answer("run", Decision(value=7)).lifecycle == "done"
+    assert received == [Decision(value=7)]
+
+
+def test_each_answer_runs_until_next_question_without_restart(rig: Rig) -> None:
+    received: list[int] = []
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        for point in (1, 2):
+            received.append((yield from env.ask(Choose(point=point))).value)
+        return Done()
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "paused"
+    second = rig.engine.answer("run", Decision(value=11))
+    assert (second.lifecycle, second.call_seq) == ("paused", 1)
+    assert rig.engine.pending_question("run") == Choose(point=2)
+    assert received == [11]
+    assert rig.engine.answer("run", Decision(value=22)).lifecycle == "done"
+    assert received == [11, 22]
+    with pytest.raises(InvalidRunState):
+        rig.engine.answer("run", Decision(value=33))
+
+
+def test_stop_closes_suspended_invocation_and_discards_it(rig: Rig) -> None:
+    closed: list[bool] = []
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        try:
+            yield from env.ask(Choose(point=0))
+        finally:
+            closed.append(True)
+        return Done()
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "paused"
+    assert closed == []
+    assert rig.engine.pause("run").lifecycle == "paused"
+    assert rig.engine.stop("run").lifecycle == "stopped"
+    assert closed == [True]
+    assert rig.engine.pending_question("run") is None
+    assert rig.kinds().count("step_discarded") == 1
+    assert rig.engine.records("run") == ()
+
+
+def test_answer_reserves_worker_segment_and_pause_discards_on_next_effect(rig: Rig) -> None:
+    entered, release = Event(), Event()
+    closed: list[bool] = []
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        try:
+            yield from env.ask(Choose(point=0))
+            entered.set()
+            assert release.wait(5)
+            yield from env.wait_until(START)
+        finally:
+            closed.append(True)
+        return Done()
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "paused"
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(rig.engine.answer, "run", Decision(value=1))
+        try:
+            assert entered.wait(5)
+            with pytest.raises(InvalidRunState):
+                rig.engine.answer("run", Decision(value=2))
+            with pytest.raises(InvalidRunState):
+                rig.engine.execute("run")
+            assert rig.engine.pause("run").lifecycle == "pausing"
+        finally:
+            release.set()
+        assert future.result(timeout=5).lifecycle == "paused"
+    assert closed == [True]
+    assert rig.engine.pending_question("run") is None
+    assert rig.engine.resume("run").lifecycle == "running"
+    assert rig.engine.execute("run").lifecycle == "paused"
+    rig.engine.stop("run")
+
+
+def test_answer_failure_uses_execution_failure_boundary(rig: Rig) -> None:
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        yield from env.ask(Choose(point=0))
+        raise ValueError("analysis after answer failed")
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "paused"
+    failed = rig.engine.answer("run", Decision(value=1))
+    assert failed.lifecycle == "failed"
+    assert failed.reason == "ValueError: analysis after answer failed"
+    assert rig.engine.pending_question("run") is None
+    assert "step_failed" in rig.kinds()
+
+
+def test_question_controls_reject_stale_run_ids(rig: Rig) -> None:
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        yield from env.ask(Choose(point=0))
+        return Done()
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "paused"
+    with pytest.raises(RunMismatch):
+        rig.engine.pending_question("stale")
+    with pytest.raises(RunMismatch):
+        rig.engine.answer("stale", Decision(value=1))
+    assert rig.engine.pending_question("run") == Choose(point=0)
+    rig.engine.stop("run")
