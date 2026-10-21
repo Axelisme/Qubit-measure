@@ -103,8 +103,8 @@ Program 平均 reps/rounds，completed-round hook 保留目前點已完成 round
 `MuxAmpRabiAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
 Its native generated Form is registered as `mux/amp_rabi`.
 The registered MCP recipe is `mux_amp_rabi`. See the
-[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
-source-bound reporting and explicit writeback decisions.
+[mux recipe guide](../../../recipes/mux-guide.md#mux_amp_rabi)
+for typed overrides, origins, source-bound reporting and explicit writeback decisions.
 
 Summary rows retain the original tone `position` and source `name`, including failed
 fits and their reasons. Rows follow participants order, so Q3/Q1 gives indices
