@@ -67,10 +67,14 @@ def test_initial_field_retains_common_reference_pulse_coordinates_and_moments(sh
         atol=1e-13,
         max_step=0.05,
     ).y.T.reshape(-1, 2, 2)
-    fields = adc.cavity_fields(model, pulses, times, initial_field=initial, initial_time_ns=5.0)
+    fields = adc.cavity_fields(
+        model, pulses, times, initial_field=initial, initial_time_ns=5.0
+    )
     np.testing.assert_allclose(fields, reference, rtol=1e-8, atol=1e-10)
     np.testing.assert_allclose(fields[0], np.tile(initial, (2, 1)), atol=1e-12)
-    average = adc.cavity_field_average(model, pulses, 5.0, 45.0, initial_field=initial, initial_time_ns=5.0)
+    average = adc.cavity_field_average(
+        model, pulses, 5.0, 45.0, initial_field=initial, initial_time_ns=5.0
+    )
     products = np.einsum("tsr,tuq->tsruq", reference, reference.conj())
     np.testing.assert_allclose(
         average.field_products,
@@ -102,10 +106,14 @@ def test_initial_field_without_pulses_rings_down_and_has_analytic_average():
     )
     initial = np.array([0.2 + 0.3j, 0j])
     times = np.array([10.0, 15.0, 30.0])
-    fields = adc.cavity_fields(model, (), times, initial_field=initial, initial_time_ns=10.0)
+    fields = adc.cavity_fields(
+        model, (), times, initial_field=initial, initial_time_ns=10.0
+    )
     expected = initial[0] * np.exp(-0.04 * (times - 10))
     np.testing.assert_allclose(fields[:, :, 0], np.tile(expected[:, None], (1, 2)))
-    average = adc.cavity_field_average(model, (), 10.0, 30.0, initial_field=initial, initial_time_ns=10.0)
+    average = adc.cavity_field_average(
+        model, (), 10.0, 30.0, initial_field=initial, initial_time_ns=10.0
+    )
     expected_photons = abs(initial[0]) ** 2 * (-np.expm1(-1.6)) / 1.6
     np.testing.assert_allclose(average.photons, [[expected_photons, 0]] * 2, atol=1e-12)
 

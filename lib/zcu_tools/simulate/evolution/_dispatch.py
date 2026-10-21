@@ -247,6 +247,10 @@ def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics
     return PathDiagnostics(
         dict(zip(unique.tolist(), counts.tolist(), strict=True)),
         dict(zip(point_names.tolist(), point_counts.tolist(), strict=True)),
+        point_members={
+            str(name): tuple(np.unique(table.timeline[names == name]).tolist())
+            for name in point_names
+        },
     )
 
 

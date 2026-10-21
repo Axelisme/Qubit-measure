@@ -1,6 +1,6 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-21，腔驅動模型與 CKP 適用範圍
+**Last updated:** 2026-10-21，segment 主分支腔場繼承
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
@@ -162,7 +162,7 @@ Readout generator 上的非終端脈衝是腔驅動，必須在 terminal 起點�
 
 FTF 將腔驅動起迄加入演化切分，對每個最終 segment 使用平均 Stark 頻移與平均驅動去相位率。段內不逐時套用瞬時場。脈衝結束後保留 ringdown，不清空腔場。Readout 開始前的 charge/flux drive controls 仍會演化狀態，terminal readout 期間及之後的 drive controls 不納入讀出計算。
 
-條件腔場依 qubit 能階自 t=0 各自從真空演化。Probe 不繼承 prepared 分支的腔場。這個近似讓 CKP 的 g/e preparation 分支給出相同腔中心，因此不支援 preparation-resolved χ 校準。
+FTF 依序推進各 segment 的 density 與腔場。每段開始時，所有能階的條件場都繼承上一段主分支的段末場，再依各自能階演化。第一段從零場開始。主分支取段首 density 中 population 最大的能階，相同時取最低能量。這讓探測段保留 prepared 分支留下的腔場。疊加態只攜帶一個主分支的場是半古典近似，不表示完整的量子腔場糾纏。
 
 模型假設 weak dispersive coupling，不包含 MIST 躍遷或其 onset。只施加腔驅動、沒有 qubit drive 時，這些新增頻移與去相位不改變能階 populations。若 Stark 頻移讓能量排序反轉，演化會報錯並指出 point 與 segment，不重排能階。未報錯不代表強驅動、截斷或色散近似已通過適用性驗證。
 

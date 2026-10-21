@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-18, bounded exact physical memo
+**Last updated:** 2026-10-21, dominant-branch cavity memory
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their
@@ -89,6 +89,14 @@ terminal DC sample. Filtering integrates sampled linear complex envelopes and
 carriers analytically across the point arrays, without per-point quadrature.
 `readout_model(joint, resonators)` supplies the existing ADC model at DC, with a
 zero reference frequency and neutral receiver for composition to calibrate.
+
+`CavityDrive.advance` averages one span's photons, Stark shifts and driven
+coherence decay, then returns its main branch's final field. The main branch
+has the largest span-start population; exact ties select the lowest DC energy.
+Every conditional branch begins with the same inherited field at that span's
+absolute start time. ADC owns propagation and second-moment integration. This
+single-branch memory is semiclassical and does not describe quantum cavity-state
+entanglement. Experiment composes it with evolution's continued DC densities.
 
 ## Readout and Floquet paths
 

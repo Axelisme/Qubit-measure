@@ -288,6 +288,8 @@ class Schedule:
         Opaque returned data is
         referenced by the returned list alone, never by Schedule or the cache.
         """
+        if self.geometry.initial_densities is not None:
+            return bindings
         bound: list[_Binding] = []
         zero = tuple(0 for _ in range(self.table.level.shape[1]))
         dc = self.source.model(zero)
@@ -452,6 +454,10 @@ class Schedule:
             exceeded,
             float(np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))),
             routing=self.context.work_plan.routing.snapshot(segments),
+            point_members={
+                name: tuple(sorted(int(self.geometry.points[i]) for i in timelines))
+                for name, timelines in points.items()
+            },
         )
 
     def resolve_deferred(
@@ -610,9 +616,12 @@ class _Chunk:
             self.key[binding.rows[mask]] = binding.indices[mask]
         self.cursor = np.searchsorted(self.table.timeline, points, side="left")
         self.end = np.searchsorted(self.table.timeline, points, side="right")
-        self.states = np.repeat(
-            schedule.initial_density[None], len(points), axis=0
-        ).copy()
+        initial = schedule.geometry.initial_densities
+        self.states = (
+            np.repeat(schedule.initial_density[None], len(points), axis=0)
+            if initial is None
+            else initial[points].copy()
+        )
         zero = tuple(0 for _ in range(self.table.level.shape[1]))
         self.dc = schedule.source.model(zero)
         self.level = np.zeros((len(points), len(zero)), dtype=np.int64)

@@ -53,7 +53,11 @@ def test_cavity_advance_inherits_main_branch_and_keeps_ringdown(cavity, branch):
     inherited = np.array([0.2 + 0.3j, -0.1j])
     average, final = drive.advance(10.0, 25.0, populations, inherited)
     fields = cavity_fields(
-        model, (pulse,), np.array([10.0, 25.0]), initial_field=inherited, initial_time_ns=10.0
+        model,
+        (pulse,),
+        np.array([10.0, 25.0]),
+        initial_field=inherited,
+        initial_time_ns=10.0,
     )
     expected = cavity_field_average(
         model, (pulse,), 10.0, 25.0, initial_field=inherited, initial_time_ns=10.0

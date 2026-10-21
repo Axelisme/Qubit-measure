@@ -1,10 +1,11 @@
-"""State-conditioned vacuum fields before scattering and receiver calibration."""
+"""State-conditioned coherent fields before scattering and calibration."""
 
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.linalg import expm
 
 from ._constant import ConstantLine
 from ._trajectories import PathFields, line_parameters
@@ -16,15 +17,25 @@ def cavity_fields(
     model: ReadoutModel,
     pulses: tuple[ReadoutPulse, ...],
     times_ns: RealArray,
+    *,
+    initial_field: NDArray[np.complex128] | None = None,
+    initial_time_ns: float = 0.0,
 ) -> NDArray[np.complex128]:
     """Return coherent intracavity alpha, shaped (time,state,2), in sqrt(photons).
 
     model sets joint-state order, resonant frequencies, reciprocal shared-line
     damping and the rotating reference. pulses are incident fields in that
-    reference's pulse-local convention. Each starts from vacuum; their fields
-    add coherently, including ringdown and overlapping/different-start supports.
-    times_ns is a finite nonempty strictly increasing emitted-ns vector.
-    Times before a pulse starts return zero. Empty pulses return vacuum.
+    reference's pulse-local convention. Pulse contributions add coherently,
+    including ringdown and overlapping/different-start supports. times_ns is a
+    finite nonempty strictly increasing emitted-ns vector.
+    initial_field is a finite complex (2,) field shared by all states, in
+    sqrt(photons) in model's rotating reference at initial_time_ns. None means
+    zero. initial_time_ns is finite nonnegative absolute emitted ns, default 0,
+    in the same origin as pulses and times_ns. Only pulse history at/after that
+    time propagates; pulse-local envelopes and phases are never restarted.
+    Omitting both equals explicit vacuum at t=0, including mid-pulse queries.
+    Empty pulses retain homogeneous memory decay. Invalid fields/times raise
+    ValueError. A query before initial_time_ns names both times in ValueError.
 
     States remain fixed branches: directional population rates do not mix them.
     Receiver delay, gain, offset, noise and mismatch scattering phases do not
@@ -35,12 +46,21 @@ def cavity_fields(
     times = readonly_array(times_ns, "cavity times")
     if times.ndim != 1 or not len(times) or np.any(np.diff(times) <= 0):
         raise ValueError("cavity times must be nonempty and strictly increasing")
-    fields = np.zeros((len(times), len(model.state_labels), 2), dtype=np.complex128)
+    initial = _initial_field(initial_field)
+    _validate_origin(initial_time_ns, float(times[0]))
+    fields = _memory_fields(model, times, initial, initial_time_ns)
     for pulse in pulses:
         # Integrate near this carrier, then restore the caller's pulse-local
         # rotating coordinates. Absolute microwave frequencies need no ODE steps.
         carrier_model = replace(model, reference_frequency_ghz=pulse.frequency_ghz)
-        path = PathFields(carrier_model, pulse, times, 1e-9, 1e-11)
+        path = PathFields(
+            carrier_model,
+            pulse,
+            times,
+            1e-9,
+            1e-11,
+            start_ns=initial_time_ns,
+        )
         phase = np.exp(
             -2j
             * np.pi
@@ -72,16 +92,26 @@ def cavity_field_average(
     pulses: tuple[ReadoutPulse, ...],
     start_ns: float,
     end_ns: float,
+    *,
+    initial_field: NDArray[np.complex128] | None = None,
+    initial_time_ns: float = 0.0,
 ) -> CavityFieldAverage:
     """Average intracavity second moments over finite end_ns > start_ns.
 
-    Endpoints are absolute emitted ns, before receiver delay. Full vacuum-start
-    pulse history, including ringdown, is retained. Pulse-local phase is the
+    Endpoints are absolute emitted ns, before receiver delay. Pulse history from
+    initial_time_ns, including ringdown, is retained. Pulse-local phase is the
     ReadoutPulse convention used by cavity_fields: amplitude*envelope(local)*
     exp(-2*pi*i*(carrier-reference)*local+i*phase). Products use the same-time
     alpha times conjugate-alpha convention and are invariant under a common
     rotating frame. No calibration, scattering mismatch or population-rate
-    mixing is applied. Empty pulses give vacuum. Inputs are not changed.
+    mixing is applied. initial_field is a finite complex (2,) field shared by
+    all states at initial_time_ns in sqrt(photons), in model's reference. None
+    means zero. initial_time_ns is finite nonnegative absolute emitted ns in the
+    same origin as pulses/start/end, default 0. Only subsequent pulse history
+    propagates; pulse-local envelopes and phases are never restarted. Omitting
+    both equals explicit vacuum at t=0 even for a mid-pulse interval. Empty pulses
+    propagate memory. Invalid fields/times raise ValueError. start_ns before
+    initial_time_ns raises ValueError naming both times. Inputs are unchanged.
 
     Flat contents use ConstantLine propagators and singular-safe analytic
     quadratic integrals, including cross-carrier terms. Shaped contents use
@@ -92,12 +122,19 @@ def cavity_field_average(
     """
     if not np.isfinite([start_ns, end_ns]).all() or end_ns <= start_ns:
         raise ValueError("cavity average interval must be finite and positive")
+    initial = _initial_field(initial_field)
+    _validate_origin(initial_time_ns, start_ns)
     n = len(model.state_labels)
     products = np.zeros((n, 2, n, 2), dtype=np.complex128)
-    if pulses:
+    if pulses or np.any(initial):
         # Pulse-local phases need +2*pi*delta_f*start so the reference change
         # rotates every field by the same exp(+2*pi*i*delta_f*t).
-        near = replace(model, reference_frequency_ghz=pulses[0].frequency_ghz)
+        near = replace(
+            model,
+            reference_frequency_ghz=(
+                pulses[0].frequency_ghz if pulses else model.reference_frequency_ghz
+            ),
+        )
         delta_f = near.reference_frequency_ghz - model.reference_frequency_ghz
         pulses = tuple(
             replace(
@@ -106,12 +143,48 @@ def cavity_field_average(
             )
             for pulse in pulses
         )
+        initial = initial * np.exp(2j * np.pi * delta_f * initial_time_ns)
         if all(pulse.envelope is None for pulse in pulses):
-            products = _flat_average(near, pulses, start_ns, end_ns)
+            products = _flat_average(
+                near, pulses, start_ns, end_ns, initial, initial_time_ns
+            )
         else:
-            products = _shaped_average(near, pulses, start_ns, end_ns)
+            products = _shaped_average(
+                near, pulses, start_ns, end_ns, initial, initial_time_ns
+            )
     photons = products.reshape(2 * n, 2 * n).diagonal().real.reshape(n, 2).copy()
     return CavityFieldAverage(photons, products)
+
+
+def _initial_field(
+    value: NDArray[np.complex128] | None,
+) -> NDArray[np.complex128]:
+    if value is None:
+        return np.zeros(2, dtype=np.complex128)
+    field = np.array(value, dtype=np.complex128, copy=True)
+    if field.shape != (2,) or not np.isfinite(field).all():
+        raise ValueError("initial field must be a finite complex (2,) vector")
+    return field
+
+
+def _validate_origin(origin: float, query: float) -> None:
+    if not np.isfinite(origin) or origin < 0:
+        raise ValueError("initial time must be finite and nonnegative")
+    if query < origin:
+        raise ValueError(f"query time {query} precedes initial time {origin}")
+
+
+def _memory_fields(
+    model: ReadoutModel,
+    times: RealArray,
+    initial: NDArray[np.complex128],
+    origin: float,
+) -> NDArray[np.complex128]:
+    if not np.any(initial):
+        return np.zeros((len(times), len(model.state_labels), 2), dtype=np.complex128)
+    a, _ = line_parameters(model)
+    propagators = expm(-(times - origin)[:, None, None, None] * a[None])
+    return np.einsum("tsru,u->tsr", propagators, initial)
 
 
 def _boundaries(
@@ -141,15 +214,19 @@ def _boundaries(
 
 
 def _flat_average(
-    model: ReadoutModel, pulses: tuple[ReadoutPulse, ...], start: float, end: float
+    model: ReadoutModel,
+    pulses: tuple[ReadoutPulse, ...],
+    start: float,
+    end: float,
+    initial: NDArray[np.complex128],
+    origin: float,
 ) -> NDArray[np.complex128]:
     n = len(model.state_labels)
     a, v = line_parameters(model)
     line = ConstantLine(np.zeros((n, n)), a, v, v.astype(np.complex128))
-    origin = min(start, min(pulse.start_ns for pulse in pulses))
     boundaries = _boundaries(pulses, origin, end)
     boundaries = np.unique(np.append(boundaries, start))
-    fields = np.zeros((n, 2), dtype=np.complex128)
+    fields = np.tile(initial, (n, 1))
     products = np.zeros((n, 2, n, 2), dtype=np.complex128)
     for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
         active = tuple(
@@ -174,7 +251,12 @@ def _flat_average(
 
 
 def _shaped_average(
-    model: ReadoutModel, pulses: tuple[ReadoutPulse, ...], start: float, end: float
+    model: ReadoutModel,
+    pulses: tuple[ReadoutPulse, ...],
+    start: float,
+    end: float,
+    initial: NDArray[np.complex128],
+    origin: float,
 ) -> NDArray[np.complex128]:
     # Prepare each dense baseline once, not once per quadrature refinement.
     paths = [
@@ -184,6 +266,7 @@ def _shaped_average(
             np.array([end]),
             1e-9,
             1e-11,
+            start_ns=origin,
         )
         for pulse in pulses
     ]
@@ -196,7 +279,7 @@ def _shaped_average(
         nodes, weights = _gauss_rule(order)
         times = (mid[:, None] + half[:, None] * nodes).ravel()
         scaled = (half[:, None] * weights).ravel() / (end - start)
-        fields = np.zeros((len(times), len(model.state_labels), 2), dtype=np.complex128)
+        fields = _memory_fields(model, times, initial, origin)
         for pulse, path in zip(pulses, paths, strict=True):
             phase = np.exp(
                 -2j
