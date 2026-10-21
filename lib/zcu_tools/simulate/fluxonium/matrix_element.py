@@ -29,22 +29,25 @@ def calculate_n_oper(
     flux: float,
     return_dim: int = 4,
     esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
-) -> NDArray[np.float64]:
-    """
-    Calculate the matrix elements of the fluxonium
-    """
+    *,
+    cutoff: int = _SCALAR_QUB_CUTOFF,
+) -> NDArray[np.complex128]:
+    """Return dimensionless charge n in the lowest return_dim energy states.
 
+    params=(EJ,EC,EL) uses GHz; flux is absolute Phi/Phi0. cutoff is the native
+    oscillator dimension (default 30). Optional esys supplies matching native
+    energies and oscillator eigenvector columns at this flux and cutoff.
+    Returns complex128 (return_dim,return_dim), without changing inputs.
+    scqubits input/diagonalization errors propagate. Without esys, diagonalize
+    this circuit at the requested cutoff; existing default resolution is unchanged.
+    """
     from scqubits.core.fluxonium import Fluxonium
 
-    fluxonium = Fluxonium(
-        *params, flux=flux, cutoff=_SCALAR_QUB_CUTOFF, truncated_dim=return_dim
-    )
+    fluxonium = Fluxonium(*params, flux=flux, cutoff=cutoff, truncated_dim=return_dim)
     if esys is None:
         esys = fluxonium.eigensys(evals_count=return_dim)
-
     matrix_elements = fluxonium.n_operator(energy_esys=esys)
-
-    return matrix_elements[:return_dim, :return_dim]
+    return np.asarray(matrix_elements[:return_dim, :return_dim], dtype=np.complex128)
 
 
 def calculate_n_oper_vs_flux(

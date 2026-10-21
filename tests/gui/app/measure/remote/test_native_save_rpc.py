@@ -90,6 +90,51 @@ def native_save_rpc(
             qapp.processEvents()
 
 
+def test_analysis_reports_raw_identity_without_saving_measurement_data(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        unsaved = {"run_id": session.metadata.run_id, "saved": False}
+        before = call(sock, "tab.snapshot", {"tab_id": "tab"})["result"]["tabs"][0]
+        assert before.get("raw_data") == unsaved
+        started = call(sock, "tab.analyze", {"tab_id": "tab"})
+        assert started["ok"], started
+        assert started["result"]["raw_data"] == unsaved
+        operation = started["result"]["operation_id"]
+        # The accepted synthetic analysis always completes; timeout only guards deadlock.
+        finished = call(
+            sock, "operation.await", {"operation_id": operation, "timeout": 30}
+        )
+        assert finished["result"]["status"] == "finished", finished
+        result = call(
+            sock, "tab.get_analyze_result", {"tab_id": "tab", "operation_id": operation}
+        )
+        assert result["result"]["operation_state"]["raw_data"] == unsaved
+        saved_analysis = call(
+            sock,
+            "tab.save_artifacts",
+            {
+                "tab_id": "tab",
+                "artifacts": [{"section": "analysis", "name": "results"}],
+            },
+        )
+        assert saved_analysis["ok"], saved_analysis
+        after_analysis = call(sock, "tab.snapshot", {"tab_id": "tab"})["result"][
+            "tabs"
+        ][0]
+        assert after_analysis["run_id"] == session.metadata.run_id
+        assert after_analysis["raw_data"] == unsaved
+        assert not session.native_data_path.exists()
+        saved_raw = call(sock, "tab.save_data", {"tab_id": "tab"})
+        assert saved_raw["ok"], saved_raw
+        after_raw = call(sock, "tab.snapshot", {"tab_id": "tab"})["result"]["tabs"][0]
+        assert after_raw["raw_data"] == {
+            "run_id": session.metadata.run_id,
+            "saved": True,
+        }
+        assert session.native_data_path.is_file()
+
+
 def install_unbound_saved_capture(session: NativeSaveSession) -> None:
     """Keep the selected point's fixed names and values without storage capability."""
     captured = session.state.session_env.parameters

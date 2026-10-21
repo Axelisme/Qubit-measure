@@ -6,9 +6,9 @@ WIRE_VERSION; it reports GUI_VERSION without comparing it.
 
 from __future__ import annotations
 
-# Predictor sources use entry-local JSON filenames instead of qubit names.
-WIRE_VERSION = 111
+# Library/recipe diagnostics, explicit raw-save observations and predictor files.
+WIRE_VERSION = 113
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 144
+GUI_VERSION = 146

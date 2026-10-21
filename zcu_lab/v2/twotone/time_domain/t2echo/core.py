@@ -196,11 +196,28 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         fit_phase and return zero detune. Fringe detune is the observed MHz
         frequency, including the applied phase ramp, not a corrected qubit
         detuning. Return fit uncertainties and quality, and draw the fit.
-        Unknown fit_method values raise ValueError.
+        Zero source detune forces decay. For fringe eligibility use cfg.detune
+        when present, otherwise finite result.true_activate_detune. Missing
+        detune for a requested fringe fit raises ValueError; explicit decay needs
+        no detune source. Unknown fit_method values raise ValueError.
         """
         result = source.result
         fit_method = options.fit_method
         fit_phase = options.fit_phase
+        if fit_method not in ("fringe", "decay"):
+            raise ValueError(f"Unknown fit_method: {fit_method}")
+        if fit_method == "fringe":
+            detune_source = (
+                source.cfg.detune
+                if source.cfg is not None
+                else result.true_activate_detune
+            )
+            if detune_source is None or not np.isfinite(detune_source):
+                raise ValueError(
+                    "Echo fringe fit requires source detune: cfg or saved finite actual_detune"
+                )
+            if detune_source == 0.0:
+                fit_method = "decay"
 
         xs, signals = result.times, result.signals
 

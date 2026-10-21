@@ -426,7 +426,7 @@ class MuxReadout(AbsReadout):
         ch = self.cfg.gen_ch
         gens = prog.soccfg["gens"]
         if ch >= len(gens):
-            raise ValueError(f"{self.name}: missing generator {ch}")
+            raise ValueError(f"{self.name}.gen_ch: missing generator {ch}")
         gen = gens[ch]
         if (
             gen["type"] != "axis_sg_mixmux8_v1"
@@ -436,14 +436,16 @@ class MuxReadout(AbsReadout):
             or len(self.cfg.tones) > gen["n_tones"]
         ):
             raise ValueError(
-                f"{self.name}: generator {ch} requires mixmux8 mixer/gain/phase capacity"
+                f"{self.name}.gen_ch: generator {ch} requires mixmux8 mixer/gain/phase capacity"
             )
         if ch in prog.gen_chs:
-            raise ValueError(f"{self.name}: generator route {ch} already declared")
+            raise ValueError(
+                f"{self.name}.gen_ch: generator route {ch} already declared"
+            )
         cycles = prog.us2cycles(self.cfg.length, gen_ch=ch)
         if not 3 <= cycles < 2**32:
             raise ValueError(
-                f"{self.name}: generator {ch} rounded length must be 3..2**32-1 cycles"
+                f"{self.name}.length: generator {ch} rounded length must be 3..2**32-1 cycles"
             )
 
     def _validate_readouts(self, prog: ModularProgramV2) -> None:
@@ -453,7 +455,7 @@ class MuxReadout(AbsReadout):
         readouts = prog.soccfg["readouts"]
         for i, tone in enumerate(self.cfg.tones):
             ch = tone.ro_ch
-            where = f"{self.name}: tone {i} ro_ch {ch}"
+            where = f"{self.name}.tones[{i}].ro_ch: ADC {ch}"
             if ch >= len(readouts) or ch in channels or ch in prog.ro_chs:
                 raise ValueError(f"{where} missing or duplicate readout route")
             ro = readouts[ch]
@@ -475,7 +477,9 @@ class MuxReadout(AbsReadout):
             ):
                 raise ValueError(f"{where} invalid or duplicate PFB output/capacity")
             if prog.us2cycles(self.cfg.ro_length, ro_ch=ch) <= 0:
-                raise ValueError(f"{where} rounded ADC window must be positive")
+                raise ValueError(
+                    f"{self.name}.ro_length: ADC {ch} rounded window must be positive"
+                )
             channels.add(ch)
             ports.add(port)
 

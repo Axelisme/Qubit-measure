@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-21，mux 粗掃／命名更新
+**Last updated:** 2026-10-22，mux frequency preparation
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -36,7 +36,7 @@
 `mux/onetone_fine` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
-`mux/onetone_fine` adapter 從 group 的 resonators 產生 readout tones，保留既有 readout slot 的 scalar 初值。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
+`mux/onetone_fine` adapter 從 group 的 resonators 產生 readout tones。有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。缺 slot 時使用 blank mux 範本，通道、gain 與時長留空必填。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。FIT 共用 onetone/freq 的模型與 delay 選項，逐 tone 隔離數值失敗。沒有歷史 cfg 時拒絕 FIT。
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。
@@ -48,17 +48,22 @@ MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯
 [Measure support](_support/measure/README.md#mux-綁定驗證)。
 Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
 七個 mux qubit Forms 有 readout slot 時引用 library，完整 tones 與 scalar 設定取自該模組。
-缺 slot 時從 blank mux 範本加 group tones。Mux/onetone_fine 使用副本或 blank 範本，並以 group tones 與 ringup timing 作初值。
-Group tones 的 freq 使用 resonator 校準值，gain 初值為 0.1，ro_ch 按 group 順序從 0 起算。
+缺 slot 時從 blank mux 範本加 group tones，只填 resonator 校準頻率與名稱 label。
+Gain、ro_ch、pulse length 與 ro_length 留空必填，頻率缺失或無效時也留空必填。
+`mux/onetone_fine` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
+只有這條 ringup-copy 路徑將 tone gain 設為 0.1，ro_ch 按 group 順序從 0 起算。
+缺 slot 時仍使用 blank 範本，ringup timing 不補齊必填時長。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
-Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
+Library 的 `readout/mux:blank` 不預填必需的通道、gain 或時長。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
 九個 FTF Forms 有 readout slot 時同樣引用 library。八張缺 slot 時提供 blank mux 範本，rb 缺 slot 時保持 Invalid。
 操作員必須確認通道與功率；範本不是硬體安全預設。
 
 ## Mux qubit numeric cores
 
 `mux/twotone_spectrum` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。
-兩個 `run()` 各自在 core 直接寫出掃描與 pulse 序列，每點 compile 一次。
+兩個 `run()` 各自在 core 直接寫出掃描與 pulse 序列。
+Twotone spectrum 用一個 program 的共用硬體 loop 掃 drive DAC 頻率，mux readout 保持固定。
+Amp Rabi 仍逐點 compile。
 共同 reset 後，既有 Join 讓 drives 同時起跑，短 branch 完成後等待當點最長 branch，
 再做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。
 七個 mux qubit adapters 已註冊在 catalog，透過各 leaf 的 native `form.py` 生成完整
@@ -69,11 +74,12 @@ Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。Mux Forms 的 fa
 [mux recipe guide](../recipes/mux-guide.md)。
 各 leaf guide 說明 GUI、保存來源及 explicit Apply 操作，core 本身仍不依賴 GUI。
 
-`_support.mux_liveplot.draw_mux_magnitudes` 為七個實驗提供 combined `measurement` 圖，
-保留原有 `measurement_i`。Legend 取自 source cfg 原始 index/name，順序跟 participants。
-每線保留自己的 actual x；delay 類共用 requested-delay 軸，GE 另標 probe off/on。
-Helper 先複製本次座標、magnitude 及標籤，再經公開 `Plots.draw` 在 host owner 繪圖。
-Worker 不持有 active artists。它不讀 Form、改 acquisition 或將 partial NaN 補成零。
+Mux 實驗（onetone_find 除外）每個參與 tone 各有一張 `measurement_i`，
+不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
+requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩個 preparation。
+`_support.singleshot.plot.draw_ge_scatter` 供單 qubit 與 mux GE 共用，先複製 IQ，
+再經公開 `Plots.draw` 在 host owner 繪圖。Worker 不持有 active artists，
+partial NaN 不補零。
 
 七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[str]`。
 每個元素有固定 qubit `name` 與必填 drive；pulse sweep 類另有自己的 sweep，
@@ -84,12 +90,17 @@ Participants 非空、不重複，名稱必須存在。Runtime 按名稱順序�
 例如 Q3／Q1 對應 `[2, 0]`。GE raw、analysis 與 native persistence 同樣保留該順序。
 RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 group snapshot。
 
-`prepare_frequency_scan(cfg, soccfg=...)` 與 `prepare_amplitude_scan(cfg, soccfg=...)`
-各自按 participants 查出原始 indices，回傳 `_support.mux.MuxPulseScan`。
-其 `indices` 保留原始序號，`coordinates` 是各自硬體 grid 的 `(K,P)` 浮點陣列，
-`point_pulses` 是 `(P,K)` 固定 numeric pulse cfg，不展開 Cartesian product。
-這些入口只準備資料，不 acquire；各 public `run()` 直接寫出 common-start zip 排程。
-Frequency／gain conversion 分別沿既有 `round_zcu_freq`／`round_zcu_gain`。
+`prepare_frequency_scan(cfg, soccfg=...)` 按 participants 查出原始 indices，
+回傳 `mux.twotone_spectrum.MuxFreqScan`。
+其 `indices` 保留 participants 順序的原始序號，`coordinates` 是各 drive 硬體 grid
+上的 `(K,P)` float64 MHz 陣列。座標沿 `sweep2array(..., "freq", ...)` 的硬體
+start/span/step 量化。Frequency preparation 不建立逐點 pulse；
+`run()` 用各 tone 的 `sweep2param("point", tone.sweep)` 建立 symbolic drive。
+`prepare_amplitude_scan(cfg, soccfg=...)` 仍回傳 `_support.mux.MuxPulseScan`，
+包含原始 `indices`、量化 gain `coordinates (K,P)` 及
+固定 numeric `point_pulses (P,K)`。Gain conversion 沿既有 `round_zcu_gain`。
+這些入口只準備資料，不 acquire；各 public `run()` 直接寫出 common-start zip 排程，
+不展開 Cartesian product。
 
 `MuxSweepResult` 保存原始 `tone_indices`、各自量化的 `coordinates` 及平均 complex IQ `signals`。
 兩個矩陣都是 `(K,P)`。NaN IQ 表示未取得的 partial data，不表示成功。
@@ -100,7 +111,8 @@ Freq 沿用單 qubit 的 magnitude/background transform 與 linewidth fitter；A
 Native mapping 使用 `coordinates`／`signals` 兩個 variables，共享 Point／Tone axes。
 Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
 Analyze／Save 使用 explicit RunRecord；Load 還原同次完整 tones cfg、原始 indices、獨立數值座標與 IQ。
-它們不讀目前 Form 或 library。取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
+它們不讀目前 Form 或 library。Freq 取消保留全 sweep 已完成 rounds 的平均；
+Amp Rabi 取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
 Caller 先呼叫 RunContext.cancel_signal.raise_if_error()，不把 failure 的 partial data 報為成功。
 Numeric core 不保存 writeback destination，也不發 proposal。
 

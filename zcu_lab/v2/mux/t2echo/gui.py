@@ -29,7 +29,10 @@ from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2._support.mux_coherence import MuxCoherenceResult
 from zcu_lab.v2._support.mux_coherence_analysis import MuxCoherenceFit
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
-from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAnalyzeParams
+from zcu_lab.v2.twotone.time_domain.t2echo.gui import (
+    T2EchoAnalyzeParams,
+    coherence_review_note,
+)
 
 from .core import MuxT2EchoCfg, MuxT2EchoExp
 from .form import make_form
@@ -102,7 +105,10 @@ class MuxT2EchoAdapter(
         Missing capture returns no items. Captured bindings must match any source
         cfg names/count; errors propagate. Partial/nonfinite rows and failed fits
         produce no calibration items. Pulse proposals copy source cfg only, never
-        current library values. This method neither writes nor applies proposals.
+        current library values. T2 and its sample share the coherence review gate:
+        r2 >=0.9, normalized RMS <=0.1 and error/T2 <=0.5. Poor or unavailable
+        quality leaves candidates unselected with reasons; users may override.
+        This method neither writes nor applies proposals.
         """
         snapshot = req.run_result.cfg
         names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
@@ -117,6 +123,7 @@ class MuxT2EchoAdapter(
             ):
                 continue
             qubit = qubits[outcome.index]
+            note = coherence_review_note(outcome.t2, outcome.t2_err, outcome.quality)
             row_items: list[WritebackItem] = []
             row_items.extend(
                 [
@@ -124,6 +131,8 @@ class MuxT2EchoAdapter(
                         target_name=f"{qubit}.t2e",
                         description="t2e coherence time (us)",
                         proposed_value=outcome.t2,
+                        selected=note is None,
+                        note=note,
                     ),
                     SampleWriteback(
                         target_name=qubit,
@@ -132,6 +141,8 @@ class MuxT2EchoAdapter(
                             "t2e_us": outcome.t2,
                             "t2e_err_us": outcome.t2_err,
                         },
+                        selected=note is None,
+                        note=note,
                     ),
                 ]
             )

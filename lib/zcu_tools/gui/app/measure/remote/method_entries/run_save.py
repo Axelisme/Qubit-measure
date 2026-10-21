@@ -22,7 +22,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "admission. Use wait(op=handle) for terminal "
             "status, failure/cancellation and Send & Stop feedback. The GUI "
             "returns an operation_id, which MCP exposes as {handle}; starting "
-            "is not completion. After completion, read result state with "
+            "is not completion. Run completion does not save raw data; call "
+            "tab.save_data explicitly to save it. tab.snapshot.raw_data reports "
+            "the acquisition run_id and whether measurement_data is fully saved. "
+            "After completion, read result state with "
             "rpc_call on tab.snapshot, or the run figure with rpc_call on "
             "tab.get_figure using subtab_id=run.",
             (

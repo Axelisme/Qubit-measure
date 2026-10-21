@@ -54,6 +54,7 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.context.library import library_key_kind
 
 from .adapter import AdapterGuide, SessionEnv
 from .events.completion import (
@@ -102,6 +103,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
+    from zcu_tools.plotting.figures import FigureCollection
 
     from .artifacts import SaveControlPort
     from .services import AppServices
@@ -160,6 +162,16 @@ class RenderHost(Protocol):
     The worker captures the pane's container at start; switching the visible pane
     does not change the routing target. Save/Guide have no container (placeholder).
     """
+
+    def present_figures(
+        self, tab_id: str, pane: str, figures: FigureCollection
+    ) -> None:
+        """Borrow original names on the Qt owner after attachment; errors propagate.
+
+        Presentation references end at clear/replacement; Figures remain owned
+        by their operation. A closed tab is a no-op.
+        """
+        ...
 
     def make_run_container(self, tab_id: str) -> FigureContainer | None:
         """Run pane FigureContainer (live plot, view-only)."""
@@ -1102,8 +1114,10 @@ class Controller(SessionControllerMixin):
 
         item_kind is 'module' or 'waveform' and must match the template. name
         is an unused '<component>.<partition>.<entry>' root in that family. Template, capture, Form validation,
-        conflict and I/O failures propagate without a write. Expr seeds use
-        the fixed alias-aware capture, and bound Slots keep child library keys.
+        conflict and I/O failures propagate without a write. Placeholders bind
+        to resolved same-named aliases, never the component in name. Missing
+        aliases raise InvalidInputError naming the required bindings. Expr seeds
+        use the fixed alias-aware capture, and bound Slots keep child library keys.
         The new state uses template_input's specialized model. Optional edits
         map model-field paths to Form input JSON and are applied as one batch
         before validation. Invalid edits or Form results raise LibraryEntryInvalid
@@ -1118,6 +1132,18 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"Template {template_id!r} is a {template_kind}, not a {item_kind}."
             )
+        try:
+            name_kind = library_key_kind(name)
+        except ValueError as exc:
+            raise InvalidInputError(
+                f"Invalid library name {name!r}; use component.partition.name. "
+                "Module partitions: pulses, readout, reset; waveform partition: waveforms."
+            ) from exc
+        if name_kind != item_kind:
+            raise InvalidInputError(
+                f"Name {name!r} must use component.partition.name for {item_kind}. "
+                "Module partitions: pulses, readout, reset; waveform partition: waveforms."
+            )
         parameters = self._context_control.read_context()
         keys = (
             parameters.library.module_keys()
@@ -1128,9 +1154,21 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists."
             )
+        bindings = {
+            row.alias: row.resolved
+            for row in parameters.resolved_aliases()
+            if row.resolved is not None
+        }
+        missing = self.get_template(template_id).placeholder_names() - bindings.keys()
+        if missing:
+            aliases = ", ".join(f"${alias}" for alias in sorted(missing))
+            raise InvalidInputError(
+                f"Template {template_id!r} requires resolved aliases {aliases}. "
+                "Bind these names in Aliases before creating the entry."
+            )
         entry = new_library_entry(
             parameters,
-            Template(template_id),
+            Template(template_id, bindings=bindings),
             self._registry.templates,
             arb_names=self._arb_waveform_svc.list_data_keys(),
         )

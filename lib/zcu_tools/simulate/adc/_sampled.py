@@ -29,13 +29,14 @@ class SampledLine:
         output: ComplexArray,
         omega: float,
     ):
-        n = len(q)
-        self._generator = np.zeros((4 * n, 4 * n), dtype=np.complex128)
-        self._generator[: 2 * n, : 2 * n] = m + 1j * omega * np.eye(2 * n)
-        self._generator[: 2 * n, 2 * n : 3 * n] = b
-        self._generator[2 * n : 3 * n, 2 * n : 3 * n] = q
-        self._generator[2 * n : 3 * n, 3 * n :] = np.eye(n)
-        self._generator[3 * n :, 3 * n :] = q
+        self._states = n = len(q)
+        self._moments = k = len(m)
+        self._generator = np.zeros((k + 2 * n, k + 2 * n), dtype=np.complex128)
+        self._generator[:k, :k] = m + 1j * omega * np.eye(k)
+        self._generator[:k, k : k + n] = b
+        self._generator[k : k + n, k : k + n] = q
+        self._generator[k : k + n, k + n :] = np.eye(n)
+        self._generator[k + n :, k + n :] = q
         self._blocks: dict[
             float, tuple[ComplexArray, ComplexArray, ComplexArray, ComplexArray]
         ] = {}
@@ -43,7 +44,7 @@ class SampledLine:
         self._output, self._omega = output, omega
 
     def _advance(self, populations, moments, dt, amplitude, slope):
-        n = len(populations)
+        n, k = self._states, self._moments
         if not dt:
             return populations, moments
         if dt not in self._blocks:
@@ -56,10 +57,10 @@ class SampledLine:
             if len(self._blocks) == 128:
                 self._blocks.pop(next(iter(self._blocks)))
             self._blocks[dt] = (
-                step[3 * n :, 3 * n :].copy(),
-                step[: 2 * n, : 2 * n].copy(),
-                step[: 2 * n, 2 * n : 3 * n].copy(),
-                step[: 2 * n, 3 * n :].copy(),
+                step[k + n :, k + n :].copy(),
+                step[:k, :k].copy(),
+                step[:k, k : k + n].copy(),
+                step[:k, k + n :].copy(),
             )
         ep, em, c0, c1 = self._blocks[dt]
         return ep @ populations, em @ moments + (
@@ -77,7 +78,8 @@ class SampledLine:
         envelope = pulse.envelope
         if not isinstance(envelope, PiecewiseLinearEnvelope):
             return None
-        n = self._generator.shape[0] // 4
+        n = self._states
+        c = self._moments // n
         omega, output = self._omega, self._output
         start = pulse.start_ns
         end = max(start, float(times[-1]))
@@ -94,7 +96,7 @@ class SampledLine:
             )
         )
         populations = np.eye(n, dtype=np.complex128)
-        moments = np.zeros((2 * n, n), dtype=np.complex128)
+        moments = np.zeros((self._moments, n), dtype=np.complex128)
         outgoing = np.zeros((len(times), n), dtype=np.complex128)
         scale = pulse.amplitude * np.exp(1j * pulse.phase_rad)
         for left, right in zip(corners[:-1], corners[1:], strict=True):
@@ -132,9 +134,9 @@ class SampledLine:
         at_start = times == start
         if pulse.end_ns > start:
             outgoing[at_start] = scale * envelope(0.0)
-        state = np.empty((n, 3, n), dtype=np.complex128)
+        state = np.empty((n, 1 + c, n), dtype=np.complex128)
         state[:, 0, :] = populations
-        state[:, 1:, :] = moments.reshape(n, 2, n)
+        state[:, 1:, :] = moments.reshape(n, c, n)
         if not np.isfinite(state).all() or not np.isfinite(outgoing).all():
             return None
         return outgoing, state

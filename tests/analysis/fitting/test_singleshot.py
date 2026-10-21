@@ -49,6 +49,37 @@ def _make_overlapping_histogram(
     return g_pdf, e_pdf
 
 
+@pytest.mark.parametrize("swap_labels", [False, True])
+def test_ge_boundary_peak_recovers_mixed_populations_without_an_outer_tail(swap_labels):
+    xs = np.linspace(-1.0, 3.0, 81)
+    truth = (-1.0, 1.0, 0.3, 0.65, 0.35, 0.2, 0.3)
+    ground = calc_population_pdf(xs, *truth)
+    excited = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
+    if swap_labels:
+        ground, excited = excited, ground
+    try:
+        fitted, covariance = fit_singleshot(xs, ground, excited)
+    except ValueError as error:
+        pytest.fail(
+            f"A finite boundary-peak histogram must fit without NaN width: {error}"
+        )
+    expected = truth if not swap_labels else (1.0, -1.0, 0.3, 0.65, 0.35, 0.8, 0.3)
+    np.testing.assert_allclose(fitted, expected, atol=0.03)
+    assert np.isfinite(covariance).all()
+
+
+@pytest.mark.parametrize("invalid", [np.nan, np.inf, -np.inf])
+def test_ge_rejects_nonfinite_supplied_initial_parameters(invalid):
+    xs = np.linspace(-3.0, 3.0, 61)
+    truth = (-1.0, 1.0, 0.3, 0.65, 0.35, 0.2, 0.3)
+    ground = calc_population_pdf(xs, *truth)
+    excited = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
+    with pytest.raises(ValueError, match="initial.*finite"):
+        fit_singleshot(
+            xs, ground, excited, fitparams=[-1.0, 1.0, invalid, 0.65, 0.35, 0.2, 0.3]
+        )
+
+
 def test_fit_singleshot_no_raise_when_s_exceeds_xs_range():
     # Reproduce the ValueError: "Initial guess is outside of provided bounds" that occurs
     # when the data-derived sigma s = 0.5*(sigma_g + sigma_e) exceeds xs[-1]-xs[0].

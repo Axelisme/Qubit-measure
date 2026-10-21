@@ -26,10 +26,17 @@ def get_rotate_angle(
 def fit_ge_by_center(
     signals: NDArray[np.complex128],
     *,
-    plots: Plots,
+    plots: Plots | None = None,
     options: GEFitOptions | None = None,
     figure_name: str = "fit",
 ) -> tuple[float, NDArray[float64], GE_FitResult]:
+    """Fit paired IQ (2,N); plots=None returns calibration without diagnostics.
+
+    IQ uses normalized ADC units. options controls the shared histogram model;
+    figure_name names the 2x2 diagnostic when plots is supplied. Caller owns
+    plots finish/release. Numerical failures raise GENumericalError with their
+    cause; invalid input and plotting errors propagate from the shared fitter.
+    """
     return fitting_ge_and_plot(
         signals, get_rotate_angle, plots=plots, options=options, figure_name=figure_name
     )

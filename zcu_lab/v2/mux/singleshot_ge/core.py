@@ -196,8 +196,8 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
+from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
 
 from .analysis import (
     MuxGEAnalysis,
@@ -458,7 +458,7 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         without averaging, sorting or classification. K follows participants;
         the two rows mean probe off/on, not guaranteed pure ground/excited states.
         Use one round with reps=shots, leaving config unchanged.
-        context supplies hardware, stop signal and live magnitude plots. Missing
+        context supplies hardware, stop signal and live IQ scatter plots. Missing
         preparations remain NaN; check context.cancel_signal.raise_if_error()
         before reporting success. Invalid config or program builds raise.
         """
@@ -480,28 +480,14 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         shots = np.arange(cfg.shots, dtype=np.int64)
 
         # 2. Show both preparations without averaging away their IQ spread.
-        viewers = [
-            context.plots.liveplot_1d(
-                f"measurement_{i}", "Shot Index", "Magnitude (a.u.)", num_lines=2
-            )
-            for i in indices
-        ]
-
         def update(data: NDArray[np.complex128]) -> None:
-            for row, viewer in enumerate(viewers):
-                viewer.update(shots.astype(np.float64), np.abs(data[:, :, row]))
-            traces = data.transpose(2, 0, 1).reshape(2 * len(indices), cfg.shots)
-            draw_mux_magnitudes(
-                context.plots,
-                np.broadcast_to(shots.astype(np.float64), traces.shape),
-                traces,
-                [
-                    f"{index}: {cfg.tones[index].name}, probe {preparation}"
-                    for index in indices
-                    for preparation in ("off", "on")
-                ],
-                "Shot Index",
-            )
+            for row, index in enumerate(indices):
+                draw_ge_scatter(
+                    context.plots,
+                    f"measurement_{index}",
+                    data[:, :, row],
+                    title=f"{index}: {cfg.tones[index].name}",
+                )
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
         with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:

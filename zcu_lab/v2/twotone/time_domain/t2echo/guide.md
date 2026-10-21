@@ -16,8 +16,13 @@ Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout 
 
 ## Typical writeback
 
+Initial T2/sample selection requires positive finite T2, r2 at least 0.9,
+normalized residual RMS at most 0.1 and relative T2 error at most 0.5.
+Failed or unavailable checks leave candidates unselected with explanatory notes.
+You may select them manually after reviewing the source and fit.
+
 Proposes fitted qubit.t2e (us) to the captured qubit and working point, including loaded data with IQ only. Frequency and module slots stay unchanged. Proposals keep the qubit and working point captured for this result even after focus changes. An independent t2e_us/t2e_err_us sample uses the captured Run bias when device evidence is available.
 
 ## Recommended
 
-Enable Fit phase offset to fit a free fringe phase; it defaults to fixed phase and applies to fringe fits only. Set the 'Detune ratio (fringes/step)' input (default 0.1). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the final pi/2 pulse phase is detune_ratio / sweep step, leaving a residual oscillation on the echo decay. Analysis 'Fit method' defaults to 'fringe' (matching the nonzero default ratio) so the fringe frequency is fit; the computed detune is used for analysis only. Set the ratio to 0 and switch 'Fit method' to 'decay' for a standard echo (pure exponential decay → T2E). A total-delay sweep reaching a few T2E lets the echo decay; the first sweep point is dropped in the fit.
+Enable Fit phase offset to fit a free fringe phase; it defaults to fixed phase and applies to fringe fits only. Set the 'Detune ratio (fringes/step)' input (default 0.1). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the final pi/2 pulse phase is detune_ratio / sweep step, leaving a residual oscillation on the echo decay. Analysis 'Fit method' defaults to 'decay'. Select 'fringe' explicitly only for nonzero source detune; choosing 'decay' remains valid. Zero source detune forces decay even when fringe is selected. Analysis uses the saved cfg detune, or finite saved actual detune without cfg. A fringe request without either source reports a missing-detune error; explicit decay still works. Set the ratio to 0 for a standard echo (pure exponential decay → T2E). A total-delay sweep reaching a few T2E lets the echo decay; the first sweep point is dropped in the fit.

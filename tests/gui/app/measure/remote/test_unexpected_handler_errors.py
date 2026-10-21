@@ -59,6 +59,8 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
     analyze_control.has_tab.return_value = True
     analyze_control.get_tab_snapshot.return_value = SimpleNamespace(
         interaction=SimpleNamespace(has_run_result=True),
+        artifacts=(),
+        run=None,
         analysis=SimpleNamespace(params=_AnalyzeParams(), has_writeback_draft=False),
         post_analysis=None,
         capabilities=SimpleNamespace(analysis=None),

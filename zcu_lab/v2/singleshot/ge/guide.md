@@ -18,7 +18,31 @@ These starting values remain editable and separate from calibration writeback. A
 
 Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.reset` for optional reset, and `$qubit.module.readout` for readout. Missing required slots use pi_pulse/readout templates; missing optional slots stay disabled. Run uses the Open/Reset snapshot.
 
+## Assignment and model quality
+
+Fidelity is the empirical, equal-weight assignment of the two prepared labels at
+the best projected-IQ histogram boundary. Probe off/on are preparation labels,
+not guaranteed pure g/e states. Thermal mixing and imperfect pulses remain in
+this score. A threshold can also exploit small differences inside one cluster;
+a high prepared-label score does not establish pure-state readout fidelity.
+
+Initial populations come from the fitted histogram model. Post-analysis instead
+classifies shots by nearest-center regions and a radius, then solves the fitted
+population matrix to remove preparation mixing. It does not reuse the primary
+histogram threshold. These outputs need not equal the prepared-label score.
+Low joint r2 means the histogram model does not describe the observations;
+then fitted populations and population-corrected post results are not reliable
+calibration evidence. Inspect raw clusters, residuals and uncertainty before
+using centers, width or the confusion matrix.
+
 ## Typical writeback
+
+Primary candidates are initially selected only when joint r2 is at least 0.9,
+normalized residual RMS at most 0.1 and relative width error at most 0.5.
+Post radius/confusion also require a finite condition number at most 10.
+Required missing/nonfinite metrics or their invalid issues leave candidates
+unselected with notes. Unrelated fixed-zero parameter issues do not reject them.
+You may select a candidate manually after inspecting the model and raw IQ.
 
 Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
 
@@ -28,6 +52,16 @@ Writeback targets `$qubit.ext.readout_cal` for the source qubit when that source
 
 ## Recommended
 
-Set Initial State to the predominant state after reset/init and before the probe pi-pulse. This labels the two acquisitions; each can contain a mixture of states. Use a large 'shots' (~1e5) so the IQ histograms are well sampled; the default analysis method is 'pca'. Analysis also exposes histogram log scale, T1 alignment, and an optional shared length ratio. Run once the qubit pi-pulse and the readout are both calibrated. A clean two-cluster IQ scatter indicates good discrimination. Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
+Set Initial State to the predominant state after reset/init and before the probe pi-pulse.
+This labels the two acquisitions; each can contain a mixture of states.
+Use a large 'shots' (~1e5) so the IQ histograms are well sampled.
+The default analysis method is 'pca'.
+Analysis also exposes histogram log scale, T1 alignment, and an optional shared length ratio.
+Run once the qubit pi-pulse and the readout are both calibrated.
+Run and Analyze each show one IQ scatter, with blue g-preparation and red e-preparation shots.
+The live labels mean probe off/on; Analyze maps them using Initial State.
+Histogram fitting remains internal, so histogram log scale does not change the scatter.
+Two separated IQ clouds indicate readout separation.
+Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
 
 **Last updated:** 2026-10-21
