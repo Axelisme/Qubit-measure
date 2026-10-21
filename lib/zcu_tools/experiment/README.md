@@ -32,8 +32,13 @@ fixed-coordinate joint circuits, explicit evolution/population conversion and th
 single-receiver ADC. It uses the same bundle and acquisition contracts, without
 adding GUI physics or exposing state labels to ordinary Run metadata.
 
-`readout_plan.py` owns shared template-to-ADC waveform conversion without
-settings or circuit physics. It partitions terminal readout and earlier cavity
+[`single_fluxonium`](single_fluxonium/README.md) plans complete microwave/fast-flux
+timelines and assembles a one-source mock environment. Its acquisition remains
+explicitly unavailable pending single-cavity readout integration.
+
+`readout_plan.py` owns shared QICK drive/readout waveform conversion without
+settings or circuit physics. `drive_track` detaches microwave slots with the
+same support, carrier-phase and envelope semantics for both environments. It partitions terminal readout and earlier cavity
 drives, detaches envelopes, deduplicates pulse/grid contents and converts
 common-origin carrier phases to pulse-local phases. Environment planners supply
 `ReadoutDrive` calibration and retain responsibility for receiver binding,

@@ -7,13 +7,12 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
-    EventSlot,
     TimelineTemplate,
 )
 from zcu_tools.experiment.readout_plan import (
     ReadoutDrive,
     classify_readout,
-    envelope_specs,
+    drive_track,
     local_readout_pulses,
     readout_contents,
 )
@@ -24,7 +23,6 @@ from zcu_tools.simulate.adc import (
     Receiver,
 )
 from zcu_tools.simulate.evolution import (
-    DriveTrack,
     EnvelopeSpec,
     ModelSource,
     SegmentShift,
@@ -119,25 +117,6 @@ class FTFTemplatePlan:
     cavity_drives: tuple[tuple[ReadoutPulse, ...], ...]
 
 
-def _track(event: EventSlot, port: str, memo: dict[int, EnvelopeSpec]) -> DriveTrack:
-    start = event.start_us * 1000
-    # Match the old numeric owner's absolute nearest-2-ns support, ties even.
-    quantized = 2 * np.rint(start / 2)
-    end = 2 * np.rint((start + event.duration_us * 1000) / 2)
-    return DriveTrack(
-        port,
-        quantized,
-        end - quantized,
-        event.frequency_mhz / 1000,
-        np.deg2rad(event.phase_deg)
-        - 2 * np.pi * event.frequency_mhz * event.phase_reference_us,
-        event.gain,
-        envelope_specs(event, memo),
-        event.envelope_index,
-        event.active,
-    )
-
-
 def _timeline_batch(
     settings: FTFSettings,
     joint: JointModel,
@@ -153,7 +132,7 @@ def _timeline_batch(
             continue
         if event.gen_ch not in microwave:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
-        drives.append(_track(event, microwave[event.gen_ch], memo))
+        drives.append(drive_track(event, microwave[event.gen_ch], memo))
     fixed_dc = schedule(
         (),
         dc_flux=joint.dc_flux,

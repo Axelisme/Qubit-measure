@@ -1,4 +1,4 @@
-"""Shared QICK template-to-ADC waveform conversion without environment physics."""
+"""Shared QICK drive/readout waveform conversion without environment physics."""
 
 from dataclasses import dataclass, replace
 from typing import Literal
@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import EventSlot, ReadoutSlot, TimelineTemplate
 from zcu_tools.simulate.adc import PiecewiseLinearEnvelope, ReadoutPulse, SampleGrid
-from zcu_tools.simulate.evolution import EnvelopeSpec
+from zcu_tools.simulate.evolution import DriveTrack, EnvelopeSpec
 
 
 @dataclass(frozen=True)
@@ -96,6 +96,39 @@ def envelope_specs(
             )
         specs.append(memo[key])
     return tuple(specs)
+
+
+def drive_track(
+    event: EventSlot, port: str, memo: dict[int, EnvelopeSpec]
+) -> DriveTrack:
+    """Detach one QICK drive slot into an evolution track in ns/GHz/radians.
+
+    event has the aligned per-point arrays defined by core.simulation.EventSlot
+    in us/MHz/degrees. port is a nonempty numeric SecularDrive name, not a
+    generator index. memo follows envelope_specs' template-local lifetime.
+    Absolute support endpoints round independently to nearest 2 ns, ties even.
+    Phase retains the common t=0 carrier origin, including phase_reference_us.
+    Signed gains and complex samples are unchanged; inactive rows remain masked.
+    Returned arrays own read-only copies. No calibration or physics is applied.
+    Invalid supports, shapes, sample values or indices raise ValueError through
+    DriveTrack/EnvelopeSpec. Inputs are not modified.
+    """
+    start = event.start_us * 1000
+    # Match the old numeric owner's absolute nearest-2-ns support, ties even.
+    quantized = 2 * np.rint(start / 2)
+    end = 2 * np.rint((start + event.duration_us * 1000) / 2)
+    return DriveTrack(
+        port,
+        quantized,
+        end - quantized,
+        event.frequency_mhz / 1000,
+        np.deg2rad(event.phase_deg)
+        - 2 * np.pi * event.frequency_mhz * event.phase_reference_us,
+        event.gain,
+        envelope_specs(event, memo),
+        event.envelope_index,
+        event.active,
+    )
 
 
 def classify_readout(
