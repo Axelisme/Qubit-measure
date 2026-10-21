@@ -9,6 +9,7 @@ from .coherence import (
     calculate_eff_t1_with,
     calculate_purcell_t1_vs_flux,
 )
+from .coherence.rates import FluxoniumNoise, calculate_directional_loss_rates
 from .dispersive import (
     calculate_chi_sweep,
     calculate_chi_vs_flux,
@@ -28,6 +29,12 @@ from .matrix_element import (
     calculate_sin_phi_oper_vs_flux,
     calculate_system_n_oper_vs_flux,
 )
+from .model import DispersiveResonator, SingleFluxoniumModel
+from .operators import (
+    FluxoniumOperators,
+    calculate_eigensystem,
+    calculate_oscillator_operators,
+)
 from .physical_fit import (
     FluxoniumLocalFitResult,
     FluxoniumModelSnapshot,
@@ -44,6 +51,13 @@ from .prediction import (
 )
 
 __all__ = [
+    "SingleFluxoniumModel",
+    "DispersiveResonator",
+    "FluxoniumNoise",
+    "FluxoniumOperators",
+    "calculate_eigensystem",
+    "calculate_oscillator_operators",
+    "calculate_directional_loss_rates",
     # coherence
     "calculate_eff_t1",
     "calculate_eff_t1_vs_flux",

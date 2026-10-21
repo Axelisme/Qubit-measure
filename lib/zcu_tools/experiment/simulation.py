@@ -2,6 +2,7 @@
 
 import importlib.util
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
@@ -38,6 +39,11 @@ class SimulationEnvironment:
     startup FakeDevices define the modeled addresses for create_device. Their
     identities live only in FakeDevice's process-wide class container; this
     environment retains only address metadata, not a second instance registry.
+    close_backend optionally releases backend-owned numeric state. The host calls
+    it once after all acquisition work has drained. None leaves backend release
+    to garbage collection. Callback errors propagate to the host; the callback
+    never owns drivers. Hosts must still perform their separate device cleanup,
+    including when backend cleanup fails.
     """
 
     soc: SimulationSoc
@@ -45,6 +51,7 @@ class SimulationEnvironment:
     devices: DeviceManager
     description: str
     warmup: EnvironmentWarmup | None = None
+    close_backend: Callable[[], None] | None = None
     _fake_addresses: frozenset[str] = field(init=False, repr=False)
 
     def create_device(self, type_name: str, address: str) -> FakeDevice:

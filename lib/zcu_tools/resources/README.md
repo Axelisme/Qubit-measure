@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-21，Single-fluxonium settings 與共用 simulation YAML/schema
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -8,13 +8,14 @@
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
 - `predictor_file.py` 擁有 `zcu.predictor` v1 JSON 的具名讀寫。它依模型名稱使用 simulate 的 nullable 參數型別，驗證欄名、有限數值與來源 metadata。`validate_predictor_file(PredictorFile)` 提供不做 I/O 的候選驗證，與 load/save 共用表示規則，供 dry-run 使用。完整性與物理約束由 `params.build_predictor()` 驗證。它不讀 component、alias 或舊 `params.json`。
-- `simulation_replay.py` owns opt-in private FTF input JSON, content integrity,
+- `simulation_replay.py` owns opt-in private FTF and single-fluxonium input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit
   JSON records of dtype, shape and flat values, with typed float64, int64 and bool
   reconstruction. Numeric manifests stay opaque and are verified by their numeric
   owner. Normal waveform assets and data.h5
   policies do not change. This module does not import program or simulate.
+- [`single_fluxonium/`](single_fluxonium/README.md) reads immutable single-qubit YAML with microwave, fast-flux and single-cavity routes. `simulation_schema.py` and `yaml.py` share neutral physical records and safe YAML decoding with FTF.
 - [`ftf/`](ftf/README.md) 讀取 immutable FTF YAML，擁有具名欄位、units、limits、接線與 noise PSD 的 field-path 診斷，不依賴 simulate、device 或 program。
 - [`qubit_params.py`](qubit_params.py) 直接管理 result scope 的 typed `params.json` handoff。公開讀寫先重新讀取 JSON，寫入採原子替換；方法與 section 規則見 [qubit_params.md](qubit_params.md)。
 - [`sample_table/`](sample_table/README.md) 管理條目的只追加 JSONL 樣本歷史、CSV 匯出與 opt-in v2 欄位協定。

@@ -1,6 +1,7 @@
 """Internal algorithm registry, resolved by stable Kernel.name."""
 
 from ..kernel import Kernel
+from .adiabatic_map import AdiabaticMapKernel
 from .common_frame_kernel import CommonFrameKernel
 from .dop853 import DOP853Kernel
 from .dyson import DysonKernel
@@ -19,6 +20,7 @@ from .t6 import T6Kernel
 
 REGISTRY: tuple[Kernel, ...] = (
     T4(),
+    AdiabaticMapKernel(),
     CommonFrameKernel(),
     T6Kernel(),
     FloquetPeriodKernel(),
