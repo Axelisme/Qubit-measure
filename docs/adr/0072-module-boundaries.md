@@ -101,7 +101,7 @@ Framework resources、session 與 program 不擁有這些關係。既有表單�
 Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.resonators`。
 一般 mux 與 FTF 表單在 `$mux.module.readout` 存在時引用 library，保留其完整 tones 與 scalar 設定。
 Mux 缺 slot 時用 blank 範本加 group tones；FTF 八張缺 slot 用 blank 範本，rb 保持 Invalid。
-Mux/onetone 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
+Mux/onetone_fine 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
 使用者於 2026-10-20 裁定：「不只twotone，應該說除了onetone與readout optimize/mist等本身就在處理readout相關，其他實驗的readout預設值請優先使用ref。」
 Framework 不認得 group/mux 或 resonators，
 也不新增 list alias、group registry、RPC 或保存格式。

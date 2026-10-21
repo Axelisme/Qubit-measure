@@ -327,9 +327,11 @@ class MuxOnetoneFindExp(PersistableExperiment[MuxOnetoneFindResult, MuxOnetoneFi
 
     Each host frequency builds a new readout-only program. Native persistence
     stores the complete cfg and complex IQ; the frequency axis is MHz in memory
-    and Hz on disk. The module's analyze function identifies coarse dips;
+    and Hz on disk. analyze identifies coarse dips with typed Options;
     writeback destinations belong to the GUI adapter.
     """
+
+    Options = MuxOnetoneFindOptions
 
     AXES_SPEC = AxesSpec(
         axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
@@ -382,3 +384,26 @@ class MuxOnetoneFindExp(PersistableExperiment[MuxOnetoneFindResult, MuxOnetoneFi
 
         signals_buffer.trigger_update(flush=True)
         return MuxOnetoneFindResult(freqs=freqs, signals=signals_buffer.array)
+
+    def analyze(
+        self,
+        source: RunRecord[MuxOnetoneFindCfg, MuxOnetoneFindResult],
+        options: MuxOnetoneFindOptions,
+        *,
+        plots: Plots,
+    ) -> tuple[ResonatorDip, ...]:
+        """Find N coarse dips after linear-background removal and Gaussian smoothing.
+
+        source supplies matching (P,) absolute MHz and complex IQ arrays in a.u.,
+        with P >= 11; cfg may be None. options supplies frequency-ordered names
+        and positive minimum separation in MHz. Return one ResonatorDip per
+        name, ordered by ascending frequency, with freq in MHz and prominence
+        depth in a.u. Publish raw/background and annotated corrected curves to
+        plots as 'fit'. No hardware, current Form, capture or writeback is used;
+        source and options are unchanged, and no analysis state is retained.
+
+        ValueError rejects invalid options, mismatched/short arrays, partial or
+        nonfinite scans, duplicate frequencies and fewer than N separated dips.
+        The module-level analyze documents the shared dip-selection policy.
+        """
+        return analyze(source, options, plots=plots)
