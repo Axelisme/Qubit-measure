@@ -1,5 +1,7 @@
 # v2 experiment authoring
 
+使用者入口見 [tutorial](../tutorial/README.md)。
+
 **Last updated:** 2026-10-19，分析政策也由各實驗 core 明示
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。

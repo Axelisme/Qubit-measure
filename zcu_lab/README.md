@@ -4,6 +4,8 @@
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
 
+使用者擴充入口見 [tutorial](tutorial/README.md)，程式碼規則與檢查方式見 [POLICY](POLICY.md)。
+
 `startup.py` 是 Measure composition 注入的預設腳本。它在 user cache 的 `gui/measure-session.json` 保存自己的 session 紀錄，不使用 repo config 或 cwd。啟動依序嘗試 SoC、各 device、entry／point，再開帶 authored input 的 tabs。每項失敗寫 log，device 失敗保留未連線列，entry／point 失敗就跳過 tabs，不等之後補來源。最後狀態列列出 restored／failed／skipped 數。正常關閉時，腳本在 driver 關閉前讀取當時的狀態並原子寫回。
 
 模板佔位名只由 lab 表單在 `Template.bindings` 明填，腳本不保存或恢復模板綁定。Setup 與每個 point 各有自己的 `aliases.yaml`。恢復 point 自然載入該表，這份 cache 不保存 alias、硬體設定或量測資料。`--clean` 不執行腳本，`--script` 完全取代預設腳本。
