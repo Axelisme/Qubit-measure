@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-21，Aliases 手動編輯與啟動預設列；predictor 參數與曲線 owner、空白欄位與獨立 SoC dialog／Setup 版面；腳本與 entry 保存分界、儀器 adapters、shared user cache、entry 資產、Inspect general/ext 與 point-local aliases
+**Last updated:** 2026-10-21，New entry 範本使用 point aliases 綁定佔位符；Aliases 手動編輯與啟動預設列；predictor 參數與曲線 owner、空白欄位與獨立 SoC dialog／Setup 版面；腳本與 entry 保存分界、儀器 adapters、shared user cache、entry 資產、Inspect general/ext 與 point-local aliases
 
 # gui/session/ — 量測 session core
 
@@ -14,7 +14,7 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 `ContextService.apply_writeback` 是底層 accept 入口，先驗 captured SavedPoint 的 entry、point label、存在性與文件，再綁定資源交共用 executor。Executor 先 append accepted event，再沿項目順序呼叫 setters。Parameter／library setter 要求目前已有選取的 point，sample-only 不要求 selection，直接追加 entry JSONL 並記 captured point label。直接呼叫底層入口時，未選 point 的 parameter／library 項目可在 append 後失敗；成功前綴與 accepted event 保留，首錯停止，不 rollback 或 retry。Application 的 `GuardService.check_writeback` 才在未選工作點時以 no_context 提前拒絕，提示先選或建立工作點。同 entry 現選 B 只允許開始命令，不把 captured SavedPoint(E, A) 改成 B；跨 entry 在 append 前拒絕。入口不寫記憶體、不自動建點。成功前綴依每項實際提交發布。樣本 preview／receipt 經 sample owner 讀 entry JSONL，不維護另一份樣本或延後 flush。
 
 模板綁定由呼叫端在 `Template.bindings` 明填。Session 與 startup 不提供模板預設值。
-Library 新建沿用這個契約，缺 binding 在展開時報 `ValueError`。
+Inspect 的 New 以目前 point 的同名 alias 解析目標填入 bindings。缺少或無法解析的 alias 顯示綁定錯誤並停用 Create，切換範本重新載入。其他 library 新建 caller 仍須明填，缺 binding 在展開時報 `ValueError`。
 
 ## Context、session environment 與 Run snapshot
 
@@ -63,7 +63,7 @@ session/
 ├── predictor_control.py — Read-only explicit-parameter queries and entry predictor file selection for dialog and remote callers
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
 ├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。Alias 表可在未選 point 時編輯；set 只改 memory，Apply 要求並保存目前 point。
-├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責
+├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責；template_placeholders 列出 seeds 需要的佔位符名稱，不讀來源或解析 alias
 ├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：entry-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
 ├── setup_control.py    — SetupControlPort／SetupControlFacet 擁有 entry open/new、point use/new 與 cached setup preferences，公開 devices facet 供 cached label 建議。SocControlPort／SocControlFacet 獨立提供連線、connection preferences、完成通知與 soccfg 查詢
 ├── controller_mixin.py — SessionControllerMixin：measure 的 session forwards；shared dialog 使用窄 control facet，entry open/new 直接交 SetupControlPort，不經 project identity 或 app Controller
@@ -101,8 +101,8 @@ session/
     ├── predictor_parameters.py — PredictorParameterEditor：持有 model／nullable 參數控件、已知欄位與 live lock，以及顯式 file 預填。完整替換以同步 callback 通知 dialog，保留立即刷新與 cache 保存次序及例外傳遞。
     ├── predictor_curves.py — PredictorCurveTabs：持有三張 canvas、toolbars、matrix tab capability 與跨圖 marker／highlight／xlim 協調。以明確 params 查詢原 predictor facet，不保留另一份物理模型。
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
-    ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口與 DialogPresenter，沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，draft 固定來源 entry／point。Clean 時隨切換換表，dirty 時保留；跨 target Apply 拒絕且不改兩端檔案，提示以 Revert 或重開載入目前 point。相同 label 的不同 entry 也是不同 target。同 target Apply 正常保存。關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
-    ├── new_entry_dialog.py — NewEntryDialog：Inspect 的 New。每次選範本讀一次 capture，以 new_library_entry 建新 State 與 FormEditor，欄位、折疊與捲動回範本初始；只保留使用者打過的 Name，未打時建議 default_name 並在同 family 內加 _2、_3 去重。Create 經 apply_library_change put，被拒時經 presenter 報錯並留在對話框
+    ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口與 DialogPresenter，沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。New 開啟共用 NewEntryDialog，範本缺 alias 時仍顯示對話框與綁定錯誤。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，draft 固定來源 entry／point。Clean 時隨切換換表，dirty 時保留；跨 target Apply 拒絕且不改兩端檔案，提示以 Revert 或重開載入目前 point。相同 label 的不同 entry 也是不同 target。同 target Apply 正常保存。關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
+    ├── new_entry_dialog.py — NewEntryDialog：Inspect 的 New。每次選範本讀一次 capture，以該 point 的同名 alias 解析目標綁定佔位符，再用 new_library_entry 建新 State 與 FormEditor。缺少或未解析的 alias 逐名顯示，停用 Create；切換範本可恢復。欄位、折疊與捲動回範本初始；只保留使用者打過的 Name，未打時建議 default_name 並在同 family 內加 _2、_3 去重。Create 經 apply_library_change put，被拒時經 presenter 報錯並留在對話框
     └── arb_waveform_dialog.py — ArbWaveformDialog：arb 資產管理對話框，只收 ArbWaveformPort。Measure 經具名 `arb_waveform` dialog 開，workflows 直接開同一類別
 ```
 
