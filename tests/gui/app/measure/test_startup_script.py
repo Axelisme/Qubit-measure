@@ -86,7 +86,6 @@ def startup_app(qapp, tmp_path, monkeypatch):
     finally:
         probe.release.set()
         behavior.close(assembly)
-        window.deleteLater()
         sys.excepthook = previous_hook
         qapp.processEvents()
 
@@ -602,7 +601,6 @@ def test_composition_starts_only_selected_synthetic_script(
             assert probe.calls == [selection]
     finally:
         behavior.close(assembly)
-        window.deleteLater()
         qapp.processEvents()
 
 
