@@ -488,8 +488,22 @@ def project_execution(
 
     if "pending_question" in snapshot:
         return _script_execution(snapshot)
-    recipes = tuple(item for item in recipes if isinstance(item, RecipeDefinition))
-    definition = definition if isinstance(definition, RecipeDefinition) else None
+    return _legacy_execution(
+        snapshot,
+        recipes=tuple(item for item in recipes if isinstance(item, RecipeDefinition)),
+        definition=definition if isinstance(definition, RecipeDefinition) else None,
+        detail=detail,
+    )
+
+
+def _legacy_execution(
+    snapshot: dict[str, Any],
+    *,
+    recipes: Sequence[RecipeDefinition],
+    definition: RecipeDefinition | None,
+    detail: ReplyDetail,
+) -> dict[str, Any]:
+    """Project legacy recipe or analysis captures with legacy-only declarations."""
     if detail == "full":
         full = deepcopy(snapshot)
         if "recipe" in snapshot:
