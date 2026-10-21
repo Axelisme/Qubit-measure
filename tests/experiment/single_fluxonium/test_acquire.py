@@ -69,7 +69,7 @@ def request_for(
             drive.frequency_mhz[:] = [frequency, frequency + 500]
         pulses.append(drive)
     if experiment == "fastflux_t1":
-        pulses.append(slot(2, 32, 8, frequency_mhz=0.0, phase_deg=0.0, gain=0.01))
+        pulses.append(slot(2, 32, 8, frequency_mhz=0.0, phase_deg=0.0, gain=0.1))
     readout = replace(
         slot(0, 40, 24, frequency_mhz=7000.0, phase_deg=0.0, gain=0.1),
         start_us=ends / 1000,
@@ -381,7 +381,9 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
     try:
         replay.replay_round(path)
     except AttributeError:
-        pytest.fail("single replay must expose a round execution interface")
+        pytest.fail(
+            f"{target} replay must reject other-backend settings with ValueError before numeric work"
+        )
     except ValueError as error:
         assert (
             "single-fluxonium replay requires single-fluxonium settings"
@@ -390,6 +392,28 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
         ) in str(error)
     else:
         pytest.fail("replay must reject settings belonging to another backend")
+
+
+def test_builder_backend_cleanup_rejects_later_work_but_leaves_drivers_owned():
+    env = single_fluxonium(physical_settings())
+    driver = env.create_device("FakeDevice", physical_settings().dc_bias.source.name)
+    try:
+        try:
+            cleanup = env.close_backend
+        except AttributeError:
+            pytest.fail(
+                "single-fluxonium builder must expose backend cleanup to its host"
+            )
+        if cleanup is None:
+            pytest.fail("single-fluxonium builder must install its source cleanup")
+        cleanup()
+        with pytest.raises(RuntimeError, match="closed"):
+            env.soc.binding.capture_snapshot()
+        assert driver.get_value() == 0
+        driver.set_value(0.2)
+        assert driver.get_value() == 0.2
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
