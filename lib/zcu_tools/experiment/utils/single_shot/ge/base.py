@@ -214,15 +214,16 @@ def fitting_ge_and_plot(
     ],
     *,
     options: GEFitOptions | None = None,
-    plots: Plots,
+    plots: Plots | None = None,
     figure_name: str = "fit",
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     """Fit paired raw IQ (2,N) and publish diagnostics under figure_name.
 
     IQ uses ADC units per sample. Existing histogram/population and quality
     policy is unchanged by the name, which defaults to fit. plots owns the
-    figure; caller finishes/releases the operation. Empty or conflicting names
-    raise from Plots. Rotation/classification, histogram fitting, population /
+    figure; caller finishes/releases the operation. With plots=None, return the
+    same calibration and quality without creating diagnostics. With plots supplied,
+    empty or conflicting names raise from Plots. Rotation/classification, histogram fitting, population /
     center validation and fidelity calculations translate ValueError,
     RuntimeError, ArithmeticError and numpy.linalg.LinAlgError into
     GENumericalError with the original cause. Plotting is outside that boundary;
@@ -335,64 +336,67 @@ def fitting_ge_and_plot(
     except (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError) as exc:
         raise GENumericalError(str(exc)) from exc
 
-    fig, raw_axes = plots.subplots(figure_name, nrows=2, ncols=2, figsize=(8, 8))
-    # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
-    axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
-    scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
-    hist(Ig, Ie, options.numbins, axs[1][0])
-    axs[0][1].hist(xs, bins=bins.tolist(), weights=g_pdfs, color="b", alpha=0.5)
-    axs[1][1].hist(xs, bins=bins.tolist(), weights=e_pdfs, color="r", alpha=0.5)
+    if plots is not None:
+        fig, raw_axes = plots.subplots(figure_name, nrows=2, ncols=2, figsize=(8, 8))
+        # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
+        axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
+        scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
+        hist(Ig, Ie, options.numbins, axs[1][0])
+        axs[0][1].hist(xs, bins=bins.tolist(), weights=g_pdfs, color="b", alpha=0.5)
+        axs[1][1].hist(xs, bins=bins.tolist(), weights=e_pdfs, color="r", alpha=0.5)
 
-    axs[0][0].plot(
-        rotated_g_center.real,
-        rotated_g_center.imag,
-        markerfacecolor="b",
-        color="r",
-        linestyle=":",
-        marker="o",
-        markersize=5,
-    )
-    axs[0][0].plot(
-        rotated_e_center.real,
-        rotated_e_center.imag,
-        markerfacecolor="r",
-        color="b",
-        linestyle=":",
-        marker="o",
-        markersize=5,
-    )
-    axs[0][0].set_xlim(np.min(bins), np.max(bins))
+        axs[0][0].plot(
+            rotated_g_center.real,
+            rotated_g_center.imag,
+            markerfacecolor="b",
+            color="r",
+            linestyle=":",
+            marker="o",
+            markersize=5,
+        )
+        axs[0][0].plot(
+            rotated_e_center.real,
+            rotated_e_center.imag,
+            markerfacecolor="r",
+            color="b",
+            linestyle=":",
+            marker="o",
+            markersize=5,
+        )
+        axs[0][0].set_xlim(np.min(bins), np.max(bins))
 
-    _plot_population_histogram(
-        axs[0][1],
-        xs,
-        ge_params,
-        _PopulationHistogram(g_pdfs, fit_g_pdfs, p0_gg, p0_ge, True),
-        show_ideal=length_ratio != 0.0,
-    )
-    _plot_population_histogram(
-        axs[1][1],
-        xs,
-        ge_params,
-        _PopulationHistogram(e_pdfs, fit_e_pdfs, p0_eg, p0_ee, False),
-        show_ideal=length_ratio != 0.0,
-    )
+        _plot_population_histogram(
+            axs[0][1],
+            xs,
+            ge_params,
+            _PopulationHistogram(g_pdfs, fit_g_pdfs, p0_gg, p0_ge, True),
+            show_ideal=length_ratio != 0.0,
+        )
+        _plot_population_histogram(
+            axs[1][1],
+            xs,
+            ge_params,
+            _PopulationHistogram(e_pdfs, fit_e_pdfs, p0_eg, p0_ee, False),
+            show_ideal=length_ratio != 0.0,
+        )
 
-    axs[1][0].plot(xs, fit_g_pdfs, "b-", label="g")
-    axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
+        axs[1][0].plot(xs, fit_g_pdfs, "b-", label="g")
+        axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
 
-    axs[1][0].set_title(
-        r"${F}_{ge}: $" + f"{fid:.1%} / {1e2 * ideal_fid:.3g}%", fontsize=14
-    )
+        axs[1][0].set_title(
+            r"${F}_{ge}: $" + f"{fid:.1%} / {1e2 * ideal_fid:.3g}%", fontsize=14
+        )
 
-    _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
+        _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
 
-    if options.align_t1:
-        fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
-    else:
-        fig.suptitle(f"Readout length = {l_ratio_g:.1f} / {l_ratio_e:.1f} " + r"$T_1$")
-    fig.tight_layout()
-    fig.subplots_adjust(hspace=0.25, wspace=0.15)
+        length_title = (
+            f"{length_ratio:.1f}"
+            if options.align_t1
+            else f"{l_ratio_g:.1f} / {l_ratio_e:.1f}"
+        )
+        fig.suptitle(f"Readout length = {length_title} " + r"$T_1$")
+        fig.tight_layout()
+        fig.subplots_adjust(hspace=0.25, wspace=0.15)
 
     return (
         fid,
