@@ -249,6 +249,41 @@ def test_representative_single_points_match_population_oracle(experiment):
         env.devices.close_all_devices()
 
 
+def test_onetone_mean_matches_causal_scalar_cavity_solution():
+    config = physical_settings()
+    env = single_fluxonium(config)
+    source = SingleFluxoniumSource(config, env.devices)
+    try:
+        request = request_for(source)
+        try:
+            result = expect_integrated(
+                source.execute(RoundRequest(request, source.snapshot(), 0))
+            )
+        except NotImplementedError:
+            pytest.fail("onetone acquire must compute physical cavity means")
+        facts = source.model_facts(source.snapshot())
+        frequency = facts.readout.frequencies_ghz[0, 0]
+        external = 2 * np.pi * config.readout.resonator.kappa_external_mhz / 1000
+        internal = 2 * np.pi * config.readout.resonator.kappa_internal_mhz / 1000
+        pole = (external + internal) / 2 + 2j * np.pi * (frequency - 7)
+        # The ADC samples at 2..9 ns after switch-on. The cavity starts in vacuum.
+        emitted = 1 - external / (2 * pole) * (1 - np.exp(-pole * np.arange(2, 10)))
+        mean = 1000 * np.conj(emitted).sum()
+        expected = [mean.real, mean.imag]
+        channel = result.statistics.channels[0]
+        np.testing.assert_allclose(
+            channel.conditional_sums[0, 0, 0], expected, atol=1e-6, rtol=1e-9
+        )
+        # Ground state is absorbing at zero temperature. Only ADC rounding noise
+        # remains in the direct sum, with standard error sqrt(1/(12*reps)).
+        np.testing.assert_allclose(
+            channel.sums[0, 0] / request.reps, expected, atol=0.01, rtol=0
+        )
+    finally:
+        source.close()
+        env.devices.close_all_devices()
+
+
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     from zcu_tools.experiment.single_fluxonium import replay
