@@ -84,8 +84,10 @@ def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
     ordinary = ~flux
     constant = table.constant_envelopes(np.arange(len(table.timeline), dtype=np.int64))
     single = ordinary & (table.tones == 1)
+    adiabatic = geometry.flux_drive & (table.tones == 0)
     return {
-        "idle": _CandidateDomain(table.tones == 0, ("t4",)),
+        "idle": _CandidateDomain((table.tones == 0) & ~adiabatic, ("t4",)),
+        "adiabatic": _CandidateDomain(adiabatic, ("adiabatic_map",)),
         "flux": _CandidateDomain(flux, ("flux_dop853",)),
         "plateau": _CandidateDomain(
             single & constant, ("dyson", "single_tone_rwa", "floquet_period", "t6")
@@ -662,7 +664,7 @@ class _Classifier:
     def classify(self) -> Dispatch:
         table = self.table
         rows = np.flatnonzero(self.scope)
-        for name in ("idle", "flux"):
+        for name in ("idle", "adiabatic", "flux"):
             domain = self.domains[name]
             self.accept(rows[domain.mask[rows]], domain.families)
         # Group shaped and constant consumers together before any legacy prepare.
