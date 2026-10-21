@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec, TemplateDef
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.form_adapter import module_form
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
@@ -661,6 +663,92 @@ def test_new_entry_rejects_a_name_taken_in_its_family(session: _Session) -> None
     assert presenter.messages("warning")
     assert new.isVisible()
     assert _library(session).document() == before
+
+
+@pytest.mark.parametrize(
+    ("rows", "loaded"),
+    [
+        pytest.param((AliasRow("resonator", "Q1"),), True, id="bound"),
+        pytest.param(
+            (AliasRow("unrelated", ""), AliasRow("resonator", "Q1")),
+            True,
+            id="unrelated-unbound",
+        ),
+        pytest.param((), False, id="missing"),
+        pytest.param((AliasRow("resonator", ""),), False, id="unbound"),
+    ],
+)
+def test_new_entry_uses_point_aliases_and_recovers_after_missing_bindings(
+    session: _Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rows: tuple[AliasRow, ...],
+    loaded: bool,
+) -> None:
+    session.control.set_alias_rows(rows)
+    templates = {
+        "aliased": TemplateDef(
+            PulseSpec,
+            "Aliased pulse",
+            {
+                "ch": 0,
+                "nqz": 1,
+                "freq": 120.0,
+                "gain": 0.3,
+                "waveform": "{resonator}.waveforms.base",
+            },
+            default_name="aliased_pulse",
+        ),
+        "drive": TEMPLATES["drive"],
+    }
+    unhandled: list[str] = []
+    monkeypatch.setattr(
+        sys, "excepthook", lambda _kind, error, _tb: unhandled.append(str(error))
+    )
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter, templates=templates)
+    ui = ComponentDriver(dialog)
+    ui.screenshot(tmp_path / "01-inspect.png")
+    ui.click("New")
+    ui.screenshot(tmp_path / "02-new-entry.png")
+    assert not unhandled, f"New must handle template bindings: {unhandled}"
+    assert any(d.title == "Create ModuleLibrary entry" for d in ui.dialogs())
+    new = _child(dialog, QDialog, "inspect.new_entry")
+    editor = ComponentDriver(new)
+    if loaded:
+        assert not editor.observe(object_name="inspect.new_entry.error").visible
+        assert editor.observe("Create").enabled
+        assert editor.observe(object_name="form.input.waveform").text == WAVEFORM
+        assert float(editor.observe(object_name="form.input.freq").text) == 120.0
+    else:
+        error = editor.observe(object_name="inspect.new_entry.error")
+        assert error.visible
+        assert error.text == (
+            "template 需要綁定 {resonator}，請先在 Aliases 設定同名 alias"
+        )
+        assert not editor.observe("Create").enabled
+
+    editor.choose_option(
+        object_name="inspect.new_entry.template", value="Drive pulse  (module)"
+    )
+    editor.screenshot(tmp_path / "03-other-template.png")
+    assert not unhandled, f"Template switching must not escape Qt: {unhandled}"
+    assert editor.observe("Create").enabled
+    assert not editor.observe(object_name="inspect.new_entry.error").visible
+    assert float(editor.observe(object_name="form.input.freq").text) == 200.0
+
+    editor.choose_option(
+        object_name="inspect.new_entry.template", value="Aliased pulse  (module)"
+    )
+    editor.screenshot(tmp_path / "04-return-to-aliased.png")
+    assert not unhandled
+    assert editor.observe("Create").enabled == loaded
+    if loaded:
+        assert editor.observe(object_name="form.input.waveform").text == WAVEFORM
+    else:
+        assert editor.observe(object_name="inspect.new_entry.error").visible
+    editor.click("Cancel")
+    presenter.assert_no_unexpected_messages()
 
 
 def test_arb_waveforms_button_calls_the_host_entry(session: _Session) -> None:

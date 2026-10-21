@@ -5,7 +5,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
 from zcu_lab.v2._support.measure.mux_forms import READOUT_ELEMENTS, mux_readout_initial
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
+from zcu_lab.v2.mux.onetone_fine.core import MuxOnetoneCfg
 
 
 def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:

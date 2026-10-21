@@ -15,7 +15,7 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
 Group tones 的 freq 取捕捉的 resonator.freq，gain 初值為 0.1，ro_ch 依 group 順序從 0 起算，label 初值為 resonator 名稱。
 `mux_readout_initial` 有 captured readout 時回傳 Slot ref，使用 library 完整 tones 與 scalar 設定。沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源，再加 group tones。
-`mux/onetone` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。Helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
+`mux/onetone_fine` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。Helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
 缺 leaf 或 null 的 kappa 不參與最小值。全未設時不加等待，trig_offset 保留來源的 time-of-flight offset。
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。

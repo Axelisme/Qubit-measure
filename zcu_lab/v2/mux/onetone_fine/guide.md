@@ -1,4 +1,4 @@
-# Mux onetone
+# Mux onetone fine
 
 **讀者：** operator、agent。從 GUI 或 MCP 掃描 mux resonator 的共同頻率偏移，分析並套用校準結果。
 

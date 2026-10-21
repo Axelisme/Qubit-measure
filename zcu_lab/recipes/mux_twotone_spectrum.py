@@ -23,10 +23,12 @@ from .mux_helpers import (
 )
 
 
-def mux_freq(session: RecipeSession, **inputs: Unpack[MuxInputs]) -> RecipeGenerator:
+def mux_twotone_spectrum(
+    session: RecipeSession, **inputs: Unpack[MuxInputs]
+) -> RecipeGenerator:
     """Measure selected qubit spectra, fit them and ask before writing calibration.
 
-    session opens a mux/freq tab. target selects the mux group; reuse_tab_id
+    session opens a mux/twotone_spectrum tab. target selects the mux group; reuse_tab_id
     resets an idle tab. participants gives qubit names in measurement order.
     library selects path/key pairs, inline copies references outer-first, then
     overrides edits scalar paths in one batch. Integer path segments are full
@@ -40,7 +42,7 @@ def mux_freq(session: RecipeSession, **inputs: Unpack[MuxInputs]) -> RecipeGener
     target = inputs.get("target")
     participants = inputs.get("participants")
     tab = session.open_tab(
-        "mux/freq",
+        "mux/twotone_spectrum",
         aliases=None if target is None else {"mux": target},
         reuse=inputs.get("reuse_tab_id"),
     )
@@ -89,11 +91,11 @@ def mux_freq(session: RecipeSession, **inputs: Unpack[MuxInputs]) -> RecipeGener
 
 
 DEFINITION = RecipeDefinition(
-    name="mux_freq",
-    description="Run mux qubit frequency, save raw and analysis, and ask before Apply.",
+    name="mux_twotone_spectrum",
+    description="Run mux two-tone spectrum, save raw and analysis, and ask before Apply.",
     input_schema=INPUTS,
-    run=mux_freq,
-    adapter_name="mux/freq",
+    run=mux_twotone_spectrum,
+    adapter_name="mux/twotone_spectrum",
     summary_parameters=(
         SummaryElements(
             "tones",

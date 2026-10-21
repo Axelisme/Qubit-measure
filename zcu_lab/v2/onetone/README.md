@@ -22,7 +22,7 @@ Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Templa
 
 ## Mux 初值
 
-[`mux/onetone`](../mux/onetone/form.py) 啟用 `mux_readout_initial` 的 ringup 初值政策。
+[`mux/onetone_fine`](../mux/onetone_fine/form.py) 啟用 `mux_readout_initial` 的 ringup 初值政策。
 共同等待為 `5 / (2 * pi * min(已設 group kappas)) us`，忽略缺 leaf 或 null 的成員。
 全未設時不加等待，`trig_offset` 保留來源的 time-of-flight offset。
 

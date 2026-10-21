@@ -84,19 +84,46 @@ def ftf_document() -> dict[str, object]:
     }
 
 
+def dual_readout_document(channels: tuple[int, ...] = (4, 1)) -> dict[str, object]:
+    """Pulse plus independent mux source with distinct receiver calibrations."""
+    document = ftf_document()
+    readout = document["readout"]
+    if not isinstance(readout, dict):
+        raise TypeError("fixture requires a readout mapping")
+    readout["mux"] = {
+        "gen_ch": 1,
+        "input_per_gain": -2.0,
+        "adc": [
+            {
+                "ro_ch": ch,
+                "gain": 1000.0 + i,
+                "phase_deg": 10.0 + i,
+                "offset_adc": [0.1 + i, -0.2],
+                "noise_psd_adc2_ns": [[1.0 + i, 0.0], [0.0, 2.0]],
+                "time_of_flight_ns": 20.0 + i,
+            }
+            for i, ch in enumerate(channels)
+        ],
+    }
+    return document
+
+
 def mux_document(channels=(4, 1)) -> dict[str, object]:
     """The same tiny circuit with explicit mux receiver bindings."""
     document = ftf_document()
     readout = document["readout"]
     if not isinstance(readout, dict):
         raise TypeError("fixture requires a readout mapping")
-    readout["drive"] = {"kind": "mux", "gen_ch": 0, "input_per_gain": 1.0}
-    readout["adc"] = [
-        {
-            "ro_ch": ch,
-            "gain": 10000.0 + 1000 * i,
-            "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
-        }
-        for i, ch in enumerate(channels)
-    ]
+    readout["mux"] = {
+        "gen_ch": 1,
+        "input_per_gain": 1.0,
+        "adc": [
+            {
+                "ro_ch": ch,
+                "gain": 10000.0 + 1000 * i,
+                "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+            }
+            for i, ch in enumerate(channels)
+        ],
+    }
     return document

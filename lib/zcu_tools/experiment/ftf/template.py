@@ -36,7 +36,7 @@ from zcu_tools.simulate.ftf import (
 
 from . import replay
 from .numeric import dc_flux, drive_sources, joint_parameters, resonators
-from .readout import FTFReadoutConfig, readout_configuration
+from .readout import FTFReadoutConfig, FTFReceiverConfig, readout_configuration
 
 
 class FTFModelFacts:
@@ -115,18 +115,47 @@ class FTFTemplatePlan:
     cavity_drives: tuple[tuple[ReadoutPulse, ...], ...]
 
 
+@dataclass(frozen=True)
+class _ReadoutPath:
+    """Selected source, calibration and ADC capabilities for one template."""
+
+    gen_ch: int
+    input_per_gain: float
+    receivers: tuple[FTFReceiverConfig, ...]
+    multiplexed: bool
+
+
+def _readout_path(
+    settings: FTFSettings, config: FTFReadoutConfig, template: TimelineTemplate
+) -> _ReadoutPath:
+    """Select capabilities from active event generators, rejecting mixed paths."""
+    pulse_gen = settings.readout.drive.gen_ch
+    generators = {event.gen_ch for event in template.events if np.any(event.active)}
+    config.validate_generators(pulse_gen, generators)
+    mux = config.mux
+    if mux is not None and mux.gen_ch in generators:
+        return _ReadoutPath(mux.gen_ch, mux.input_per_gain, mux.receivers, True)
+    return _ReadoutPath(
+        settings.readout.drive.gen_ch,
+        settings.readout.drive.input_per_gain,
+        (config.pulse,),
+        False,
+    )
+
+
 def _timeline_batch(
     settings: FTFSettings,
     joint: JointModel,
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
+    path: _ReadoutPath,
     memo: dict[int, EnvelopeSpec],
 ) -> TimelineBatch:
     """Map charge/flux drive tracks onto the engine's fixed-DC schedule."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
     drives = []
     for event in template.events:
-        if event.gen_ch == settings.readout.drive.gen_ch:
+        if event.gen_ch == path.gen_ch or not np.any(event.active):
             continue
         if event.gen_ch not in microwave:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
@@ -182,6 +211,9 @@ def plan_template(
     match the complete settings, snapshot and numeric revision or raises ValueError.
     None builds physical inputs for this call. Receiver/carrier/content data are
     always constructed from the current template and readout configuration.
+    Event generators select pulse or mux capabilities. Using both configured
+    readout generators in one template raises ValueError naming both channels.
+    Readout windows must belong to that path's receivers and generator.
     Mux permits simultaneous coherent tones with independent ADC grids. Program
     common-origin carrier phases convert to pulse-local phases in the first
     carrier's model reference frame; ADC demodulation remains absolute-time.
@@ -190,7 +222,8 @@ def plan_template(
     detach once per active point/slot. No per-point evolution planner is called.
     """
     config = readout_configuration(settings) if readout is None else readout
-    receivers = {receiver.ro_ch: receiver for receiver in config.receivers}
+    path = _readout_path(settings, config, template)
+    receivers = {receiver.ro_ch: receiver for receiver in path.receivers}
     if not template.readouts:
         raise ValueError("FTF requires at least one bound receiver")
     if len({window.channel for window in template.readouts}) != len(template.readouts):
@@ -199,9 +232,9 @@ def plan_template(
     # this call. No memo survives a plan or retains compiled program buffers.
     memo: dict[int, EnvelopeSpec] = {}
     drive = ReadoutDrive(
-        settings.readout.drive.gen_ch,
-        settings.readout.drive.input_per_gain,
-        config.kind,
+        path.gen_ch,
+        path.input_per_gain,
+        "mux" if path.multiplexed else "pulse",
     )
     partition = classify_readout(template, drive, memo)
     cavity_drives = partition.cavity_drives
@@ -257,7 +290,7 @@ def plan_template(
     return FTFTemplatePlan(
         source,
         _cavity_batch(
-            _timeline_batch(settings, joint, template, end_ns, memo),
+            _timeline_batch(settings, joint, template, end_ns, path, memo),
             cavity_drives,
         ),
         tuple(readouts),
