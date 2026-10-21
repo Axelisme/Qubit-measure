@@ -66,7 +66,10 @@ def rotating_source(initial):
     static = np.diag([-0.3, 0.3]).astype(complex)
     expansion = FluxExpansion(
         static,
-        (FluxTerm(0, "cos_2pi", 0.15 * x), FluxTerm(0, "sin_2pi", 0.15 * y)),
+        (
+            FluxTerm(0, "cos_2pi", (0.15 + 0j) * x),
+            FluxTerm(0, "sin_2pi", (0.15 + 0j) * y),
+        ),
     )
     dc_energy, dc_basis = np.linalg.eigh(static + 0.15 * x)
     # Circular resonant pulses are expressed in fixed DC coordinates.
