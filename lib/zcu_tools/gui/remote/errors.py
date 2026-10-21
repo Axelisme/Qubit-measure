@@ -59,7 +59,8 @@ class RemoteError(Exception):
 
 def remote_error_from_expected(exc: ExpectedError) -> RemoteError:
     """Project one nominal caller-correctable failure onto the wire policy."""
-    if not isinstance(exc, ExpectedError):
+    # tolerated: Reject structural lookalikes from untyped callers; only nominal errors opt in.
+    if not isinstance(exc, ExpectedError):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(
             f"expected a nominal ExpectedError instance, got {type(exc).__name__}"
         )

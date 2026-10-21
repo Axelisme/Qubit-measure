@@ -6,8 +6,8 @@ from io import BytesIO
 
 import numpy as np
 import pytest
-from qtpy.QtCore import QThread  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import QThread
+from qtpy.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
@@ -52,9 +52,7 @@ def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure):
     bounds = ParamBounds(EJ=(2.0, 15.0), EC=(0.2, 2.0), EL=(0.1, 2.0))
     ctrl.set_fit_params(
         search_database_hdf5,
-        bounds.EJ,
-        bounds.EC,
-        bounds.EL,
+        bounds,
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,

@@ -530,7 +530,8 @@ class McpBridge:
             result = resp.get("result", {})
             wire_ver = result.get("wire_version")
             gui_ver = result.get("gui_version", "?")
-        except Exception as exc:  # noqa: BLE001 — probe is best-effort
+        # tolerated: Any RPC or response decoding failure must leave this probe reporting gui=unknown.
+        except Exception as exc:  # noqa: BLE001
             return (
                 f" versions: mcp wire=v{cfg.wire_version} mcp=v{cfg.mcp_version}, "
                 f"gui=unknown ({exc})"

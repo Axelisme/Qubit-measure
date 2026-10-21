@@ -19,7 +19,8 @@ from .helpers import (
 )
 
 
-def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
+# tolerated: Public frequency/flux survey keywords must match the handwritten input_schema.
+def onetone_spectrum_over_flux(  # noqa: PLR0913
     session: RecipeSession,
     *,
     target: str | None = None,

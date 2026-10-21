@@ -164,6 +164,7 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
         result = program.acquire_decimated(
             env.soc, progress=False, round_hook=change_bias
         )
+        assert result is not None
         rounds = env.soc.binding.rounds
         assert rounds[0].snapshot.values == (("bias", 0.2),)
         assert rounds[1].snapshot.values == (("bias", 0.4),)
@@ -176,7 +177,9 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
             ProgramV2Cfg(reps=2, rounds=1),
             modules=[pulse.build("charge2"), _readout().build("ro2")],
         )
-        trace = np.asarray(program2.acquire_decimated(env.soc, progress=False)[0])
+        acquired = program2.acquire_decimated(env.soc, progress=False)
+        assert acquired is not None
+        trace = np.asarray(acquired[0])
         raw_channels = program2.get_raw()
         if raw_channels is None:
             raise AssertionError("decimated acquisition must retain companion raw")

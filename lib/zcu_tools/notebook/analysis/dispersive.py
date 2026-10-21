@@ -22,7 +22,8 @@ from zcu_tools.simulate.fluxonium import (
 logger = logging.getLogger(__name__)
 
 
-def search_proper_g(
+# tolerated: Documented widget entry accepts spectrum axes and signals positionally.
+def search_proper_g(  # noqa: PLR0913
     params: tuple[float, float, float],
     bare_rf: float,
     sp_fluxs: NDArray[np.float64],
@@ -212,7 +213,8 @@ def search_proper_g(
     return close_and_get_values
 
 
-def auto_fit_dispersive(
+# tolerated: Documented fit entry passes the spectrum positionally alongside fit controls.
+def auto_fit_dispersive(  # noqa: PLR0913
     params: tuple[float, float, float],
     bare_rf_GHz: float,
     sp_fluxs: NDArray[np.float64],
@@ -311,7 +313,8 @@ def auto_fit_dispersive(
     return res[0].item(), None
 
 
-def plot_dispersive_with_onetone(
+# tolerated: Documented plot entry passes simulated curves and measured spectrum positionally.
+def plot_dispersive_with_onetone(  # noqa: PLR0913
     bare_rf: float,
     g: float,
     fluxs: NDArray[np.float64],

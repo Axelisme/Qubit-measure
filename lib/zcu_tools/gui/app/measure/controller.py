@@ -1,3 +1,9 @@
+# tolerated(file-size): Services and control facets own domain work. This owner
+# keeps app composition, diagnostic/render-host wiring, the application facade,
+# and drain -> script callbacks -> hardware close ordering together. Another
+# facade/mixin or moving view protocols would hide no new behavior and only
+# scatter the same composition contract.
+
 from __future__ import annotations
 
 import logging
@@ -21,6 +27,7 @@ from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
+from zcu_tools.gui.session.device_models import ActiveDeviceOperation
 from zcu_tools.gui.session.events import (
     DeviceOperationFinishedPayload,
     DeviceSetupFinishedPayload,
@@ -39,7 +46,6 @@ from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
 )
-from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.types import ParameterContext
 
 from .adapter import AdapterGuide, SessionEnv
@@ -275,7 +281,8 @@ class Controller(SessionControllerMixin):
     instead of this facade.
     """
 
-    def __init__(
+    # tolerated: View/state wiring and storage, reload, predictor and device injections have distinct owners; no shared input bundle.
+    def __init__(  # noqa: PLR0913
         self,
         state: State,
         registry: Registry,

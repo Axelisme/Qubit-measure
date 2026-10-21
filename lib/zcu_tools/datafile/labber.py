@@ -1,99 +1,11 @@
-"""Standalone read/write of Labber HDF5 log files (Python 3.9+).
+"""Write Labber 1.8.6 uniform-grid and variable-length trace HDF5 logs.
 
-This module saves and loads complex measurement data with axes in Labber's
-HDF5 log-file format, *without* depending on the original ``Labber`` package
-(which only runs on Python 3.6-3.9).  It uses only ``h5py`` and ``numpy`` and
-therefore runs on Python 3.9 through 3.14+.  Files written here are
-byte-compatible with the real Labber software (version tag ``1.8.6``) and can be
-opened by Labber / the original API; conversely it reads files Labber wrote.
-
-Quick start
------------
-Everything is described by ``(name, unit, values)`` triples.  Axes are listed
-**inner axis first** (the inner axis is the last axis of the data array)::
-
-    import numpy as np
-    from zcu_tools.datafile import save_labber_data, load_labber_data
-
-    freq  = np.linspace(4e9, 5e9, 201)
-    power = np.linspace(-30, 0, 11)
-
-    # 1-D: one complex trace,  data shape (Nx,)
-    save_labber_data("scan_1d",
-        z=("S21", "", s21),
-        axes=[("Frequency", "Hz", freq)],
-        comment="resonator dip", tags=["cooldown7"])
-
-    # 2-D: one trace per power, data shape (Ny, Nx)  (inner axis last)
-    save_labber_data("scan_2d",
-        z=("S21", "", z2d),
-        axes=[("Frequency", "Hz", freq),    # inner axis (x)
-              ("Power", "dBm", power)])      # outer axis (y)
-
-    # 3-D / N-D: just pass more axes (inner first), data shape (Nw, Ny, Nx)
-    save_labber_data("scan_3d",
-        z=("S21", "", z3d),
-        axes=[("Frequency","Hz",freq), ("Power","dBm",power), ("Flux","",flux)])
-
-    # read back
-    d = load_labber_data("scan_2d")
-    d.data.values        # the complex data array  (== d.z)
-    d.axes[0].values     # the inner-axis array    (== d.x)
-    d.axes[1].name       # "Power"
-    d.comment, d.tags, d.timestamps
-    z, x, y = d          # also unpacks as (z, x, y)
-
-``LabberData`` is the hub
--------------------------
-:func:`save_labber_data` / :func:`load_labber_data` are thin wrappers around the
-:class:`LabberData` model, which can be used directly::
-
-    from zcu_tools.datafile import Axis, LabberData
-
-    ld = LabberData(("S21", "", z2d),
-                    axes=[("Frequency","Hz",freq), ("Power","dBm",power)])
-    ld.save("scan_2d")                 # == save_labber_data(...)
-    ld = LabberData.load("scan_2d")    # == load_labber_data(...)
-
-:data:`Axis` is a ``namedtuple(name, unit, values)`` -- and therefore a plain
-3-tuple, so a ``(name, unit, values)`` triple and an ``Axis`` are
-interchangeable everywhere.
-
-Data-shape convention
----------------------
-The data array's **last axis is always the inner (x) axis**; outer axes precede
-it in the array's natural index order, so ``z[i_power, :]`` is the inner trace at
-``power[i_power]``.  List ``axes`` inner-first to match.
-
-Variable-length traces
-----------------------
-When each entry has a *different length* or a *non-uniform x-axis*, use
-:func:`save_labber_trace_data` instead (Labber's ``vector=True`` mode).  The data
-is stored in the ``Traces/`` group and :func:`load_labber_data` auto-detects it,
-returning ``d.data.values`` as a list of ragged arrays (or a stacked array when
-all lengths match).
-
-Public API
-----------
-* :data:`Axis`                  -- ``(name, unit, values)`` namedtuple
-* :class:`LabberData`           -- the data model, with ``.save`` / ``.load``
-* :func:`save_labber_data`      -- save a uniform-grid scan (1-D / 2-D / N-D)
-* :func:`save_labber_trace_data`-- save variable-length / non-uniform traces
-* :func:`load_labber_data`      -- load any of the above into a ``LabberData``
-
-On-disk format (for reference)
-------------------------------
-Uniform-grid data lives in the ``Data/Data`` dataset, shape
-``(Nx, Ncol, Nentries)``: axis 0 = inner step points (x), axis 1 = channel
-columns ordered ``[x, y, w, ..., z_real, z_imag]``, axis 2 = outer entries.  A
-complex log channel occupies the last *two* columns (real, imaginary), recorded
-in ``Data/Channel names`` with ``info`` = ``Real`` / ``Imaginary``.  Per-entry
-timestamps live in ``Data/Time stamp`` relative to the root ``creation_time``.
-Variable-length traces live in ``Traces/<name>`` of shape
-``(maxN, ncol, Nentries)`` with a ``<name>_N`` length per entry.  Multiple log
-configs are stored as the root plus ``Log_2``, ``Log_3`` groups.  The format was
-reverse-engineered from the ``Labber._include38`` bytecode and ground-truth
-files produced by the original package.
+Axes are inner-first; array dimensions are outermost-first, inner axis last.
+Save helpers normalize the Labber suffix through LabberData.save. Exact-path
+writers and borrowed-log writers document their own path and handle ownership.
+New files use exclusive creation and failures may leave partial new files.
+Shared bookkeeping labels, dtypes and string conversion belong to labber_format;
+loading belongs to labber_reader. Neither owner chooses caller artifact policy.
 """
 
 from __future__ import annotations
@@ -106,8 +18,21 @@ from typing import TYPE_CHECKING, Any
 import h5py
 import numpy as np
 
+from .labber_format import (
+    API_STEP_NAME,
+    CHANNEL_NAMES_DTYPE,
+    CHANNELS_DTYPE,
+    INSTRUMENTS_DTYPE,
+    LABBER_VERSION,
+    LOG_INSTRUMENT,
+    LOG_LIST_DTYPE,
+    RELATION_PARAMETERS_DTYPE,
+    STEP_INSTRUMENT,
+    STEP_ITEMS_DTYPE,
+    STEP_LIST_DTYPE,
+    labber_string_array,
+)
 from .models import (
-    Axis,
     LabberData,
     LabberMetadata,
     LabberPayload,
@@ -122,183 +47,7 @@ if TYPE_CHECKING:
 else:
     ArrayLike = Any
 
-__all__ = [
-    "Axis",
-    "LabberMetadata",
-    "LabberPayload",
-    "LabberData",
-    "save_labber_data",
-    "save_labber_trace_data",
-    "load_labber_data",
-]
-
-_VERSION = "1.8.6"
-_INSTR_STEP = "Generic - GPIB: , Step channels at localhost"
-_INSTR_LOG = "Generic - GPIB: , Log channels at localhost"
-# dummy step channel Labber inserts for trace/vector logs with no real step axis
-_STEP_NAME_API = "Step index API"
-
-# ----------------------------------------------------------------------------
-# h5py string / attribute helpers (mirror Labber's SR_HDF5)
-# ----------------------------------------------------------------------------
-
-_VLEN_STR = h5py.special_dtype(vlen=str)
-
-
-def _decode(value: Any) -> Any:
-    """Decode hdf5 bytes/arrays to python str (mirrors SR_HDF5.decodeAttribute)."""
-    if isinstance(value, (bytes, str)):
-        s = value.decode("utf-8") if isinstance(value, bytes) else value
-        return None if s == "NoneValue" else s
-    if isinstance(value, np.ndarray):
-        if value.dtype.type is np.bytes_:
-            return [el.decode("utf-8") for el in value]
-        if value.dtype.type is np.object_:
-            return [
-                el.decode("utf-8") if isinstance(el, bytes) else str(el) for el in value
-            ]
-        return value
-    if isinstance(value, np.bool_):
-        return bool(value)
-    return value
-
-
-def _str_array(values: Sequence[str]) -> np.ndarray:
-    return np.array(list(values), dtype=_VLEN_STR)
-
-
-# ----------------------------------------------------------------------------
-# compound dtypes for the bookkeeping datasets (exact match to Labber 1.8.6)
-# ----------------------------------------------------------------------------
-
-
-def _enum_i2(mapping: dict[str, int]) -> np.dtype:
-    return h5py.special_dtype(enum=(np.int16, mapping))
-
-
-_DT_CHANNELS = np.dtype(
-    [
-        ("name", _VLEN_STR),
-        ("instrument", _VLEN_STR),
-        ("quantity", _VLEN_STR),
-        ("unitPhys", _VLEN_STR),
-        ("unitInstr", _VLEN_STR),
-        ("gain", "<f8"),
-        ("offset", "<f8"),
-        ("amp", "<f8"),
-        ("highLim", "<f8"),
-        ("lowLim", "<f8"),
-        ("outputChannel", _VLEN_STR),
-        ("limit_action", _VLEN_STR),
-        ("limit_run_script", "?"),
-        ("limit_script", _VLEN_STR),
-        ("use_log_interval", "?"),
-        ("log_interval", "<f8"),
-        ("limit_run_always", "?"),
-    ]
-)
-
-_DT_INSTRUMENTS = np.dtype(
-    [
-        ("hardware", _VLEN_STR),
-        ("version", _VLEN_STR),
-        ("id", _VLEN_STR),
-        ("model", _VLEN_STR),
-        ("name", _VLEN_STR),
-        (
-            "interface",
-            _enum_i2(
-                {
-                    "GPIB": 0,
-                    "TCPIP": 1,
-                    "USB": 2,
-                    "PXI": 3,
-                    "Serial": 4,
-                    "VISA": 5,
-                    "Other": 6,
-                    "None": 7,
-                }
-            ),
-        ),
-        ("address", _VLEN_STR),
-        ("server", _VLEN_STR),
-        ("startup", _enum_i2({"Set config": 0, "Get config": 1, "Do nothing": 2})),
-        ("lock", "?"),
-        ("show_advanced", "?"),
-        ("Timeout", "<f8"),
-        ("Term. character", _VLEN_STR),
-        ("Send end on write", "?"),
-        ("Lock VISA resource", "?"),
-        ("Suppress end bit termination on read", "?"),
-        ("Use specific TCP port", "?"),
-        ("TCP port", "<f8"),
-        ("Use VICP protocol", "?"),
-        ("Baud rate", "<f8"),
-        ("Data bits", "<f8"),
-        ("Stop bits", "<f8"),
-        ("Parity", _VLEN_STR),
-        ("GPIB board number", "<f8"),
-        ("Send GPIB go to local at close", "?"),
-        ("PXI chassis", "<f8"),
-        ("Run in 32-bit mode", "?"),
-    ]
-)
-
-_DT_LOG_LIST = np.dtype([("channel_name", _VLEN_STR)])
-
-_DT_STEP_LIST = np.dtype(
-    [
-        ("channel_name", _VLEN_STR),
-        ("step_unit", _enum_i2({"Instrument": 0, "Physical": 1})),
-        ("wait_after", "<f8"),
-        (
-            "after_last",
-            _enum_i2({"Goto first point": 0, "Stay at final": 1, "Goto value...": 2}),
-        ),
-        ("final_value", "<f8"),
-        ("use_relations", "?"),
-        ("equation", _VLEN_STR),
-        ("show_advanced", "?"),
-        ("sweep_mode", _enum_i2({"Off": 0, "Between points": 1, "Continuous": 2})),
-        ("use_outside_sweep_rate", "?"),
-        ("sweep_rate_outside", "<f8"),
-        ("alternate_direction", "?"),
-    ]
-)
-
-_DT_REL_PARAMS = np.dtype(
-    [
-        ("variable", _VLEN_STR),
-        ("channel_name", _VLEN_STR),
-        ("use_lookup", "?"),
-    ]
-)
-
-_DT_STEP_ITEMS = np.dtype(
-    [
-        ("range_type", _enum_i2({"Single": 0, "Start - Stop": 1, "Center - Span": 2})),
-        ("step_type", _enum_i2({"Fixed step": 0, "Fixed # of pts": 1})),
-        ("single", "<f8"),
-        ("start", "<f8"),
-        ("stop", "<f8"),
-        ("center", "<f8"),
-        ("span", "<f8"),
-        ("step", "<f8"),
-        ("n_pts", "<i4"),
-        (
-            "interp",
-            _enum_i2({"Linear": 0, "Log": 1, "Log, #/decade": 2, "Lorentzian": 3}),
-        ),
-        ("sweep_rate", "<f8"),
-    ]
-)
-
-_DT_CHANNEL_NAMES = np.dtype([("name", _VLEN_STR), ("info", _VLEN_STR)])
-
-
-# ============================================================================
-# WRITE -- public save functions (thin wrappers) + private _save_* / _write_*
-# ============================================================================
+__all__ = ["save_labber_data", "save_labber_trace_data"]
 
 
 def save_labber_data(
@@ -306,10 +55,7 @@ def save_labber_data(
     z: tuple[str, str, ArrayLike],
     axes: Sequence[tuple[str, str, ArrayLike]],
     *,
-    comment: str = "",
-    tags: str | Sequence[str] | None = None,
-    project: str = "",
-    user: str = "",
+    metadata: LabberMetadata | None = None,
     timestamps: ArrayLike | None = None,
 ) -> str:
     """Save complex measurement data to a Labber-compatible HDF5 log file.
@@ -338,12 +84,9 @@ def save_labber_data(
         One triple per axis, **inner axis first** (``axes[0]`` is x).
         ``len(axes)`` must equal ``values.ndim`` and each ``len(axes[k][2])``
         must match the corresponding data dimension.
-    comment : str
-        Free-text comment.
-    tags : str or sequence of str, optional
-        Tag(s) to store.
-    project, user : str
-        Project / user metadata.
+    metadata : LabberMetadata, optional
+        Comment, tags, project, user and optional creation epoch. Omission uses
+        default metadata. The supplied object is passed through without copying.
     timestamps : array_like, optional
         Per-entry absolute timestamps (epoch s), one per stored entry.  If
         omitted, the current time is used for all entries.
@@ -356,10 +99,7 @@ def save_labber_data(
     return LabberData(
         z,
         axes,
-        comment=comment,
-        tags=tags,
-        project=project,
-        user=user,
+        metadata=metadata,
         timestamps=timestamps,
     ).save(path)
 
@@ -375,7 +115,7 @@ def write_labber_data_file(path: str, ld: LabberData) -> str:
     return path
 
 
-def _write_payload_to_log(
+def write_payload_to_log(
     target: h5py.File | h5py.Group,
     payload: LabberPayload,
     metadata: LabberMetadata,
@@ -384,6 +124,15 @@ def _write_payload_to_log(
     creation_time: float | None = None,
     write_tags: bool = False,
 ) -> None:
+    """Populate a borrowed open log group from one inner-first payload.
+
+    List-valued data selects trace layout; other values select uniform layout.
+    log_name labels the log, creation_time overrides metadata's epoch origin,
+    and write_tags includes metadata tags/project/user when true. Inputs are
+    borrowed without mutation. The caller owns flush/close. Invalid shapes or
+    timestamps raise ValueError; HDF5 failures propagate and may leave partial
+    groups in target. This does not open a file or normalize a path.
+    """
     data = LabberData(payload=payload, metadata=metadata)
     if isinstance(data.data.values, list):
         _write_trace_log_group(
@@ -433,7 +182,6 @@ def _write_uniform_log_group(
                 f"axis '{nm}' length {val.shape[0]} != z dim {inner_to_outer_dims[k]}"
             )
 
-    n_x = z_arr.shape[-1]
     # Step dimensions are inner-first: [Nx, Ny, Nw, ...].
     step_dims = np.array([a[2].shape[0] for a in axis_list], dtype=np.int64)
     # number of stored entries = product of all outer dims
@@ -451,11 +199,11 @@ def _write_uniform_log_group(
     if write_tags:
         _write_tags(target, as_tag_list(ld.tags), ld.project, ld.user)
     _write_multi_channel_data_group(
-        target, axis_list, log_channels, step_dims, [z_arr], n_entry, n_x, ts_rel
+        target, axis_list, log_channels, step_dims, [z_arr], ts_rel
     )
 
 
-def _write_uniform_multi_channel_log_group(
+def write_uniform_multi_channel_log_group(
     target: h5py.File | h5py.Group,
     payloads: Sequence[LabberPayload],
     metadata: LabberMetadata,
@@ -463,7 +211,15 @@ def _write_uniform_multi_channel_log_group(
     log_name: str,
     creation_time: float,
 ) -> None:
-    """Write scalar payloads as parallel channels on one shared grid."""
+    """Populate a borrowed log group with parallel common-grid scalar channels.
+
+    payloads is a nonempty ordered sequence already validated for equal
+    inner-first axes, shapes and timestamps by the grouped owner. metadata
+    provides shared tags and comment; log_name labels the log and creation_time
+    is its epoch origin. Inputs are not mutated. Empty payloads or invalid
+    timestamps raise ValueError; conversion/HDF5 failures propagate and may
+    leave partial groups. The caller owns the open target and flush/close.
+    """
     if not payloads:
         raise ValueError("at least one payload is required")
 
@@ -474,7 +230,6 @@ def _write_uniform_multi_channel_log_group(
     ]
     z_arrays = [np.asarray(payload.z, dtype=complex) for payload in payloads]
     step_dims = np.array([axis[2].shape[0] for axis in axis_list], dtype=np.int64)
-    n_x = z_arrays[0].shape[-1]
     n_entry = int(np.prod(step_dims[1:])) if len(step_dims) > 1 else 1
     log_channels = [(payload.data.name, payload.data.unit) for payload in payloads]
     t0, ts_rel = _resolve_timestamps(reference.timestamps, n_entry, creation_time)
@@ -488,8 +243,6 @@ def _write_uniform_multi_channel_log_group(
         log_channels,
         step_dims,
         z_arrays,
-        n_entry,
-        n_x,
         ts_rel,
     )
 
@@ -520,10 +273,7 @@ def save_labber_trace_data(
     x: tuple[str, str, ArrayLike | Sequence[ArrayLike]],
     y: tuple[str, str, ArrayLike] | None = None,
     *,
-    comment: str = "",
-    tags: str | Sequence[str] | None = None,
-    project: str = "",
-    user: str = "",
+    metadata: LabberMetadata | None = None,
     timestamps: ArrayLike | None = None,
 ) -> str:
     """Save **variable-length** complex traces (Labber ``vector=True`` mode).
@@ -554,7 +304,8 @@ def save_labber_trace_data(
     y : (name, unit, values), optional
         Outer step axis, one value per trace (e.g. Power).  ``len(values)`` must
         equal ``len(traces)``.  If omitted, the traces are an unstructured list.
-    comment, tags, project, user : metadata (see :func:`save_labber_data`).
+    metadata : LabberMetadata, optional
+        File metadata (see :func:`save_labber_data`); passed without copying.
     timestamps : array_like, optional
         Per-entry absolute timestamps (epoch s), one per trace.  If omitted,
         the current time is used for all entries.
@@ -571,16 +322,20 @@ def save_labber_trace_data(
     return LabberData(
         (z_name, z_unit, list(traces)),
         axes,
-        comment=comment,
-        tags=tags,
-        project=project,
-        user=user,
+        metadata=metadata,
         timestamps=timestamps,
     ).save(path)
 
 
-def _save_labber_trace_data(path: str, ld: LabberData) -> str:
-    """Core writer for variable-length traces (the ``Traces/`` layout)."""
+def write_labber_trace_file(path: str, ld: LabberData) -> str:
+    """Write borrowed dataset ld as a new variable-length Traces-layout file.
+
+    Normalize path to .hdf5 and return that path. ld supplies inner-first axes,
+    trace values, metadata and timestamps without being mutated. The file is
+    closed before return. Existing paths raise FileExistsError; invalid shapes
+    or timestamps raise ValueError. I/O errors propagate and may leave a
+    partial new file; the destination is never overwritten.
+    """
     path = format_ext(path)
     log_name = os.path.splitext(os.path.basename(path))[0]
 
@@ -633,10 +388,10 @@ def _write_trace_log_group(
     # Step dimensions: inner is variable (=1), then the outer entry axis.
     if has_outer:
         step_dims = np.array([1, n_entry], dtype=np.int64)
-        step_channels = [(_STEP_NAME_API, "", None), (y_name, y_unit, y_vals)]
+        step_channels = [(API_STEP_NAME, "", None), (y_name, y_unit, y_vals)]
     else:
         step_dims = np.array([1], dtype=np.int64)
-        step_channels = [(_STEP_NAME_API, "", None)]
+        step_channels = [(API_STEP_NAME, "", None)]
     log_channels = [(z_name, z_unit)]
 
     t0, ts_rel = _resolve_timestamps(
@@ -674,7 +429,7 @@ def _is_sequence_of_arrays(x) -> bool:
 def _write_root_attrs(f, log_name, step_dims, comment, t0):
     a = f.attrs
     a["Step dimensions"] = step_dims
-    a["version"] = _VERSION
+    a["version"] = LABBER_VERSION
     a["log_name"] = log_name
     a["comment"] = comment
     a["creation_time"] = float(t0)
@@ -693,7 +448,7 @@ def _channels_rows(step_channels, log_channels):
         rows.append(
             (
                 name,
-                _INSTR_STEP,
+                STEP_INSTRUMENT,
                 name,
                 unit,
                 unit,
@@ -715,7 +470,7 @@ def _channels_rows(step_channels, log_channels):
         rows.append(
             (
                 name,
-                _INSTR_LOG,
+                LOG_INSTRUMENT,
                 name,
                 unit,
                 unit,
@@ -733,7 +488,7 @@ def _channels_rows(step_channels, log_channels):
                 False,
             )
         )
-    return np.array(rows, dtype=_DT_CHANNELS)
+    return np.array(rows, dtype=CHANNELS_DTYPE)
 
 
 def _write_config(
@@ -789,15 +544,16 @@ def _write_config(
         "Instruments",
         data=np.array(
             [
-                instr_row(_INSTR_STEP, "Step channels"),
-                instr_row(_INSTR_LOG, "Log channels"),
+                instr_row(STEP_INSTRUMENT, "Step channels"),
+                instr_row(LOG_INSTRUMENT, "Log channels"),
             ],
-            dtype=_DT_INSTRUMENTS,
+            dtype=INSTRUMENTS_DTYPE,
         ),
     )
 
     f.create_dataset(
-        "Log list", data=np.array([(n,) for n, _u in log_channels], dtype=_DT_LOG_LIST)
+        "Log list",
+        data=np.array([(n,) for n, _u in log_channels], dtype=LOG_LIST_DTYPE),
     )
 
     f.create_dataset(
@@ -807,7 +563,7 @@ def _write_config(
                 (name, 0, 0.0, 0, 0.0, False, "x", False, 0, False, 0.0, False)
                 for name, _u, _v in step_channels
             ],
-            dtype=_DT_STEP_LIST,
+            dtype=STEP_LIST_DTYPE,
         ),
     )
 
@@ -816,7 +572,7 @@ def _write_config(
         _write_step_config_entry(g_step_cfg, name, vals)
 
     g_ic = f.create_group("Instrument config")
-    g_log = g_ic.create_group(_INSTR_LOG)
+    g_log = g_ic.create_group(LOG_INSTRUMENT)
     g_log.attrs["Installed options"] = np.array([], dtype=float)
     for name, _unit in log_channels:
         if log_vector:
@@ -828,7 +584,7 @@ def _write_config(
             # scalar complex log channel: scalar default (0j) and NO ___x___
             # attrs (those would mark it vector and trigger a Traces lookup).
             g_log.attrs[name] = 0j
-    g_st = g_ic.create_group(_INSTR_STEP)
+    g_st = g_ic.create_group(STEP_INSTRUMENT)
     g_st.attrs["Installed options"] = np.array([], dtype=float)
     for name, _unit, _vals in step_channels:
         g_st.attrs[name] = 0.0
@@ -856,23 +612,24 @@ def _write_step_config_entry(parent, name, vals):
 
     g.create_dataset(
         "Relation parameters",
-        data=np.array([("x", "Step values", False)], dtype=_DT_REL_PARAMS),
+        data=np.array([("x", "Step values", False)], dtype=RELATION_PARAMETERS_DTYPE),
     )
 
     g.create_dataset(
         "Step items",
         data=np.array(
-            [(1, 1, start, start, stop, 0.0, 0.0, 0.0, n, 0, 0.0)], dtype=_DT_STEP_ITEMS
+            [(1, 1, start, start, stop, 0.0, 0.0, 0.0, n, 0, 0.0)],
+            dtype=STEP_ITEMS_DTYPE,
         ),
     )
 
 
 def _write_tags(f, tags, project, user):
     g = f.create_group("Tags")
-    g.attrs["Project"] = _str_array([project])
-    g.attrs["User"] = _str_array([user])
+    g.attrs["Project"] = labber_string_array([project])
+    g.attrs["User"] = labber_string_array([user])
     if tags:
-        g.attrs["Tags"] = _str_array(tags)
+        g.attrs["Tags"] = labber_string_array(tags)
     else:
         g.attrs["Tags"] = np.array([], dtype=float)
 
@@ -883,8 +640,6 @@ def _write_multi_channel_data_group(
     log_channels,
     step_dims,
     z_arrays,
-    n_entry,
-    n_x,
     ts_rel,
 ):
     """Write scalar log channels sharing one inner-first step grid."""
@@ -896,13 +651,15 @@ def _write_multi_channel_data_group(
     for name, _u in log_channels:
         names_info.extend(((name, "Real"), (name, "Imaginary")))
     g.create_dataset(
-        "Channel names", data=np.array(names_info, dtype=_DT_CHANNEL_NAMES)
+        "Channel names", data=np.array(names_info, dtype=CHANNEL_NAMES_DTYPE)
     )
 
+    reference = z_arrays[0]
+    n_x = reference.shape[-1]
+    n_entry = int(np.prod(step_dims[1:])) if len(step_dims) > 1 else 1
     data = np.zeros((n_x, len(names_info), n_entry), dtype=float)
     data[:, 0, :] = axis_list[0][2][:, None]
 
-    reference = z_arrays[0]
     z_outer_shape = reference.shape[:-1]
     if z_outer_shape:
         multi = np.unravel_index(np.arange(n_entry), z_outer_shape)
@@ -934,7 +691,7 @@ def _write_trace_data_stub(f, step_channels, step_dims, y_vals, n_entry, ts_rel)
     g = f.create_group("Data")
     names_info = [(name, "") for name, _u, _v in step_channels]
     g.create_dataset(
-        "Channel names", data=np.array(names_info, dtype=_DT_CHANNEL_NAMES)
+        "Channel names", data=np.array(names_info, dtype=CHANNEL_NAMES_DTYPE)
     )
 
     n_cols = len(step_channels)
@@ -955,7 +712,10 @@ def _write_trace_data_stub(f, step_channels, step_dims, y_vals, n_entry, ts_rel)
         g.attrs["Entries, last trace"] = 1
 
 
-def _write_traces_group(f, z_name, trace_list, x_list, x_name, x_unit, n_entry, ts_rel):
+# tolerated: One trace-layout caller supplies ragged values, x labels and entry timestamps.
+def _write_traces_group(  # noqa: PLR0913
+    f, z_name, trace_list, x_list, x_name, x_unit, n_entry, ts_rel
+):
     """Write the Traces/ group: <name> (maxN, 3, Nentry), <name>_N, <name>_t0dt.
 
     Column layout per entry: 0=real, 1=imag, 2=x (explicit axis).  ``_t0dt`` is
@@ -980,582 +740,3 @@ def _write_traces_group(f, z_name, trace_list, x_list, x_name, x_unit, n_entry, 
     g.create_dataset(z_name + "_t0dt", data=np.zeros((1, 2), dtype=float))
     g.create_dataset(z_name + "_N", data=n_arr)
     g.create_dataset("Time stamp", data=np.asarray(ts_rel, dtype=float))
-
-
-# ============================================================================
-# READ -- public load function (thin wrapper) + private _load_* / _read_*
-# ============================================================================
-
-
-def load_labber_data(path: str) -> LabberData:
-    """Load complex measurement data from a Labber HDF5 log file.
-
-    Reads every log in the file (root + ``Log_2``, ``Log_3`` ...).  A single log
-    returns ``z`` reshaped to its natural N-D grid: ``(Nx,)`` for 1-D,
-    ``(Ny, Nx)`` for 2-D, ``(Nw, Ny, Nx)`` for 3-D, etc. (inner axis last).
-    Multiple logs that share identical axes are stacked along a new leading
-    axis, giving ``z`` shape ``(Nlog, ...)``.
-
-    Parameters
-    ----------
-    path : str
-        Path to the ``.hdf5`` log file (``.h5`` is also accepted).
-
-    Returns
-    -------
-    LabberData
-        Complex data, axes and metadata.  ``.axes`` lists ``(name, unit,
-        values)`` inner-first; ``.x``/``.y``/``.w`` are convenience aliases.
-        Also unpacks as ``z, x, y``.
-    """
-    return _load_labber_data(path)
-
-
-def load_labber_logs(path: str) -> tuple[LabberData, ...]:
-    """Read each unmarked Labber log independently, without stacking grids.
-
-    path names an existing Labber file (the usual suffix resolution applies).
-    Return root then numerically ordered Log_N entries, each with its own
-    inner-first axes, signal label/unit and absolute epoch timestamps. Shared
-    comment, tags, project, user and creation time accompany every entry.
-    This format reader assigns no domain variable identity. Callers must supply
-    an explicit ordered mapping and validate schemas. Marked grouped files and
-    inconsistent stored scalar-log step dimensions raise ValueError; I/O errors
-    propagate. Trace grids retain the existing trace reader's shape semantics.
-    No source data is changed, padded or truncated.
-    """
-    path = _resolve_path(path)
-    with h5py.File(path, "r") as file:
-        if "zcu_tools.grouped_dataset_version" in file.attrs:
-            raise ValueError("marked grouped file requires load_grouped_labber_data")
-        comment = _decode(file.attrs.get("comment", "")) or ""
-        tags, project, user = _read_tags(file)
-        creation_time = float(file.attrs.get("creation_time", 0.0) or 0.0)
-        entries: list[LabberData] = []
-        for log in _all_log_refs(file):
-            z, axes, timestamps = _read_single_log(file, log)
-            name, unit = _read_log_label(file, log)
-            data = log["Data"]
-            if "Step dimensions" in data.attrs and "Traces" not in log:
-                declared = tuple(int(value) for value in data.attrs["Step dimensions"])
-                actual = tuple(len(values) for _name, _unit, values in axes)
-                if declared != actual:
-                    raise ValueError(
-                        f"{path}:{log.name}: step dimensions disagree with axes shape"
-                    )
-            entries.append(
-                LabberData(
-                    data=Axis(name, unit, z),
-                    axes=[Axis(*axis) for axis in axes],
-                    timestamps=None
-                    if timestamps is None
-                    else creation_time + np.asarray(timestamps),
-                    comment=comment,
-                    tags=tags,
-                    project=project,
-                    user=user,
-                    creation_time=creation_time,
-                )
-            )
-    return tuple(entries)
-
-
-def _load_labber_data(path: str) -> LabberData:
-    """Core reader: build a :class:`LabberData` from a Labber HDF5 file."""
-    path = _resolve_path(path)
-
-    with h5py.File(path, "r") as f:
-        if "zcu_tools.grouped_dataset_version" in f.attrs:
-            raise ValueError(
-                "file is a grouped Labber dataset; use load_grouped_labber_data"
-            )
-
-        comment = _decode(f.attrs.get("comment", "")) or ""
-        tags, project, user = _read_tags(f)
-        creation_time = float(f.attrs.get("creation_time", 0.0) or 0.0)
-
-        logs = _all_log_refs(f)
-        z0, axes0, ts0 = _read_single_log(f, logs[0])
-        z_name, z_unit = _read_log_label(f, logs[0])
-
-        if len(logs) == 1:
-            z = z0
-            ts_rel = ts0
-        else:
-            z_list = [z0]
-            for log in logs[1:]:
-                zi, axes_i, _tsi = _read_single_log(f, log)
-                if len(axes_i) != len(axes0):
-                    raise ValueError("logs have different number of axes")
-                for (n0, _u0, v0), (_ni, _ui, vi) in zip(axes0, axes_i, strict=False):
-                    if np.shape(v0) != np.shape(vi) or not np.allclose(v0, vi):
-                        raise ValueError(f"axis '{n0}' differs across logs")
-                z_list.append(zi)
-            z = np.array(z_list)
-            ts_rel = ts0
-
-    timestamps = None if ts_rel is None else (creation_time + np.asarray(ts_rel))
-
-    return LabberData(
-        data=Axis(z_name, z_unit, z),
-        axes=[Axis(n, u, v) for n, u, v in axes0],
-        comment=comment,
-        tags=tags,
-        project=project,
-        user=user,
-        timestamps=timestamps,
-        creation_time=creation_time,
-    )
-
-
-def _resolve_path(path: str) -> str:
-    if os.path.exists(path):
-        return path
-    cand = format_ext(path)
-    return cand if os.path.exists(cand) else path
-
-
-def _all_log_refs(f: h5py.File) -> list[Any]:
-    """Root (if it holds Data) plus Log_2, Log_3 ... in sorted order."""
-    refs: list[Any] = []
-    if "Data" in f:
-        refs.append(f)
-    log_ns = sorted(
-        int(k[4:]) for k in f.keys() if k.startswith("Log_") and k[4:].isdigit()
-    )
-    for n in log_ns:
-        g = f["Log_%d" % n]
-        if isinstance(g, h5py.Group) and "Data" in g:
-            refs.append(g)
-    if not refs:
-        raise ValueError("file contains no data ('Data' group not found)")
-    return refs
-
-
-def _read_single_log(f, log):
-    """Read one log into an N-D complex array, its axes and timestamps.
-
-    Two storage modes are auto-detected:
-
-    * **scalar** (``vector=False``): z lives in ``Data/Data`` columns
-      ``[x, y, w, ..., z_real, z_imag]``; reshaped to ``(..., Ny, Nx)``.
-    * **trace** (``vector=True``): z lives in ``Traces/<name>`` with a per-entry
-      x-axis; entries may have different lengths.  The inner x-axis is read from
-      the trace; outer axes come from ``Data/Data`` step columns.
-
-    Returns ``(z, axes, ts_rel)``: ``axes`` is inner-first
-    ``[(name, unit, values), ...]``; ``ts_rel`` is per-entry timestamps relative
-    to ``creation_time``.  For trace mode, ``z`` is a list of ragged arrays when
-    entry lengths differ.
-    """
-    z_name, _z_unit = _read_log_label(f, log)
-    if "Traces" in log and z_name and z_name in log["Traces"]:
-        return _read_trace_log(f, log, z_name)
-
-    D = log["Data"]["Data"][()]  # (Nx, Ncol, Nentries)
-    n_x, n_col, n_entry = D.shape
-    col_names = [(_decode(n), _decode(i)) for n, i in log["Data"]["Channel names"][()]]
-    infos = [i for _n, i in col_names]
-    log_complex = "Imaginary" in infos
-
-    # which columns are step axes (everything before the log channel columns)
-    n_log_cols = 2 if log_complex else 1
-    n_axes = n_col - n_log_cols
-    step_dims = [int(v) for v in _data_step_dims(log, n_x, n_entry, n_axes)]
-
-    # axis values + labels/units
-    units = _channel_units(f, log)
-    axes: list[tuple[str, str, np.ndarray]] = []
-    for k in range(n_axes):
-        name = col_names[k][0]
-        if k == 0:
-            vals = D[:, 0, 0]  # inner axis along axis 0
-        else:
-            # outer axis k: distinct coordinate per "block" of entries.
-            # entry e has axis-k index = (e // prod(step_dims[1:k])) % step_dims[k]
-            stride = int(np.prod(step_dims[1:k])) if k > 1 else 1
-            idx = (np.arange(n_entry) // stride) % step_dims[k]
-            # value for each unique index, in order
-            vals = np.array([D[0, k, np.argmax(idx == j)] for j in range(step_dims[k])])
-        axes.append((name, units.get(name, ""), np.asarray(vals)))
-
-    # complex data, entries flattened with y (axis 1) fastest
-    zf = (
-        D[:, -2, :] + 1j * D[:, -1, :] if log_complex else D[:, -1, :].astype(complex)
-    )  # (Nx, Nentries)
-    zf = zf.T  # (Nentries, Nx)
-
-    # reshape to natural grid (..., Ny, Nx): outer dims are step_dims[1:] but
-    # in z-order they are outermost-first == reversed(step_dims[1:]).
-    outer = step_dims[1:][::-1]  # (Nw, ..., Ny)
-    z = zf.reshape(tuple(outer) + (n_x,))
-    if z.ndim == 1 or (len(outer) == 0):
-        z = z.reshape(n_x)  # 1-D -> (Nx,)
-
-    ts_rel = _read_timestamps(log["Data"])
-    return z, axes, ts_rel
-
-
-def _read_v2_log_channel_bookkeeping(
-    source: h5py.File | h5py.Group, channel_source: h5py.File | h5py.Group
-) -> tuple[list[str], h5py.Dataset, h5py.Group]:
-    log_list = source.get("Log list")
-    if not isinstance(log_list, h5py.Dataset):
-        raise ValueError("grouped v2 log is missing Log list")
-    channel_names = [_decode(row["channel_name"]) or "" for row in log_list[()]]
-    if not channel_names or any(not name for name in channel_names):
-        raise ValueError("grouped v2 log channels must have non-empty labels")
-    if len(set(channel_names)) != len(channel_names):
-        raise ValueError("grouped v2 log channel labels must be unique")
-
-    channels_dataset = channel_source.get("Channels")
-    if not isinstance(channels_dataset, h5py.Dataset):
-        raise ValueError("grouped v2 log is missing Channels")
-    configured_channels = [
-        _decode(row["name"]) or ""
-        for row in channels_dataset[()]
-        if _decode(row["instrument"]) == _INSTR_LOG
-    ]
-    if configured_channels != channel_names:
-        raise ValueError("grouped v2 Labber channel bookkeeping is inconsistent")
-
-    instrument_config = source.get("Instrument config")
-    if not isinstance(instrument_config, h5py.Group):
-        raise ValueError("grouped v2 log is missing Instrument config")
-    log_instrument = instrument_config.get(_INSTR_LOG)
-    if not isinstance(log_instrument, h5py.Group):
-        raise ValueError("grouped v2 log is missing log-channel instrument config")
-    configured_defaults = [
-        name
-        for name in log_instrument.attrs
-        if isinstance(name, str)
-        and name != "Installed options"
-        and not name.startswith("___")
-    ]
-    if set(configured_defaults) != set(channel_names):
-        raise ValueError("grouped v2 Labber channel bookkeeping is inconsistent")
-    return channel_names, channels_dataset, instrument_config
-
-
-def _require_v2_step_bookkeeping(
-    source: h5py.File | h5py.Group,
-    channels_dataset: h5py.Dataset,
-    instrument_config: h5py.Group,
-    step_names: list[str],
-) -> None:
-    """Require consistent ordered step names across all Labber metadata tables."""
-    configured_steps = [
-        _decode(row["name"]) or ""
-        for row in channels_dataset[()]
-        if _decode(row["instrument"]) == _INSTR_STEP
-    ]
-    step_list = source.get("Step list")
-    step_config = source.get("Step config")
-    step_instrument = instrument_config.get(_INSTR_STEP)
-    if (
-        configured_steps != step_names
-        or not isinstance(step_list, h5py.Dataset)
-        or [_decode(row["channel_name"]) or "" for row in step_list[()]] != step_names
-        or not isinstance(step_config, h5py.Group)
-        or set(step_config) != set(step_names)
-        or not isinstance(step_instrument, h5py.Group)
-        or {
-            name
-            for name in step_instrument.attrs
-            if isinstance(name, str) and name != "Installed options"
-        }
-        != set(step_names)
-    ):
-        raise ValueError("grouped v2 step-channel bookkeeping is inconsistent")
-
-
-def _decode_v2_step_grid(
-    data: np.ndarray, step_dims: list[int], step_names: list[str], units: dict[str, str]
-) -> list[tuple[str, str, np.ndarray]]:
-    """Decode inner-first axes and require every stored coordinate to match the grid."""
-    n_x, _n_col, n_entry = data.shape
-    n_axes = len(step_names)
-    axes: list[tuple[str, str, np.ndarray]] = []
-    outer_strides = np.cumprod([1, *step_dims[1:-1]])
-    for k, name in enumerate(step_names):
-        values = (
-            data[:, 0, 0]
-            if k == 0
-            else data[0, k, outer_strides[k - 1] * np.arange(step_dims[k])]
-        )
-        axes.append((name, units.get(name, ""), np.asarray(values)))
-
-    expected_steps = np.zeros((n_x, n_axes, n_entry), dtype=float)
-    expected_steps[:, 0, :] = axes[0][2][:, None]
-    for col in range(n_axes - 1, 0, -1):
-        indices = (np.arange(n_entry) // outer_strides[col - 1]) % step_dims[col]
-        expected_steps[:, col, :] = axes[col][2][indices][None, :]
-    if not np.array_equal(data[:, :n_axes, :], expected_steps, equal_nan=True):
-        raise ValueError("grouped v2 step-coordinate columns do not match the grid")
-
-    return axes
-
-
-def _read_uniform_multi_channel_log(
-    f: h5py.File, log: h5py.File | h5py.Group
-) -> tuple[
-    dict[str, tuple[str, np.ndarray]],
-    list[tuple[str, str, np.ndarray]],
-    np.ndarray | None,
-]:
-    """Read one scalar multi-channel log with strict Labber bookkeeping."""
-    if "Traces" in log:
-        raise ValueError("grouped v2 does not support vector or trace log channels")
-
-    source = log if "Log list" in log else f
-    channel_source = log if "Channels" in log else f
-    channel_names, channels_dataset, instrument_config = (
-        _read_v2_log_channel_bookkeeping(source, channel_source)
-    )
-
-    data_group = log.get("Data")
-    if not isinstance(data_group, h5py.Group):
-        raise ValueError("grouped v2 log is missing Data group")
-    data_dataset = data_group.get("Data")
-    channel_names_dataset = data_group.get("Channel names")
-    if not isinstance(data_dataset, h5py.Dataset) or not isinstance(
-        channel_names_dataset, h5py.Dataset
-    ):
-        raise ValueError("grouped v2 Data group is incomplete")
-    data = np.asarray(data_dataset[()])
-    n_x, n_col, n_entry = data.shape
-    columns = [
-        (_decode(name) or "", _decode(info) or "")
-        for name, info in channel_names_dataset[()]
-    ]
-    n_axes = n_col - 2 * len(channel_names)
-    if n_axes < 1:
-        raise ValueError("grouped v2 requires at least one step axis")
-    expected_log_columns = [
-        item for name in channel_names for item in ((name, "Real"), (name, "Imaginary"))
-    ]
-    if columns[n_axes:] != expected_log_columns:
-        raise ValueError("grouped v2 data columns do not match declared log channels")
-    if any(info for _name, info in columns[:n_axes]):
-        raise ValueError("grouped v2 step-channel columns have invalid bookkeeping")
-
-    step_dims = _read_strict_v2_step_dimensions(
-        log, data_group, n_x=n_x, n_entry=n_entry, n_axes=n_axes
-    )
-    step_names = [name for name, _info in columns[:n_axes]]
-    _require_v2_step_bookkeeping(
-        source, channels_dataset, instrument_config, step_names
-    )
-
-    # Decode inner-first axes, then verify every stored coordinate against them.
-    units = _channel_units(f, log)
-    axes = _decode_v2_step_grid(data, step_dims, step_names, units)
-
-    values_by_channel: dict[str, tuple[str, np.ndarray]] = {}
-    for index, name in enumerate(channel_names):
-        col = n_axes + 2 * index
-        flat = (data[:, col, :] + 1j * data[:, col + 1, :]).T
-        values = flat.reshape(tuple(step_dims[::-1]))
-        values_by_channel[name] = (units.get(name, ""), values)
-
-    return values_by_channel, axes, _read_timestamps(data_group)
-
-
-def _read_strict_v2_step_dimensions(
-    log: h5py.File | h5py.Group,
-    data_group: h5py.Group,
-    *,
-    n_x: int,
-    n_entry: int,
-    n_axes: int,
-) -> list[int]:
-    root_raw = log.attrs.get("Step dimensions")
-    data_raw = data_group.attrs.get("Step dimensions")
-    if root_raw is None or data_raw is None:
-        raise ValueError("grouped v2 is missing Step dimensions")
-    root_values = np.asarray(root_raw)
-    data_values = np.asarray(data_raw)
-    try:
-        root_dims = root_values.astype(np.int64)
-        data_dims = data_values.astype(np.int64)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("grouped v2 has invalid Step dimensions") from exc
-    if (
-        root_values.ndim != 1
-        or data_values.ndim != 1
-        or len(root_dims) != n_axes
-        or not np.array_equal(root_values, root_dims)
-        or not np.array_equal(data_values, data_dims)
-        or not np.array_equal(root_dims, data_dims)
-        or np.any(root_dims <= 0)
-        or int(root_dims[0]) != n_x
-        or int(np.prod(root_dims[1:])) != n_entry
-    ):
-        raise ValueError("grouped v2 has inconsistent Step dimensions")
-    return [int(value) for value in root_dims]
-
-
-def _read_trace_log(f, log, z_name):
-    """Read a vector log channel stored in Traces/<z_name>.
-
-    ``Traces/<name>`` has shape ``(maxN, ncol, Nentries)`` -- col 0 real,
-    col 1 imag (if complex), the next col the explicit x-axis (when
-    ``<name>_t0dt`` is ``(0, 0)``).  ``<name>_N`` gives the true length of each
-    entry's trace; when lengths differ, ``z`` is returned as a list of arrays.
-    """
-    g = log["Traces"]
-    h5 = g[z_name]
-    is_complex = bool(_decode(h5.attrs.get("complex", False)))
-    x_name = _decode(h5.attrs.get("x, name", "")) or "Index"
-    x_unit = _decode(h5.attrs.get("x, unit", "")) or ""
-    raw = h5[()]  # (maxN, ncol, Nentries)
-    max_n, n_col, n_entry = raw.shape
-    i_x = 2 if is_complex else 1
-    has_x_col = i_x <= n_col - 1
-
-    if is_complex:
-        zf = raw[:, 0, :] + 1j * raw[:, 1, :]  # (maxN, Nentries)
-    else:
-        zf = raw[:, 0, :].astype(complex)
-
-    h5_N = g[z_name + "_N"][()]
-    t0dt = g[z_name + "_t0dt"][()]
-
-    def _x_for(e, n):
-        if has_x_col and t0dt.shape[0] >= 1 and t0dt[0, 0] == 0.0 and t0dt[0, 1] == 0.0:
-            return raw[:n, i_x, e]
-        row = t0dt[e] if t0dt.shape[0] > e else t0dt[0]
-        t0, dt = float(row[0]), float(row[1])
-        return t0 + np.arange(n, dtype=float) * dt
-
-    lengths = [int(h5_N[e]) if h5_N.shape[0] > e else max_n for e in range(n_entry)]
-    ragged = len(set(lengths)) > 1
-
-    if ragged:
-        z = [zf[: lengths[e], e] for e in range(n_entry)]
-        x = _x_for(0, lengths[0])  # representative inner axis
-    else:
-        n = lengths[0] if lengths else max_n
-        z = zf[:n, :].T  # (Nentries, n)
-        x = _x_for(0, n)
-
-    # outer axes from Data/Data step columns (skip the dummy Step index API)
-    axes: list[tuple[str, str, np.ndarray]] = [(x_name, x_unit, np.asarray(x))]
-    outer_axes = _read_outer_step_axes(f, log)
-    axes.extend(outer_axes)
-
-    if not ragged:
-        # reshape (Nentries, n) -> (..., n) by outer dims
-        z_arr = np.asarray(z)
-        n_inner = z_arr.shape[1]
-        outer_dims = [len(a[2]) for a in outer_axes][::-1]  # outermost-first
-        if outer_dims:
-            z = z_arr.reshape(tuple(outer_dims) + (n_inner,))
-        elif z_arr.shape[0] == 1:
-            # single entry, no outer axis -> canonical 1-D (n,)
-            z = z_arr.reshape(n_inner)
-        else:
-            # multiple equal-length entries, no outer axis -> stacked (Nentries, n)
-            z = z_arr  # already (Nentries, n), no reshape needed
-
-    ts_rel = _read_timestamps(g)
-    return z, axes, ts_rel
-
-
-def _read_outer_step_axes(f, log):
-    """Return outer step axes (name, unit, values) from Data/Data, skipping the
-    dummy 'Step index API' column.  Used for trace-mode logs.
-
-    Labber trace logs store one scalar step coordinate per entry. We reconstruct
-    axes by first appearance after rounding to 15 decimals, so intentional
-    repeated coordinates such as bidirectional sweeps cannot be represented as
-    distinct axis points in this compatibility layout.
-    """
-    if "Data" not in log:
-        return []
-    D = log["Data"]["Data"][()]
-    col_names = [(_decode(n), _decode(i)) for n, i in log["Data"]["Channel names"][()]]
-    units = _channel_units(f, log)
-    _n_inner, _n_col, _n_entry = D.shape
-
-    # all step columns are scalar-info columns; drop the dummy API channel
-    out = []
-    for col, (name, _info) in enumerate(col_names):
-        if name == _STEP_NAME_API:
-            continue
-        vals = D[0, col, :]  # one value per entry
-        # collapse to unique values in order of first appearance
-        uniq = []
-        seen = set()
-        for v in vals:
-            key = round(float(v), 15)
-            if key not in seen:
-                seen.add(key)
-                uniq.append(float(v))
-        out.append((name, units.get(name, ""), np.asarray(uniq)))
-    return out
-
-
-def _read_timestamps(group):
-    """Return the relative per-entry timestamps from a group's Time stamp ds."""
-    if "Time stamp" in group:
-        return np.asarray(group["Time stamp"][()], dtype=float)
-    return None
-
-
-def _data_step_dims(log, n_x, n_entry, n_axes):
-    """Return step dimensions (inner-first), preferring the stored attr."""
-    g = log["Data"]
-    if "Step dimensions" in g.attrs:
-        dims = [int(v) for v in g.attrs["Step dimensions"]]
-        if len(dims) == n_axes and int(np.prod(dims[1:]) or 1) == n_entry:
-            return dims
-    # fall back: assume each outer column is one axis with all-distinct blocks
-    if n_axes <= 1:
-        return [n_x]
-    # best effort: 2-D layout
-    return [n_x, n_entry] + [1] * (n_axes - 2)
-
-
-def _read_tags(f) -> tuple[list[str], str, str]:
-    tags: list[str] = []
-    project = user = ""
-    if "Tags" in f:
-        a = f["Tags"].attrs
-        dec = _decode(a.get("Tags"))
-        if isinstance(dec, list):
-            tags = list(dec)
-        proj = _decode(a.get("Project"))
-        if isinstance(proj, list) and proj:
-            project = proj[0]
-        usr = _decode(a.get("User"))
-        if isinstance(usr, list) and usr:
-            user = usr[0]
-    return tags, project or "", user or ""
-
-
-def _channel_units(f, log) -> dict[str, str]:
-    """Map channel name -> physical unit, from the root/log ``Channels`` table."""
-    units: dict[str, str] = {}
-    src = log if "Channels" in log else f
-    if "Channels" in src:
-        for row in src["Channels"][()]:
-            units[_decode(row["name"])] = _decode(row["unitPhys"]) or ""
-    return units
-
-
-def _read_log_label(f, log) -> tuple[str, str]:
-    """Return (z_name, z_unit) of the first log channel."""
-    z_name = ""
-    src = log if "Log list" in log else f
-    if "Log list" in src and len(src["Log list"]):
-        z_name = _decode(src["Log list"][()][0]["channel_name"]) or ""
-    if not z_name:
-        # fall back: the log-instrument channel in Channels
-        csrc = log if "Channels" in log else f
-        if "Channels" in csrc:
-            for row in csrc["Channels"][()]:
-                if _decode(row["instrument"]) == _INSTR_LOG:
-                    z_name = _decode(row["name"])
-                    break
-    return z_name, _channel_units(f, log).get(z_name, "")

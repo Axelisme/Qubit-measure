@@ -17,12 +17,10 @@ painting happens on the Qt main thread, so a plain ``draw_idle`` is sufficient
 
 from __future__ import annotations
 
-from typing import cast
-
 from matplotlib.backend_bases import Event, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+from PyQt6.QtCore import pyqtSignal as Signal
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -144,17 +142,14 @@ class InteractiveMplWidget(QWidget):
 
     # --- dispatch (filter to in-axes events) -----------------------------
 
-    def _dispatch_press(self, event: Event) -> None:
-        mouse = cast(MouseEvent, event)
-        if self._editable and mouse.inaxes is not None:
-            self.on_press(mouse)
+    def _dispatch_press(self, event: MouseEvent) -> None:
+        if self._editable and event.inaxes is not None:
+            self.on_press(event)
 
-    def _dispatch_move(self, event: Event) -> None:
-        mouse = cast(MouseEvent, event)
-        if self._editable and mouse.inaxes is not None:
-            self.on_move(mouse)
+    def _dispatch_move(self, event: MouseEvent) -> None:
+        if self._editable and event.inaxes is not None:
+            self.on_move(event)
 
-    def _dispatch_release(self, event: Event) -> None:
-        mouse = cast(MouseEvent, event)
+    def _dispatch_release(self, event: MouseEvent) -> None:
         if self._editable:
-            self.on_release(mouse)
+            self.on_release(event)

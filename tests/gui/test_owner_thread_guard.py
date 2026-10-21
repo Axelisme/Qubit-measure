@@ -16,7 +16,8 @@ def _foreign_error(callback: Callable[[], None]) -> BaseException:
     def invoke() -> None:
         try:
             callback()
-        except BaseException as exc:
+        # tolerated: Transfer any worker failure intact so the caller can assert the actual owner-guard error.
+        except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
     thread = threading.Thread(target=invoke)

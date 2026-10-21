@@ -99,7 +99,8 @@ def calculate_dispersive(
     return rf_0, rf_1
 
 
-def calculate_dispersive_sweep(
+# tolerated: Flux adapter alone forwards independent basis sizes and output count.
+def calculate_dispersive_sweep(  # noqa: PLR0913
     sweep_list: NDArray[np.float64],
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
@@ -153,7 +154,8 @@ def calculate_dispersive_sweep(
     return tuple(rf_list)
 
 
-def calculate_dispersive_vs_flux(
+# tolerated: Notebook/fallback callers tune basis sizes separately from output count.
+def calculate_dispersive_vs_flux(  # noqa: PLR0913
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     bare_rf: float,
@@ -188,7 +190,8 @@ def calculate_dispersive_vs_flux(
     )
 
 
-def calculate_chi_sweep[T_SweepItem](
+# tolerated: Design rows and flux adapter share callback API, not resolution objects.
+def calculate_chi_sweep[T_SweepItem](  # noqa: PLR0913
     sweep_list: NDArray[np.generic] | list[T_SweepItem],
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
@@ -233,7 +236,8 @@ def calculate_chi_sweep[T_SweepItem](
     return sweep["chi"]["subsys1":0, "subsys2":1]
 
 
-def calculate_chi_vs_flux(
+# tolerated: Plot caller varies resonator size; qubit truncation stays independent.
+def calculate_chi_vs_flux(  # noqa: PLR0913
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     bare_rf: float,
@@ -268,7 +272,8 @@ def calculate_chi_vs_flux(
     )
 
 
-def calculate_dispersive_vs_flux_fast(
+# tolerated: Fast/fallback callers share public dimension keywords, not a fixed bundle.
+def calculate_dispersive_vs_flux_fast(  # noqa: PLR0913
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     bare_rf: float,
@@ -300,9 +305,9 @@ def calculate_dispersive_vs_flux_fast(
     arrays (rf_0, rf_1, ...) in GHz, one value per input flux — same shape/units as
     ``calculate_dispersive_vs_flux``.
     """
-    from .energies import _fold_unique_fluxs
+    from .energies import fold_unique_fluxs
 
-    folded, sort_idxs, uni_idxs = _fold_unique_fluxs(fluxs)
+    folded, sort_idxs, uni_idxs = fold_unique_fluxs(fluxs)
 
     # Flux-independent fluxonium pieces — built once per (params, cutoff, dim) and
     # memoised (the expensive cos/sin matrix functions would otherwise dominate the

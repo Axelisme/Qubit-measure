@@ -24,7 +24,11 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import make_sweep
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime.schedule import (
+    Schedule,
+    SignalBuffer,
+)
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
@@ -369,11 +373,13 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
                     )
                     .declare_sweep("length", length_sweep)
                     .build_and_acquire(
-                        stop_condition=snr_checker(
-                            signals_buffer[step],
-                            earlystop_snr,
-                            lambda x: rotate2real(x).real,
-                            after_check=update_snr,
+                        options=AcquireOptions(
+                            stop_condition=snr_checker(
+                                signals_buffer[step],
+                                earlystop_snr,
+                                lambda x: rotate2real(x).real,
+                                after_check=update_snr,
+                            )
                         ),
                         **(acquire_kwargs or {}),
                     )

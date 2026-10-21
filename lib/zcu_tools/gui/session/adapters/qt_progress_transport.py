@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
+# tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
+from qtpy.QtCore import QObject, Qt, Signal  # pyright: ignore[reportPrivateImportUsage]
 
 from zcu_tools.gui.session.ports import ProgressEvent
 
@@ -25,7 +26,8 @@ class QtProgressTransport(QObject):
         self._receiver: Callable[[ProgressEvent], None] | None = None
         # Queued so the slot runs on this QObject's owning thread (main thread),
         # marshalling worker-thread emits across the boundary.
-        self._event.connect(self._on_event, type=Qt.ConnectionType.QueuedConnection)  # type: ignore[call-arg]
+        # tolerated: PyQt6 connect stub omits the connection type needed for owner-thread delivery.
+        self._event.connect(self._on_event, type=Qt.ConnectionType.QueuedConnection)  # pyright: ignore[reportCallIssue]
 
     def emit(self, event: ProgressEvent) -> None:
         # Thread-safe: Qt marshals the queued signal to the owning thread.

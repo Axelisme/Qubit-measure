@@ -136,7 +136,9 @@ def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> 
     adapter = SimpleNamespace(run_analyze_control=ctrl)
 
     reply = h_tab_load_data(
-        cast(Any, adapter), {"tab_id": "tab-1", "data_path": "/tmp/result.hdf5"}
+        # tolerated(cast): The control-only namespace is not a RemoteControlAdapter.
+        cast(Any, adapter),
+        {"tab_id": "tab-1", "data_path": "/tmp/result.hdf5"},
     )
 
     ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")

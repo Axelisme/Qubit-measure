@@ -7,7 +7,24 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
-    from zcu_tools.gui.session.services.progress import ProgressService
+
+
+class OwnerProgressPort(Protocol):
+    """Owner-thread progress service surface shared by control facets.
+
+    ``owner_id`` is the existing tab ID or device name. A no-argument listener
+    re-queries bars when notified and follows that owner across operations.
+    The returned disposer detaches the listener and is safe to call repeatedly.
+    Queries return current ``(handle_id, live model)`` pairs, or an empty tuple
+    when the owner has no live bars; they do not copy the models.
+    """
+
+    def attach_by_owner(
+        self, owner_id: str, listener: Callable[[], None]
+    ) -> Callable[[], None]: ...
+    def bars_for_owner(
+        self, owner_id: str
+    ) -> tuple[tuple[int, ProgressBarModel], ...]: ...
 
 
 class ProgressControlPort(Protocol):
@@ -24,7 +41,7 @@ class ProgressControlPort(Protocol):
 class ProgressControlFacet:
     """Adapter over ProgressService's owner-keyed progress surface."""
 
-    def __init__(self, progress: ProgressService) -> None:
+    def __init__(self, progress: OwnerProgressPort) -> None:
         self._progress = progress
 
     def attach_progress(

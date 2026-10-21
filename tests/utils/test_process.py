@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from zcu_tools.utils.process import (
+    SmoothingOptions,
     find_rotate_angle,
     minus_background,
     minus_mean,
@@ -49,6 +50,32 @@ def test_rescale_complex_warning_identifies_the_caller_and_preserves_data() -> N
     assert result.dtype == signals.dtype
     assert_allclose(result, original)
     assert_allclose(signals, original)
+
+
+@pytest.mark.parametrize("axis", [0, 1, -1])
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_rescale_masked_axis_preserves_unselected_columns_and_input(
+    axis: int, dtype: str
+) -> None:
+    signals = np.array(
+        [[2.0, np.nan, 5.0], [6.0, np.nan, np.nan], [np.nan, np.nan, np.nan]],
+        dtype=dtype,
+    )
+    expected = np.array(
+        [[1.0, np.nan, 5.0], [3.0, np.nan, np.nan], [np.nan, np.nan, np.nan]],
+        dtype=dtype,
+    )
+    if axis != 0:
+        signals, expected = signals.T, expected.T
+    original = signals.copy()
+
+    result = rescale(signals, axis=axis)
+
+    assert result is not signals
+    assert not np.shares_memory(result, signals)
+    assert result.dtype == signals.dtype
+    assert_allclose(result, expected, equal_nan=True)
+    np.testing.assert_array_equal(signals, original)
 
 
 def _make_complex(rng: np.random.Generator, n: int = 50) -> np.ndarray:
@@ -196,7 +223,7 @@ class TestMinusMedian:
 
     def test_invalid_axis_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid axis"):
-            minus_median(np.array([[1.0, 2.0]]), axis=[0, 1])  # type: ignore[arg-type]
+            minus_median(np.array([[1.0, 2.0]]), axis=[0, 1])
 
 
 class TestMinusMean:
@@ -229,9 +256,34 @@ class TestMinusMean:
         out = minus_mean(a)
         assert np.all(np.isnan(out))
 
+    @pytest.mark.parametrize("axis", [0, 1, -1])
+    @pytest.mark.parametrize("dtype", ["float32", "float64", "complex128"])
+    def test_masked_axis_preserves_unselected_columns_and_input(
+        self, axis: int, dtype: str
+    ) -> None:
+        signals = np.array(
+            [[2.0, np.nan, 5.0], [6.0, np.nan, np.nan], [np.nan, np.nan, np.nan]],
+            dtype=dtype,
+        )
+        expected = np.array(
+            [[-2.0, np.nan, 0.0], [2.0, np.nan, np.nan], [np.nan, np.nan, np.nan]],
+            dtype=dtype,
+        )
+        if axis != 0:
+            signals, expected = signals.T, expected.T
+        original = signals.copy()
+
+        result = minus_mean(signals, axis=axis)
+
+        assert result is not signals
+        assert not np.shares_memory(result, signals)
+        assert result.dtype == signals.dtype
+        assert_allclose(result, expected, equal_nan=True)
+        np.testing.assert_array_equal(signals, original)
+
     def test_invalid_axis_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid axis"):
-            minus_mean(np.array([[1.0, 2.0]]), axis="bad")  # type: ignore[arg-type]
+            minus_mean(np.array([[1.0, 2.0]]), axis="bad")
 
 
 # ===========================================================================
@@ -348,7 +400,8 @@ class TestPeakNAvgMaxMode:
 
     def test_invalid_mode_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid mode"):
-            peak_n_avg(np.array([1.0, 2.0]), n=1, mode="median")  # type: ignore[arg-type]
+            # tolerated: Verify unsupported peak selection modes fail.
+            peak_n_avg(np.array([1.0, 2.0]), n=1, mode="median")  # pyright: ignore[reportArgumentType]
 
     def test_large_random_consistency(self) -> None:
         """Optimised result must match the old loop on a large array."""
@@ -415,7 +468,9 @@ class TestWaveletSmoothing:
         data = np.vstack([np.sin(x), np.cos(x)]).astype(np.float64)
         data[1, 7] = np.nan
 
-        out = smooth_signal1d(data, method="wavelet", sigma=1.0, axis=1)
+        out = smooth_signal1d(
+            data, options=SmoothingOptions(method="wavelet", sigma=1.0), axis=1
+        )
 
         assert out.shape == data.shape
         assert np.isnan(out[1, 7])
@@ -426,7 +481,9 @@ class TestWaveletSmoothing:
         real = np.vstack([np.sin(x), np.cos(x)])
         data = (real + 0.25j * real).astype(np.complex128)
 
-        out = smooth_signal_nd(data, method="wavelet", sigma=1.0, axes=(1,))
+        out = smooth_signal_nd(
+            data, options=SmoothingOptions(method="wavelet", sigma=1.0), axes=(1,)
+        )
 
         assert out.shape == data.shape
         assert np.iscomplexobj(out)
@@ -437,11 +494,17 @@ class TestWaveletSmoothing:
         from scipy.ndimage import gaussian_filter1d
 
         data = RNG.random((4, 20))
-        out = smooth_signal1d(data, method="gaussian", sigma=1.5, axis=1)
+        out = smooth_signal1d(
+            data, options=SmoothingOptions(method="gaussian", sigma=1.5), axis=1
+        )
         expected = gaussian_filter1d(data, sigma=1.5, axis=1)
 
         assert_allclose(out, expected)
 
     def test_invalid_smooth_method_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid smoothing method"):
-            smooth_signal1d(np.arange(8.0), method="median")  # type: ignore[arg-type]
+            smooth_signal1d(
+                np.arange(8.0),
+                # tolerated: Verify unsupported smoothing methods fail.
+                options=SmoothingOptions(method="median"),  # pyright: ignore[reportArgumentType]
+            )

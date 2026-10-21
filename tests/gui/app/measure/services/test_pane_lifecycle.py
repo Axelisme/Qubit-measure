@@ -147,6 +147,8 @@ def _analyze_service(
     runner = OperationRunner(
         MagicMock(), handles, ProgressService(DirectProgressTransport()), bg, bus
     )
+    # tolerated(cast): The minimal fake returns _Draft, not the port's WritebackDraft.
+    # Its create_draft also takes list items rather than the port's Iterable.
     return AnalyzeService(state, runner, bus, cast(Any, writeback), handles), bg
 
 
@@ -657,7 +659,8 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
             return object()
 
     adapter = DisabledAdapter()
-    state.get_tab(tab_id).adapter = adapter  # type: ignore[assignment]
+    # tolerated: This load-capability fixture implements only the adapter surface exercised by the service.
+    state.get_tab(tab_id).adapter = adapter  # pyright: ignore[reportAttributeAccessIssue]
     load = LoadService(
         state,
         MagicMock(),
@@ -681,6 +684,7 @@ def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
         def restore(self, stored: object) -> object:
             return object()
 
-    state.get_tab(tab_id).adapter = EnabledAdapter()  # type: ignore[assignment]
+    # tolerated: This load-capability fixture implements only the adapter surface exercised by the service.
+    state.get_tab(tab_id).adapter = EnabledAdapter()  # pyright: ignore[reportAttributeAccessIssue]
     GuardService(state).check_load(tab_id)
     assert state.get_tab(tab_id).run.result == "run"

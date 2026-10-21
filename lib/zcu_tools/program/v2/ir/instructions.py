@@ -1,11 +1,47 @@
+"""Core, compute, control and timing instructions with the central QICK dispatcher."""
+
 from __future__ import annotations
 
 import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeGuard, override
+from typing import Any, override
 
 from .hw_semantics import ADDR_REG, STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
+from .instruction_fields import (
+    VALID_ARITH_COPS,
+    VALID_CLEAR_COPS,
+    VALID_COM_COPS,
+    VALID_COM_FLAG_VALS,
+    VALID_FLAG_COPS,
+    VALID_NET_COPS,
+    VALID_PA_CMDS,
+    VALID_TIME_COPS,
+    VALID_WAIT_COPS,
+    ArithCOp,
+    ClearCOp,
+    ComCOp,
+    ComFlagVal,
+    CondCode,
+    FlagCOp,
+    NetCOp,
+    PACOp,
+    TimeCOp,
+    WaitCOp,
+    is_valid_literal,
+    parse_cond_code,
+    parse_optional_addr,
+    parse_optional_immediate,
+    parse_optional_register,
+    parse_optional_side_write,
+    parse_optional_src,
+    parse_optional_time,
+    parse_wp_port,
+    remap_label_ref,
+    require_alu_expr,
+    require_literal,
+    require_register,
+)
 from .labels import Label, LabelRef
 from .operands import (
     AddrType,
@@ -13,262 +49,15 @@ from .operands import (
     DmemAddr,
     ExprType,
     Immediate,
-    ImmValue,
-    MemAddr,
     Register,
     SideWrite,
     SrcKeyword,
     SrcType,
-    TimeOffset,
     TimeType,
-    parse_addr,
-    parse_alu_expr,
-    parse_imm_value,
     parse_immediate,
     parse_label,
-    parse_mem_addr,
     parse_register,
-    parse_side_write,
-    parse_src,
-    parse_time,
 )
-
-CondCode = Literal["Z", "S", "NZ", "NS"]
-_VALID_COND_CODES: frozenset[CondCode] = frozenset({"Z", "S", "NZ", "NS"})
-
-TimeCOp = Literal["inc_ref", "set_ref", "updt", "rst"]
-_VALID_TIME_COPS: frozenset[TimeCOp] = frozenset({"inc_ref", "set_ref", "updt", "rst"})
-
-FlagCOp = Literal["set", "clr", "inv"]
-_VALID_FLAG_COPS: frozenset[FlagCOp] = frozenset({"set", "clr", "inv"})
-
-WaitCOp = Literal["time", "port_dt", "div_rdy", "div_dt", "qpa_rdy", "qpa_dt"]
-_VALID_WAIT_COPS: frozenset[WaitCOp] = frozenset(
-    {"time", "port_dt", "div_rdy", "div_dt", "qpa_rdy", "qpa_dt"}
-)
-
-ClearCOp = Literal["arith", "div", "qnet", "qcom", "qpa", "qpb", "port", "all"]
-_VALID_CLEAR_COPS: frozenset[ClearCOp] = frozenset(
-    {"arith", "div", "qnet", "qcom", "qpa", "qpb", "port", "all"}
-)
-
-NetCOp = Literal[
-    "set_net", "sync_net", "updt_offset", "set_dt", "get_dt", "set_flag", "get_flag"
-]
-_VALID_NET_COPS: frozenset[NetCOp] = frozenset(
-    {"set_net", "sync_net", "updt_offset", "set_dt", "get_dt", "set_flag", "get_flag"}
-)
-
-ComCOp = Literal[
-    "set_flag",
-    "sync",
-    "reset",
-    "set_byte_1",
-    "set_byte_2",
-    "set_hw_1",
-    "set_hw_2",
-    "set_word_1",
-    "set_word_2",
-]
-_VALID_COM_COPS: frozenset[ComCOp] = frozenset(
-    {
-        "set_flag",
-        "sync",
-        "reset",
-        "set_byte_1",
-        "set_byte_2",
-        "set_hw_1",
-        "set_hw_2",
-        "set_word_1",
-        "set_word_2",
-    }
-)
-
-ArithCOp = Literal["T", "TP", "TM", "PT", "PTP", "PTM", "MT", "MTP", "MTM"]
-_VALID_ARITH_COPS: frozenset[ArithCOp] = frozenset(
-    {"T", "TP", "TM", "PT", "PTP", "PTM", "MT", "MTP", "MTM"}
-)
-
-TrigSrc = Literal["set", "clr"]
-_VALID_TRIG_SRCS: frozenset[TrigSrc] = frozenset({"set", "clr"})
-
-PACOp = Literal["PA", "PB"]
-_VALID_PA_CMDS: frozenset[PACOp] = frozenset({"PA", "PB"})
-
-ComFlagVal = Literal["0", "1"]
-_VALID_COM_FLAG_VALS: frozenset[ComFlagVal] = frozenset({"0", "1"})
-
-
-def _is_valid_literal[T: str](val: str, valid: frozenset[T]) -> TypeGuard[T]:
-    return val in valid
-
-
-def _require_literal[T: str](val: str, field: str, valid: frozenset[T]) -> T:
-    if not _is_valid_literal(val, valid):
-        raise ValueError(
-            f"{field}: {val!r} is not valid, expected one of {sorted(valid)}"
-        )
-    return val
-
-
-def _parse_cond_code(val: str | None) -> CondCode | None:
-    if val is None:
-        return None
-    if not _is_valid_literal(val, _VALID_COND_CODES):
-        raise ValueError(
-            f"IF: {val!r} is not a valid condition code, expected one of {sorted(_VALID_COND_CODES)}"
-        )
-    return val
-
-
-def _require_register(val: str, field: str) -> Register:
-    reg = parse_register(val)
-    if reg is None:
-        raise ValueError(f"{field}: {val!r} is not a valid register name")
-    return reg
-
-
-def _parse_optional_register(
-    d: dict[str, Any], key: str, field: str
-) -> Register | None:
-    if key not in d:
-        return None
-    reg = parse_register(d[key])
-    if reg is None:
-        raise ValueError(f"{field}: {d[key]!r} is not a valid register name")
-    return reg
-
-
-def _require_immediate(val: Any, field: str) -> Immediate:
-    imm = parse_immediate(val)
-    if imm is None:
-        raise ValueError(f"{field}: {val!r} is not a valid immediate")
-    return imm
-
-
-def _parse_optional_immediate(
-    d: dict[str, Any], key: str, field: str
-) -> Immediate | None:
-    if key not in d:
-        return None
-    return _require_immediate(d[key], field)
-
-
-def _require_alu_expr(val: str, field: str) -> AluExpr:
-    expr = parse_alu_expr(val)
-    if expr is None:
-        raise ValueError(f"{field}: {val!r} is not a valid ALU expression")
-    return expr
-
-
-def _parse_port_dst(val: str) -> Register | ImmValue:
-    """Parse a port DST: either a register or a bare integer (port number)."""
-    reg = parse_register(val)
-    if reg is not None:
-        return reg
-    imm = parse_imm_value(val)
-    if imm is not None:
-        return imm
-    raise ValueError(f"DST: {val!r} is not a register or port number")
-
-
-def _parse_mem_addr_field(val: str, field: str) -> Register | MemAddr:
-    """Parse an address field: register or &N numeric address."""
-    reg = parse_register(val)
-    if reg is not None:
-        return reg
-    addr = parse_mem_addr(val)
-    if addr is not None:
-        return addr
-    raise ValueError(f"{field}: {val!r} is not a register or memory address")
-
-
-def _parse_optional_addr(d: dict[str, Any], key: str, field: str) -> AddrType | None:
-    if key not in d:
-        return None
-    addr = parse_addr(d[key])
-    if addr is None:
-        raise ValueError(f"{field}: {d[key]!r} is not a valid address")
-    return addr
-
-
-def _parse_optional_time(d: dict[str, Any], key: str, field: str) -> TimeType | None:
-    if key not in d:
-        return None
-    raw = d[key]
-    time = parse_time(raw)
-    if time is None:
-        raise ValueError(f"{field}: {raw!r} is not a valid time operand")
-    if (
-        isinstance(raw, str)
-        and raw.strip().startswith("@")
-        and not isinstance(time, TimeOffset)
-    ):
-        raise ValueError(f"{field}: {raw!r} is not a valid time literal")
-    return time
-
-
-def _parse_optional_src(d: dict[str, Any], key: str, field: str) -> SrcType | None:
-    if key not in d:
-        return None
-    src = parse_src(d[key])
-    if src is None:
-        raise ValueError(f"{field}: {d[key]!r} is not a valid source")
-    return src
-
-
-def _parse_optional_side_write(
-    d: dict[str, Any], key: str, field: str
-) -> SideWrite | None:
-    if key not in d:
-        return None
-    wr = parse_side_write(d[key])
-    if wr is None:
-        raise ValueError(f"{field}: {d[key]!r} is not a valid side-write")
-    return wr
-
-
-def _parse_wp_port(d: dict[str, Any], cmd: str) -> tuple[str | None, str | None]:
-    wp_raw = d.get("WP")
-    port_raw = d.get("PORT")
-    wp = None if wp_raw is None else str(wp_raw)
-    port = None if port_raw is None else str(port_raw)
-
-    if wp is not None and len(wp.split()) != 1:
-        raise ValueError(f"{cmd}.WP: packed WP/PORT form is not supported")
-    if wp is None and port is not None:
-        raise ValueError(f"{cmd}.WP: PORT requires an explicit WP field")
-    if wp is not None and port is None:
-        raise ValueError(f"{cmd}.PORT: WP requires an explicit PORT field")
-    if port is not None and parse_imm_value(port) is None:
-        raise ValueError(f"{cmd}.PORT: {port!r} is not a valid port number")
-    return wp, port
-
-
-DportSrc = Literal["imm", "reg"]
-
-
-def _parse_dport_src_keyword(val: Any) -> DportSrc:
-    if val is None:
-        raise ValueError("DPORT_WR.SRC is required")
-    raw = str(val)
-    if raw not in ("imm", "reg"):
-        raise ValueError(f"DPORT_WR.SRC must be 'imm' or 'reg', got {raw!r}")
-    return raw
-
-
-def _parse_dport_data_field(val: Any, src: DportSrc) -> Register | ImmValue:
-    if val is None:
-        raise ValueError("DPORT_WR.DATA is required")
-    if src == "imm":
-        data = parse_imm_value(val)
-        if data is not None:
-            return data
-        raise ValueError(f"DPORT_WR.DATA: {val!r} is not a bare integer for SRC='imm'")
-    reg = parse_register(val)
-    if reg is not None:
-        return reg
-    raise ValueError(f"DPORT_WR.DATA: {val!r} is not a register for SRC='reg'")
 
 
 @dataclass(frozen=True)
@@ -298,6 +87,17 @@ class BaseInst(Instruction):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> BaseInst:
+        # Import concrete IO instructions here to avoid a base/IO initialization cycle.
+        from .io_instructions import (
+            DmemReadInst,
+            DmemWriteInst,
+            DportReadInst,
+            DportWriteInst,
+            PortWriteInst,
+            TrigInst,
+            WmemWriteInst,
+        )
+
         cmd = d.get("CMD")
         if not cmd:
             raise ValueError(f"Unknown instruction format: {d}")
@@ -366,7 +166,8 @@ class BaseInst(Instruction):
         lbl = self.need_label
         return frozenset({lbl}) if lbl is not None else frozenset()
 
-    def remap_labels(self, remap: dict[str, Label]) -> BaseInst:
+    # tolerated: No-label instructions share the remap signature with label-bearing overrides.
+    def remap_labels(self, remap: dict[str, Label]) -> BaseInst:  # noqa: ARG002
         """Return a copy with LabelRef targets remapped via ``remap``.
 
         Default implementation returns ``self`` unchanged; override in any
@@ -374,14 +175,6 @@ class BaseInst(Instruction):
         ``remap`` is keyed by label name strings (``str(label)``).
         """
         return self
-
-
-def _remap_label_ref(ref: LabelRef | None, remap: dict[str, Label]) -> LabelRef | None:
-    """Return a remapped copy of ``ref``, or the original if unchanged."""
-    if ref is None or ref.is_pseudo():
-        return ref
-    new = remap.get(str(ref.as_label()))
-    return LabelRef(new) if new is not None else ref
 
 
 def _remap_op_labels(op: ExprType | None, remap: dict[str, Label]) -> ExprType | None:
@@ -454,9 +247,9 @@ class TimeInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TimeInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "TIME.C_OP", _VALID_TIME_COPS),
-            lit=_parse_optional_immediate(d, "LIT", "TIME.LIT"),
-            r1=_parse_optional_register(d, "R1", "TIME.R1"),
+            c_op=require_literal(str(d["C_OP"]), "TIME.C_OP", VALID_TIME_COPS),
+            lit=parse_optional_immediate(d, "LIT", "TIME.LIT"),
+            r1=parse_optional_register(d, "R1", "TIME.R1"),
         )
 
     @property
@@ -493,7 +286,7 @@ class TestInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TestInst:
         return cls(
-            op=_require_alu_expr(d["OP"], "OP"),
+            op=require_alu_expr(d["OP"], "OP"),
             uf="UF" in d,
         )
 
@@ -525,10 +318,10 @@ class JumpInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> JumpInst:
         return cls(
             label=parse_label(d.get("LABEL")),
-            if_cond=_parse_cond_code(d.get("IF")),
-            addr=_parse_optional_addr(d, "ADDR", "JUMP.ADDR"),
-            wr=_parse_optional_side_write(d, "WR", "JUMP.WR"),
-            op=_require_alu_expr(d["OP"], "JUMP.OP") if "OP" in d else None,
+            if_cond=parse_cond_code(d.get("IF")),
+            addr=parse_optional_addr(d, "ADDR", "JUMP.ADDR"),
+            wr=parse_optional_side_write(d, "WR", "JUMP.WR"),
+            op=require_alu_expr(d["OP"], "JUMP.OP") if "OP" in d else None,
             uf="UF" in d,
         )
 
@@ -570,7 +363,7 @@ class JumpInst(BaseInst):
         return {k: v for k, v in d.items() if v is not None}
 
     def remap_labels(self, remap: dict[str, Label]) -> JumpInst:
-        new_label = _remap_label_ref(self.label, remap)
+        new_label = remap_label_ref(self.label, remap)
         if new_label is self.label:
             return self
         return dataclasses.replace(self, label=new_label)
@@ -595,16 +388,16 @@ class RegWriteInst(BaseInst):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> RegWriteInst:
-        wp, port = _parse_wp_port(d, "REG_WR")
+        wp, port = parse_wp_port(d, "REG_WR")
         return cls(
-            dst=_require_register(d["DST"], "DST"),
-            src=_parse_optional_src(d, "SRC", "REG_WR.SRC"),
-            wr=_parse_optional_side_write(d, "WR", "REG_WR.WR"),
-            op=_require_alu_expr(d["OP"], "REG_WR.OP") if "OP" in d else None,
-            lit=_parse_optional_immediate(d, "LIT", "REG_WR.LIT"),
-            addr=_parse_optional_addr(d, "ADDR", "REG_WR.ADDR"),
+            dst=require_register(d["DST"], "DST"),
+            src=parse_optional_src(d, "SRC", "REG_WR.SRC"),
+            wr=parse_optional_side_write(d, "WR", "REG_WR.WR"),
+            op=require_alu_expr(d["OP"], "REG_WR.OP") if "OP" in d else None,
+            lit=parse_optional_immediate(d, "LIT", "REG_WR.LIT"),
+            addr=parse_optional_addr(d, "ADDR", "REG_WR.ADDR"),
             uf="UF" in d,
-            if_cond=_parse_cond_code(d.get("IF")),
+            if_cond=parse_cond_code(d.get("IF")),
             label=parse_label(d.get("LABEL")),
             ww=d.get("WW"),
             wp=wp,
@@ -672,78 +465,11 @@ class RegWriteInst(BaseInst):
         return {k: v for k, v in d.items() if v is not None}
 
     def remap_labels(self, remap: dict[str, Label]) -> RegWriteInst:
-        new_label = _remap_label_ref(self.label, remap)
+        new_label = remap_label_ref(self.label, remap)
         new_op = _remap_op_labels(self.op, remap)
         if new_label is self.label and new_op is self.op:
             return self
         return dataclasses.replace(self, label=new_label, op=new_op)
-
-
-@dataclass(frozen=True)
-class PortWriteInst(BaseInst):
-    """WPORT_WR instruction: write to output port."""
-
-    dst: Register | ImmValue
-    src: SrcType | None = None
-    addr: Register | MemAddr | None = None
-    time: TimeType | None = None
-    wr: SideWrite | None = None
-    op: ExprType | None = None
-    uf: bool = False
-    if_cond: CondCode | None = None
-    ww: str | None = None
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> PortWriteInst:
-        return cls(
-            dst=_parse_port_dst(str(d["DST"])),
-            src=_parse_optional_src(d, "SRC", "WPORT_WR.SRC"),
-            addr=_parse_mem_addr_field(str(d["ADDR"]), "ADDR") if "ADDR" in d else None,
-            time=_parse_optional_time(d, "TIME", "WPORT_WR.TIME"),
-            wr=_parse_optional_side_write(d, "WR", "WPORT_WR.WR"),
-            op=_require_alu_expr(d["OP"], "WPORT_WR.OP") if "OP" in d else None,
-            uf="UF" in d,
-            if_cond=_parse_cond_code(d.get("IF")),
-            ww=d.get("WW"),
-        )
-
-    @property
-    def reg_read(self) -> frozenset[str]:
-        reads: frozenset[str] = frozenset({TIMED_BASE_REG})
-        if isinstance(self.src, Register):
-            reads = reads | self.src.regs()
-        for op in [self.dst, self.addr, self.time]:
-            if isinstance(op, Register):
-                reads = reads | op.regs()
-        if self.op:
-            reads = reads | self.op.regs()
-        return reads
-
-    @property
-    def reg_write(self) -> frozenset[str]:
-        return self.wr.regs() if self.wr else frozenset()
-
-    def to_dict(self) -> dict[str, Any]:
-        src_val = (
-            self.src.value
-            if isinstance(self.src, SrcKeyword)
-            else str(self.src)
-            if self.src
-            else None
-        )
-        d = {
-            "CMD": "WPORT_WR",
-            "DST": str(self.dst) if self.dst else None,
-            "SRC": src_val,
-            "ADDR": str(self.addr) if self.addr else None,
-            "TIME": str(self.time) if self.time else None,
-            "WR": str(self.wr) if self.wr else None,
-            "OP": str(self.op) if self.op else None,
-            "UF": "1" if self.uf else None,
-            "IF": self.if_cond if self.if_cond else None,
-            "WW": self.ww,
-        }
-        return {k: v for k, v in d.items() if v is not None}
 
 
 @dataclass(frozen=True)
@@ -760,323 +486,6 @@ class NopInst(BaseInst):
 
 
 @dataclass(frozen=True)
-class DmemReadInst(BaseInst):
-    """DMEM read lowered to the native REG_WR form."""
-
-    dst: Register
-    src: SrcKeyword = SrcKeyword.DMEM
-    addr: AddrType | None = None
-    wr: SideWrite | None = None
-    op: ExprType | None = None
-    lit: Immediate | None = None
-    uf: bool = False
-    if_cond: CondCode | None = None
-    label: LabelRef | None = None
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> DmemReadInst:
-        return cls(
-            dst=_require_register(d["DST"], "DST"),
-            src=SrcKeyword.DMEM,
-            addr=_parse_optional_addr(d, "ADDR", "REG_WR.ADDR"),
-            wr=_parse_optional_side_write(d, "WR", "REG_WR.WR"),
-            op=_require_alu_expr(d["OP"], "REG_WR.OP") if "OP" in d else None,
-            lit=_parse_optional_immediate(d, "LIT", "REG_WR.LIT"),
-            uf="UF" in d,
-            if_cond=_parse_cond_code(d.get("IF")),
-            label=parse_label(d.get("LABEL")),
-        )
-
-    @property
-    def reg_read(self) -> frozenset[str]:
-        reads: frozenset[str] = frozenset()
-        if isinstance(self.addr, Register):
-            reads = reads | self.addr.regs()
-        if self.op:
-            reads = reads | self.op.regs()
-        return reads
-
-    @property
-    def reg_write(self) -> frozenset[str]:
-        writes = self.dst.regs() if self.dst else frozenset()
-        if self.wr is not None:
-            writes = writes | self.wr.regs()
-        return writes
-
-    @property
-    def need_label(self) -> Label | None:
-        if self.label is not None and not self.label.is_pseudo():
-            return self.label.as_label()
-        return None
-
-    def to_dict(self) -> dict[str, Any]:
-        d = {
-            "CMD": "REG_WR",
-            "DST": str(self.dst) if self.dst else None,
-            "SRC": self.src.value,
-            "ADDR": str(self.addr) if self.addr else None,
-            "WR": str(self.wr) if self.wr else None,
-            "OP": str(self.op) if self.op else None,
-            "LIT": str(self.lit) if self.lit else None,
-            "UF": "1" if self.uf else None,
-            "IF": self.if_cond if self.if_cond else None,
-            "LABEL": str(self.label) if self.label is not None else None,
-        }
-        return {k: v for k, v in d.items() if v is not None}
-
-    def remap_labels(self, remap: dict[str, Label]) -> DmemReadInst:
-        new_label = _remap_label_ref(self.label, remap)
-        if new_label is self.label:
-            return self
-        return dataclasses.replace(self, label=new_label)
-
-
-DmemSrc = Literal["imm", "op"]
-
-
-def _parse_dmem_src_keyword(val: str) -> DmemSrc:
-    if val not in ("imm", "op"):
-        raise ValueError(f"DMEM_WR.SRC must be 'imm' or 'op', got {val!r}")
-    return val
-
-
-@dataclass(frozen=True)
-class DmemWriteInst(BaseInst):
-    """DMEM_WR instruction: write to data memory."""
-
-    dst: Register | MemAddr
-    src: DmemSrc = "imm"
-    op: ExprType | None = None
-    lit: Immediate | None = None
-    wr: SideWrite | None = None
-    uf: bool = False
-    if_cond: CondCode | None = None
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> DmemWriteInst:
-        dst_raw = str(d["DST"])
-        if dst_raw.startswith("[") and dst_raw.endswith("]"):
-            dst_raw = dst_raw[1:-1]
-        return cls(
-            dst=_parse_mem_addr_field(dst_raw, "DST"),
-            src=_parse_dmem_src_keyword(str(d["SRC"])),
-            wr=_parse_optional_side_write(d, "WR", "DMEM_WR.WR"),
-            op=_require_alu_expr(d["OP"], "DMEM_WR.OP") if "OP" in d else None,
-            lit=_parse_optional_immediate(d, "LIT", "DMEM_WR.LIT"),
-            uf="UF" in d,
-            if_cond=_parse_cond_code(d.get("IF")),
-        )
-
-    @property
-    def reg_read(self) -> frozenset[str]:
-        reads: frozenset[str] = frozenset()
-        if isinstance(self.dst, Register):
-            reads = reads | self.dst.regs()
-        if self.op:
-            reads = reads | self.op.regs()
-        return reads
-
-    @property
-    def reg_write(self) -> frozenset[str]:
-        return self.wr.regs() if self.wr else frozenset()
-
-    def to_dict(self) -> dict[str, Any]:
-        dst_str = str(self.dst)
-        if isinstance(self.dst, MemAddr):
-            dst_str = f"[{dst_str}]"
-        d = {
-            "CMD": "DMEM_WR",
-            "DST": dst_str,
-            "SRC": self.src,
-            "OP": str(self.op) if self.op else None,
-            "LIT": str(self.lit) if self.lit else None,
-            "WR": str(self.wr) if self.wr else None,
-            "UF": "1" if self.uf else None,
-            "IF": self.if_cond if self.if_cond else None,
-        }
-        return {k: v for k, v in d.items() if v is not None}
-
-
-@dataclass(frozen=True)
-class WmemWriteInst(BaseInst):
-    """WMEM_WR instruction: write wave registers into wave memory."""
-
-    addr: Register | MemAddr | None = None
-    time: TimeType | None = None
-    wr: SideWrite | None = None
-    op: ExprType | None = None
-    uf: bool = False
-    if_cond: CondCode | None = None
-    wp: str | None = None
-    port: str | None = None
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> WmemWriteInst:
-        wp, port = _parse_wp_port(d, "WMEM_WR")
-        return cls(
-            addr=_parse_mem_addr_field(str(d["DST"]), "DST") if "DST" in d else None,
-            time=_parse_optional_time(d, "TIME", "WMEM_WR.TIME"),
-            wr=_parse_optional_side_write(d, "WR", "WMEM_WR.WR"),
-            op=_require_alu_expr(d["OP"], "WMEM_WR.OP") if "OP" in d else None,
-            uf="UF" in d,
-            if_cond=_parse_cond_code(d.get("IF")),
-            wp=wp,
-            port=port,
-        )
-
-    @property
-    def reg_read(self) -> frozenset[str]:
-        reads = Register("r_wave").regs() | frozenset({TIMED_BASE_REG})
-        if isinstance(self.addr, Register):
-            reads = reads | self.addr.regs()
-        if isinstance(self.time, Register):
-            reads = reads | self.time.regs()
-        if self.op:
-            reads = reads | self.op.regs()
-        return reads
-
-    @property
-    def reg_write(self) -> frozenset[str]:
-        return self.wr.regs() if self.wr else frozenset()
-
-    def to_dict(self) -> dict[str, Any]:
-        d = {
-            "CMD": "WMEM_WR",
-            "DST": str(self.addr) if self.addr else None,
-            "TIME": str(self.time) if self.time else None,
-            "WR": str(self.wr) if self.wr else None,
-            "OP": str(self.op) if self.op else None,
-            "UF": "1" if self.uf else None,
-            "IF": self.if_cond if self.if_cond else None,
-            "WP": self.wp,
-            "PORT": self.port,
-        }
-        return {k: v for k, v in d.items() if v is not None}
-
-
-@dataclass(frozen=True)
-class DportWriteInst(BaseInst):
-    """DPORT_WR instruction: write to data port."""
-
-    dst: Register | ImmValue
-    src: DportSrc = "imm"
-    data: Register | ImmValue = ImmValue(0)
-    time: TimeType | None = None
-    wr: SideWrite | None = None
-    op: ExprType | None = None
-    uf: bool = False
-    if_cond: CondCode | None = None
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> DportWriteInst:
-        src = _parse_dport_src_keyword(d.get("SRC"))
-        return cls(
-            dst=_parse_port_dst(str(d["DST"])),
-            src=src,
-            data=_parse_dport_data_field(d.get("DATA"), src),
-            time=_parse_optional_time(d, "TIME", "DPORT_WR.TIME"),
-            wr=_parse_optional_side_write(d, "WR", "DPORT_WR.WR"),
-            op=_require_alu_expr(d["OP"], "DPORT_WR.OP") if "OP" in d else None,
-            uf="UF" in d,
-            if_cond=_parse_cond_code(d.get("IF")),
-        )
-
-    @property
-    def reg_read(self) -> frozenset[str]:
-        reads: frozenset[str] = frozenset({TIMED_BASE_REG})
-        if isinstance(self.src, Register):
-            reads = reads | self.src.regs()
-        for op in [self.dst, self.data, self.time]:
-            if isinstance(op, Register):
-                reads = reads | op.regs()
-        if self.op:
-            reads = reads | self.op.regs()
-        return reads
-
-    @property
-    def reg_write(self) -> frozenset[str]:
-        return self.wr.regs() if self.wr else frozenset()
-
-    def to_dict(self) -> dict[str, Any]:
-        d = {
-            "CMD": "DPORT_WR",
-            "DST": str(self.dst) if self.dst else None,
-            "SRC": self.src,
-            "DATA": str(self.data),
-            "TIME": str(self.time) if self.time else None,
-            "WR": str(self.wr) if self.wr else None,
-            "OP": str(self.op) if self.op else None,
-            "UF": "1" if self.uf else None,
-            "IF": self.if_cond if self.if_cond else None,
-        }
-        return {k: v for k, v in d.items() if v is not None}
-
-
-@dataclass(frozen=True)
-class DportReadInst(BaseInst):
-    """DPORT_RD instruction: read I/Q result from a data port."""
-
-    dst: Register | ImmValue
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> DportReadInst:
-        return cls(dst=_parse_port_dst(str(d["DST"])))
-
-    @property
-    def reg_read(self) -> frozenset[str]:
-        reads: frozenset[str] = frozenset({STATUS_REG})
-        if isinstance(self.dst, Register):
-            reads = reads | self.dst.regs()
-        return reads
-
-    @property
-    def reg_write(self) -> frozenset[str]:
-        return frozenset({"s8", "s9"})
-
-    def to_dict(self) -> dict[str, Any]:
-        d = {
-            "CMD": "DPORT_RD",
-            "DST": str(self.dst) if self.dst else None,
-        }
-        return {k: v for k, v in d.items() if v is not None}
-
-
-@dataclass(frozen=True)
-class TrigInst(BaseInst):
-    """TRIG instruction: set or clear a trigger port."""
-
-    dst: Register | ImmValue
-    src: TrigSrc
-    time: TimeType | None = None
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> TrigInst:
-        return cls(
-            dst=_parse_port_dst(str(d["DST"])),
-            src=_require_literal(str(d["SRC"]), "TRIG.SRC", _VALID_TRIG_SRCS),
-            time=_parse_optional_time(d, "TIME", "TRIG.TIME"),
-        )
-
-    @property
-    def reg_read(self) -> frozenset[str]:
-        reads: frozenset[str] = frozenset({TIMED_BASE_REG})
-        if isinstance(self.dst, Register):
-            reads = reads | self.dst.regs()
-        if isinstance(self.time, Register):
-            reads = reads | self.time.regs()
-        return reads
-
-    def to_dict(self) -> dict[str, Any]:
-        d = {
-            "CMD": "TRIG",
-            "DST": str(self.dst) if self.dst else None,
-            "SRC": self.src,
-            "TIME": str(self.time) if self.time else None,
-        }
-        return {k: v for k, v in d.items() if v is not None}
-
-
-@dataclass(frozen=True)
 class CallInst(BaseInst):
     """CALL instruction: call a subroutine (stores return address before jumping)."""
 
@@ -1087,7 +496,7 @@ class CallInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> CallInst:
         return cls(
             label=parse_label(d.get("LABEL")),
-            addr=_parse_optional_addr(d, "ADDR", "CALL.ADDR"),
+            addr=parse_optional_addr(d, "ADDR", "CALL.ADDR"),
         )
 
     def __post_init__(self) -> None:
@@ -1117,7 +526,7 @@ class CallInst(BaseInst):
         return {k: v for k, v in d.items() if v is not None}
 
     def remap_labels(self, remap: dict[str, Label]) -> CallInst:
-        new_label = _remap_label_ref(self.label, remap)
+        new_label = remap_label_ref(self.label, remap)
         if new_label is self.label:
             return self
         return dataclasses.replace(self, label=new_label)
@@ -1145,15 +554,14 @@ class FlagInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FlagInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "FLAG.C_OP", _VALID_FLAG_COPS),
+            c_op=require_literal(str(d["C_OP"]), "FLAG.C_OP", VALID_FLAG_COPS),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        d = {
+        return {
             "CMD": "FLAG",
             "C_OP": self.c_op,
         }
-        return {k: v for k, v in d.items() if v is not None}
 
 
 @dataclass(frozen=True)
@@ -1169,11 +577,11 @@ class ArithInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ArithInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "ARITH.C_OP", _VALID_ARITH_COPS),
-            r1=_parse_optional_register(d, "R1", "ARITH.R1"),
-            r2=_parse_optional_register(d, "R2", "ARITH.R2"),
-            r3=_parse_optional_register(d, "R3", "ARITH.R3"),
-            r4=_parse_optional_register(d, "R4", "ARITH.R4"),
+            c_op=require_literal(str(d["C_OP"]), "ARITH.C_OP", VALID_ARITH_COPS),
+            r1=parse_optional_register(d, "R1", "ARITH.R1"),
+            r2=parse_optional_register(d, "R2", "ARITH.R2"),
+            r3=parse_optional_register(d, "R3", "ARITH.R3"),
+            r4=parse_optional_register(d, "R4", "ARITH.R4"),
         )
 
     @property
@@ -1254,10 +662,10 @@ class NetInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> NetInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "NET.C_OP", _VALID_NET_COPS),
-            r1=_parse_optional_register(d, "R1", "NET.R1"),
-            r2=_parse_optional_register(d, "R2", "NET.R2"),
-            r3=_parse_optional_register(d, "R3", "NET.R3"),
+            c_op=require_literal(str(d["C_OP"]), "NET.C_OP", VALID_NET_COPS),
+            r1=parse_optional_register(d, "R1", "NET.R1"),
+            r2=parse_optional_register(d, "R2", "NET.R2"),
+            r3=parse_optional_register(d, "R3", "NET.R3"),
         )
 
     @property
@@ -1295,8 +703,8 @@ class ComInst(BaseInst):
         r1 = None
         if "R1" in d:
             r1_raw = d["R1"]
-            if isinstance(r1_raw, str) and _is_valid_literal(
-                r1_raw, _VALID_COM_FLAG_VALS
+            if isinstance(r1_raw, str) and is_valid_literal(
+                r1_raw, VALID_COM_FLAG_VALS
             ):
                 flag_val = r1_raw
             else:
@@ -1307,11 +715,11 @@ class ComInst(BaseInst):
                     )
 
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "COM.C_OP", _VALID_COM_COPS),
+            c_op=require_literal(str(d["C_OP"]), "COM.C_OP", VALID_COM_COPS),
             r1=r1,
             flag_val=flag_val,
-            lit=_parse_optional_immediate(d, "LIT", "COM.LIT"),
-            if_cond=_parse_cond_code(d.get("IF")),
+            lit=parse_optional_immediate(d, "LIT", "COM.LIT"),
+            if_cond=parse_cond_code(d.get("IF")),
         )
 
     @property
@@ -1350,12 +758,12 @@ class CustomPeripheralInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CustomPeripheralInst:
         return cls(
-            cmd=_require_literal(str(d["CMD"]), "PA/PB.CMD", _VALID_PA_CMDS),
+            cmd=require_literal(str(d["CMD"]), "PA/PB.CMD", VALID_PA_CMDS),
             c_op=int(d["C_OP"]),
-            r1=_parse_optional_register(d, "R1", f"{d['CMD']}.R1"),
-            r2=_parse_optional_register(d, "R2", f"{d['CMD']}.R2"),
-            r3=_parse_optional_register(d, "R3", f"{d['CMD']}.R3"),
-            r4=_parse_optional_register(d, "R4", f"{d['CMD']}.R4"),
+            r1=parse_optional_register(d, "R1", f"{d['CMD']}.R1"),
+            r2=parse_optional_register(d, "R2", f"{d['CMD']}.R2"),
+            r3=parse_optional_register(d, "R3", f"{d['CMD']}.R3"),
+            r4=parse_optional_register(d, "R4", f"{d['CMD']}.R4"),
         )
 
     @property
@@ -1391,7 +799,7 @@ class ClearInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ClearInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "CLEAR.C_OP", _VALID_CLEAR_COPS),
+            c_op=require_literal(str(d["C_OP"]), "CLEAR.C_OP", VALID_CLEAR_COPS),
         )
 
     @property
@@ -1399,11 +807,10 @@ class ClearInst(BaseInst):
         return frozenset({"s2"})
 
     def to_dict(self) -> dict[str, Any]:
-        d = {
+        return {
             "CMD": "CLEAR",
             "C_OP": self.c_op,
         }
-        return {k: v for k, v in d.items() if v is not None}
 
 
 @dataclass(frozen=True)
@@ -1417,9 +824,9 @@ class WaitInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WaitInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "WAIT.C_OP", _VALID_WAIT_COPS),
-            time=_parse_optional_time(d, "TIME", "WAIT.TIME"),
-            addr=_parse_optional_addr(d, "ADDR", "WAIT.ADDR"),
+            c_op=require_literal(str(d["C_OP"]), "WAIT.C_OP", VALID_WAIT_COPS),
+            time=parse_optional_time(d, "TIME", "WAIT.TIME"),
+            addr=parse_optional_addr(d, "ADDR", "WAIT.ADDR"),
         )
 
     def __post_init__(self) -> None:

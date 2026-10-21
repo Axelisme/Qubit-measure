@@ -303,7 +303,8 @@ def sweep2array[T_SweepItem](
         return round_sweep.start + np.linspace(
             0, round_sweep.stop - round_sweep.start, round_sweep.expts
         )
-    if isinstance(sweep, (list, np.ndarray)):
+    # tolerated: Reject runtime inputs outside the annotated union instead of converting them as custom arrays.
+    if isinstance(sweep, (list, np.ndarray)):  # pyright: ignore[reportUnnecessaryIsInstance]
         if not allow_array:
             raise ValueError(f"Custom sweep is not allowed: {sweep}")
         sweep_array = np.asarray(sweep, dtype=np.float64)

@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 import pytest
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QLineEdit
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
@@ -127,37 +127,6 @@ def test_sync_class_change_rebuilds_and_clear_fast_fails(qapp):
     assert _form_layout(form).rowCount() == 0
     with pytest.raises(RuntimeError, match="not been populated"):
         form.read_params()
-
-
-def test_field_metadata_is_resolved_once_per_class_build(qapp, monkeypatch):
-    from zcu_tools.gui.app.measure.ui import analyze_form as module
-
-    real_hints = module.get_type_hints
-    real_resolve = module._resolve_field_info
-    hint_calls = 0
-    resolve_calls = 0
-
-    def counted_hints(*args, **kwargs):
-        nonlocal hint_calls
-        hint_calls += 1
-        return real_hints(*args, **kwargs)
-
-    def counted_resolve(*args, **kwargs):
-        nonlocal resolve_calls
-        resolve_calls += 1
-        return real_resolve(*args, **kwargs)
-
-    monkeypatch.setattr(module, "get_type_hints", counted_hints)
-    monkeypatch.setattr(module, "_resolve_field_info", counted_resolve)
-    form = AnalyzeFormWidget()
-
-    form.sync(_TestParams(threshold=0.5, model="a"))
-    form.read_params()
-    form.sync(_TestParams(threshold=0.9, model="b"))
-    form.read_params()
-
-    assert hint_calls == 1
-    assert resolve_calls == 2
 
 
 def test_analyze_form_user_edit_emits_params_changed(qapp):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -19,7 +19,6 @@ from zcu_tools.gui.app.measure.adapter import (
     PostWritebackRequest,
     RunRequest,
     SessionEnv,
-    T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
 )
@@ -85,7 +84,11 @@ class GEPostAnalyzeResult(PostAnalyzeResultBase):
     confusion: list[list[float]]
 
 
-class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams]):
+class GEAdapter(
+    BaseAdapter[
+        GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams, GEPostAnalyzeResult
+    ]
+):
     experiment_tag: ClassVar[str | None] = GE_Exp.persistence_tag()
 
     @staticmethod
@@ -190,9 +193,9 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
 
     def get_post_writeback_items(
         self,
-        req: PostWritebackRequest[GERunResult, GEAnalyzeResult, T_PostAnalyzeResult],
+        req: PostWritebackRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        result = cast(GEPostAnalyzeResult, req.post_analyze_result)
+        result = req.post_analyze_result
         return [
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.radius",

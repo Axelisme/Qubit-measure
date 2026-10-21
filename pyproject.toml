@@ -173,6 +173,7 @@ executionEnvironments = [
 # on lib/: the reportUnknown* family is 59% of strict output and is almost entirely
 # third-party in origin; with it disabled every remaining diagnostic is own-code.
 typeCheckingMode = "strict"
+reportUnnecessaryTypeIgnoreComment = "error"
 # Missing optional-profile packages remain visible debt in the ratchet; missing
 # imports and missing third-party stubs are different diagnostics.
 reportMissingImports = "error"

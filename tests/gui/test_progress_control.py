@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
 from unittest.mock import MagicMock
 
 from zcu_tools.gui.session.progress_control import ProgressControlFacet
@@ -10,7 +9,7 @@ from zcu_tools.gui.session.progress_control import ProgressControlFacet
 
 def test_progress_control_facet_delegates_owner_progress_calls() -> None:
     progress = MagicMock()
-    facet = ProgressControlFacet(cast(Any, progress))
+    facet = ProgressControlFacet(progress)
     listener = MagicMock()
 
     progress.attach_by_owner.return_value = "dispose"

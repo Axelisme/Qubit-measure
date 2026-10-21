@@ -17,6 +17,7 @@ import logging
 import os
 import threading
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -46,6 +47,29 @@ logger = logging.getLogger(__name__)
 
 # An event serializer maps a domain payload to a wire payload (or None to drop).
 Serializer = Callable[[Any], Mapping[str, object] | None]
+
+
+@dataclass(frozen=True, kw_only=True)
+class RemoteAppSpec:
+    """App-owned dispatch declarations and endpoint identity, shared by adapters.
+
+    Versions and server_name retain the app's wire handshake identity. Registries
+    and serializers remain app-owned; this record does not grant control authority
+    or select an owner scheduler.
+    """
+
+    wire_version: int
+    """App wire-protocol version used for handshake compatibility checks."""
+    gui_version: int
+    """App GUI implementation version advertised by the endpoint."""
+    server_name: str
+    """App's published server identity in handshake replies."""
+    method_registry: Mapping[str, BoundMethod]
+    """Wire method names mapped to app handlers and their dispatch policies."""
+    event_serializers: Mapping[Any, Serializer]
+    """Domain event keys mapped to lazy payload projections; None drops an event."""
+    wire_event_name: Callable[[Any], str]
+    """Map the same domain event keys to their subscribed wire names."""
 
 
 def _store_expected_error(
@@ -107,20 +131,14 @@ class RemoteControlServiceBase:
         opts: ControlOptions,
         *,
         owner_scheduler: OwnerScheduler,
-        wire_version: int,
-        gui_version: int,
-        server_name: str,
-        method_registry: Mapping[str, BoundMethod],
-        event_serializers: Mapping[Any, Serializer],
-        wire_event_name: Callable[[Any], str],
+        app: RemoteAppSpec,
         control_identity: ControlIdentity | None = None,
     ) -> None:
         """Bind app dispatch and optional owner-thread control authority.
 
-        controller exposes the app bus and commands used by method_registry.
+        controller exposes the app bus and commands used by app.method_registry.
         opts configures the socket; owner_scheduler serializes State work.
-        wire_version, gui_version and server_name identify the endpoint.
-        event_serializers and wire_event_name project subscribed domain events.
+        app supplies endpoint identity, dispatch methods and event projections.
         control_identity is the application's optional write-authority owner;
         omit it for observe-only apps. When supplied, unmarked methods require
         the calling socket's holder identity, and off-main methods must declare
@@ -128,7 +146,7 @@ class RemoteControlServiceBase:
         Construction opens no socket; start() begins serving requests.
         """
         if control_identity is not None:
-            for method, entry in method_registry.items():
+            for method, entry in app.method_registry.items():
                 if entry.off_main_thread and not entry.readonly:
                     raise ValueError(
                         f"off-owner control method must be readonly: {method}"
@@ -136,16 +154,16 @@ class RemoteControlServiceBase:
         self.control_identity = control_identity
         self.ctrl = controller
         self._opts = opts
-        self._wire_version = wire_version
-        self._method_registry = method_registry
-        self._event_serializers = event_serializers
-        self._wire_event_name = wire_event_name
+        self._wire_version = app.wire_version
+        self._method_registry = app.method_registry
+        self._event_serializers = app.event_serializers
+        self._wire_event_name = app.wire_event_name
         self._owner_scheduler = owner_scheduler
         self._endpoint = NdjsonRpcEndpoint(
             opts,
-            wire_version=wire_version,
-            gui_version=gui_version,
-            server_name=server_name,
+            wire_version=app.wire_version,
+            gui_version=app.gui_version,
+            server_name=app.server_name,
             router=self,
         )
         # EventBus subscriptions registered in start(); unsubscribed in stop().
@@ -587,4 +605,9 @@ class RemoteControlServiceBase:
         return _on_event
 
 
-__all__ = ["ControlOptions", "RemoteControlServiceBase", "SubscriptionCtx"]
+__all__ = [
+    "ControlOptions",
+    "RemoteAppSpec",
+    "RemoteControlServiceBase",
+    "SubscriptionCtx",
+]

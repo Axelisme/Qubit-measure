@@ -18,6 +18,7 @@ class PulseByReg(TimedMacro):
     def preprocess(self, prog):
         self.convert_time(prog, self.t, "t")
 
+    # tolerated: QICK Macro.expand is inferred as None, but translate iterates the returned macro list.
     def expand(self, prog):  # pyright: ignore[reportIncompatibleMethodOverride]
         tproc_ch = prog.soccfg["gens"][self.ch]["tproc_ch"]
         t_reg = self.t_regs["t"]

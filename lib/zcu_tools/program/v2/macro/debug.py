@@ -24,6 +24,7 @@ class PrintTimeStamp(Macro):
         super().__init__(name=name, t=t, prefix=prefix, gen_chs=gen_chs, ro_chs=ro_chs)
 
     @override
+    # tolerated: QICK Macro.expand is inferred as None, but translate iterates the returned macro list.
     def expand(self, prog) -> list[AsmInst]:  # pyright: ignore[reportIncompatibleMethodOverride]
         return []
 

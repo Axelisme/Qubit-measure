@@ -109,7 +109,8 @@ def test_flux_frame_rejects_invalid_frames() -> None:
     with pytest.raises(ValueError, match="unsupported device unit"):
         FluxFrame(
             params=(1.0, 2.0, 3.0),
-            dev_unit="mA",  # type: ignore[arg-type]
+            # tolerated: Reject noncanonical mA frame units.
+            dev_unit="mA",  # pyright: ignore[reportArgumentType]
             flux_int=0.0,
             flux_period=1.0,
             label="bad",
@@ -148,7 +149,8 @@ def test_flux_frame_rejects_invalid_frames() -> None:
         )
     with pytest.raises(ValueError, match="params"):
         FluxFrame(
-            params=(1.0, 2.0),  # type: ignore[arg-type]
+            # tolerated: Reject an incomplete EJ/EC/EL tuple.
+            params=(1.0, 2.0),  # pyright: ignore[reportArgumentType]
             dev_unit="A",
             flux_int=0.0,
             flux_period=1.0,
@@ -168,7 +170,8 @@ def test_from_result_dir_requires_explicit_dev_unit(tmp_path: Path) -> None:
     target_dir = _write_params(tmp_path / "target")
 
     with pytest.raises(TypeError):
-        FluxFrame.from_result_dir(target_dir)  # type: ignore[call-arg]
+        # tolerated: Verify missing explicit dev_unit fails rather than inferring units.
+        FluxFrame.from_result_dir(target_dir)  # pyright: ignore[reportCallIssue]
 
     frame = FluxFrame.from_result_dir(target_dir, dev_unit="A")
     assert frame.dev_unit == "A"
@@ -193,10 +196,12 @@ def test_merge_requires_exactly_one_target_identity(tmp_path: Path) -> None:
     sources = (SampleSource(path=source_path, label="s"),)
 
     with pytest.raises(TypeError):
-        merge_sample_sources(sources=sources)  # type: ignore[call-arg]
+        # tolerated: Verify omission of the required target_frame is rejected.
+        merge_sample_sources(sources=sources)  # pyright: ignore[reportCallIssue]
     with pytest.raises(TypeError):
-        merge_sample_sources(  # type: ignore[call-arg]
-            target_result_dir=target_dir,  # type: ignore[call-arg]
+        merge_sample_sources(
+            # tolerated: Verify the removed target_result_dir argument is rejected.
+            target_result_dir=target_dir,  # pyright: ignore[reportCallIssue]
             sources=sources,
             target_frame=_target_frame(),
         )
@@ -536,7 +541,8 @@ def test_integer_flux_offset_must_be_an_int(tmp_path: Path) -> None:
         flux=np.array([0.5]),
     )
     with pytest.raises(ValueError, match="integer_flux_offset must be an int"):
-        SampleSource(path=source_path, integer_flux_offset=1.0)  # type: ignore[arg-type]
+        # tolerated: Reject float offsets even when numerically integral.
+        SampleSource(path=source_path, integer_flux_offset=1.0)  # pyright: ignore[reportArgumentType]
 
 
 def test_merge_fits_one_batch_flux_offset_against_target_model(tmp_path: Path) -> None:
@@ -587,7 +593,8 @@ def test_sample_source_rejects_manual_flux_offset(tmp_path: Path) -> None:
         SampleSource(
             path=str(tmp_path / "samples.csv"),
             label="manual",
-            manual_flux_offset=1.0,  # type: ignore[call-arg]
+            # tolerated: Verify the removed manual_flux_offset argument is rejected.
+            manual_flux_offset=1.0,  # pyright: ignore[reportCallIssue]
         )
 
 

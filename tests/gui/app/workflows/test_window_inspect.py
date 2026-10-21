@@ -20,6 +20,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.cfg_model import ConstWaveformCfg, TemplateDef
 from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -201,7 +202,7 @@ def test_reopening_inspect_reads_the_latest_alias_table(
     assert value is not None and value.text() == "Q1"
 
 
-def test_composition_supplies_templates_presets_and_the_shared_arb_dialog(
+def test_composition_supplies_templates_and_the_shared_arb_dialog(
     tmp_path: Path, qapp: QApplication
 ) -> None:
     templates = {
@@ -212,36 +213,30 @@ def test_composition_supplies_templates_presets_and_the_shared_arb_dialog(
             default_name="Q1.waveforms.flat",
         )
     }
-    presets = {"default": (), "probe": (AliasRow("probe", "Q1"),)}
     app = WorkflowsGuiBehavior(
-        registrations=[small_registration()],
-        templates=templates,
-        alias_presets=presets,
+        composition=WorkflowComposition(
+            registrations=[small_registration()],
+            templates=templates,
+        ),
         project_root=str(tmp_path),
         cache_dir=tmp_path / "cache",
         clean=True,
     )
     app.assemble(None)
     try:
-        # Aliases and ARB remain available even before opening a point.
+        # ARB remains available even before opening a point.
         app.window.show()
         dialog = open_inspect(app.window, qapp)
-        menu = child(dialog, QPushButton, "inspect.aliases.load_preset").menu()
-        assert menu is not None
-        assert [action.text() for action in menu.actions()] == ["default", "probe"]
         button(dialog, "Arb Waveforms…").click()
         qapp.processEvents()
         arb = [d for d in app.window.findChildren(ArbWaveformDialog) if d.isVisible()]
         assert len(arb) == 1
         arb[0].close()
-        # Alias Apply and template creation both require a selected point.
+        # Template creation requires a selected point.
         app.services.settings.new_entry(EntryRequest("sample"))
         app.services.context.new_point(
             PointCreateRequest("source", "", CommandOrigin("gui"))
         )
-        menu.actions()[1].trigger()
-        child(dialog, QPushButton, "inspect.aliases.apply").click()
-        assert app.services.context.get_alias_rows() == presets["probe"]
         child(dialog, QTabWidget, "").setCurrentIndex(1)
         button(dialog, "New").click()
         qapp.processEvents()
@@ -254,9 +249,6 @@ def test_composition_supplies_templates_presets_and_the_shared_arb_dialog(
             "Q1.waveforms.flat"
         ) == ConstWaveformCfg(length=0.3)
     finally:
-        # A failed assertion after loading a preset must not open a native modal.
-        for dialog in app.window.findChildren(InspectDialog):
-            child(dialog, QPushButton, "inspect.aliases.revert").click()
         app.window.close()
         app.shutdown()
         app.window.deleteLater()

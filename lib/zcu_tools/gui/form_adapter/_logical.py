@@ -296,7 +296,18 @@ def _children(
     return tuple(result)
 
 
-def _errors(errors: FormErrors | None, path: FormWritePath) -> FormErrors | None:
+def errors_for_path(
+    errors: FormErrors | None, path: FormWritePath
+) -> FormErrors | None:
+    """Project existing errors onto a full target path in the same coordinates.
+
+    errors is FormErrors with canonical paths, or None. path is the complete
+    canonical target path in the same coordinate system as the error keys.
+    Keep messages for the target itself, its ancestors and its descendants,
+    preserving absolute keys, message text and original order without rebasing.
+    Return None for None or no matching messages; the root path () matches all
+    paths. Do not mutate inputs, evaluate values or add diagnostics.
+    """
     if errors is None:
         return None
     messages = {
@@ -503,7 +514,7 @@ def _with_input_errors(
     env: FormEnv,
 ) -> LogicalFieldObservation:
     validation = logical_errors(input, FormState(input).preview(env).errors, env)
-    relevant = _errors(validation, observed.description.path)
+    relevant = errors_for_path(validation, observed.description.path)
     if relevant is None:
         return observed
     return replace(

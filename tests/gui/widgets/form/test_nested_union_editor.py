@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_converters import RebuildingForm
@@ -62,7 +62,7 @@ class ModuleInlineChoice(RebuildingForm):
     branch_models = {("module",): (DriveModule, ShortReadoutModule, PulseReadoutModule)}
 
     kind: Literal["inline"] = "inline"
-    module: AnyModule
+    module: Annotated[AnyModule, Display(collapsed=False)]
 
 
 type ModuleChoice = Annotated[
@@ -78,8 +78,8 @@ class InlineModuleForm(RebuildingForm):
         ("readout",): (ModuleRefChoice, ModuleInlineChoice),
     }
 
-    qub_pulse: ModuleChoice
-    readout: ModuleChoice
+    qub_pulse: Annotated[ModuleChoice, Display(collapsed=False)]
+    readout: Annotated[ModuleChoice, Display(collapsed=False)]
 
 
 @pytest.fixture

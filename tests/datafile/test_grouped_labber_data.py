@@ -512,6 +512,7 @@ def test_grouped_variable_value_cannot_be_labber_data(tmp_path):
         axes=[Axis("Frequency", "Hz", np.arange(3, dtype=float))],
     )
 
+    # tolerated(cast): Pass real LabberData despite the LabberPayload-only contract.
     invalid_variables = cast(
         Mapping[str | DataVariable, LabberPayload], {"signal": data}
     )

@@ -173,8 +173,8 @@ frequency correction. NaN detune does not meet that requirement.
 `MuxT2RamseyAdapter` in `gui.py` uses the explicit Run/Load record and its capture.
 Its native generated Form is registered as `mux/t2ramsey`.
 The registered MCP recipe is `mux_t2ramsey`. See the
-[mux recipe guide](../../../recipes/mux-guide.md) for typed overrides, origins,
-source-bound reporting and explicit writeback decisions.
+[mux recipe guide](../../../recipes/mux-guide.md#mux_t2ramsey)
+for typed overrides, origins, source-bound reporting and explicit writeback decisions.
 
 Summary rows include original tone `position`, source `name`, selected fit model,
 quality and values, or a failure reason. Q3/Q1 retains indices 2/0 in that row

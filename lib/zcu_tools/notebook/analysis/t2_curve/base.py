@@ -91,7 +91,8 @@ def make_thermal_limit_table(
     )
 
 
-def calculate_t2_channel_curves(
+# tolerated: Public curve API keeps model axes and fitted/interpolated T1 sources explicit.
+def calculate_t2_channel_curves(  # noqa: PLR0913
     t_fluxs: NDArray[np.float64],
     *,
     params: tuple[float, float, float],
@@ -196,7 +197,8 @@ def t2_parameter_text(
     return "\n".join(lines)
 
 
-def plot_t2e_vs_flux(
+# tolerated: Public plot callers pass positional samples and optional fit-error overlays.
+def plot_t2e_vs_flux(  # noqa: PLR0913
     sample_fluxs: NDArray[np.float64],
     sample_T2e_us: NDArray[np.float64],
     sample_T1_us: NDArray[np.float64],
@@ -238,7 +240,8 @@ def plot_t2e_vs_flux(
     return fig, ax
 
 
-def plot_thermal_photon_t2_limit(
+# tolerated: Public plot callers supply separate measured times and readout-model inputs.
+def plot_thermal_photon_t2_limit(  # noqa: PLR0913
     n_th_axis: NDArray[np.float64],
     *,
     T1_us: float,
@@ -313,7 +316,8 @@ def plot_flux_noise_sensitivity(
     return fig, ax
 
 
-def plot_t2_channel_curves(
+# tolerated: Public plot callers pass positional samples/curves and keyword overlays/layout.
+def plot_t2_channel_curves(  # noqa: PLR0913
     sample_fluxs: NDArray[np.float64],
     sample_T2e_us: NDArray[np.float64],
     sample_T1_us: NDArray[np.float64],

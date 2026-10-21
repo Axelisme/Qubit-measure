@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-21，predictor 空白欄位與獨立 SoC dialog／Setup 版面
+**Last updated:** 2026-10-21，Aliases 手動編輯與啟動預設列；predictor 參數與曲線 owner、空白欄位與獨立 SoC dialog／Setup 版面；腳本與 entry 保存分界、儀器 adapters、shared user cache、entry 資產、Inspect general/ext 與 point-local aliases
 
 # gui/session/ — 量測 session core
 
@@ -25,7 +25,7 @@ Library 新建沿用這個契約，缺 binding 在展開時報 `ValueError`。
 - 目前 point 的 alias 表由 `ContextService` 持有。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列。元件與 device 使用同一張表，GUI 不做 kind 或裝置可用性檢查。Notebook 的顯式元件 consumer 仍可要求 kind。
   解析失敗的 `RoleResolutionError` 訊息以 `$alias` 指名：未定義時請使用者在 Aliases 新增，未綁定時請使用者綁定，link 鏈停在空列時指名該列。Link 欄位缺失、目標不是名稱與 kind 不符也各自說明原因。`reason` 維持 `Unknown alias`、`Alias is not bound` 等短分類，供 caller 比對；只有訊息文字給使用者看。Expression 的裸 `$alias` 讀取直接沿用這段訊息，不再加前綴。
   `set_alias_rows` 只改 memory，不要求 point。Inspect Apply、RPC 與 startup 的 `apply_alias_rows` 要求目前已有 point，否則以 `FailedPreconditionError(no_context)` 拒絕。Service 先驗整表，再由 resources 原子保存 `<entry>/points/<label>/aliases.yaml`，成功後才安裝 memory 並發布 fact。它不寫 setup alias。Storage 失敗保留舊表、舊檔與頁面 draft，顯錯後可 retry。關閉 Inspect 時未存 draft 走 Save／Discard／Cancel；Discard 不撤已 Apply 的表。
-  Caller 以 `AliasPresets` 提供名稱到有序表的資料。兩 app 的 composition 保留完整 catalog，只將 default rows 交 `build_session_services(alias_rows=...)` 與 ContextService，作為尚未開 entry 的 memory 初值。`alias_presets` 省略或 None 建立空表，顯式 mapping 必須含 default，default 的空 tuple 合法。開 entry 或 clear 清空 alias；每次選取或建立 point 都載入該 point 的表。缺檔、空表與空列不自填，也不回退 setup 或 preset。格式、結構與 alias 語法錯誤保原 binding 與表。Preset 仍可由 Inspect 明確載入 draft 再 Apply。
+  Caller 以 `AliasPresets` 提供名稱到有序表的資料。兩 app 只將 default rows 交 `build_session_services(alias_rows=...)` 與 ContextService，作為尚未開 entry 的 memory 初值。`alias_presets` 省略或 None 建立空表，顯式 mapping 必須含 default，default 的空 tuple 合法。開 entry 或 clear 清空 alias；每次選取或建立 point 都載入該 point 的表。缺檔、空表與空列不自填，也不回退 setup 或 preset。格式、結構與 alias 語法錯誤保原 binding 與表。Inspect 只編輯目前表的草稿，Apply 才保存。
   公開 `read_context(aliases=None)` 每次固定 point/library/storage 與全表，GUI 不要求 consumer declarations 或 kind 檢查。`aliases={"qubit": "Q2"}` 只覆寫該次 capture 的具名列，保留 dependent authored links，不改全域 rows、版本或 selection。EMPTY 沿 `no_context` 失敗，缺或未綁定的 `$alias` 在讀取時指名報錯。
   歷史 `read_target(target, roles=...)` 使用已固定的 names，不展開目前全表。GUI adapter 不宣告角色，Tab、Run 與 Load 直接使用 alias-aware capture。App 的 EMPTY 無 override 讀取回 None，保留 context-free 與 deferred 路徑。非空 overrides 仍拒絕 no_context。省略 overrides、None 與 {} 等價。Notebook 的 role resolver 與 via 保留原契約。
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC 與 cached value sources 保持各自 owner。
@@ -52,11 +52,12 @@ session/
 ├── types.py            — SocProtocol/SocCfgProtocol/SocHandle/SocCfgHandle/ContextReadiness/SessionEnv（P-a 值型別）
 ├── aliases.py          — session-only 有序表；原子替換、lazy 名稱 links 與單次 override
 ├── events.py           — SessionEvent enum + SessionPayload base + 11 payload（Md/Ml/ContextSwitched/Soc/Device{Changed,SetupStarted,SetupFinished} + GateChanged/ConnectionFinished/DeviceOperationFinished）
+├── device_models.py    — Device requests 與 read projections 的正式 owner，供 service、control facets、dialogs 與 remote 共用；DeviceSnapshot.info 是 cached reference，不是深層不可變的硬體 snapshot
 ├── state.py            — SessionState（session_env+devices/DeviceState+preferences/SessionPreferences+shared VersionTable+device mutators）；DeviceStatus
-├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、DeviceRegistryPort（production 使用 session-owned DeviceManager，測試注入 in-memory fake，ADR-0066）、ContextReadPort、ProjectContextPort
+├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DeviceProtocol 與 DriverFactoryPort、DeviceRegistryPort（production 使用 session-owned DeviceManager，測試注入 in-memory fake，ADR-0066）、ContextReadPort、ProjectContextPort
 ├── hardware_gate.py    — RunBlocksHardwareGate：量測硬體互斥矩陣（RUN 擋 RUN/SoC/device mutation；device mutation 依 resource id 互斥；SoC connect 擋 RUN/SoC）；每個lease另保存captured origin、human note與monotonic start，register/release emit `GateChangedPayload`，`snapshot()`只投影active duration、不曝露raw epoch
 ├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0066）+ captured EventOrigin operation record；`create(cancel_hook=, origin=)`要求caller顯式capture，`event_origin(token)`在live/retained-done record上投影string operation id；`has_cancel_hook`/channel.`can_cancel` 提供一般取消能力查詢；cancel hook例外只log，Stop事件仍入列且cancel_all繼續處理其它operation
-├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0066：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
+├── operation_runner.py — OperationInfrastructure（app 組裝的 gate/background/runner/handles 明示注入組，不建立 owner 或改 operation policy）；OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0066：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
 ├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0066，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。Figure 使用 operation-owned Plots，不透過 ambient scope
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不提供參數容器讀取
 ├── predictor_control.py — Read-only explicit-parameter queries and entry predictor file selection for dialog and remote callers
@@ -91,14 +92,16 @@ session/
 └── ui/                 — 共用 dialog，依賴各 domain 的窄 control facets
     ├── progress_bar.py   — LightweightProgressBar（native-free QWidget；`setValue` 只更新狀態並排程 repaint，避免高頻 progress 卡在 `QProgressBar.setValue`）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件；高頻 render 只對變更過的 maximum/format/value 寫入 LightweightProgressBar；可注入 profiling callback 拆量 derive / value writes）
-    ├── alias_panel.py — AliasPanel：Inspect 的 Aliases 頁。編輯有序 authored rows，透過 ContextControlPort 原子提交；唯讀解析欄投影已安裝的表。Load preset 選單列出 host 傳入的具名 preset，選一份整張取代草稿、不合併、不提交，Apply 才保存；None 表示無 catalog，選單停用。唯讀時同樣停用。只回報 Unsaved，不自己詢問
+    ├── alias_panel.py — AliasPanel：Inspect 的 Aliases 頁。編輯有序 authored rows，透過 ContextControlPort 原子提交；唯讀解析欄投影已安裝的表。Add、Remove 與儲存格編輯只改草稿，Apply 才保存。唯讀時停用編輯與提交，表格仍可讀取與捲動。只回報 Unsaved，不自己詢問
     ├── component_tree.py — ComponentTreeWidget：Field／Value／Unit／Metadata 四欄樹，Metadata 以單行 flow YAML 與多行 tooltip 顯示 caller 的 opaque mapping，不解讀 key；依 `component_field_specs` 列出全部欄位（未設定顯示 `(unset)`），Value 就地編輯；父欄位未設定時寫入最淺一層未設定祖先的巢狀 mapping。寫入走 owner，UI 不直接寫文件
     ├── soc_dialog.py — SocDialog 以 SocControlPort 提供 IP、Port、Connect、連線狀態與 soccfg 瀏覽。每次 explicit show 從 session cache 預填 connection preferences 並同步連線狀態與 soccfg，Disconnected 時清除舊內容；可見期間由 SocChanged 更新
     ├── setup_dialog.py — SetupDialog 左欄為 Result entry 與 New working point，右欄為 Working points 清單。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。Clone from 的 `(empty)` 表示新 point 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體
     ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；專屬 panel 由 device adapter 建立並按需保留；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. Calibration displays actual MHz and clamped from the shared model result; it changes only dialog bias/cache, never a component. No Apply or session model. Device values and frequency expressions remain optional inputs.
+    ├── predictor_parameters.py — PredictorParameterEditor：持有 model／nullable 參數控件、已知欄位與 live lock，以及顯式 file 預填。完整替換以同步 callback 通知 dialog，保留立即刷新與 cache 保存次序及例外傳遞。
+    ├── predictor_curves.py — PredictorCurveTabs：持有三張 canvas、toolbars、matrix tab capability 與跨圖 marker／highlight／xlim 協調。以明確 params 查詢原 predictor facet，不保留另一份物理模型。
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
-    ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口、DialogPresenter 與具名 alias preset catalog（None 表示無 catalog），沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，draft 固定來源 entry／point。Clean 時隨切換換表，dirty 時保留；跨 target Apply 拒絕且不改兩端檔案，提示以 Revert 或重開載入目前 point。相同 label 的不同 entry 也是不同 target。同 target Apply 正常保存。關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
+    ├── inspect_dialog.py — InspectDialog：各 host 共用的唯一 Inspect。必填協作者為 ContextControlPort、event bus、範本目錄、arb 名稱來源、host 的 ARB 開啟入口與 DialogPresenter，沒有可選能力或依 host 隱藏的按鈕。Parameters 是元件樹；Modules 選取條目時以 library entry 表單在固定 capture 開啟，右側 Name、Saved／Unsaved、Revert、Apply 與 FormEditor（包在 scroll area）。Unsaved 由 Name、FormState.is_dirty 與 editor 未解析文字決定。is_dirty 包含 selection-only 差異，不只比較 raw data；切換、刪除或關閉時以 presenter 的 Save／Discard／Cancel 詢問。Aliases 頁是 AliasPanel，draft 固定來源 entry／point。Clean 時隨切換換表，dirty 時保留；跨 target Apply 拒絕且不改兩端檔案，提示以 Revert 或重開載入目前 point。相同 label 的不同 entry 也是不同 target。同 target Apply 正常保存。關閉時未存 draft 同樣三選一，Save 被拒時留在 Aliases 頁。唯讀只鎖輸入，表單與 alias 表仍可讀、捲動與折疊
     ├── new_entry_dialog.py — NewEntryDialog：Inspect 的 New。每次選範本讀一次 capture，以 new_library_entry 建新 State 與 FormEditor，欄位、折疊與捲動回範本初始；只保留使用者打過的 Name，未打時建議 default_name 並在同 family 內加 _2、_3 去重。Create 經 apply_library_change put，被拒時經 presenter 報錯並留在對話框
     └── arb_waveform_dialog.py — ArbWaveformDialog：arb 資產管理對話框，只收 ArbWaveformPort。Measure 經具名 `arb_waveform` dialog 開，workflows 直接開同一類別
 ```
@@ -180,6 +183,9 @@ from these markers. The selected-device value poller keeps its independent lifet
   `SessionServices.runner: OperationRunner` 與 `SessionServices.progress: ProgressService`
   保留 build 輸入的同一 instances。共用 session 的 operation caller 從這份 bundle
   取用，不另傳 runner／progress。Composition root 仍建立基礎物件並注入 build。
+  `build_session_services(operations=OperationInfrastructure(...), progress=...)`
+  與 `DeviceService` 共用同一組 gate/background/runner/handles；具名組只轉交既有
+  instances，不從 runner 反查 ports。Progress 仍獨立注入且原樣保留於 bundle。
   Operation policy、exclusion 與 owner-thread 契約不變。
   `tests/gui/session/test_headless_composition.py` 在同一程序穿過正式 build 與
   offline MockSoc success/cancel lifecycle，驗證無 `QApplication` 的 owner-thread、
@@ -203,6 +209,8 @@ from these markers. The selected-device value poller keeps its independent lifet
 Run、WB 與目前 point 的 Inspect Set 都要求先選取或建立工作點。GUI 停用操作並提示下一步，application 入口以 failed precondition 拒絕。WB 的 selection 只允許開始命令，不替換候選的 captured SavedPoint 目的地。同 entry 選取另一個 point 後仍寫原 point；跨 entry 仍拒絕。Setup template 編輯獨立於目前 point，不修改既有 point。
 
 ## 獨立 predictor
+
+Dialog 持有 cache、device 訂閱、tracked table、calibration 與持續隱藏／重開的生命週期。兩個具體 child QWidget 分別持有參數編輯與曲線互動的 controls 和局部 state。子元件不取得整個 dialog，也不讀其他 owner 的私有狀態。Programmatic 預填同步完成整批編輯，再由 dialog 停止參數 timer、立即刷新、同步 calibration 並保存一次。User edit 則先清舊結果、同步狀態及保存，再啟動 150ms debounce。
 
 `simulate.fluxonium.predict.FluxoniumParams` 與 `simulate.transmon.TransmonParams` 保存可未知的具名物理輸入，missing() 指出缺項。
 齊全且有效才建立中性 query model。Service 不持有 installed model，不讀 dialog。

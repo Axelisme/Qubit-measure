@@ -20,7 +20,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## GUI Service Architecture
 
 - [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：driver 記錄兩項活動狀態、DeviceManager 具名快照、GUI 定時讀取與標記、單 driver 單名稱及 closing driver 登記拒絕，以及獨立於 acquisition snapshot 的 run 後 cache 讀回。
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control facets、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組與 explicit plotting。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control facets、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組與 explicit plotting；PredictorParameterEditor／PredictorCurveTabs 與 ExperimentFigureArea 的具體控件 owner。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher／runtime／composition、可信 startup(ctx) 的 default／custom／clean 選擇、背景執行、on_close 與預設腳本的 session 保存責任。
 
 ## Cfg / Value Model

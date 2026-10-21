@@ -124,6 +124,7 @@ def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
 
     env.soc.binding.execute = execute
     traces = prog.acquire_decimated(env.soc, progress=False)
+    assert traces is not None
     assert [trace.shape for trace in traces] == [(2, 7, 2), (2, 3, 2)]
     np.testing.assert_array_equal(traces[0], 10.75)
     np.testing.assert_array_equal(traces[1], 0.75)

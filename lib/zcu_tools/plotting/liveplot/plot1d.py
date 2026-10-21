@@ -52,4 +52,5 @@ class LivePlot1D(BaseSegmentLivePlot):
         return self.axs[0][0]
 
     def get_segment(self) -> Plot1DSegment:
+        # tolerated(cast): segments stores AbsSegment; this slot starts as Plot1DSegment.
         return cast(Plot1DSegment, self.segments[0][0])

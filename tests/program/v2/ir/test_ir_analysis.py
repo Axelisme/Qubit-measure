@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
-    PortWriteInst,
     RegWriteInst,
     TestInst,
     TimeInst,
+)
+from zcu_tools.program.v2.ir.io_instructions import (
+    PortWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import (

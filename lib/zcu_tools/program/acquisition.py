@@ -5,7 +5,7 @@ import operator
 import os
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Protocol, TypeAlias, cast, final
+from typing import Literal, Protocol, TypeAlias, cast, final, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,6 +13,7 @@ from qick import qick_asm
 from qick.qick_asm import (
     AcquireMixin,
     logger,
+    # tolerated: QICK imports obtain dynamically from optional RPyC or defines its local fallback.
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
@@ -70,7 +71,10 @@ class TypedAcquireMixin(AcquireMixin):
         return super().get_raw()
 
     def get_time_axis(
-        self, ro_index: int, length_only: bool = False
+        self,
+        ro_index: int,
+        # tolerated: QICK's get_time_axis accepts the length-only selector positionally.
+        length_only: bool = False,  # noqa: FBT001, FBT002
     ) -> NDArray[np.float64] | int:
         return super().get_time_axis(ro_index, length_only)
 
@@ -84,33 +88,83 @@ class TypedAcquireMixin(AcquireMixin):
     ) -> list[NDArray[np.float64]]:
         return super()._summarize_decimated(rounds_buf)
 
+    # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
     def _average_buf(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         d_reps: Sequence[NDArray[np.float64] | NDArray[np.int64]],
-        length_norm: bool = True,
-        remove_offset: bool = True,
+        # tolerated: QICK's averaging override accepts positional readout-length normalization.
+        length_norm: bool = True,  # noqa: FBT001, FBT002
+        # tolerated: QICK's averaging override accepts positional IQ-offset subtraction.
+        remove_offset: bool = True,  # noqa: FBT001, FBT002
     ) -> list[NDArray[np.float64]]:
         return super()._average_buf(
+            # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
             d_reps,  # pyright: ignore[reportArgumentType, reportReturnType]
             length_norm=length_norm,
             remove_offset=remove_offset,
         )
 
+    # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
     def _process_accumulated(  # pyright: ignore[reportIncompatibleMethodOverride]
         self, acc_buf: Sequence[NDArray[np.float64] | NDArray[np.int64]]
     ) -> list[NDArray[np.float64]]:
+        # tolerated: QICK annotates acquisition buffers as ndarray although its implementations consume and return per-channel lists.
         return super()._process_accumulated(acc_buf)  # pyright: ignore[reportReturnType]
 
-    def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]]:
+    @overload
+    def acquire(
+        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire(
+        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+    ) -> None: ...
+
+    @overload
+    def acquire(
+        self, soc: object, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
+    def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
+        """Return averaged IQ for omitted/False step_rounds; True prepares only.
+
+        Preparation returns None. Mode typing is precise with only soc
+        positional; extra positional options or a dynamic bool retain the union.
+        QICK argument/transport errors propagate. Cancellation retains completed
+        rounds, or raises StoppedPartialAcquireError if none completed.
+        """
         return self._acquire_configured(*args, **kwargs)
 
-    def _acquire_configured(self, *args, **kwargs) -> list[NDArray[np.float64]]:
+    def _acquire_configured(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
         # Environment adapters can replace buffer allocation after modifiers
         # have supplied their options through the normal acquire chain.
-        return super().acquire(*args, **kwargs)  # pyright: ignore[reportReturnType]
+        return super().acquire(*args, **kwargs)
 
-    def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]]:
-        return super().acquire_decimated(*args, **kwargs)  # pyright: ignore[reportReturnType]
+    @overload
+    def acquire_decimated(
+        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+    ) -> None: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
+    def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
+        """Return decimated IQ for omitted/False step_rounds; True prepares only.
+
+        Preparation returns None. Mode typing is precise with only soc
+        positional; extra positional options or a dynamic bool retain the union.
+        QICK argument/transport errors propagate. Cancellation retains completed
+        rounds, or raises StoppedPartialAcquireError if none completed.
+        """
+        return super().acquire_decimated(*args, **kwargs)
 
     def _completed_round_count(self) -> int:
         rounds_buf = self.rounds_buf
@@ -138,6 +192,7 @@ class EarlyStopMixin(TypedAcquireMixin):
 
     def finish_round(self) -> bool:
         assert self.acquire_params is not None
+        # tolerated(cast): QICK merges the typed acquire cancel_flag into its untyped, heterogeneous acquire_params mapping.
         cancel_flag = cast(
             CancelFlagProtocol | None, self.acquire_params.get("cancel_flag")
         )
@@ -172,21 +227,26 @@ class EarlyStopMixin(TypedAcquireMixin):
         # Validate acquisition and early-stop behavior with existing public-interface tests.
         assert self.acquire_params is not None
         soc = self.acquire_params["soc"]
-        total_count = functools.reduce(operator.mul, self.loop_dims)  # type: ignore[arg-type]
-        reads_per_shot = [ro["trigs"] for ro in self.ro_chs.values()]  # type: ignore[union-attr]
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        assert self.loop_dims is not None
+        assert self.acc_buf is not None
+        total_count = functools.reduce(operator.mul, self.loop_dims)
+        reads_per_shot = [ro["trigs"] for ro in self.ro_chs.values()]
 
         count = 0
-        stats_start = len(self.stats) if self.stats is not None else 0
+        # tolerated: QICK infers stats from its [] initialization; preserve optional-stats handling in this mirrored round loop.
+        stats_start = len(self.stats) if self.stats is not None else 0  # pyright: ignore[reportUnnecessaryComparison]
         reps_pbar = make_pbar(
             total=total_count,
             disable=self.acquire_params["hidereps"],
             leave=False,
         )
         try:
-            soc.start_readout(
+            # tolerated: QICK mixes the original soc transport with scalar options in acquire_params without a per-key type.
+            soc.start_readout(  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
                 total_count,
                 counter_addr=self.counter_addr,
-                ch_list=list(self.ro_chs),  # type: ignore[arg-type]
+                ch_list=list(self.ro_chs),
                 reads_per_shot=reads_per_shot,
             )
             while count < total_count:
@@ -195,28 +255,18 @@ class EarlyStopMixin(TypedAcquireMixin):
                         soc, stats_start=stats_start
                     )
 
-                new_data = obtain(soc.poll_data())
+                # tolerated: QICK's heterogeneous acquire_params loses the original soc transport's poll_data method.
+                new_data = obtain(soc.poll_data())  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
                 for new_points, (data, stats) in new_data:
                     if cancel_flag.is_set():
                         return self._finish_stopped_partial_accumulated_round(
                             soc, stats_start=stats_start
                         )
-                    for ii, nreads in enumerate(reads_per_shot):
-                        if new_points * nreads != data[ii].shape[0]:
-                            logger.error(
-                                "data size mismatch: new_points=%d, nreads=%d, data shape %s"
-                                % (new_points, nreads, data[ii].shape)
-                            )
-                        if count + new_points > total_count:
-                            logger.error(
-                                "got too much data: count=%d, new_points=%d, total_count=%d"
-                                % (count, new_points, total_count)
-                            )
-                        self.acc_buf[ii].reshape((-1, 2))[  # type: ignore[index]
-                            count * nreads : (count + new_points) * nreads
-                        ] = data[ii]
+                    self._store_accumulated_chunk(
+                        reads_per_shot, data, count, new_points, total_count
+                    )
                     count += new_points
-                    self.stats.append(stats)  # type: ignore[attr-defined]
+                    self.stats.append(stats)
                     reps_pbar.update(new_points)
 
                 if count < total_count and cancel_flag.is_set():
@@ -233,26 +283,56 @@ class EarlyStopMixin(TypedAcquireMixin):
 
         assert self.rounds_buf is not None
         assert self.acc_buf is not None
-        self.rounds_buf.append(
-            self._process_accumulated(self.acc_buf)  # type: ignore[arg-type]
-        )
+        self.rounds_buf.append(self._process_accumulated(self.acc_buf))
 
-        soc.cleanup_round()
+        # tolerated: QICK's heterogeneous acquire_params loses the original soc transport's cleanup_round method.
+        soc.cleanup_round()  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
         if self.rounds_pbar is not None:
             self.rounds_pbar.update()
-        self.acquire_params["rounds_remaining"] -= 1
+        # tolerated: QICK stores the integer round counter alongside transport and string options without a per-key type.
+        self.acquire_params["rounds_remaining"] -= 1  # pyright: ignore[reportOperatorIssue]
         done = self.acquire_params["rounds_remaining"] <= 0
         if done or cancel_flag.is_set():
             self._close_rounds_pbar()
             return False
         return True
 
+    def _store_accumulated_chunk(
+        self,
+        reads_per_shot: Sequence[int],
+        data: Sequence[NDArray[np.int64]],
+        count: int,
+        new_points: int,
+        total_count: int,
+    ) -> None:
+        """Write each channel at its shot offset, logging sizes before NumPy assignment.
+
+        Keep QICK's channel order and slice/broadcast failures; size diagnostics
+        do not reject or normalize the transport's data.
+        """
+        assert self.acc_buf is not None
+        for ii, nreads in enumerate(reads_per_shot):
+            if new_points * nreads != data[ii].shape[0]:
+                logger.error(
+                    "data size mismatch: new_points=%d, nreads=%d, data shape %s"
+                    % (new_points, nreads, data[ii].shape)
+                )
+            if count + new_points > total_count:
+                logger.error(
+                    "got too much data: count=%d, new_points=%d, total_count=%d"
+                    % (count, new_points, total_count)
+                )
+            self.acc_buf[ii].reshape((-1, 2))[
+                count * nreads : (count + new_points) * nreads
+            ] = data[ii]
+
     def _finish_stopped_partial_accumulated_round(
         self, soc, *, stats_start: int
     ) -> bool:
         self._stop_started_accumulated_round(soc)
         self._discard_partial_accumulated_round()
-        if self.stats is not None:
+        # tolerated: QICK infers stats from its [] initialization; preserve optional-stats handling when discarding a stopped round.
+        if self.stats is not None:  # pyright: ignore[reportUnnecessaryComparison]
             del self.stats[stats_start:]
         soc.cleanup_round()
         self._close_rounds_pbar()
@@ -288,6 +368,7 @@ class EarlyStopMixin(TypedAcquireMixin):
     def _is_stopped_before_first_completed_round(self) -> bool:
         if self.acquire_params is None:
             return False
+        # tolerated(cast): finish_acquire reads the same QICK-owned flag entry to distinguish no completed data from a valid partial result.
         cancel_flag = cast(
             CancelFlagProtocol | None, self.acquire_params.get("cancel_flag")
         )
@@ -329,14 +410,20 @@ class SingleShotMixin(TypedAcquireMixin):
     def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
         assert self.acquire_params is not None
 
-        threshold: float | None = self.acquire_params.get("threshold")
-        angle: float | None = self.acquire_params.get("angle")
+        # tolerated: QICK documents scalar or per-channel thresholds, but acquire_params also contains unrelated string options.
+        threshold: float | list[float] | None = self.acquire_params.get("threshold")  # pyright: ignore[reportAssignmentType]
+        # tolerated: QICK documents scalar or per-channel angles, but acquire_params has no per-key value types.
+        angle: float | list[float] | None = self.acquire_params.get("angle")  # pyright: ignore[reportAssignmentType]
 
-        g_center: complex | None = self.acquire_params.get("g_center")
-        e_center: complex | None = self.acquire_params.get("e_center")
-        ge_radius: float | None = self.acquire_params.get("ge_radius")
+        # tolerated: QICK merges the typed acquire g_center option into its heterogeneous acquire_params mapping.
+        g_center: complex | None = self.acquire_params.get("g_center")  # pyright: ignore[reportAssignmentType]
+        # tolerated: QICK merges the typed acquire e_center option into its heterogeneous acquire_params mapping.
+        e_center: complex | None = self.acquire_params.get("e_center")  # pyright: ignore[reportAssignmentType]
+        # tolerated: QICK merges the typed acquire ge_radius option into its heterogeneous acquire_params mapping.
+        ge_radius: float | None = self.acquire_params.get("ge_radius")  # pyright: ignore[reportAssignmentType]
 
-        remove_offset: bool = self.acquire_params["remove_offset"]
+        # tolerated: QICK stores its boolean remove_offset option alongside transport and string options without a per-key type.
+        remove_offset: bool = self.acquire_params["remove_offset"]  # pyright: ignore[reportAssignmentType]
 
         if threshold is not None:
             d_reps = [np.zeros_like(d) for d in acc_buf]
@@ -366,7 +453,7 @@ class SingleShotMixin(TypedAcquireMixin):
         return self._average_buf(
             d_reps,
             length_norm=True,
-            remove_offset=self.acquire_params["remove_offset"],
+            remove_offset=remove_offset,
         )
 
     def _apply_classification(
@@ -378,11 +465,12 @@ class SingleShotMixin(TypedAcquireMixin):
         *,
         remove_offset: bool,
     ) -> list[NDArray[np.float64]]:
+        assert isinstance(self, qick_asm.AbsQickProgram)
         shots = []
-        for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # pyright: ignore[reportAttributeAccessIssue]
+        for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):
             avg = acc_buf[i_ch] / ro["length"]
             if remove_offset:
-                offset = self.soccfg["readouts"][ro_ch]["iq_offset"]  # pyright: ignore[reportAttributeAccessIssue]
+                offset = self.soccfg["readouts"][ro_ch]["iq_offset"]
                 avg -= offset
             g_shot, e_shot, _ = classify_shots(
                 avg.dot([1, 1j]), g_center, e_center, ge_radius
@@ -409,6 +497,7 @@ class TrackerMixin(TypedAcquireMixin):
 
         assert self.acquire_params is not None
 
+        # tolerated(cast): QICK's extra_args update erases the typed acquire trackers list; retain the original objects for completed-round updates.
         trackers = cast(
             list[TrackerProtocol] | None, self.acquire_params.get("trackers")
         )
@@ -424,7 +513,8 @@ class TrackerMixin(TypedAcquireMixin):
                     "Tracker is not implemented for thresholded data"
                 )
 
-            ro_chs: dict = self.ro_chs  # pyright: ignore[reportAttributeAccessIssue, reportMissingTypeArgument]
+            assert isinstance(self, qick_asm.AbsQickProgram)
+            ro_chs = self.ro_chs
 
             if len(trackers) != len(self.acc_buf):
                 raise ValueError(
@@ -441,6 +531,7 @@ class TrackerMixin(TypedAcquireMixin):
 
                 if not ro["edge_counting"]:
                     d_rep = d_rep / ro["length"]
+                # tolerated(cast): The tracker protocol requires float64, but QICK edge-counting buffers stay int64; preserve this no-conversion handoff.
                 d_rep = cast(NDArray[np.float64], d_rep)
 
                 tracker.update(d_rep)  # (..., m, 2)
@@ -480,7 +571,8 @@ class RoundHookMixin(TypedAcquireMixin):
             )
             return self._summarize_accumulated(rounds_buf)
 
-        n_ro_chs = len(self.ro_chs)  # pyright: ignore[reportAttributeAccessIssue]
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        n_ro_chs = len(self.ro_chs)
 
         assert self.rounds_buf is not None
         if self._inc_sum_state is None:  # first round
@@ -529,7 +621,7 @@ class RoundHookMixin(TypedAcquireMixin):
         assert acquire_params is not None
 
         # trigger the hook function after each round
-        round_hook = cast(RoundHookType | None, acquire_params.get("round_hook"))
+        round_hook = acquire_params.get("round_hook")
         if round_hook is not None:
             assert callable(round_hook), "round_hook must be a callable function"
             assert self.rounds_buf is not None
@@ -558,6 +650,7 @@ class RoundHookMixin(TypedAcquireMixin):
     def _round_hook_cancel_flag(self) -> CancelFlagProtocol:
         acquire_params = self.acquire_params
         assert acquire_params is not None
+        # tolerated(cast): QICK's dynamic mapping loses the flag protocol; the callback must receive the original acquire flag, not a replacement.
         cancel_flag = cast(CancelFlagProtocol | None, acquire_params.get("cancel_flag"))
         if cancel_flag is None:
             raise RuntimeError("round_hook requires acquire cancel_flag")

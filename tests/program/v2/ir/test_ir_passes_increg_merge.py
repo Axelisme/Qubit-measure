@@ -3,9 +3,11 @@ from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     CallInst,
     NopInst,
-    PortWriteInst,
     RegWriteInst,
     TimeInst,
+)
+from zcu_tools.program.v2.ir.io_instructions import (
+    PortWriteInst,
     WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-20，通用 value patch 明填單位、startup script selection、Writeback destination 摘要與 Predictor filename sources
+**Last updated:** 2026-10-20，recipe author 入口、Tab 實作、契約與 operation handles 的 owner；通用 value patch 明填單位、startup script selection、Writeback destination 摘要與 Predictor filename sources
 
 # `zcu_tools/mcp/measure/`
 
@@ -56,6 +56,8 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 ## Recipe 與 execution
 
+`recipe.py` 是正式 author import surface，保留 Session 準備與 definition，直接 re-export 同一個 RecipeTab class 及原有契約與 handles。`recipe_tab.py` 擁有 RecipeTab 的欄位編輯與 Run 準備。`recipe_contracts.py` 擁有共用 input schema、資料 carriers、missing-parameter、writeback 收據與 detached snapshots，供 input codec、writeback 與 handles 直接引用。`recipe_handles.py` 擁有 Run／analysis／question handles、共用 binding state 與 yield-from envelope，集中 completion、保存、取消及 lifetime 協調。含 RecipeRun annotation 的 step result 與 RecipeRun 留在同一 owner。
+
 Recipe helper 分成「工作步驟」與「交還控制權」。工作步驟以 `result = yield from tab.run_step()` 等待 Run。作者取出 `run = result.run`，檢查取消與空 handle 後，以 `analysis = yield from run.analyze_step("primary")` 等待分析。兩者分別回傳 `RunStepResult` 與 `AnalysisStepResult`，欄位為 run／analysis 與 status。Run status 為 completed、finished_early 或 cancelled；分析為 completed 或 cancelled。Cancelled Run 可保留 partial handle，未送出 Run 時 run 為 None；cancelled analysis 的 analysis 為 None。作者檢查 status，自行收尾並 return，不以例外代表取消。
 
 需要交還控制權做寫回判斷時，作者用 `decision = yield from ask(run.propose_writeback())`，回傳 `WritebackResult`。`decision.status` 為 completed 時，`decision.decision` 是 accepted 或 skipped；cancelled 時為 None。`ask` 只接受已捕捉的 WritebackQuestion，不寫入資料。Opaque operation 不可迭代，也不能直接 yield；driver 會拒絕並提示 helper 寫法。Driver 將具名結果放在 operation.delivery，以 None 推進 generator，原有 completion failure 仍 throw 到作者的 helper 呼叫處。
@@ -104,7 +106,7 @@ Parameter/library reads、cfg、Edit 與 Run 使用同一固定來源。`tab.par
 
 Load 只載既有結果及分析來源，不覆寫 Form input。RPC/MCP 的 Load 回覆保留結果與分析準備 facts。`cfg_issue` 為 null 表示 typed cfg 可用，字串則說明不可用原因；有效數據仍可成功載入。MCP 的 `rpc_call` 原樣傳遞這份 GUI 投影，不另判斷 cfg。原始 cfg 保存在 native 資料檔，透過公開 `datafile.load_run_data` 離線讀取為 `StoredRun`。GUI 不提供原始 cfg 檢視入口。
 
-Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與該 Run 的 run_id，全部輸出失敗亦保留這個 ID。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
+Author Run 的 cfg、來源與 completion 由 `recipe_handles.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與該 Run 的 run_id，全部輸出失敗亦保留這個 ID。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
 
 Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。`recipe_execution.py` 擁有 generator、單一 recipe admission、一次性取消、captured question 與 typed snapshot。它以同一 worker 完成 author handles；analysis 共用 driver 的本地 condition 交付進度。Session 與 tool table 使用必填的同一份注入 definitions。Guide 與 analysis-only scalar estimates 也讀 owning registry。單一 recipe 包含 interactive 與 awaiting_answer；terminal 之後才放行下一個呼叫。
 

@@ -169,8 +169,11 @@ class ProjectDialog(QDialog):
     def _refresh_result_scopes(self, *, silent: bool = False) -> None:
         try:
             self._result_scopes = ResultScopeManager(self._root or ".").list_scopes()
-        except Exception as exc:  # noqa: BLE001 - scope discovery is best-effort UI.
-            logger.warning("ProjectDialog: failed to list result scopes: %s", exc)
+        # tolerated: Best-effort UI isolation; Ruff flags warning(exc_info=True).
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ProjectDialog: failed to list result scopes: %s", exc, exc_info=True
+            )
             self._result_scopes = ()
             if not silent:
                 self._scope_combo.setToolTip(f"Failed to refresh result scopes: {exc}")

@@ -13,7 +13,7 @@ disengages and locks the marker at its current position.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
+from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.backend_bases import Event
@@ -31,6 +31,22 @@ _HIGHLIGHT_LW = 2.5
 _NORMAL_LW = 1.0
 _HIGHLIGHT_ALPHA = 1.0
 _NORMAL_ALPHA = 0.6
+
+
+@dataclass(frozen=True, kw_only=True)
+class CurveView:
+    """Shared presentation coordinates for frequency and matrix-element curves."""
+
+    marker_value: float
+    """Marker x coordinate in device-value units; need not be inside flux_window."""
+    value_to_flux: Callable[[float], float]
+    """Monotone affine map from device values to reduced flux Phi/Phi0."""
+    flux_to_value: Callable[[float], float]
+    """Inverse affine map to device values; preserves NumPy broadcasting."""
+    highlights: tuple[tuple[int, int], ...] = ()
+    """From/to level-index pairs; empty means no highlighted transition."""
+    flux_window: tuple[float, float] = (0.4, 1.1)
+    """Initial reduced-flux interval (lower, upper); pans to include the marker."""
 
 
 def _compute_xlim(
@@ -172,11 +188,7 @@ class PredictorCurveCanvas(QWidget):
         labels: tuple[str, ...],
         series: NDArray[np.float64],
         ylabel: str,
-        highlights: tuple[tuple[int, int], ...] = (),
-        marker_value: float,
-        flux_window: tuple[float, float] = (0.4, 1.1),
-        value_to_flux: Callable[[float], float],
-        flux_to_value: Callable[[float], float],
+        view: CurveView,
     ) -> None:
         """Redraw all transition curves onto the figure.
 
@@ -186,8 +198,13 @@ class PredictorCurveCanvas(QWidget):
 
         The primary x-axis is device value (no unit).  A secondary top x-axis shows
         flux (Φ/Φ₀) using the affine callables ``value_to_flux`` / ``flux_to_value``.
-        ``highlights=()`` renders all curves in normal style.
+        ``view.highlights=()`` renders all curves in normal style.
         """
+        flux_window = view.flux_window
+        value_to_flux = view.value_to_flux
+        flux_to_value = view.flux_to_value
+        marker_value = view.marker_value
+        highlights = view.highlights
         self._flux_window = flux_window
         self._value_to_flux = value_to_flux
         self._flux_to_value = flux_to_value
@@ -225,12 +242,11 @@ class PredictorCurveCanvas(QWidget):
 
         # Secondary top x-axis: flux Φ/Φ₀ (monotone affine, so both callables
         # are safe for secondary_xaxis which expects a pair of inverse functions).
-        # The matplotlib stubs type functions as (ArrayLike)->ArrayLike, but our
-        # scalar callables also satisfy that at runtime (numpy passes floats and
-        # numpy arrays alike). Suppress the stub mismatch here.
         ax.secondary_xaxis(
             "top",
-            functions=(value_to_flux, flux_to_value),  # type: ignore[arg-type]
+            # These affine maps broadcast over NumPy numeric arrays passed by Matplotlib.
+            # tolerated: the scalar API does not promise all ArrayLike inputs (e.g. lists/strings).
+            functions=(value_to_flux, flux_to_value),  # pyright: ignore[reportArgumentType]
         ).set_xlabel("Flux (Φ/Φ₀)")
 
         # Set x display window (shift if marker is outside).
@@ -353,10 +369,12 @@ class PredictorCurveCanvas(QWidget):
     def _on_xlim_changed_event(self, ax: object) -> None:
         if self._suppress_xlim_changed:
             return
-        get_xlim = getattr(ax, "get_xlim", None)
+        get_xlim: Callable[[], tuple[float, float]] | None = getattr(
+            ax, "get_xlim", None
+        )
         if not callable(get_xlim):
             return
-        x_lo, x_hi = cast(tuple[float, float], get_xlim())
+        x_lo, x_hi = get_xlim()
         self._on_xlim_changed(self, (float(x_lo), float(x_hi)))
 
     def _pick_marker(self, x_data: float) -> bool:

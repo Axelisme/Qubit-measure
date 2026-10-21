@@ -9,7 +9,7 @@ from typing import NotRequired, TypedDict, TypeVar
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.remote.control_service import RemoteControlServiceBase
+from zcu_tools.gui.remote.control_service import RemoteAppSpec, RemoteControlServiceBase
 from zcu_tools.gui.remote.method_spec import MethodSpec, build_method_registry
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink, ControlOptions
 from zcu_tools.gui.remote.wire import Request
@@ -101,13 +101,15 @@ def _harness() -> Harness:
     service = RemoteControlServiceBase(
         state,
         ControlOptions(port=0),
+        app=RemoteAppSpec(
+            wire_version=1,
+            gui_version=1,
+            server_name="DispatchFailureTest",
+            method_registry=build_method_registry(handlers, specs),
+            event_serializers={},
+            wire_event_name=lambda key: str(key),
+        ),
         owner_scheduler=scheduler,
-        wire_version=1,
-        gui_version=1,
-        server_name="DispatchFailureTest",
-        method_registry=build_method_registry(handlers, specs),
-        event_serializers={},
-        wire_event_name=lambda key: str(key),
     )
     return Harness(state, scheduler, service)
 

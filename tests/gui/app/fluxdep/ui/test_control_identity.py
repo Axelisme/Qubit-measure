@@ -145,9 +145,7 @@ def test_remote_blocks_spectrum_writes_but_keeps_result_canvas_available(window)
 def _record_stale_fit(ctrl, search_db):
     ctrl.set_fit_params(
         search_db,
-        (3.0, 12.0),
-        (0.3, 1.5),
-        (0.2, 1.2),
+        ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
@@ -493,9 +491,7 @@ def pending_window(qapp, cross_controller, search_database_hdf5):
     ctrl.set_selection(np.ones(4, dtype=np.bool_))
     ctrl.set_fit_params(
         search_database_hdf5,
-        (2, 15),
-        (0.2, 2),
-        (0.1, 2),
+        ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,

@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-PSEUDO_LABELS: frozenset[str] = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
-
 PseudoLabel = Literal["PREV", "HERE", "NEXT", "SKIP"]
+
+PSEUDO_LABELS: frozenset[PseudoLabel] = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
 
 
 @dataclass(frozen=True)

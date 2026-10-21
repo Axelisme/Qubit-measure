@@ -118,14 +118,35 @@ class ResultTree(Generic[T_Env]):
         else:
             self._result_cache.pop(measurement_name, None)
 
-    def _set_node_value(
+    def set_node_value(
         self, path: tuple[Hashable, ...], value: Any, *, flush: bool
     ) -> None:
-        """Write a direct node value and notify using this tree's run env.
+        """Write a data node, invalidate its cache, then notify subscribers.
 
-        Missing-env subscription preflight runs before mutation. A successful
-        write invalidates the result cache before emitting events. Write errors
-        propagate without emitting; callback errors propagate after mutation.
+        ``path`` is an ordinary data path, as built by ``ResultTree.at`` and
+        ``ResultNode.child``: a root list index, a measurement dict key, then
+        result subtree keys/list indices or ndarray indices. An empty path
+        selects the root list. This is not a read-only measurement subscription
+        view path from ``measurement_node``. Array indices must select a
+        writable view; integer scalar indices select a writable 0-D view.
+
+        ``value`` must match the selected target: a mutable mapping accepts a
+        mapping and updates its entries; a list accepts a list and replaces its
+        contents; an ndarray accepts an ndarray or number, copied into the
+        existing target with NumPy broadcasting and casting rules.
+
+        Events use this tree's constructor-supplied run ``env``. ``flush=True``
+        bypasses subscription throttling; False uses the subscription interval.
+        If an affected measurement has subscribers but the tree has no env,
+        raise RuntimeError before mutation. This preflight precedes the write.
+        A successful write invalidates the affected measurement cache (all
+        caches for a root/row write) before emitting events.
+
+        Unsupported targets/values, non-integer list indices and unsupported
+        traversal targets raise ValueError. Lookup/index errors and NumPy
+        view/copy errors propagate.
+        Write errors emit no events; callback errors propagate after mutation
+        and cache invalidation, without rolling back the write.
         """
         self._ensure_direct_update_can_emit(path)
         self.set_path(path, value)
@@ -237,7 +258,7 @@ class ResultNode(Generic[T_Env]):
     def set(self, value: Any, *, flush: bool = False) -> None:
         if self.measurement_name is not None:
             raise ValueError("measurement subscription nodes are read-only")
-        self._tree._set_node_value(self.path, value, flush=flush)
+        self._tree.set_node_value(self.path, value, flush=flush)
 
     def buffer(
         self,

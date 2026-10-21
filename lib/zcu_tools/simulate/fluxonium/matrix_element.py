@@ -84,7 +84,8 @@ def calculate_n_oper_vs_flux(
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
 
 
-def calculate_system_n_oper_vs_flux(
+# tolerated: Public sweep reuse and output size are independent of model inputs.
+def calculate_system_n_oper_vs_flux(  # noqa: PLR0913
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     bare_rf: float,
@@ -136,6 +137,8 @@ def calculate_system_n_oper_vs_flux(
     ) -> NDArray[np.complex128]:
         from scqubits.utils.spectrum_utils import identity_wrap
 
+        # tolerated(cast): get_subsys returns QuantumSystem, losing index 1's Fluxonium
+        # type required by n_operator and identity_wrap's narrower subsystem contract.
         fluxonium = cast(Fluxonium, paramsweep.get_subsys(1))
 
         bare_evecs = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]

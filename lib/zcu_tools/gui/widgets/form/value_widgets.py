@@ -117,9 +117,11 @@ def write_value_widget(widget: QWidget, value: object) -> None:
         widget.setChecked(bool(value))
         return
     if isinstance(widget, QSpinBox):
+        # tolerated(cast): object cannot prove int() support; retain inputs/errors.
         widget.setValue(int(cast(Any, value)))
         return
     if isinstance(widget, TrimDoubleSpinBox):
+        # tolerated(cast): object cannot prove float() support; retain inputs/errors.
         widget.setValue(float(cast(Any, value)))
         return
     if isinstance(widget, QLineEdit):

@@ -19,11 +19,8 @@ from unittest.mock import MagicMock, patch
 
 def _restore_hooks() -> None:
     """Unconditionally reset both hooks to the Python built-ins."""
-    import _thread
-
     sys.excepthook = sys.__excepthook__
-    # Python 3.9 does not expose threading.__excepthook__; the original is _thread._excepthook.
-    threading.excepthook = _thread._excepthook  # type: ignore[attr-defined]
+    threading.excepthook = threading.__excepthook__
 
 
 def test_install_replaces_sys_excepthook(qapp):
@@ -45,9 +42,7 @@ def test_install_replaces_threading_excepthook(qapp):
 
     try:
         install_global_exception_hook(MagicMock())
-        import _thread
-
-        assert threading.excepthook is not _thread._excepthook  # type: ignore[attr-defined]
+        assert threading.excepthook is not threading.__excepthook__
     finally:
         _restore_hooks()
 

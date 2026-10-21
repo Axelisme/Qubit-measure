@@ -4,19 +4,24 @@ The optional device control supplies values only. Entry predictor files are read
 prefill. No operation installs a model or writes a component or source file.
 """
 
+# tolerated(file-size): Device polling/subscriptions, transition selection/table and
+# calibration share marker/debounce and persistent-close ordering. Splitting their
+# callbacks would spread that timing across more owners; parameter editing and
+# curve-local state already have dedicated widget owners.
+
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from math import isfinite
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from matplotlib.backends.backend_qt import NavigationToolbar2QT
-from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
-from qtpy.QtGui import QCloseEvent, QPalette, QShowEvent
+
+# tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
+from qtpy.QtCore import QTimer, Signal  # pyright: ignore[reportPrivateImportUsage]
+from qtpy.QtGui import QCloseEvent, QShowEvent
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -26,18 +31,16 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTableWidgetSelectionRange,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
@@ -45,18 +48,16 @@ from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshot,
     PredictorSnapshotCodec,
 )
-from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
+from zcu_tools.gui.session.ui.predictor_curves import PredictorCurveTabs
+from zcu_tools.gui.session.ui.predictor_parameters import PredictorParameterEditor
 from zcu_tools.gui.widgets import error_colour, set_foreground, success_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
-from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
 from zcu_tools.simulate.predictor import (
     CalibrationResult,
-    MatrixPredictor,
     PredictorInputError,
 )
-from zcu_tools.simulate.transmon import TransmonParams
 
 if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
@@ -67,10 +68,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Default display window in flux (Φ/Φ₀) units (plan spec).
-_DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
-# Number of grid points for the curve computation.
-_CURVE_GRID_N = 200
 # Debounce delay (ms) before updating the per-transition frequency column.
 _DEBOUNCE_MS = 150
 # Default tracked transitions: from∈{0,1}, from<to<4.
@@ -82,16 +79,6 @@ _DEFAULT_TRANSITIONS: list[tuple[int, int]] = [
     (1, 3),
 ]
 
-# Initial standalone trial values, not defaults for missing file inputs.
-_DEFAULT_EJ: float = 4.0
-_DEFAULT_EC: float = 1.0
-_DEFAULT_EL: float = 1.0
-_DEFAULT_EJMAX: float = 20.0
-_DEFAULT_TRANSMON_EC: float = 0.25
-_DEFAULT_ASYMMETRY: float = 0.0
-_DEFAULT_FLUX_HALF: float = 0.0
-_DEFAULT_FLUX_PERIOD: float = 0.005
-_DEFAULT_FLUX_BIAS: float = 0.0
 _DEFAULT_CALIBRATION_EXPR: str = ""
 
 # Column indices for the 4-column tracked-transitions table.
@@ -163,8 +150,6 @@ class PredictorDialog(QDialog):
         self._persistent_on_close = persistent_on_close
         self._live_mode = False
         self._suppress_state_changed = False
-        self._updating_parameters = False
-        self._parameter_fields: dict[QLineEdit, str] = {}
         self._caretaker: SingleFileCaretaker[PredictorSnapshot, None] | None = None
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
@@ -176,16 +161,6 @@ class PredictorDialog(QDialog):
         # Modified only by _add_transition / _delete_transition / _on_remove_selected.
         self._tracked: list[tuple[int, int]] = list(_DEFAULT_TRANSITIONS)
 
-        # Last computed results; None when predictor is not loaded or
-        # tracked list is empty. Both matrix operators are always tracked.
-        self._last_freq_result = None
-        self._last_mat_n_result = None
-        self._last_mat_phi_result = None
-        self._synced_xlim: tuple[float, float] | None = None
-        self._syncing_xlim = False
-        # Matrix curves are an optional model capability, learned from the built model.
-        self._matrix_supported = True
-
         # Root layout: left curve tabs | right controls column, so Close sits at
         # the dialog's right edge like the other dialogs.
         root_layout = QHBoxLayout(self)
@@ -196,7 +171,13 @@ class PredictorDialog(QDialog):
         controls_layout = QVBoxLayout(controls_widget)
         controls_layout.setContentsMargins(0, 0, 0, 0)
 
-        controls_layout.addWidget(self._build_model_group())
+        self._parameter_editor = PredictorParameterEditor(
+            predictor,
+            on_edited=self._on_parameters_changed,
+            on_replaced=self._on_parameters_replaced,
+            on_status=lambda message, error: self._set_status(message, error=error),
+        )
+        controls_layout.addWidget(self._parameter_editor)
 
         controls_layout.addWidget(self._build_transition_group(), stretch=1)
 
@@ -210,10 +191,22 @@ class PredictorDialog(QDialog):
 
         controls_layout.addLayout(self._build_transition_actions())
 
-        self._build_curve_tabs()
+        self._curve_tabs = PredictorCurveTabs(
+            predictor,
+            on_follow=self._on_canvas_follow,
+            on_lock=self._on_canvas_lock,
+            on_status=lambda message, error: self._set_status(message, error=error),
+            on_clear_values=lambda: self._set_all_value_columns("—"),
+            on_matrix_capability=lambda supported: self._set_matrix_columns_visible(
+                supported=supported
+            ),
+        )
 
-        root_layout.addWidget(self._tab_widget, stretch=1)
-        root_layout.addWidget(controls_widget, stretch=0)
+        # Matching minima and stretch split available width evenly, rather than
+        # letting the controls' larger sizeHint squeeze the curves on opening.
+        self._curve_tabs.setMinimumWidth(480)
+        root_layout.addWidget(self._curve_tabs, stretch=1)
+        root_layout.addWidget(controls_widget, stretch=1)
 
         self._initialize_trial(params)
 
@@ -224,81 +217,6 @@ class PredictorDialog(QDialog):
         )
         self.finished.connect(self._cleanup_subscriptions)
         self.destroyed.connect(self._cleanup_subscriptions)
-
-    def _build_model_group(self) -> QGroupBox:
-        # ── Model params (editable EJ/EC/EL/flux anchors/flux_bias) ───────
-        # File loading only prefills independent trial parameters.
-        model_group = QGroupBox("Model params")
-        model_form = QFormLayout(model_group)
-
-        self._add_model_sources(model_form)
-
-        # Energies use GHz; flux anchors and bias use device-value units. Plain
-        # text preserves finite float precision and blank unknowns. The params
-        # classes own physical validation.
-        self._ej_field = self._make_param_field(_DEFAULT_EJ)
-        self._ec_field = self._make_param_field(_DEFAULT_EC)
-        self._el_field = self._make_param_field(_DEFAULT_EL)
-        self._fluxonium_energies_label = QLabel("Energies:")
-        self._fluxonium_energies_row = self._make_param_row(
-            ("EJ", self._ej_field),
-            ("EC", self._ec_field),
-            ("EL", self._el_field),
-        )
-        self._ec_field.setObjectName("predictor_input_fluxonium_EC")
-        model_form.addRow(self._fluxonium_energies_label, self._fluxonium_energies_row)
-        # SQUID transmon: EJmax/EC in GHz, d is the dimensionless asymmetry.
-        self._ejmax_field = self._make_param_field(_DEFAULT_EJMAX)
-        self._transmon_ec_field = self._make_param_field(_DEFAULT_TRANSMON_EC)
-        self._asymmetry_field = self._make_param_field(_DEFAULT_ASYMMETRY)
-        self._transmon_energies_label = QLabel("Energies:")
-        self._transmon_energies_row = self._make_param_row(
-            ("EJmax", self._ejmax_field),
-            ("EC", self._transmon_ec_field),
-            ("d", self._asymmetry_field),
-        )
-        self._transmon_ec_field.setObjectName("predictor_input_transmon_EC")
-        model_form.addRow(self._transmon_energies_label, self._transmon_energies_row)
-        self._model_combo.currentIndexChanged.connect(self._sync_model_rows)
-        self._sync_model_rows()
-        self._flux_half_field = self._make_param_field(_DEFAULT_FLUX_HALF)
-        self._flux_period_field = self._make_param_field(_DEFAULT_FLUX_PERIOD)
-        # flux_bias lives here (was in the old "Load predictor" group).
-        self._flux_bias_field = self._make_param_field(_DEFAULT_FLUX_BIAS)
-        model_form.addRow(
-            "Flux:",
-            self._make_param_row(
-                ("half", self._flux_half_field),
-                ("period", self._flux_period_field),
-                ("bias", self._flux_bias_field),
-            ),
-        )
-
-        return model_group
-
-    def _add_model_sources(self, model_form: QFormLayout) -> None:
-        self._model_combo = QComboBox()
-        self._model_combo.addItem("Fluxonium", "fluxonium")
-        self._model_combo.addItem("SQUID transmon", "transmon")
-        model_form.addRow("Model:", self._model_combo)
-        self._file_combo = QComboBox()
-        self._file_combo.setObjectName("predictor_file")
-        self._file_combo.setMinimumContentsLength(12)
-        file_row = QHBoxLayout()
-        file_row.addWidget(self._file_combo, stretch=1)
-        self._file_refresh_btn = QPushButton("Refresh files")
-        self._file_refresh_btn.setToolTip(
-            "Refresh entry predictor filenames without loading"
-        )
-        self._file_refresh_btn.clicked.connect(self._refresh_files)
-        file_row.addWidget(self._file_refresh_btn)
-        self._file_load_btn = QPushButton("Load")
-        self._file_load_btn.clicked.connect(self._on_load_file_clicked)
-        file_row.addWidget(self._file_load_btn)
-        model_form.addRow("Predictor file:", file_row)
-        self._file_hint = QLabel()
-        self._file_hint.setWordWrap(True)
-        model_form.addRow(self._file_hint)
 
     def _build_transition_group(self) -> QGroupBox:
         # ── Tracked transitions group (predict controls + table + remove) ──
@@ -433,48 +351,8 @@ class PredictorDialog(QDialog):
         action_row.addWidget(close_btn)
         return action_row
 
-    def _build_curve_tabs(self) -> None:
-        # ── Left: QTabWidget with three canvases ──────────────────────────
-        # Frequency, |n|, |phi|. All three share one marker value and one set of
-        # follow/lock callbacks, so a click-follow on any tab drives the others.
-        # Each tab owns a native Matplotlib toolbar; x-ranges stay synced across
-        # tabs while y-ranges remain per-tab because their units differ.
-        self._tab_widget = QTabWidget()
-
-        self._freq_canvas = PredictorCurveCanvas(figsize=(6.0, 4.0))
-        self._mat_n_canvas = PredictorCurveCanvas(figsize=(6.0, 4.0))
-        self._mat_phi_canvas = PredictorCurveCanvas(figsize=(6.0, 4.0))
-
-        # All canvases whose marker stays in sync with the device-value spinbox.
-        self._all_canvases = (
-            self._freq_canvas,
-            self._mat_n_canvas,
-            self._mat_phi_canvas,
-        )
-        for canvas in self._all_canvases:
-            canvas.bind_callbacks(
-                on_follow=self._on_canvas_follow,
-                on_lock=self._on_canvas_lock,
-            )
-            canvas.bind_xlim_changed(self._on_canvas_xlim_changed)
-
-        self._freq_tab, self._freq_toolbar = self._make_canvas_tab(self._freq_canvas)
-        self._mat_n_tab, self._mat_n_toolbar = self._make_canvas_tab(self._mat_n_canvas)
-        self._mat_phi_tab, self._mat_phi_toolbar = self._make_canvas_tab(
-            self._mat_phi_canvas
-        )
-        self._all_toolbars = (
-            self._freq_toolbar,
-            self._mat_n_toolbar,
-            self._mat_phi_toolbar,
-        )
-
-        self._tab_widget.addTab(self._freq_tab, "Frequency")
-        self._tab_widget.addTab(self._mat_n_tab, "|n|")
-        self._tab_widget.addTab(self._mat_phi_tab, "|phi|")
-
     def _initialize_trial(self, params: ModelParams | None) -> None:
-        """Populate the completed view, then bind parameter edits before applying the trial."""
+        """Populate table/device choices, then apply the trial after timers exist."""
         # ── Debounce timer for per-row column updates ─────────────────────
         # Used both by the spinbox and by the marker follow-loop so cursor motion
         # updates the spinbox/table/markers at the debounce cadence, not per pixel.
@@ -482,10 +360,6 @@ class PredictorDialog(QDialog):
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.setInterval(_DEBOUNCE_MS)
         self._debounce_timer.timeout.connect(self._update_value_columns)
-
-        # ── Predictor info cache (flux_half, flux_period for conversions) ──
-        self._flux_half: float | None = None
-        self._flux_period: float | None = None
 
         # Populate table from default transitions before loading predictor.
         self._rebuild_table()
@@ -495,17 +369,14 @@ class PredictorDialog(QDialog):
         self._parameter_timer.setSingleShot(True)
         self._parameter_timer.setInterval(_DEBOUNCE_MS)
         self._parameter_timer.timeout.connect(self._refresh_curves)
-        self._refresh_files()
-        self._model_combo.currentIndexChanged.connect(self._on_parameters_changed)
-        for field in self._parameter_fields:
-            field.textChanged.connect(self._on_parameters_changed)
+        self._parameter_editor.refresh_files()
 
         if params is not None:
             self.set_parameters(params)
         else:
             self._refresh_curves()
         self._sync_live_mode_controls()
-        self._tab_widget.currentChanged.connect(self._emit_state_changed)
+        self._curve_tabs.currentChanged.connect(self._emit_state_changed)
 
     def parameters(self) -> ModelParams:
         """Return the selected model's local trial: GHz energies and native affine inputs.
@@ -514,24 +385,7 @@ class PredictorDialog(QDialog):
         PredictorInputError. No source/session read or write occurs.
         Invalid physical values are rejected only when queried.
         """
-        affine = (
-            self._parameter_value(self._flux_half_field),
-            self._parameter_value(self._flux_period_field),
-            self._parameter_value(self._flux_bias_field),
-        )
-        if self._model_combo.currentData() == "transmon":
-            return TransmonParams(
-                self._parameter_value(self._ejmax_field),
-                self._parameter_value(self._transmon_ec_field),
-                self._parameter_value(self._asymmetry_field),
-                *affine,
-            )
-        return FluxoniumParams(
-            self._parameter_value(self._ej_field),
-            self._parameter_value(self._ec_field),
-            self._parameter_value(self._el_field),
-            *affine,
-        )
+        return self._parameter_editor.parameters()
 
     def set_parameters(self, params: ModelParams) -> None:
         """Replace the detached trial and select its model, retaining invalid physics.
@@ -540,47 +394,11 @@ class PredictorDialog(QDialog):
         the field; users enter a value to complete the model.
         Computation validates physics later. If enabled, only user cache is saved.
         """
-        self._updating_parameters = True
-        try:
-            self._model_combo.setCurrentIndex(self._model_combo.findData(params.model))
-            if isinstance(params, TransmonParams):
-                energies = (
-                    (self._ejmax_field, params.EJmax),
-                    (self._transmon_ec_field, params.EC),
-                    (self._asymmetry_field, params.d),
-                )
-            else:
-                energies = (
-                    (self._ej_field, params.EJ),
-                    (self._ec_field, params.EC),
-                    (self._el_field, params.EL),
-                )
-            for field, value in (
-                *energies,
-                (self._flux_half_field, params.flux_half),
-                (self._flux_period_field, params.flux_period),
-                (self._flux_bias_field, params.flux_bias),
-            ):
-                field.setEnabled(not self._live_mode)
-                field.setText("" if value is None else repr(value))
-        finally:
-            self._updating_parameters = False
-        self._parameter_timer.stop()
-        self._refresh_curves()
-        self._sync_calibration_button()
-        self._save_parameters()
-
-    def _sync_model_rows(self, *_args: object) -> None:
-        """Show only the selected model's energy inputs; keep hidden values untouched."""
-        transmon = self._model_combo.currentData() == "transmon"
-        self._fluxonium_energies_label.setVisible(not transmon)
-        self._fluxonium_energies_row.setVisible(not transmon)
-        self._transmon_energies_label.setVisible(transmon)
-        self._transmon_energies_row.setVisible(transmon)
+        self._parameter_editor.set_parameters(params)
 
     def selected_file(self) -> str | None:
         """Return the selected entry filename, or None; selection alone never loads."""
-        return self._file_combo.currentText() or None
+        return self._parameter_editor.selected_file()
 
     def load_file(self, filename: str | None = None) -> None:
         """Prefill this local trial from a current-entry predictor filename.
@@ -588,14 +406,7 @@ class PredictorDialog(QDialog):
         Omit filename to load the current selection. Failures from predictor
         control propagate without changing the trial. The source is never written.
         """
-        name = filename if filename is not None else self.selected_file()
-        if name is None:
-            raise FailedPreconditionError("No predictor file selected")
-        predictor = self._pred.load_file(name)
-        self.set_parameters(predictor.params)
-        index = self._file_combo.findText(name)
-        if index >= 0:
-            self._file_combo.setCurrentIndex(index)
+        self._parameter_editor.load_file(filename)
 
     def enable_parameter_cache(self, *, cache_dir: Path | None = None) -> None:
         """Restore and enable versioned user-cache persistence for this trial.
@@ -631,27 +442,6 @@ class PredictorDialog(QDialog):
         """Restore a validated cache snapshot into editable local fields only."""
         self.set_parameters(state.params)
 
-    def _parameter_value(self, field: QLineEdit) -> float | None:
-        field.setToolTip("Leave blank for unknown.")
-        set_foreground(field, self.palette().color(QPalette.ColorRole.Text))
-        text = field.text().strip()
-        if not text:
-            return None
-        name = self._parameter_fields[field]
-        try:
-            value = float(text)
-        except ValueError as exc:
-            message = f"{name}: enter a finite number or leave blank."
-            field.setToolTip(message)
-            set_foreground(field, error_colour(field))
-            raise PredictorInputError(message) from exc
-        if not isfinite(value):
-            message = f"{name}: enter a finite number or leave blank."
-            field.setToolTip(message)
-            set_foreground(field, error_colour(field))
-            raise PredictorInputError(message)
-        return value
-
     def _save_parameters(self) -> None:
         if self._caretaker is not None:
             try:
@@ -664,9 +454,15 @@ class PredictorDialog(QDialog):
             except PersistenceError as exc:
                 self._set_status(str(exc), error=True)
 
-    def _on_parameters_changed(self, *_args: object) -> None:
-        if self._updating_parameters:
-            return
+    def _on_parameters_replaced(self) -> None:
+        """Settle one programmatic trial replacement synchronously; failures propagate."""
+        self._parameter_timer.stop()
+        self._refresh_curves()
+        self._sync_calibration_button()
+        self._save_parameters()
+
+    def _on_parameters_changed(self) -> None:
+        """Clear stale results and save a valid user edit before scheduling refresh."""
         self._parameter_timer.stop()
         self._clear_predictor_display()
         self._sync_calibration_button()
@@ -681,37 +477,6 @@ class PredictorDialog(QDialog):
             self._set_status("")
         self._save_parameters()
         self._parameter_timer.start()
-
-    def _refresh_files(self) -> None:
-        previous = self.selected_file()
-        self._file_combo.clear()
-        try:
-            names = self._pred.list_files()
-            self._file_combo.addItems(names)
-            if previous in names:
-                self._file_combo.setCurrentIndex(names.index(previous))
-            self._file_hint.setText(
-                ""
-                if names
-                else "Open an entry with predictors/*.json, or add predictor files."
-            )
-        except (ExpectedError, OSError) as exc:
-            self._file_hint.setText(str(exc))
-            logger.exception("predictor file listing failed")
-        self._file_combo.setEnabled(
-            not self._live_mode and self.selected_file() is not None
-        )
-        self._file_load_btn.setEnabled(
-            not self._live_mode and self.selected_file() is not None
-        )
-
-    def _on_load_file_clicked(self) -> None:
-        try:
-            self.load_file()
-        except (ExpectedError, OSError, ValueError) as exc:
-            self._set_status(str(exc), error=True)
-        else:
-            self._set_status("Loaded predictor file into local trial", error=False)
 
     def predict_frequency(
         self, value: float, transition: tuple[int, int] = (0, 1)
@@ -745,18 +510,18 @@ class PredictorDialog(QDialog):
         """Return the persistent UI state only; live marker/device/cache state is excluded."""
         return PredictorDialogState(
             tracked_transitions=tuple(self._tracked),
-            tab_index=int(self._tab_widget.currentIndex()),
+            tab_index=int(self._curve_tabs.currentIndex()),
         )
 
     def restore_state(self, state: PredictorDialogState) -> None:
         """Restore display preferences without changing the local trial parameters."""
         transitions = _normalize_tracked_transitions(state.tracked_transitions)
-        tab_count = self._tab_widget.count()
+        tab_count = self._curve_tabs.count()
         tab_index = max(0, min(int(state.tab_index), max(0, tab_count - 1)))
         self._suppress_state_changed = True
         try:
             self._tracked = list(transitions)
-            self._tab_widget.setCurrentIndex(tab_index)
+            self._curve_tabs.setCurrentIndex(tab_index)
             self._rebuild_table()
         finally:
             self._suppress_state_changed = False
@@ -802,7 +567,7 @@ class PredictorDialog(QDialog):
             self._set_status("Live predictor view", error=False)
             return
         self._refresh_device_selector()
-        self._refresh_files()
+        self._parameter_editor.refresh_files()
         selected = self._selected_device_name()
         if selected is not None:
             self._apply_cached_device_value(selected)
@@ -839,16 +604,8 @@ class PredictorDialog(QDialog):
 
     def _sync_live_mode_controls(self) -> None:
         enabled = not self._live_mode
+        self._parameter_editor.set_live_mode(enabled=self._live_mode)
         for widget in (
-            self._ej_field,
-            self._ec_field,
-            self._el_field,
-            self._ejmax_field,
-            self._transmon_ec_field,
-            self._asymmetry_field,
-            self._flux_half_field,
-            self._flux_period_field,
-            self._flux_bias_field,
             self._predict_value_spin,
             self._add_from_spin,
             self._add_to_spin,
@@ -857,90 +614,17 @@ class PredictorDialog(QDialog):
             self._calibration_freq_field,
         ):
             widget.setEnabled(enabled)
-        self._model_combo.setEnabled(enabled)
-        self._file_combo.setEnabled(enabled and self.selected_file() is not None)
-        self._file_refresh_btn.setEnabled(enabled)
-        self._file_load_btn.setEnabled(enabled and self.selected_file() is not None)
         if self._device_combo is not None:
             self._device_combo.setEnabled(enabled)
         if self._device_refresh_btn is not None:
             self._device_refresh_btn.setEnabled(enabled)
         self._update_device_buttons()
         self._sync_calibration_button()
-        for canvas in self._all_canvases:
-            canvas.set_interaction_enabled(enabled=enabled)
-
-    # ------------------------------------------------------------------
-    # Model-param widgets / helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _make_param_field(default: float = 0.0) -> QLineEdit:
-        """Preserve finite float text and allow blank or invalid drafts."""
-        return QLineEdit(repr(default))
-
-    def _make_param_row(self, *pairs: tuple[str, QLineEdit]) -> QWidget:
-        holder = QWidget()
-        row = QHBoxLayout(holder)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        for label, field in pairs:
-            field.setObjectName(f"predictor_input_{label}")
-            name = {
-                "half": "flux_half",
-                "period": "flux_period",
-                "bias": "flux_bias",
-            }.get(label, label)
-            self._parameter_fields[field] = name
-            field.setPlaceholderText("unknown")
-            field.setToolTip("Leave blank for unknown.")
-            caption = QLabel(label)
-            caption.setBuddy(field)
-            row.addWidget(caption)
-            row.addWidget(field, stretch=1)
-        return holder
-
-    @staticmethod
-    def _make_canvas_tab(
-        canvas: PredictorCurveCanvas,
-    ) -> tuple[QWidget, NavigationToolbar2QT]:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        toolbar = NavigationToolbar2QT(canvas.canvas, page)
-        layout.addWidget(toolbar)
-        layout.addWidget(canvas, stretch=1)
-        return page, toolbar
+        self._curve_tabs.set_interaction_enabled(enabled=enabled)
 
     def _clear_predictor_display(self) -> None:
-        self._synced_xlim = None
-        for canvas in self._all_canvases:
-            canvas.clear()
-        for row_idx in range(self._table.rowCount()):
-            for col in (_COL_FREQ, _COL_MAG_N, _COL_MAG_PHI):
-                item = self._table.item(row_idx, col)
-                if item is not None:
-                    item.setText("—")
-
-    # ------------------------------------------------------------------
-    # Affine helpers (value ↔ flux)
-    # ------------------------------------------------------------------
-
-    def _make_affine(
-        self,
-    ) -> tuple[Callable[[float], float] | None, Callable[[float], float] | None]:
-        """Return (value_to_flux, flux_to_value) closures or (None, None) if no predictor.
-
-        Mirrors FluxoniumPredictor.value_to_flux exactly:
-          flux = (value + flux_bias - flux_half) / flux_period + 0.5
-          value = (flux - 0.5) * flux_period + flux_half - flux_bias
-        """
-        try:
-            model = self.parameters().build_predictor()
-        except PredictorInputError:
-            return None, None
-        self._matrix_supported = isinstance(model, MatrixPredictor)
-        return model.value_to_flux, model.flux_to_value
+        self._curve_tabs.clear_curves()
+        self._set_all_value_columns("—")
 
     # ------------------------------------------------------------------
     # Device-value selector helpers
@@ -990,7 +674,8 @@ class PredictorDialog(QDialog):
                     f"{entry.name}  [{entry.type_name}]{unit_suffix}",
                     userData=entry.name,
                 )
-        except Exception as exc:
+        # tolerated: Device query ports have open failure sets; show status and restore combo signal delivery.
+        except Exception as exc:  # noqa: BLE001
             self._set_status(f"Failed to refresh device list: {exc}", error=True)
         finally:
             idx = combo.findData(current_name) if current_name is not None else 0
@@ -1002,7 +687,7 @@ class PredictorDialog(QDialog):
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
-        self._sync_markers(self._predict_value_spin.value())
+        self._curve_tabs.set_marker(self._predict_value_spin.value())
         self._debounce_timer.stop()
         self._update_value_columns()
         if update_status:
@@ -1028,7 +713,8 @@ class PredictorDialog(QDialog):
                     f"Skipped refresh for {name!r}: a run is active.",
                     error=False,
                 )
-        except Exception as exc:
+        # tolerated: Refresh admission/provider failures must become status text, not escape the Qt callback.
+        except Exception as exc:  # noqa: BLE001
             self._set_status(f"Failed to refresh {name!r}: {exc}", error=True)
 
     def _on_refresh_devices_clicked(self) -> None:
@@ -1057,7 +743,8 @@ class PredictorDialog(QDialog):
             return
         try:
             info = self._dev.get_device_info(selected)
-        except Exception as exc:
+        # tolerated: Driver read failures have no closed exception set; report status without replacing the value.
+        except Exception as exc:  # noqa: BLE001
             self._set_status(f"Failed to read {selected!r}: {exc}", error=True)
             return
         value = self._extract_numeric_info_value(info)
@@ -1161,7 +848,8 @@ class PredictorDialog(QDialog):
             resolved = coerce_eval_result(
                 evaluate_numeric_expr(raw.expr, parameters), raw.type_
             )
-        except Exception as exc:
+        # tolerated: Arbitrary capture/source failures must block calibration and retain the diagnostic message.
+        except Exception as exc:  # noqa: BLE001
             if update_status:
                 self._set_status(f"Calibration frequency: {exc}", error=True)
             return None
@@ -1226,7 +914,7 @@ class PredictorDialog(QDialog):
         logger.info("PredictorDialog: calibrated flux bias %r", req)
 
     def _display_calibration(self, result: CalibrationResult) -> None:
-        self._flux_bias_field.setText(repr(result.flux_bias))
+        self._parameter_editor.set_flux_bias(result.flux_bias)
         self._set_status(
             f"Calibrated flux_bias={result.flux_bias:.6g}; "
             f"{result.frequency_mhz:.6g} MHz; clamped={str(result.clamped).lower()}",
@@ -1312,156 +1000,18 @@ class PredictorDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _refresh_curves(self) -> None:
-        """Recompute and redraw the freq curve and both matrix-element curves."""
-        from zcu_tools.gui.session.services.predictor import (
-            PredictCurveRequest,
-        )
-
-        if not self._tracked:
-            for canvas in self._all_canvases:
-                canvas.clear()
-            return
-
-        value_to_flux, flux_to_value = self._make_affine()
-        if value_to_flux is None or flux_to_value is None:
-            self._clear_predictor_display()
-            try:
-                self.parameters().build_predictor()
-            except PredictorInputError as exc:
-                self._set_status(str(exc), error=True)
-            return
-
-        # Build value grid from the default flux window.
-        v_lo = flux_to_value(_DEFAULT_FLUX_WINDOW[0])
-        v_hi = flux_to_value(_DEFAULT_FLUX_WINDOW[1])
-        if v_lo > v_hi:
-            v_lo, v_hi = v_hi, v_lo
-        grid = np.linspace(v_lo, v_hi, _CURVE_GRID_N, dtype=np.float64)
-
-        highlights = self._selected_highlights()
-        marker_value = self._predict_value_spin.value()
-
-        # ── Frequency curves ──────────────────────────────────────────────
-        try:
-            freq_result = self._pred.predict_freq_curve(
-                self.parameters(),
-                PredictCurveRequest(values=grid, transitions=tuple(self._tracked)),
-            )
-            self._last_freq_result = freq_result
-            self._freq_canvas.render_curves(
-                values=freq_result.values,
-                labels=freq_result.labels,
-                series=freq_result.freqs_mhz,
-                ylabel="Frequency (MHz)",
-                highlights=highlights,
-                marker_value=marker_value,
-                flux_window=_DEFAULT_FLUX_WINDOW,
-                value_to_flux=value_to_flux,
-                flux_to_value=flux_to_value,
-            )
-        except (FailedPreconditionError, PredictorInputError) as exc:
-            self._set_status(str(exc), error=True)
-            return
-        except Exception as exc:
-            logger.exception("predictor frequency curve refresh failed")
-            self._set_status(str(exc), error=True)
-            return
-
-        # ── Matrix element curves (both operators, one tab each) ───────────
-        self._sync_matrix_capability()
-        matrix_canvases: tuple[
-            tuple[Literal["n", "phi"], PredictorCurveCanvas], ...
-        ] = (
-            ("n", self._mat_n_canvas),
-            ("phi", self._mat_phi_canvas),
-        )
-        if self._matrix_supported and not all(
-            self._render_matrix_curve(
-                operator,
-                canvas,
-                grid,
-                highlights,
-                marker_value,
-                flux_to_value,
-                value_to_flux,
-            )
-            for operator, canvas in matrix_canvases
+        """Refresh the curve view, then settle table values only after successful rendering."""
+        if self._curve_tabs.refresh_curves(
+            self.parameters(),
+            tuple(self._tracked),
+            self._selected_highlights(),
+            self._predict_value_spin.value(),
         ):
-            return
+            self._update_value_columns()
 
-        self._apply_synced_xlim_to_all()
-
-        # Refresh all value columns for the new marker position.
-        self._update_value_columns()
-
-    def _sync_matrix_capability(self) -> None:
-        """Hide matrix tabs/columns for models without optional matrix elements."""
-        supported = self._matrix_supported
-        for index, canvas, column in (
-            (1, self._mat_n_canvas, _COL_MAG_N),
-            (2, self._mat_phi_canvas, _COL_MAG_PHI),
-        ):
-            self._tab_widget.setTabEnabled(index, supported)
+    def _set_matrix_columns_visible(self, *, supported: bool) -> None:
+        for column in (_COL_MAG_N, _COL_MAG_PHI):
             self._table.setColumnHidden(column, not supported)
-            if not supported:
-                canvas.clear()
-        if not supported and self._tab_widget.currentIndex() != 0:
-            self._tab_widget.setCurrentIndex(0)
-
-    def _render_matrix_curve(
-        self,
-        operator: Literal["n", "phi"],
-        canvas: PredictorCurveCanvas,
-        grid: np.ndarray,
-        highlights: tuple[tuple[int, int], ...],
-        marker_value: float,
-        flux_to_value: Callable[[float], float],
-        value_to_flux: Callable[[float], float],
-    ) -> bool:
-        """Compute+render one operator's matrix-element curve onto ``canvas``.
-
-        Returns True on success; on an expected failure it sets the status and
-        returns False so the caller can stop the refresh.
-        """
-        from zcu_tools.gui.session.services.predictor import (
-            PredictMatrixCurveRequest,
-        )
-
-        try:
-            mat_result = self._pred.predict_matrix_element_curve(
-                self.parameters(),
-                PredictMatrixCurveRequest(
-                    values=grid,
-                    transitions=tuple(self._tracked),
-                    operator=operator,
-                ),
-            )
-        except (FailedPreconditionError, PredictorInputError) as exc:
-            self._set_status(str(exc), error=True)
-            return False
-        except Exception as exc:
-            logger.exception(
-                "predictor matrix curve refresh failed: operator=%s", operator
-            )
-            self._set_status(str(exc), error=True)
-            return False
-
-        if operator == "n":
-            self._last_mat_n_result = mat_result
-        else:
-            self._last_mat_phi_result = mat_result
-        canvas.render_curves(
-            values=mat_result.values,
-            labels=mat_result.labels,
-            series=mat_result.mags,
-            ylabel=f"|<i|{operator}|j>|",
-            highlights=highlights,
-            marker_value=marker_value,
-            flux_window=_DEFAULT_FLUX_WINDOW,
-            value_to_flux=value_to_flux,
-            flux_to_value=flux_to_value,
-        )
-        return True
 
     # ------------------------------------------------------------------
     # Add / delete transitions
@@ -1531,44 +1081,11 @@ class PredictorDialog(QDialog):
     # Spinbox / canvas bidirectional coupling
     # ------------------------------------------------------------------
 
-    def _sync_markers(self, value: float) -> None:
-        """Move the marker on every canvas to ``value`` (no recompute)."""
-        for canvas in self._all_canvases:
-            canvas.set_marker(value)
-
-    def _on_canvas_xlim_changed(
-        self,
-        source: PredictorCurveCanvas,
-        xlim: tuple[float, float],
-    ) -> None:
-        """Propagate one canvas' x-range to every predictor tab."""
-        if self._syncing_xlim:
-            return
-        self._synced_xlim = (float(xlim[0]), float(xlim[1]))
-        self._syncing_xlim = True
-        try:
-            for canvas in self._all_canvases:
-                if canvas is source:
-                    continue
-                canvas.apply_xlim(self._synced_xlim, notify=False)
-        finally:
-            self._syncing_xlim = False
-
-    def _apply_synced_xlim_to_all(self) -> None:
-        if self._synced_xlim is None:
-            return
-        self._syncing_xlim = True
-        try:
-            for canvas in self._all_canvases:
-                canvas.apply_xlim(self._synced_xlim, notify=False)
-        finally:
-            self._syncing_xlim = False
-
     def _on_spinbox_changed(self, value: float) -> None:
         """Spinbox changed → move all canvas markers; schedule debounced column update."""
         if self._live_mode:
             return
-        self._sync_markers(value)
+        self._curve_tabs.set_marker(value)
         self._debounce_timer.start()
 
     def _on_canvas_follow(self, value: float) -> None:
@@ -1585,7 +1102,7 @@ class PredictorDialog(QDialog):
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
-        self._sync_markers(value)
+        self._curve_tabs.set_marker(value)
         self._debounce_timer.start()
 
     def _on_canvas_lock(self, value: float) -> None:
@@ -1595,7 +1112,7 @@ class PredictorDialog(QDialog):
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
-        self._sync_markers(value)
+        self._curve_tabs.set_marker(value)
         # Lock triggers an immediate update (cancel any pending debounce first).
         self._debounce_timer.stop()
         self._update_value_columns()
@@ -1603,8 +1120,7 @@ class PredictorDialog(QDialog):
     def _on_selection_changed(self) -> None:
         """Table row selection changed → restyle highlighted curve on all canvases."""
         highlights = self._selected_highlights()
-        for canvas in self._all_canvases:
-            canvas.set_highlights(highlights)
+        self._curve_tabs.set_highlights(highlights)
         self._sync_calibration_button()
 
     # ------------------------------------------------------------------

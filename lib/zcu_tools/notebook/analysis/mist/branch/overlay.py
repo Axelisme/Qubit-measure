@@ -9,7 +9,8 @@ from numpy.typing import NDArray
 from zcu_tools.simulate.fluxonium.branch.floquet import FloquetBranchAnalysis
 
 
-def calc_overlay(
+# tolerated: Notebook passes Floquet inputs and truncation controls positionally.
+def calc_overlay(  # noqa: PLR0913
     params: tuple[float, float, float],
     photons: NDArray[np.float64],
     r_f: float,
@@ -37,7 +38,8 @@ def calc_overlay(
     return overlays
 
 
-def plot_overlay(
+# tolerated: Notebook subplot calls pass grids and threshold positionally, with keyword styling.
+def plot_overlay(  # noqa: PLR0913
     fig: go.Figure,
     name: str,
     overlay: NDArray[np.float64],

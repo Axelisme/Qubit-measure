@@ -31,7 +31,10 @@ def test_emit_routes_by_payload_type_only():
 def test_unsubscribe_stops_delivery():
     bus = EventBus()
     seen = []
-    cb = lambda p: seen.append(p.name)  # noqa: E731
+
+    def cb(p: OnetoneLoadedPayload) -> None:
+        seen.append(p.name)
+
     bus.subscribe(OnetoneLoadedPayload, cb)
     bus.unsubscribe(OnetoneLoadedPayload, cb)
     bus.emit(OnetoneLoadedPayload(name="r1"))

@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime.schedule import (
+    Schedule,
+    SignalBuffer,
+)
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -36,7 +41,7 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
             .build_and_acquire(
                 raw2signal_fn=identity_array,
                 tag="x",
-                stop_condition=lambda: False,
+                options=AcquireOptions(stop_condition=lambda: False),
             )
         )
         assert sched.cfg.reps == 4
@@ -79,7 +84,7 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
             else:
                 builder.build_and_acquire(
                     raw2signal_fn=identity_array,
-                    progress_leave=progress_leave,
+                    options=AcquireOptions(progress_leave=progress_leave),
                 )
 
     with use_pbar_factory(recording_pbar_factory(progress_bars)):
@@ -90,6 +95,35 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
     assert all(bar.closed for bar in progress_bars)
 
 
+@pytest.mark.parametrize("progress_leave", [None, True, False])
+def test_step_program_progress_closes_with_default_or_explicit_leave(
+    progress_leave: bool | None,
+) -> None:
+    progress_bars: list[RecordingProgressBar] = []
+    signals_buffer = SignalBuffer((1, 1), dtype=np.float64)
+
+    with (
+        use_pbar_factory(recording_pbar_factory(progress_bars)),
+        Schedule(_cfg(rounds=2), signals_buffer, stop=StopSignal()) as sched,
+    ):
+        for _, step in sched.scan("host", [0]):
+            step.prog_builder(
+                "soc", "soccfg", program_cls=FakeProgram, marker="kw"
+            ).add(FakeModule("readout")).build_and_acquire(
+                raw2signal_fn=identity_array,
+                options=AcquireOptions(progress_leave=progress_leave),
+            )
+            rounds_bar = next(bar for bar in progress_bars if bar.desc == "rounds")
+            assert rounds_bar.leave is (
+                False if progress_leave is None else progress_leave
+            )
+            assert rounds_bar.closed
+            assert not progress_bars[0].closed
+
+    assert all(bar.closed for bar in progress_bars)
+    np.testing.assert_allclose(signals_buffer.array, [[2.0]])
+
+
 def test_run_program_reuses_caller_owned_program_cache():
     FakeCachedProgram.instances.clear()
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
@@ -97,7 +131,8 @@ def test_run_program_reuses_caller_owned_program_cache():
 
     with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         for value, step in sched.scan("value", [1.0, 1.0, 2.0]):
-            setattr(step.cfg, "value", value)
+            # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
+            setattr(step.cfg, "value", value)  # noqa: B010
             builder = step.prog_builder(
                 "soc",
                 "soccfg",
@@ -135,7 +170,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
             .add(FakeModule("readout"))
             .build_and_acquire_decimated(
                 tag="trace",
-                stop_condition=lambda: False,
+                options=AcquireOptions(stop_condition=lambda: False),
             )
         )
 

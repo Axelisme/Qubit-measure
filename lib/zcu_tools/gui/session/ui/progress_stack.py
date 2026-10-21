@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from qtpy.QtWidgets import QVBoxLayout, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QVBoxLayout, QWidget
 
 from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
 

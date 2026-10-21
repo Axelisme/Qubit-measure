@@ -8,6 +8,7 @@ from zcu_tools.program.v2.ir.instructions import (
     LabelInst,
     NopInst,
     RegWriteInst,
+    TimeInst,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.node import (
@@ -20,6 +21,9 @@ from zcu_tools.program.v2.ir.node import (
     clone_renamed,
 )
 from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
     Register,
     SrcKeyword,
 )
@@ -56,10 +60,11 @@ def test_basic_block_leaf_api_string_and_validation():
         block.replace_child(DummyNode(), DummyNode())
 
     with pytest.raises(ValueError, match="LabelInst"):
-        BasicBlockNode(insts=[LabelInst(name=Label("bad"))])  # type: ignore[list-item]
+        # tolerated: Reject label markers inside a basic instruction block.
+        BasicBlockNode(insts=[LabelInst(name=Label("bad"))])  # pyright: ignore[reportArgumentType]
 
     with pytest.raises(ValueError, match="JumpInst"):
-        BasicBlockNode(insts=[JumpInst(label=LabelRef(Label("bad")))])  # type: ignore[list-item]
+        BasicBlockNode(insts=[JumpInst(label=LabelRef(Label("bad")))])
 
 
 def test_block_node_mutation_and_string():
@@ -106,7 +111,8 @@ def test_irloop_body_rejects_non_block_node():
             name="loop",
             counter_reg=Register("r0"),
             n=3,
-            body=BasicBlockNode(insts=[NopInst()]),  # type: ignore[arg-type]
+            # tolerated: Reject a loop body that is not a BlockNode.
+            body=BasicBlockNode(insts=[NopInst()]),  # pyright: ignore[reportArgumentType]
         )
 
 
@@ -224,3 +230,119 @@ def test_clone_renamed_remaps_regwrite_label_and_dispatch_structure_names():
 def test_clone_renamed_rejects_unexpected_irnode_type():
     with pytest.raises(TypeError, match="unexpected node type DummyNode"):
         clone_renamed(DummyNode(), set())
+
+
+def test_clone_renamed_remaps_internal_label_refs():
+    """clone_renamed must remap LabelRef targets inside the cloned body.
+
+    A body containing a conditional back-jump to its own internal label must
+    have that LabelRef updated to point to the cloned (renamed) label, not the
+    original label in the un-cloned body.
+    """
+    from zcu_tools.program.v2.ir.node import clone_renamed
+
+    inner_label = Label("inner")
+    body = BlockNode(
+        insts=[
+            BasicBlockNode(
+                labels=[LabelInst(name=inner_label)],
+                insts=[TimeInst(c_op="inc_ref", lit=Immediate(1))],
+                branch=JumpInst(
+                    label=LabelRef(inner_label),
+                    if_cond="S",
+                    op=AluExpr(Register("r0"), AluOp.SUB, Immediate(1)),
+                ),
+            )
+        ]
+    )
+
+    allocated: set[str] = {"inner"}
+    cloned = clone_renamed(body, allocated)
+
+    assert isinstance(cloned, BlockNode)
+    assert len(cloned.insts) == 1
+    bb = cloned.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+
+    # The cloned label must have a different name (suffix added).
+    cloned_label_name = bb.labels[0].name
+    assert cloned_label_name != inner_label, "cloned LabelInst must be renamed"
+
+    # The branch LabelRef must point to the same renamed label.
+    assert bb.branch is not None
+    assert isinstance(bb.branch, JumpInst)
+    assert bb.branch.label is not None
+    assert not bb.branch.label.is_pseudo()
+    assert bb.branch.label.as_label() == cloned_label_name, (
+        "cloned branch LabelRef must point to the renamed label"
+    )
+
+
+def test_clone_renamed_uniquifies_nested_structure_names():
+    """clone_renamed must give a nested IRLoop a fresh name so the labels its
+    later unparse() synthesises (``{name}_start`` etc.) do not collide."""
+    from zcu_tools.program.v2.ir.node import clone_renamed
+
+    inner = IRLoop(
+        name="inner",
+        counter_reg=Register("r2"),
+        n=2,
+        body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+    )
+    body = BlockNode(insts=[inner])
+
+    allocated: set[str] = {"inner"}
+    cloned = clone_renamed(body, allocated)
+
+    assert isinstance(cloned, BlockNode)
+    cloned_loop = cloned.insts[0]
+    assert isinstance(cloned_loop, IRLoop)
+    assert cloned_loop.name != "inner", "nested loop name must be uniquified"
+
+
+def test_clone_renamed_remaps_dmem_addr_table_labels():
+    """clone_renamed must remap the entry labels inside a DmemAddr.
+
+    A dmem dispatch instruction (REG_WR s15 op (idx + DmemAddr)) inside a
+    cloned loop body must have its DmemAddr.table_labels remapped to the
+    cloned case-entry labels — otherwise every unrolled copy's dispatch would
+    point at the first copy's case entries.
+    """
+    from zcu_tools.program.v2.ir.node import clone_renamed
+    from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, DmemAddr
+
+    entry = Label("case_entry_0")
+    # A block that both *defines* `entry` and references it via a DmemAddr.
+    body = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("s15"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r0"), AluOp.ADD, DmemAddr((entry,))),
+                    )
+                ],
+            ),
+            BasicBlockNode(labels=[LabelInst(name=entry)], insts=[NopInst()]),
+        ]
+    )
+
+    cloned = clone_renamed(body, {"case_entry_0"})
+    assert isinstance(cloned, BlockNode)
+
+    # The defining LabelInst was renamed.
+    entry_block = cloned.insts[1]
+    assert isinstance(entry_block, BasicBlockNode)
+    cloned_entry = entry_block.labels[0].name
+    assert cloned_entry != entry
+
+    # The DmemAddr.table_labels must point at the *cloned* entry label.
+    disp_block = cloned.insts[0]
+    assert isinstance(disp_block, BasicBlockNode)
+    inst = disp_block.insts[0]
+    assert isinstance(inst, RegWriteInst)
+    assert isinstance(inst.op, AluExpr) and isinstance(inst.op.rhs, DmemAddr)
+    assert inst.op.rhs.table_labels == (cloned_entry,), (
+        "DmemAddr.table_labels must be remapped to the cloned entry label"
+    )

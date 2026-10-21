@@ -17,20 +17,22 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.device_models import (
+    ConnectDeviceRequest,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.ports import DeviceMemoryInfo
-from zcu_tools.gui.session.services.device import (
-    ConnectDeviceRequest,
-    DeviceRegistrationError,
-    DeviceService,
-    DisconnectDeviceRequest,
-    SetupDeviceRequest,
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
 )
+from zcu_tools.gui.session.ports import DeviceMemoryInfo
+from zcu_tools.gui.session.services.device import DeviceRegistrationError, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import DeviceStatus
 
@@ -74,10 +76,12 @@ def _make_svc(
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: device,
         device_registry=FakeDeviceRegistry(),
     )
@@ -107,10 +111,12 @@ def test_script_rows_reconnect_after_rename_without_manual_admission(qapp, origi
     service = DeviceService(
         bus,
         State(MagicMock()),
-        gate,
-        bg,
-        OperationRunner(gate, handles, progress, bg, bus),
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=OperationRunner(gate, handles, progress, bg, bus),
+            handles=handles,
+        ),
         device_registry=registry,
     )
     driver = FakeDevice(address="script-bias", fast_mode=True)
@@ -223,7 +229,9 @@ def test_device_service_emits_started_and_finished_events(qapp):
 # ---------------------------------------------------------------------------
 
 
-def _make_real_svc(driver: FakeDevice | None = None) -> tuple[DeviceService, object]:
+def _make_real_svc(
+    driver: FakeDevice | None = None,
+) -> tuple[DeviceService, FakeDevice]:
     fake_device = driver if driver is not None else FakeDevice(fast_mode=True)
     manager = DeviceManager()
     manager.register_device("flux", fake_device)
@@ -237,10 +245,12 @@ def _make_real_svc(driver: FakeDevice | None = None) -> tuple[DeviceService, obj
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: fake_device,
         device_registry=manager,
     )
@@ -360,10 +370,12 @@ def test_direct_poll_skips_terminal_admission_without_reading_driver(qapp) -> No
     svc = DeviceService(
         bus,
         state,
-        gate,
-        bg,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=bg,
+            runner=runner,
+            handles=handles,
+        ),
         driver_factory=lambda type_name, address: driver,
         device_registry=FakeDeviceRegistry(),
     )

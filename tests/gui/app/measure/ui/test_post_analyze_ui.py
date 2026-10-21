@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QLabel, QPushButton, QTabWidget
+from qtpy.QtWidgets import QLabel, QPushButton, QTabWidget, QWidget
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -392,12 +392,14 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch, make_
         )
 
         captured: dict[str, object] = {}
-        monkeypatch.setattr(
-            "zcu_tools.gui.app.measure.ui.exp_tab_widget.attach_existing_figure_to_container",
-            lambda fig, container: (
-                captured.setdefault("container", container) or MagicMock()
-            ),
-        )
+        container = tab_w.get_post_container()
+        attach = container.attach_canvas
+
+        def record_attach(canvas: QWidget) -> None:
+            captured["container"] = container
+            attach(canvas)
+
+        monkeypatch.setattr(container, "attach_canvas", record_attach)
 
         bus.emit(
             TabContentChangedPayload("tab-1", TabContentFact.POST_ANALYSIS_COMMITTED)

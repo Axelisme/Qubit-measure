@@ -64,9 +64,7 @@ def search_case(cross_controller, search_database_hdf5):
     bounds = ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2))
     ctrl.set_fit_params(
         search_database_hdf5,
-        bounds.EJ,
-        bounds.EC,
-        bounds.EL,
+        bounds,
         TransitionDict({"transitions": [(0, 1)]}),
         None,
         None,
@@ -103,7 +101,11 @@ def test_changed_input_rejects_success(search_case, mutation):
     elif mutation == "fit":
         fit = ctrl.state.fit
         ctrl.set_fit_params(
-            fit.search_db, fit.EJb, fit.ECb, fit.ELb, fit.transitions, None, None
+            fit.search_db,
+            ParamBounds(EJ=fit.EJb, EC=fit.ECb, EL=fit.ELb),
+            fit.transitions,
+            None,
+            None,
         )
     elif mutation == "project":
         ctrl.setup_project(ctrl.state.project)

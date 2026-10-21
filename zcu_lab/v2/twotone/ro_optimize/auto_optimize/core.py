@@ -102,6 +102,7 @@ class ReadoutOptimizer:
             self.optimizer.tell(self.last_param, -last_snr)
 
         param = self.optimizer.ask()
+        # tolerated(cast): skopt's untyped list must keep its identity, not become a tuple.
         param = cast(tuple[float, float, float] | None, param)
 
         self.last_param = param

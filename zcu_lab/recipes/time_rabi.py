@@ -31,7 +31,8 @@ def _validate_inputs(
         raise ValueError("points must be at least two")
 
 
-def time_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
+# tolerated: Public length Rabi keywords must match the handwritten input_schema.
+def time_rabi(  # noqa: PLR0913
     session: RecipeSession,
     *,
     target: str | None = None,

@@ -122,11 +122,11 @@ class WritebackControlFacet:
             raise FailedPreconditionError(
                 f"No {'post ' if pane == 'post_analysis' else ''}writeback draft for tab {tab_id!r}"
             )
-        if not getattr(draft, "is_active", False):  # type: ignore[attr-defined]
+        if not getattr(draft, "is_active", False):
             raise FailedPreconditionError(
                 f"Writeback draft for tab {tab_id!r} pane {pane!r} has been torn down"
             )
-        return draft  # type: ignore[return-value]
+        return draft
 
     def get_writeback_item_form_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
@@ -211,7 +211,8 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
-        return self._writeback.get_all_summaries(draft)  # type: ignore[arg-type]
+        # tolerated: The active pane draft was created by WritebackService; the pane annotation erases its concrete type.
+        return self._writeback.get_all_summaries(draft)  # pyright: ignore[reportArgumentType]
 
     def get_writeback_applied_for_pane(
         self, tab_id: str, pane: WritebackPane
@@ -220,7 +221,8 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
-        return self._writeback.get_all_applied(draft)  # type: ignore[arg-type]
+        # tolerated: The active pane draft was created by WritebackService; the pane annotation erases its concrete type.
+        return self._writeback.get_all_applied(draft)  # pyright: ignore[reportArgumentType]
 
     def _emit_draft_changed(self, tab_id: str) -> None:
         self._bus.emit(

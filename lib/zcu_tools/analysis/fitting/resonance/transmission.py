@@ -47,7 +47,8 @@ class TransmissionParams(TypedDict):
 
 class TransmissionModel:
     @classmethod
-    def calc_signals(
+    # tolerated: Joint residuals pass scalars; public positional and **TransmissionParams calls keep this shape.
+    def calc_signals(  # noqa: PLR0913
         cls,
         freqs: NDArray[np.float64],
         freq: float,
@@ -223,7 +224,8 @@ class TransmissionModel:
         return decode(result)
 
     @classmethod
-    def fit(
+    # tolerated: Dispersive callers fix delay; public branch/radius and background keywords remain independent.
+    def fit(  # noqa: PLR0913
         cls,
         freqs: NDArray[np.float64],
         signals: NDArray[np.complex128],

@@ -129,7 +129,8 @@ class WorkflowController[F: FormModel, C]:
         run = self._run
         return run is not None and run.phase not in {"paused", "terminal"}
 
-    def start[P: BaseModel, T: BaseModel, S, R](
+    # tolerated: One attachment submitter pairs native plan/tunables; ports and pending binding have distinct owners.
+    def start[P: BaseModel, T: BaseModel, S, R](  # noqa: PLR0913
         self,
         step: WorkflowStep[P, T, S, R, C],
         *,

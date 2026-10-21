@@ -22,17 +22,7 @@ from .fit import (
     T1FitResult,
     fit_t1_noise_params,
 )
-from .Qcap import calc_cap_dipole, calc_Qcap_vs_omega, charge_spectral_density
-from .Qind import calc_ind_dipole, calc_Qind_vs_omega, inductive_spectral_density
-from .Qqp import calc_qp_dipole, calc_qp_oper, calc_Qqp_vs_omega, qp_spectral_density
-from .utils import (
-    F01FluxCorrectionResult,
-    calc_therm_ratio,
-    correct_flux_from_f01,
-    format_exponent,
-    freq2omega,
-)
-from .workflow import (
+from .models import (
     MechanismName,
     MechanismOrParamName,
     ProbeStatistic,
@@ -46,24 +36,16 @@ from .workflow import (
     T1CurveContext,
     T1CurveData,
     T1FluxCalibration,
+    T1MechanismOptions,
     T1MechanismProbe,
     T1PreparedData,
-    analyze_t1_capacitive_limit,
-    analyze_t1_inductive_limit,
-    analyze_t1_mechanism_limit,
-    analyze_t1_quasiparticle_limit,
-    build_t1_channel_curves,
-    calculate_purcell_t1_limit,
+)
+from .preparation import (
     calibrate_t1_flux,
-    clear_t1_purcell_cache,
-    collect_t1_curve_result,
-    estimate_purcell_Temp_upper_bound,
-    fit_t1_curve,
     load_t1_curve_context,
-    load_t1_purcell_params,
-    make_t1_fit_bounds,
-    make_t1_fit_init,
-    mechanisms_to_fixed_params,
+    prepare_t1_curve_data,
+)
+from .presentation import (
     plot_purcell_Temp_upper_bound,
     plot_t1_channel_analysis,
     plot_t1_curve_data,
@@ -71,12 +53,41 @@ from .workflow import (
     plot_t1_mechanism_dipole,
     plot_t1_mechanism_limit,
     plot_t1_mechanism_probe,
-    prepare_t1_curve_data,
-    run_t1_curve_analysis,
     save_t1_curve_figure,
-    subtract_relaxation_limit,
-    t1_noise_channels_from_params,
     t1_parameter_text,
+)
+from .probes import (
+    analyze_t1_capacitive_limit,
+    analyze_t1_inductive_limit,
+    analyze_t1_mechanism_limit,
+    analyze_t1_quasiparticle_limit,
+)
+from .purcell import (
+    calculate_purcell_t1_limit,
+    clear_t1_purcell_cache,
+    estimate_purcell_Temp_upper_bound,
+    load_t1_purcell_params,
+    subtract_relaxation_limit,
+)
+from .Qcap import calc_cap_dipole, calc_Qcap_vs_omega, charge_spectral_density
+from .Qind import calc_ind_dipole, calc_Qind_vs_omega, inductive_spectral_density
+from .Qqp import calc_qp_dipole, calc_qp_oper, calc_Qqp_vs_omega, qp_spectral_density
+from .utils import (
+    F01FluxCorrectionResult,
+    calc_therm_ratio,
+    correct_flux_from_f01,
+    format_exponent,
+    freq2omega,
+)
+from .workflow import (
+    build_t1_channel_curves,
+    collect_t1_curve_result,
+    fit_t1_curve,
+    make_t1_fit_bounds,
+    make_t1_fit_init,
+    mechanisms_to_fixed_params,
+    run_t1_curve_analysis,
+    t1_noise_channels_from_params,
     write_t1_curve_fit,
 )
 
@@ -104,6 +115,7 @@ __all__ = [
     "T1FitParams",
     "T1FitResult",
     "T1FluxCalibration",
+    "T1MechanismOptions",
     "T1MechanismProbe",
     "T1PreparedData",
     "add_Q_fit",

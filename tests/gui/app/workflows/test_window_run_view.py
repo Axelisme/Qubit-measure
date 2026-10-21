@@ -23,6 +23,7 @@ from qtpy.QtWidgets import (
     QTabWidget,
     QWidget,
 )
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 
@@ -705,9 +706,11 @@ def unmonitored(
         harness.state,
         harness.services,
         harness.owner,
-        templates={},
-        alias_presets=None,
-        registrations=window_session.source.catalog.attachments,
+        composition=WorkflowComposition(
+            templates={},
+            alias_presets=None,
+            registrations=window_session.source.catalog.attachments,
+        ),
     )
     try:
         yield window

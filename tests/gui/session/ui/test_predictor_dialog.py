@@ -16,12 +16,13 @@ from qtpy.QtWidgets import (
     QTabWidget,
 )
 from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.gui.session.device_models import DeviceEntry
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
-from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
+from zcu_tools.gui.session.ui.predictor_curves import PredictorCurveTabs
 from zcu_tools.gui.session.ui.predictor_dialog import (
     PredictorDialog,
     PredictorDialogState,
@@ -119,6 +120,28 @@ def test_live_device_value_updates_read_only_control(qapp):
     assert _value_spin(dialog).value() == 0.25
     assert not _value_spin(dialog).isEnabled()
     assert "0.25" in _status(dialog)
+
+
+def test_predictor_dialog_curve_and_controls_share_width_on_open_and_resize(qapp):
+    dialog = _make_dialog()
+    curves = dialog.findChild(PredictorCurveTabs)
+    controls = _button(dialog, "Close").parentWidget()
+    layout = dialog.layout()
+    assert curves is not None and controls is not None and layout is not None
+
+    dialog.show()
+    qapp.processEvents()
+    try:
+        initial_curve_width = curves.width()
+        assert abs(curves.width() - controls.width()) <= 2 * layout.spacing()
+
+        dialog.resize(dialog.width() + 400, dialog.height())
+        qapp.processEvents()
+
+        assert curves.width() > initial_curve_width
+        assert abs(curves.width() - controls.width()) <= 2 * layout.spacing()
+    finally:
+        dialog.close()
 
 
 def test_predictor_dialog_default_tracked_count(qapp):

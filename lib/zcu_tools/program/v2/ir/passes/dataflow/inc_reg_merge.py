@@ -52,12 +52,14 @@ from __future__ import annotations
 
 from ...instructions import (
     BaseInst,
+    RegWriteInst,
+    TimeInst,
+)
+from ...io_instructions import (
     DmemReadInst,
     DmemWriteInst,
     DportWriteInst,
     PortWriteInst,
-    RegWriteInst,
-    TimeInst,
     WmemWriteInst,
 )
 from ...node import BasicBlockNode

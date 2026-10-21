@@ -29,7 +29,6 @@ class _FactoryRegistry(MainDialogRegistry):
             dialog_refs=self.refs,
             templates=lambda: {},
             dialog_presenter=RecordingDialogPresenter(),
-            alias_presets=None,
         )
         self._factory = factory
 
@@ -77,7 +76,6 @@ def test_arb_writability_is_applied_when_opened(qapp) -> None:
         dialog_refs=DialogRefStore(),
         templates=lambda: {},
         dialog_presenter=RecordingDialogPresenter(),
-        alias_presets=None,
     )
     try:
         for writable in (False, True):
@@ -101,7 +99,7 @@ def test_arb_writability_is_applied_when_opened(qapp) -> None:
 
 def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
     parent = QWidget()
-    created: list[QDialog] = []
+    created: list[_PersistentDialog] = []
 
     def build_dialog(name: DialogName) -> QDialog:
         assert name is DialogName.PREDICTOR
@@ -189,6 +187,7 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
         return dialog
 
     registry = _FactoryRegistry(parent, build_dialog)
+    # tolerated(cast): Non-Qt fake deterministically raises the deleted-wrapper error.
     stale = cast(QDialog, _DestroyedDialog())
     registry.refs.retain_named(DialogName.SETUP, stale, on_released=lambda: None)
 

@@ -3,7 +3,10 @@
 import pytest
 from qtpy.QtCore import QTimer, QTranslator
 from qtpy.QtWidgets import QMessageBox, QWidget
-from zcu_tools.gui.widgets.dialog_presenter import QtDialogPresenter
+from zcu_tools.gui.widgets.dialog_presenter import (
+    DestructiveConfirmation,
+    QtDialogPresenter,
+)
 
 
 class _DiscardTranslation(QTranslator):
@@ -100,10 +103,12 @@ def test_destructive_choice_only_accepts_explicit_action(qapp, decision):
     try:
         presenter.destructive_confirm(
             parent,
-            "Background work",
-            "Work is still running.",
-            action_text="Force close",
-            cancel_text="Wait again",
+            DestructiveConfirmation(
+                title="Background work",
+                message="Work is still running.",
+                action_text="Force close",
+                cancel_text="Wait again",
+            ),
             on_decision=decisions.append,
         )
         box = parent.findChild(QMessageBox)

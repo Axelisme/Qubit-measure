@@ -3,8 +3,7 @@
 Every case drives the page through the real session owner: Apply commits the
 whole draft atomically, the resolution column projects the installed table,
 unsaved drafts follow Inspect's Save/Discard/Cancel close decision and the
-read-only mode only locks writes. Synthetic named presets replace the draft
-through the page's Load preset menu.
+read-only mode only locks writes.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.alias_presets import AliasPresets
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -162,31 +160,7 @@ def _open(
         arb_waveforms=_ArbNames(),
         open_arb_waveforms=lambda: None,
         dialog_presenter=presenter or RecordingDialogPresenter(),
-        alias_presets=None,
     )
-    session.dialogs.append(dialog)
-    dialog.show()
-    return dialog
-
-
-def _open_with_presets(
-    session: _Session,
-    presets: AliasPresets | None,
-    presenter: RecordingDialogPresenter | None = None,
-) -> InspectDialog:
-    """Build the shared Inspect with a composition's preset catalog and show it."""
-    try:
-        dialog = InspectDialog(
-            session.control,
-            session.bus,
-            templates={},
-            arb_waveforms=_ArbNames(),
-            open_arb_waveforms=lambda: None,
-            dialog_presenter=presenter or RecordingDialogPresenter(),
-            alias_presets=presets,
-        )
-    except TypeError as error:
-        pytest.fail(f"Inspect must accept the composition's alias presets: {error}")
     session.dialogs.append(dialog)
     dialog.show()
     return dialog
@@ -595,168 +569,6 @@ def test_read_only_locks_alias_writes_but_keeps_the_table_readable(
     _cell(table, 0, 1).setText("Q2")
     _button(page, "apply").click()
     assert control.get_alias_rows()[0] == AliasRow("qubit", "Q2")
-
-
-# Named presets in catalog order; "zeta" precedes "alpha" so order is not sorted.
-PRESETS: AliasPresets = {
-    "default": (AliasRow("qubit", "Q9"),),
-    "zeta": (
-        AliasRow("probe", "Q2"),
-        AliasRow("sense", "$probe.resonator"),
-        AliasRow("spare", ""),
-    ),
-    "alpha": (),
-}
-
-
-def _preset_button(page: QWidget) -> QPushButton:
-    return _button(page, "load_preset")
-
-
-def _preset_names(page: QWidget) -> list[str]:
-    menu = _preset_button(page).menu()
-    assert menu is not None, "Load preset has no menu"
-    return [action.text() for action in menu.actions()]
-
-
-def _load_preset(page: QWidget, name: str) -> None:
-    """Choose name from the Load preset menu, as a user clicking it does."""
-    menu = _preset_button(page).menu()
-    assert menu is not None, "Load preset has no menu"
-    action = next((a for a in menu.actions() if a.text() == name), None)
-    assert action is not None, f"Load preset lacks {name!r}"
-    action.trigger()
-
-
-def _rows(rows: tuple[AliasRow, ...]) -> list[tuple[str, str]]:
-    return [(row.alias, row.value) for row in rows]
-
-
-def test_load_preset_menu_offers_catalog_names_in_order(memory_session) -> None:
-    page = _aliases_page(_open_with_presets(memory_session, PRESETS))
-    assert _preset_button(page).isEnabled()
-    assert _preset_names(page) == ["default", "zeta", "alpha"]
-
-
-def test_without_a_catalog_no_preset_can_be_loaded(memory_session) -> None:
-    page = _aliases_page(_open_with_presets(memory_session, None))
-    button = _preset_button(page)
-    assert not button.isEnabled()
-    menu = button.menu()
-    assert menu is None or not menu.actions()
-
-
-def test_loading_a_preset_replaces_the_whole_draft_without_writing(
-    entry_session,
-) -> None:
-    entry = entry_session.entry
-    assert entry is not None
-    control = entry_session.control
-    page = _aliases_page(_open_with_presets(entry_session, PRESETS))
-    table = _table(page)
-    _cell(table, 0, 1).setText("Q2")
-    _button(page, "add").click()
-    _cell(table, 1, 0).setText("extra")
-    _cell(table, 1, 1).setText("Q3")
-
-    _load_preset(page, "zeta")
-    assert _shown_rows(table) == _rows(PRESETS["zeta"])
-    assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
-    assert _fresh_rows(entry) == ()
-
-    _load_preset(page, "alpha")
-    assert table.rowCount() == 0
-    assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
-    assert _fresh_rows(entry) == ()
-
-
-def test_apply_saves_the_loaded_preset_and_closing_keeps_it(entry_session) -> None:
-    entry = entry_session.entry
-    assert entry is not None
-    control = entry_session.control
-    presenter = RecordingDialogPresenter()
-    dialog = _open_with_presets(entry_session, PRESETS, presenter)
-    page = _aliases_page(dialog)
-    _load_preset(page, "zeta")
-    _button(page, "apply").click()
-    assert control.get_alias_rows() == PRESETS["zeta"]
-    assert _fresh_rows(entry) == PRESETS["zeta"]
-
-    dialog.close()
-    assert not dialog.isVisible()
-    assert presenter.calls == []
-    assert control.get_alias_rows() == PRESETS["zeta"]
-
-
-def test_failed_apply_keeps_owner_file_and_preset_draft(entry_session) -> None:
-    entry = entry_session.entry
-    assert entry is not None
-    control = entry_session.control
-    page = _aliases_page(_open_with_presets(entry_session, PRESETS))
-    _load_preset(page, "zeta")
-    # A directory where aliases.yaml belongs makes the atomic replace fail.
-    blocker = entry.result_path / "points" / "working" / "aliases.yaml"
-    blocker.mkdir()
-    _button(page, "apply").click()
-    assert _error(page)
-    assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
-    assert _shown_rows(_table(page)) == _rows(PRESETS["zeta"])
-    blocker.rmdir()
-    assert _fresh_rows(entry) == ()
-
-
-def test_unsaved_preset_draft_close_follows_save_discard_cancel(
-    entry_session,
-) -> None:
-    entry = entry_session.entry
-    assert entry is not None
-    control = entry_session.control
-    presenter = RecordingDialogPresenter()
-    dialog = _open_with_presets(entry_session, PRESETS, presenter)
-    page = _aliases_page(dialog)
-    _load_preset(page, "zeta")
-    tabs = dialog.findChild(QTabWidget)
-    assert tabs is not None
-    tabs.setCurrentIndex(0)
-
-    presenter.queue_save_discard_cancel("cancel")
-    dialog.close()
-    assert dialog.isVisible()
-    assert _shown_rows(_table(page)) == _rows(PRESETS["zeta"])
-
-    blocker = entry.result_path / "points" / "working" / "aliases.yaml"
-    blocker.mkdir()
-    presenter.queue_save_discard_cancel("save")
-    dialog.close()
-    assert dialog.isVisible()
-    assert tabs.currentWidget() is page
-    assert _error(page)
-    assert _shown_rows(_table(page)) == _rows(PRESETS["zeta"])
-    assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
-    blocker.rmdir()
-
-    presenter.queue_save_discard_cancel("discard")
-    dialog.close()
-    assert not dialog.isVisible()
-    assert [call.kind for call in presenter.calls] == ["save_discard_cancel"] * 3
-    assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
-    assert _fresh_rows(entry) == ()
-
-
-def test_read_only_blocks_loading_presets_but_keeps_rows_readable(
-    memory_session,
-) -> None:
-    dialog = _open_with_presets(memory_session, PRESETS)
-    page = _aliases_page(dialog)
-    dialog.set_read_only(read_only=True)
-    assert not _preset_button(page).isEnabled()
-    assert _shown_rows(_table(page)) == [
-        ("qubit", "Q1"),
-        ("resonator", "$qubit.resonator"),
-    ]
-
-    dialog.set_read_only(read_only=False)
-    assert _preset_button(page).isEnabled()
 
 
 def test_alias_resolution_error_uses_table_theme(resolved_session, window_palette):

@@ -16,6 +16,7 @@ import pytest
 from zcu_tools.datafile import (
     Axis,
     LabberData,
+    LabberMetadata,
     load_labber_data,
     save_labber_data,
     save_labber_trace_data,
@@ -139,10 +140,12 @@ def test_metadata_roundtrip_str_tags(tmp_path):
         path,
         z=("S21", "", z),
         axes=[("Freq", "Hz", freq)],
-        comment="my comment",
-        tags="tagA",
-        project="proj1",
-        user="alice",
+        metadata=LabberMetadata(
+            comment="my comment",
+            tags="tagA",
+            project="proj1",
+            user="alice",
+        ),
     )
 
     d = load_labber_data(path)
@@ -162,7 +165,7 @@ def test_metadata_roundtrip_list_tags(tmp_path):
         path,
         z=("S21", "", z),
         axes=[("Freq", "Hz", freq)],
-        tags=["tagA", "tagB"],
+        metadata=LabberMetadata(tags=["tagA", "tagB"]),
     )
 
     d = load_labber_data(path)
@@ -375,8 +378,7 @@ def test_labberdata_class_save_load(tmp_path):
             Axis("Frequency", "Hz", freq),
             Axis("Power", "dBm", power),
         ],
-        comment="class test",
-        tags=["cls"],
+        metadata=LabberMetadata(comment="class test", tags=["cls"]),
     )
 
     path = str(tmp_path / "cls_io")

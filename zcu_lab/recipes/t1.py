@@ -30,7 +30,8 @@ def _validate_inputs(
         raise ValueError("points must be at least two")
 
 
-def t1(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
+# tolerated: Public T1 delay keywords must match the handwritten input_schema.
+def t1(  # noqa: PLR0913
     session: RecipeSession,
     *,
     target: str | None = None,

@@ -63,7 +63,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     FitChangedPayload,
@@ -649,9 +649,11 @@ class AnalyzePanelWidget(QWidget):
         sample_f = self._sample_f.value()
         self._ctrl.set_fit_params(
             search_db=self._db_edit.text().strip(),
-            EJb=(self._ej_lo.value(), self._ej_hi.value()),
-            ECb=(self._ec_lo.value(), self._ec_hi.value()),
-            ELb=(self._el_lo.value(), self._el_hi.value()),
+            bounds=ParamBounds(
+                EJ=(self._ej_lo.value(), self._ej_hi.value()),
+                EC=(self._ec_lo.value(), self._ec_hi.value()),
+                EL=(self._el_lo.value(), self._el_hi.value()),
+            ),
             transitions=transitions,
             r_f=r_f,
             sample_f=sample_f,
@@ -857,7 +859,8 @@ class AnalyzePanelWidget(QWidget):
     def _on_export(self) -> None:
         try:
             path = self._ctrl.export_params()
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
+        # tolerated: Isolate arbitrary export failures and show failed Qt status.
+        except Exception as exc:  # noqa: BLE001
             self._status.setText("Export failed.")
             self._status.setToolTip("")
             self._show_message("Export failed", friendly_fit_message("Export", exc))

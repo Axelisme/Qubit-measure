@@ -32,7 +32,10 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.library_entry import open_library_entry
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -150,7 +153,6 @@ def _open(
         arb_waveforms=_ArbNames(),
         open_arb_waveforms=lambda: session.arb_opened.append(True),
         dialog_presenter=presenter,
-        alias_presets=None,
     )
     session.dialogs.append(dialog)
     tabs = dialog.findChild(QTabWidget)
@@ -680,11 +682,13 @@ def test_a_synthetic_host_opens_the_shared_arb_dialog(
     services = build_session_services(
         state=state,
         bus=bus,
-        gate=gate,
-        handles=handles,
-        background=background,
+        operations=OperationInfrastructure(
+            gate=gate,
+            background=background,
+            runner=OperationRunner(gate, handles, progress, background, bus),
+            handles=handles,
+        ),
         progress=progress,
-        runner=OperationRunner(gate, handles, progress, background, bus),
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=str(tmp_path),
     )
@@ -704,7 +708,6 @@ def test_a_synthetic_host_opens_the_shared_arb_dialog(
         arb_waveforms=services.arb_waveform,
         open_arb_waveforms=open_entry,
         dialog_presenter=RecordingDialogPresenter(),
-        alias_presets=None,
         parent=host,
     )
     try:

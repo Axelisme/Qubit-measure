@@ -131,7 +131,8 @@ class RunAnalyzeControlPort(Protocol):
 class RunAnalyzeControlFacet:
     """Composite adapter over run/load/analyze services."""
 
-    def __init__(
+    # tolerated: Independent workflow services and render/owner/background ports are assembled before AppServices; no existing multi-owner bundle.
+    def __init__(  # noqa: PLR0913
         self,
         *,
         state: State,

@@ -4,12 +4,14 @@ from typing import TYPE_CHECKING
 
 from .instructions import (
     BaseInst,
-    DmemReadInst,
-    DmemWriteInst,
     LabelInst,
     MetaInst,
-    PortWriteInst,
     TimeInst,
+)
+from .io_instructions import (
+    DmemReadInst,
+    DmemWriteInst,
+    PortWriteInst,
     WmemWriteInst,
 )
 from .labels import Label
@@ -85,8 +87,8 @@ def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
 
 
 def _block_word_count(block: BasicBlockNode) -> int:
-    """Count physical words, retaining the BaseInst check for runtime inputs."""
-    size = sum(inst.addr_inc for inst in block.insts if isinstance(inst, BaseInst))
+    """Count physical words for the linear instructions and terminal branch."""
+    size = sum(inst.addr_inc for inst in block.insts)
     if block.branch is not None:
         size += block.branch.addr_inc
     return size

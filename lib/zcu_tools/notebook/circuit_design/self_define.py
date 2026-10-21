@@ -14,7 +14,10 @@
 """File contains dictionary for Rectangle and the make()."""
 
 try:
+    # tolerated: Qiskit Metal needs Python 3.12's design extra, absent in dev+quality.
     from qiskit_metal import Dict, draw  # pyright: ignore[reportMissingImports]
+
+    # tolerated: Qiskit Metal needs Python 3.12's design extra, absent in dev+quality.
     from qiskit_metal.qlibrary.core import (  # pyright: ignore[reportMissingImports]
         QComponent,
     )

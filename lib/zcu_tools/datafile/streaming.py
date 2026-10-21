@@ -16,7 +16,8 @@ import h5py
 import numpy as np
 
 from .grouped import DATA_VARIABLE_ATTR, DATA_VARIABLES_ATTR, GROUPED_VERSION_ATTR
-from .labber import _str_array, _write_payload_to_log
+from .labber import write_payload_to_log
+from .labber_format import labber_string_array
 from .models import Axis, DataVariable, LabberMetadata, LabberPayload, as_axis
 from .paths import format_ext
 
@@ -45,7 +46,8 @@ class StreamingLabberVariableSpec:
     fill_value: complex | float = np.nan
     attrs: Mapping[str, Any] = field(default_factory=dict)
 
-    def __init__(
+    # tolerated: Full-shape streaming schema has no data values to reuse LabberPayload.
+    def __init__(  # noqa: PLR0913
         self,
         variable: str | DataVariable,
         data_name: str,
@@ -154,7 +156,7 @@ class StreamingGroupedLabberWriter:
                     spec.axes,
                     timestamps=np.full(_entry_count(spec.shape), creation_time),
                 )
-                _write_payload_to_log(
+                write_payload_to_log(
                     target,
                     payload,
                     effective_metadata,
@@ -174,7 +176,7 @@ class StreamingGroupedLabberWriter:
                 )
 
             self._file.attrs[GROUPED_VERSION_ATTR] = STREAMING_GROUPED_DATASET_VERSION
-            self._file.attrs[DATA_VARIABLES_ATTR] = _str_array(variable_names)
+            self._file.attrs[DATA_VARIABLES_ATTR] = labber_string_array(variable_names)
             self._file.attrs[STREAMING_VERSION_ATTR] = STREAMING_DATASET_VERSION
             self._file.attrs[STREAMING_FINALIZED_ATTR] = False
             self.flush()
@@ -275,7 +277,7 @@ class StreamingLabberWriter:
                 spec.axes,
                 timestamps=np.full(_entry_count(spec.shape), creation_time),
             )
-            _write_payload_to_log(
+            write_payload_to_log(
                 self._file,
                 payload,
                 effective_metadata,
@@ -445,7 +447,7 @@ def _attr_value(value: Any) -> Any:
     if isinstance(value, (bool, int, float, np.integer, np.floating)):
         return value
     if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
-        return _str_array([str(item) for item in value])
+        return labber_string_array([str(item) for item in value])
     return str(value)
 
 

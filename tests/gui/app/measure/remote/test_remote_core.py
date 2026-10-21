@@ -10,6 +10,7 @@ handlers a chance to execute.
 from __future__ import annotations
 
 import socket
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -404,6 +405,38 @@ def test_socket_reader_preserves_fragmented_frames_and_parked_pushes(qapp):
             assert recv_response(reader, "one") == {"id": "one", "ok": True}
             assert recv_push(reader, "notice") == {"event": "notice", "payload": 1}
             assert recv_response(reader, "two") == {"id": "two", "ok": True}
+        finally:
+            reset_inbox(reader)
+
+
+@pytest.mark.requires_loopback
+@pytest.mark.parametrize(
+    "frame", [b"[]", b"null", b"7"], ids=["array", "null", "scalar"]
+)
+@pytest.mark.parametrize(
+    "receiver",
+    [
+        pytest.param(partial(recv_response, rid="one"), id="response"),
+        pytest.param(partial(recv_push, event="notice"), id="push"),
+        pytest.param(
+            partial(
+                recv_until, accept=lambda message: message == {"id": "one", "ok": True}
+            ),
+            id="until",
+        ),
+    ],
+)
+def test_socket_reader_rejects_non_object_frames(
+    qapp, frame: bytes, receiver: Callable[[socket.socket], dict[str, object]]
+):
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        reset_inbox(reader)
+        try:
+            # Matching tails make a missing rejection fail without the watchdog.
+            writer.sendall(frame + b'\n{"id":"one","ok":true}\n{"event":"notice"}\n')
+            with pytest.raises(ValueError, match="JSON object"):
+                receiver(reader)
         finally:
             reset_inbox(reader)
 

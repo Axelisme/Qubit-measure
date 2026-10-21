@@ -31,6 +31,8 @@ from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
+from ._helpers import dispatch_handler as _dispatch
+
 
 def _items() -> list[WritebackItem]:
     md = ParameterWriteback(
@@ -128,9 +130,6 @@ def _ctrl() -> MagicMock:
     ctrl.writeback_control = wc
     ctrl.writeback_control.has_tab.return_value = True
     return ctrl
-
-
-from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 
 def test_entry_edit_reply_is_lean_and_preserves_invalid_authored_input():
@@ -582,7 +581,8 @@ def test_preview_serializes_complex_as_tag():
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    item = list(res["items"])[0]  # type: ignore[call-overload]
+    # tolerated: The handler returns a list of wire items; the response annotation erases container types to object.
+    item = list(res["items"])[0]  # pyright: ignore[reportArgumentType]
     assert item["proposed_value"] == {"__complex__": [1.5, -2.25]}
     assert item["proposed"] == {"__complex__": [1.5, -2.25]}
 
@@ -613,7 +613,8 @@ def test_complex_preview_set_round_trip_is_lossless():
     preview = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
+    # tolerated: The handler returns a list of wire items; the response annotation erases container types to object.
+    wire_value = list(preview["items"])[0]["proposed_value"]  # pyright: ignore[reportArgumentType]
 
     _dispatch(
         ctrl,
@@ -662,7 +663,8 @@ def test_preview_serializes_nested_list_verbatim():
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    item = list(res["items"])[0]  # type: ignore[call-overload]
+    # tolerated: The handler returns a list of wire items; the response annotation erases container types to object.
+    item = list(res["items"])[0]  # pyright: ignore[reportArgumentType]
     assert item["proposed_value"] == _CONFUSION
     assert item["proposed"] == _CONFUSION
 
@@ -692,7 +694,8 @@ def test_nested_list_preview_set_round_trip_is_lossless():
     preview = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
+    # tolerated: The handler returns a list of wire items; the response annotation erases container types to object.
+    wire_value = list(preview["items"])[0]["proposed_value"]  # pyright: ignore[reportArgumentType]
 
     _dispatch(
         ctrl,

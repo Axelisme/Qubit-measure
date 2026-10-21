@@ -43,6 +43,7 @@ class _Level:
     path: FormWritePath
     widget: QWidget
     layout: QVBoxLayout
+    elements: bool = False  # Direct children of a list with an element picker.
     rows: dict[FormWritePath, FieldRow] = field(default_factory=dict)
     children: dict[FormWritePath, _Level] = field(default_factory=dict)
     groups: dict[str, tuple[GroupBlock, _Level]] = field(default_factory=dict)
@@ -195,7 +196,9 @@ class FormEditor[F: FormModel](QWidget):
     group's first field. A group whose fields are all hidden has no block.
     While any of its rows (or their children) shows an error, the header
     shows a "Contains errors" note; a folded group stays folded.
-    Groups start folded; model rows start as Display(collapsed=...) says.
+    Groups start folded. Model rows start folded unless collapsed=False or
+    their subtree has errors on the editor's first publication. Saved user
+    folds take precedence, and later refreshes keep the established folds.
     Folds the user sets on groups and model rows survive rebuilds of this
     editor (option or activation changes), remembered by path.
     form.value.<path> is a QLabel with the resolved value of an Expression-mode
@@ -214,8 +217,9 @@ class FormEditor[F: FormModel](QWidget):
     and their uncommitted text without writing state. Changing an option or
     nullable activation replaces only that subtree, not unrelated rows.
     A FixedList has form.picker.<path>, a navigation-only QComboBox listing
-    "index: name". It draws the picked element below the list row and keeps
-    other elements mounted but hidden. Switching never writes state or commits
+    "index: name". It draws the picked element's fields directly below the list
+    row, without an element title or extra indentation. Field labels and full
+    indexed paths stay unchanged. Other elements remain mounted but hidden. Switching never writes state or commits
     hidden text, and preserves drafts and parse errors. The list row marks
     hidden errors with their element name in its tooltip. Participants remain
     a separate JSON list input. Other sequences and typed mappings use JSON
@@ -320,7 +324,7 @@ class FormEditor[F: FormModel](QWidget):
         self._local: dict[FormWritePath, LocalText] = {}
         self._rows: dict[FormWritePath, FieldRow] = {}
         self._groups: list[GroupBlock] = []
-        # User folds by model path, and by (model level path, group name).
+        # Established model folds by path; user group folds by (level path, name).
         self._model_expanded: dict[FormWritePath, bool] = {}
         self._group_expanded: dict[tuple[FormWritePath, str], bool] = {}
         self._state_errors: FormErrors | None = None
@@ -582,6 +586,7 @@ class FormEditor[F: FormModel](QWidget):
             row = level.rows.get(field.path)
             fresh = row is None or _shape(row.field) != _shape(field)
             if fresh:
+                self._remember_initial_fold(field, preview.errors)
                 if row is not None:
                     child = level.children.pop(field.path, None)
                     if child is not None:
@@ -595,6 +600,7 @@ class FormEditor[F: FormModel](QWidget):
                     self._model_expanded,
                     RowActions(command=self._run_command, select=self._select),
                 )
+                row.configure_body(element=level.elements)
                 row.connect_fold(self._fold_changed)
                 row.connect_pick(self._pick_changed)
                 level.rows[field.path] = row
@@ -619,6 +625,24 @@ class FormEditor[F: FormModel](QWidget):
             self._sync_children(level, row, data, preview, redraw=redraw)
         _align_labels([row.label for row in level.rows.values()])
 
+    def _remember_initial_fold(
+        self, field: FieldView, errors: FormErrors | None
+    ) -> None:
+        if field.kind not in ("model", "elements"):
+            return
+        # Initial errors include descendants whose rows are not built yet.
+        self._model_expanded.setdefault(
+            field.path,
+            not field.collapsed
+            or (
+                self._publication_count == 0
+                and errors is not None
+                and any(
+                    path[: len(field.path)] == field.path for path in errors.messages
+                )
+            ),
+        )
+
     def _sync_children(
         self,
         level: _Level,
@@ -635,7 +659,7 @@ class FormEditor[F: FormModel](QWidget):
         if child is None:
             if row.group.isHidden():
                 return
-            child = _Level(path, row.group, row.rows)
+            child = _Level(path, row.group, row.rows, elements=row.picker is not None)
             level.children[path] = child
         fields = self._require_state().describe(path, self._require_env()).children
         row.set_children_available(available=any(not field.hidden for field in fields))
@@ -806,8 +830,11 @@ class FormEditor[F: FormModel](QWidget):
         for length in range(len(path), 0, -1):
             prefix = path[:length]
             for candidate in self._rows:
-                if candidate == prefix and self._rows[candidate].widget.isVisibleTo(
-                    self._content
+                row = self._rows[candidate]
+                if (
+                    candidate == prefix
+                    and not row.label.isHidden()
+                    and row.widget.isVisibleTo(self._content)
                 ):
                     return candidate
         return None

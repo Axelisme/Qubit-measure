@@ -26,6 +26,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
 from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.remote import FormWrite
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import Display, FormEnv, FormModel
@@ -34,7 +35,7 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
-from tests.gui._user_input import mouse_click
+from tests.gui._user_input import ComponentDriver, mouse_click
 
 from ._reload_source import SourceNamespace
 from ._start_fakes import StartHarness
@@ -277,6 +278,22 @@ def install_soc(harness: StartHarness) -> None:
     )
 
 
+def show_sample_section[C](window: WorkflowWindow[C], tab: str = "Tunables") -> None:
+    """Show the synthetic sample section in the named Start or live tunables tab.
+
+    Window startup uses Qt directly; tab navigation and expansion use the driver.
+    Call again after Prepare, Start or terminal delivery replaces the panel.
+    """
+    window.resize(1100, 900)
+    window.show()
+    QApplication.processEvents()
+    driver = ComponentDriver(window)
+    driver.select_tab(tab)
+    panel = window.tunables_panel if tab == "Tunables" else window.tuning_panel
+    assert panel is not None
+    ComponentDriver(panel).expand_section("form.fold.sample")
+
+
 def form_editable(panel: QWidget) -> bool:
     """Whether a user can type into panel's form.
 
@@ -344,10 +361,12 @@ class WindowSession:
             self.harness.state,
             self.harness.services,
             self.harness.owner,
-            templates={},
-            alias_presets=None,
-            registrations=self.source.catalog.attachments,
-            loader=self.source.loader,
+            composition=WorkflowComposition(
+                templates={},
+                alias_presets=None,
+                registrations=self.source.catalog.attachments,
+                loader=self.source.loader,
+            ),
         )
 
     def fresh_catalog(self) -> WorkflowCatalog[None]:

@@ -53,15 +53,13 @@ from zcu_tools.gui.event_bus import BaseEventBus, EventSubscriptions
 from zcu_tools.gui.session.events import ConnectionFinishedPayload
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.device_models import DeviceEntry
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
         SoCConnectionService,
     )
     from zcu_tools.gui.session.services.context import ContextService
-    from zcu_tools.gui.session.services.device import (
-        DeviceEntry,
-        DeviceService,
-    )
+    from zcu_tools.gui.session.services.device import DeviceService
     from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo

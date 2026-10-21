@@ -41,8 +41,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QEvent, QSize, Qt
-from qtpy.QtGui import QPixmap
+from qtpy.QtCore import QEvent, QObject, QSize, Qt
+from qtpy.QtGui import QPixmap, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -196,11 +196,15 @@ class _PreviewCard(QWidget):
     def show_image(self, pixmap: QPixmap) -> None:
         # Cache original pixmap (presentation cache, S3).
         self._orig_pixmap = pixmap
-        self._apply_scaled()
+        self.rescale_image_to_viewport()
         self._stack.setCurrentWidget(self._image_page)
 
-    def _apply_scaled(self) -> None:
-        """Scale original pixmap to image viewport with KeepAspectRatio (S3)."""
+    def rescale_image_to_viewport(self) -> None:
+        """Fit the cached pixmap to the image viewport without cropping.
+
+        Call after a gallery reflow or card resize. Empty/null images are a no-op;
+        a not-yet-laid-out label uses the card width as a provisional viewport.
+        """
         if self._orig_pixmap is None or self._orig_pixmap.isNull():
             return
         # Viewport is the image label's available size.
@@ -223,23 +227,25 @@ class _PreviewCard(QWidget):
         )
         self._image_label.setPixmap(scaled)
 
-    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 is None or a1 is None:
+            return super().eventFilter(a0, a1)
         if (
-            obj is self._image_label
-            and event.type() == QEvent.Type.Resize
+            a0 is self._image_label
+            and a1.type() == QEvent.Type.Resize
             and self._orig_pixmap is not None
             and self._stack.currentWidget() is self._image_page
         ):
-            self._apply_scaled()
-        return super().eventFilter(obj, event)
+            self.rescale_image_to_viewport()
+        return super().eventFilter(a0, a1)
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
         if (
             self._orig_pixmap is not None
             and self._stack.currentWidget() is self._image_page
         ):
-            self._apply_scaled()
+            self.rescale_image_to_viewport()
 
     def current_state(self) -> str:
         """Return 'available' | 'empty' | 'unavailable' for test inspection."""
@@ -297,6 +303,9 @@ class DataFigurePreviewGallery(QWidget):
     (scroll viewport when available) decides narrow vs wide at threshold
     2*MIN_CARD_WIDTH + spacing. Aspect-fit scaling (S3) keeps the displayed
     pixmap within the image viewport with KeepAspectRatio.
+
+    Viewport setup tolerates Qt RuntimeError lifetime failures; other setup
+    failures propagate from construction.
     """
 
     def __init__(
@@ -307,12 +316,14 @@ class DataFigurePreviewGallery(QWidget):
         renderer: Callable[[Figure], bytes] | None = None,
     ) -> None:
         super().__init__(parent)
-        if capabilities is None:
+        # tolerated: Untyped callers must receive the distinct missing-capabilities TypeError.
+        if capabilities is None:  # pyright: ignore[reportUnnecessaryComparison]
             raise TypeError("DataFigurePreviewGallery requires AdapterCapabilities")
         # Import here to avoid circular import at module load.
         from zcu_tools.gui.app.measure.adapter import AdapterCapabilities as _Caps
 
-        if not isinstance(capabilities, _Caps):
+        # tolerated: Untyped callers must supply nominal capabilities, not a lookalike.
+        if not isinstance(capabilities, _Caps):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(
                 f"DataFigurePreviewGallery requires AdapterCapabilities, got {type(capabilities).__name__!r}"
             )
@@ -365,11 +376,12 @@ class DataFigurePreviewGallery(QWidget):
             vp = self._scroll.viewport()
             if vp is not None:
                 vp.installEventFilter(self)
-        except Exception:
+        except RuntimeError:
+            # A deleted Qt viewport must not prevent gallery construction.
             pass
 
         # Initial layout arrangement
-        self._arrange_cards()
+        self.refresh_layout()
 
         # Initial empty state for all present cards
         for card in self._cards.values():
@@ -429,7 +441,8 @@ class DataFigurePreviewGallery(QWidget):
             vp = self._scroll.viewport()
             if vp is not None and vp.width() > 0:
                 return int(vp.width())
-        except Exception:
+        except RuntimeError:
+            # A deleted Qt viewport falls back to the gallery's own width.
             pass
         # Fallback to gallery width minus outer margins.
         w = int(self.width())
@@ -446,11 +459,20 @@ class DataFigurePreviewGallery(QWidget):
         return avail >= WIDE_THRESHOLD
 
     def is_wide_mode(self) -> bool:
-        """Public inspector for tests: current responsive mode."""
+        """Return the responsive mode, tolerating only Qt viewport lifetime errors.
+
+        A RuntimeError from viewport access uses the gallery width instead;
+        other viewport failures propagate to the caller.
+        """
         return self._is_wide()
 
-    def _arrange_cards(self) -> None:
-        """Reflow cards by viewport width and card count (S1/S4)."""
+    def refresh_layout(self) -> None:
+        """Reflow existing cards for the current viewport width and card count.
+
+        Call on resize/show or after activating the containing Data page, when
+        hidden-page resize events may have been deferred. Available images are
+        rescaled after wide-mode reflow. An empty gallery is a no-op.
+        """
         # Clear grid without deleting widgets.
         while self._inner_layout.count():
             item = self._inner_layout.takeAt(0)
@@ -505,23 +527,26 @@ class DataFigurePreviewGallery(QWidget):
                 card.original_pixmap() is not None
                 and card.current_state() == "available"
             ):
-                card._apply_scaled()  # type: ignore[attr-defined]
+                card.rescale_image_to_viewport()
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
-        self._arrange_cards()
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
+        self.refresh_layout()
 
-    def showEvent(self, event) -> None:  # type: ignore[override]
-        super().showEvent(event)
-        self._arrange_cards()
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
+        self.refresh_layout()
 
-    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 is None or a1 is None:
+            return super().eventFilter(a0, a1)
         try:
-            if obj is self._scroll.viewport() and event.type() == QEvent.Type.Resize:
-                self._arrange_cards()
-        except Exception:
+            if a0 is self._scroll.viewport() and a1.type() == QEvent.Type.Resize:
+                self.refresh_layout()
+        # tolerated: Public reflow overrides can raise arbitrary errors; isolate Qt resize delivery.
+        except Exception:  # noqa: BLE001
             pass
-        return super().eventFilter(obj, event)
+        return super().eventFilter(a0, a1)
 
     # -- capability queries -----------------------------------------
 
@@ -613,21 +638,24 @@ class DataFigurePreviewGallery(QWidget):
         # Render via injected adapter (S3) — per-card isolated.
         try:
             png_bytes = self._renderer(fig)
-        except Exception as exc:  # pragma: no cover - exercised via injected failure
+        # tolerated: The injected renderer is an open callback; preserve per-card failure isolation.
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - exercised via injected failure
             logger.warning("preview render failed for %r: %s", key, exc, exc_info=True)
             card.show_unavailable(type(exc).__name__)
             return
         # Convert PNG bytes to pixmap
         try:
             pixmap = QPixmap()
-            if not isinstance(png_bytes, (bytes, bytearray)):
+            # tolerated: Reject non-byte renderer results with a per-card TypeError before Qt decoding.
+            if not isinstance(png_bytes, (bytes, bytearray)):  # pyright: ignore[reportUnnecessaryIsInstance]
                 raise TypeError(
                     f"renderer returned {type(png_bytes).__name__!r}, expected bytes"
                 )
             if not pixmap.loadFromData(png_bytes, "PNG"):
                 raise RuntimeError("pixmap loadFromData failed")
             card.show_image(pixmap)
-        except Exception as exc:  # pragma: no cover - defensive
+        # tolerated: PNG decode/allocation and Qt presentation failures must stay local to this card.
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
             logger.warning("preview pixmap failed for %r: %s", key, exc, exc_info=True)
             card.show_unavailable(type(exc).__name__)
 

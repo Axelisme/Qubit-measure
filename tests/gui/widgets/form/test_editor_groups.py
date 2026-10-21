@@ -4,6 +4,7 @@ Group blocks and model sections fold by a click on their bold title.
 """
 
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Annotated, Literal
 
 import pytest
@@ -22,7 +23,7 @@ from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_converters import RebuildingForm
-from tests.gui._user_input import key_click, mouse_click, type_text
+from tests.gui._user_input import ComponentDriver, key_click, mouse_click, type_text
 
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
 type Build = Callable[[type[FormModel], dict[str, JsonValue] | None], View]
@@ -141,7 +142,7 @@ class Drive(BaseModel):
     ch: int = 0
     phase: Annotated[float, Display(group="Advanced")] = 0.0
     freq: float = 100.0
-    inner: Annotated[Section, Display(group="Advanced")] = Field(
+    inner: Annotated[Section, Display(group="Advanced", collapsed=False)] = Field(
         default_factory=Section
     )
 
@@ -154,10 +155,85 @@ class GroupForm(FormModel):
     window: Annotated[float, Display(group="Timing")] = 2.0
     second: Annotated[float, Display(group="Advanced")] = 3.0
     after: float = 4.0
-    drive: Drive = Field(default_factory=Drive)
+    drive: Annotated[Drive, Display(collapsed=False)] = Field(default_factory=Drive)
     secret: Annotated[float, Display(group="Hidden", hidden=True)] = 5.0
     kept: Annotated[float, Display(group="Partly", hidden=True)] = 6.0
     visible: Annotated[float, Display(group="Partly")] = 7.0
+
+
+def test_model_sections_start_folded_unless_requested_open(
+    build: Build, qapp: QApplication, tmp_path: Path
+) -> None:
+    class Form(FormModel):
+        folded: Section = Field(default_factory=Section)
+        opened: Annotated[Section, Display(collapsed=False)] = Field(
+            default_factory=Section
+        )
+
+    view, _ = build(Form, None)
+    view.resize(600, 400)
+    view.show()
+    qapp.processEvents()
+    driver = ComponentDriver(view)
+    driver.screenshot(tmp_path / "initial-folds.png")
+    assert driver.observe(object_name="form.fold.folded").text == FOLDED + "Folded"
+    assert driver.observe(object_name="form.fold.opened").text == EXPANDED + "Opened"
+    assert driver.observe(object_name="form.input.opened.level").visible
+
+
+@pytest.mark.parametrize("hidden", [False, True])
+def test_initial_subtree_errors_expand_only_affected_sections(
+    build: Build, qapp: QApplication, tmp_path: Path, hidden: bool
+) -> None:
+    class Required(BaseModel):
+        value: Annotated[float, Display(hidden=hidden)]
+
+    class Nested(BaseModel):
+        required: Required
+
+    class Form(FormModel):
+        invalid: Annotated[Nested, Display(collapsed=True)]
+        valid: Section = Field(default_factory=Section)
+
+    view, _ = build(Form, {"invalid": {"required": {}}, "valid": {"level": 1.0}})
+    view.resize(600, 400)
+    view.show()
+    qapp.processEvents()
+    driver = ComponentDriver(view)
+    driver.screenshot(tmp_path / "initial-errors.png")
+    assert driver.observe(object_name="form.fold.invalid").text == EXPANDED + "Invalid"
+    assert driver.observe(object_name="form.fold.valid").text == FOLDED + "Valid"
+    if not hidden:
+        assert driver.observe(object_name="form.input.invalid.required.value").visible
+
+
+def test_refresh_keeps_user_fold_of_an_invalid_section(
+    build: Build, qapp: QApplication, tmp_path: Path
+) -> None:
+    class Required(BaseModel):
+        value: float
+
+    class Form(FormModel):
+        invalid: Annotated[Required, Display(collapsed=True)]
+        other: float = 1.0
+
+    view, _ = build(Form, {"invalid": {}, "other": 1.0})
+    view.resize(600, 400)
+    view.show()
+    qapp.processEvents()
+    driver = ComponentDriver(view)
+    driver.screenshot(tmp_path / "before-fold.png")
+    assert driver.observe(object_name="form.fold.invalid").text == EXPANDED + "Invalid"
+    assert driver.observe(object_name="form.input.invalid.value").visible
+    driver.click(object_name="form.fold.invalid")
+    driver.screenshot(tmp_path / "user-fold.png")
+    assert driver.observe(object_name="form.fold.invalid").text == FOLDED + "Invalid"
+    driver.enter_text(object_name="form.input.other", value="2")
+    driver.screenshot(tmp_path / "after-refresh.png")
+    assert float(driver.observe(object_name="form.input.other").text) == 2.0
+    assert driver.observe(object_name="form.fold.invalid").text == FOLDED + "Invalid"
+    assert "Field required" in driver.observe(object_name="form.row.invalid").tooltip
+    assert not driver.observe(object_name="form.input.invalid.value").visible
 
 
 def test_groups_fold_grouped_rows_after_ungrouped_rows(
@@ -255,10 +331,10 @@ class FoldForm(RebuildingForm):
     gain: float = 1.0
     delay: Annotated[float, Display(group="Advanced")] = 0.0
     window: Annotated[float, Display(group="Timing")] = 0.0
-    shape: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
-        default_factory=Alpha
-    )
-    drive: Section = Field(default_factory=Section)
+    shape: Annotated[
+        Alpha | Beta, Field(discriminator="kind"), Display(collapsed=False)
+    ] = Field(default_factory=Alpha)
+    drive: Annotated[Section, Display(collapsed=False)] = Field(default_factory=Section)
     extra: Annotated[Section, Display(collapsed=True)] = Field(default_factory=Section)
 
 
@@ -308,7 +384,7 @@ class ErrorForm(FormModel):
 
     gain: float = 1.0
     delay: Annotated[float, Display(group="Advanced")] = Field(default=1.0, gt=0)
-    inner: Annotated[Section, Display(group="Advanced")] = Field(
+    inner: Annotated[Section, Display(group="Advanced", collapsed=False)] = Field(
         default_factory=Section
     )
 
@@ -380,7 +456,9 @@ class InnerGroupFirst(BaseModel):
 class NestedGroupFirst(FormModel):
     """A root holding one nested level with a group declared first."""
 
-    drive: InnerGroupFirst = Field(default_factory=InnerGroupFirst)
+    drive: Annotated[InnerGroupFirst, Display(collapsed=False)] = Field(
+        default_factory=InnerGroupFirst
+    )
 
 
 def value_at(data: dict[str, JsonValue], path: str) -> JsonValue:
@@ -463,13 +541,13 @@ class ShapeForm(RebuildingForm):
     branch_models = {("shape",): (Alpha, Beta), ("tone",): (Muted, Tone)}
 
     delay: Annotated[float, Display(group="Advanced")] = 0.0
-    shape: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
-        default_factory=Alpha
-    )
-    extra: Extra | None = None
-    tone: Annotated[Muted | Tone, Field(discriminator="kind")] = Field(
-        default_factory=Muted
-    )
+    shape: Annotated[
+        Alpha | Beta, Field(discriminator="kind"), Display(collapsed=False)
+    ] = Field(default_factory=Alpha)
+    extra: Annotated[Extra | None, Display(collapsed=False)] = None
+    tone: Annotated[
+        Muted | Tone, Field(discriminator="kind"), Display(collapsed=False)
+    ] = Field(default_factory=Muted)
 
 
 def test_shape_changes_rebuild_rows_and_keep_folds_with_groups_first(
@@ -532,14 +610,14 @@ class SectionsForm(FormModel):
 
     gain: float = 1.0
     mode: Literal["fast", "slow"] = "fast"
-    drive: Section = Field(default_factory=Section)
-    shape: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
-        default_factory=Alpha
-    )
-    wrapped: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
-        default_factory=Packed
-    )
-    extra: Extra | None = None
+    drive: Annotated[Section, Display(collapsed=False)] = Field(default_factory=Section)
+    shape: Annotated[
+        Alpha | Beta, Field(discriminator="kind"), Display(collapsed=False)
+    ] = Field(default_factory=Alpha)
+    wrapped: Annotated[
+        Packed | Bare, Field(discriminator="kind"), Display(collapsed=False)
+    ] = Field(default_factory=Packed)
+    extra: Annotated[Extra | None, Display(collapsed=False)] = None
     off: Extra | None = None
     delay: Annotated[float, Display(group="Advanced")] = 0.0
 
@@ -734,7 +812,7 @@ class Span(BaseModel):
 class SweepForm(FormModel):
     """One model section whose Display carries a unit."""
 
-    freq: Annotated[Span, Display(label="Freq", unit="MHz")] = Field(
+    freq: Annotated[Span, Display(label="Freq", unit="MHz", collapsed=False)] = Field(
         default_factory=Span
     )
 

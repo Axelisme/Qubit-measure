@@ -1,5 +1,7 @@
 # v2 experiment authoring
 
+使用者入口見 [tutorial](../tutorial/README.md)。
+
 **Last updated:** 2026-10-19，分析政策也由各實驗 core 明示
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。
@@ -55,7 +57,7 @@ Helper 只能完成單一步驟，例如選一次 library，不能包住整個�
 `session.open_tab(...)`、`tab.use_library(...)`、`tab.set_fields(...)`、
 `yield from tab.run_step()`、`yield from run.analyze_step("primary")` 與
 `yield from ask(run.propose_writeback())`。接受答案後才 `tab.accept()`。
-完整的短例與保存步驟見 [recipe 撰寫慣例](../recipes/mux-guide.md#authoring-readable-experiments-and-recipes)。
+完整操作流程與保存步驟見 [mux_amp_rabi 函式本體](../recipes/mux_amp_rabi.py#L26)。
 
 ### 3. Docstring 說明量測、序列與結果
 
@@ -389,7 +391,7 @@ distinct depths 時分析明確失敗。
 
 新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但本次 `RunContext.cancel_signal` 會攜帶第一個非取消錯誤 cause，GUI 與 Notebook 在提交成果前呼叫 `raise_if_error()`，不將失敗的 partial data 當成成功；retry 成功會清除 transient failure cause。
 
-- 若使用 SNR early stop，將 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 傳給 `ProgramBuilder(...).build_and_acquire(stop_condition=...)`；runner 只在 completed round 寫入 buffer 後檢查，命中時呼叫 acquire-local `cancel_flag.set()`，保留目前 round 並讓 `Schedule.outcome` 維持 `completed`。
+- `AcquireOptions` 從 `zcu_tools.experiment.v2.runtime` 匯入。若使用 SNR early stop，將 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 傳給 `ProgramBuilder(...).build_and_acquire(options=AcquireOptions(stop_condition=...))`；runner 只在 completed round 寫入 buffer 後檢查，命中時呼叫 acquire-local `cancel_flag.set()`，保留目前 round 並讓 `Schedule.outcome` 維持 `completed`。
 - `singleshot/ge/core.py`、`singleshot/check/core.py` 的 raw-shot acquire path 不經 `ProgramBuilder.run_program(...)`，因此在實驗邊界直接傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。
 
 ---
@@ -399,7 +401,7 @@ distinct depths 時分析明確失敗。
 1. 定義 `XxxModuleCfg` / `XxxSweepCfg`（通常繼承 `ConfigBase`）與 `XxxCfg = ProgramV2Cfg + ExpCfgModel + 自己欄位`。
 2. 需要單一 canonical 檔案持久化時，繼承 `PersistableExperiment[T_Result, XxxCfg]` 並宣告 class-level `AXES_SPEC`，即取得 explicit RunRecord 的 save／load。Result dataclass 只放資料，cfg 由 RunRecord 持有。Grouped roles 使用共用 grouped persistence 接縫。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
-4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `stop_condition=snr_checker(...)`。
+4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。
 5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`AXES_SPEC.tag` 取有層次的 on-disk 名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定，batch 本身不做 per-child retry。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
 

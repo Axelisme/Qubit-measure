@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from inspect import Signature, signature
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,7 +34,9 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     _simulation_active: bool = False
     _simulation_raw: tuple[RawShots, AcquireRequest] | None = None
 
-    def _acquire_configured(self, soc, *args, **kwargs) -> list[NDArray[np.float64]]:
+    def _acquire_configured(
+        self, soc, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None:
         if not isinstance(soc, SimulationSoc):
             self._simulation_raw = None
             return super()._acquire_configured(soc, *args, **kwargs)
@@ -235,13 +237,59 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             self.acc_buf = [raw[ch] for ch in self._program().ro_chs]
         return super().get_raw()
 
-    def acquire(self, soc, *args, **kwargs):
+    @overload
+    def acquire(
+        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire(
+        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+    ) -> None: ...
+
+    @overload
+    def acquire(
+        self, soc: object, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
+    def acquire(self, soc, *args, **kwargs) -> list[NDArray[np.float64]] | None:
+        """Return averaged IQ for omitted/False step_rounds.
+
+        True prepares hardware and returns None; SimulationSoc raises ValueError
+        instead, before admission. Typing is precise with only soc positional;
+        extra positional options or a dynamic bool retain the union.
+        Other acquisition errors and cancellation follow the normal pipeline.
+        """
         if not isinstance(soc, SimulationSoc):
             return super().acquire(soc, *args, **kwargs)
         with self._simulation_call(soc, "integrated", kwargs):
             return super().acquire(soc, *args, **kwargs)
 
-    def acquire_decimated(self, soc, *args, **kwargs):
+    @overload
+    def acquire_decimated(
+        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+    ) -> None: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
+    def acquire_decimated(
+        self, soc, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None:
+        """Return decimated IQ for omitted/False step_rounds.
+
+        True prepares hardware and returns None; SimulationSoc raises ValueError
+        instead, before admission. Typing is precise with only soc positional;
+        extra positional options or a dynamic bool retain the union.
+        Other acquisition errors and cancellation follow the normal pipeline.
+        """
         if not isinstance(soc, SimulationSoc):
             return super().acquire_decimated(soc, *args, **kwargs)
         with self._simulation_call(soc, "decimated", kwargs):

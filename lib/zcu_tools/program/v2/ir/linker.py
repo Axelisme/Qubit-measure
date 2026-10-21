@@ -139,7 +139,16 @@ class IRLinker:
                 )
 
     @staticmethod
-    def _parse_label_addr(label_name: str, label_addr: Any) -> int:
+    def parse_label_addr(label_name: str, label_addr: Any) -> int:
+        """Return the integer program address represented by label_addr.
+
+        label_name identifies the label in error messages. label_addr may be
+        an int or a decimal string with an optional leading '&'; strings use
+        Python's int parsing. The value is parsed without changing linker state.
+
+        Raise ValueError for other types or invalid decimal strings. Invalid
+        strings retain the int conversion's ValueError as their cause.
+        """
         if isinstance(label_addr, int):
             return label_addr
 

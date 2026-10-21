@@ -23,6 +23,7 @@ from zcu_tools.device.manager import DeviceManager
 from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
 from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.remote import WorkflowRemoteControlAdapter
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -34,7 +35,7 @@ from zcu_tools.gui.runtime import GuiAssembly
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
+from zcu_tools.gui.session.device_models import ConnectDeviceRequest
 from zcu_tools.resources.entry import (
     ResultEntry,
     RoleResolutionError,
@@ -61,6 +62,7 @@ from ._synthetic import (
     context_seed,
     sample_step,
 )
+from ._window_support import show_sample_section
 
 
 @pytest.fixture(scope="session")
@@ -81,9 +83,11 @@ def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior[Con
             role_registry.register("qubit", RoleSpec("qubit/*"))
         installed = registry_state()
         behavior = WorkflowsGuiBehavior(
-            templates={},
-            registrations=build_registry(),
-            alias_presets={"default": ALIAS_PRESET},
+            composition=WorkflowComposition(
+                templates={},
+                registrations=build_registry(),
+                alias_presets={"default": ALIAS_PRESET},
+            ),
             project_root=str(tmp_path),
             driver_factory=lambda type_name, address: FakeDevice(address=address),
         )
@@ -120,9 +124,9 @@ def test_named_presets_reach_workflows_composition_without_overwriting_saved_row
         )
     try:
         behavior = WorkflowsGuiBehavior(
-            templates={},
-            registrations=build_registry(),
-            alias_presets=presets,
+            composition=WorkflowComposition(
+                templates={}, registrations=build_registry(), alias_presets=presets
+            ),
             project_root=str(tmp_path),
             cache_dir=tmp_path / "cache",
             clean=True,
@@ -153,9 +157,9 @@ def test_workflows_empty_initial_table_is_explicit_or_has_no_catalog(
 ) -> None:
     try:
         behavior = WorkflowsGuiBehavior(
-            templates={},
-            registrations=build_registry(),
-            alias_presets=presets,
+            composition=WorkflowComposition(
+                templates={}, registrations=build_registry(), alias_presets=presets
+            ),
             cache_dir=tmp_path,
             clean=True,
         )
@@ -178,7 +182,9 @@ def test_workflows_behavior_rejects_catalog_without_default(
     try:
         with pytest.raises(ValueError, match="default"):
             WorkflowsGuiBehavior(
-                templates={}, registrations=build_registry(), alias_presets=presets
+                composition=WorkflowComposition(
+                    templates={}, registrations=build_registry(), alias_presets=presets
+                ),
             )
     except TypeError as error:
         pytest.fail(f"Named alias preset admission is missing: {error}")
@@ -241,9 +247,9 @@ def test_window_parent_and_close_callback_retry(
         harness.state,
         harness.services,
         harness.owner,
-        templates={},
-        alias_presets=None,
-        registrations=build_registry(),
+        composition=WorkflowComposition(
+            templates={}, alias_presets=None, registrations=build_registry()
+        ),
         parent=parent,
         on_close=on_close,
     )
@@ -336,6 +342,7 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     knobs = window.tunables_panel.state.result(env)
     assert isinstance(knobs, TunablesForm) and knobs.sample.value == 31.0
     window.tunables_panel.state.write({("sample", "value"): 8.0}, env)
+    show_sample_section(window)
     edit = window.tunables_panel.findChild(QLineEdit, "form.input.sample.value")
     assert edit is not None
     edit.setText("1+")
@@ -405,6 +412,7 @@ def test_prepare_form_dependency_names_missing_alias_and_preserves_panels(
     window.reload_source()
     plan, knobs = window.plan_panel, window.tunables_panel
     knobs.state.write({("sample", "value"): 17.0}, knobs.env)
+    show_sample_section(window)
     edit = knobs.findChild(QLineEdit, "form.input.sample.value")
     assert edit is not None
     edit.setText("1+")

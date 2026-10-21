@@ -1,13 +1,15 @@
 """Shared real measure UI composition and teardown for public view contracts."""
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 
 import pytest
+from qtpy.QtCore import QCoreApplication, QEvent
 from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.control_identity import ControlIdentity
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -16,6 +18,28 @@ from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     native_save_session,
 )
+
+
+@pytest.fixture
+def main_window_control_factory(
+    qapp: QApplication,
+) -> Iterator[Callable[[], ControlIdentity]]:
+    """Keep fake application authority alive until its Qt view tree is deleted."""
+    baseline = set(qapp.topLevelWidgets())
+    authorities: list[ControlIdentity] = []
+
+    def create() -> ControlIdentity:
+        authority = ControlIdentity()
+        authorities.append(authority)
+        return authority
+
+    yield create
+    for widget in qapp.topLevelWidgets():
+        if widget not in baseline:
+            widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+    authorities.clear()
 
 
 @pytest.fixture

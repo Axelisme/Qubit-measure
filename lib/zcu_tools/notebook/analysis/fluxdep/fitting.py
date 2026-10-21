@@ -53,7 +53,8 @@ def search_in_database(
 ) -> tuple[tuple[float, float, float], None]: ...
 
 
-def search_in_database(
+# tolerated: Documented/tested seven-position wrapper builds ParamBounds for the shared kernel.
+def search_in_database(  # noqa: PLR0913
     fluxs: NDArray[np.float64],
     freqs: NDArray[np.float64],
     datapath: str,

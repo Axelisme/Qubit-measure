@@ -18,7 +18,8 @@ def _require_positive_upto(upto: int) -> None:
         raise ValueError(f"upto must be positive, got {upto}")
 
 
-def make_hilbertspace(
+# tolerated: Sweep's sole builder keeps qubit/resonator dimensions and coupling explicit.
+def make_hilbertspace(  # noqa: PLR0913
     params: tuple[float, float, float],
     r_f: float,
     qub_dim: int,
@@ -105,7 +106,8 @@ def calc_branch_population(
     return dict(zip(branchs, populations, strict=False))
 
 
-def calc_branch_population_over_flux(
+# tolerated: Model dimensions, positive photon cutoff, branch selection and batching differ.
+def calc_branch_population_over_flux(  # noqa: PLR0913
     fluxs: NDArray[np.float64],
     params: tuple[float, float, float],
     r_f: float,
@@ -118,16 +120,20 @@ def calc_branch_population_over_flux(
     batch_size: int = 10,
 ) -> NDArray[np.float64]:
     _require_positive_upto(upto)
-    from scqubits.core.param_sweep import ParameterSweep  # lazy import
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
+    from scqubits.core.param_sweep import ParameterSweep
 
     if branchs is None:
         branchs = list(range(qub_dim))
 
     hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g)
     fluxonium, _resonator = hilbertspace.subsystem_list
+    # make_hilbertspace constructs the fluxonium-first topology.
+    if not isinstance(fluxonium, Fluxonium):
+        raise TypeError("Expected Fluxonium as the first subsystem")
 
     def update_hilbertspace(flux: float) -> None:
-        fluxonium.flux = flux  # pyright: ignore[reportAttributeAccessIssue]
+        fluxonium.flux = flux
 
     bra_array = make_bra_array(hilbertspace, qub_dim, res_dim)
 

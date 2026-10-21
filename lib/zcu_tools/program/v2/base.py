@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal, overload
 
 import numpy as np
+from numpy.typing import NDArray
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 
@@ -45,6 +46,7 @@ class ProgramV2Cfg(ConfigBase):
 
 
 # QICK annotates single ndarrays; our existing mixin returns one array per ADC.
+# tolerated: QICK annotates acquisition buffers as ndarray although its implementations return per-channel lists.
 class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
     SimulationAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompileMixin
 ):
@@ -102,10 +104,62 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
             f"dmem={dmem_len}/{dmem_cap} ({(100 * dmem_len / dmem_cap if dmem_cap else 0):.1f}%)",
         )
 
-    def acquire(self, soc, *args, **kwargs):
+    @overload
+    def acquire(
+        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire(
+        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+    ) -> None: ...
+
+    @overload
+    def acquire(
+        self, soc: object, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
+    def acquire(self, soc, *args, **kwargs) -> list[NDArray[np.float64]] | None:
+        """Return averaged IQ for omitted/False step_rounds, using cfg rounds.
+
+        Pass acquisition options by keyword: cfg_model supplies rounds, so any
+        positional option after soc or an explicit rounds keyword duplicates
+        rounds and raises TypeError, as in the original forwarding API.
+        True prepares hardware and returns None; SimulationSoc rejects True
+        with ValueError. Typing is precise with only soc positional; extra
+        positional options or a dynamic bool retain the union. Acquisition errors
+        and cancellation propagate from the acquisition mixins unchanged.
+        """
         return super().acquire(soc, *args, rounds=self.cfg_model.rounds, **kwargs)
 
-    def acquire_decimated(self, soc, *args, **kwargs):
+    @overload
+    def acquire_decimated(
+        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+    ) -> None: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
+    def acquire_decimated(
+        self, soc, *args, **kwargs
+    ) -> list[NDArray[np.float64]] | None:
+        """Return decimated IQ for omitted/False step_rounds, using cfg rounds.
+
+        Pass acquisition options by keyword: cfg_model supplies rounds, so any
+        positional option after soc or an explicit rounds keyword duplicates
+        rounds and raises TypeError, as in the original forwarding API.
+        True prepares hardware and returns None; SimulationSoc rejects True
+        with ValueError. Typing is precise with only soc positional; extra
+        positional options or a dynamic bool retain the union. Acquisition errors
+        and cancellation propagate from the acquisition mixins unchanged.
+        """
         return super().acquire_decimated(
             soc, *args, rounds=self.cfg_model.rounds, **kwargs
         )

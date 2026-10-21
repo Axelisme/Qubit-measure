@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
-from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
+from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
 
 @dataclass(frozen=True)
@@ -185,11 +185,13 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         # Apply smoothing for peak finding
         signals_smooth = smooth_signal_nd(
             signals,
-            method=options.smooth_method,
-            sigma=options.smooth,
+            options=SmoothingOptions(
+                method=options.smooth_method,
+                sigma=options.smooth,
+                wavelet=options.wavelet,
+                wavelet_level=options.wavelet_level,
+            ),
             axes=(0, 1),
-            wavelet=options.wavelet,
-            wavelet_level=options.wavelet_level,
         )
 
         ref_i = 0 if gains1[0] < gains1[-1] else -1

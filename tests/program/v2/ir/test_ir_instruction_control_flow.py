@@ -8,7 +8,6 @@ import pytest
 from zcu_tools.program.v2.ir.instructions import (
     BaseInst,
     CallInst,
-    DmemReadInst,
     JumpInst,
     LabelInst,
     MetaInst,
@@ -17,6 +16,9 @@ from zcu_tools.program.v2.ir.instructions import (
     TestInst,
     TimeInst,
     WaitInst,
+)
+from zcu_tools.program.v2.ir.io_instructions import (
+    DmemReadInst,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import (

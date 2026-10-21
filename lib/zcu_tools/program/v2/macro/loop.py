@@ -70,6 +70,7 @@ class OpenInnerLoop(Macro):
     ) -> None:
         super().__init__(name=name, counter_reg=counter_reg, n=n, range_hint=range_hint)
 
+    # tolerated: QICK Macro.expand is inferred as None, but translate iterates the returned macro list.
     def expand(self, prog):  # pyright: ignore[reportIncompatibleMethodOverride]
         start = f"{self.name}_start"
         end = f"{self.name}_end"
@@ -129,6 +130,7 @@ class CloseInnerLoop(Macro):
     def __init__(self, name: str, counter_reg: str, n: int | str) -> None:
         super().__init__(name=name, counter_reg=counter_reg, n=n)
 
+    # tolerated: QICK Macro.expand is inferred as None, but translate iterates the returned macro list.
     def expand(self, prog):  # pyright: ignore[reportIncompatibleMethodOverride]
         start = f"{self.name}_start"
         end = f"{self.name}_end"

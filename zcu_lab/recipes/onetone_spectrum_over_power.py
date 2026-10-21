@@ -15,7 +15,8 @@ from .helpers import (
 )
 
 
-def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords.
+# tolerated: Public frequency/gain survey keywords must match the handwritten input_schema.
+def onetone_spectrum_over_power(  # noqa: PLR0913
     session: RecipeSession,
     *,
     target: str | None = None,

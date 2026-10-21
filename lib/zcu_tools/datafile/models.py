@@ -10,7 +10,8 @@ from typing import Any
 
 import numpy as np
 
-Axis = namedtuple("Axis", ["name", "unit", "values"])
+# tolerated: Values pass through by identity without a normalized container contract.
+Axis = namedtuple("Axis", ["name", "unit", "values"])  # pyright: ignore[reportUntypedNamedTuple]
 
 _VARIABLE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
@@ -149,7 +150,10 @@ class LabberData:
     """Single-file Labber dataset with payload plus metadata.
 
     The constructor accepts either the compact ``LabberData(data, axes, ...)`` form
-    or explicit ``payload=`` and ``metadata=`` values.
+    or explicit ``payload=`` and ``metadata=`` values. Metadata is retained
+    by identity; omitting it creates default LabberMetadata. Pass timestamps
+    with compact data/axes, or through LabberPayload when supplying payload.
+    Mixing payload with data/axes or timestamps raises TypeError.
     """
 
     __slots__ = ("payload", "metadata")
@@ -161,12 +165,7 @@ class LabberData:
         *,
         payload: LabberPayload | None = None,
         metadata: LabberMetadata | None = None,
-        comment: str = "",
-        tags: str | Sequence[str] | None = None,
-        project: str = "",
-        user: str = "",
         timestamps: Any = None,
-        creation_time: float | None = None,
     ) -> None:
         if payload is None:
             if data is None or axes is None:
@@ -178,23 +177,7 @@ class LabberData:
             raise TypeError("Pass timestamps through LabberPayload when using payload")
 
         if metadata is None:
-            metadata = LabberMetadata(
-                comment=comment,
-                tags=tags,
-                project=project,
-                user=user,
-                creation_time=creation_time,
-            )
-        elif any(
-            (
-                comment,
-                tags is not None,
-                project,
-                user,
-                creation_time is not None,
-            )
-        ):
-            raise TypeError("Pass either metadata or metadata fields, not both")
+            metadata = LabberMetadata()
 
         self.payload = payload
         self.metadata = metadata
@@ -302,9 +285,9 @@ class LabberData:
         propagate, possibly leaving a partial new file.
         """
         if isinstance(self.data.values, list):
-            from .labber import _save_labber_trace_data
+            from .labber import write_labber_trace_file
 
-            return _save_labber_trace_data(path, self)
+            return write_labber_trace_file(path, self)
         from .labber import write_labber_data_file
         from .paths import format_ext
 
@@ -312,7 +295,7 @@ class LabberData:
 
     @classmethod
     def load(cls, path: str) -> LabberData:
-        from .labber import load_labber_data
+        from .labber_reader import load_labber_data
 
         return load_labber_data(path)
 
@@ -378,14 +361,16 @@ class GroupedLabberData:
                     "GroupedLabberData variable values must be LabberPayload, "
                     "not LabberData"
                 )
-            if not isinstance(payload, LabberPayload):
+            # tolerated: Untyped callers must get TypeError here, before payload I/O.
+            if not isinstance(payload, LabberPayload):  # pyright: ignore[reportUnnecessaryIsInstance]
                 raise TypeError(
                     "GroupedLabberData variable values must be LabberPayload "
                     f"(variable {variable!r} got {type(payload).__name__})"
                 )
             normalized[variable] = payload
 
-        if metadata is not None and not isinstance(metadata, LabberMetadata):
+        # tolerated: Reject invalid runtime metadata before storing it or opening a file.
+        if metadata is not None and not isinstance(metadata, LabberMetadata):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(
                 "GroupedLabberData metadata must be LabberMetadata "
                 f"(got {type(metadata).__name__})"

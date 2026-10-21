@@ -14,7 +14,10 @@ from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTrans
 from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.services.device import DeviceService, DisconnectDeviceRequest
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
@@ -44,10 +47,9 @@ def rename_ui(qapp, request: pytest.FixtureRequest) -> Iterator[ComponentDriver]
     device = DeviceService(
         bus,
         state,
-        gate,
-        background,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate, background=background, runner=runner, handles=handles
+        ),
         driver_factory=lambda type_name, address: drivers[address],
         device_registry=manager,
     )

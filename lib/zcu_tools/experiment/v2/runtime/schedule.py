@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from abc import ABC, abstractmethod
 from collections.abc import (
     Callable,
     Hashable,
@@ -14,7 +13,7 @@ from collections.abc import (
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from types import TracebackType
-from typing import Any, Generic, Protocol, Self, TypeAlias, cast, overload
+from typing import Any, Generic, Protocol, cast, overload
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -22,7 +21,6 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
-from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
 from zcu_tools.experiment.v2.runtime.outcome import (
     RunStatus as RunStatus,
 )
@@ -32,63 +30,22 @@ from zcu_tools.experiment.v2.runtime.outcome import (
 from zcu_tools.experiment.v2.runtime.outcome import (
     exception_reason,
 )
-from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Module,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
+from zcu_tools.experiment.v2.runtime.program_builder import (
+    ProgramBuilder,
+    ProgramFactory,
+    ProgramT,
 )
-from zcu_tools.progress_bar import BaseProgressBar, make_pbar
+from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc, min_interval
 
 T_Cfg = TypeVar("T_Cfg")
 T_ChildCfg = TypeVar("T_ChildCfg")
 T_Env = TypeVar("T_Env", default=dict[str, Any])
 
-T_Raw = TypeVar("T_Raw")
 T_Value = TypeVar("T_Value")
 T_NestedValue = TypeVar("T_NestedValue")
 T_BatchResult = TypeVar("T_BatchResult")
-T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
-T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
-SignalArray: TypeAlias = NDArray[Any]
-StopCondition: TypeAlias = Callable[[], bool]
-
-
-class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
-    @property
-    def cfg_model(self) -> ProgramV2Cfg: ...
-
-    def acquire(
-        self,
-        soc: object,
-        *,
-        progress: bool,
-        round_hook: Callable[[int, T_AcquireRaw_co, CancelFlagProtocol], object],
-        cancel_flag: CancelFlagProtocol,
-        **kwargs: object,
-    ) -> T_AcquireRaw_co: ...
-
-    def acquire_decimated(
-        self,
-        soc: object,
-        *,
-        progress: bool,
-        round_hook: Callable[[int, T_DecimatedRaw_co, CancelFlagProtocol], object],
-        cancel_flag: CancelFlagProtocol,
-        **kwargs: object,
-    ) -> T_DecimatedRaw_co: ...
-
-
-T_Program = TypeVar("T_Program", bound=ProgramProtocol[Any, Any])
-ProgramFactory: TypeAlias = Callable[..., T_Program]
 
 
 class BufferProtocol(Protocol):
@@ -100,16 +57,6 @@ class BufferProtocol(Protocol):
     def trigger_update(
         self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
     ) -> None: ...
-
-
-def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
-    return raw[0][0].dot([1, 1j])
-
-
-def default_decimated_raw2signal_fn(
-    raw: Sequence[NDArray[np.float64]],
-) -> NDArray[np.complex128]:
-    return raw[0].dot([1, 1j])
 
 
 class SignalBuffer:
@@ -149,7 +96,11 @@ class SignalBuffer:
         self.trigger_update()
 
     def trigger_update(
-        self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
+        self,
+        # tolerated: BufferProtocol requires step; this buffer always notifies with the full array.
+        step: ScheduleStep[Any, Any, Any] | None = None,  # noqa: ARG002
+        *,
+        flush: bool = False,
     ) -> None:
         if self._throttled_update is not None:
             self._pending_update = True
@@ -184,7 +135,12 @@ class SignalSlot:
 
 
 class Schedule(Generic[T_Cfg, T_Env]):
-    """Runtime scope for Python-like measurement orchestration."""
+    """Runtime scope for Python-like measurement orchestration.
+
+    ScheduleStep and ProgramBuilder use the owner-aware cooperation methods to
+    access buffers and record outcomes. Schedule alone owns scope validation,
+    local-buffer registration, stop transitions and failed-attempt retry reset.
+    """
 
     def __init__(
         self,
@@ -195,6 +151,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
     ) -> None:
         self._ensure_single_root_buffer_count(len(buffers))
         self.cfg = deepcopy(init_cfg)
+        # tolerated(cast): T_Env cannot express the required {} fallback for env=None.
         self._env = cast(T_Env, {} if env is None else env)
         self._buffers = list(buffers)
         self._local_buffers: dict[tuple[Hashable, ...], SignalBuffer] = {}
@@ -237,30 +194,30 @@ class Schedule(Generic[T_Cfg, T_Env]):
             self._is_closed = True
         if isinstance(exc, KeyboardInterrupt):
             # Let the caller return buffered partial data after a Notebook stop.
-            self._mark_interrupted(exc)
+            self.mark_interrupted(exc)
             return True
         return False
 
     @property
     def data(self) -> Any:
-        return self._get_data(self)
+        return self.get_data_for(self)
 
     @property
     def env(self) -> T_Env:
         return self._env
 
     def register_buffer(self, *buffers: BufferProtocol) -> None:
-        self._ensure_active()
+        self.ensure_active()
         if not buffers:
             raise ValueError("register_buffer requires at least one SignalBuffer")
         self._ensure_single_root_buffer_count(len(self._buffers) + len(buffers))
         self._buffers.extend(buffers)
 
     def trigger_update(self, *, flush: bool = False) -> None:
-        self._trigger_update(self, flush=flush)
+        self.trigger_update_for(self, flush=flush)
 
     def set_data(self, value: Any, *, flush: bool = False) -> None:
-        self._set_data(self, value, flush=flush)
+        self.set_data_for(self, value, flush=flush)
 
     @property
     def path(self) -> tuple[Hashable, ...]:
@@ -286,14 +243,16 @@ class Schedule(Generic[T_Cfg, T_Env]):
     def scan(
         self, name: str, values: Iterable[T_Value]
     ) -> Iterator[tuple[T_Value, ScheduleStep[T_Cfg, T_Value, T_Env]]]:
-        self._ensure_active()
-        yield from self._scan(parent=self, name=name, values=values)
+        self.ensure_active()
+        yield from self.scan_from(parent=self, name=name, values=values)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
     ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
-        self._ensure_active()
-        yield from self._repeat(parent=self, name=name, times=times, interval=interval)
+        self.ensure_active()
+        yield from self.repeat_from(
+            parent=self, name=name, times=times, interval=interval
+        )
 
     def batch(
         self,
@@ -301,8 +260,8 @@ class Schedule(Generic[T_Cfg, T_Env]):
             Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
     ) -> dict[Hashable, T_BatchResult]:
-        self._ensure_active()
-        return self._batch(parent=self, tasks=tasks)
+        self.ensure_active()
+        return self.batch_from(parent=self, tasks=tasks)
 
     @overload
     def prog_builder(
@@ -322,9 +281,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         soccfg: object,
         *,
         cfg: object | None = None,
-        program_cls: ProgramFactory[T_Program],
+        program_cls: ProgramFactory[ProgramT],
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Program]: ...
+    ) -> ProgramBuilder[ProgramT]: ...
 
     def prog_builder(
         self,
@@ -332,10 +291,10 @@ class Schedule(Generic[T_Cfg, T_Env]):
         soccfg: object,
         *,
         cfg: object | None = None,
-        program_cls: ProgramFactory[T_Program] | None = None,
+        program_cls: ProgramFactory[ProgramT] | None = None,
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Program] | ProgramBuilder[ModularProgramV2]:
-        self._ensure_active()
+    ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
+        self.ensure_active()
         if program_cls is None:
             return ProgramBuilder(
                 owner=self,
@@ -354,7 +313,11 @@ class Schedule(Generic[T_Cfg, T_Env]):
             program_kwargs=program_kwargs,
         )
 
-    def _ensure_active(self) -> None:
+    def ensure_active(self) -> None:
+        """Raise RuntimeError unless this schedule's context is currently active.
+
+        Steps and builders must call this before starting scoped operations.
+        """
         if not self._is_active:
             raise RuntimeError(
                 "Schedule operations must run inside 'with Schedule(...)'"
@@ -371,14 +334,24 @@ class Schedule(Generic[T_Cfg, T_Env]):
             # Enrich a prior stop without replacing its status or an earlier cause.
             self._outcome = replace(self._outcome, exception=exception)
 
-    def _mark_interrupted(self, exc: BaseException) -> None:
+    def mark_interrupted(self, exc: BaseException) -> None:
+        """Stop the run after an interrupt without discarding buffered results.
+
+        Record exc on the outcome and shared stop signal only if no prior
+        non-completed outcome exists; otherwise preserve that outcome and cause.
+        """
         reason = exception_reason(exc)
         if self._set_outcome("interrupted", reason=reason, exception=exc):
             self._stop.set_error("interrupted", reason, exc)
         else:
             self._stop.set()
 
-    def _mark_failed(self, exc: BaseException) -> None:
+    def mark_failed(self, exc: BaseException) -> None:
+        """Stop the run after a failure without discarding buffered results.
+
+        Record exc on the outcome and shared stop signal only if no prior
+        non-completed outcome exists; otherwise preserve that outcome and cause.
+        """
         reason = exception_reason(exc)
         if self._set_outcome("failed", reason=reason, exception=exc):
             self._stop.set_error("failed", reason, exc)
@@ -403,13 +376,25 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._outcome = ScheduleOutcome()
         self._stop.clear_stop()
 
-    def _check_stop_requested(self, *, exception: Exception | None = None) -> bool:
+    def check_stop_requested(self, *, exception: Exception | None = None) -> bool:
+        """Return whether the shared stop signal is set and record a stopped run.
+
+        Preserve earlier outcomes. If stopped has no cause yet, attach exception
+        when supplied; a normal stop does not set the shared signal's error cause.
+        """
         if self.is_stop():
             self._mark_stopped("stop requested", exception=exception)
             return True
         return False
 
-    def _should_retry_after_failed_attempt(self, attempt: int, retry: int) -> bool:
+    def prepare_retry_after_failed_attempt(self, attempt: int, retry: int) -> bool:
+        """Reset a failed outcome and shared stop cause if another attempt remains.
+
+        attempt is the zero-based failed attempt and retry is the allowed retry
+        count. Return False without resetting stopped/interrupted outcomes or an
+        exhausted budget. The builder checks external stop before marking failed.
+        Partial buffer data is retained for the next attempt.
+        """
         if self._outcome.status != "failed" or attempt >= retry:
             return False
         self._reset_outcome_for_retry()
@@ -420,13 +405,20 @@ class Schedule(Generic[T_Cfg, T_Env]):
         if buffer_count > 1:
             raise ValueError("Schedule supports at most one root result buffer")
 
-    def _scan(
+    def scan_from(
         self,
         *,
         parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
         name: str,
         values: Iterable[T_Value],
     ) -> Iterator[tuple[T_Value, ScheduleStep[T_Cfg, T_Value, T_Env]]]:
+        """Yield named scan children of parent until stop, pairing values and steps.
+
+        parent must belong to this schedule; the caller ensures an active scope
+        before iteration. Children deepcopy parent.cfg, share env and extend its
+        path with the index. Each child's local buffers are released after yield;
+        result data remains. Unsized values are materialized before iteration.
+        """
         if isinstance(values, Sized):
             sweep_values = values
             total = len(values)
@@ -441,7 +433,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         )
         try:
             for index, value in enumerate(sweep_values):
-                if self._check_stop_requested():
+                if self.check_stop_requested():
                     break
                 step = ScheduleStep(
                     schedule=self,
@@ -459,7 +451,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         finally:
             pbar.close()
 
-    def _repeat(
+    def repeat_from(
         self,
         *,
         parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
@@ -467,6 +459,14 @@ class Schedule(Generic[T_Cfg, T_Env]):
         times: int,
         interval: float,
     ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
+        """Yield named repeat children, checking stop before steps and while waiting.
+
+        parent must belong to this schedule; the caller ensures an active scope
+        before iteration. times and interval (seconds between steps) must be
+        non-negative or ValueError is raised. Each child deepcopies parent.cfg,
+        shares env and appends its index to the path. Release its local buffers
+        after yield without clearing result data.
+        """
         if times < 0:
             raise ValueError("times must be non-negative")
         if interval < 0.0:
@@ -486,18 +486,18 @@ class Schedule(Generic[T_Cfg, T_Env]):
         start_t = time.time() - 2 * interval
         try:
             for index in range(times):
-                if self._check_stop_requested():
+                if self.check_stop_requested():
                     break
 
                 while time.time() - start_t < interval:
-                    if self._check_stop_requested():
+                    if self.check_stop_requested():
                         break
                     passed_time = round(time.time() - start_t, 1)
                     time_pbar.set_progress(passed_time)
                     time.sleep(0.1)
                 time_pbar.reset()
 
-                if self._check_stop_requested():
+                if self.check_stop_requested():
                     break
 
                 step = ScheduleStep(
@@ -518,7 +518,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
             iter_pbar.close()
             time_pbar.close()
 
-    def _batch(
+    def batch_from(
         self,
         *,
         parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
@@ -526,6 +526,14 @@ class Schedule(Generic[T_Cfg, T_Env]):
             Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
     ) -> dict[Hashable, T_BatchResult]:
+        """Run tasks in mapping order with child steps and return completed results.
+
+        parent must belong to this schedule; the caller ensures an active scope.
+        Each child deepcopies parent.cfg, shares env and appends its task key to
+        the path. Stop skips later tasks. Exception or KeyboardInterrupt records
+        failure/interruption and returns prior results without retry. Release
+        child-local buffers before and after each task, retaining written data.
+        """
         results: dict[Hashable, T_BatchResult] = {}
         task_items = list(tasks.items())
         pbar = make_pbar(
@@ -535,7 +543,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         )
         try:
             for key, child_fn in task_items:
-                if self._check_stop_requested():
+                if self.check_stop_requested():
                     break
 
                 pbar.set_description(f"Batch [{str(key)}]")
@@ -552,25 +560,33 @@ class Schedule(Generic[T_Cfg, T_Env]):
                     result = child_fn(step)
                 except KeyboardInterrupt as exc:
                     self._clear_local_buffers(step.path)
-                    self._mark_interrupted(exc)
+                    self.mark_interrupted(exc)
                     break
-                except Exception as exc:
+                # tolerated: Child callables may fail arbitrarily; retain prior results and the cause.
+                except Exception as exc:  # noqa: BLE001
                     self._clear_local_buffers(step.path)
-                    self._mark_failed(exc)
+                    self.mark_failed(exc)
                     break
 
                 self._clear_local_buffers(step.path)
                 results[key] = result
                 pbar.update()
-                if self._check_stop_requested():
+                if self.check_stop_requested():
                     break
         finally:
             pbar.close()
 
         return results
 
-    def _get_data(self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any]) -> Any:
-        self._ensure_active()
+    def get_data_for(
+        self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any]
+    ) -> Any:
+        """Return the live result node at owner's path in this active schedule.
+
+        owner must be this schedule or one of its steps. An inactive scope raises
+        RuntimeError; an invalid path propagates the result container's error.
+        """
+        self.ensure_active()
         return get_path(self._data_root(), owner.path)
 
     def _data_root(self) -> Any:
@@ -580,24 +596,37 @@ class Schedule(Generic[T_Cfg, T_Env]):
             return ()
         raise ValueError("Schedule supports at most one root result buffer")
 
-    def _set_data(
+    def set_data_for(
         self,
         owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
         value: Any,
         *,
         flush: bool = False,
     ) -> None:
-        target = self._get_data(owner)
-        set_target(target, value)
-        self._trigger_update(owner, flush=flush)
+        """Write value into owner's existing result node, then notify root buffers.
 
-    def _register_local_buffer(
+        owner must belong to this active schedule. Container assignment enforces
+        supported value types and array shapes; lookup or write errors propagate
+        before update. flush requests immediate delivery through the root hook.
+        """
+        target = self.get_data_for(owner)
+        set_target(target, value)
+        self.trigger_update_for(owner, flush=flush)
+
+    def register_local_buffer(
         self,
         owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
         buffer: SignalBuffer,
     ) -> None:
-        self._ensure_active()
-        target = self._get_data(owner)
+        """Register buffer as the default acquire target at owner's result path.
+
+        owner must belong to this active schedule. Raise ValueError unless its
+        result node is an ndarray with buffer's shape. ScheduleStep.buffer wires
+        updates back to that node; registration alone does not copy or notify.
+        The enclosing scan/repeat/batch controls the registration's lifetime.
+        """
+        self.ensure_active()
+        target = self.get_data_for(owner)
         if not isinstance(target, np.ndarray):
             raise ValueError(
                 "ScheduleStep.buffer target must point to an NDArray in result data, "
@@ -610,13 +639,19 @@ class Schedule(Generic[T_Cfg, T_Env]):
             )
         self._local_buffers[owner.path] = buffer
 
-    def _trigger_update(
+    def trigger_update_for(
         self,
         owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
         *,
         flush: bool = False,
     ) -> None:
-        self._ensure_active()
+        """Notify this active schedule's root buffers after an owner-level update.
+
+        owner must belong to this schedule. Step updates pass owner to the hook;
+        root updates pass None. flush requests immediate delivery. No registered
+        root buffer is a no-op; inactive scopes raise RuntimeError.
+        """
+        self.ensure_active()
         if not self._buffers:
             return
         step = owner if isinstance(owner, ScheduleStep) else None
@@ -631,10 +666,17 @@ class Schedule(Generic[T_Cfg, T_Env]):
             if path[: len(prefix)] == prefix:
                 self._local_buffers.pop(path, None)
 
-    def _default_slot(
+    def default_slot_for(
         self, owner: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env]
     ) -> SignalSlot:
-        self._ensure_active()
+        """Resolve the writable acquire slot for an owner in this active schedule.
+
+        Prefer its registered local buffer. Otherwise require one SignalBuffer
+        root and an integer-indexed owner path, raising ValueError if unavailable.
+        owner must belong to this schedule. The slot retains its buffer's update
+        hook, including child-to-root synchronization for a local buffer.
+        """
+        self.ensure_active()
         if owner.path in self._local_buffers:
             return self._local_buffers[owner.path].at()
         if len(self._buffers) != 1 or not isinstance(self._buffers[0], SignalBuffer):
@@ -664,7 +706,7 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
 
     @property
     def data(self) -> Any:
-        return self.schedule._get_data(self)
+        return self.schedule.get_data_for(self)
 
     @property
     def array_data(self) -> NDArray[Any]:
@@ -686,10 +728,10 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         self.schedule.set_stop()
 
     def set_data(self, value: Any, *, flush: bool = False) -> None:
-        self.schedule._set_data(self, value, flush=flush)
+        self.schedule.set_data_for(self, value, flush=flush)
 
     def trigger_update(self, *, flush: bool = False) -> None:
-        self.schedule._trigger_update(self, flush=flush)
+        self.schedule.trigger_update_for(self, flush=flush)
 
     @overload
     def child(
@@ -704,7 +746,7 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
     def child(
         self, addr: Hashable, *, cfg: object | None = None
     ) -> ScheduleStep[Any, Hashable, T_Env]:
-        self.schedule._ensure_active()
+        self.schedule.ensure_active()
         return ScheduleStep(
             schedule=self.schedule,
             name=str(addr),
@@ -720,27 +762,27 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         *,
         dtype: DTypeLike = np.complex128,
     ) -> SignalBuffer:
-        self.schedule._ensure_active()
+        self.schedule.ensure_active()
         buffer = SignalBuffer(
             shape,
             dtype=dtype,
             on_update=lambda data: self.set_data(data),
             update_interval=None,
         )
-        self.schedule._register_local_buffer(self, buffer)
+        self.schedule.register_local_buffer(self, buffer)
         return buffer
 
     def scan(
         self, name: str, values: Iterable[T_NestedValue]
     ) -> Iterator[tuple[T_NestedValue, ScheduleStep[T_Cfg, T_NestedValue, T_Env]]]:
-        self.schedule._ensure_active()
-        yield from self.schedule._scan(parent=self, name=name, values=values)
+        self.schedule.ensure_active()
+        yield from self.schedule.scan_from(parent=self, name=name, values=values)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
     ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
-        self.schedule._ensure_active()
-        yield from self.schedule._repeat(
+        self.schedule.ensure_active()
+        yield from self.schedule.repeat_from(
             parent=self, name=name, times=times, interval=interval
         )
 
@@ -750,8 +792,8 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
             Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
     ) -> dict[Hashable, T_BatchResult]:
-        self.schedule._ensure_active()
-        return self.schedule._batch(parent=self, tasks=tasks)
+        self.schedule.ensure_active()
+        return self.schedule.batch_from(parent=self, tasks=tasks)
 
     @overload
     def prog_builder(
@@ -771,9 +813,9 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         soccfg: object,
         *,
         cfg: object | None = None,
-        program_cls: ProgramFactory[T_Program],
+        program_cls: ProgramFactory[ProgramT],
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Program]: ...
+    ) -> ProgramBuilder[ProgramT]: ...
 
     def prog_builder(
         self,
@@ -781,10 +823,10 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         soccfg: object,
         *,
         cfg: object | None = None,
-        program_cls: ProgramFactory[T_Program] | None = None,
+        program_cls: ProgramFactory[ProgramT] | None = None,
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Program] | ProgramBuilder[ModularProgramV2]:
-        self.schedule._ensure_active()
+    ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
+        self.schedule.ensure_active()
         if program_cls is None:
             return ProgramBuilder(
                 owner=self,
@@ -802,371 +844,6 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
             program_cls=program_cls,
             program_kwargs=program_kwargs,
         )
-
-
-class ModuleFacade(ABC):
-    @abstractmethod
-    def add(self, *modules: Module | Sequence[Module]) -> Self: ...
-
-    def add_reset(self, name: str, cfg: ResetCfg | None) -> Self:
-        return self.add(Reset(name, cfg))
-
-    def add_pulse(self, name: str, cfg: PulseCfg | None, **kwargs: Any) -> Self:
-        return self.add(Pulse(name, cfg, **kwargs))
-
-    def add_readout(self, name: str, cfg: ReadoutCfg) -> Self:
-        return self.add(Readout(name, cfg))
-
-
-class ProgramBuilder(ModuleFacade, Generic[T_Program]):
-    """Build and acquire a single QICK program within a Schedule scope."""
-
-    def __init__(
-        self,
-        *,
-        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
-        soc: object,
-        soccfg: object,
-        cfg: object,
-        program_cls: ProgramFactory[T_Program],
-        program_kwargs: dict[str, object],
-    ) -> None:
-        self._owner = owner
-        self._schedule = owner if isinstance(owner, Schedule) else owner.schedule
-        self._soc = soc
-        self._soccfg = soccfg
-        self._cfg = cfg
-        self._program_cls = program_cls
-        self._program_kwargs = dict(program_kwargs)
-        self._modules: list[Module] = []
-        self._sweeps: list[tuple[str, SweepCfg | int]] = []
-        self._raw2signal_fn: Callable[[Any], SignalArray] | None = None
-
-    def add(self, *modules: Module | Sequence[Module]) -> Self:
-        for module_or_group in modules:
-            if isinstance(module_or_group, Module):
-                self._modules.append(module_or_group)
-            else:
-                self._modules.extend(module_or_group)
-        return self
-
-    def declare_sweep(self, name: str, spec: SweepCfg | int) -> Self:
-        self._sweeps.append((name, spec))
-        return self
-
-    def set_raw2signal_fn(self, fn: Callable[[T_Raw], SignalArray]) -> Self:
-        self._raw2signal_fn = fn
-        return self
-
-    def build(self) -> T_Program:
-        self._schedule._ensure_active()
-        self._ensure_modules()
-        return self._build_program(self._isolated_cfg())
-
-    def build_and_acquire(
-        self,
-        *,
-        raw2signal_fn: Callable[[Any], SignalArray] | None = None,
-        retry: int = 0,
-        progress: bool = False,
-        progress_label: str = "rounds",
-        progress_leave: bool | None = None,
-        stop_condition: StopCondition | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        self._schedule._ensure_active()
-        self._ensure_modules()
-        return self._build_and_run(
-            runner=self.run_program,
-            raw2signal_fn=raw2signal_fn,
-            retry=retry,
-            progress=progress,
-            progress_label=progress_label,
-            progress_leave=progress_leave,
-            stop_condition=stop_condition,
-            acquire_kwargs=acquire_kwargs,
-        )
-
-    def build_and_acquire_decimated(
-        self,
-        *,
-        raw2signal_fn: Callable[[Any], SignalArray] | None = None,
-        retry: int = 0,
-        progress: bool = False,
-        progress_label: str = "rounds",
-        progress_leave: bool | None = None,
-        stop_condition: StopCondition | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        self._schedule._ensure_active()
-        self._ensure_modules()
-        return self._build_and_run(
-            runner=self.run_program_decimated,
-            raw2signal_fn=raw2signal_fn,
-            retry=retry,
-            progress=progress,
-            progress_label=progress_label,
-            progress_leave=progress_leave,
-            stop_condition=stop_condition,
-            acquire_kwargs=acquire_kwargs,
-        )
-
-    def run_program(
-        self,
-        program: ProgramProtocol[T_Raw, object],
-        *,
-        raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
-        retry: int = 0,
-        progress: bool = False,
-        progress_label: str = "rounds",
-        progress_leave: bool | None = None,
-        stop_condition: StopCondition | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        return self._run_program(
-            acquire=program.acquire,
-            rounds=self._rounds_from(program),
-            raw2signal_fn=raw2signal_fn,
-            default_raw2signal_fn=default_raw2signal_fn,
-            retry=retry,
-            progress=progress,
-            progress_label=progress_label,
-            progress_leave=progress_leave,
-            stop_condition=stop_condition,
-            acquire_kwargs=acquire_kwargs,
-        )
-
-    def run_program_decimated(
-        self,
-        program: ProgramProtocol[object, T_Raw],
-        *,
-        raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
-        retry: int = 0,
-        progress: bool = False,
-        progress_label: str = "rounds",
-        progress_leave: bool | None = None,
-        stop_condition: StopCondition | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        return self._run_program(
-            acquire=program.acquire_decimated,
-            rounds=self._rounds_from(program),
-            raw2signal_fn=raw2signal_fn,
-            default_raw2signal_fn=default_decimated_raw2signal_fn,
-            retry=retry,
-            progress=progress,
-            progress_label=progress_label,
-            progress_leave=progress_leave,
-            stop_condition=stop_condition,
-            acquire_kwargs=acquire_kwargs,
-        )
-
-    def _build_and_run(
-        self,
-        *,
-        runner: Callable[..., SignalArray],
-        raw2signal_fn: Callable[[Any], SignalArray] | None,
-        retry: int,
-        progress: bool,
-        progress_label: str,
-        progress_leave: bool | None,
-        stop_condition: StopCondition | None,
-        acquire_kwargs: dict[str, object],
-    ) -> SignalArray:
-        if retry < 0:
-            raise ValueError("retry must be non-negative")
-
-        slot = self._default_slot()
-        for attempt in range(retry + 1):
-            if self._schedule._check_stop_requested():
-                return slot.view
-            try:
-                program = self._build_program(self._isolated_cfg())
-            except KeyboardInterrupt as exc:
-                self._schedule._mark_interrupted(exc)
-                return slot.view
-            except Exception as exc:
-                if self._schedule._check_stop_requested(exception=exc):
-                    return slot.view
-                if attempt == retry:
-                    self._schedule._mark_failed(exc)
-                    return slot.view
-                continue
-
-            result = runner(
-                program,
-                raw2signal_fn=raw2signal_fn,
-                retry=0,
-                progress=progress,
-                progress_label=progress_label,
-                progress_leave=progress_leave,
-                stop_condition=stop_condition,
-                **acquire_kwargs,
-            )
-            if self._schedule._should_retry_after_failed_attempt(attempt, retry):
-                continue
-            return result
-
-        return self._default_slot().view
-
-    def _run_program(
-        self,
-        *,
-        acquire: Callable[..., T_Raw],
-        rounds: int,
-        raw2signal_fn: Callable[[T_Raw], SignalArray] | None,
-        default_raw2signal_fn: Callable[[Any], SignalArray],
-        retry: int,
-        progress: bool,
-        progress_label: str,
-        progress_leave: bool | None,
-        stop_condition: StopCondition | None,
-        acquire_kwargs: dict[str, object],
-    ) -> SignalArray:
-        if retry < 0:
-            raise ValueError("retry must be non-negative")
-        self._schedule._ensure_active()
-
-        slot = self._default_slot()
-        signal_fn = self._resolve_raw2signal_fn(raw2signal_fn, default_raw2signal_fn)
-
-        pbar = make_pbar(
-            total=rounds,
-            smoothing=0,
-            desc=progress_label,
-            leave=self._resolve_progress_leave(progress_leave=progress_leave),
-            disable=rounds == 1,
-        )
-        try:
-            for attempt in range(retry + 1):
-                if self._schedule._check_stop_requested():
-                    break
-                pbar.reset()
-                try:
-                    raw = self._acquire_once(
-                        acquire=acquire,
-                        progress=progress,
-                        acquire_kwargs=acquire_kwargs,
-                        stop_condition=stop_condition,
-                        signal_fn=signal_fn,
-                        slot=slot,
-                        pbar=pbar,
-                    )
-                except KeyboardInterrupt as exc:
-                    self._schedule._mark_interrupted(exc)
-                    break
-                except Exception as exc:
-                    # The producer reports first-round cancellation with an exception.
-                    cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
-                    if self._schedule._check_stop_requested(exception=cause):
-                        break
-                    if attempt == retry:
-                        self._schedule._mark_failed(exc)
-                        break
-                    continue
-
-                if self._schedule._check_stop_requested():
-                    break
-
-                try:
-                    pbar.set_progress(rounds)
-                    slot.set(signal_fn(raw))
-                except KeyboardInterrupt as exc:
-                    self._schedule._mark_interrupted(exc)
-                except Exception as exc:
-                    self._schedule._mark_failed(exc)
-                break
-        except KeyboardInterrupt as exc:
-            self._schedule._mark_interrupted(exc)
-        finally:
-            pbar.close()
-
-        return slot.view
-
-    def _resolve_raw2signal_fn(
-        self,
-        raw2signal_fn: Callable[[T_Raw], SignalArray] | None,
-        default_fn: Callable[[Any], SignalArray],
-    ) -> Callable[[Any], SignalArray]:
-        signal_fn = raw2signal_fn if raw2signal_fn is not None else self._raw2signal_fn
-        if signal_fn is None:
-            return default_fn
-        return signal_fn
-
-    def _ensure_modules(self) -> None:
-        if not self._modules:
-            raise ValueError("ProgramBuilder requires explicit modules")
-
-    def _isolated_cfg(self) -> ProgramV2Cfg:
-        return deepcopy(_program_cfg_from(self._cfg))
-
-    def _build_program(self, cfg: ProgramV2Cfg) -> T_Program:
-        program_kwargs = dict(self._program_kwargs)
-        program_kwargs["modules"] = deepcopy(self._modules)
-        return self._program_cls(
-            self._soccfg,
-            cfg,
-            sweep=deepcopy(self._sweeps) or None,
-            **program_kwargs,
-        )
-
-    def _acquire_once(
-        self,
-        *,
-        acquire: Callable[..., T_Raw],
-        progress: bool,
-        acquire_kwargs: dict[str, object],
-        stop_condition: StopCondition | None,
-        signal_fn: Callable[[T_Raw], SignalArray],
-        slot: SignalSlot,
-        pbar: BaseProgressBar,
-    ) -> T_Raw:
-        acquire_cancel_flag = AcquireCancelFlag(self._schedule.stop)
-
-        def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
-            pbar.set_progress(ir)
-            slot.set(signal_fn(raw))
-            if stop_condition is not None and stop_condition():
-                cancel_flag.set()
-
-        return acquire(
-            self._soc,
-            progress=progress,
-            round_hook=update_hook,
-            cancel_flag=acquire_cancel_flag,
-            **dict(acquire_kwargs),
-        )
-
-    def _rounds_from(self, program: ProgramProtocol[Any, Any]) -> int:
-        rounds = program.cfg_model.rounds
-        if rounds < 1:
-            raise ValueError("Program cfg.rounds must be positive")
-        return rounds
-
-    def _resolve_progress_leave(self, *, progress_leave: bool | None) -> bool:
-        if progress_leave is not None:
-            return progress_leave
-        return not isinstance(self._owner, ScheduleStep)
-
-    def _default_slot(self) -> SignalSlot:
-        return self._schedule._default_slot(self._owner)
-
-
-def _program_cfg_from(cfg: object) -> ProgramV2Cfg:
-    if isinstance(cfg, ProgramV2Cfg):
-        return cfg
-    program_fields = ProgramV2Cfg.model_fields
-    if isinstance(cfg, Mapping):
-        data = {key: cfg[key] for key in program_fields if key in cfg}
-    else:
-        data = {key: getattr(cfg, key) for key in program_fields if hasattr(cfg, key)}
-    if not data:
-        raise TypeError(
-            "ProgramBuilder cfg must be ProgramV2Cfg or provide at least one "
-            "ProgramV2Cfg field; pass ProgramV2Cfg() for default program runtime "
-            "settings"
-        )
-    return ProgramV2Cfg.model_validate(data)
 
 
 def _make_nan_array(shape: int | Sequence[int], dtype: DTypeLike) -> NDArray[Any]:

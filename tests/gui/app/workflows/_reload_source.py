@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
 from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.catalog_loader import SourceCatalogLoader, SourcePackage
 
@@ -100,10 +101,12 @@ def build():
             harness.state,
             harness.services,
             harness.owner,
-            templates={},
-            alias_presets=None,
-            registrations=catalog.attachments,
-            loader=self.loader,
+            composition=WorkflowComposition(
+                templates={},
+                alias_presets=None,
+                registrations=catalog.attachments,
+                loader=self.loader,
+            ),
         )
         self.views.append((view, harness))
         return view

@@ -131,7 +131,8 @@ def test_entry_identity_is_read_only_and_refresh_cannot_publish_a_replacement(
     entry.setup.description = "original annotation"
     replacement_id = "00000000-0000-0000-0000-000000000001"
     with pytest.raises(AttributeError, match="entry_id"):
-        setattr(entry, "entry_id", replacement_id)  # noqa: B010 -- Exercise the readonly descriptor at runtime; static assignment is invalid.
+        # tolerated: Exercise runtime readonly rejection without an invalid typed assignment.
+        setattr(entry, "entry_id", replacement_id)  # noqa: B010
 
     setup_path = results / "entry" / "setup.yaml"
     yaml = YAML(typ="safe")

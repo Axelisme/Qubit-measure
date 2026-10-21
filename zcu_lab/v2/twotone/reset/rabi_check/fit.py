@@ -119,6 +119,8 @@ def _reference_frequency(
 
     grid = np.linspace(0.25, upper, max(33, int(16 * upper) + 1))
     best = int(np.argmin([loss(float(frequency)) for frequency in grid]))
+    # tolerated(cast): SciPy's untyped minimize_scalar also accepts custom-solver returns;
+    # its bounded solver constructs OptimizeResult for the success/fun/x checks below.
     optimum = cast(
         OptimizeResult,
         minimize_scalar(

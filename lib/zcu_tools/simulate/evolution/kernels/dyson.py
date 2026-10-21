@@ -235,6 +235,28 @@ def _pruned_path_mask(
     return keep, discarded
 
 
+def _validate_path_records(indices: NDArray[np.int64], dimension: int) -> None:
+    """Validate (a,b,c,r,s) fields without changing the path records.
+
+    The caller guarantees an integer array of shape (N,5) and a positive modal
+    dimension. a and b must index modes; c is -1 for first order or a mode index
+    for second order. r is +/-1; s is 0 for first order and +/-1 for second order.
+    Return None when all records are valid, otherwise raise ValueError.
+    """
+    a, b, c, r, s = indices.T
+    if (
+        np.any(a < 0)
+        or np.any(a >= dimension)
+        or np.any(b < 0)
+        or np.any(b >= dimension)
+        or np.any(c < -1)
+        or np.any(c >= dimension)
+        or np.any(abs(r) != 1)
+        or np.any(np.where(c == -1, s != 0, abs(s) != 1))
+    ):
+        raise ValueError("Dyson pruning received an invalid path record")
+
+
 def prune_dyson_paths(
     indices: NDArray[np.int64],
     coefficients: NDArray[np.complex128],
@@ -293,18 +315,8 @@ def prune_dyson_paths(
         raise ValueError("Dyson pruning requires integer paths and conjugate modes")
     if not np.array_equal(conjugates[conjugates], np.arange(dimension)):
         raise ValueError("Dyson conjugate modes must form an involution")
-    a, b, c, r, s = indices.T
-    if (
-        np.any(a < 0)
-        or np.any(a >= dimension)
-        or np.any(b < 0)
-        or np.any(b >= dimension)
-        or np.any(c < -1)
-        or np.any(c >= dimension)
-        or np.any(abs(r) != 1)
-        or np.any(np.where(c == -1, s != 0, abs(s) != 1))
-    ):
-        raise ValueError("Dyson pruning received an invalid path record")
+    _validate_path_records(indices, dimension)
+    a, c = indices[:, 0], indices[:, 2]
     strength = np.float64(extent.max_abs_gain) * extent.max_duration_ns
     with np.errstate(over="ignore", invalid="ignore"):
         growth = np.exp(

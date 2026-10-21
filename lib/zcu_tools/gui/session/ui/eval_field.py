@@ -10,8 +10,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+# tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
+from qtpy.QtCore import Qt, Signal  # pyright: ignore[reportPrivateImportUsage]
+from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
@@ -191,7 +192,8 @@ class EvalNumericField(QWidget):
                 evaluate_numeric_expr(self._line_edit.text(), parameters), self._type
             )
             self._direct_value = float(resolved)
-        except Exception:
+        # tolerated: Any capture/source failure must retain the stored direct value when leaving eval mode.
+        except Exception:  # noqa: BLE001
             pass
         self._mode = "direct"
         self._spin.setValue(self._direct_value)
@@ -235,7 +237,8 @@ class EvalNumericField(QWidget):
                 self._ghost.setText(text)
                 self._ghost.setToolTip("")
                 set_foreground(self._ghost, secondary_colour(self))
-        except Exception as exc:
+        # tolerated: Any capture/source failure becomes a preview diagnostic instead of escaping a Qt callback.
+        except Exception as exc:  # noqa: BLE001
             self._ghost.setText("= ?")
             self._ghost.setToolTip(str(exc))
             set_foreground(self._ghost, error_colour(self))
@@ -261,10 +264,12 @@ class EvalNumericField(QWidget):
             menu.addSeparator()
         if self._mode == "eval":
             action = menu.addAction("Use direct value")
-            action.triggered.connect(self._switch_to_direct)  # type: ignore[attr-defined]
+            assert action is not None
+            action.triggered.connect(self._switch_to_direct)
         else:
             action = menu.addAction("Use expression")
-            action.triggered.connect(self._switch_to_eval)  # type: ignore[attr-defined]
+            assert action is not None
+            action.triggered.connect(self._switch_to_eval)
         return menu
 
     def _show_context_menu(self, widget: QWidget, global_pos: Any) -> None:

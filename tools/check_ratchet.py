@@ -142,15 +142,19 @@ def remap_counts(
     return mapped
 
 
-def changed_python_files(root: Path, base: str) -> tuple[str, ...]:
-    """Return candidate-touched Python files under the checked roots."""
+def _checked_python_paths(paths: Iterable[str]) -> tuple[str, ...]:
     return tuple(
         sorted(
             name
-            for name in changed_paths(root, base)
+            for name in paths
             if name.endswith(".py") and name.split("/")[0] in _support.CHECKED_ROOTS
         )
     )
+
+
+def changed_python_files(root: Path, base: str) -> tuple[str, ...]:
+    """Return candidate-touched Python files under the checked roots."""
+    return _checked_python_paths(changed_paths(root, base))
 
 
 def extract_base_tree(root: Path, base: str, destination: Path) -> None:
@@ -531,6 +535,29 @@ def quality_settings(tree: Path, filename: str) -> dict[str, Any]:
     return settings
 
 
+def _configuration_changes(
+    base_tree: Path, candidate_tree: Path
+) -> list[dict[str, object]]:
+    """Compare flattened quality settings in an extracted base and candidate.
+
+    Read the base's preserved pyproject.base.toml before the candidate's
+    pyproject.toml, including each tree's optional .importlinter. Return changed
+    entries in sorted path order, with path/before/after keys and None for a
+    missing value. File-read and TOML parsing failures propagate unchanged.
+    """
+    before = quality_settings(base_tree, _BASE_CONFIG)
+    after = quality_settings(candidate_tree, "pyproject.toml")
+    return [
+        {"path": key, "before": before.get(key), "after": after.get(key)}
+        for key in sorted(before.keys() | after.keys())
+        if before.get(key) != after.get(key)
+    ]
+
+
+# tolerated(radon): Keep changed/full Pyright, cache hits/misses, other detectors
+# and configuration review in one temporary comparison lifetime so orchestration
+# and error cleanup stay visible. Context/options wrappers or passing unstructured
+# receipts would only move the remaining branches, not simplify them.
 def run(
     root: Path,
     base: str | None,
@@ -538,31 +565,39 @@ def run(
     *,
     full_pyright: bool = False,
 ) -> dict[str, Any]:
-    """Compare named detectors in candidate checkout `root` against Git ref `base`.
+    """Compare the candidate Git worktree at root against a base revision.
 
-    None selects the merge-base with main. Detector names are ruff, pyright,
-    radon, file-size, path-correspondence, test-structure, capabilities and
-    suppressions; unknown names raise KeyError. Full Pyright requires pyright
-    in the selection. It compares all configured sources and caches only base
-    counts across worktrees; other detectors still compare changed files.
-    The JSON-compatible receipt reports regressions and configuration changes,
-    plus `pyright_base` (cache/computed) in full mode. Git and detector failures
-    raise RatchetError; filesystem failures propagate to the caller.
+    base is a Git ref, or None to use HEAD's merge-base with main. detectors is
+    an ordered iterable of names: capabilities, suppressions, ruff, pyright,
+    file-size, radon, path-correspondence or test-structure. full_pyright requires
+    pyright among them and compares its configured whole tree instead of only
+    changed Python files under the checked roots.
+
+    Return base (resolved revision), changed_files (sorted Python paths),
+    pyright_scope (changed/full), configuration_changes (sorted path/before/after
+    entries), detectors (per-name regression_count and regressions containing
+    path/rule/before/after), and status (FAIL for any regression, else PASS).
+    Configuration differences alone do not change status.
+
+    Invoke Git and the selected tools when comparison is needed. Extract the
+    base under root/.agent_state/ratchet and remove its temporary directory on
+    completion or failure. Both trees use the candidate's detector settings;
+    read the original settings for review only when configuration is touched.
+    RatchetError reports Git/detector failures or invalid full_pyright usage.
+    Unknown detector names raise KeyError when dispatched. Filesystem, parsing
+    and other unhandled collaborator errors propagate unchanged.
+
+    Full Pyright caches base counts across worktrees and adds pyright_base
+    (cache/computed) to the receipt; other detectors still compare changed files.
     """
     resolved = resolve_base(root, base)
     touched = changed_paths(root, resolved)
-    files = tuple(
-        sorted(
-            name
-            for name in touched
-            if name.endswith(".py") and name.split("/")[0] in _support.CHECKED_ROOTS
-        )
-    )
+    files = _checked_python_paths(touched)
     renames = renamed_paths(root, resolved)
     old_by_new = {new: old for old, new in renames.items()}
     base_files = tuple(sorted({old_by_new.get(name, name) for name in files}))
     found: dict[str, tuple[Regression, ...]] = {}
-    configuration_changes: list[dict[str, Any]] = []
+    configuration_changes: list[dict[str, object]] = []
     selected = tuple(detectors)
     if full_pyright and "pyright" not in selected:
         raise RatchetError("--full-pyright requires the pyright detector")
@@ -592,13 +627,7 @@ def run(
                 extract_base_tree(root, resolved, destination)
             tree = destination / "tree"
             if config_touched:
-                before = quality_settings(tree, _BASE_CONFIG)
-                after = quality_settings(root, "pyproject.toml")
-                configuration_changes = [
-                    {"path": key, "before": before.get(key), "after": after.get(key)}
-                    for key in sorted(before.keys() | after.keys())
-                    if before.get(key) != after.get(key)
-                ]
+                configuration_changes = _configuration_changes(tree, root)
             for name in selected:
                 if name == "pyright" and full_pyright:
                     if base_counts is None:

@@ -141,7 +141,9 @@ def test_active_is_display_only_and_replacement_clears_stale_result(
     assert reply["result"].get("stale", "missing") is False
     assert reply["result"].get("stale_reasons") == []
     state.set_selection(np.empty(0, dtype=np.bool_))
-    state.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2), {}, None, None)
+    state.set_fit_params(
+        "", ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)), {}, None, None
+    )
     cleared = route_harness.request(client, "fit.result")
     assert cleared["ok"] and "result" in cleared
     assert cleared["result"]["params"] is None
@@ -223,7 +225,11 @@ def test_fit_render_returns_png_at_shared_geometry(
     route_harness: RouteHarness,
 ) -> None:
     route_harness.ctrl.state.set_fit_params(
-        "", (2, 15), (0.2, 2), (0.1, 2), {"transitions": [(0, 1)]}, None, None
+        "",
+        ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
+        {"transitions": [(0, 1)]},
+        None,
+        None,
     )
     route_harness.ctrl.state.set_fit_result((3.0, 0.8, 0.5))
     reply = route_harness.request(route_harness.client(), "fit.render")

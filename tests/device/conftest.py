@@ -5,8 +5,15 @@ from collections.abc import Iterator
 
 import pytest
 import zcu_tools.device.fake as fake_module
+from zcu_tools.device import DeviceManager
 
 from ._threads import DeviceThreads
+
+
+@pytest.fixture
+def manager() -> DeviceManager:
+    """Create a fresh registry owner for each manager contract test."""
+    return DeviceManager()
 
 
 @pytest.fixture

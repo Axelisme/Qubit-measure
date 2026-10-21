@@ -81,3 +81,44 @@ def test_load_spectrums_preserves_missing_group_error(tmp_path):
         handle.create_group("entry")
     with pytest.raises(KeyError):
         load_spectrums(str(path))
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "flux_half",
+        "flux_int",
+        "flux_period",
+        "spectrum/dev_values",
+        "spectrum/fluxs",
+        "spectrum/freqs",
+        "spectrum/signals",
+        "points/dev_values",
+        "points/fluxs",
+        "points/freqs",
+    ],
+)
+@pytest.mark.parametrize("kind", ["group", "datatype"])
+def test_load_spectrums_rejects_non_dataset_fields_with_their_path(
+    tmp_path, field, kind
+):
+    path = tmp_path / "wrong-kind.hdf5"
+    with h5py.File(path, "w") as handle:
+        entry = handle.create_group("entry")
+        for calibration in ("flux_half", "flux_int", "flux_period"):
+            entry.create_dataset(calibration, data=1.0)
+        for group_name, fields in (
+            ("spectrum", ("dev_values", "fluxs", "freqs", "signals")),
+            ("points", ("dev_values", "fluxs", "freqs")),
+        ):
+            group = entry.create_group(group_name)
+            for name in fields:
+                group.create_dataset(name, data=np.array([1.0]))
+        del entry[field]
+        if kind == "group":
+            entry.create_group(field)
+        else:
+            entry[field] = np.dtype("float64")
+
+    with pytest.raises(TypeError, match=f"/entry/{field}"):
+        load_spectrums(str(path))

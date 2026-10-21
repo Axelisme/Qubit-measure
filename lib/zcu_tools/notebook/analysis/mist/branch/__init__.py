@@ -217,7 +217,8 @@ def plot_cn_over_flux(
     return fig
 
 
-def plot_cn_with_mist(
+# tolerated: Notebook names population grids, branch thresholds and projection fluxes explicitly.
+def plot_cn_with_mist(  # noqa: PLR0913
     fig,
     fluxs: NDArray[np.float64],
     photons: NDArray[np.float64],

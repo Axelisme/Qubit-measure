@@ -82,7 +82,8 @@ def _draw_corrected_iq(
 
 class HangerModel:
     @classmethod
-    def calc_signals(
+    # tolerated: Joint residuals pass scalars; public positional and **HangerParams calls keep this shape.
+    def calc_signals(  # noqa: PLR0913
         cls,
         freqs: NDArray[np.float64],
         freq: float,
@@ -302,7 +303,8 @@ class HangerModel:
         return decode(result)
 
     @classmethod
-    def fit(
+    # tolerated: fit_resonance selects delay/seed separately; public radius/background keywords stay independent.
+    def fit(  # noqa: PLR0913
         cls,
         freqs: NDArray[np.float64],
         signals: NDArray[np.complex128],

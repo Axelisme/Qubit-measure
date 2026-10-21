@@ -375,7 +375,7 @@ def test_role_mapping_stays_fixed_while_values_follow_bound_point(
     point = make_point(tmp_path)
     roles = point.resolve(driver="Q2")
     with pytest.raises(TypeError):
-        # Attempt mutation explicitly to verify that the returned mapping is read-only.
+        # tolerated(cast): Test assignment TypeError on the actual read-only mapping.
         cast(MutableMapping[str, str], roles.components)["driver"] = "Q1"
     roles.driver.rate = 5250.0
     assert point.Q2.rate == 5250.0

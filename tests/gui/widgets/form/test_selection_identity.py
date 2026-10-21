@@ -11,7 +11,7 @@ import pytest
 from pydantic import Field, JsonValue, create_model
 from qtpy.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 from zcu_tools.gui import form as api
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -29,7 +29,9 @@ class Second(FormModel):
 
 
 class SelectionForm(FormModel):
-    branch: First | Second = Field(discriminator="kind")
+    branch: Annotated[First | Second, Display(collapsed=False)] = Field(
+        discriminator="kind"
+    )
 
 
 @pytest.mark.parametrize("with_converter", [False, True], ids=["plain", "converter"])
@@ -206,7 +208,9 @@ def test_converter_rejection_restores_selector_and_preserves_visible_drafts(
         "RejectingSelection",
         __base__=SelectionForm,
         branch=(
-            Annotated[First | Second, api.InputConverter(reject)],
+            Annotated[
+                First | Second, api.InputConverter(reject), Display(collapsed=False)
+            ],
             Field(discriminator="kind"),
         ),
     )
