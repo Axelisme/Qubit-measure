@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import Field
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
+    Expr,
     MuxReadoutSpec,
     MuxReadoutTone,
+    PulseSpec,
     TemplateDef,
 )
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.resources.entry import ComponentSchema
 
 from tests.gui.app.measure._templates import TEMPLATES
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -135,11 +140,19 @@ def test_ml_get_index_and_named_cfg_are_read_only(library_client):
 MUX_TONES = [{"freq": 100.0, "gain": 0.2, "ro_ch": 0}]
 
 
+class SlottedComponent(ComponentSchema):
+    module: dict[str, str | None] = Field(default_factory=dict)
+    rate: float
+
+
 @pytest.fixture()
 def component_registry():
     before = registry_state()
     try:
         register_fakes()
+        from zcu_tools.resources.entry import component_registry as registry
+
+        registry.register("synthetic/slotted", SlottedComponent)
         installed = registry_state()
         yield
         assert registry_state() == installed
@@ -154,8 +167,23 @@ def role_socket(qapp, tmp_path, component_registry):
         "Synthetic mux readout",
         {"gen_ch": 0, "nqz": 1, "mixer_freq": 0.0, "length": 1.0, "ro_length": 1.0},
     )
-    fx = Fixture(project_root=str(tmp_path), templates={"mux:blank": template})
-    fx.ctrl.context_control.add_component("R1", "fake/drive/a", {})
+    probe = TemplateDef(
+        PulseSpec,
+        "Synthetic alias probe",
+        {
+            "ch": 2,
+            "nqz": 1,
+            "freq": Expr("{qubit}.rate"),
+            "gain": 0.2,
+            "waveform.style": "const",
+            "waveform.length": 0.5,
+        },
+    )
+    fx = Fixture(
+        project_root=str(tmp_path),
+        templates={"mux:blank": template, "probe": probe},
+    )
+    fx.ctrl.context_control.add_component("R1", "synthetic/slotted", {"rate": 234.0})
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -163,6 +191,64 @@ def role_socket(qapp, tmp_path, component_registry):
     finally:
         sock.close()
         fx.stop()
+
+
+def test_ml_create_binds_placeholders_to_resolved_alias_not_entry_name(role_socket):
+    fx, sock = role_socket
+    fx.ctrl.context_control.add_component("Q2", "synthetic/slotted", {"rate": 567.0})
+    fx.ctrl.context_control.set_alias_rows((AliasRow("qubit", "R1"),))
+    reply = call(
+        sock,
+        "context.ml_create_from_role",
+        {"role_id": "probe", "name": "Q2.pulses.probe"},
+    )
+    assert reply["ok"] is True, reply
+    written = fx.ctrl.read_context().library.module_spec("Q2.pulses.probe")
+    assert written.model_dump(mode="json")["freq"] == 234.0
+
+
+@pytest.mark.parametrize("alias_value", [None, ""])
+def test_ml_create_missing_alias_reports_binding_without_writing(
+    role_socket, alias_value
+):
+    fx, sock = role_socket
+    if alias_value is not None:
+        fx.ctrl.context_control.set_alias_rows((AliasRow("qubit", alias_value),))
+    before = fx.ctrl.read_context().library.document()
+    reply = call(
+        sock,
+        "context.ml_create_from_role",
+        {"role_id": "probe", "name": "R1.pulses.probe"},
+    )
+    assert reply["ok"] is False, reply
+    assert reply["error"]["code"] == "invalid_params"
+    assert "qubit" in reply["error"]["message"]
+    assert "Aliases" in reply["error"]["message"]
+    assert fx.ctrl.read_context().library.document() == before
+
+
+@pytest.mark.parametrize("whole_module", [False, True])
+def test_parameter_set_binds_missing_module_slot_and_returns_previous_value(
+    role_socket, whole_module
+):
+    fx, sock = role_socket
+    key = "R1.readout.mux_readout"
+    fx.ctrl.create_from_template(
+        "module", "mux:blank", key, edits={("tones",): MUX_TONES}
+    )
+    path = "R1.module" if whole_module else "R1.module.readout"
+    value = {"readout": key} if whole_module else key
+    reply = call(sock, "context.set_parameter", {"path": path, "value": value})
+    assert reply["ok"] is True, reply
+    assert reply["result"] == {
+        "path": path,
+        "before": {} if whole_module else None,
+        "value": value,
+    }
+    assert fx.ctrl.read_context().library_key("R1.module.readout") == key
+    replaced = call(sock, "context.set_parameter", {"path": path, "value": value})
+    assert replaced["ok"] is True, replaced
+    assert replaced["result"]["before"] == value
 
 
 @pytest.mark.parametrize("name", ["mux_ro", "R1.mux_ro", "R1.invalid.mux_ro"])
