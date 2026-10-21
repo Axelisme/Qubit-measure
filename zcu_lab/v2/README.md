@@ -2,7 +2,7 @@
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
-**Last updated:** 2026-10-20，readout slot 引用初值
+**Last updated:** 2026-10-21，mux 粗掃／命名更新
 
 ZigZag 的 `run()` 直接列出 pulse 序列，使用 register loop。
 公開 `build_zigzag_modules` 保留給離線編譯，另行列出相同序列。
