@@ -183,7 +183,7 @@ Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入�
 
 ### Mux drive 與 receivers
 
-`readout.mux` 可省略，省略時只建立 pulse 路徑。提供時必須填齊下列三個欄位，不接受 null。Mux 使用固定 mixmux8 generator／PFBv4 ADC profile。這些 profile 只提供離線編譯能力，不代表連接真機，也不提供 clock override。
+`readout.mux` 可省略或設為 `null`，兩者都只關閉 mux，不影響 pulse 路徑。提供 object 時必須填齊下列三個欄位，欄位本身不接受 `null`。Mux 使用固定 mixmux8 generator／PFBv4 ADC profile。這些 profile 只提供離線編譯能力，不代表連接真機，也不提供 clock override。
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
