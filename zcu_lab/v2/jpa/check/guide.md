@@ -1,19 +1,21 @@
 ## Behavior
 
-JPA pump off/on resonator check: sweeps the readout frequency with the JPA pump RF output off and again with it on, recording the one-tone resonator response in both states so you can compare the resonance by eye. Runs on real hardware and commands the selected JPA RF device (its output is toggled off, then on). WARNING: the run leaves the JPA pump output ON when it finishes — the pump is NOT turned off afterwards. Review the selected RF device and the sweep range before running — the seeded bounds are bring-up defaults, not certified safety limits.
+**Readers:** operator, agent. Run the JPA pump off/on resonator check from the GUI or MCP and compare the traces. The run sweeps the readout frequency with the selected JPA RF output off, then repeats with it on. Compare the two one-tone resonator traces by eye. This run commands real hardware. WARNING: the JPA pump output remains ON after the run. Review the selected RF device and sweep range before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware.
 
-## Expects (parameter context)
+## Parameter sources
 
-Uses the resonator alias for `$resonator.freq`, `$resonator.kappa` and resonator wiring. The qubit alias supplies an optional reset module. Select the connected JPA RF device in the form. RF defaults capture jpa_rf_dev at Open or Reset; an unbound alias leaves the optional field empty. This check does not use jpa pump-frequency, pump-power or flux calibration. Missing required resonator calibration leaves the form Invalid.
+Uses the resonator alias for `$resonator.freq`, `$resonator.kappa` and resonator wiring. The qubit alias supplies an optional reset module. Opening or resetting the form selects the RF default from `jpa_rf_dev`; an unbound alias leaves the optional field empty. Select the connected JPA RF device in the form. The check uses the existing pump-frequency, pump-power and flux settings on the hardware. Missing required resonator calibration marks the form Invalid.
 
-## Expects (ModuleLibrary)
+## Module slots
 
-Readout starts as a fresh readout template, not a library copy. Its inline pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05. Run replaces both frequencies from the sweep. Readout library keys remain selectable. Optional reset uses `$qubit.module.reset`; an unset slot disables reset.
+Readout starts from the readout template. Its pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05. The sweep sets both frequencies during the run. You can also select a saved readout module. Optional reset uses `$qubit.module.reset`; an empty slot disables reset.
 
 ## Typical writeback
 
-No writeback — the check is a visual diagnostic: compare the two traces and update parameters in another step.
+Use this visual diagnostic to compare the two traces. Update stored parameters in a separate step.
 
 ## Recommended
 
-No analysis options — the Analyze tab shows the pump off/on comparison figure only. Typical sweep: readout frequency ~101 points spanning 1.5 linewidths around `$resonator.freq`. Before every run, confirm the current JPA pump state and review the selected RF device: the run toggles its output off then on and leaves it ON.
+The Analyze tab shows the pump off/on comparison figure with fixed settings. A typical readout-frequency sweep uses about 101 points spanning 1.5 linewidths around `$resonator.freq`. Before every run, confirm the current JPA pump state and review the selected RF device. The run toggles its output off, then on, and leaves it ON.
+
+**Last updated:** 2026-10-21
