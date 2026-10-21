@@ -1,6 +1,8 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-19，instruction owners
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 
 本模塊負責把 QICK ASM V2 程式表示成可分析、可優化、可再降階回 assembler 輸入的 IR。
 
@@ -11,10 +13,10 @@
    - `link()` 是唯一會寫入 `P_ADDR` 與 `LINE` 的地方。
 2. `IRLexer` ([factory.py](factory.py))
    - 負責 `list[Instruction] ↔ list[BasicBlockNode | MetaInst]`。
-   - `MetaInst` 永遠作為 chunked stream 的獨立元素存在，不屬於任何 `BasicBlockNode`。
+   - `MetaInst` 在 chunked stream 中獨立於 `BasicBlockNode` 存在。
 3. `IRParser` ([factory.py](factory.py))
    - `parse()` 把 `list[BasicBlockNode | MetaInst]` 建構為 `BlockNode` 根節點。
-   - `unparse(root: IRNode)` 是唯一的降階入口，接受 tree pass 替換後的任意合法 IR 根節點，輸出含結構 MetaInst 的 chunked stream。原有 `BlockNode` tree 與 `parse()` 保持 round-trip（`IRDispatch` 例外，它是 pass 才生成的葉節點，不會被 `parse` 重建）。
+   - `unparse(root: IRNode)` 是唯一的降階入口，接受 tree pass 替換後的任意合法 IR 根節點，輸出含結構 MetaInst 的 chunked stream。原有 `BlockNode` tree 與 `parse()` 保持 round-trip。`IRDispatch` 葉節點由 pass 生成。
 4. [dispatch.py](dispatch.py)
    - 提供 loop / branch 共用的 dispatch-table lowering 原語。
 
@@ -71,7 +73,7 @@ list[Instruction]
 
 ## Serialization boundary
 
-`from_dict` 是外部序列化邊界（接收 QICK `prog_list`），不使用任何防禦性降級（`d.get("KEY", "")` 等 fallback）。缺少必要 key 直接 `KeyError`，parse 失敗直接 `ValueError`，讓 bug 在反序列化時立即暴露。
+`from_dict` 是接收 QICK `prog_list` 的外部序列化邊界。缺少必要 key 時拋出 `KeyError`，parse 失敗時拋出 `ValueError`，讓呼叫端在反序列化時取得明確錯誤。
 
 - IR 中的 `Instruction`（`BaseInst` 的子類，如 `RegWriteInst`, `PortWriteInst`, `WmemWriteInst` 等）的 `from_dict` 與 `to_dict` 實作必須嚴格對應 QICK `tprocv2_assembler.py` 裡的欄位。
-- 不可使用任何自定義或延伸的虛擬欄位（例如不該有 `DATA`, `PHASE`, `FREQ` 若底層不支援，將 `DST` 誤植為 `ADDR`）。所有參數（包含 `WW`, `WP` 等 side-effects）都必須精確序列化，以保證最終產生給 QICK 的 `prog_list` 是合法且無誤的。
+- 序列化只使用底層 QICK 支援的欄位，並保留精確欄名，例如 `DST`。`WW`、`WP` 等 side-effects 也必須完整序列化，讓 `prog_list` 符合 QICK 格式。

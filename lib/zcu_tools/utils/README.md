@@ -1,6 +1,8 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-10-20，shared smoothing options；bounded atomic replacement retries
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。共用 helper、cache 與原子檔案替換機制。
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 資料檔格式、讀寫與 streaming 見 `zcu_tools.datafile`。
@@ -22,7 +24,7 @@ Package 初始化不載入 QICK。`format_obj` 在 caller 呼叫時才載入 Qic
 
 `atomic_replace(source, destination)` 只重試 Windows sharing／lock violation，
 以 monotonic clock 限制重試約 0.5 秒。其他錯誤與持續鎖定的最後例外原樣傳播。
-各保存 owner 仍負責關檔、清理暫存檔、提交與錯誤轉譯，不提供跨檔交易或掉電恢復。
+各保存 owner 負責關檔、清理暫存檔、提交與錯誤轉譯。此 helper 的保證限於單次原子替換，跨檔一致性與掉電恢復由上層處理。
 
 ## fitting helpers
 
@@ -41,7 +43,7 @@ linear regression。
 `utils.debug.enable_debug`、`disable_debug` 與 `debug_scope` 設定、清除或暫時啟用指定 module namespace 的 debug logging。
 `utils.debug.log_current_exception` 透過 caller-owned logger 記錄目前 active
 exception；若 exception 來自 Pyro 且包含 `_pyroTraceback`，會把 remote traceback
-文字併入同一筆 log record，不直接 print 到 stdout / stderr。
+文字併入同一筆 log record，由 logging handler 決定輸出位置。
 
 ## process helpers
 

@@ -24,6 +24,8 @@ jupyter:
     version: 3.9.23
 ---
 
+**Readers:** operator, lab-author. Plot calibrated sample points alongside predicted fluxonium spectra, matrix elements and relaxation curves.
+
 ```python
 %load_ext autoreload
 import os

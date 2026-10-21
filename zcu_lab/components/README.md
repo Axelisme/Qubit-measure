@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-10-21，kind、角色與字串引用索引
 
+**讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
+
 新增 model、註冊與表單引用見 [component 教學](../tutorial/01-components.md)。`register_all` 註冊以下六個 kind，import 不會註冊。
 
 | Kind | 代表什麼 | 哪些實驗讀它 |

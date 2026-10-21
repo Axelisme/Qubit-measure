@@ -1,5 +1,7 @@
 # zcu_lab 程式碼規則
 
+**讀者：** lab-author、agent。逐條核對 zcu_lab 的程式碼規則、檢查方式與契約來源。
+
 修改 `zcu_lab` 時逐條核對本頁。每條列出檢查方式與來源，細節以連結的文件為準。
 新增 component、實驗與 recipe 的步驟見 [tutorial](tutorial/README.md)。
 本頁不授權操作硬體，範例能載入不代表校準齊全或可以 Run。

@@ -1,5 +1,7 @@
 # 離線遷移工具
 
+**讀者：** framework-dev、agent。查閱離線轉換工具的公開 API、格式契約與內部規格入口。
+
 支援的檔案與格式就轉換，不支援的就原樣保留。欄位也一樣，未知欄位以原名原值留在新容器，報告區分已轉換與原樣保留。Pending 僅用於支援項目缺必要證據而無法轉換，原文仍須可見。非法輸入與安全衝突仍須回報，不當成成功。
 
 本目錄提供使用者明確執行的舊資料轉換。正常量測 runtime 不 import migrations。工具不操作硬體，也不替使用者選擇來源檔或推論單位。
@@ -10,7 +12,7 @@
 
 `migrations.storage_migration` 擁有離線轉換、歷史 evidence 與可續跑 publication。Caller 明填 mapping 與 native 驗證，不接正常 runtime。`migrations.legacy_labber.load_legacy_labber_payload` 以明確 disk schema 讀取 single 或 marker-qualified grouped Labber。未標記多 log 以 caller 的 schema 變數順序對應 root、Log_2 等，各自嚴格驗證 label、單位與 shape，不猜 variable identity 或單位。
 
-CLI 以 `python -m migrations.migrate_storage` 執行。同來源、同宣告可直接重跑，中斷補缺，完成後逐項重驗；`--resume` 仍可使用。相同目的以 typed `skipped` 列出且不重寫，不同目的以 `MigrationInputError.differences` 定位並 exit 2，不改目的、manifest 或原報告。YAML／JSON 按 owner typed 語意比較並保留 unknown raw，binary／JSONL 按已驗 SHA256。操作授權、dry-run、pending 與 resume 步驟見 [Agent 離線遷移說明書](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 在 `storage_mapping.py`，固定 native declarations 在 `migration_experiments.py`，兩者都只為遷移存在，跟本目錄一起保留或刪除。`lib` 與 `zcu_lab` 都不 import 本目錄。
+CLI 以 `python -m migrations.migrate_storage` 執行。同來源、同宣告可直接重跑，中斷補缺，完成後逐項重驗；`--resume` 仍可使用。相同目的以 typed `skipped` 列出且不重寫，不同目的以 `MigrationInputError.differences` 定位並 exit 2，不改目的、manifest 或原報告。YAML／JSON 按 owner typed 語意比較並保留 unknown raw，binary／JSONL 按已驗 SHA256。操作授權、dry-run、pending 與 resume 步驟見 [operator CLI 指南](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 在 `storage_mapping.py`，固定 native declarations 在 `migration_experiments.py`，兩者都只為遷移存在，跟本目錄一起保留或刪除。`lib` 與 `zcu_lab` 都不 import 本目錄。
 
 `--result-root` 指定舊來源根目錄，`--entry-result-root` 指定新 entry 根目錄。兩者可同為 `<checkout>/result`，但新 entry 不得與本次來源樹互相包含。以下只做 dry-run，不建立備份或寫入目的地：
 

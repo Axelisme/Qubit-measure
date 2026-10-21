@@ -1,23 +1,35 @@
 ## Behavior
 
+**Readers:** operator, agent. How to run single-shot length Rabi calibration from the GUI or MCP and interpret the results.
+
 Single-shot Length Rabi: sweeps the qubit-drive pulse length, preserves every raw IQ shot, and derives ground / excited / other population curves during live view and analysis. Runs on real hardware.
 
-## Expects (parameter context)
+## Parameter sources
 
-Open and Reset capture the current aliases, parameters and library. Relax delay starts at 5*T1. Length sweep is 0.03 us to 4 * `$qubit.module.x180.waveform.length.` Classification seeds `$qubit.ext.readout_cal.g_center`/e_center/radius; missing calibration stays Invalid. Inline templates read `$qubit.freq`, `$qubit.wiring.ch` and `$resonator.freq`/wiring.ch/wiring.ro_ch; readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Other missing required sources remain Invalid.
+Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Length sweep is 0.03 us to 4 * `$qubit.module.x180.waveform.length`.
 
-Both Length Rabi forms sweep from 0.03 us to 4*pi_len. Missing/null pi_len, including arb without a persistent scalar length, uses a 1 us stop; stored invalid pi_len leaves stop empty. Valid pi_len is a finite positive non-bool number. Existing x180 stays a Slot with its gain; without x180 both forms use qub_probe with gain=1. No asset is read to obtain a runtime length.
+Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
 
-T1-derived defaults use the fixed Open/Reset capture. A missing/null T1 or absent capture uses 30 us, so the 5*T1 wait starts at 150 us. Stored invalid T1 leaves derived required fields empty while the Form opens. Alias/path/source failures propagate. Defaults remain editable, are not written back as calibration, and do not shorten automatically for active reset.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
-## Expects (ModuleLibrary)
+The length sweep runs from 0.03 us to 4*pi_len. A missing or null stored pi_len uses a 1 us stop, including for arbitrary waveforms whose scalar length is absent. An invalid stored pi_len leaves the required stop empty for correction. A valid pi_len is a finite positive number, with booleans treated as invalid.
 
-Qubit pulse follows the shared Rabi source policy above, using x180 when present and qub_probe only when absent. Reset uses optional `$qubit.module.reset`; readout uses `$qubit.module.readout` or readout template. Sweep-overwritten pulse values remain editable and library keys stay selectable. Run uses this fixed capture.
+An existing x180 stays selected through its module slot and keeps its gain. If x180 is absent, the qub_probe template starts at gain=1. The default stop depends only on the stored scalar length.
+
+T1-derived defaults use the Open/Reset snapshot. A missing or null T1, or an unavailable snapshot, uses 30 us, so the 5*T1 wait starts at 150 us. An invalid stored T1 leaves the required derived fields empty when the form opens. Alias, parameter-path or source errors are reported to the operator.
+
+These starting values remain editable and separate from calibration writeback. Active reset keeps the same default wait; adjust it explicitly if needed.
+
+## Module slots
+
+The qubit pulse uses the x180 module when present and the qub_probe template when absent, with the starting values described above. Reset uses optional `$qubit.module.reset`; readout uses `$qubit.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Reset snapshot.
 
 ## Typical writeback
 
-When the joint fit is valid and its complete calibration is finite, proposes `$qubit.ext.readout_cal.g_center`, `$qubit.ext.readout_cal.e_center`, `$qubit.ext.readout_cal.radius`, and `$qubit.ext.readout_cal.confusion_matrix` as four independent items. The four-item proposal is all-or-none.
+When the joint fit is valid and its complete calibration is finite, proposes `$qubit.ext.readout_cal.g_center`, `$qubit.ext.readout_cal.e_center`, `$qubit.ext.readout_cal.radius`, and `$qubit.ext.readout_cal.confusion_matrix` as four separately applicable items. All four proposals appear together when the complete calibration passes validation; otherwise the proposal list stays empty.
 
 ## Recommended
 
-Set Initial State to the predominant state before the swept drive pulse even when the first sweep point is nonzero. Fit phase offset allows a correction within +/-90 degrees of that initial-state direction; the extrapolated zero-length population can then differ from the pre-pulse population. It is disabled by default. Set calibration cfg directly or seed it with 'singleshot/ge'. A sweep spanning a few pi lengths captures a full oscillation. Review the measured population curves and overlaid joint-fit curves before applying all four calibration proposals.
+Set Initial State to the predominant state before the swept drive pulse even when the first sweep point is nonzero. Fit phase offset allows a correction within +/-90 degrees of that initial-state direction; the extrapolated zero-length population can then differ from the pre-pulse population. It is disabled by default. Set the classification calibration directly or seed it with 'singleshot/ge'. A sweep spanning a few pi lengths captures a full oscillation. Review the measured population curves and overlaid joint-fit curves before applying all four calibration proposals.
+
+**Last updated:** 2026-10-21

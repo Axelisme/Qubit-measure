@@ -1,6 +1,8 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-20，Labber reader／writer／format owners、metadata 契約、獨立 logs 與 device snapshot；native 2.1、grouped independent layout 與完整 run_id 路徑
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Native 與 Labber 檔案格式、讀寫與 metadata 契約。
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -98,8 +100,8 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
   root Labber log 的平行 scalar channels。ordered variable-to-channel attrs 保存 domain
   identity；experiment loader 傳 required variables，省略 required variables 只用於
   diagnostic inspection。
-- unmarked grouped v1 不屬於 runtime 可載入格式；loader 明確要求 canonical
-  grouped v2，不改寫 input。marker-qualified streaming grouped v1 仍走獨立 decoder。
+- Runtime loader 要求 canonical grouped v2，對 unmarked grouped v1 明確報錯並保留原檔。
+  Marker-qualified streaming grouped v1 使用獨立 decoder。
 - `StreamingLabberVariableSpec` / `open_streaming_grouped_labber_data` 處理
   grouped Labber file 的 partial-write use case。它保留 marker-qualified grouped v1
   root/`Log_N` layout 與 heterogeneous axes，不共用 one-shot v2 decoder。

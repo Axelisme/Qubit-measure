@@ -1,19 +1,32 @@
+**Readers:** operator, agent. How to measure readout time of flight from the GUI or MCP and use the result to calibrate the trigger offset.
+
+**Last updated:** 2026-10-21
+
 ## Behavior
 
-Readout time-of-flight (lookback) measurement: fires the readout pulse and captures the decimated ADC trace versus time, so you can see when the readout signal actually arrives at the digitizer. Runs on real hardware (reps is locked to 1 — decimated acquisition has no multi-rep averaging). Run this first when bringing up a new readout chain or after changing cabling, to calibrate the trigger offset.
+Lookback fires the readout pulse and captures the decimated ADC trace versus time. The trace shows when the signal arrives at the digitizer. Acquisition uses real hardware with `reps` fixed at 1. Averaging uses software rounds, initially 500. Run this first when bringing up a new readout chain or after changing cabling.
 
-## Expects (parameter context)
+## Parameter sources
 
-Defaults use the tab's fixed resonator capture. resonator.freq seeds the pulse and ADC frequency; resonator.wiring.ch/ro_ch seed generator and ADC channels. Missing/null time_of_fly starts trigger offset at 0 us, with an editable 1.5 us ADC window. Valid TOF is a finite non-bool real number >= 0; trigger offset is TOF - 0.1 us even when the result is negative, without clamping. Stored invalid TOF leaves trigger offset required and empty; alias/path/source failures propagate. These editable initial values are not calibration writeback. Increase the ADC window if arrival time plus pulse duration exceeds 1.5 us. Other missing required calibration remains Invalid.
+Defaults use the tab's fixed resonator selection, captured when the form opens or resets. The `$resonator` alias identifies that resonator.
 
-## Expects (ModuleLibrary)
+- Pulse and ADC frequency start at `resonator.freq + resonator.kappa` in MHz. Missing or null `kappa` uses 1 MHz. Both stored values must be positive, finite real numbers, with booleans excluded. Missing or null frequency, invalid frequency or linewidth, or an absent resonator capture leaves frequency required and blank.
+- `resonator.wiring.ch` and `resonator.wiring.ro_ch` supply the generator and ADC channels through the readout slot.
+- Missing or null `resonator.ext.time_of_fly` starts the trigger offset at 0 us. A valid time of flight is a finite real number >= 0, with booleans excluded. The trigger offset starts at `time_of_fly - 0.1` us, including negative results. Invalid stored time of flight leaves the trigger offset required and blank.
+- The ADC window starts at 1.5 us. Extend it when the arrival time plus pulse duration exceeds this window.
 
-Readout always starts as a fresh inline pulse-readout, even when a calibrated readout slot exists. Its const waveform is inline, not a named library waveform. Reset and Init pulse are not exposed in this Form; the core retains both fields.
+Alias, path, or parameter-source lookup failures appear as errors. Other missing required calibration leaves the form Invalid. Initial values remain editable; calibration changes require writeback.
+
+## Module slots
+
+The readout slot uses the captured resonator as its parameter source. Its initial gain is 1.0, with frequency, ADC window, and trigger offset set as described above. The form exposes only readout; Reset and Init pulse are hidden.
 
 ## Typical writeback
 
-Proposes the detected signal-arrival time in us at captured resonator.ext.time_of_fly. The writeback service resolves the destination on the analysis capture, not current focus. No module or waveform writeback.
+Analysis proposes the detected arrival time in us for `$resonator.ext.time_of_fly`. The destination is the resonator captured for that analysis, even if the current selection changes. Writeback updates only this parameter; module and waveform definitions stay unchanged.
 
 ## Recommended
 
-Analysis defaults: threshold 'ratio'=0.1 (the offset is the latest time before the peak where the magnitude is still below 10% of maximum), 'smooth' sigma=1.0, plot-fit on. Use a wide readout window so the full pulse arrival is captured; raise 'smooth' if the trace is noisy and the offset jitters, lower 'ratio' if it triggers too early on baseline ripple.
+Analysis starts with `ratio=0.1`, `smooth=1.0`, and Plot fit enabled. The offset is the latest time before the peak where the magnitude remains below 10% of the maximum. If every pre-peak sample is at or above the threshold, analysis returns the first sample time. Check the trace before accepting this result as the arrival time.
+
+Use a wide readout window to capture the full pulse arrival. Increase `smooth`, the Gaussian width in samples, if noise makes the offset jitter. Lower `ratio` if baseline ripple triggers the estimate too early.

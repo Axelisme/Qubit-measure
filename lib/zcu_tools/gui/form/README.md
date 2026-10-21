@@ -1,12 +1,14 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-20，model-list indexed editing
+**Last updated:** 2026-10-21
 
-`FormState.describe(path, env)` 直接從 model 宣告與目前 input 回傳 `FormDescription`，不產生 JSON Schema。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path，不攜帶 descendants。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
+**讀者：** framework-dev。前端中立的 Form 輸入、查詢、驗證與草稿契約。
 
-`FormFieldDescription.can_expand` 表示目前結構可到達 model，不保證展開後 children 非空。普通 model 與選中且帶 fields 的 option 為 true；whole leaf、停用 nullable、no-match 與不帶 fields 的 option 為 false。判斷不執行 child hooks，也不建立 child metadata。固定欄位排除、動態宣告與 wrapper 攤平仍在實際展開時決定 children。
+`FormState.describe(path, env)` 從 model 宣告與目前 input 回傳 `FormDescription`。Root path 是 `()`，其他位置用 model-field tuple。`target` 是指定欄位的 metadata，root 則為 None；`children` 只列下一層 metadata。每個 child 保留完整 path；descendants 在展開該層時查詢。選中選項只有一個非 nullable、沒有 options 的普通 model wrapper 時，children 攤平一層，但 wrapper 的完整 path 仍可查詢。
 
-`selection_fixed` 只表示 annotation 在本層允許一個非 null 選項分支，不凍結內部 choices。None 代表啟停，不算另一個分支；nullable 單分支在啟用與停用時都保持 selection_fixed=true。`fixed`／`fixed_value` 表示 leaf 或完整 option value 由宣告固定。固定外層 model 仍可有可切換的內層分支，此時 selection_fixed 為 true、fixed 為 false。兩種固定都不依當次 env 的選項數推定。Core cfg 自有的單值 Literal 仍算固定值，宣告唯讀不改 annotation 的值域。
+`FormFieldDescription.can_expand` 表示目前結構可到達 model；實際展開時才確定 children 是否為空。普通 model 與選中且帶 fields 的 option 為 true；whole leaf、停用 nullable、no-match 與不帶 fields 的 option 為 false。Child hooks 與 metadata 在展開該層時才執行與建立。固定欄位排除、動態宣告與 wrapper 攤平仍在實際展開時決定 children。
+
+`selection_fixed` 表示 annotation 在本層允許一個非 null 選項分支，內部 choices 仍可切換。None 代表啟停，不算另一個分支；nullable 單分支在啟用與停用時都保持 selection_fixed=true。`fixed`／`fixed_value` 表示 leaf 或完整 option value 由宣告固定。固定外層 model 仍可有可切換的內層分支，此時 selection_fixed 為 true、fixed 為 false。兩種固定都不依當次 env 的選項數推定。Core cfg 自有的單值 Literal 仍算固定值，宣告唯讀不改 annotation 的值域。
 
 `Display(readonly=True)` 由 Form core 強制執行。寫入與目前值相同則通過，不同則以帶路徑及目前值的 readonly rejection 拒絕。Qt、MCP 與 RPC 共用這項規則，完整父層替換與批次寫入也不能繞過唯讀子欄位。唯讀只作用於被宣告欄位的子樹，不固定祖先選擇。
 
@@ -14,7 +16,7 @@ Description 的 options 只列 detached value、label 與 command name／label�
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel 初值與宣告者的 converter 可使用這個入口。
 
-FormModel 的實例只承載普通值。類別上的 defaults、choices、options 與 converters 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 recursive restore，不擁有 Engine revision 或提交 policy。
+FormModel 的實例承載普通值。類別上的 defaults、choices、options 與 converters 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags。FormState 擁有 draft/base、batch write、branch switch、結果、差異與 recursive restore。宿主持有 Engine revision 與提交 policy。
 
 Expression 只用於 int、float、complex 與 str 文字欄位，只有顯式 `{"expr": str}` 求值。Literal、Enum、bool、宣告 choices 的 leaf 與 library key 沒有 expression 能力。Describe 回 `expression=False`，result 拒絕 envelope 且不求值，restore 保留 raw 交一般驗證。文字與選項混合的 union 沒有對應控制項，describe、求值與 restore 會 raise 帶欄位路徑的 ValueError。Editor 只看 description 的 expression flag。普通字串包含 `$` 前綴仍為 literal。求值共用 evaluate_scalar_expr，再遵守 Pydantic 約束；missing／unbound alias 指名失敗，不以預設值代替。Input 與 restore 保留 expression 原文。
 

@@ -1,5 +1,7 @@
 # Mux qubit recipes
 
+**Readers:** operator, agent. Run the seven mux qubit recipes, save results and review calibration proposals.
+
 These seven recipes measure selected qubits with simultaneous mux readout, save
 raw data and fits, and ask before applying calibration updates.
 
@@ -224,7 +226,7 @@ requires a fringe fit, finite source carrier, finite actual detune and finite
 fitted fringe rate. Its value is source carrier + actual detune - fitted fringe
 rate. Unavailable actual detune omits that correction but can leave a usable T2*
 result. Check the phase-wrap convention in the
-[Ramsey guide](../v2/mux/t2ramsey/guide.md#configuration-and-timing) before
+[Ramsey guide](../v2/mux/t2ramsey/guide.md#measurement-and-analysis) before
 accepting a correction. Follow the [review procedure](#save-review-and-apply).
 
 ## mux_t2echo

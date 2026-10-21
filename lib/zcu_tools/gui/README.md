@@ -1,6 +1,8 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-20，destructive confirmation inputs、分析 project app owner 與 point-local alias／Inspect 草稿來源
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。共用 GUI 層、app 邊界與生命週期速查。
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -8,7 +10,7 @@ own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 
 ## Source catalogs (`catalog_loader.py`)
 
-`SourceCatalogLoader[CatalogT]` 共用 bounded prepare/load、namespace inventory、preserved/fixed source 與 restart 契約。App 注入零參數 typed builder，負責 catalog validation 和發布；loader 不認識 measure Registry 或具體 workflow。SourcePackage、PreparedCatalogReload 與 CatalogReloadError 位於同一 shared owner。Measure 保留原 loader 簽名的 registration adapter，workflows 以 typed callable/form/panel pairing 取代舊 import。Import 並非任意 Python 副作用交易；fixed-source integrity 失敗要求重啟。App 仍擁有 active admission、draft recovery 與呈現政策（ADR-0067）。
+`SourceCatalogLoader[CatalogT]` 共用 bounded prepare/load、namespace inventory、preserved/fixed source 與 restart 契約。App 注入零參數 typed builder，負責 catalog validation 和發布；loader 不認識 measure Registry 或具體 workflow。SourcePackage、PreparedCatalogReload 與 CatalogReloadError 位於同一 shared owner。Measure 使用 registration adapter，workflows 使用 typed callable/form/panel pairing。Import 並非任意 Python 副作用交易；fixed-source integrity 失敗要求重啟。App 仍擁有 active admission、draft recovery 與呈現政策（ADR-0067）。
 
 ## Owner-loop execution (`session/adapters/`)
 
@@ -98,7 +100,7 @@ controller error與traceback。
 
 `gui.form_adapter` 集中 core cfg／持久 Spec 的生成與轉換。FieldMeta 的呈現資訊、合併的 None／keys／Inline 選項與屏蔽欄位政策都由生成器處理。Library 寫入直接提交 ModuleSpec／WaveformSpec，保留 child key，不先展開 runtime cfg。表單 expression 使用固定 env，Library 保存求得的數字。
 
-Complex 表示轉換直接使用 `core.complex_codec`。Measure 的來源 provenance 與 precondition 型別由 `app/measure/services/form_contracts.py` 擁有，remote 錯誤轉譯由 `app/measure/remote/form_errors.py` 擁有。舊 cfg、widgets/cfg 與 experiment.cfg_editing 不再提供編輯入口。
+Complex 表示轉換直接使用 `core.complex_codec`。Measure 的來源 provenance 與 precondition 型別由 `app/measure/services/form_contracts.py` 擁有，remote 錯誤轉譯由 `app/measure/remote/form_errors.py` 擁有。編輯入口由 `gui.form`、`gui.form_adapter` 與 `widgets/form` 提供。
 
 ## Process Runtime (`runtime.py`)
 

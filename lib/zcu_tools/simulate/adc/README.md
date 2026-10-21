@@ -1,6 +1,8 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-21, intracavity interval moments
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
 `cavity_fields` returns complex vacuum-start fields in fixed joint-state order,
 without population mixing or receiver calibration. `cavity_field_average`

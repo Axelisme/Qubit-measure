@@ -19,7 +19,7 @@ basis:
 
 使用者先確認：「但我覺得目前的路線可行：預先計算成檔案，模擬時載入並插值。」之後補充：「認同，通常模擬yaml參數在一輪使用中不怎麼會變。」最後要求整理「離線GPU平行建庫，模擬時插值演化，分段模擬以及快取等」。
 
-當時CPU prototype已提供數值與速度證據，GPU平行建庫則是下一條路線，不是已完成能力。決策由[模擬環境ADR](../adr/draft/simulation-environments.md#離線演化表與模擬時重用)擁有。本文保存比較、使用者修正與留下的問題，不授權恢復已暫停的研究或正式實作。
+當時CPU prototype已提供數值與速度證據，GPU平行建庫則是下一條路線，不是已完成能力。決策由[模擬環境ADR](../adr/draft/simulation-environments.md#分段引擎與重算式重播)擁有。本文保存比較、使用者修正與留下的問題，不授權恢復已暫停的研究或正式實作。
 
 ## 問題
 
@@ -82,7 +82,7 @@ basis:
 
 ## 依據
 
-- 現行方向與引用原話：[模擬環境ADR](../adr/draft/simulation-environments.md#離線演化表與模擬時重用)。
+- 現行方向與引用原話：[模擬環境ADR](../adr/draft/simulation-environments.md#分段引擎與重算式重播)。
 - 研究產物包括：task spec、離線表細節、本輪交接，以及單路 phase／amplitude、frequency 平台、完整 spectroscopy 原始 JSON、GPU CZ、CPU／GPU batch 比較等報告。它們都是本機工作檔，沒有入庫；本文的數字已寫在正文。
 
 這些研究產物沒有隨 repo commit 保存。交接須另保留來源、JSON、NPZ及既有manifest。最新完整spectroscopy輪次尚未補專屬manifest；上述數字依原始JSON／log，不宣稱已有完整封存。本文的commit與外部版本見frontmatter，沒有新增第三方效能結論。

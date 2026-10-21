@@ -82,5 +82,7 @@ validation 是成品邊界的**顯式動作**，不是型別的隱性負擔。
 pyright 0、ruff clean。新增 `test_validate.py`（20 個：結構完整/缺 key/LiteralSpec/型別 widen-reject/
 choices/None-on-ref/ref 遞迴）。live MCP：lookback/twotone tab 新建 cfg + run 過 validate。
 
+2026-10-21 註：上段是當時的驗證紀錄，測試數字不代表現況。現行 GUI 案例位於 [`tests/gui/app/measure/`](../../../tests/gui/app/measure/)、[`tests/gui/app/fluxdep/`](../../../tests/gui/app/fluxdep/) 與 [`tests/gui/app/dispersive/`](../../../tests/gui/app/dispersive/)；`tests/experiment/v2_gui/` 是已刪除的歷史位置。
+
 與 [[0009]]（spec/value fluent、lock_literal）、[[0010]]（value 樹完整 + None 表空）相關。
 第二階段（validate 擴動態檢查、痛點 2 的「有更好 default 值的 helper」）為 backlog。

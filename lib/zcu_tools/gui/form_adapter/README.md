@@ -1,6 +1,8 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-20，局部欄位排序
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。Core cfg 與持久 Spec 的表單推導與轉換契約。
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -16,10 +18,10 @@
 
 `AliasName` 的 devices 選項包含 core 欄位的靜態字串預設，空字串顯示為 None。Description 與驗證共用同一份 choices。缺 alias 時 input 保持缺席，有 core 預設就用該預設，無預設的 required 欄位仍 Invalid。綁定 alias 照舊帶入裝置名，其他未列出的值仍被拒絕。
 
-生成器擁有兩條翻譯政策，host 與 `gui.form` 不重做：
+生成器集中處理兩條翻譯政策，host 與 `gui.form` 使用轉換結果：
 
 - `FieldMeta` 的 label、unit、decimals、description、group、readonly 與 element_label 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。唯讀不把欄位改成單值 Literal，原有數值型別與精度保留。Sweep 的 decimals 傳到 start／stop、center／span 與 step float 欄位，不套外層 model 或 n。
-- 生成 module 欄位時，選填的 `desc` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，原 description 被丟棄，所以編輯後會變回預設。Readout 的必填通道照常可編輯；Pulse cfg 不保存 `ro_ch`、`mux_*`、`mask` 或 `outsel`。範本 seed 屏蔽欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。目前沒有露出覆寫機制。
+- 生成 module 欄位時，選填的 `desc` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，原 description 被丟棄，所以編輯後會變回預設。Readout 的必填通道照常可編輯；Pulse cfg 不保存 `ro_ch`、`mux_*`、`mask` 或 `outsel`。範本 seed 屏蔽欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。屏蔽政策由生成器固定。
 
 生成的 `options(env)` 宣告可留空欄位的 None、依持久 Spec family 篩選的 captured library keys，以及每個可編輯 Inline kind。只有結構 tag 的 kind 不列為 Inline。對明確預設為 None 的 nullable module，生成器補入停用值，讓選單顯示 None 而非空白。只允許 None、卻沒有 None 預設的 required 欄位不自動停用。通用 Form 的 static defaults 仍省略 None，不影響 validator 推導值。所有 key input 使用 `{"kind": "ref", "name": key}`，inline 使用 `{"kind": "inline", "module": content}`，可留空時也接受 null。Options 的 value 只帶 key 或所選 kind 的 tag。fields 指向該 kind 的 wrapper 子表單，describe 所選欄位才列 children，不重複固定 tag。Ref 選項不帶 fields，也不顯示 entry 內容。切換由 `_converters.py` 集中處理，依 [ADR-0079](../../../../docs/adr/0079-form-field-transitions.md#共用-inline-政策) 共用同名同型別的 raw 繼承。
 
@@ -77,7 +79,7 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 
 ## 固定元素宣告
 
-`FixedElements(list_path, name_field, participants_path)` 指定 root-relative typed paths 與元素的 str 名稱欄位。手寫表單繼承 `FixedElementsForm`，以 `fixed_elements` tuple 列出宣告；生成器接受 `Form(..., fixed_elements=(... ,))`。Fresh `default_input` 先呼叫 Core，再檢查宣告與捕捉名稱唯一性。重名錯誤列出名稱及原始 indices。這個共用能力集中名稱與 participants 政策，Core、widgets 和各 host 不再各自維護。
+`FixedElements(list_path, name_field, participants_path)` 指定 root-relative typed paths 與元素的 str 名稱欄位。手寫表單繼承 `FixedElementsForm`，以 `fixed_elements` tuple 列出宣告；生成器接受 `Form(..., fixed_elements=(... ,))`。Fresh `default_input` 先呼叫 Core，再檢查宣告與捕捉名稱唯一性。重名錯誤列出名稱及原始 indices。這個共用能力集中名稱與 participants 政策，Core、widgets 和各 host 使用同一份政策。
 
 `FixedElements(list_path)` 省略 name 與 participants，使用固定槽位模式。它只固定目前 active inline 清單的長度，label 與其他欄位都可編輯。相同長度的值交換不被拒絕，因此它不保證 component 身份，也不提供 ElementIdentity。宣告可穿過 nested ref／inline 的 canonical typed path，例如 `("modules", "readout", "module", "tones")`。合法 ref／inline 切換仍可進行，新 active 清單建立新的長度邊界。增刪或把 active 清單改成非 list 以 FormInputRejected 原子拒絕，還原與 Reset 不受這項 mutation 檢查。
 
@@ -144,7 +146,7 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 
 ## Logical 操作
 
-`KeyRef`、`ModuleRef`、`ModuleInline` 與 `ModuleInput` 從本 package import，不再由 form core export。`KeyRef.name` 以通用 `InputPolicy` 宣告 literal input。它不要求 captured key 存在，持久 Spec 保存 child key 的政策不變。`ModuleRef.check_sources` 承接 core module 的 captured source admission。
+`KeyRef`、`ModuleRef`、`ModuleInline` 與 `ModuleInput` 從本 package import。`KeyRef.name` 以通用 `InputPolicy` 宣告 literal input。它不要求 captured key 存在，持久 Spec 保存 child key 的政策不變。`ModuleRef.check_sources` 承接 core module 的 captured source admission。
 
 生成器在 core cfg、Spec 與手寫 `ModuleInputField.annotation` 附上 `ModuleSelector` metadata。它記錄 wrapper 名稱、inline/ref families 與 module/waveform namespace，沒有 env 或 mutable state。Logical paths 只略過這些生成 wrapper，真實名為 `module` 的欄位保留。Canonical Form/widget paths 與持久 JSON 不變。
 
@@ -156,9 +158,9 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 
 ## 依賴方向
 
-本 package 依賴 `cfg_model`、`program`、`resources`、`gui.form` 與 `gui.session.parameters`。它不 import `gui.app`、widgets、remote、experiment、mcp、Qt 或 `zcu_lab`；`.importlinter` 的 `form-adapter-no-host` contract 與 C16 執行這條邊界。
+本 package 依賴 `cfg_model`、`program`、`resources`、`gui.form` 與 `gui.session.parameters`。Host、widgets、remote、experiment、MCP、Qt 與 lab 組合位於上層；`.importlinter` 的 `form-adapter-no-host` contract 與 C16 檢查依賴方向。
 
-`gui.form` 是通用 Pydantic 輸入核心，不認得 core cfg 推導。推導與 module materialization 放在本 package，不放回 `gui.form`。
+`gui.form` 提供通用 Pydantic 輸入核心。本 package 擁有 core cfg 推導與 module materialization。
 
 設計背景見 [ADR-0073 measure 表單推導](../../../../docs/adr/0073-measure-form-derivation.md) 與 [`gui/form` README](../form/README.md)。
 

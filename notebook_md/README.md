@@ -1,5 +1,7 @@
 # Notebook 用途入口
 
+**讀者：** operator、lab-author。依分析或電路設計用途選擇 Notebook 與支援介面文件。
+
 `notebook_md/` 收錄 Jupytext Markdown 格式的 Notebook。Notebook 記錄輸入、探索步驟與結果解讀；支援程式的 README 說明可呼叫的介面和限制。
 
 - [`single_qubit.md`](single_qubit.md) 已改為 FTF 公開 acquisition 範例，示範共用 GUI／Notebook environment、gen2 charge drive、R1 readout、decimated acquisition 與 round 間 A 單位 DC bias 修改。它不連硬體，不依賴尚未交付的單顆 preset。範例直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，並明示 [`zcu_lab/simulation_envs/FTF/`](../zcu_lab/simulation_envs/FTF/README.md) 的工作副本 YAML 路徑。GUI 使用該目錄的 `startup.py`。

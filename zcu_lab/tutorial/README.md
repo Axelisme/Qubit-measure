@@ -1,5 +1,7 @@
 # zcu_lab 擴充教學
 
+**讀者：** lab-author、agent。依序新增 component、建立 entry、註冊實驗與 MCP recipe。
+
 這份教學寫給會 Python 與 pydantic、要擴充 `zcu_lab` 的使用者。你會新增 component、用 startup 建立 entry、註冊實驗與表單，再接上 MCP recipe，不需要讀 `lib/` 原始碼。先完成前一篇的註冊與資料準備，再往下操作。FTF kickstart 不安裝模擬環境，範例值也不代表已完成校準或可以安全 Run。
 
 ## 閱讀順序
