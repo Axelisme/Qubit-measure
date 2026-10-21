@@ -159,7 +159,7 @@ class CavityAverageCache:
         """
         if not np.isfinite([start_ns, end_ns]).all() or end_ns <= start_ns:
             raise ValueError("cavity average interval must be finite and positive")
-        initial = _initial_field(initial_field)
+        initial = _initial_field(initial_field, model.cavity_count)
         _validate_origin(initial_time_ns, start_ns)
         if any(p.envelope is not None for p in pulses) or not (
             pulses or np.any(initial)
