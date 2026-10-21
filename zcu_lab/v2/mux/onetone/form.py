@@ -16,8 +16,10 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
     Start with all tones selected and 101 offsets from -1 to 1 MHz. If the group
     names qubits, invalid pairings raise at Open/Reset. Groups without qubits
     still support resonator bring-up. Add five ringup times using the smallest
-    group kappa to the original scalar trigger offset and extend the pulse to
-    cover the unchanged ADC window. Invalid member kappa rejects Open/Reset.
+    set group kappa to the original scalar trigger offset and extend the pulse
+    to cover the unchanged ADC window. Absent/null kappas add no wait; when all
+    are unset, trig_offset equals the source time-of-flight offset. Invalid set
+    member kappa rejects Open/Reset.
     """
     # Check declared qubit/resonator pairs before choosing readout defaults.
     validate_mux_bindings(ctx.parameters)
