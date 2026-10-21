@@ -157,6 +157,59 @@ def test_deferred_getter_keeps_its_round_and_does_not_advance_mean_stream(mux):
         repeat.devices.close_all_devices()
 
 
+@pytest.mark.parametrize("mux_gen, channels", [(1, (4, 1)), (7, (9, 8))])
+def test_one_environment_acquires_mux_then_pulse_without_reconfiguration(
+    mux_gen, channels
+):
+    numeric = settings().with_telemetry(enabled=False)
+    configured = parse_ftf(mux_document(channels))
+    assert configured.readout.mux is not None
+    numeric = numeric.model_copy(
+        update={
+            "readout": configured.readout.model_copy(
+                update={
+                    "mux": configured.readout.mux.model_copy(update={"gen_ch": mux_gen})
+                }
+            )
+        }
+    )
+    env = ftf(numeric, min_round_duration_s=0)
+    try:
+        mux = MuxReadoutCfg(
+            gen_ch=mux_gen,
+            nqz=1,
+            mixer_freq=6000,
+            length=0.020,
+            ro_length=0.026,
+            tones=[
+                MuxReadoutTone(ro_ch=ch, freq=6000 + 80 * i, gain=0.1)
+                for i, ch in enumerate(channels)
+            ],
+        )
+        pulse = PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=0,
+            nqz=1,
+            freq=6000,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.020),
+            ro_length=0.026,
+        )
+        for module, expected_channels in ((mux, channels), (pulse, (0,))):
+            prog = ModularProgramV2(
+                env.soccfg, ProgramV2Cfg(reps=2), modules=[module.build("readout")]
+            )
+            result = prog.acquire(env.soc, progress=False)
+            assert tuple(prog.ro_chs) == expected_channels
+            assert len(result) == len(expected_channels)
+            assert all(np.isfinite(iq).all() for iq in result)
+            shots = raw_shots(prog)
+            assert all(iq.shape == (2, 1, 2) for iq in shots)
+            assert any(np.any(iq != 0) for iq in shots)
+    finally:
+        env.devices.close_all_devices()
+
+
 @pytest.mark.parametrize("channels", [(4, 1), (1,)])
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_yaml_mux_program_produces_each_tones_raw_shots(channels, mode):

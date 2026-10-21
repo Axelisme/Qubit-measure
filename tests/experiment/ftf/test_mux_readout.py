@@ -88,6 +88,18 @@ def test_mux_planner_rejects_unbound_receiver_and_different_pulse_start():
         )
 
 
+def test_one_program_cannot_mix_pulse_and_mux_readout_generators():
+    pulse = template()
+    mux = mux_template()
+    mixed = replace(
+        mux,
+        events=(*pulse.events, *mux.events),
+        readouts=(*pulse.readouts, *mux.readouts),
+    )
+    with pytest.raises(ValueError, match=r"readout generators.*0.*1"):
+        ftf_module.plan_template(settings(), snapshot(), mixed, readout=configuration())
+
+
 class MixedEngine(Engine):
     """Supply a nontrivial joint mixture without performing evolution."""
 
