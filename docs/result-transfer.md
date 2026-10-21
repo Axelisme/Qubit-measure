@@ -1,7 +1,9 @@
 # 結果傳輸：首次 GUI 設定，之後 CLI
 
-這是唯一的結果傳輸入口。底層使用固定版 rclone，取代已移除的
-`upload_result.py`、`download_result.py`，不需要自行安裝 rclone 或 Google Python SDK。
+**讀者：** operator、agent。設定雲端位置，並從 CLI 上傳或下載結果。
+入口使用專案準備的固定版 rclone。
+
+**Last updated:** 2026-10-21
 
 ## 第一次在桌面設定
 
@@ -40,12 +42,10 @@ Windows、macOS、Linux 使用相同的 Python 入口與命令，不需要 shell
 對既有資料夾上下載通常選 `scope=drive`；只下載可用 `drive.readonly`。
 `drive.file` 不能瀏覽所有既有檔案；一般個人登入的 `service_account_file` 留空。
 參考 [rclone Drive OAuth 設定](https://rclone.org/drive/#making-your-own-client-id)。
-此實例尚未完成真實 Google 同意畫面與 Drive 傳輸驗收。
 
-Setup 只用來授權及選位置，不會複製／移動／刪除雲端資料；
-官方介面的 Upload、Transfer、Delete 等資料寫入功能在 setup 中會被拒絕。
-不要按 Copy here 來保存位置，請回終端機按 Enter。
-官方 GUI 沒有匯出預設位置的按鈕，所以需要這一步明確確認。
+Setup 的用途是授權及選位置。它會拒絕官方介面的 Upload、Transfer、Delete 等資料寫入請求，保留雲端資料原樣。
+選好資料夾後，回終端機按 Enter 保存位置。Copy here 是傳輸操作，setup 會拒絕該請求。
+官方 GUI 的瀏覽位置透過這一步確認後才保存。
 設定未完成或取消時，既有的已保存位置會保留；帳號連線的修改則由 rclone 即時保存。
 
 ## 日常從 CLI 上傳／下載
@@ -75,7 +75,7 @@ uv run --directory . --no-sync -- python scripts/transfer_results.py --local-roo
 GUI 關閉、主機重新開機後仍可使用。OAuth token 由 rclone 在需要時更新；
 帳號授權被撤銷時，CLI 會報錯，需要回桌面重新設定／授權，不會自行開瀏覽器。
 
-雲端父資料夾在同一使用者的不同 checkout 間共用。不保存前一次 checkout 的絕對本地路徑。
+帳號憑證在同一使用者的不同 checkout 間共用；每個 checkout 各自保存雲端父資料夾。
 每次明填本地根目錄。上例在 repo root 執行，以 `$PWD/result` 指向當前 checkout；
 要用另一個本地父資料夾，也在子命令前提供 `--local-root`：
 
@@ -121,15 +121,14 @@ Rclone 的傳輸輸出直接送到終端機，可由 Bash 正常重導向。
 
 上下傳皆使用 rclone **copy**，一次命令處理所有指定 entry（以 `--filter` 選取，`*.lock` 排除），帶 `--update --fast-list --checkers 16`，並放寬 Google Drive 的請求間隔（`--drive-pacer-min-sleep 10ms --drive-pacer-burst 200`，遇速率限制 rclone 會自動退避重試）；`-j` 預設 8 個平行傳輸。每個複製、更新或略過的檔案都會逐行印出（`-v`）；在終端機執行時另有 rclone 即時進度畫面（`--progress`，含列舉中、傳輸中的檔案與速率），非終端機（例如 agent）則每 10 秒印一行摘要：
 
-- 複製新檔、更新來源較新的檔案；不建立空資料夾（程式寫檔時會自行建立目錄）。
-- 保留目的地較新的同名檔案，以及目的地獨有的檔案。
-- 不傳輸 `*.lock`，不刪除目的地多出的檔案，也不刪除來源。
+- 複製新檔，更新來源較新的檔案，寫入檔案時建立所需目錄。空資料夾會略過。
+- 保留目的地較新的同名檔案、目的地獨有的檔案，以及全部來源檔案。
+- 排除 `*.lock` 檔案與資料夾。
 
-目前不提供 prune／sync 刪除選項。這不是雙向衝突合併；
-相同時間的差異另依 rclone 的大小及 backend checksum 規則判斷，
-不保證與舊腳本單純修改時間比較逐項等價。
-中斷後可重跑命令重新比較，不承諾所有 backend 都支援單一檔案斷點續傳。
-避免不同進程同時傳輸同一批檔案；目的地較新時保留不等於並行寫入鎖。
+CLI 僅提供 copy，來源與目的地各自保留檔案，雙向傳輸時也逐方向比較。
+相同時間的差異依 rclone 的大小及 backend checksum 規則判斷。
+中斷後可重跑命令重新比較，單一檔案的續傳能力依 backend 而定。
+同一批檔案一次只交給一個進程傳輸。比較檔案時間只決定複製或略過，並行寫入仍可能互相覆蓋。
 
 ## 重新設定與憑證保存
 
@@ -148,29 +147,5 @@ Rclone 的傳輸輸出直接送到終端機，可由 Bash 正常重導向。
 Google 帳號的第三方應用程式管理可撤銷授權；只移除本地 remote 不等於撤銷 Google 授權。
 如需隔離帳號或工作流程，可在子命令前提供 `--config-dir`、`--settings-dir` 與 `--cache-dir` 的絕對路徑。
 
-## 工具準備與維護
-
-```bash
-# 只安裝／驗證工具，不啟動 GUI
-uv run --directory . --no-sync -- python scripts/transfer_results.py prepare
-```
-
-固定 **rclone v1.75.2**，內含 **Web GUI 1.1.11**。
-支援 Windows／macOS／Linux 的 x86-64、ARM64；不需要管理員權限或系統 PATH 的 rclone。
-從官方 GitHub release 下載，核對 repo 固定的六平台 SHA-256；
-重開會核對快取 archive 與 executable，損壞時拒絕執行或由已驗證 archive 修復 executable。
-需先有專案的 uv/Python 環境，不另外要求 Node 或 Google Python SDK。
-
-Setup 的 GUI、原生 API 與設定 bridge 都只綁本機 `127.0.0.1` 動態 port，
-檢查 API 認證及 HTML readiness 後才開啟瀏覽器。
-沒有自製前端；bridge 只觀察官方 GUI 成功的資料夾讀取，並轉送帳號設定請求。
-以請求順序排除過期的資料夾載入，保存前再確認一次選定路徑可讀。
-`--no-browser setup` 會印出私有 session 連結，它含本次登入資訊，不要貼到聊天或日誌。
-
-首次下載需能連線 GitHub release 資產目的地；OAuth 與傳輸另外需要 Google 服務。
-升版需一起更新 `lib/zcu_tools/utils/result_transfer/rclone.py` 的版本與 checksum，
-並重新驗證官方 GUI 的連線／資料夾列舉 API 與 CLI 行為，不自動升級固定版本。
-
-目前完成 Linux x86-64 的官方 GUI 選位置→保存→關閉→純 CLI 雙向 copy、dry-run、
-中文與空白路徑、更新／排除規則、取消保存、錯誤碼與來源預檢驗證。
-Windows／macOS／ARM64 實機、真實 Google OAuth 與 Drive 傳輸尚未驗證。
+工具版本、校驗方式、setup bridge 與升版驗證見
+[結果傳輸模組維護說明](../lib/zcu_tools/utils/result_transfer/README.md#工具準備與維護)。
