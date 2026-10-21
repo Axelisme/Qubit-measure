@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-21, bounded flat-average ownership
+**Last updated:** 2026-10-22, joint-Fock validation limits
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -205,3 +205,38 @@ Gaussian arrays as `round_statistics`, and retains no noisy results or identitie
 The public `round_statistics` still validates arbitrary inputs by building a plan
 for that call. FTF retains plans with noiseless preparations; no RNG draws or
 deferred raw materialization move into preparation.
+
+## Joint-Fock validation limits
+
+The independent [evolution joint-Fock prototype](../evolution/README.md#joint-fock-prototype)
+does not feed ADC or change Engine's flat/shaped routes. One two-cavity FTF
+parameter set was evaluated over 25 resonator carriers, 51 qubit carriers and
+two preparations, for 2,550 Pe values. Each resonator carrier starts from
+physical vacuum, with a finite 1-us nominal-pi branch, 1.5-us cavity prefill,
+and a 4-us weak square probe with locally reset carrier phase. The analytic
+two-state path uses sampled-pointer Poisson tail <=1e-3 plus one excitation
+and CSR RK4 steps <=1 ns. It selected N2 for 17 rows and N3 for eight rows.
+
+The six specified Pe comparisons passed their individual 4,096-shot standard
+deviations, with maximum error 0.00547735 sigma. Six qubit-line centres at three
+specified resonator carriers passed the saved Run's residual-scaled standard
+errors, with maximum displacement 0.0587280 SE. These are local gates, not new
+bounds on the remaining rows. The complete candidate map's fitted cavity-centre
+differences from the saved reference are -0.00000809 MHz for ground,
+-0.00014071 MHz for nominal-pi, and -0.00013262 MHz for their difference.
+Cavity-centre differences are diagnostics without an acceptance gate.
+
+One warmed public-entry call took 173.867 s wall and 171.883 s CPU on one
+P-core with single-threaded BLAS. This includes cutoff selection, preparation,
+probe propagation and output density diagnostics. It excludes imports, data
+reads, synthetic warmup, serialization, fitting and plotting. The historical
+129.426-s estimate extrapolates three rows, so this is not a paired speedup.
+
+Numeric-preparation diagnostics retaining [0,2] and the lowest four levels both
+fail with nonfinite RK4 density during prefill at the same research parameters.
+Four-level validation is therefore incomplete. No population clipping, density
+repair or solver substitution is applied. The sampled coherent cutoff rule is
+not a complete-density error bound, and fixed RK4 does not guarantee positivity
+for arbitrary inputs. Numeric preparation also changes the cutoff scan to
+include the initial vacuum, so comparison with analytic preparation would not
+isolate dynamic-level truncation error even after that failure is resolved.
