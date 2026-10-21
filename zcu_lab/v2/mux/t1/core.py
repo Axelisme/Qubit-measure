@@ -161,7 +161,6 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_liveplot import draw_mux_magnitudes
 from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
@@ -305,7 +304,7 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         reset/readout and averaging controls; it is validated without mutation.
         Join waits for the longest pi branch, including its pulse delays, before
         the shared wait. Return requested times (P,), original tone indices (K,)
-        and averaged complex IQ (K,P), with individual and combined live plots.
+        and averaged complex IQ (K,P), with one live figure per tone.
         Cancelled scans retain acquired averages and leave unwritten IQ as NaN.
         context supplies offline or hardware handles, plots and a stop signal;
         check cancel_signal.raise_if_error() before reporting success.
@@ -320,10 +319,13 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
             tones=[cfg.modules.readout.tones[i] for i in indices]
         )
 
-        # 2. Show each decay and a combined view on the requested delay axis.
+        # 2. Show each decay in its own figure on the requested delay axis.
         viewers = [
             context.plots.liveplot_1d(
-                f"measurement_{i}", "Requested delay (us)", "Magnitude (a.u.)"
+                f"measurement_{i}",
+                "Requested delay (us)",
+                "Magnitude (a.u.)",
+                title=f"{i}: {cfg.tones[i].name}",
             )
             for i in indices
         ]
@@ -331,13 +333,6 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         def update(data: NDArray[np.complex128]) -> None:
             for row, viewer in enumerate(viewers):
                 viewer.update(times, np.abs(data[:, row]))
-            draw_mux_magnitudes(
-                context.plots,
-                np.broadcast_to(times, data.T.shape),
-                data.T,
-                [f"{index}: {cfg.tones[index].name}" for index in indices],
-                "Requested delay (us)",
-            )
 
         # 3. Compile each delay once; all pi pulses start together after reset.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)

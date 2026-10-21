@@ -41,6 +41,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
+from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
 from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
 
 # ------------------------------------------------------------
@@ -366,7 +367,10 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             relax_delay=cfg.relax_delay,
         )
 
-        signals_buffer = SignalBuffer((2, cfg.shots))
+        signals_buffer = SignalBuffer(
+            (2, cfg.shots),
+            on_update=lambda data: draw_ge_scatter(context.plots, "measurement", data),
+        )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
                 modules = step.cfg.modules
@@ -391,6 +395,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                     step.set_stop()
                     break
                 signals_buffer[step].set(raw_shots_to_signal(program))
+        signals_buffer.trigger_update(flush=True)
         signals = signals_buffer.array
 
         # Keep acquisition order; physical G/E mapping belongs to analysis.
@@ -415,8 +420,9 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         centers, width, model populations and empirical prepared-label assignment
         fidelity, which includes preparation mixing and is not pure-state readout
         fidelity. Poor histogram fit quality makes model populations and post
-        population correction unreliable. Publish the
-        distribution fit to plots as figure_name. cfg=None is supported.
+        population correction unreliable. Publish raw g/e IQ scatter to plots
+        as figure_name, including on numerical failure. Histogram fitting stays
+        internal. cfg=None is supported.
 
         Rotation/classification, histogram fitting, fitted population/center
         validation and fidelity calculations wrap ValueError, RuntimeError,
@@ -428,6 +434,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
         if options.backend not in ("pca", "center"):
             raise ValueError(f"Unknown backend: {options.backend}")
+        if figure_name in plots:
+            raise ValueError(f"Figure already exists: {figure_name}")
+        draw_ge_scatter(
+            plots, figure_name, signals, labels=("g preparation", "e preparation")
+        )
         fidelity, init_pops, fit = singleshot_ge_analysis(
             signals,
             angle=options.angle,
@@ -437,8 +448,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                 align_t1=options.align_t1,
                 length_ratio=options.length_ratio,
             ),
-            plots=plots,
-            figure_name=figure_name,
+            plots=None,
         )
         analysis = GEAnalysis(
             initial_state=options.initial_state,

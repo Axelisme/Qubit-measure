@@ -81,10 +81,10 @@ Review cluster separation, quality, confusion diagnostics and destination.
 
 ## Results and saved sources
 
-Run draws a combined `measurement` figure.
-Each original tone has probe-off/on lines on the shot-index axis.
-Legends show the original index and source name in Participants order.
-Individual `measurement_i` figures remain available.
+Run draws one `measurement_i` IQ scatter per participant.
+Blue and red shots distinguish the g (probe-off) and e (probe-on) preparations.
+These preparations may contain state mixtures; they are not classified shots.
+Analyze draws each participant's raw IQ clouds in `fit_i`.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i` and the Post figure picker for `post_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.

@@ -91,7 +91,7 @@ def singleshot_ge_analysis(
     angle: float | None = None,
     backend: Literal["center", "pca"] = "pca",
     *,
-    plots: Plots,
+    plots: Plots | None = None,
     options: GEFitOptions | None = None,
     figure_name: str = "fit",
 ) -> tuple[float, NDArray[np.float64], GE_FitResult]:
@@ -112,8 +112,10 @@ def singleshot_ge_analysis(
         if given, use this angle for rotation, ignore backend
     backend : Literal["center", "pca"], default="pca"
         Method used for determining the rotation angle when angle is absent.
-    plots : Plots
-        Caller-owned operation; caller finishes/releases it after analysis.
+    plots : Plots or None, default=None
+        Caller-owned diagnostics operation; caller finishes/releases it after
+        analysis. None fits without drawing and returns the same calibration
+        and quality. Numerical failures retain the same GENumericalError.
     figure_name : str, default="fit"
         Unique diagnostic figure name within plots. Empty or conflicting names
         raise from Plots. Naming does not change fitting or quality results.

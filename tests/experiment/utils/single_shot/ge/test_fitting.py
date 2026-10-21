@@ -202,6 +202,37 @@ def test_ge_analysis_degenerate_iq_has_named_numerical_error_with_cause(selectio
         plots.release()
 
 
+@pytest.mark.parametrize(
+    "selection", [{"backend": "pca"}, {"backend": "center"}, {"angle": 0.0}]
+)
+def test_ge_analysis_fit_only_retains_calibration_and_quality(selection):
+    from scipy.special import ndtri
+
+    noise = 0.25 * ndtri((np.arange(1000) + 0.5) / 1000)
+    quadrature = 0.1j * np.sin(np.arange(1000))
+    signals = np.asarray([-1 + noise + quadrature, 1 + noise + quadrature])
+    options = GEFitOptions(length_ratio=0.0)
+    plots = Plots(NonPresentingHost())
+    try:
+        expected_fidelity, expected_populations, expected_fit = singleshot_ge_analysis(
+            signals, plots=plots, options=options, **selection
+        )
+        fidelity, populations, fit = singleshot_ge_analysis(
+            signals, plots=None, options=options, **selection
+        )
+
+        assert fidelity == expected_fidelity
+        np.testing.assert_array_equal(populations, expected_populations)
+        assert fit == expected_fit
+        assert fit["g_center"].real == pytest.approx(-1.0, abs=0.03)
+        assert fit["e_center"].real == pytest.approx(1.0, abs=0.03)
+        assert set(fit["fit_quality"]) == {"joint", "ground", "excited"}
+        assert len(plots["fit"].axes) == 4
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
 @pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
 def test_ge_analysis_propagates_original_matplotlib_error(monkeypatch, error_type):
     from scipy.special import ndtri
