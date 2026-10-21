@@ -23,7 +23,7 @@ from tests.gui.widgets.form._text_input import commit_text
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
 from ._synthetic import Context, PlanForm, TunablesForm, context_seed, sample_step
-from ._window_support import RpcRequest
+from ._window_support import RpcRequest, show_sample_section
 
 
 def test_fixed_element_form_rpc_keeps_indexes_in_descriptions_and_preview(
@@ -206,6 +206,7 @@ def test_form_inspection_rpc_uses_accepted_host_and_preserves_local_text(
     assert panel is not None and engine is not None
     state = panel.host.state
     state.write({("sample", "value"): {"expr": "3 * 11"}}, panel.host.env)
+    show_sample_section(window, "Tunables (live)")
     local = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(local, QLineEdit)
     commit_text(local, "-")
@@ -387,6 +388,7 @@ def test_describe_form_rpc_keeps_run_capture_and_local_errors_read_only(
     assert panel is not None and engine is not None
     host = panel.host
     host.state.write({("sample", "value"): {"expr": "general.ext.value * 2"}}, host.env)
+    show_sample_section(window, "Tunables (live)")
     local = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(local, QLineEdit)
     commit_text(local, "-")

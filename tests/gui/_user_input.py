@@ -499,6 +499,19 @@ class ComponentDriver:
             mouse_click(widget, point)
         QApplication.processEvents()
 
+    def expand_section(self, object_name: str) -> None:
+        """Click a visible folded section title; leave an expanded title open.
+
+        The caller must reveal the title first (including its ancestors and tab).
+        Missing, clipped, disabled or non-fold titles fail rather than bypass UI.
+        """
+        title = self.observe(object_name=object_name)
+        assert title.visible and title.enabled, object_name
+        assert title.text.startswith(("\u25b8 ", "\u25be ")), title
+        if title.text.startswith("\u25b8 "):
+            self.click(object_name=object_name)
+        assert self.observe(object_name=object_name).text.startswith("\u25be ")
+
     def click_tooltip(self, tooltip: str) -> None:
         """Click the unique on-screen control with this exact tooltip.
 

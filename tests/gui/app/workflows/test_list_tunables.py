@@ -144,7 +144,9 @@ def test_visible_list_apply_discard_and_native_error_correction(
     driver = list_driver
     driver.screenshot(tmp_path / "01-list-ready.png")
     # The picker identifies the original second element, not participant order.
+    driver.expand_section("form.fold.tones")
     driver.select_combo("1: B", object_name="form.picker.tones")
+    driver.expand_section("form.fold.tones.1")
     driver.enter_text(object_name="form.input.tones.1.gain", value="6")
     driver.click(object_name="workflow.tuning.apply")
     driver.screenshot(tmp_path / "02-list-applied.png")

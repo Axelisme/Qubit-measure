@@ -52,6 +52,7 @@ def test_registered_workflow_sweep_commands_and_prepare(
     coordinate_window: ComponentDriver, tmp_path: Path
 ):
     driver = coordinate_window
+    driver.expand_section("form.fold.sweep")
     driver.screenshot(tmp_path / "01-workflow-range.png")
     driver.invoke_context_action(
         object_name="form.fold.sweep", action="Switch to Center / Span"
@@ -65,6 +66,7 @@ def test_registered_workflow_sweep_commands_and_prepare(
     driver.screenshot(tmp_path / "03-workflow-expression.png")
     assert driver.observe(object_name="form.input.sweep.center").text == "3 + 4"
     driver.click("Prepare forms")
+    driver.expand_section("form.fold.sweep")
     driver.screenshot(tmp_path / "04-workflow-reset.png")
     start = next(
         item
@@ -78,6 +80,7 @@ def test_registered_workflow_restores_center_expression(
     restored_coordinate_window: ComponentDriver, tmp_path: Path
 ):
     driver = restored_coordinate_window
+    driver.expand_section("form.fold.sweep")
     driver.screenshot(tmp_path / "01-workflow-restored.png")
     assert driver.observe(object_name="form.input.sweep.center").text == "3 + 4"
     assert float(driver.observe(object_name="form.input.sweep.span").text) == -6.0
