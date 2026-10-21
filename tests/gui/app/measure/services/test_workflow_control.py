@@ -3,7 +3,7 @@
 from threading import Event
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from zcu_tools.experiment.workflows import Actor, Done, InitEnv, Next, Step, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.services import app_services
 from zcu_tools.gui.form import FormErrors, FormModel
@@ -18,6 +18,7 @@ class Values(FormModel):
 
 
 class Native(BaseModel):
+    model_config = ConfigDict(frozen=True, extra='forbid')
     value: int = 3
 
 

@@ -40,9 +40,9 @@ def test_controller_exposes_read_only_live_session(qapp, tmp_path):
     try:
         session = controller.session_services
         assert controller.session_services is session
-        assert session.context_control is controller.context_control()
-        assert session.device_control is controller.device_control()
-        assert session.progress_control is controller.progress_control()
+        assert session.context_control is controller.context_control
+        assert session.device_control is controller.device_control
+        assert session.progress_control is controller.progress_control
         with pytest.raises(AttributeError):
             controller.session_services = session
     finally:
