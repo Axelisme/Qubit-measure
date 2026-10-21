@@ -27,6 +27,8 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._qt_waits import qt_until
+from tests.gui.app.measure._workflow_ask import AskAuthor
+from tests.mcp.measure._support import make_client
 
 from ._form_rpc import FormRpc, ImmediateScheduler
 
@@ -110,6 +112,82 @@ def result(rpc, method, **params):
     reply = rpc.call(method, params)
     assert reply["ok"], reply
     return reply["result"]
+
+
+def test_mcp_status_question_envelope_and_answer_share_native_operation(
+    workflow_rpc, tmp_path
+):
+    controller, rpc = workflow_rpc
+    author = AskAuthor()
+    controller.workflow_control().configure((author.attachment(),))
+
+    def respond(method, params):
+        reply = rpc.call(method, params)
+        if not reply["ok"]:
+            from zcu_tools.gui.remote.errors import RemoteError
+
+            error = reply["error"]
+            raise RemoteError(
+                error["code"],
+                error["message"],
+                reason=error.get("reason"),
+                data=error.get("data"),
+            )
+        return reply["result"]
+
+    client = make_client(tmp_path, respond)
+    try:
+        tab = client.call("workflow_open", {"name": "asking"})["tab_id"]
+        started = client.call("workflow_start", {"tab_id": tab, "run_id": "ask-mcp"})
+        # A submitted finite segment reaches the native Ask and returns.
+        qt_until(
+            lambda: (
+                controller.workflow_control().status("ask-mcp") is not None
+                and controller.workflow_control().status("ask-mcp").lifecycle
+                == "paused"
+            ),
+            label="MCP Ask",
+        )
+        status = client.call("workflow_status", {"run_id": "ask-mcp"})
+        question = status.get("pending_question")
+        assert question is not None, "Status must expose the native question envelope"
+        assert question["question_type"] == "Choose"
+        assert question["question"] == {
+            "question_type": "authored evidence",
+            "point": 4,
+        }
+        assert question["answer_schema"]["properties"]["value"]["type"] == "integer"
+        from zcu_tools.mcp.measure.session import GuiRpcError
+
+        with pytest.raises(GuiRpcError) as invalid:
+            client.call(
+                "workflow_answer", {"run_id": "ask-mcp", "answer": {"value": "bad"}}
+            )
+        assert invalid.value.code == "invalid_params"
+        assert (
+            client.call("workflow_status", {"run_id": "ask-mcp"})["pending_question"]
+            == question
+        )
+        answered = client.call(
+            "workflow_answer", {"run_id": "ask-mcp", "answer": {"value": 29}}
+        )
+        assert answered["handle"] == started["handle"]
+        # Finite answer continuation ends in Done; terminal wait observes owner delivery.
+        qt_until(
+            lambda: not controller.workflow_control().tabs()[0].busy,
+            label="MCP answer delivery",
+        )
+        assert (
+            client.call("wait", {"op": started["handle"], "timeout": 0})["status"]
+            == "completed"
+        )
+        assert author.deliveries[0][0].value == 29
+        assert (
+            client.call("workflow_status", {"run_id": "ask-mcp"})["pending_question"]
+            is None
+        )
+    finally:
+        client.context.session.close()
 
 
 def test_workflow_open_edit_preview_and_close_share_headless_drafts(workflow_rpc):

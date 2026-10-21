@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import Event, get_ident
 
 import pytest
+from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.workflows import (
@@ -45,6 +46,63 @@ class Choose(Question[Decision]):
 @pytest.fixture
 def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
+
+
+def test_pending_answer_type_is_readonly_and_absent_outside_ask(rig: Rig) -> None:
+    received: list[Decision | None] = []
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        received.append((yield from env.ask(Choose(point=4))))
+        return Done()
+
+    rig.start(step)
+    assert rig.engine.pending_answer_type("run") is None
+    rig.engine.execute("run")
+    before = rig.kinds()
+    assert rig.engine.pending_answer_type("run") is Decision
+    assert (
+        rig.engine.pending_answer_type("run").model_json_schema()["properties"][
+            "value"
+        ]["type"]
+        == "integer"
+    )
+    assert received == []
+    assert rig.kinds() == before
+    with pytest.raises(RunMismatch):
+        rig.engine.pending_answer_type("stale")
+    rig.engine.answer("run", Decision(value=7))
+    assert rig.engine.pending_answer_type("run") is None
+
+
+def test_parse_answer_validates_without_resuming_and_preserves_retry(rig: Rig) -> None:
+    received: list[Decision | None] = []
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        received.append((yield from env.ask(Choose(point=4))))
+        return Done()
+
+    rig.start(step)
+    with pytest.raises(RuntimeError, match="pending"):
+        rig.engine.parse_answer("run", {"value": 7})
+    rig.engine.execute("run")
+    before = rig.kinds()
+    with pytest.raises(ValidationError, match="Choose"):
+        rig.engine.parse_answer("run", {"value": "not an integer"})
+    with pytest.raises(RunMismatch):
+        rig.engine.parse_answer("stale", {"value": 7})
+    answer = rig.engine.parse_answer("run", {"value": 7})
+    assert answer == Decision(value=7)
+    assert received == []
+    assert rig.engine.status().lifecycle == "paused"
+    assert rig.kinds() == before
+    rig.engine.answer("run", answer)
+    assert received == [Decision(value=7)]
+    with pytest.raises(RuntimeError, match="pending"):
+        rig.engine.parse_answer("run", {"value": 8})
 
 
 def test_answer_continues_same_invocation_with_original_capture(rig: Rig) -> None:

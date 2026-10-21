@@ -33,6 +33,7 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.gui.app.measure._workflow_ask import AskAuthor
 
 
 class Plan(FormModel):
@@ -377,6 +378,67 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     driver.click_tooltip("Close synthetic (1)")
     _shot(driver, tmp_path, "12-closed-after-stop")
     assert driver.tabs("synthetic (2)").captions == ("synthetic (2)",)
+    assert driver.observe("Start").enabled
+
+
+@pytest.fixture
+def asking_window(workflow_window):
+    ctrl, window = workflow_window
+    author = AskAuthor()
+    ctrl.workflow_control().configure((author.attachment(),))
+    return window
+
+
+def _ask_shot(driver: ComponentDriver, root: Path, step: str) -> None:
+    driver.screenshot(root / f"{step}.png")
+    (root / f"{step}.txt").write_text(repr(driver.visible()), encoding="utf-8")
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_ask_answer_or_cancel_preserves_visible_exchange(
+    asking_window, tmp_path, cancel
+):
+    driver = ComponentDriver(asking_window)
+    _ask_shot(driver, tmp_path, "ask-01-experiments")
+    driver.click(object_name="workflow.toggle")
+    _ask_shot(driver, tmp_path, "ask-02-workflows")
+    driver.select_menu("New Tab ▾", ("asking",))
+    _ask_shot(driver, tmp_path, "ask-03-opened")
+    driver.click("Start")
+    # Start submitted a finite segment that must yield its synthetic question.
+    qt_until(lambda: _status(driver, "paused"), label="Ask pause")
+    _ask_shot(driver, tmp_path, "ask-04-question")
+    assert driver.tabs("Ask").current == "Ask", "Pending question must select Ask"
+    assert "authored evidence" in driver.observe(object_name="workflow.ask").text
+    assert "value" in driver.observe(object_name="workflow.answer_schema").text
+    assert "等待回答" in driver.observe(object_name="workflow.badge").text
+    assert not driver.observe("Resume").enabled
+    driver.select_tab("Tunables")
+    _ask_shot(driver, tmp_path, "ask-05-tunables")
+    driver.click(object_name="workflow.toggle")
+    _ask_shot(driver, tmp_path, "ask-06-experiments")
+    driver.click(object_name="workflow.badge")
+    _ask_shot(driver, tmp_path, "ask-07-badge-question")
+    assert driver.tabs("Ask").current == "Ask"
+    if cancel:
+        driver.click("Stop")
+        # Stop scheduled the retained Ask drain; delivery ends this same run.
+        qt_until(lambda: _status(driver, "stopped"), label="Ask cancellation delivery")
+    else:
+        driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
+        _ask_shot(driver, tmp_path, "ask-08-answer-edited")
+        driver.click("Answer")
+        # Answer submitted a finite continuation ending in Done.
+        qt_until(lambda: _status(driver, "done"), label="answer terminal delivery")
+    _ask_shot(driver, tmp_path, "ask-09-retained-exchange")
+    assert "authored evidence" in driver.observe(object_name="workflow.ask").text
+    assert not driver.observe("Answer").enabled
+    assert not driver.observe(object_name="workflow.answer").enabled
+    if cancel:
+        assert driver.observe(object_name="workflow.answer_status").text == "提問已取消"
+    else:
+        assert driver.observe(object_name="workflow.answer").text == '{"value": 17}'
+        assert "已回答" in driver.observe(object_name="workflow.answer_status").text
     assert driver.observe("Start").enabled
 
 
