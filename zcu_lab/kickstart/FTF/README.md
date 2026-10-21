@@ -6,4 +6,5 @@
 在 repo root 執行 `uv run --directory . --no-sync -- python scripts/run_measure_gui.py --script zcu_lab/kickstart/FTF/startup.py`，或在 MCP 呼叫 `connect(launch="new", script="/absolute/path/to/zcu_lab/kickstart/FTF/startup.py")`。
 首次執行會按相鄰的 `entry-template.yaml` 建立 Q1、Q2、coupler、R1、R2、MG12 的 setup 參數，建立並選取 `initial` point，再保存該 point 的 aliases。
 FTF 已存在時只重開並選取 `initial`，不覆寫元件或 aliases；缺少該 point 或 entry 不完整時會報錯，已完成的操作不會自動回滾。
-範本不含 module library 或校準完成的量測參數，量測前須自行確認接線、填入有效參數並連線所需硬體。
+Kickstart 範本預填示意 qubit energies 與 R1／R2 頻率 7190／7080 MHz；模擬用 entry 範本則省略這些值，由 FTF YAML 定義物理模型。兩份範本都不含 module library 或校準完成的量測參數。使用 kickstart 量測前須自行確認接線、填入有效參數並連線所需硬體。
+R1／R2 wiring 保留 pulse ch 0／ro_ch 0。要對接 FTF 模擬樣板，請按[接線步驟](../../simulation_envs/FTF/field-guide.md#generatoradc-與-entry-接線對照)將 `MG12.module.readout` 指向 mux library 模組，使用 gen1 與 R1／R2 的 ADC1／ADC2，並核對 Open／Reset 後的輸入。

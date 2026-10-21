@@ -333,12 +333,24 @@ to zero. Delay does not move evolution's endpoint, pulse support or ADC grids.
 ADC owns the causal output shift, absolute carrier delay phase, per-resonator
 scattering phase and conjugation to microwave I+iQ before calibration/noise.
 
-`FTFReadoutConfig(kind, receivers)` is the detached author configuration below
-settings. `readout_configuration` is its settings adapter. The default
-`readout.drive.kind: pulse` retains the single ADC object; `kind: mux` requires
-an ADC receiver list with 1..8 unique `ro_ch` values. The builder selects a fixed
-mixmux8/PFBv4 compile profile only for mux. `plan_template` and
-`FTFSource` accept an explicit `readout=` override; private replay rejects an
+`FTFReadoutConfig(pulse, mux=None)` is the detached author configuration below
+settings. `pulse` is one `FTFReceiverConfig`; its generator and incident amplitude
+calibration remain in `settings.readout.drive`. The optional
+`FTFMuxReadoutConfig(gen_ch, input_per_gain, receivers)` binds a separate generator
+and 1..8 unique receivers, disjoint from the pulse ADC. `readout_configuration`
+adapts the single `readout.adc` object and optional `readout.mux` section without
+changing calibrations. Omitting mux disables only that path. The removed
+`readout.drive.kind` field raises a field-path error at YAML loading. Generator
+and receiver indices are nonnegative integers with no fixed upper bound.
+Active event generators select the pulse or mux path. Each readout window must
+use a receiver and generator from that path. `FTFSource.open_acquire` rejects
+pulse and mux generators anywhere in one request's templates and names both
+indices. Standalone `plan_template` rejects mixing within its template too.
+Separate acquires can select different paths in the same environment.
+The runtime sizes generator and ADC arrays from their maximum configured indices
+plus one, including both readout paths and all drive lines. It uses the mux mock
+profile only when mux is configured and includes both paths in the routes.
+`plan_template` and `FTFSource` accept an explicit `readout=` override; private replay rejects an
 override that cannot be reconstructed from captured settings. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
 Each batch contains every incident tone and that ADC's grids. Integrated flat,

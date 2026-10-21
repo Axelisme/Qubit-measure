@@ -8,6 +8,7 @@
 Caller 從 package root import 公開名稱。
 
 `Template.bindings` 提供任意具名替換，是模板佔位符唯一的綁定來源。
+`TemplateDef.placeholder_names()` 列出展開 seeds 所需的 binding 名稱，包含 nested format specs，不包含 escaped braces 或 Slot 的 consumer options。
 `TemplateDef` 建構只驗語法，展開時缺 binding 就報 `ValueError`。展開保留 escaped braces，不解析 alias、不讀寫檔案。
 
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。

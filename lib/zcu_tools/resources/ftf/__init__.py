@@ -57,6 +57,11 @@ class _UniqueKeyLoader(yaml.SafeLoader):
 def _wiring(config: FTFSettings) -> None:
     names = set(config.dc_bias.sources)
     channels = {config.readout.drive.gen_ch}
+    mux = config.readout.mux
+    if mux is not None:
+        if mux.gen_ch in channels:
+            raise ValueError("readout.mux.gen_ch: duplicate generator binding")
+        channels.add(mux.gen_ch)
     for name, control in config.drive_lines.items():
         if control.gen_ch in channels:
             raise ValueError(f"drive_lines.{name}.gen_ch: duplicate generator binding")
