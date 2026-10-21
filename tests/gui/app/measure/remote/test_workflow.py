@@ -51,6 +51,7 @@ def step(
     if state:
         return Done()
     env.plots.subplots("trend")
+
     def draw(figure: Figure) -> None:
         figure.axes[0].plot([0, 1], [plan.value, tun.value])
 
