@@ -333,7 +333,6 @@ snapshot = manager.get_all_info()
 
 - `lib/zcu_tools/device/base.py` — `BaseDeviceInfo`（Pydantic ConfigBase）, `BaseDevice`
 - `lib/zcu_tools/device/manager.py` — `DeviceManager`
-- `lib/zcu_tools/device/cancel_scope.py` — device setup ambient cancel scope
 - `lib/zcu_tools/device/__init__.py` — `DeviceInfo` Union TypeAlias 與對外匯出
 - `lib/zcu_tools/device/yoko.py` — `YOKOGS200Info`, `YOKOGS200`
 - `lib/zcu_tools/device/sgs100a.py` — `RohdeSchwarzSGS100AInfo`, `RohdeSchwarzSGS100A`

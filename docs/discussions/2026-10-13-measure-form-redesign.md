@@ -6,7 +6,7 @@ related:
   - docs/adr/0073-measure-form-derivation.md
   - docs/adr/retired/0012-cfgbuilder-value-layer-fluent-assembly.md
   - docs/adr/0065-cfg-editing.md
-  - docs/adr/draft/module-boundaries.md
+  - docs/adr/0072-module-boundaries.md
 basis:
   - main@bc244c544（討論起點，2026-10-12）
   - main@553ac802f（撰寫時）

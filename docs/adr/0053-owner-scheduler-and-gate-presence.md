@@ -9,9 +9,9 @@ status: accepted
 
 ## 背景（2026-07-12 決策時）
 
-本節記錄決策當時的狀態。現況：`OwnerScheduler`（`gui/session/ports.py`）與其 Qt adapter `QtOwnerScheduler`（`gui/session/adapters/qt_owner_scheduler.py`）已取代 `MainThreadDispatcher`；下列 session 與 measure services 不再繼承 QObject；`_ActiveLease` 已帶 `origin_kind`、`note`、`since`（`gui/session/hardware_gate.py`）。
+本節記錄決策當時的狀態。現況：`OwnerScheduler`（`gui/session/ports.py`）與其 Qt adapter `QtOwnerScheduler`（`gui/session/adapters/qt_owner_scheduler.py`，契約測試見 [`tests/gui/session/adapters/test_owner_scheduler.py`](../../tests/gui/session/adapters/test_owner_scheduler.py)）已取代 `MainThreadDispatcher`；下列 session 與 measure services 不再繼承 QObject；`_ActiveLease` 已帶 `origin_kind`、`note`、`since`（`gui/session/hardware_gate.py`）。
 
-當時 application core 對「Qt main thread」的殘餘依賴已收斂到少數機制點(`tests/gui/test_qt_import_boundary.py` 的 KNOWN_QT_DEBT 清單):core 真正需要的不是 Qt main thread,而是**「所有 State mutation 由單一 owner loop 序列執行」**這個不變式。具體殘餘:
+當時 application core 對「Qt main thread」的殘餘依賴已收斂到少數機制點（當時的 KNOWN_QT_DEBT 清單，對應測試已退休）:core 真正需要的不是 Qt main thread,而是**「所有 State mutation 由單一 owner loop 序列執行」**這個不變式。具體殘餘:
 
 - `gui/remote/rpc_endpoint.py` 的 `MainThreadDispatcher(QObject)`:IO thread → main thread 的 marshal 用 Qt queued Signal 實作。
 - `gui/session/adapters/qt_background.py`:`BackgroundExecutor` port([[0066]])的 Qt 實作以 QThread/QThreadPool 執行,「完成後回 owner thread」靠 Qt 事件圈。
