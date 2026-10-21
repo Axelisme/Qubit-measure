@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-20，mux raw／trace 共用完整 CTMC 路徑
+**Last updated:** 2026-10-21，n 維 flux 線路與多指數長尾
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -96,6 +96,16 @@ and parent virtual readout transitions. `spectra` owns shared scalar/array loss 
 both directions for equilibrium T1. Default Q models and caller-supplied Q,
 impedance and admittance options retain their existing definitions;
 `dephasing` owns both the shared Notebook pure-rate formulas and CP multilevel
-Markov dephasing. `lines.FilteredFlux` applies causal source delay/lowpass before
-loop mixing and retains passive tails within a shot. These tools do not read
-YAML, drivers or program Modules. `experiment.ftf` composes them for acquisition.
+Markov dephasing. These tools do not read YAML, drivers or program Modules.
+`experiment.ftf` composes them for acquisition.
+
+## Flux source lines
+
+`lines.FluxLine` maps one source to any positive number of reduced-flux loops.
+`FilteredFlux` requires a matching finite DC vector and applies each source's
+causal delay and scalar filter before loop mixing. `DistortionTerm` adds signed
+exponential weights and positive decay times to the base lowpass step response.
+A zero base time constant retains instantaneous feedthrough; an empty term tuple
+retains the original first-order response. Passive tails remain within a shot
+without a cutoff or cross-shot memory. The planner owns conversion of this
+continuous flux into evolution inputs; the line tool does not freeze readout.

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-20，完整 run_id 前綴輸出與保存路徑
+**Last updated:** 2026-10-21，共用中性 readout waveform planning
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 只提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
@@ -31,6 +31,13 @@ their existing moment calculation and RNG stream.
 fixed-coordinate joint circuits, explicit evolution/population conversion and the
 single-receiver ADC. It uses the same bundle and acquisition contracts, without
 adding GUI physics or exposing state labels to ordinary Run metadata.
+
+`readout_plan.py` owns shared template-to-ADC waveform conversion without
+settings or circuit physics. It partitions terminal readout and earlier cavity
+drives, detaches envelopes, deduplicates pulse/grid contents and converts
+common-origin carrier phases to pulse-local phases. Environment planners supply
+`ReadoutDrive` calibration and retain responsibility for receiver binding,
+physical models, evolution and sampling.
 
 ## 實驗介面與資料
 
