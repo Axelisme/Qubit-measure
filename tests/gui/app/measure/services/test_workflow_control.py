@@ -4,7 +4,7 @@ from threading import Event
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-from zcu_tools.experiment.workflows import Actor, Done, InitEnv, Next, Step, WorkflowEnv, workflow
+from zcu_tools.experiment.workflows import Actor, Done, InitEnv, Next, RunMismatch, Step, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.services import app_services
 from zcu_tools.gui.form import FormErrors, FormModel
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -103,7 +103,7 @@ def test_start_records_tunables_and_stale_run_targets_use_same_headless_owner(tm
     assert control.figures("first") == ()
     assert control.pending_question("first") is None
     assert control.answer("first", {"value": 3}) is None
-    with pytest.raises(Exception, match="stale|match|Unknown"):
+    with pytest.raises(RunMismatch):
         control.stop("not-this-run")
     assert control.close(tab)
 
@@ -161,7 +161,7 @@ def test_pause_resume_stop_share_one_operation_and_keep_tunables_binding(tmp_pat
     harness.complete_segment()
     assert control.status("pausing-run").lifecycle == "paused"
     assert not control.close(tab)
-    snapshot = control.apply_tunables("pausing-run", {("value",): 9}, actor=Actor("gui", "test"))
+    snapshot = control.apply_tunables("pausing-run", {("value",): 9}, actor=Actor("user", "test"))
     assert not isinstance(snapshot, FormErrors)
     assert snapshot.revision == 1
     assert control.resume("pausing-run") == token
