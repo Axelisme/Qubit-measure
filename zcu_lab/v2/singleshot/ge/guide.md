@@ -28,6 +28,16 @@ Writeback targets `$qubit.ext.readout_cal` for the source qubit when that source
 
 ## Recommended
 
-Set Initial State to the predominant state after reset/init and before the probe pi-pulse. This labels the two acquisitions; each can contain a mixture of states. Use a large 'shots' (~1e5) so the IQ histograms are well sampled; the default analysis method is 'pca'. Analysis also exposes histogram log scale, T1 alignment, and an optional shared length ratio. Run once the qubit pi-pulse and the readout are both calibrated. A clean two-cluster IQ scatter indicates good discrimination. Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
+Set Initial State to the predominant state after reset/init and before the probe pi-pulse.
+This labels the two acquisitions; each can contain a mixture of states.
+Use a large 'shots' (~1e5) so the IQ histograms are well sampled.
+The default analysis method is 'pca'.
+Analysis also exposes histogram log scale, T1 alignment, and an optional shared length ratio.
+Run once the qubit pi-pulse and the readout are both calibrated.
+Run and Analyze each show one IQ scatter, with blue g-preparation and red e-preparation shots.
+The live labels mean probe off/on; Analyze maps them using Initial State.
+Histogram fitting remains internal, so histogram log scale does not change the scatter.
+Two separated IQ clouds indicate readout separation.
+Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
 
 **Last updated:** 2026-10-21

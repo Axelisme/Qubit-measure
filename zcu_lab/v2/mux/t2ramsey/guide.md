@@ -71,10 +71,9 @@ sources retain their original pulses.
 
 ## Results and saved sources
 
-Run draws a combined `measurement` figure.
-All lines use the common requested-delay axis.
-Legends show the original index and source name in Participants order.
-Individual `measurement_i` figures remain available.
+Run draws one `measurement_i` figure per participant, without a shared overlay.
+Each figure uses the common requested-delay axis.
+The index `i` is the original tone position in the saved configuration.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.

@@ -53,10 +53,9 @@ Review the original tone position and captured destination before applying.
 
 ## Results and saved sources
 
-Run draws a combined `measurement` figure.
-Each line uses its own hardware-rounded scan coordinates, even when ranges differ.
-Legends show the original index and source name in Participants order.
-Individual `measurement_i` figures remain available.
+Run draws one `measurement_i` figure per participant, without a shared overlay.
+Each figure uses that tone's hardware-rounded scan coordinates.
+The index `i` is the original tone position in the saved configuration.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i`.
 Here `i` is the original tone position, so Q3/Q1 uses indices 2/0.
