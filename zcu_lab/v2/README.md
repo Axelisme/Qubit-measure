@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-21，mux 粗掃／命名更新
+**Last updated:** 2026-10-22，mux frequency preparation
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -87,13 +87,17 @@ Participants 非空、不重複，名稱必須存在。Runtime 按名稱順序�
 例如 Q3／Q1 對應 `[2, 0]`。GE raw、analysis 與 native persistence 同樣保留該順序。
 RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 group snapshot。
 
-`prepare_frequency_scan(cfg, soccfg=...)` 與 `prepare_amplitude_scan(cfg, soccfg=...)`
-各自按 participants 查出原始 indices，回傳 `_support.mux.MuxPulseScan`。
-其 `indices` 保留原始序號，`coordinates` 是各自硬體 grid 的 `(K,P)` 浮點陣列，
-`point_pulses` 是 `(P,K)` 固定 numeric pulse cfg，不展開 Cartesian product。
-這些入口只準備資料，不 acquire；各 public `run()` 直接寫出 common-start zip 排程。
-Frequency 座標沿 `sweep2array(..., "freq", ...)` 的硬體 start/span/step 量化；
-gain conversion 沿既有 `round_zcu_gain`。
+`prepare_frequency_scan(cfg, soccfg=...)` 按 participants 查出原始 indices，
+回傳 `mux.twotone_spectrum.MuxFreqScan`。
+其 `indices` 保留 participants 順序的原始序號，`coordinates` 是各 drive 硬體 grid
+上的 `(K,P)` float64 MHz 陣列。座標沿 `sweep2array(..., "freq", ...)` 的硬體
+start/span/step 量化。Frequency preparation 不建立逐點 pulse；
+`run()` 用各 tone 的 `sweep2param("point", tone.sweep)` 建立 symbolic drive。
+`prepare_amplitude_scan(cfg, soccfg=...)` 仍回傳 `_support.mux.MuxPulseScan`，
+包含原始 `indices`、量化 gain `coordinates (K,P)` 及
+固定 numeric `point_pulses (P,K)`。Gain conversion 沿既有 `round_zcu_gain`。
+這些入口只準備資料，不 acquire；各 public `run()` 直接寫出 common-start zip 排程，
+不展開 Cartesian product。
 
 `MuxSweepResult` 保存原始 `tone_indices`、各自量化的 `coordinates` 及平均 complex IQ `signals`。
 兩個矩陣都是 `(K,P)`。NaN IQ 表示未取得的 partial data，不表示成功。

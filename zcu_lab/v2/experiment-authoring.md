@@ -168,12 +168,14 @@ NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，�
 
 `mux.twotone_spectrum.MuxFreqExp` 與 `mux.amp_rabi.MuxAmpRabiExp` 提供無 GUI 的 `run(config, *, context)`。
 完整 `tones: list[MuxToneCfg]` 保留 readout 原始順序。Prepare 在 numeric 邊界一次選出 active indices，
-產生各 drive 自己的量化座標 `(K,P)` 與 nominal `point_pulses (P,K)`。Inactive tone 不限制掃描點數。
+產生各 drive 自己的量化座標 `(K,P)`。只有 Amp Rabi 另建 nominal `point_pulses (P,K)`。
+Inactive tone 不限制掃描點數。
 Freq 的座標是 MHz，Amp Rabi 是 normalized gain。不同範圍按 index zip，不展開 Cartesian product。
 
 兩個 run 各自在函式本體直接組成 reset、`Join(Pulse(...), ...)` 與 active
 `MuxReadout`，不經共用 acquisition helper 選擇或隱藏序列。
-可共用的 `MuxPulseScan` 準備工作只產生已驗證的座標與 pulses，不 acquire。
+Freq preparation 回傳 `MuxFreqScan`，只包含原始 indices 與量化座標。
+Amp Rabi preparation 仍回傳含逐點 pulses 的 `MuxPulseScan`。兩者都不 acquire。
 Freq 的各 drive 用 `sweep2param("point", tone.sweep)` 共用同一硬體 loop，只 compile 一次。
 Readout DAC tones 與 ADC 頻率保持固定。Freq 座標按硬體 start/span/step 量化，
 不逐點獨立 round。Amp Rabi 仍每點 compile 一次。

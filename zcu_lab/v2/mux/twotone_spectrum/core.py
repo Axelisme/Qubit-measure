@@ -71,6 +71,7 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar
 
@@ -89,7 +90,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg, sweep2param
 from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
 
-from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
+from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
@@ -125,33 +126,44 @@ class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
         return self
 
 
-def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxPulseScan:
-    """Prepare each selected qubit's frequency axis and per-point drive pulses.
+@dataclass(frozen=True)
+class MuxFreqScan:
+    """Selected tone positions and hardware-rounded frequency axes for a zip scan.
+
+    indices is a nonempty sequence of unique original tone positions, in
+    participant order. coordinates is float64 (K,P) in MHz, with K selected
+    tones and P sweep points. Each row uses that drive's hardware grid;
+    columns advance together by point index, not as a Cartesian product.
+    This record contains no pulses or acquisition state. Treat values as read-only.
+    """
+
+    indices: Sequence[int]
+    coordinates: NDArray[np.float64]
+
+
+def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqScan:
+    """Prepare each selected qubit's original index and rounded frequency axis.
 
     cfg is copied and validated. soccfg supplies the board frequency grids.
-    Returned coordinates use QICK's hardware start/span/step rounding in MHz,
-    in participant order. point_pulses keeps nominal per-point pulse copies.
-    Sweeps advance together by point index.
+    Return MuxFreqScan with original indices and float64 (K,P) MHz coordinates
+    in participant order. Coordinates use QICK's hardware start/span/step rounding.
+    Sweeps advance together by point index. No per-point pulses are prepared.
     Invalid settings raise ValueError; frequency conversion errors propagate.
     This function does not acquire data or change cfg.
     """
     cfg = MuxFreqCfg.model_validate(cfg.model_dump())
     indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     coordinates = []
-    points = [[] for _ in range(cfg.tones[indices[0]].sweep.expts)]
     for index in indices:
         tone = cfg.tones[index]
         drive = tone.drive
-        nominal = sweep2array(tone.sweep, "none")
         actual = sweep2array(
             tone.sweep,
             "freq",
             {"soccfg": soccfg, "gen_ch": drive.ch, "mixer_freq": drive.mixer_freq},
         )
         coordinates.append(actual)
-        for point, value in enumerate(nominal):
-            points[point].append(drive.with_updates(freq=float(value)))
-    return MuxPulseScan(indices, np.asarray(coordinates, dtype=np.float64), points)
+    return MuxFreqScan(indices, np.asarray(coordinates, dtype=np.float64))
 
 
 def _averaged_signal(
