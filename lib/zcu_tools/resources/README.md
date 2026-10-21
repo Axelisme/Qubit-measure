@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-20，Result-only entry 與獨立 Database 輸出位置
+**Last updated:** 2026-10-21，Single-fluxonium settings 與共用 simulation YAML/schema
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
@@ -13,6 +13,7 @@
   reconstruction. Numeric manifests stay opaque and are verified by their numeric
   owner. Normal waveform assets and data.h5
   policies do not change. This module does not import program or simulate.
+- [`single_fluxonium/`](single_fluxonium/README.md) reads immutable single-qubit YAML with microwave, fast-flux and single-cavity routes. `simulation_schema.py` and `yaml.py` share neutral physical records and safe YAML decoding with FTF.
 - [`ftf/`](ftf/README.md) 讀取 immutable FTF YAML，擁有具名欄位、units、limits、接線與 noise PSD 的 field-path 診斷，不依賴 simulate、device 或 program。
 - [`qubit_params.py`](qubit_params.py) 直接管理 result scope 的 typed `params.json` handoff。公開讀寫先重新讀取 JSON，寫入採原子替換；方法與 section 規則見 [qubit_params.md](qubit_params.md)。
 - [`sample_table/`](sample_table/README.md) 管理條目的只追加 JSONL 樣本歷史、CSV 匯出與 opt-in v2 欄位協定。
