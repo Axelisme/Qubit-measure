@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
+from string import Formatter
 from types import UnionType, new_class
 from typing import (
     Annotated,
@@ -29,7 +30,9 @@ from pydantic import BaseModel, JsonValue
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
     ConfigBase,
+    Expr,
     ModuleSpec,
+    Slot,
     Template,
     TemplateDef,
     WaveformSpec,
@@ -242,6 +245,33 @@ def library_entry_kind(spec_type: type[ConfigBase]) -> LibraryKind:
     raise TypeError(
         "Template must define a concrete persistent module or waveform Spec"
     )
+
+
+def template_placeholders(definition: TemplateDef) -> frozenset[str]:
+    """Return placeholder names required to expand a library template's seeds.
+
+    definition is an already validated persistent TemplateDef. Names come from
+    string seeds, Expr bodies and Slot paths, including nested format specs.
+    Escaped braces are literals and contribute no names. This reads no sources
+    and does not resolve aliases or modify the definition.
+    """
+    texts: list[str] = []
+    for seed in definition.seeds.values():
+        if isinstance(seed, Expr):
+            texts.append(seed.text)
+        elif isinstance(seed, Slot):
+            texts.append(seed.path)
+        elif isinstance(seed, str):
+            texts.append(seed)
+    names: set[str] = set()
+    formatter = Formatter()
+    while texts:
+        for _, name, spec, _ in formatter.parse(texts.pop()):
+            if name is not None:
+                names.add(name)
+            if spec:
+                texts.append(spec)
+    return frozenset(names)
 
 
 def new_library_entry(
