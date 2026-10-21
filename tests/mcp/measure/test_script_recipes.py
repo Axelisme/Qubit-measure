@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import Event
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from zcu_tools.core.script_protocol import (
     Answer,
     Ask,
@@ -31,7 +31,7 @@ class Report(BaseModel):
 
 
 class Choice(Answer):
-    proceed: bool
+    proceed: bool = Field(description="Continue with the captured evidence when true.")
 
 
 class Decision(Question[Choice]):
@@ -113,7 +113,7 @@ def test_pending_question_validates_before_resume_and_blocks_other_recipes(
     key = first.data["execution"]
     status = client.call("status", {"execution": key})
     assert status["status"] == "paused"
-    assert status["pending_question"] == {"evidence": "captured only"}
+    assert status["pending_question"]["question"] == {"evidence": "captured only"}
     assert (
         client.call("wait", {"execution": key, "timeout": 0}).data["status"] == "paused"
     )
@@ -318,9 +318,49 @@ def test_failed_host_work_closes_suspended_generator_before_terminal_reply(
             closed.set()
 
     host = RecipeHost(session=RecipeSession(), wait=wait)
-    client = make_client(tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host)
+    client = make_client(
+        tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host
+    )
     clients.append(client)
     result = client.call("failure", {"count": 1})
     assert result.data["outcome"]["status"] == "failed"
     assert result.data["error"]["message"] == "host work failed after drain"
     assert closed.is_set()
+
+
+def test_pending_question_exposes_answer_schema_without_overwriting_evidence(
+    tmp_path: Path, clients: list[MeasureClient]
+) -> None:
+    from zcu_tools.mcp.measure.recipe_api import RecipeGenerator, RecipeSession, recipe
+
+    class Evidence(Question[Choice]):
+        question_type: str
+        answer_schema: str
+
+    @recipe("schema", description="Expose the answer contract")
+    def synthetic(session: RecipeSession, inputs: Inputs) -> RecipeGenerator[Report]:
+        request = Ask(Evidence(question_type="authored type", answer_schema="authored evidence"))
+        yield request
+        assert request.delivery is not None
+        return Report(status="answered", count=int(request.delivery.proceed))
+
+    client = make_client(tmp_path, recipes=(synthetic,))
+    clients.append(client)
+    key = client.call("schema", {"count": 1}).data["execution"]
+    pending = client.call("status", {"execution": key})["pending_question"]
+    assert "answer_schema" in pending
+    assert pending["question_type"] == "Evidence"
+    assert pending["question"] == {
+        "question_type": "authored type", "answer_schema": "authored evidence"
+    }
+    schema = pending["answer_schema"]
+    assert schema["required"] == ["proceed"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["proceed"]["type"] == "boolean"
+    assert schema["properties"]["proceed"]["description"] == (
+        "Continue with the captured evidence when true."
+    )
+    reply = client.call("answer", {
+        "execution": key, "answer": {name: True for name in schema["required"]}
+    })
+    assert reply.data["outcome"]["report"] == {"status": "answered", "count": 1}

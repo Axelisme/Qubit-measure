@@ -370,3 +370,29 @@ def test_validate_answer_does_not_deliver_or_resume() -> None:
     assert driver.status == "paused"
     driver.answer(approval)
     assert driver.result is approval
+
+
+def test_pending_answer_type_is_read_only_and_clears_at_terminal() -> None:
+    from zcu_tools.core.script_protocol import Answer, Ask, Question
+    from zcu_tools.experiment.script_driver import ScriptDriver
+
+    class Approval(Answer):
+        accepted: bool
+
+    class Confirm(Question[Approval]):
+        evidence: str
+
+    request = Ask(Confirm(evidence="captured"))
+
+    def script() -> Generator[ScriptRequest, None, Approval | None]:
+        yield request
+        return request.delivery
+
+    driver = ScriptDriver(script())
+    assert driver.pending_answer_type() is None
+    driver.advance()
+    assert driver.pending_answer_type() is Approval
+    assert driver.status == "paused"
+    assert request.delivery is None
+    driver.answer(Approval(accepted=True))
+    assert driver.pending_answer_type() is None
