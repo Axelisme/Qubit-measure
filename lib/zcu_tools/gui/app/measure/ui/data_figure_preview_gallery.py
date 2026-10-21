@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import QEvent, QObject, QSize, Qt
 from qtpy.QtGui import QPixmap, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -59,10 +60,13 @@ from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.widgets import secondary_colour, set_foreground
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
+from .figure_pane_layout import MAX_TILED_FIGURES, FigurePaneLayout
+
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
+    from zcu_tools.plotting.figures import FigureCollection
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +107,10 @@ class _PreviewCard(QWidget):
         # Header
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        title = QLabel(f"<b>{display_name}</b>")
-        title.setTextFormat(Qt.TextFormat.RichText)
+        title = QLabel(display_name)
+        title.setTextFormat(Qt.TextFormat.PlainText)
         title.setObjectName(f"previewTitle_{source_key}")
+        self._title = title
         header.addWidget(title)
         header.addStretch()
         outer.addLayout(header)
@@ -131,6 +136,19 @@ class _PreviewCard(QWidget):
         # The error text names what failed; the empty text is a placeholder.
         make_label_selectable(self._error_label)
 
+        self._named_page = QWidget()
+        named_layout = QVBoxLayout(self._named_page)
+        named_layout.setContentsMargins(0, 0, 0, 0)
+        self._named_selector = QComboBox()
+        self._named_selector.setAccessibleName(f"{display_name} saved figure")
+        self._named_stack = FigurePaneLayout()
+        self._named_stack.addWidget(QLabel("No figure yet"))
+        self._named_selector.currentIndexChanged.connect(
+            lambda index: self._named_stack.setCurrentIndex(index + 1)
+        )
+        named_layout.addWidget(self._named_selector)
+        named_layout.addWidget(self._named_stack, stretch=1)
+        self._stack.addWidget(self._named_page)
         outer.addWidget(self._stack, stretch=1)
 
         # Presentation cache — original pixmap, never a Figure (S3).
@@ -178,6 +196,37 @@ class _PreviewCard(QWidget):
         layout.addWidget(label)
         self._stack.addWidget(page)
         return page, label
+
+    def show_named_figures(
+        self,
+        figures: FigureCollection,
+        render: Callable[[_PreviewCard, Figure], None],
+    ) -> None:
+        """Render a borrowed stage snapshot, retaining only pixmaps and UI names."""
+        selected = self._named_selector.currentText()
+        while self._named_stack.count() > 1:
+            child = self._named_stack.widget(self._named_stack.count() - 1)
+            if child is not None:
+                self._named_stack.removeWidget(child)
+                child.deleteLater()
+        self._named_selector.blockSignals(True)
+        try:
+            self._named_selector.clear()
+            for name, figure in figures.items():
+                card = _PreviewCard(f"{self._source_key}_member", name)
+                render(card, figure)
+                card._title.setVisible(len(figures) <= MAX_TILED_FIGURES)
+                self._named_stack.addWidget(card)
+                self._named_selector.addItem(name)
+            if selected in figures:
+                self._named_selector.setCurrentText(selected)
+        finally:
+            self._named_selector.blockSignals(False)
+        self._named_selector.setVisible(len(figures) > MAX_TILED_FIGURES)
+        self._named_stack.setCurrentIndex(self._named_selector.currentIndex() + 1)
+        self._named_stack.set_tiled(tiled=len(figures) <= MAX_TILED_FIGURES)
+        self.setMinimumHeight(360 if len(figures) > 2 else 260)
+        self._stack.setCurrentWidget(self._named_page)
 
     def show_empty(self) -> None:
         self._orig_pixmap = None
@@ -247,9 +296,24 @@ class _PreviewCard(QWidget):
         ):
             self.rescale_image_to_viewport()
 
+    def named_presentation_active(self) -> bool:
+        """Return whether this stage currently shows a named figure group."""
+        return self._stack.currentWidget() is self._named_page
+
     def current_state(self) -> str:
         """Return 'available' | 'empty' | 'unavailable' for test inspection."""
         cur = self._stack.currentWidget()
+        if cur is self._named_page:
+            cards = [
+                self._named_stack.widget(index)
+                for index in range(1, self._named_stack.count())
+            ]
+            if cards and all(
+                isinstance(card, _PreviewCard) and card.current_state() == "unavailable"
+                for card in cards
+            ):
+                return "unavailable"
+            return "available"
         if cur is self._image_page:
             return "available"
         if cur is self._empty_page:
@@ -267,6 +331,10 @@ class _PreviewCard(QWidget):
             return self._empty_label.text()
         if cur is self._error_page:
             return self._error_label.text()
+        if cur is self._named_page:
+            selected = self._named_stack.currentWidget()
+            if isinstance(selected, _PreviewCard):
+                return selected.current_text()
         return ""
 
     # -- aspect-fit inspection helpers (for tests) -------------------
@@ -483,7 +551,10 @@ class DataFigurePreviewGallery(QWidget):
             self._inner_layout.setColumnStretch(i, 0)
             self._inner_layout.setRowStretch(i, 0)
 
-        is_wide = self._is_wide()
+        named_groups = any(
+            card.named_presentation_active() for card in self._ordered_cards
+        )
+        is_wide = self._is_wide() and not named_groups
         n = len(self._ordered_cards)
         if n == 0:
             return
@@ -592,6 +663,28 @@ class DataFigurePreviewGallery(QWidget):
         # Deduplicate alias — count ordered cards.
         return len(self._ordered_cards)
 
+    def update_collections(
+        self,
+        run: FigureCollection | None,
+        analysis: FigureCollection | None = None,
+        post_analysis: FigureCollection | None = None,
+    ) -> None:
+        """Render named stage groups without moving canvases or retaining Figures.
+
+        Call on the Qt owner after update_figures has established fallback/error
+        states through the public pane reader. Each member's rendering failure
+        stays local. Selectors and raster widgets are presentation cache only.
+        """
+        for key, figures in (
+            ("run", run),
+            ("analysis", analysis),
+            ("post_analysis", post_analysis),
+        ):
+            card = self._cards.get(key)
+            if card is not None and figures:
+                card.show_named_figures(figures, self._render_card)
+        self.refresh_layout()
+
     # -- snapshot update ---------------------------------------------
 
     def update_figures(
@@ -635,12 +728,15 @@ class DataFigurePreviewGallery(QWidget):
         if fig is None:
             card.show_empty()
             return
+        self._render_card(card, fig)
+
+    def _render_card(self, card: _PreviewCard, fig: Figure) -> None:
         # Render via injected adapter (S3) — per-card isolated.
         try:
             png_bytes = self._renderer(fig)
         # tolerated: The injected renderer is an open callback; preserve per-card failure isolation.
         except Exception as exc:  # noqa: BLE001  # pragma: no cover - exercised via injected failure
-            logger.warning("preview render failed for %r: %s", key, exc, exc_info=True)
+            logger.warning("preview render failed: %s", exc, exc_info=True)
             card.show_unavailable(type(exc).__name__)
             return
         # Convert PNG bytes to pixmap
@@ -656,7 +752,7 @@ class DataFigurePreviewGallery(QWidget):
             card.show_image(pixmap)
         # tolerated: PNG decode/allocation and Qt presentation failures must stay local to this card.
         except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
-            logger.warning("preview pixmap failed for %r: %s", key, exc, exc_info=True)
+            logger.warning("preview pixmap failed: %s", exc, exc_info=True)
             card.show_unavailable(type(exc).__name__)
 
     # -- test helpers ------------------------------------------------
