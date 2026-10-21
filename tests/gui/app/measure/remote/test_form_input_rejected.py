@@ -59,8 +59,13 @@ class RefusalTone(ConfigBase):
     gain: float
 
 
+class EditableSlot(ConfigBase):
+    gain: float
+
+
 class RefusalCfg(SampleCfg):
     tones: list[RefusalTone]
+    slots: list[EditableSlot]
 
 
 class RefusalAdapter(SampleAdapter):
@@ -72,8 +77,9 @@ class RefusalAdapter(SampleAdapter):
             {
                 "sweep": Range.between(1, 2, expts=3),
                 "tones": [{"name": "A", "gain": 0.1}, {"name": "B", "gain": 0.2}],
+                "slots": [{"gain": 0.1}],
             },
-            fixed_elements=(FixedElements(("tones",)),),
+            fixed_elements=(FixedElements(("slots",)),),
         )
 
 
@@ -85,7 +91,7 @@ class RefusalAdapter(SampleAdapter):
             "renamed",
             {"form_path": ["tones", 0, "name"], "reason": "readonly", "current": "A"},
         ),
-        (["tones"], [], {"form_path": ["tones"]}),
+        (["slots"], [], {"form_path": ["slots"]}),
     ],
     ids=["readonly", "fixed-list"],
 )
@@ -111,8 +117,13 @@ def test_cfg_refusal_includes_usable_canonical_paths_without_partial_write(
         error = refused["error"]
         assert error["code"] == "invalid_params"
         assert error["reason"] == "form_input_rejected"
-        for key, expected in details.items():
-            assert error["data"][key] == expected
+        assert {
+            key: value
+            for key, value in error["data"].items()
+            if key not in {"editable_paths", "selection_paths"}
+        } == details
+        if path == ["slots"]:
+            assert "Fixed slot count changed" in error["message"]
         assert rpc.call("tab.get_cfg", {"tab_id": tab})["result"] == before
 
         editable = error["data"].get("editable_paths", [])
