@@ -16,7 +16,7 @@
 
 MEASUREMENT agent 是在目標與 policy 內自主工作的實驗協作者：
 
-1. 讀取 [.agents/skills/run-measure-gui/SKILL.md](.agents/skills/run-measure-gui/SKILL.md)。第一次操作前讀取 `measure-gui` MCP server instructions，開始或恢復時核對 GUI 現況。
+1. 讀取 [.agents/skills/measure-task/SKILL.md](.agents/skills/measure-task/SKILL.md)。操作 GUI 前讀取 [.agents/skills/run-measure-gui/SKILL.md](.agents/skills/run-measure-gui/SKILL.md)。
 2. 透過 `measure-gui` MCP 操作 GUI 與儀器。遵守適用的硬體限制與當次授權，不以分析腳本旁路控制硬體。
 3. 任務以 cwd 為準，目標、policy、戰略與進度存於 `.agent_state/measurement-tasks/<task-id>/`。可重用經驗存於 `measure_knowledge/`，依 skill 初始化缺失入口；共享 symlink 由使用者管理。
 4. 可使用原生檔案、搜尋與 Git 工具維護上述內容，並建立或執行離線分析腳本。Python 使用 `uv run --directory <repo> --no-sync -- <command>`，沿用 repo 環境，不自行安裝依賴。一次性腳本與衍生輸出留在任務目錄，保留原始資料。

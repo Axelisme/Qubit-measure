@@ -157,6 +157,30 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     assert child(view, QLabel, "form.value.delay").text() == "= 0.333"
 
 
+def test_committed_number_text_keeps_the_typed_digits(build: Build) -> None:
+    class PlainForm(FormModel):
+        plain: float = 2.0
+        count: int = 2
+
+    view, state = build(PlainForm, None)
+    plain = child(view, QLineEdit, "form.input.plain")
+    # An idle commit of "11" stores 11.0 but leaves "11" under the cursor, so
+    # typing on yields "115", not "11.05".
+    commit_text(plain, "11")
+    assert state.input.data["plain"] == 11.0
+    assert plain.text() == "11"
+    commit_text(plain, "115")
+    assert state.input.data["plain"] == 115.0
+    assert plain.text() == "115"
+    # A different external value still redraws the text.
+    state.write({("plain",): 4.0}, FormEnv())
+    assert plain.text() == "4.0"
+    count = child(view, QLineEdit, "form.input.count")
+    commit_text(count, "11")
+    assert state.input.data["count"] == 11
+    assert count.text() == "11"
+
+
 def test_one_value_literal_is_read_only_text_without_modes(build: Build) -> None:
     class LockForm(FormModel):
         reps: Literal[1000] = 1000
