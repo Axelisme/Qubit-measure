@@ -33,6 +33,33 @@ def test_seeds_expand_explicit_bindings_without_losing_literals() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("seeds", "expected"),
+    [
+        ({}, frozenset()),
+        ({"gain": 0.2, "ch": 2, "desc": "{{literal}}"}, frozenset()),
+        (
+            {
+                "freq": cfg_model.Expr("{drive}.freq + {sensor}.offset"),
+                "desc": "{{literal}} {drive!s:>{width}}",
+                "waveform": cfg_model.Slot(
+                    "{shape}.waveform",
+                    set={"desc": "{consumer_owned}"},
+                ),
+            },
+            frozenset({"drive", "sensor", "width", "shape"}),
+        ),
+    ],
+    ids=["empty", "literals", "expression-string-slot-and-format-spec"],
+)
+def test_placeholder_names_identify_bindings_expanded_by_the_template(
+    seeds: dict[str, cfg_model.TemplateSeed], expected: frozenset[str]
+) -> None:
+    definition = cfg_model.TemplateDef(cfg_model.PulseSpec, "Synthetic", seeds)
+
+    assert definition.placeholder_names() == expected
+
+
 @pytest.mark.parametrize("text", ["{drive.missing}", "{drive", "{}", "{drive[0]}"])
 def test_unknown_or_malformed_placeholders_fail_at_definition(text: str) -> None:
     with pytest.raises(ValueError, match="placeholder"):
