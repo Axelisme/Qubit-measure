@@ -10,7 +10,7 @@
 
 `v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬參數檔與 startup 範例，不提供離線建庫入口。
 
-`alias_presets/default.yaml` 定義 GUI 啟動時的 alias 預設列，格式使用 `zcu.aliases`。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。`load_alias_presets()` 重用 resources reader，讀取目錄內的具名表，不提前載入實驗 catalog。兩個 launcher 以 `alias_presets` 注入 app，格式錯誤或缺 default 直接中止啟動，改檔後需重開 GUI。底層 session 只收 default rows 作為未開 entry 的 memory 初值。開 entry 清空 alias，選 point 只載入該 point 的表，不回退 default。Inspect 編輯目前表的草稿，Apply 才保存至目前 point。模擬 startup 先建立 point，再用 `ctx.context.apply_alias_rows` 初始化並保存其表。框架不選裝置，也不從 cache 綁定 flux_dev。
+GUI 啟動時 alias 表是空的，沒有 preset 檔。Alias 只存在各 point 的 `aliases.yaml`：開 entry 清空 alias，選 point 載入該 point 的表；Inspect 編輯目前表的草稿，Apply 才保存至目前 point。要在啟動時有初值，由 startup 腳本先建立 point，再用 `ctx.context.apply_alias_rows` 初始化並保存其表（simulation_envs 與 kickstart 的腳本都這樣做）。框架不選裝置，也不從 cache 綁定 flux_dev。
 
 `templates.TEMPLATES` 是「新建 module／waveform」的持久範本來源。組合根以 `Registry(templates=TEMPLATES)` 注入一次；Library 新建直接讀 registry 的範本，不另建 catalog。`definitions.register_all` 註冊 adapters，並可用 `components` 傳入共用 ComponentRegistry。Reload 省略此 receiver，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 
