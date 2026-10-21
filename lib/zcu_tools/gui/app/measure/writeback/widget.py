@@ -258,6 +258,15 @@ class _WritebackRow(QFrame):
             self._outer.addWidget(self._proposed_table)
         self.set_narrow(narrow=False)
 
+    def add_note(self, note: str) -> None:
+        """Append the adapter note below the destination as plain text."""
+        label = QLabel(note)
+        label.setObjectName("writebackNote")
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        make_label_selectable(label)
+        label.setWordWrap(True)
+        self._outer.addWidget(label)
+
     def set_narrow(self, *, narrow: bool) -> None:
         # Move only target/action; value and path widgets keep their layouts.
         self._heading.removeWidget(self._cb)
@@ -562,6 +571,8 @@ class WritebackWidget(QWidget):
             proposed_table=proposed_table,
             actual_path=actual_path,
         )
+        if item.note is not None:
+            row.add_note(item.note)
         self._foregrounds.set(row.arrow, secondary_colour)
         row.setToolTip(item.description)
         return row
