@@ -39,7 +39,7 @@ Stop 保留已取得的點，尚未取得的 IQ 為 NaN。Analyze 拒絕部分�
 
 ## Analyze 與判讀
 
-在 Analysis 展開 Analysis parameters。Resonators (JSON) 欄位使用 JSON list 文字，例如 `["R2", "R1"]` 代表低頻凹陷叫 R2，高頻凹陷叫 R1。預設名稱來自該次 Run／Load capture 的 `$mux.resonators`，依其當時的 `freq` 排序。檢查這個順序是否符合接線；圖形本身不能證明 component 身分。名稱必須加雙引號，不能只填 `R2, R1`。無效 JSON、非 list、空值、重複或非字串名稱會拒絕 Analyze 並顯示原因，不會自動改成空 list。
+在 Analysis 展開 Analysis parameters。Resonators (JSON) 欄位使用 JSON list 文字，例如 `["R2", "R1"]` 代表低頻凹陷叫 R2，高頻凹陷叫 R1。預設名稱來自該次 Run／Load capture 的 `$mux.resonators`，依其當時的 `freq` 排序。任一 `freq` 為 null 時，預設改為可編輯的 `[]`，不猜名稱與凹陷的對應。先依頻率由低到高手填 resonator 名稱，再 Analyze。不必先補校準頻率或重跑。檢查這個順序是否符合接線；圖形本身不能證明 component 身分。名稱必須加雙引號，不能只填 `R2, R1`。無效 JSON、非 list、空值、重複或非字串名稱會拒絕 Analyze 並顯示原因，不會自動改成空 list。
 
 `min_separation` 是兩個選中凹陷間的最小 MHz 距離，必須大於 0。預設 1 MHz，對應 MHz 級 readout linewidth。寬凹陷附近有多個細小結構時可提高；兩個 resonator 靠近時需減小並增加取樣點數。
 

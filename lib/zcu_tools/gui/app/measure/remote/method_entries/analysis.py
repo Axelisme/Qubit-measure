@@ -35,7 +35,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Read the current scalar summary. Optional "
             "operation_id requires that operation's result and also returns complete "
-            "operation_state.",
+            "operation_state, including raw_data {run_id, saved}. Analysis output "
+            "saving does not imply raw data was saved.",
             (required_string("tab_id"), optional_integer("operation_id")),
             readonly=True,
         ),
@@ -60,7 +61,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Start analyzing the tab's run result via tab_analyze. Returns "
-            "operation_id, interactive, complete params and invalidated_on_success "
+            "operation_id, interactive, complete params, raw_data {run_id, saved} "
+            "and invalidated_on_success "
             "(analysis.writeback/post.result/post.writeback when previously present). "
             "Invalidation applies only on successful completion. Runs on a worker "
             "thread; the GUI returns a raw operation_id, which MCP exposes as a "
@@ -69,6 +71,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "analyze params (read current values with rpc_call on "
             "tab.get_analyze_params). Makes the tab busy while it runs; a "
             "concurrent save/edit returns precondition_failed until it settles. "
+            "Run completion does not save raw data; call tab.save_data explicitly. "
+            "Analysis does not save raw data either. "
             "Read the fit summary with rpc_call on tab.get_analyze_result. "
             "Optional run_operation_id requires that Run result before following "
             "the pane or starting; a replaced result returns result_superseded.",
