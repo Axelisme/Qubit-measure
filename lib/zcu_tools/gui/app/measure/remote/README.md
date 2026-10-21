@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -36,6 +36,33 @@ not declare MCP tools and does not own stdio transport.
 Shared transport primitives live in [`zcu_tools.gui.remote`](../../../remote/README.md): NDJSON framing,
 typed request/reply/error envelope, socket endpoint, owner-scheduler dispatch, and
 router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/wire.py).
+
+## Workflow namespace
+
+`workflow.open/close/start/status/form/describe_form/edit_form/tunables/pause/resume/stop/records/figures/figure/answer`
+call the same headless `WorkflowControlFacet` as Qt panes. Commands never switch
+GUI mode or select a tab. `tab_id` names an opened draft owner; `run_id` names a
+native run. Status without run_id lists catalog names and all opened tab
+snapshots. Start/Resume operation_id uses the existing measure operation owner;
+submission does not prove native acceptance. MCP exposes the same operation as
+an opaque handle for wait.
+
+Readonly methods allow observers, including batch previews. Mutations use the
+shared holder check and the owner's busy/Form/RUN admission. Preview and
+single-layer description use one owner candidate and fixed capture. The remote
+only encodes input, ordinary values/errors and metadata. Start omitted/null
+batches read shared drafts; explicit batches use fresh captured defaults. Apply
+with [] submits current tunables draft, not defaults.
+
+Native run mismatch and lifecycle errors preserve reason/data. Form paths keep
+form_path, Form refusal keeps form_input_rejected, and invalid Start/Apply
+returns form_errors with path/message rows. Unexpected producer failures retain
+controller_error. No retry or rollback follows an error or transport timeout.
+Figures and committed records remain readable after terminal delivery. Names
+and status do not render; figure returns png_b64 for validated MCP image delivery.
+Answer currently returns None until native Ask is integrated. Real answer
+execution belongs in the worker under the existing RUN lease and terminal
+operation delivery, not the RPC/UI owner thread.
 
 ## Predictor sources
 

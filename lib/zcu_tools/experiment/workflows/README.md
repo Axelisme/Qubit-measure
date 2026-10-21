@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。具名 workflow 的執行、控制與保存契約。
 
@@ -38,7 +38,7 @@ Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init�
 
 `WorkflowEnv.plots` 直接提供注入的 `Plots`，跨步驟與 retry 保留同一個繪圖 lifetime。`live` 接 `LiveUpdate` 回呼，收到 buffer 維度順序的 float64 axes tuple 與 complex128 samples，包含 partial NaN。回呼同步執行，不修改或保留借用的資料；workflow 用 typed handles 投影實數，或以 draw 任意繪圖、save 保存。Run 只綁定一個 buffer，保留回呼錯誤來源，不驗證繪圖策略。宿主在 producer 停止後 finish／release，Pause 不結束 Plots。回呼簽名目前是顧問代裁，待使用者審查。`assemble_rows`／`assemble_scalars` 把稀疏結果組成 detached 顯示陣列，保留缺值與 filled mask，不插值。
 
-獨立 GUI app 由 `zcu_tools.gui.app.workflows` 提供。`zcu_tools.gui.app.workflows` 擁有泛型 Window、App 組裝、forms 協調、source reload 與 input 保存。Window 使用同一份 SessionServices 的 runner／progress，組合根注入註冊清單、source loader 與 alias preset。核心與宿主不依賴具體 workflow 或 `Calibrated`，不反向 import `zcu_lab`。各 workflow 保留自己的 forms 與科學流程。這些組裝不改變核心的 device、run 或保存契約。
+Workflow 由 `gui.app.measure` 承載。`WorkflowControlFacet` 路由多個 headless tab owner，Qt pane 與 measure RPC 呼叫同一 facet。組合根注入註冊清單，owner 使用既有 SessionServices 的 runner／progress 與 RUN lease。核心與宿主不依賴具體 workflow 或 `Calibrated`，不反向 import `zcu_lab`。各 workflow 保留自己的 forms 與科學流程。這些組裝不改變核心的 device、run 或保存契約。宿主與 agent 入口見 [measure README](../../gui/app/measure/README.md) 及 [measure MCP](../../mcp/measure/README.md#workflow-tools)。
 
 `saved_run` 提供 typed manifest／iteration reader，由 caller 傳入 workflow 名稱與 point TypeAdapter。它只消費 structured committed summaries，指名缺失與 malformed source，不讀 journal 或從 leftover native 檔創造提交點。`export` 以 caller 的 native declaration 讀具名 trace，並對已準備好的 grouped payload 分別寫 merged native 與 Labber。Writer failure 保留各自 path／error，不操作 ledger 或修復 run identity。
 

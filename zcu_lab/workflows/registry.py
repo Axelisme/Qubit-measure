@@ -1,7 +1,10 @@
 """Lab workflow registrations consumed by the generic GUI host."""
 
 from zcu_tools.experiment.workflows.declaration import WorkflowRegistry
-from zcu_tools.gui.app.workflows.attachment import Attachment, WorkflowAttachment
+from zcu_tools.gui.app.measure.services.workflow_attachment import (
+    Attachment,
+    WorkflowAttachment,
+)
 
 from zcu_lab.workflows.coherence_fluxdep.form import CoherencePlanForm
 from zcu_lab.workflows.coherence_fluxdep.workflow import CoherencePlan

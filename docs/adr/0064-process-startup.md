@@ -56,6 +56,6 @@ SoC 由 caller 擁有，不假設通用 close 方法。Device 只有成功 regis
 
 ## 邊界與核實
 
-目前四個 standalone launcher（measure、workflows、fluxdep、dispersive）透過共用 runtime 啟動。`gui/runtime.py` 建立或取得 `QApplication`，呼叫 app assembly 與 lifecycle hooks，並在正常退出路徑停止 remote adapter。這只證明 standalone 入口的流程，不承諾嵌入既有 Qt host 時的 event loop 所有權，也不承諾 assembly、plotting 或 adapter 啟動途中失敗時完整清理。Runtime 不管理外部 agent session、Python profiles 或板端服務。
+目前三個 standalone launcher（measure、fluxdep、dispersive）透過共用 runtime 啟動。Workflow 由 measure 的同一組合根承載，見 [[0067]]。`gui/runtime.py` 建立或取得 `QApplication`，呼叫 app assembly 與 lifecycle hooks，並在正常退出路徑停止 remote adapter。這只證明 standalone 入口的流程，不承諾嵌入既有 Qt host 時的 event loop 所有權，也不承諾 assembly、plotting 或 adapter 啟動途中失敗時完整清理。Runtime 不管理外部 agent session、Python profiles 或板端服務。
 
 `GuiRuntimeSpec`、behavior hook、launch options 與 rendering 接線見 [`gui/README.md`](../../lib/zcu_tools/gui/README.md)。Measure 的公開 facets 與局部契約見 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)、[`startup_context.py`](../../lib/zcu_tools/gui/app/measure/startup_context.py) 及 [預設腳本](../../lib/zcu_tools/gui/app/measure/default_startup.py)。

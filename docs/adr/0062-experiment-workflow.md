@@ -22,7 +22,7 @@ Workflow 作者可在步驟開頭檢查所需的 soc、devices 或 context 並 f
 
 Generator 協作、recipe 的取消結果與 workflow 的 agent yield 見 [[0075]]。2026-10-21 使用者裁定 Engine 底層改用與 recipe 共用的 `Wait`／`Ask`／`Signal` 協定，現有 `RunEffect`、`DeviceEffect`、`WaitEffect` 與 `env.run`／`env.setup_device`／`env.wait_until` 成為協定上的糖；`Ask` 使 run 進入 paused 並掛上問題，answer 經 Resume 送回；內建 Signal（cancel、finish_early、pause、stop、tunables apply）由 Engine 在 yield 邊界處理，腳本第一版不讀 inbox。原話：「Engine底層應該也要用Ask/Wait模式，其他都是糖」。一 run 一 operation、Pause／Resume、tunables revision、records 與 journal 不變。已採用、待實作；推導見 [三角色協定](../discussions/2026-10-21-three-role-protocol.md)。
 
-同日裁定 workflow 的執行基底維持 helper：只有 workflow 使用的實驗在其目錄內加 `workflow_helper.py` 與 `core.py` 並列，放該實驗給 workflow 用的 acquisition helper，pulse sequence 允許與 core 重複定義；workflow 不經 adapter Form、core.run 或 adapter analysis，共用 cfg model、`signal2real`、fit kernel 與 result 型別，分析政策與接受門檻自持。原話：「sequence重複定義兩次沒有什麼不好的。core一次，旁邊的檔案，可能叫workflow_helper.py一次」；「不要每個實驗，workflow需要的實驗就好」。承載改由 measure-gui 嵌入 `WorkflowWindow`，見 [[0075]] 與 [Workflow 定位與承載](../discussions/2026-10-21-workflow-positioning-and-hosting.md)。
+同日裁定 workflow 的執行基底維持 helper：只有 workflow 使用的實驗在其目錄內加 `workflow_helper.py` 與 `core.py` 並列，放該實驗給 workflow 用的 acquisition helper，pulse sequence 允許與 core 重複定義；workflow 不經 adapter Form、core.run 或 adapter analysis，共用 cfg model、`signal2real`、fit kernel 與 result 型別，分析政策與接受門檻自持。原話：「sequence重複定義兩次沒有什麼不好的。core一次，旁邊的檔案，可能叫workflow_helper.py一次」；「不要每個實驗，workflow需要的實驗就好」。承載改由 measure-gui 的 headless workflow owner 與 Qt driving pane 提供，見 [[0075]] 與 [Workflow 定位與承載](../discussions/2026-10-21-workflow-positioning-and-hosting.md)。
 
 ## 表單 input 與 Engine 普通值
 
@@ -30,7 +30,7 @@ FormInput 保存 expression 原文；宿主捕捉求值環境，決定 Start、A
 
 持久 snapshot 的 plan 與 knobs 各存固定 FormInput data／selections JSON。啟動、source reload 與 RAM switching 共用 Core 的依名與形狀遞迴還原。新欄位用 defaults，無法還原的欄位或 selection 列 dropped 並顯示。還原不呼叫 converter 或 options hook。壞 JSON 或格式不符時顯錯並以 defaults 開啟，不備份。共用契約見 [[0079]]、[[0063]]。
 
-Workflow host 只有在 Engine 成功 publication 後才接受 input／base。失敗保留可修正的 draft，不以輸入已編輯推定 Engine 已接受。這避免 Engine 維護另一份 input 狀態，代價是 Engine journal 無法重建當時的 expression。Form／editor 的共用與宿主提交邊界見 [[0065]]，具體接線見 [workflows host](../../lib/zcu_tools/gui/app/workflows/README.md)。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入現行 ADR。
+Workflow host 只有在 Engine 成功 publication 後才接受 input／base。失敗保留可修正的 draft，不以輸入已編輯推定 Engine 已接受。這避免 Engine 維護另一份 input 狀態，代價是 Engine journal 無法重建當時的 expression。Form／editor 的共用與宿主提交邊界見 [[0065]]，具體接線見 [measure workflow host](../../lib/zcu_tools/gui/app/measure/README.md#workflow-hosting)。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入現行 ADR。
 
 使用者於 2026-10-18 裁定：「基本正確，但我認為不同比較不同，直接用就行了，也不用記錄。」選擇日誌格式時確認「甲乙都可以」。採完整快照保留更新者與 revision，不增加遞迴比對。List 隨完整 model 提交，不需要 native index path。Iteration record.json 的完整 tunables 格式不變，不增加舊 journal reader 或格式遷移。Form 的 typed path 編輯入口仍由宿主擁有，見 [[0079]]。依賴方向沿用 C8、C9、C18 與 form-core-no-ui-policy。
 
@@ -96,7 +96,7 @@ Framework 只提供 `env.plots` live plot 工具，不知道趨勢圖、具體 c
 
 使用者在 2026-10-12 更正：「1workflow框架不可以有calibrated認知或是overnight判斷，沒不用畫趨勢圖」與「我說的趨勢圖是workflow不知道趨勢圖，他只是準備可以liveplot的工具，讓workflow決定要畫什麼以及什麼時候更新」。這不是取消趨勢圖，而是將 live 繪圖的資料與更新責任交給 workflow。
 
-GUI presentation owner 在 `zcu_tools.gui.app.workflows.figures`，與 Window 固定。它只管理 native Plots 的生命週期與 PNG 呈現，不讀 records 或持有繪圖 cursor。Pause 保留 Plots，producer 返回與 terminal delivery 後才 finish，replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
+Measure 的 headless workflow owner 管理 native Plots 生命週期，Qt pane 顯示圖像，remote 使用共用 PNG renderer。它們不讀 records 來重畫科學趨勢，也不持有繪圖 cursor。Pause 保留 Plots，producer 返回與 terminal delivery 後才 finish，replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
 
 框架不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure、Engine 提交通知或 committed journal reader。Workflow 實作者若要保存 iter 內的圖，在自己的 workflow 程式內處理。使用者可自行從 record.json 或 native 資料重畫。
 
@@ -106,4 +106,4 @@ Journal writer 與 Engine 提交順序不變。Iteration 檔案保存依上節�
 
 一 run 一 handle 讓 Pause、Resume、tunables failure 與 worker failure 使用同一終局政策。代價是 paused run 保留本地 RUN lease，同程序的其他硬體 mutation 仍受 lease 阻擋。這不是從 artifact 還原的跨程序 resume，也不提供 hardware rollback。
 
-通用迭代與 journal 契約見 [workflows engine](../../lib/zcu_tools/experiment/workflows/README.md)。GUI run owner 與 tunables 提交見 [workflows host](../../lib/zcu_tools/gui/app/workflows/README.md)。具體定義與 T1 attachments 見 [使用者 workflows](../../zcu_lab/workflows/README.md)及 [GUI attachments](../../zcu_lab/workflows/forms.md)。
+通用迭代與 journal 契約見 [workflows engine](../../lib/zcu_tools/experiment/workflows/README.md)。GUI run owner 與 tunables 提交見 [measure workflow host](../../lib/zcu_tools/gui/app/measure/README.md#workflow-hosting)。具體定義與 T1 attachments 見 [使用者 workflows](../../zcu_lab/workflows/README.md)及 [GUI attachments](../../zcu_lab/workflows/forms.md)。

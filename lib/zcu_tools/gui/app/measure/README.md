@@ -84,6 +84,16 @@ ordering. Drain timeout preserves resources and raises for retry. Callback and
 driver failures are logged without skipping the remaining cleanup. Boards remain
 caller-owned and have no required close method.
 
+The runtime's `MeasureGuiBehavior.close()` delegates to its owner-thread
+`dispose()`. After successful `finish_close()`, it stops the remote adapter and
+calls `MainWindow.dispose()` to release view subscriptions and destroy the Qt
+tree before QApplication/Python exit. Partial assembly retains the window for
+this same cleanup. A drain timeout leaves the window and adapter intact for
+retry. View disposal finishes hidden named dialogs through `QDialog.done()` so
+their owners release subscriptions, detaches tabs, then explicitly delivers the
+window's DeferredDelete even when the main event loop has already returned.
+Successful disposal is idempotent; closing/hiding a window alone is not disposal.
+
 [`StartupContext`](startup_context.py) exposes typed soc, device, setup, context
 and tab commands. Public signatures, thread restrictions and failure semantics
 live with these facets rather than a separate script API list.
@@ -122,6 +132,33 @@ Templates use caller-authored `Template.bindings`.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.
+
+## Workflow hosting
+
+`Controller.session_services` exposes the existing session bundle. Workflow
+attachments import from `services.workflow_attachment`; the caller supplies the
+registration list to `WorkflowControlFacet.configure`. Framework code never
+imports the lab registry.
+
+`Controller.workflow_control()` returns the headless facet. Each `open(name)`
+creates independent plan/tunables drafts, including repeated names. `tab_id`
+addresses a draft owner; `run_id` addresses its native run. Start, Pause, Resume,
+Stop and Apply use the same runner, operation and RUN lease as experiment tabs.
+Pending and paused runs refuse tab close. Closing the last idle workflow tab
+does not drain services or disconnect hardware.
+
+Qt workflow panes display these owners and forward commands. Measure remote
+calls the same facet without a pane, toggle or selected-tab dependency. Form
+`observe_form` prepares one call-local candidate using the owner's fixed env;
+metadata and values come from that candidate, with no native lowering or commit.
+None Start batches use parsed shared drafts. Explicit batches use fresh captured
+defaults. Tunables Apply with an empty batch submits the current shared draft.
+
+`pending_question` and `answer` currently validate the run and return None.
+Native Ask integration follows separately. A real answer is a synchronous engine
+segment and must run in the worker with the retained RUN lease, original
+operation and terminal delivery; the UI owner must not continue the generator.
+Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 ## Sources and workflow
 

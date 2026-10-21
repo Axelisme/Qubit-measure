@@ -17,6 +17,7 @@ from zcu_tools.gui.form import (
     FormDescription,
     FormEnv,
     FormErrors,
+    FormInput,
     FormModel,
     FormPreview,
     FormState,
@@ -50,6 +51,20 @@ class WorkflowTabSnapshot:
     status: RunStatus | None
     busy: bool
     error: str | None
+
+
+@dataclass(frozen=True)
+class WorkflowFormSnapshot:
+    """One detached draft/candidate observation from the tab's fixed capture.
+
+    input retains authored values and selections. preview holds ordinary leaves
+    and complete Form errors, without lowering native cfg. description is one
+    requested layer, or None when no path was requested. No field grants admission.
+    """
+
+    input: FormInput[FormModel]
+    preview: FormPreview
+    description: FormDescription | None
 
 
 class WorkflowControlFacet:
@@ -251,6 +266,32 @@ class WorkflowControlFacet:
         """Describe one canonical path using the shared core Form contract."""
         tab = self._tabs[tab_id]
         return tab.form_state(form).describe(path, tab.form_env(form))
+
+    def observe_form(
+        self,
+        tab_id: str,
+        form: FormKind,
+        *,
+        batch: FormBatch | None = None,
+        path: FormWritePath | None = None,
+    ) -> WorkflowFormSnapshot:
+        """Read or preview one candidate and optional metadata without publication.
+
+        None batch reads the parsed shared draft; even an empty batch previews
+        that draft, never fresh defaults. path=None omits metadata, () describes
+        root. All observations use the same candidate and fixed FormEnv. Form
+        structural/source/path failures propagate; ordinary invalid input stays
+        readable via preview.errors. No input/base, run or capture is changed.
+        """
+        tab = self._tabs[tab_id]
+        env = tab.form_env(form)
+        candidate = FormState(tab.form_state(form).input)
+        if batch is not None:
+            candidate.write(batch, env)
+        description = None if path is None else candidate.describe(path, env)
+        return WorkflowFormSnapshot(
+            candidate.input, candidate.preview(env), description
+        )
 
     def tunables(self, run_id: str) -> TunablesSnapshot:
         """Read detached native values and revision after acceptance."""

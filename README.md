@@ -4,7 +4,7 @@
 
 ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI、Notebook、分析與模擬；ZCU 板端提供 QICK Pyro server。連接硬體前，先確認板端環境與資產版本。
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## 執行環境
 
@@ -17,7 +17,7 @@ ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI�
 uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
 ```
 
-板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 [`scripts/start_server.ipynb`](scripts/start_server.ipynb)；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘使用者 GUI 與資料處理入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。Workflow 模擬使用 workflows GUI 的模擬模式。
+板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 [`scripts/start_server.ipynb`](scripts/start_server.ipynb)；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘使用者 GUI 與資料處理入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。Workflow 在 measure GUI 的 Workflow tabs 執行，與 Experiment tabs 共用 session 與 RUN lease。離線驗證使用同一 measure GUI 與合成註冊清單。
 
 ## 操作與量測
 
@@ -29,5 +29,6 @@ uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
 
 - [實驗層](lib/zcu_tools/experiment/README.md) 與 [GUI](lib/zcu_tools/gui/README.md) 的 README 說明模組責任與介面；跨模組決策見 [ADR](docs/adr/README.md)。
 - [測試目錄與 fixture](tests/README.md) 說明案例歸屬；[程式碼品質](docs/code-quality.md) 說明 review 判準。
+- [Measure MCP workflow 工具](lib/zcu_tools/mcp/measure/README.md#workflow-tools) 使用明確的 workflow 名稱、tab_id 與 native run_id，不受 GUI toggle 或選中 tab 影響。
 - [Agent MCP 組合根](mcp_servers/README.md) 使用工作站 GUI/MCP profile，注入 lab 定義與 repo 啟動設定。使用者入口放在 `scripts/`，框架仍在 lib。
 - [品質工具](tools/README.md) 說明 gate、ratchet 與報表的執行及判讀。開發操作與環境仍依 [repo 操作指引](CLAUDE.md)。
