@@ -1,5 +1,7 @@
 # 使用者 workflows
 
+**讀者：** lab-author。查找各量測 workflow 的科學流程、表單與註冊入口。
+
 - `coherence_fluxdep/`：逐個 flux 點校準並量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
 - `overnight/`：在固定 flux 下按固定間隔量測 T1 與 Hahn echo，不做 feedback。

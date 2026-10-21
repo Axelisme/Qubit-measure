@@ -1,4 +1,96 @@
-"""Mux length Rabi with simultaneous drives and per-qubit length sweeps."""
+"""Mux length Rabi with simultaneous drives and per-qubit length sweeps.
+
+Technical reference for lab authors and framework developers.
+MuxLenRabiExp.run(config, *, context) sweeps selected drive lengths together.
+
+Configuration and timing
+------------------------
+The full tones list matches the complete MuxReadoutCfg in count and order.
+Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+a nonempty, unique list of existing names. Q3/Q1 selects original indices [2, 0]
+from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
+including nonparticipants, on independent generators distinct from readout.
+The caller supplies the complete qubit/resonator bindings; numeric cfg validation
+does not resolve component identities.
+
+Sweep ranges may differ but every tone, including nonparticipants, must have the
+same point count. Point p pairs each active tone's p-th value, not a Cartesian
+product. Each point compiles once and executes optional common reset, Join of
+independent drive pulses, then active mux readout. Branches start together;
+short branches wait for the longest branch at that point. Pre/post delays stay
+unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
+All participants share reps, rounds, initial_delay and relax_delay.
+Program modules perform native conversion and averaging.
+
+Results and cancellation
+------------------------
+MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
+float64 (K,P) on each drive's own rounded grid. Signals are complex128 (K,P),
+ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
+original tone indices and each tone's own coordinates, so duplicate labels retain
+distinct plots. Cancellation preserves completed points and the current point's
+completed-round average. Unacquired points remain NaN.
+
+Length scan contract
+--------------------
+MuxLenRabiCfg.modules contains optional common reset and full mux readout.
+Sweep bounds are positive requested lengths in us. Every tone must use const
+or flat_top, including nonparticipants. Const length is the entire pulse.
+Flat_top length includes raise_waveform ramps; the waveform implementation
+subtracts ramps to determine the plateau. Gain, frequency, phase and ramp
+settings stay fixed. Arb assets have fixed length and are rejected by cfg and
+run validation rather than stretched or cropped.
+
+prepare_length_scan(cfg, soccfg=...) copies cfg and resolves original indices
+in participant order. sweep2array(..., "time", gen_ch=...) creates each drive's
+rounded requested-length grid for set_param("length", ...). Each grid retains its
+hardware spacing and full point count, with no sorting or deduplication.
+Nonpositive rounded lengths or overlapping adjacent points raise. Coordinates
+are requested total lengths rather than compiled traces; flat_top ramp handling
+and native rounding can change playback by a few ticks. Waveform/compiler
+constraints, including ramps and minimum cycles, propagate as errors.
+Nonzero pre_delay remains part of the pulse's native branch.
+
+Analysis and persistence
+------------------------
+Analysis accepts an explicit RunRecord, including cfg=None. It returns
+MuxLenRabiFit or MuxFitFailure per original index and draws fit_i. Each curve
+uses its own length coordinates and needs six finite IQ points. Empty or
+insufficient data fails per tone; malformed source shapes/dtypes raise.
+
+Options reuse single-qubit Len Rabi. decay=True selects the default damped
+cosine; it can be disabled. fit_phase=False fixes phase at zero with signed
+amplitude; True fits free phase. The fitter computes pi/pi2 lengths and
+covariance error propagation. Length and one-sigma errors are in us; Rabi
+frequency and its error are in MHz. FitQuality uses finite observations,
+model and covariance. Small-truncation or poor-quality curves can fit numerically
+while remaining unsuitable for calibration.
+
+Native persistence retains the full cfg, original indices, separate length axes
+and complex IQ. Length coordinates use seconds on disk and us in memory.
+The source drive/ramp stays in cfg for later proposals. Persistence does not
+embed waveform asset bytes or fetch replacement pulses from a current library.
+
+Calling and ownership
+---------------------
+For context, plots, stop/error handling and record/persistence ownership, see
+lib/zcu_tools/experiment/README.md, section "實驗介面與資料", and
+lib/zcu_tools/experiment/v2/runtime/README.md, section "Stop 與 Retry".
+
+Analysis uses the explicit historical source, not the current Form or library.
+The numerical core leaves component bindings and writeback to its caller.
+
+Example with validated cfg, RunContext and fresh analysis_plots::
+
+    from zcu_tools.experiment.records import RunRecord
+    from zcu_lab.v2.mux.len_rabi import MuxLenRabiExp
+
+    core = MuxLenRabiExp()
+    result = core.run(cfg, context=context)
+    context.cancel_signal.raise_if_error()
+    source = RunRecord(cfg=cfg, result=result)
+    outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
+"""
 
 from __future__ import annotations
 

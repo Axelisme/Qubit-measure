@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # 0064 — GUI process startup 與 app composition
 
 **狀態：** accepted。

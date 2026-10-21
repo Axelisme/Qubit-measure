@@ -1,8 +1,8 @@
-> 狀態：已退役（2026-09-27）。現行局部契約見 [`gui/app/measure/README.md`](../../../lib/zcu_tools/gui/app/measure/README.md) 與 [ADR-0068](../0068-remote-transport.md)（錯誤投影；原 [ADR-0047](0047-typed-expected-error-taxonomy.md) 已退役）；以下保留歷史正文。
+---
+status: retired
+---
 
----
-status: accepted
----
+> 狀態：retired（2026-09-27）。現行局部契約見 [`gui/app/measure/README.md`](../../../lib/zcu_tools/gui/app/measure/README.md) 與 [ADR-0068](../0068-remote-transport.md)（錯誤投影；原 [ADR-0047](0047-typed-expected-error-taxonomy.md) 已退役）；以下保留歷史正文。
 
 # Arbitrary waveform MCP failures use tool errors
 

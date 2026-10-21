@@ -24,6 +24,8 @@ jupyter:
     version: 3.13.11
 ---
 
+**Readers:** operator, lab-author. Fit resonator responses and compare measured dispersive shifts with fluxonium predictions.
+
 ```python
 %load_ext autoreload
 from pathlib import Path

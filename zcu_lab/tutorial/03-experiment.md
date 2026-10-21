@@ -1,5 +1,7 @@
 # 新增實驗與 GUI 表單
 
+**讀者：** lab-author、agent。複製並註冊實驗，接上 core、Form、GUI adapter 與 operator guide。
+
 這篇把 [twotone/power_dep](../v2/twotone/power_dep/) 複製成 `twotone/power_map`。
 新實驗仍量測 qubit drive gain 對頻譜的影響，先用不同的名稱完成註冊，再改量測內容。
 你會改五個 leaf 檔案，最後把 adapter 加進 [definitions.py](../definitions.py)。

@@ -24,6 +24,8 @@ jupyter:
     version: 3.9.25
 ---
 
+**Readers:** operator, lab-author. Select spectral lines, fit fluxonium parameters and save the fitted flux calibration.
+
 ```python
 %load_ext autoreload
 import os

@@ -1,5 +1,7 @@
 # MCP recipes
 
+**讀者：** lab-author、agent。查找 recipe 流程、註冊清單與新增入口。
+
 Recipe 是串接 GUI 操作的 generator，量測與分析由它開啟的 adapter 執行。
 Adapter 定義 cfg、表單與結果，recipe 選來源、設參數並決定 Run／Save／Analyze／writeback 順序。
 新增流程從 [recipe 教學](../tutorial/04-recipe.md) 開始，先依 [實驗教學](../tutorial/03-experiment.md) 註冊 adapter。

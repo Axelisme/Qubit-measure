@@ -1,5 +1,7 @@
 # Qubit measurement context
 
+**讀者：** lab-author、framework-dev、agent。查閱量測流程、參數容器與資料交接的共用詞彙。
+
 本詞彙表定義 ZCU-Tools 的量測流程、參數容器、保存資料與分析交接用語。
 
 ## 架構角色

@@ -1,5 +1,7 @@
 # Board bitfiles
 
+**Readers:** operator, lab-author. Select QICK board bitfiles and check deployment requirements for the board server.
+
 **Last updated:** 2026-09-27 — board assets at repository root
 
 This directory contains QICK board `.bit` and `.hwh` assets and the Python `get_bitfile(version)` path selector. `get_bitfile("v1")` returns the path to `qick_216.bit`; `get_bitfile("v2")` returns the path to `qick_216_v2.bit`. Other values raise `ValueError`. The helper returns a string path relative to this package; it does not load hardware or verify existence and compatibility.

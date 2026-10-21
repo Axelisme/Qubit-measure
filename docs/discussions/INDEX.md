@@ -1,11 +1,13 @@
 # 討論紀錄索引
 
+**讀者：** framework-dev、agent。透過本索引與各篇討論快照查找設計討論、選項與裁決脈絡。
+
 討論紀錄是當時的快照，不擁有決策。撰寫規則見 [CLAUDE.md](../../CLAUDE.md) 的「討論紀錄」。
 
 ## Agent 介面
 
 - 2026-10-12 [QCA 作為前端的可行性評估](2026-10-12-qca-frontend-evaluation.md)：QCA 的儀器層較弱，不取代 measure-gui MCP；只借鏡規劃時約定判準與校準 VLM 判圖。
-- 2026-10-12 [Agent 介面分層的推導](2026-10-12-agent-interface-layers.md)：自動化往下推，agent 只在宣告的判斷交接處介入；決策見 ADR-0075 Agent 介面分層。
+- 2026-10-12 [Agent 介面分層的推導](2026-10-12-agent-interface-layers.md)：自動化往下推，agent 只在宣告的判斷交接處介入；決策見 [ADR-0075 Agent 介面分層](../adr/0075-agent-interface-layers.md)。
 - 2026-10-12 [fluxdep MCP 的定位與介面重設計](2026-10-12-fluxdep-mcp-design.md)：MCP 依 agent 的六個決策點與能力清單組裝 RPC，每張譜各自保有 context，證據圖只在決策點回；並歸納出十條適用於全部 MCP 的設計範式。
 - 2026-10-16 [Recipe 與 workflow 的協作模型：generator、阻塞函式或 async](2026-10-16-recipe-workflow-yield-vs-async.md)：保留 generator 由 driver 掌控進度，recipe 改用有型別的 `yield from` helper；主動訊息只支援控制命令與邊界生效的 tunables，不做 async。
 
@@ -27,8 +29,8 @@
 ## Cfg 與表單
 
 - 2026-10-17 [Measure Form 的校準初值與 sweep 模式切換](2026-10-17-measure-form-initial-values-and-sweep-mode.md)：缺值給公允值、無效值留空、故障報錯，「可預測與一致比正確重要」，初值開 Form 時算成數字；sweep 模式存於共用 Form 輸入，recipe 一次設定並重設為 range + expts。
-- 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 ADR draft `measure-form-derivation`。
-- 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：選項清單由生成器產生、核心通用、widget 只照清單畫；換分支不繼承舊值；ref 轉 inline 用選項指令；key-or-inline 統一成有 tag 的形狀；決策見 Pydantic 表單 ADR draft。
+- 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 [ADR-0073 Measure 表單推導](../adr/0073-measure-form-derivation.md)。
+- 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：選項清單由生成器產生、核心通用、widget 只照清單畫；換分支不繼承舊值；ref 轉 inline 用選項指令；key-or-inline 統一成有 tag 的形狀；歷史草稿為 Pydantic 表單 ADR，現行決策見 [ADR-0065](../adr/0065-cfg-editing.md) 與 [ADR-0073](../adr/0073-measure-form-derivation.md)。
 
 ## 模組邊界
 
@@ -40,4 +42,4 @@
 
 ## 存檔與資料格式
 
-- 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 `data.h5`，Notebook 與 GUI 都讀它；Artifact 以項目種類擴充、格式由框架決定，讀回採資料優先、設定可缺；決策見 ADR-0063／0069／0067。
+- 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 `data.h5`，Notebook 與 GUI 都讀它；Artifact 以項目種類擴充、格式由框架決定，讀回採資料優先、設定可缺；決策見 [ADR-0063](../adr/0063-persistence-ownership.md)／[0069](../adr/0069-experiment-core-and-frontends.md)／[0067](../adr/0067-gui-application.md)。

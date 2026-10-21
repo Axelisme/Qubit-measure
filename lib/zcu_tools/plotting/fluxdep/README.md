@@ -1,6 +1,8 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-14 — colour-blind-safe shared palette; brush band along the stroke
+**Last updated:** 2026-10-21
+
+**讀者：** framework-dev。通量頻譜搜尋與選點診斷圖的 builder 契約。
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a

@@ -6,7 +6,7 @@ related:
   - docs/adr/draft/simulation-environments.md
   - docs/adr/0064-process-startup.md
   - docs/adr/0069-experiment-core-and-frontends.md
-  - docs/adr/draft/module-boundaries.md
+  - docs/adr/0072-module-boundaries.md
 basis:
   - "repo@007a30ccc5e25d4d68300b5c6ea2ddb9dfa693b5，撰寫本快照時"
   - "repo@179882fd00d583bffabe86c6b99ca54c796a92dd，第一輪速度 prototype"
