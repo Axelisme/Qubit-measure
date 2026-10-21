@@ -303,3 +303,71 @@ def test_return_payload_is_not_projected_or_copied() -> None:
     assert driver.result is report
     driver.advance()
     assert driver.result is report
+
+
+def test_parse_answer_only_validates_and_preserves_pending_delivery() -> None:
+    from pydantic import ValidationError
+
+    from zcu_tools.core.script_protocol import Answer, Ask, Question
+    from zcu_tools.experiment.script_driver import ScriptDriver
+
+    class Approval(Answer):
+        accepted: bool
+
+    class Confirm(Question[Approval]):
+        evidence: str
+
+    request = Ask(Confirm(evidence="captured"))
+
+    def script() -> Generator[ScriptRequest, None, Approval | None]:
+        yield request
+        return request.delivery
+
+    driver = ScriptDriver(script())
+    with pytest.raises(RuntimeError, match="pending question"):
+        driver.parse_answer({"accepted": True})
+    driver.advance()
+    for invalid in ({"accepted": "wrong"}, {"accepted": True, "unknown": 1}):
+        with pytest.raises(ValidationError, match="Confirm"):
+            driver.parse_answer(invalid)
+        assert driver.status == "paused"
+        assert request.delivery is None
+    answer = driver.parse_answer({"accepted": False})
+    assert answer == Approval(accepted=False)
+    assert driver.status == "paused"
+    assert request.delivery is None
+    driver.answer(answer)
+    assert driver.result is answer
+
+
+def test_validate_answer_does_not_deliver_or_resume() -> None:
+    from zcu_tools.core.script_protocol import Answer, Ask, Question
+    from zcu_tools.experiment.script_driver import ScriptDriver
+
+    class Approval(Answer):
+        accepted: bool
+
+    class Other(Answer):
+        message: str
+
+    class Confirm(Question[Approval]):
+        evidence: str
+
+    request = Ask(Confirm(evidence="captured"))
+
+    def script() -> Generator[ScriptRequest, None, Approval | None]:
+        yield request
+        return request.delivery
+
+    driver = ScriptDriver(script())
+    approval = Approval(accepted=True)
+    with pytest.raises(RuntimeError, match="pending question"):
+        driver.validate_answer(approval)
+    driver.advance()
+    with pytest.raises(TypeError, match="Confirm.*Approval"):
+        driver.validate_answer(Other(message="wrong model"))
+    driver.validate_answer(approval)
+    assert request.delivery is None
+    assert driver.status == "paused"
+    driver.answer(approval)
+    assert driver.result is approval

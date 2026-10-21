@@ -1,9 +1,11 @@
 """Recording wire adapter for public measure MCP contracts."""
 
+from __future__ import annotations
+
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
 from zcu_tools.gui.app.measure.remote.method_entries._registry import (
@@ -24,6 +26,10 @@ from zcu_tools.mcp.measure.session import (
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 from ._pipeline_recipe import PIPELINE
+
+if TYPE_CHECKING:
+    from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
+    from zcu_tools.mcp.measure.recipe_host import RecipeHostFactory
 
 RpcResponder = Callable[[str, dict[str, Any]], dict[str, Any]]
 
@@ -139,7 +145,8 @@ def make_client(
     tmp_path: Path,
     responder: RpcResponder | None = None,
     *,
-    recipes: Sequence[RecipeDefinition] = (PIPELINE,),
+    recipes: Sequence[RecipeDefinition | RecipeDeclaration] = (PIPELINE,),
+    recipe_host_factory: RecipeHostFactory | None = None,
     resolve_connect_port: ResolveConnectPortFn | None = None,
     port_is_open: PortIsOpenFn | None = None,
 ) -> MeasureClient:
@@ -163,6 +170,7 @@ def make_client(
     session = MeasureMcpSession(
         config,
         recipes=recipes,
+        recipe_host_factory=recipe_host_factory,
         resolve_connect_port=resolver,
         port_is_open=port_is_open or (lambda port: False),
     )
