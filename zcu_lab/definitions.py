@@ -32,6 +32,7 @@ from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAdapter
 from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
 from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
+from zcu_lab.v2.mux.onetone_find.gui import MuxOnetoneFindAdapter
 from zcu_lab.v2.mux.onetone_fine.gui import MuxOnetoneAdapter
 from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEAdapter
 from zcu_lab.v2.mux.t1.gui import MuxT1Adapter
@@ -141,6 +142,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/reset/bath/phase": BathPhaseAdapter,
     "twotone/reset/check": RabiCheckAdapter,
     "mux/onetone_fine": MuxOnetoneAdapter,
+    "mux/onetone_find": MuxOnetoneFindAdapter,
     "mux/twotone_spectrum": MuxFreqAdapter,
     "mux/len_rabi": MuxLenRabiAdapter,
     "mux/amp_rabi": MuxAmpRabiAdapter,

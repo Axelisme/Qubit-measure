@@ -13,6 +13,12 @@ ZigZag 的 `run()` 直接列出 pulse 序列，使用 register loop。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 
+`mux/onetone_find` 使用一個 mux tone 掃絕對 MHz，每點只播放所選 tone 並讀取其 ADC。
+完整 native cfg 保留原始 tone 序號及全部 readout tones，raw 是一維頻率與 complex IQ。
+分析去除直線 magnitude 背景，選取最顯著且符合最小 MHz 間距的 N 個凹陷，依頻率升序配名稱。
+每個 capture 中存在的名稱只提議一列 `freq`，不提出 module、kappa 或 edelay。
+不足 N 個凹陷時整次分析失敗。操作與判讀見 [coarse scan guide](mux/onetone_find/guide.md)。
+
 `mux/onetone_fine` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
