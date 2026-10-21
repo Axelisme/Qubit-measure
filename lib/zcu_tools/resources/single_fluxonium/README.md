@@ -1,6 +1,8 @@
 # Single-fluxonium YAML values
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
+
+**讀者：** framework-dev。查閱 single-fluxonium YAML 的載入入口、欄位單位與驗證規則。
 
 `load_single_fluxonium(path)` reads UTF-8 YAML. `parse_single_fluxonium(document)` validates a decoded document. Both return immutable `SingleFluxoniumSettings` and reject invalid values with dotted field paths. Neither creates devices or numerical models.
 
