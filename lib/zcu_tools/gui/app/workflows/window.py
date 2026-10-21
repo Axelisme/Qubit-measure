@@ -114,13 +114,12 @@ class WorkflowWindow[C](QWidget):
 
         state belongs to services; owner marshals plot commands. parent=None is
         top-level; otherwise embedded. EMPTY builds partial source-free drafts.
-        composition supplies registrations, templates, alias_presets and loader.
+        composition supplies registrations, templates and loader.
         Its registrations are nonempty, ordered and have unique declaration names;
         its first item is the default. Invalid catalogs raise ValueError.
         The event bus comes from services. templates supplies the
         persistent module/waveform catalog shared Inspect offers under New; an
-        empty catalog is valid. alias_presets is the caller's complete named
-        catalog for Inspect, or None for no presets. No files are read for either.
+        empty catalog is valid. No catalog files are read.
         loader supplies current WorkflowCatalog[C] instances on source reload;
         caller owns its bounded namespaces and fresh-registration builder.
         loader=None is unmonitored and disables Reload.
@@ -138,7 +137,6 @@ class WorkflowWindow[C](QWidget):
         self._state = state
         self._services = services
         self._templates = composition.templates
-        self._alias_presets = composition.alias_presets
         self._dialog_presenter = QtDialogPresenter()
         self._runner = services.runner
         self._owner = owner
@@ -245,7 +243,6 @@ class WorkflowWindow[C](QWidget):
             arb_waveforms=self._services.arb_waveform,
             open_arb_waveforms=self._open_arb_waveforms,
             dialog_presenter=self._dialog_presenter,
-            alias_presets=self._alias_presets,
             parent=self,
         )
         dialog.set_read_only(read_only=self._run_view.start_locked)

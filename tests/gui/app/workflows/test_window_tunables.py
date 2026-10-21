@@ -30,7 +30,7 @@ from tests.gui.widgets.form._text_input import commit_text
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
 from ._synthetic import Context, Plan, Tunables
-from ._window_support import RpcRequest, form_editable
+from ._window_support import RpcRequest, form_editable, show_sample_section
 
 
 def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_capture(
@@ -64,6 +64,7 @@ def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_captur
             panel.panel.state.write(
                 {("sample", "value"): {"expr": "10 * 3"}}, FormEnv()
             )
+            show_sample_section(window, "Tunables (live)")
             control = panel.panel.editor.findChild(
                 QLineEdit, "form.input.sample.factor"
             )
@@ -400,6 +401,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     )
     before = controller.engine.tunables("tuning")
     accepted = panel.host.accepted_input.data
+    show_sample_section(window, "Tunables (live)")
     control = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(control, QLineEdit)
     commit_text(control, "-")
@@ -440,6 +442,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     assert sample_input(panel.panel.state.input.data)["value"] == 45.0
     assert panel.panel.editor.local_parse_errors() is not None
     assert control.text() == "-" and not harness.gate.snapshot()
+    show_sample_section(window)
     assert form_editable(window.plan_panel) and form_editable(window.tunables_panel)
     start_button = window.findChild(QPushButton, "workflow.run.start")
     assert start_button is not None and start_button.isEnabled()
@@ -469,6 +472,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     native = controller.engine.tunables("tuning")
     accepted = panel.host.accepted_input.data
     panel.panel.state.write({("sample", "value"): 45.0}, panel.host.env)
+    show_sample_section(window, "Tunables (live)")
     control = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     button = panel.findChild(QPushButton, "workflow.tuning.apply")
     message = panel.findChild(QLabel, "workflow.tuning.message")

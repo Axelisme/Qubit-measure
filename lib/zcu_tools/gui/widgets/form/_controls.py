@@ -308,6 +308,7 @@ class FieldRow:
         self._commands: list[QAction] = []
         self._field_actions: list[QAction] = []
         self._displaying = False
+        self._fields_only = False
         self._picked: Callable[[], None] = lambda: None
         # The view-local input this row shows instead of state's, if any.
         self._local: LocalText | None = None
@@ -383,6 +384,21 @@ class FieldRow:
         """Return the picked element index, or -1 on a row without a picker."""
         return -1 if self.picker is None else self.picker.currentIndex()
 
+    def configure_body(self, *, element: bool) -> None:
+        """Configure a freshly built row as an ordinary row or picked element.
+
+        element=False keeps the ordinary header and fold. element=True omits
+        the title and extra indentation, keeping the body expanded independently
+        of model folds. Its fields keep their labels, paths and fold controls.
+        """
+        if not element:
+            return
+        self._fields_only = True
+        self.label.hide()
+        if self.group is not None and self.rows is not None:
+            self.group.show()
+            self.rows.setContentsMargins(0, 0, 0, 0)
+
     def set_children_available(self, *, available: bool) -> None:
         """Hide an empty model body's fold marker, or restore it for children.
 
@@ -391,6 +407,10 @@ class FieldRow:
         empty bodies stay hidden, and no write or fold notification occurs.
         The public fold object name exists only when the layer can be folded.
         """
+        if self._fields_only:
+            if self.group is not None:
+                self.group.setVisible(available)
+            return
         if isinstance(self.label, FoldTitle):
             self.label.setObjectName(self._name("fold") if available else "")
             self.label.set_foldable(

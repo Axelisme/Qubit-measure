@@ -29,7 +29,12 @@ from tests.gui.widgets.form._text_input import commit_text
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
 from ._synthetic import Context, Plan, Tunables, inline_input
-from ._window_support import RpcRequest, form_editable, start_plan_batch
+from ._window_support import (
+    RpcRequest,
+    form_editable,
+    show_sample_section,
+    start_plan_batch,
+)
 
 
 def test_window_services_run_and_progress_share_session(
@@ -268,6 +273,7 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
     assert window.plan_panel.state.input.data["scale"] == {"expr": "0.06 * 2"}
     # Fresh Start defaults evaluate the expression default with this capture.
     assert sample_input(window.tunables_panel.state.input.data)["value"] == 31.0
+    show_sample_section(window)
     shown = window.tunables_panel.findChild(QLineEdit, "form.input.sample.value")
     assert isinstance(shown, QLineEdit) and float(shown.text()) == 31.0
     context.set_parameter(context.read_context().target, "general.ext.value", 88.0)
@@ -428,6 +434,7 @@ def test_prepare_and_reload_hold_expression_defaults_as_captured_values(
     state = window.tunables_panel.state
     assert sample_input(state.input.data)["value"] == 31.0
     assert state.base.data == state.input.data
+    show_sample_section(window)
     edit = window.tunables_panel.findChild(QLineEdit, "form.input.sample.value")
     assert isinstance(edit, QLineEdit) and float(edit.text()) == 31.0
     # Reload keeps the prepared value; only a new Prepare reads 45.0.

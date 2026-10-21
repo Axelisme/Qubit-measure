@@ -58,7 +58,7 @@ from zcu_tools.resources.context.library import (
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
-from tests.gui._user_input import ComponentDriver, key_click, mouse_click, type_text
+from tests.gui._user_input import ComponentDriver, key_click, type_text
 from tests.gui.app.measure._form_fakes import (
     LookupCfg,
     configure_form_lookup,
@@ -256,11 +256,16 @@ def test_running_tab_locks_inputs_but_keeps_the_form_readable(
 ) -> None:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     view = open_tab(resource=make_form(Form(SectionCfg, {}), state=state))
-    view.tab.resize(900, 160)
+    view.tab.resize(900, 700)
     view.tab.show()
     qapp.processEvents()
 
     view.tab.update_interaction_state(snapshot(is_running=True))
+    qapp.processEvents()
+
+    driver = ComponentDriver(view.tab)
+    driver.expand_section("form.fold.pulse")
+    view.tab.resize(900, 160)
     qapp.processEvents()
 
     for path in ("reps", "rounds", "pulse.gain", "pulse.length"):
@@ -278,15 +283,17 @@ def test_running_tab_locks_inputs_but_keeps_the_form_readable(
     bar.setValue(bar.maximum())
     assert bar.value() == bar.maximum()
 
+    view.tab.resize(900, 700)
+    qapp.processEvents()
     fold = editor.findChild(QLabel, "form.fold.pulse")
     assert isinstance(fold, QLabel)
     assert fold.isEnabled()
     assert fold.text().startswith("\u25be ")
     gain = view.input("pulse.gain")
-    mouse_click(fold, fold.rect().center())
+    driver.click(object_name="form.fold.pulse")
     assert gain.isHidden() or not gain.isVisibleTo(editor)
     assert fold.text().startswith("\u25b8 ")
-    mouse_click(fold, fold.rect().center())
+    driver.expand_section("form.fold.pulse")
     assert gain.isVisibleTo(editor)
     assert fold.text().startswith("\u25be ")
     assert view.resource.input.data == {
