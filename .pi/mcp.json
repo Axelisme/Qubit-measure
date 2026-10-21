@@ -13,19 +13,6 @@
       ],
       "exposure": "deferred"
     },
-    "workflows-gui": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        ".",
-        "--no-sync",
-        "--",
-        "python",
-        "mcp_servers/workflows.py"
-      ],
-      "exposure": "deferred"
-    },
     "fluxdep-gui": {
       "command": "uv",
       "args": [

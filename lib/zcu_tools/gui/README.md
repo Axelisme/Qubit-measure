@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。共用 GUI 層、app 邊界與生命週期速查。
 
@@ -116,18 +116,11 @@ entrypoints and call `launch_gui_runtime(...)` directly.
 
 The runtime seam deliberately stops above remote method/domain/session policy:
 `gui.remote` still owns transport, each app owns dispatch/domain handlers, and
-`gui.session` owns measurement-session primitives. All four standalone GUI
-launchers (`measure`, `fluxdep`, `dispersive`, `workflows`) use this runtime
-directly. Measurement-session apps keep their domain composition in app behavior
-classes and launcher-provided factories. The workflows launcher composes
-`zcu_tools.gui.app.workflows.app.WorkflowsGuiBehavior`: one fresh EMPTY session,
-one generic Window/Controller, and an optional RPC adapter over those same owners.
-The launcher injects the lab's ordered workflow registrations and bounded
-source loader. The loader rereads the lab registry on reload. It opens
-shared Setup non-modally. Assembly normally restores saved parsed plan/knobs
-input before display; `--clean` skips reading the previous input file. Successful
-close still saves current input. Launch does not restore native runs or connect
-hardware.
+`gui.session` owns measurement-session primitives. The three standalone GUI launchers (`measure`, `fluxdep`, `dispersive`) use this
+runtime directly. Measure hosts workflow tabs in the same session as experiment
+tabs. The launcher injects workflow registrations; `WorkflowControlFacet` owns
+headless drafts and native run routing. Qt panes and remote commands drive that
+same facet. Workflow tab close never drains the session or disconnects hardware.
 
 `gui.launcher` is the import-light CLI edge companion for runtime launchers. It
 declares shared logging/control flags and converts parser output into
@@ -142,7 +135,7 @@ When runtime gets or creates the `QApplication`, it calls
 installs one idempotent application event filter. Every `QMessageBox` shown in
 the process then lets users select its main text, informative text and detailed
 text with the mouse or keyboard. Call sites keep using plain `QMessageBox`; all
-four launchers get the filter because runtime is their only `QApplication`
+three launchers get the filter because runtime is their only `QApplication`
 factory.
 
 A `QLabel` that shows a data value (device address, name, path, computed value,

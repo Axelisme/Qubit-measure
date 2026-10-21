@@ -130,6 +130,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         self.context_control = controller.context_control
         self.device_control = controller.device_control
         self.predictor_control = controller.predictor_control
+        self.workflow_control = controller.workflow_control()
 
     # ------------------------------------------------------------------
     # Base seams

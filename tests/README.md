@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -222,7 +222,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
 `tests/experiment/v2/` 擁有通用 runtime 與工具，`tests/experiment/workflows/` 擁有泛型 Engine、effects 與共用匯出機制。
-`tests/gui/app/workflows/` 使用合成註冊清單驗證宿主；`tests/gui/app/measure/adapter/` 擁有 adapter、黑箱 Form 輸出與 Run 框架契約，`tests/gui/form_adapter/` 擁有 core cfg 生成 Form 的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
+`tests/gui/app/measure/services/`、`tests/gui/app/measure/remote/` 與 `tests/mcp/measure/` 使用合成註冊清單驗證 workflow headless owner、RPC 與 MCP；`tests/gui/app/measure/adapter/` 擁有 adapter、黑箱 Form 輸出與 Run 框架契約，`tests/gui/form_adapter/` 擁有 core cfg 生成 Form 的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
 接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
 `tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。`tests/migrations/` 擁有 root `migrations/` 的離線轉換與 legacy reader 測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
