@@ -8,6 +8,10 @@ import runpy
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import gettempdir
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +270,7 @@ def _setup_logging() -> None:
     )
 
 
-def main(*, recipes: Sequence[RecipeDefinition]) -> None:
+def main(*, recipes: Sequence[RecipeDefinition | RecipeDeclaration]) -> None:
     """Run the stdio server with explicitly supplied handwritten definitions.
 
     recipes is the composition root's immutable declaration sequence. Invalid

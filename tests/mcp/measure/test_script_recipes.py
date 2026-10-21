@@ -339,7 +339,9 @@ def test_pending_question_exposes_answer_schema_without_overwriting_evidence(
 
     @recipe("schema", description="Expose the answer contract")
     def synthetic(session: RecipeSession, inputs: Inputs) -> RecipeGenerator[Report]:
-        request = Ask(Evidence(question_type="authored type", answer_schema="authored evidence"))
+        request = Ask(
+            Evidence(question_type="authored type", answer_schema="authored evidence")
+        )
         yield request
         assert request.delivery is not None
         return Report(status="answered", count=int(request.delivery.proceed))
@@ -351,7 +353,8 @@ def test_pending_question_exposes_answer_schema_without_overwriting_evidence(
     assert "answer_schema" in pending
     assert pending["question_type"] == "Evidence"
     assert pending["question"] == {
-        "question_type": "authored type", "answer_schema": "authored evidence"
+        "question_type": "authored type",
+        "answer_schema": "authored evidence",
     }
     schema = pending["answer_schema"]
     assert schema["required"] == ["proceed"]
@@ -360,7 +363,8 @@ def test_pending_question_exposes_answer_schema_without_overwriting_evidence(
     assert schema["properties"]["proceed"]["description"] == (
         "Continue with the captured evidence when true."
     )
-    reply = client.call("answer", {
-        "execution": key, "answer": {name: True for name in schema["required"]}
-    })
+    reply = client.call(
+        "answer",
+        {"execution": key, "answer": {name: True for name in schema["required"]}},
+    )
     assert reply.data["outcome"]["report"] == {"status": "answered", "count": 1}
