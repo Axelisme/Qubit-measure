@@ -59,7 +59,7 @@ def test_main_window_role_failure_is_presented_without_registering_tab(
     window.create_tab("fake")
     assert len(dialogs.calls) == 1
     assert "qubit" in dialogs.calls[0].message
-    tabs = window.findChild(QTabWidget)
+    tabs = window.findChild(QTabWidget, "experiment.tabs")
     assert tabs is not None and tabs.count() == 0
 
 
