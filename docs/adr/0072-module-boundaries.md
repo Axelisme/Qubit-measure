@@ -64,6 +64,8 @@ GUI／Notebook 共用的模擬參數檔與 startup 範例放在 `zcu_lab/simulat
 
 2026-10-16，使用者要求：「比如components我希望除了基礎原件，其他的都是獨立的子模塊檔。」對上述拆分與環境搬移確認：「可以移到zcu_lab/simulation_envs/中嗎？2同意」。
 
+Kickstart 腳本放在 `zcu_lab/kickstart/<env>/`，只建 entry、元件參數與 alias，不連 SoC 與 device。每個 startup 腳本（模擬環境與 kickstart）各自擁有同目錄的 `entry-template.yaml`，腳本之間不共用範本：改一份範本只影響用該腳本新建的 entry。2026-10-21，使用者裁決：「3我希望startup腳本間獨立，而不是過早共用template」；目錄名：「既然都叫kickstart了，那我認為可以將envs/FTF改成kickstart/FTF」。
+
 ### Library 分組與 module slot
 
 Library 的設計是「元件 → 分組 → Pydantic model」。分組是擴充點，不是永久封閉的種類清單。現行格式仍只接受既有四分組；有第五種需求時才調整容器與 key 驗證，不把任意分組寫成目前已支援。
