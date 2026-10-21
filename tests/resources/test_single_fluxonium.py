@@ -126,11 +126,27 @@ def test_load_reads_utf8_and_honors_yaml_merge_overrides(tmp_path: Path) -> None
         ("gen_ch: 2", "gen_ch: -1", "flux_line.gen_ch"),
         ("delay_ns: 3.0", "delay_ns: -1", "flux_line.delay_ns"),
         ("tau_ns: 2.0", "tau_ns: .inf", "flux_line.tau_ns"),
-        ("amplitude: -0.1", "amplitude: .nan", "flux_line.distortion_terms.0.amplitude"),
+        (
+            "amplitude: -0.1",
+            "amplitude: .nan",
+            "flux_line.distortion_terms.0.amplitude",
+        ),
         ("tau_ns: 10.0", "tau_ns: 0", "flux_line.distortion_terms.0.tau_ns"),
-        ("kappa_external_mhz: 1.0", "kappa_external_mhz: 0", "readout.resonator.kappa_external_mhz"),
-        ("[[1.0, 0.5], [0.5, 0.25]]", "[[1, 2], [2, 1]]", "readout.adc.noise_psd_adc2_ns"),
-        ("[[1.0, 0.5], [0.5, 0.25]]", "[[1, 0], [1, 1]]", "readout.adc.noise_psd_adc2_ns"),
+        (
+            "kappa_external_mhz: 1.0",
+            "kappa_external_mhz: 0",
+            "readout.resonator.kappa_external_mhz",
+        ),
+        (
+            "[[1.0, 0.5], [0.5, 0.25]]",
+            "[[1, 2], [2, 1]]",
+            "readout.adc.noise_psd_adc2_ns",
+        ),
+        (
+            "[[1.0, 0.5], [0.5, 0.25]]",
+            "[[1, 0], [1, 1]]",
+            "readout.adc.noise_psd_adc2_ns",
+        ),
         ("levels: 4", "levels: 13", "numerics.truncation.levels"),
         ("levels: 4", "levels: 1", "numerics.truncation.levels"),
         ("rtol: 0.00000001", "rtol: 0", "numerics.solver.rtol"),
@@ -175,7 +191,9 @@ def test_load_reports_file_and_input_diagnostics(
 def test_zero_filter_and_noise_and_omitted_optional_values_are_legal() -> None:
     settings = _parse(
         yaml.safe_load(
-            DOCUMENT.replace("  distortion_terms: [{amplitude: -0.1, tau_ns: 10.0}]\n", "")
+            DOCUMENT.replace(
+                "  distortion_terms: [{amplitude: -0.1, tau_ns: 10.0}]\n", ""
+            )
             .replace("tau_ns: 2.0", "tau_ns: 0")
             .replace("[[1.0, 0.5], [0.5, 0.25]]", "[[0, 0], [0, 0]]")
             .replace("  seed: 123\n", "")

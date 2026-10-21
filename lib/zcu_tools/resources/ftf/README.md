@@ -1,8 +1,10 @@
 # FTF YAML values
 
-**Last updated:** 2026-10-20，routing telemetry、round 最短時間、mux readout 與 charge/flux drive lines
+**Last updated:** 2026-10-21，共用 simulation schema 與 YAML loader
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
+
+中性的 physical values、receiver PSD 與 solver 欄位由 `resources.simulation_schema` 擁有，與 single-fluxonium 共用。原本的 `ftf.schema` 名稱仍可 import。YAML decoding 使用公開 `resources.yaml.load_yaml`，重複明寫 key 的拒絕與 merge override 行為不變。
 
 使用者填表與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。欄位型別與省略語意的程式契約在 [schema.py](schema.py)。[環境 README](../../../../zcu_lab/simulation_envs/FTF/README.md) 提供工作副本與 GUI／Notebook 入口。
 

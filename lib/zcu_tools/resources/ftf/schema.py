@@ -10,11 +10,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Generic, Literal, Self, TypeVar
 
-import numpy as np
 from pydantic import (
     AfterValidator,
-    BaseModel,
-    ConfigDict,
     Field,
     PlainSerializer,
     TypeAdapter,
@@ -22,12 +19,20 @@ from pydantic import (
     model_validator,
 )
 
-Finite = Annotated[float, Field(allow_inf_nan=False, strict=True)]
-Positive = Annotated[Finite, Field(gt=0)]
-Nonnegative = Annotated[Finite, Field(ge=0)]
-Count = Annotated[int, Field(gt=0, strict=True)]
-Index = Annotated[int, Field(ge=0, strict=True)]
-Name = Annotated[str, Field(min_length=1)]
+from zcu_tools.resources.simulation_schema import (
+    ComplexCoefficient,
+    Count,
+    Finite,
+    Fluxonium,
+    Index,
+    Name,
+    Nonnegative,
+    Positive,
+    Receiver,
+    Solver,
+    Values,
+)
+
 LoopValue = TypeVar("LoopValue")
 
 SourceValue = TypeVar("SourceValue")
@@ -47,29 +52,6 @@ SourceMap = Annotated[
     AfterValidator(_immutable_sources),
     PlainSerializer(_serialize_sources),
 ]
-
-
-class Values(BaseModel):
-    """Frozen extra-forbidden YAML record; nested records share this policy."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
-
-
-class Fluxonium(Values):
-    """Fluxonium physical values.
-
-    ej_ghz/ec_ghz/el_ghz: positive GHz. q_cap/q_ind: positive constant Q, omitted
-    disables. xqp: nonnegative fraction, default 0 (gap 3.4e-4 eV). aphi:
-    nonnegative independent-loop Phi0/sqrt(Hz) noise amplitude, default 0.
-    """
-
-    ej_ghz: Positive
-    ec_ghz: Positive
-    el_ghz: Positive
-    q_cap: Positive | None = None
-    q_ind: Positive | None = None
-    xqp: Nonnegative = 0.0
-    aphi: Nonnegative = 0.0
 
 
 class Squid(Values):
@@ -164,13 +146,6 @@ class DCBias(Values):
     sources: SourceMap[DCSource]
 
 
-class ComplexCoefficient(Values):
-    """Finite signed real/imag coefficient; the containing map defines units."""
-
-    real: Finite
-    imag: Finite
-
-
 class DriveLine(Values):
     """One generator with charge or fixed-DC small-signal flux calibration.
 
@@ -234,42 +209,6 @@ class ReadoutSource(Values):
     input_per_gain: Finite
 
 
-class Receiver(Values):
-    """ro_ch: one logical ADC. gain: signed field-to-ADC sample gain, may be zero.
-
-    phase_deg: additive receiver phase (default 0). offset_adc: per-sample I/Q
-    offset (default zero). noise_psd_adc2_ns: required symmetric PSD 2x2 spectral
-    density ADC²*ns, two-sided white noise convention Cov(sample)=PSD/dt_ns.
-    Zero/singular matrices are supported. This is not per-sample covariance.
-    time_of_flight_ns: finite nonnegative total readout-line delay in ns, default
-    zero. Delays the waveform and gives exp(-2πi*f*delay) at absolute frequency f;
-    there is no independent electronic-delay parameter. Calibration/noise follow
-    the demodulated field's conversion to microwave I+iQ by conjugation.
-    """
-
-    ro_ch: Index
-    gain: Finite
-    phase_deg: Finite = 0.0
-    time_of_flight_ns: Nonnegative = 0.0
-    offset_adc: tuple[Finite, Finite] = (0.0, 0.0)
-    noise_psd_adc2_ns: tuple[tuple[Finite, Finite], tuple[Finite, Finite]]
-
-    @model_validator(mode="after")
-    def covariance(self) -> Self:
-        matrix = np.array(self.noise_psd_adc2_ns)
-        # Rank-one PSD matrices can acquire a negative eigenvalue of roundoff
-        # size. This is a relative machine-precision test, not a noise floor.
-        roundoff = 8 * np.finfo(float).eps * float(np.max(np.abs(matrix)))
-        if (
-            not np.array_equal(matrix, matrix.T)
-            or np.linalg.eigvalsh(matrix).min() < -roundoff
-        ):
-            raise ValueError(
-                "noise_psd_adc2_ns: must be symmetric positive semidefinite"
-            )
-        return self
-
-
 class Resonator(Values):
     """frequency_ghz: positive bare GHz. charge_coefficients_ghz: named F1/C/F2 full n
 
@@ -294,19 +233,6 @@ class Resonator(Values):
         if self.kappa_external_mhz + self.kappa_internal_mhz <= 0:
             raise ValueError("total linewidth must be positive")
         return self
-
-
-class Solver(Values):
-    """rtol/atol: positive DOP853 local tolerances; max_step_ns: positive finite
-
-    integration cap; bath_segment_ns: positive fixed bath update interval. All
-    four are explicit user choices, no convergence or applicability guarantee.
-    """
-
-    rtol: Positive
-    atol: Positive
-    max_step_ns: Positive
-    bath_segment_ns: Positive
 
 
 class Resonators(Values):
