@@ -1,6 +1,7 @@
 """Workflow hosting through caller registrations and visible mouse/keyboard input."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
@@ -12,8 +13,11 @@ from zcu_tools.experiment.workflows import Done, InitEnv, Step, WorkflowEnv, wor
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttachment
+from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.app.measure.ui.workflow_pane import WorkflowPane
+from zcu_tools.gui.app.measure.ui.workflow_tabs import WorkflowTabs
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.session.context_types import (
@@ -75,6 +79,12 @@ def workflow_window(
         project_root=str(tmp_path),
         progress_transport=DirectProgressTransport(),
     )
+    yield from _host_window(qapp, ctrl)
+
+
+def _host_window(
+    qapp: QApplication, ctrl: Controller
+) -> Iterator[tuple[Controller, MainWindow]]:
     ctrl.workflow_control().configure(
         (
             WorkflowAttachment(
@@ -104,6 +114,136 @@ def workflow_window(
         ctrl.close()
         window.deleteLater()
         qapp.processEvents()
+
+
+@dataclass
+class CleanupAttempt:
+    unsubscribe: Callable[[], None]
+    failures_left: int = 0
+    attempts: int = 0
+    successes: int = 0
+
+    def __call__(self) -> None:
+        self.attempts += 1
+        if self.failures_left:
+            self.failures_left -= 1
+            raise RuntimeError("subscription release failed")
+        self.unsubscribe()
+        self.successes += 1
+
+
+class CleanupFacet(WorkflowControlFacet):
+    cleanups: list[CleanupAttempt]
+    closed: list[str]
+
+    def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]:
+        cleanup = CleanupAttempt(super().subscribe(listener))
+        self.cleanups.append(cleanup)
+        return cleanup
+
+    def close(self, tab_id: str) -> bool:
+        self.closed.append(tab_id)
+        return super().close(tab_id)
+
+
+class CleanupController(Controller):
+    def __init__(self, root: Path) -> None:
+        state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+        super().__init__(
+            state,
+            Registry(),
+            None,
+            BaseEventBus(),
+            project_root=str(root),
+            progress_transport=DirectProgressTransport(),
+        )
+        self.workflow = CleanupFacet(state, self.session_services, self.owner_scheduler)
+        self.workflow.cleanups = []
+        self.workflow.closed = []
+
+    def workflow_control(self) -> CleanupFacet:
+        return self.workflow
+
+
+@pytest.fixture
+def cleanup_window(
+    qapp: QApplication, tmp_path: Path
+) -> Iterator[tuple[CleanupFacet, MainWindow]]:
+    ctrl = CleanupController(tmp_path)
+    for _, window in _host_window(qapp, ctrl):
+        ctrl.workflow.open("synthetic")
+        yield ctrl.workflow, window
+
+
+def _workflow_tabs(window: MainWindow) -> WorkflowTabs:
+    tabs = window.findChild(WorkflowTabs)
+    if tabs is None:
+        raise LookupError("No workflow tabs mounted")
+    return tabs
+
+
+def _workflow_pane(tabs: WorkflowTabs) -> WorkflowPane:
+    pane = tabs.widget(0)
+    if not isinstance(pane, WorkflowPane):
+        raise LookupError("No workflow pane mounted")
+    return pane
+
+
+def test_pane_dispose_retries_failed_subscription(cleanup_window):
+    control, window = cleanup_window
+    cleanup = control.cleanups[-1]
+    cleanup.failures_left = 1
+    pane = _workflow_pane(_workflow_tabs(window))
+    # The owner is stopped; only this view's cleanup can now fail.
+    with pytest.raises(RuntimeError, match="subscription release failed"):
+        pane.dispose()
+    pane.dispose()
+    pane.dispose()
+    assert cleanup.successes == 1
+    assert cleanup.attempts == 2
+
+
+def test_tabs_dispose_retries_without_repeating_successful_cleanup(cleanup_window):
+    control, window = cleanup_window
+    control.open("synthetic")
+    cleanup = control.cleanups[-1]
+    cleanup.failures_left = 1
+    tabs = _workflow_tabs(window)
+    with pytest.raises(RuntimeError, match="subscription release failed"):
+        tabs.dispose()
+    tabs.dispose()
+    tabs.dispose()
+    assert [c.successes for c in control.cleanups] == [1, 1, 1]
+    assert cleanup.attempts == 2
+
+
+def test_close_retries_view_cleanup_after_owner_has_closed(cleanup_window, tmp_path):
+    control, window = cleanup_window
+    cleanup = control.cleanups[-1]
+    cleanup.failures_left = 1
+    driver = ComponentDriver(window)
+    _shot(driver, tmp_path, "01-before-close")
+    driver.click_tooltip("Close synthetic (1)")
+    _shot(driver, tmp_path, "02-cleanup-failed-pane-retained")
+    assert driver.tabs("synthetic (1)").captions == ("synthetic (1)",)
+    driver.click_tooltip("Close synthetic (1)")
+    _shot(driver, tmp_path, "03-cleanup-retried-pane-removed")
+    assert not any(w.object_name == "workflow.status" for w in driver.visible().widgets)
+    assert cleanup.successes == 1
+    assert cleanup.attempts == 2
+    assert len(control.closed) == 1
+
+
+def test_window_dispose_retries_workflow_cleanup(cleanup_window):
+    control, window = cleanup_window
+    cleanup = control.cleanups[-1]
+    cleanup.failures_left = 1
+    with pytest.raises(RuntimeError, match="subscription release failed"):
+        window.dispose_control_watches()
+    window.dispose_control_watches()
+    window.dispose_control_watches()
+    assert all(c.successes == 1 for c in control.cleanups)
+    assert cleanup.attempts == 2
 
 
 def _ready(driver: ComponentDriver) -> None:
