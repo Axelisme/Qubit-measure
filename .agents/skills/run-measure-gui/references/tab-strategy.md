@@ -1,5 +1,7 @@
 # Tab 生命週期
 
+**讀者：** agent。決定量測 tab 的重用時機並在 reset 前保存證據。
+
 ## 新建或重用
 
 同一 adapter 連續調參或重複量測時，明確傳 `reuse_tab_id`。需要並排比較、改用不同 adapter，或刻意保留獨立工作頁時才新建。未傳 `reuse_tab_id` 會新建，recipe 不自動選 tab。

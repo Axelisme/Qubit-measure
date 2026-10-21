@@ -1,5 +1,7 @@
 # 量測任務紀錄
 
+**讀者：** agent。建立、更新與交接量測任務的目標、進度和證據紀錄。
+
 任務以 `<repo>` 為基準，採用 `<repo>/.agent_state/measurement-tasks/<task-id>/`。既有任務沿用已確認的位置，不在每次 session 新建副本。
 
 ## 建立與更新

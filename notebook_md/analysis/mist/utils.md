@@ -12,6 +12,8 @@ jupyter:
     name: python3
 ---
 
+**Readers:** lab-author. Inspect fluxonium-resonator eigenstates and search for transition collisions using saved fit parameters.
+
 ```python
 from pathlib import Path
 

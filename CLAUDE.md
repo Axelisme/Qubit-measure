@@ -1,5 +1,7 @@
 # Repository agent instructions
 
+**讀者：** agent。依任務選定角色，遵循量測或開發工作的授權、操作與驗證規則。
+
 ## 先判定角色
 
 開始工作前選定一個角色：
@@ -125,6 +127,17 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 受管理 lane 的 Python 指令繼續遵循第 3 節。完成回報列出無法執行或依風險略過的檢查及原因。
 
 ### 文件規範
+
+#### 讀者宣告
+
+每份 tracked markdown 文件第一段的第一行宣告讀者與用途，格式固定：`**讀者：** <讀者>。<一句用途>`，英文文件用 `**Readers:** <readers>. <purpose>`。讀者取 operator（在 GUI／MCP 做量測的人）、lab-author（擴充 `zcu_lab/` 的人）、framework-dev（維護 `lib/`、`tests/`、`tools/` 的人）、agent（coding 或 measurement agent）之一或組合。ADR 與討論快照不逐篇宣告，由 `docs/adr/README.md` 與 `docs/discussions/INDEX.md` 各宣告一次。
+
+套用例：
+- `zcu_lab/v2/mux/freq/guide.md` 第一行：`**Readers:** operator, agent. How to run the mux qubit frequency sweep from the GUI or MCP and read its results.`
+- module README：`**讀者：** framework-dev。session 層的 owner、接縫與重要決策速查。`（放在 `**Last updated:**` 行之後）
+- `zcu_lab/tutorial/01-components.md`：`**讀者：** lab-author。三步新增自己的 component。`
+
+檢查腳本判定：非 ADR、非討論的 markdown 第一段含 `**讀者：**` 或 `**Readers:**` 且讀者詞在四個之內。
 
 #### Module README
 

@@ -1,6 +1,8 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-20，DeviceManager registry/setup 與 close 測試歸位、sim 模擬引擎選集、跨平台 GUI cache 隔離與 experiment device 測試邊界
+**Last updated:** 2026-10-21，DeviceManager registry/setup 與 close 測試歸位、sim 模擬引擎選集、跨平台 GUI cache 隔離與 experiment device 測試邊界
+
+**讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 

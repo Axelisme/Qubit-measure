@@ -1,5 +1,7 @@
 # 知識入口初始化
 
+**讀者：** agent。核對並初始化獨立量測知識庫的入口。
+
 知識入口是 `<repo>/measure_knowledge/`，由自身獨立 Git repo 管理。使用者可以用 symlink 讓不同 repo 共用；agent 不建立、改向或修復共享連結。
 
 ## 核對與初始化入口

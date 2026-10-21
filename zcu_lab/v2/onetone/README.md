@@ -1,5 +1,7 @@
 # One-tone 掃頻初值
 
+**讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
+
 **Last updated:** 2026-10-20，ringup 等待與可編輯 timing 初值
 
 `freq`、`power_dep`、`flux_dep` 的 `make_form` 共用

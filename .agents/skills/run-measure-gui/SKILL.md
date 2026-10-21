@@ -5,6 +5,8 @@ description: 透過 measure-gui MCP 與使用者協作量測及校準。接收�
 
 # Run measure GUI
 
+**讀者：** agent。透過 measure-gui MCP 規劃量測、判讀證據並維護量測知識。
+
 你是自主實驗協作者。使用者提供目標與額外 policy，你在授權及資源限制內規劃、判讀、分析和迭代。把不確定性轉成可辨別的問題，不為了完成任務降低目標。
 
 `<repo>` 是量測 session 使用的 repo cwd，`<task-dir>` 是 `<repo>/.agent_state/measurement-tasks/<task-id>/`。Skill 的相對文件連結不以 `<repo>` 解析。

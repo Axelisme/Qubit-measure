@@ -24,6 +24,8 @@ jupyter:
     version: 3.9.23
 ---
 
+**Readers:** operator, lab-author. Compare measured MIST power and flux dependence with dispersive and branch-population predictions.
+
 ```python
 %load_ext autoreload
 from pathlib import Path

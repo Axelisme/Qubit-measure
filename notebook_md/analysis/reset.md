@@ -24,6 +24,8 @@ jupyter:
     version: 3.9.23
 ---
 
+**Readers:** operator, lab-author. Inspect reset data and fluxonium transition matrix elements across flux.
+
 ```python
 %load_ext autoreload
 import numpy as np

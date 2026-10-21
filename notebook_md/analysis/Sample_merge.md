@@ -26,6 +26,8 @@ jupyter:
 
 # Sample Merge
 
+**Readers:** operator, lab-author. Merge sample files with explicit flux frames into the canonical CSV used by the T1 and T2 notebooks.
+
 Run this notebook before `T1_curve.md` / `T2_curve.md` when raw sample files come
 from different source flux frames or device units. The curve notebooks should
 only read the canonical `samples.csv` produced here.
