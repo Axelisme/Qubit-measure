@@ -13,6 +13,7 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 
 from .data_figure_preview_gallery import DataFigurePreviewGallery
+from .figure_pane_layout import MAX_TILED_FIGURES, FigurePaneLayout
 from .interactive_frontend import InteractiveFrontend
 
 if TYPE_CHECKING:
@@ -64,7 +65,7 @@ class ExperimentFigureArea(QWidget):
     def _build_analysis_figure_pane(self) -> None:
         # Analysis figure pane (only when analysis present)
         if self._has_analysis:
-            self._analysis_stack = QStackedWidget()
+            self._analysis_stack = FigurePaneLayout()
             self._analysis_placeholder = QLabel("(no plot yet)")
             # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
             self._analysis_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
@@ -88,7 +89,7 @@ class ExperimentFigureArea(QWidget):
     def _build_post_figure_pane(self) -> None:
         # Post figure pane (only when post present)
         if self._has_post:
-            self._post_stack = QStackedWidget()
+            self._post_stack = FigurePaneLayout()
             self._post_placeholder = QLabel("(no plot yet)")
             # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
             self._post_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
@@ -116,12 +117,22 @@ class ExperimentFigureArea(QWidget):
         self._right_stack = QStackedWidget()
 
         # Run figure pane (always)
-        self._run_stack = QStackedWidget()
+        self._run_stack = FigurePaneLayout()
         self._run_placeholder = QLabel("(no plot yet)")
         # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
         self._run_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
         self._run_stack.addWidget(self._run_placeholder)
         self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
+        self._run_figures: FigureCollection | None = None
+        self._run_panel_right = QWidget()
+        run_right = QVBoxLayout(self._run_panel_right)
+        run_right.setContentsMargins(0, 0, 0, 0)
+        self._run_selector = QComboBox()
+        self._run_selector.setAccessibleName("Run figure")
+        self._run_selector.hide()
+        self._run_selector.currentIndexChanged.connect(self._on_run_figure_selected)
+        run_right.addWidget(self._run_selector)
+        run_right.addWidget(self._run_stack, stretch=1)
 
         self._build_analysis_figure_pane()
         self._build_post_figure_pane()
@@ -137,7 +148,7 @@ class ExperimentFigureArea(QWidget):
         # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
         self._right_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
 
-        self._right_stack.addWidget(self._run_stack)
+        self._right_stack.addWidget(self._run_panel_right)
         if self._has_analysis:
             self._right_stack.addWidget(self._analysis_panel_right)
         if self._has_post:
@@ -167,7 +178,7 @@ class ExperimentFigureArea(QWidget):
         """
         self._data_active = pane == "data"
         if pane == "run":
-            self._right_stack.setCurrentWidget(self._run_stack)
+            self._right_stack.setCurrentWidget(self._run_panel_right)
         elif pane == "analysis":
             self._require_analysis()
             self._right_stack.setCurrentWidget(self._analysis_panel_right)
@@ -254,6 +265,7 @@ class ExperimentFigureArea(QWidget):
         """
         self._require_analysis()
         self._analysis_selector.hide()
+        self._analysis_stack.set_tiled(tiled=False)
         self._analysis_stack.addWidget(widget)
         self._analysis_stack.setCurrentWidget(widget)
         self._right_stack.setCurrentWidget(self._analysis_panel_right)
@@ -311,6 +323,11 @@ class ExperimentFigureArea(QWidget):
     def clear_all_figures(self) -> None:
         """Clear all figure panes (used for LoadData and Run start invalidation)."""
         self._run_container.clear_dynamic_canvases()
+        self._run_figures = None
+        self._run_selector.blockSignals(True)
+        self._run_selector.clear()
+        self._run_selector.blockSignals(False)
+        self._run_selector.hide()
         if self._has_analysis:
             self._analysis_container.clear_dynamic_canvases()
             self._analysis_figures = None
@@ -356,44 +373,96 @@ class ExperimentFigureArea(QWidget):
         self._require_post()
         self._show_named_figures("post_analysis", figures)
 
+    def present_figures(self, pane: str, figures: FigureCollection) -> None:
+        """Borrow original names after attachment, synchronously on the Qt owner.
+
+        Only already attached Figures become visible. This never presents an
+        undrawn Figure, copies a collection, or changes its ownership. Unknown
+        panes raise ValueError. Clear/replacement ends these presentation borrows.
+        """
+        self._show_named_figures(pane, figures, attach=False)
+
     def _show_named_figures(
         self,
-        pane: Literal["analysis", "post_analysis"],
+        pane: str,
         figures: FigureCollection | None,
+        *,
+        attach: bool = True,
     ) -> None:
-        if pane == "analysis":
-            selector = self._analysis_selector
-            container = self._analysis_container
+        if pane == "run":
+            selector, container, stack = (
+                self._run_selector,
+                self._run_container,
+                self._run_stack,
+            )
+            previous = self._run_figures
+            self._run_figures = figures
+        elif pane == "analysis":
+            self._require_analysis()
+            selector, container, stack = (
+                self._analysis_selector,
+                self._analysis_container,
+                self._analysis_stack,
+            )
             previous = self._analysis_figures
-        else:
-            selector = self._post_selector
-            container = self._post_container
+            self._analysis_figures = figures
+        elif pane == "post_analysis":
+            self._require_post()
+            selector, container, stack = (
+                self._post_selector,
+                self._post_container,
+                self._post_stack,
+            )
             previous = self._post_figures
-        if figures is not previous:
-            selector.blockSignals(True)
-            try:
-                selector.clear()
-                if figures is not None:
-                    selector.addItems(list(figures))
-            finally:
-                selector.blockSignals(False)
-            if pane == "analysis":
-                self._analysis_figures = figures
-            else:
-                self._post_figures = figures
-        selector.setVisible(bool(figures))
-        if not figures:
-            container.clear_dynamic_canvases()
+            self._post_figures = figures
         else:
-            name = selector.currentText()
-            if name not in figures:
-                raise RuntimeError(f"No selected {pane} figure in {self.tab_id!r}")
+            raise ValueError(f"unknown pane {pane!r}")
+        selected = selector.currentText() if figures is previous else ""
+        if attach and figures is not previous:
+            container.clear_dynamic_canvases()
+        names = (
+            []
+            if figures is None
+            else [
+                name
+                for name, figure in figures.items()
+                if attach or container.contains_figure(figure)
+            ]
+        )
+        selector.blockSignals(True)
+        try:
+            selector.clear()
+            selector.addItems(names)
+            if selected in names:
+                selector.setCurrentText(selected)
+        finally:
+            selector.blockSignals(False)
+        selector.setVisible(len(names) > MAX_TILED_FIGURES)
+        stack.set_tiled(tiled=0 < len(names) <= MAX_TILED_FIGURES)
+        if not names:
+            if attach:
+                container.clear_dynamic_canvases()
+        elif figures is not None:
+            if attach:
+                self._draw_named_figures(figures, container, names)
+            figure = figures[selector.currentText()]
+            attach_existing_figure_to_container(figure, container)
+        self._refresh_data_gallery()
+
+    @staticmethod
+    def _draw_named_figures(
+        figures: FigureCollection, container: FigureContainer, names: list[str]
+    ) -> None:
+        for name in names:
             canvas = attach_existing_figure_to_container(figures[name], container)
             draw = getattr(canvas, "draw", None)
             if not callable(draw):
                 raise RuntimeError("Attached figure canvas does not support draw()")
             draw()
-        self._refresh_data_gallery()
+
+    def _on_run_figure_selected(self, index: int) -> None:
+        if index >= 0 and self._run_figures is not None:
+            self._show_named_figures("run", self._run_figures, attach=False)
 
     def _on_analysis_figure_selected(self, index: int) -> None:
         if index >= 0 and self._analysis_figures is not None:
@@ -430,5 +499,12 @@ class ExperimentFigureArea(QWidget):
             post_fig = None
         try:
             self._data_gallery.update_figures(run_fig, ana_fig, post_fig)
+            self._data_gallery.update_collections(
+                self._run_figures if run_fig is not None else None,
+                self._analysis_figures
+                if self._has_analysis and ana_fig is not None
+                else None,
+                self._post_figures if self._has_post and post_fig is not None else None,
+            )
         except Exception:
             logger.exception("failed to refresh data gallery")

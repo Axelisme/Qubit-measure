@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.writeback import WritebackPane
+    from zcu_tools.plotting.figures import FigureCollection
 
 
 # ---------------------------------------------------------------------------
@@ -608,6 +609,14 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return None
         return tab_w.prepare_post_container()
+
+    def present_figures(
+        self, tab_id: str, pane: str, figures: FigureCollection
+    ) -> None:
+        """Update named presentation on the owner; closed tabs are ignored."""
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is not None:
+            tab_w.present_figures(pane, figures)
 
     def get_figure_container(self, tab_id: str, pane: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
