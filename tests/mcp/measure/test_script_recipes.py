@@ -175,7 +175,7 @@ def test_wait_delivery_does_not_override_generator_completion(
     assert reply.data["outcome"]["report"] == {"status": operation_status, "count": 17}
 
 
-def test_cancel_wait_drains_operation_and_closes_generator(
+def test_cancel_wait_drains_operation_then_author_returns_partial_report(
     tmp_path: Path, clients: list[MeasureClient]
 ) -> None:
     from zcu_tools.mcp.measure.recipe_api import RecipeGenerator, RecipeSession, recipe
@@ -186,8 +186,9 @@ def test_cancel_wait_drains_operation_and_closes_generator(
 
     def wait(op: object, cancellation: Event) -> None:
         entered.set()
-        assert cancellation.wait(3)
-        operation.delivery = OperationResult("cancelled", None)
+        # The owner issues cancel after observing entered; cancel releases wait.
+        assert cancellation.wait(30)
+        operation.delivery = OperationResult("cancelled", 7)
         drained.set()
 
     def cancel(op: object) -> None:
@@ -198,7 +199,10 @@ def test_cancel_wait_drains_operation_and_closes_generator(
         try:
             yield Ask(Decision(evidence="start synthetic operation"))
             yield Wait(operation)
-            return Report(status="unexpected resume", count=0)
+            assert drained.is_set()
+            assert operation.delivery is not None
+            assert operation.delivery.status == "cancelled"
+            return Report(status="saved partial", count=operation.delivery.result or 0)
         finally:
             assert drained.is_set()
             closed.set()
@@ -214,19 +218,98 @@ def test_cancel_wait_drains_operation_and_closes_generator(
             client.call, "answer", {"execution": key, "answer": {"proceed": True}}
         )
         try:
-            assert entered.wait(3)
+            # Answer has been submitted and its only next action is host.wait.
+            assert entered.wait(30)
             client.call("cancel", {"execution": key})
-            result = client.call("wait", {"execution": key, "timeout": 3})
+            # Cancel releases host.wait, so authored cleanup must reach terminal.
+            result = client.call("wait", {"execution": key, "timeout": 30})
             assert result.data["outcome"] == {
                 "status": "cancelled",
-                "report": None,
+                "report": {"status": "saved partial", "count": 7},
                 "runs": [],
             }
             assert closed.is_set()
             assert drained.is_set()
         finally:
             client.context.session.close()
-        assert continuation.result(timeout=3).data["status"] == "cancelled"
+        # Cancellation and session close above have drained the original worker.
+        assert continuation.result(timeout=30).data["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_cancel_ask_resumes_none_and_preserves_author_report_or_failure(
+    tmp_path: Path, clients: list[MeasureClient], cleanup_fails: bool
+) -> None:
+    from zcu_tools.mcp.measure.recipe_api import RecipeGenerator, RecipeSession, recipe
+    from zcu_tools.mcp.measure.recipe_host import RecipeHost
+
+    resumed: list[Choice | None] = []
+    skipped = SyntheticOperation()
+    deliveries: list[object] = []
+
+    def deliver_cancelled(operation: object) -> None:
+        assert operation is skipped
+        deliveries.append(operation)
+        skipped.delivery = OperationResult("cancelled", None)
+
+    @recipe("cancel_question", description="Author owns cancellation cleanup")
+    def synthetic(session: RecipeSession, inputs: Inputs) -> RecipeGenerator[Report]:
+        request = Ask(Decision(evidence="captured"))
+        yield request
+        resumed.append(request.delivery)
+        yield Wait(skipped)
+        assert skipped.delivery == OperationResult("cancelled", None)
+        second = Ask(Decision(evidence="cancelled follow-up"))
+        yield second
+        resumed.append(second.delivery)
+        if cleanup_fails:
+            raise ValueError("cancel cleanup failed")
+        return Report(status="cancelled by author", count=inputs.count)
+
+    host = RecipeHost(session=RecipeSession(), deliver_cancelled=deliver_cancelled)
+    client = make_client(
+        tmp_path, recipes=(synthetic,), recipe_host_factory=lambda _: host
+    )
+    clients.append(client)
+    key = client.call("cancel_question", {"count": 4}).data["execution"]
+    client.call("cancel", {"execution": key})
+    # The cancelled Ask is ready immediately, with no operation left to drain.
+    client.context.session.recipes.get(key).join()
+    final = client.call("status", {"execution": key})
+    assert resumed == [None, None]
+    assert deliveries == [skipped]
+    if cleanup_fails:
+        assert final["status"] == "failed"
+        assert final["error"]["message"] == "cancel cleanup failed"
+    else:
+        assert final["outcome"] == {
+            "status": "cancelled",
+            "report": {"status": "cancelled by author", "count": 4},
+            "runs": [],
+        }
+
+
+def test_session_teardown_closes_question_without_answering(
+    tmp_path: Path, clients: list[MeasureClient]
+) -> None:
+    from zcu_tools.mcp.measure.recipe_api import RecipeGenerator, RecipeSession, recipe
+
+    events: list[str] = []
+
+    @recipe("teardown", description="Close abandoned generator")
+    def synthetic(session: RecipeSession, inputs: Inputs) -> RecipeGenerator[Report]:
+        try:
+            yield Ask(Decision(evidence="captured"))
+            events.append("answered")
+        finally:
+            events.append("finally")
+        return Report(status="returned", count=0)
+
+    client = make_client(tmp_path, recipes=(synthetic,))
+    clients.append(client)
+    client.call("teardown", {"count": 1})
+    client.context.session.close()
+    assert events == ["finally"]
 
 
 def test_failure_and_default_convenience_stub_are_failed_outcomes(

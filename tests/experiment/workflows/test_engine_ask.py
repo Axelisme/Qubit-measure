@@ -1,22 +1,25 @@
 """Public Engine question suspension, worker delivery and cancellation contracts."""
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from pathlib import Path
-from threading import Event
+from threading import Event, get_ident
 
 import pytest
 from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.workflows import (
     Actor,
     Done,
     InvalidRunState,
     Next,
+    Run,
     RunMismatch,
     Step,
     WorkflowEnv,
 )
 
-from ._engine_fakes import START, Plan, Rig, State, Tunables
+from ._engine_fakes import START, Cfg, Plan, Rig, State, Tunables
 
 
 class Decision(Answer):
@@ -128,26 +131,53 @@ def test_each_answer_runs_until_next_question_without_restart(rig: Rig) -> None:
         rig.engine.answer("run", Decision(value=33))
 
 
-def test_stop_closes_suspended_invocation_and_discards_it(rig: Rig) -> None:
-    closed: list[bool] = []
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_stop_is_control_only_and_drain_resumes_cancelled_ask_on_worker(
+    rig: Rig, cleanup_fails: bool
+) -> None:
+    closed: list[int] = []
+    received: list[Decision | None] = []
 
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
         try:
-            yield from env.ask(Choose(point=0))
+            received.append((yield from env.ask(Choose(point=0))))
+            from zcu_tools.experiment.workflows import Cancelled
+
+            def acquisition(_run: Run[Cfg]) -> int:
+                pytest.fail("Cancelled invocation must not start new work")
+
+            cancelled = yield from env.run(acquisition, Cfg())
+            assert cancelled == Cancelled(run_id="run")
+            yield from env.setup_device("unused", FakeDeviceInfo(address="unused"))
+            yield from env.wait_until(START + timedelta(days=1))
+            received.append((yield from env.ask(Choose(point=1))))
+            if cleanup_fails:
+                raise ValueError("cancel cleanup failed")
         finally:
-            closed.append(True)
+            closed.append(get_ident())
         return Done()
 
     rig.start(step)
     assert rig.engine.execute("run").lifecycle == "paused"
     assert closed == []
     assert rig.engine.pause("run").lifecycle == "paused"
-    assert rig.engine.stop("run").lifecycle == "stopped"
-    assert closed == [True]
+    assert rig.engine.stop("run").lifecycle == "stopping"
+    assert closed == []
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        # The submitted drain has no blocked collaborator and must return.
+        stopped = pool.submit(rig.engine.drain, "run").result(timeout=30)
+    assert stopped.lifecycle == ("failed" if cleanup_fails else "stopped")
+    if cleanup_fails:
+        assert stopped.reason == "ValueError: cancel cleanup failed"
+    assert len(closed) == 1 and closed[0] != get_ident()
+    assert received == [None, None]
+    assert rig.devices.values == []
+    assert rig.devices.captures == 0
+    assert rig.clock.targets == []
     assert rig.engine.pending_question("run") is None
-    assert rig.kinds().count("step_discarded") == 1
+    assert rig.kinds().count("step_failed" if cleanup_fails else "step_discarded") == 1
     assert rig.engine.records("run") == ()
 
 
@@ -163,7 +193,8 @@ def test_answer_reserves_worker_segment_and_pause_discards_on_next_effect(
         try:
             yield from env.ask(Choose(point=0))
             entered.set()
-            assert release.wait(5)
+            # The test releases the continuation in its finally block.
+            assert release.wait(30)
             yield from env.wait_until(START)
         finally:
             closed.append(True)
@@ -174,7 +205,8 @@ def test_answer_reserves_worker_segment_and_pause_discards_on_next_effect(
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(rig.engine.answer, "run", Decision(value=1))
         try:
-            assert entered.wait(5)
+            # The submitted answer resumes directly into entered.set().
+            assert entered.wait(30)
             with pytest.raises(InvalidRunState):
                 rig.engine.answer("run", Decision(value=2))
             with pytest.raises(InvalidRunState):
@@ -182,7 +214,8 @@ def test_answer_reserves_worker_segment_and_pause_discards_on_next_effect(
             assert rig.engine.pause("run").lifecycle == "pausing"
         finally:
             release.set()
-        assert future.result(timeout=5).lifecycle == "paused"
+        # Release above lets the synchronous segment reach its pause boundary.
+        assert future.result(timeout=30).lifecycle == "paused"
     assert closed == [True]
     assert rig.engine.pending_question("run") is None
     assert rig.engine.resume("run").lifecycle == "running"

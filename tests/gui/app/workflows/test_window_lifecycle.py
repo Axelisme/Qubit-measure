@@ -1,9 +1,13 @@
 """Window lifecycle contracts through public native/GUI seams."""
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import get_ident
 
 import pytest
-from qtpy.QtWidgets import QPushButton
+from qtpy.QtWidgets import QApplication, QPushButton
+from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.workflows import (
     Actor,
     Done,
@@ -23,6 +27,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.workflows._start_fakes import StartHarness
 
 from ._reload_source import InjectedCatalog
@@ -30,6 +35,115 @@ from ._sample_input import sample_input
 from ._synthetic import Context, Plan, Tunables
 from ._window_scenarios import install_pause_plot_workflow
 from ._window_support import form_editable, show_sample_section
+
+
+@pytest.mark.parametrize("action", ["stop", "close"])
+def test_paused_question_stop_drains_on_worker_under_same_operation_and_lease(
+    run_attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+    action: str,
+) -> None:
+    window, harness, _entry = run_attachment
+    cleanup_threads: list[int] = []
+    answers: list[Answer | None] = []
+
+    def init(_env: InitEnv[Context], _plan: Plan) -> None:
+        return None
+
+    @workflow("question-stop", plan=Plan, tunables=Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Context], plan: Plan, tun: Tunables, state: None
+    ) -> Step[None, int]:
+        try:
+            answers.append((yield from env.ask(Question[Answer]())))
+        finally:
+            cleanup_threads.append(get_ident())
+        return Done()
+
+    catalog_source.install(step, window)
+    token = window.start("question-stop")
+    assert isinstance(token, int)
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        # Startup has no blocking ports; it yields the explicit question.
+        worker.submit(harness.background.execute).result(timeout=30)
+        harness.owner.pump_all()
+        harness.background.deliver()
+        assert harness.background.error is None
+        paused = window.controller.status()
+        assert paused is not None and paused.lifecycle == "paused"
+        lease = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+        assert lease and harness.handles.known_outcome(token) is None
+        if action == "close":
+            assert not window.close(), "Close must retain the paused producer host"
+        else:
+            window.stop("question-stop")
+        assert cleanup_threads == [], "Stop must never run authored finally on owner"
+        assert window.controller.operation_id == token
+        assert window.controller.has_pending_segment
+        assert harness.handles.known_outcome(token) is None
+        assert (
+            tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+            == lease
+        )
+        with pytest.raises(InvalidRunState):
+            window.start("replacement-before-drain")
+        # The queued drain resumes None and has no remaining external waits.
+        worker.submit(harness.background.execute).result(timeout=30)
+        assert len(cleanup_threads) == 1 and cleanup_threads[0] != get_ident()
+        assert answers == [None]
+        assert window.controller.operation_id == token
+        assert harness.handles.known_outcome(token) is None
+        assert harness.gate.snapshot()
+        harness.owner.pump_all()
+        harness.background.deliver()
+    assert window.controller.operation_id is None
+    assert harness.handles.known_outcome(token) == OperationOutcome("cancelled")
+    assert not harness.gate.snapshot()
+
+
+def test_question_stop_ui_retains_busy_controls_until_worker_delivery(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+    catalog_source: InjectedCatalog,
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window, harness, _entry = attachment
+
+    def init(_env: InitEnv[Context], _plan: Plan) -> None:
+        return None
+
+    @workflow("question-ui", plan=Plan, tunables=Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Context], plan: Plan, tun: Tunables, state: None
+    ) -> Step[None, int]:
+        yield from env.ask(Question[Answer]())
+        return Done()
+
+    catalog_source.install(step, window)
+    window.resize(1100, 900)
+    window.show()
+    qapp.processEvents()
+    ui = ComponentDriver(window)
+    ui.screenshot(tmp_path / "question-ready.png")
+    ui.click(object_name="workflow.run.start")
+    harness.complete_segment()
+    qapp.processEvents()
+    assert ui.observe(object_name="workflow.run.badge").text == "paused"
+    ui.screenshot(tmp_path / "question-paused.png")
+    ui.click(object_name="workflow.run.stop")
+    qapp.processEvents()
+    assert ui.observe(object_name="workflow.run.badge").text == "stopping"
+    assert not ui.observe(object_name="workflow.run.start").enabled
+    ui.screenshot(tmp_path / "question-stopping.png")
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        # Stop queued a drain whose only work is the ready cancelled question.
+        worker.submit(harness.background.execute).result(timeout=30)
+    harness.owner.pump_all()
+    harness.background.deliver()
+    qapp.processEvents()
+    assert ui.observe(object_name="workflow.run.badge").text == "stopped"
+    assert ui.observe(object_name="workflow.run.start").enabled
+    ui.screenshot(tmp_path / "question-stopped.png")
 
 
 def test_close_pending_start_requests_stop_without_destroying_producer_host(
