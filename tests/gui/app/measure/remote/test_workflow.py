@@ -183,7 +183,7 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
         )
         assert (
             client.call("wait", {"op": started["handle"], "timeout": 0})["status"]
-            == "completed"
+            == "finished"
         )
         assert author.deliveries[0][0].value == 29
         assert (
