@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.workflows import (
     Aborted,
     Actor,
+    Cancelled,
     Completed,
     Done,
     Failed,
@@ -83,8 +84,8 @@ def start_effect(
     experiment: Callable[[Run[Cfg]], int],
     *,
     saver: Callable[[Completed[Cfg, int], Path], None] = save_integer,
-) -> list[Completed[Cfg, int] | Failed]:
-    observed: list[Completed[Cfg, int] | Failed] = []
+) -> list[Completed[Cfg, int] | Failed | Cancelled]:
+    observed: list[Completed[Cfg, int] | Failed | Cancelled] = []
 
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
@@ -158,7 +159,7 @@ def test_schedule_failure_remains_recoverable_and_next_effect_has_fresh_signal(
 ) -> None:
     cause = OSError("acquire disconnected")
     signals: list[StopSignal] = []
-    observed: list[Completed[Cfg, int] | Failed] = []
+    observed: list[Completed[Cfg, int] | Failed | Cancelled] = []
 
     def fail(run: Run[Cfg]) -> int:
         signals.append(run.cancel_signal)
@@ -338,7 +339,7 @@ def test_run_resolves_role_names_only_when_experiment_uses_device(
     rig: Rig, use_device: bool
 ) -> None:
     original = Cfg(value=7, dev={"selected": "missing", "unused": "disconnected"})
-    observed: list[Completed[Cfg, int] | Failed] = []
+    observed: list[Completed[Cfg, int] | Failed | Cancelled] = []
     entered: list[bool] = []
     cause = OSError("Device 'missing' is disconnected")
 
@@ -396,7 +397,7 @@ def test_run_resolves_role_names_only_when_experiment_uses_device(
 def test_live_callback_caught_by_schedule_is_still_run_failure(
     rig: Rig, rethrow: bool
 ) -> None:
-    observed: list[Completed[Cfg, int] | Failed] = []
+    observed: list[Completed[Cfg, int] | Failed | Cancelled] = []
 
     def projection(
         _axes: tuple[NDArray[np.float64], ...], _values: NDArray[np.complex128]
