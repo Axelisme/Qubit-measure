@@ -7,7 +7,7 @@ and nonfinite numbers. Energies are H/h in GHz, physical time is ns.
 from typing import Annotated, Self
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 Finite = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 Positive = Annotated[Finite, Field(gt=0)]
@@ -15,6 +15,26 @@ Nonnegative = Annotated[Finite, Field(ge=0)]
 Count = Annotated[int, Field(gt=0, strict=True)]
 Index = Annotated[int, Field(ge=0, strict=True)]
 Name = Annotated[str, Field(min_length=1)]
+
+
+def validation_message(error: ValidationError, *, root: str) -> str:
+    """Render simulation settings errors as ordered dotted-path diagnostics.
+
+    error is a Pydantic validation failure. root labels errors with no location;
+    pass an empty string to leave that location empty. Validator messages with a
+    'field: message' prefix append field to the location. The returned string
+    joins diagnostics with '; ' in their original order, without raising or
+    changing the supplied exception.
+    """
+    messages = []
+    for item in error.errors():
+        path = ".".join(str(part) for part in item["loc"])
+        message = item["msg"].removeprefix("Value error, ")
+        if ": " in message:
+            field, message = message.split(": ", 1)
+            path = f"{path}.{field}" if path else field
+        messages.append(f"{path or root}: {message}")
+    return "; ".join(messages)
 
 
 class Values(BaseModel):

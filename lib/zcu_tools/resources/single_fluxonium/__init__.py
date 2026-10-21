@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from zcu_tools.resources.simulation_schema import validation_message
 from zcu_tools.resources.yaml import load_yaml
 
 from .schema import SingleFluxoniumSettings
@@ -20,15 +21,7 @@ def parse_single_fluxonium(document: object) -> SingleFluxoniumSettings:
     try:
         return SingleFluxoniumSettings.model_validate(document)
     except ValidationError as error:
-        messages = []
-        for item in error.errors():
-            path = ".".join(str(part) for part in item["loc"])
-            message = item["msg"].removeprefix("Value error, ")
-            if ": " in message:
-                field, message = message.split(": ", 1)
-                path = f"{path}.{field}" if path else field
-            messages.append(f"{path or 'model'}: {message}")
-        raise ValueError("; ".join(messages)) from error
+        raise ValueError(validation_message(error, root="model")) from error
 
 
 def load_single_fluxonium(path: str | Path) -> SingleFluxoniumSettings:

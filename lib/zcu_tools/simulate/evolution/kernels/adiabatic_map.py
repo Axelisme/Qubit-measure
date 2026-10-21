@@ -9,6 +9,7 @@ from scipy.special import roots_legendre
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import FluxExpansion, ModelSource
+from ._flux_expansion import TERM_KINDS, PackedExpansion, flux_hamiltonian
 from ._secular import coherence_decay
 
 
@@ -26,16 +27,20 @@ def _waveform(table: SegmentTable, row: int):
     return waveform.time_ns[begin:end], waveform.flux[begin:end]
 
 
-def _hamiltonian(expansion: FluxExpansion, times, flux, time: float):
-    h = expansion.static.copy()
-    for term in expansion.terms:
-        if term.loop >= flux.shape[1]:
-            raise ValueError("flux expansion loop exceeds waveform width")
-        value = np.interp(time, times, flux[:, term.loop])
-        angle = np.pi * value * (2 if term.kind.endswith("2pi") else 1)
-        coefficient = np.cos(angle) if term.kind.startswith("cos") else np.sin(angle)
-        h += coefficient * term.matrix
-    return h
+def _pack_expansion(expansion: FluxExpansion, width: int) -> PackedExpansion:
+    """Pack a row's fixed-coordinate expansion once; reject missing flux columns."""
+    if any(term.loop >= width for term in expansion.terms):
+        raise ValueError("flux expansion loop exceeds waveform width")
+    return PackedExpansion(
+        expansion.static,
+        np.array(
+            [term.matrix for term in expansion.terms], dtype=np.complex128
+        ).reshape((-1, *expansion.static.shape)),
+        np.array([term.loop for term in expansion.terms], dtype=np.int64),
+        np.array(
+            [TERM_KINDS.index(term.kind) for term in expansion.terms], dtype=np.int64
+        ),
+    )
 
 
 def row_basis(
@@ -55,16 +60,17 @@ def row_basis(
     """
     times, flux = _waveform(table, row)
     time = float(table.start_ns[row] + (table.duration_ns[row] if end else 0))
-    return np.linalg.eigh(_hamiltonian(source.flux_expansion(), times, flux, time))[1]
+    expansion = _pack_expansion(source.flux_expansion(), flux.shape[1])
+    return np.linalg.eigh(flux_hamiltonian(expansion, times, flux, time))[1]
 
 
 def _transport(expansion, times, flux, knots, order):
-    _, previous = np.linalg.eigh(_hamiltonian(expansion, times, flux, knots[0]))
+    _, previous = np.linalg.eigh(flux_hamiltonian(expansion, times, flux, knots[0]))
     vectors = previous
     resolved = True
     for left, right in zip(knots[:-1], knots[1:], strict=True):
         for time in np.linspace(left, right, order + 1)[1:]:
-            _, vectors = np.linalg.eigh(_hamiltonian(expansion, times, flux, time))
+            _, vectors = np.linalg.eigh(flux_hamiltonian(expansion, times, flux, time))
             overlap = np.sum(previous.conj() * vectors, axis=0)
             magnitude = np.abs(overlap)
             if np.any(magnitude < 0.25):
@@ -85,7 +91,7 @@ def _integrate(expansion, times, flux, start, stop, order):
         half = (right - left) / 2
         sample_times = (right + left) / 2 + half * nodes
         for time, weight in zip(sample_times, weights, strict=True):
-            energy, _ = np.linalg.eigh(_hamiltonian(expansion, times, flux, time))
+            energy, _ = np.linalg.eigh(flux_hamiltonian(expansion, times, flux, time))
             integral += half * weight * energy
     phase, resolved = _transport(expansion, times, flux, knots, order)
     return integral, phase, resolved
@@ -99,7 +105,7 @@ def _factor(table: SegmentTable, row: int, context: KernelContext):
     shift = bath.energies_ghz - source.model(level).energies_ghz
     duration = table.duration_ns[row]
     start = table.start_ns[row]
-    expansion = source.flux_expansion()
+    expansion = _pack_expansion(source.flux_expansion(), flux.shape[1])
     previous = None
     previous_phase = None
     for order in (4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096):

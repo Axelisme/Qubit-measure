@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from zcu_tools.resources.simulation_schema import validation_message
 from zcu_tools.resources.yaml import load_yaml
 
 from .schema import FTFSettings
@@ -44,15 +45,7 @@ def parse_ftf(document: object) -> FTFSettings:
     try:
         config = FTFSettings.model_validate(document)
     except ValidationError as error:
-        messages = []
-        for item in error.errors():
-            path = ".".join(str(part) for part in item["loc"])
-            message = item["msg"].removeprefix("Value error, ")
-            if ": " in message:
-                field, message = message.split(": ", 1)
-                path = f"{path}.{field}" if path else field
-            messages.append(f"{path}: {message}")
-        raise ValueError("; ".join(messages)) from error
+        raise ValueError(validation_message(error, root="")) from error
     _wiring(config)
     return config
 

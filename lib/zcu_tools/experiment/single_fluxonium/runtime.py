@@ -43,7 +43,6 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 from zcu_tools.simulate.fluxonium import (
-    DispersiveResonator,
     FluxoniumNoise,
     SingleFluxoniumModel,
 )
@@ -51,7 +50,7 @@ from zcu_tools.simulate.fluxonium import (
 from . import replay
 from .acquire import SingleFluxoniumAcquire, SingleFluxoniumPreparation
 from .numeric import dc_flux
-from .readout import prepare_readout, readout_model
+from .readout import dispersive_resonator, prepare_readout, readout_model
 from .template import SingleFluxoniumPlan, plan_template
 
 
@@ -89,19 +88,10 @@ def _build_facts(
     drive = DriveSource(
         settings.drive_line.name, coefficient.real * charge, -coefficient.imag * charge
     )
-    resonator = settings.readout.resonator
     source = model.model_source(
         (drive,),
         noise=FluxoniumNoise(qubit.q_cap, qubit.q_ind, qubit.xqp, qubit.aphi),
-        resonator=DispersiveResonator(
-            resonator.frequency_ghz,
-            resonator.charge_coefficient_ghz,
-            2
-            * np.pi
-            * (resonator.kappa_external_mhz + resonator.kappa_internal_mhz)
-            / 1000,
-            resonator.thermal_occupation,
-        ),
+        resonator=dispersive_resonator(settings),
     )
     return SingleFluxoniumFacts(model, source, readout_model(settings, model, source))
 

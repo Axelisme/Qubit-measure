@@ -22,6 +22,26 @@ from zcu_tools.simulate.fluxonium import DispersiveResonator, SingleFluxoniumMod
 from .template import SingleFluxoniumPlan
 
 
+def dispersive_resonator(settings: SingleFluxoniumSettings) -> DispersiveResonator:
+    """Convert validated cavity settings for Purcell loss and dressed readout.
+
+    Frequencies and charge coupling remain in GHz. The returned total linewidth
+    is angular inverse ns, converted from internal plus external MHz linewidths.
+    Thermal occupation is passed through, including None for equilibrium.
+    No model construction, I/O or mutation occurs.
+    """
+    resonator = settings.readout.resonator
+    return DispersiveResonator(
+        resonator.frequency_ghz,
+        resonator.charge_coefficient_ghz,
+        2
+        * np.pi
+        * (resonator.kappa_external_mhz + resonator.kappa_internal_mhz)
+        / 1000,
+        resonator.thermal_occupation,
+    )
+
+
 def readout_model(
     settings: SingleFluxoniumSettings,
     model: SingleFluxoniumModel,
@@ -36,17 +56,7 @@ def readout_model(
     """
     resonator = settings.readout.resonator
     secular = source.model((0,))
-    frequencies = model.readout_frequencies_ghz(
-        DispersiveResonator(
-            resonator.frequency_ghz,
-            resonator.charge_coefficient_ghz,
-            2
-            * np.pi
-            * (resonator.kappa_external_mhz + resonator.kappa_internal_mhz)
-            / 1000,
-            resonator.thermal_occupation,
-        )
-    )
+    frequencies = model.readout_frequencies_ghz(dispersive_resonator(settings))
     return ReadoutModel(
         secular.identity,
         tuple(str(index) for index in range(model.retained_levels)),
