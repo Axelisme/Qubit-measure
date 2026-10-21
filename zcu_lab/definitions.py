@@ -31,13 +31,13 @@ from zcu_lab.v2.mist.flux_dep.gui import MistFluxDepAdapter
 from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAdapter
 from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
-from zcu_lab.v2.mux.freq.gui import MuxFreqAdapter
 from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
-from zcu_lab.v2.mux.onetone.gui import MuxOnetoneAdapter
+from zcu_lab.v2.mux.onetone_fine.gui import MuxOnetoneAdapter
 from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEAdapter
 from zcu_lab.v2.mux.t1.gui import MuxT1Adapter
 from zcu_lab.v2.mux.t2echo.gui import MuxT2EchoAdapter
 from zcu_lab.v2.mux.t2ramsey.gui import MuxT2RamseyAdapter
+from zcu_lab.v2.mux.twotone_spectrum.gui import MuxFreqAdapter
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
@@ -140,8 +140,8 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/reset/bath/length": BathLengthAdapter,
     "twotone/reset/bath/phase": BathPhaseAdapter,
     "twotone/reset/check": RabiCheckAdapter,
-    "mux/onetone": MuxOnetoneAdapter,
-    "mux/freq": MuxFreqAdapter,
+    "mux/onetone_fine": MuxOnetoneAdapter,
+    "mux/twotone_spectrum": MuxFreqAdapter,
     "mux/len_rabi": MuxLenRabiAdapter,
     "mux/amp_rabi": MuxAmpRabiAdapter,
     "mux/t1": MuxT1Adapter,

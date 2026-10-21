@@ -104,7 +104,7 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
 
     AXES_SPEC = mux_sweep_spec(
         MuxFreqCfg,
-        tag="mux/freq",
+        tag="mux/twotone_spectrum",
         coordinate_label="Drive frequency",
         unit="Hz",
         scale=1e6,

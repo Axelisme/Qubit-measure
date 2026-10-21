@@ -13,10 +13,10 @@ ZigZag 的 `run()` 直接列出 pulse 序列，使用 register loop。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 
-`mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
+`mux/onetone_fine` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
-`mux/onetone` adapter 從 group 的 resonators 產生 readout tones，保留既有 readout slot 的 scalar 初值。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
+`mux/onetone_fine` adapter 從 group 的 resonators 產生 readout tones，保留既有 readout slot 的 scalar 初值。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。FIT 共用 onetone/freq 的模型與 delay 選項，逐 tone 隔離數值失敗。沒有歷史 cfg 時拒絕 FIT。
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。
@@ -28,7 +28,7 @@ MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯
 [Measure support](_support/measure/README.md#mux-綁定驗證)。
 Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
 七個 mux qubit Forms 有 readout slot 時引用 library，完整 tones 與 scalar 設定取自該模組。
-缺 slot 時從 blank mux 範本加 group tones。Mux/onetone 使用副本或 blank 範本，並以 group tones 與 ringup timing 作初值。
+缺 slot 時從 blank mux 範本加 group tones。Mux/onetone_fine 使用副本或 blank 範本，並以 group tones 與 ringup timing 作初值。
 Group tones 的 freq 使用 resonator 校準值，gain 初值為 0.1，ro_ch 按 group 順序從 0 起算。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
 Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
@@ -37,7 +37,7 @@ Library 的 `readout/mux:blank` 仍只給 scalar 編輯初值。Mux Forms 的 fa
 
 ## Mux qubit numeric cores
 
-`mux/freq` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。
+`mux/twotone_spectrum` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。
 兩個 `run()` 各自在 core 直接寫出掃描與 pulse 序列，每點 compile 一次。
 共同 reset 後，既有 Join 讓 drives 同時起跑，短 branch 完成後等待當點最長 branch，
 再做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。
