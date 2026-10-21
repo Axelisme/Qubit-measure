@@ -696,6 +696,14 @@ class ExpTabWidget(QWidget):
         """Clear all figure panes (used for LoadData and Run start invalidation)."""
         self._figure_area.clear_all_figures()
 
+    def present_figures(self, pane: str, figures: FigureCollection) -> None:
+        """Borrow operation names after owner-thread canvas attachment.
+
+        Clear/replacement retires presentation references, not the original
+        Figures. Unknown panes raise ValueError; rendering errors propagate.
+        """
+        self._figure_area.present_figures(pane, figures)
+
     def show_run_figure(self, fig: Figure) -> None:
         """Embed a matplotlib Figure in the Run pane."""
         self._figure_area.show_run_figure(fig)
