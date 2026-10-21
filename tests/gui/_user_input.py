@@ -107,8 +107,10 @@ class ComponentDriver:
     """Drive a shown window on its Qt owner thread without exposing its objects.
 
     Text selectors match exact visible captions (or form labels for input).
-    ``object_name`` instead matches exact objectName, including hidden widgets,
-    so availability can be observed. Zero or multiple matches raise LookupError
+    ``object_name`` matches exact objectName, preferring on-screen matches.
+    With no on-screen match it includes hidden widgets so availability can be
+    observed. Multiple on-screen matches or multiple hidden-only matches remain
+    ambiguous. Zero or multiple matches raise LookupError
     with candidate descriptions; supply exactly one selector. Operations on
     disabled, hidden, viewport-clipped, or modal-blocked widgets are no-ops.
     On-screen means a nonempty Qt visible region, not OS-level occlusion.
@@ -141,6 +143,10 @@ class ComponentDriver:
                 matches = self._on_screen(widget) and caption == text
             if matches:
                 candidates.append(widget)
+        if object_name is not None:
+            on_screen = [widget for widget in candidates if self._on_screen(widget)]
+            if on_screen:
+                candidates = on_screen
         descriptions = [
             f"{type(w).__name__}(objectName={w.objectName()!r}, text={_display_text(w)!r})"
             for w in candidates

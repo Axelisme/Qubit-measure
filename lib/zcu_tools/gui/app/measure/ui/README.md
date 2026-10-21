@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -14,6 +14,22 @@ window participates in remote screenshots.
 Error notifications are non-modal; confirmations, choosers and writeback editing
 keep their modal protection. See the [Measure README](../README.md)
 for pane ownership and operation lifecycles.
+
+`MainWindow` uses one toggle to show experiment tabs or workflow tabs in the
+same stacked area. New Tab lists registrations for the displayed kind.
+`WorkflowTabs` subscribes to the shared workflow facet, so remote opens mount
+panes without going through a GUI selection command. Same-name tabs keep
+monotonic display numbers. The status badge returns to the active workflow.
+The shared RUN lease locks competing panes and Setup/SoC submissions.
+
+`WorkflowPane` renders the facet's Plan and Tunables drafts with `FormEditor`.
+It forwards Refresh, Start, Pause, Resume, Stop and Apply to the facet.
+The services own source capture, lowering, accepted tunables and run lifetime.
+Ask currently displays that no question is pending. `WorkflowFigures` owns only
+named canvas presentation through `QtPlotHost`. A refused close keeps the pane.
+After accepted close, the view detaches its subscriptions and editors and stops
+its redraw timers before deleting children. Closing the last pane does not drain
+or disconnect the session.
 
 `ExpTabWidget` owns the left forms and ledgers, commands, subscriptions,
 progress and splitter width. Its concrete owned child `ExperimentFigureArea`
