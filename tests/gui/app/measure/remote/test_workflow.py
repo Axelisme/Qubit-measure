@@ -197,6 +197,36 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
         client.context.session.close()
 
 
+def test_mcp_status_retains_accepted_exchange_after_answer(workflow_rpc, tmp_path):
+    controller, rpc = workflow_rpc
+    control = controller.workflow_control()
+    control.configure((AskAuthor().attachment(),))
+    client = make_client(tmp_path, lambda method, params: result(rpc, method, **params))
+    try:
+        tab = client.call("workflow_open", {"name": "asking"})["tab_id"]
+        client.call("workflow_start", {"tab_id": tab, "run_id": "exchange"})
+        # The finite Start segment must deliver its answerable Ask on-owner.
+        qt_until(
+            lambda: control.pending_question("exchange") is not None,
+            label="exchange Ask",
+        )
+        question = client.call("workflow_status", {"run_id": "exchange"})[
+            "pending_question"
+        ]
+        client.call("workflow_answer", {"run_id": "exchange", "answer": {"value": 31}})
+        # Answer's finite continuation must reach terminal owner delivery.
+        qt_until(lambda: not control.tabs()[0].busy, label="exchange answer delivery")
+        status = client.call("workflow_status", {"run_id": "exchange"})
+        assert status.get("last_exchange") == {
+            "question": question,
+            "answer": {"value": 31},
+            "state": "answered",
+        }
+        assert status["pending_question"] is None
+    finally:
+        client.context.session.close()
+
+
 def test_workflow_open_edit_preview_and_close_share_headless_drafts(workflow_rpc):
     controller, rpc = workflow_rpc
     first = result(rpc, "workflow.open", name="synthetic")["tab_id"]

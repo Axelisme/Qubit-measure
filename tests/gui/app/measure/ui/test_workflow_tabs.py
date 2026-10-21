@@ -1,5 +1,6 @@
 """Workflow hosting through caller registrations and visible mouse/keyboard input."""
 
+import json
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import timedelta
@@ -33,7 +34,7 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
-from tests.gui.app.measure._workflow_ask import AskAuthor
+from tests.gui.app.measure._workflow_ask import AskAuthor, OtherAnswer
 
 
 class Plan(FormModel):
@@ -440,6 +441,48 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
         assert driver.observe(object_name="workflow.answer").text == '{"value": 17}'
         assert "已回答" in driver.observe(object_name="workflow.answer_status").text
     assert driver.observe("Start").enabled
+
+
+@pytest.mark.parametrize("reject_first", [False, True])
+def test_external_answer_projects_accepted_exchange_to_window(
+    asking_window, workflow_window, tmp_path, reject_first
+):
+    ctrl, _window = workflow_window
+    control = ctrl.workflow_control()
+    driver = ComponentDriver(asking_window)
+    driver.click(object_name="workflow.toggle")
+    driver.select_menu("New Tab ▾", ("asking",))
+    _ask_shot(driver, tmp_path, "external-01-opened")
+    driver.click("Start")
+    # Start's finite Ask segment must publish answerable controls on owner delivery.
+    qt_until(
+        lambda: any(w.text == "Answer" and w.enabled for w in driver.visible().widgets),
+        label="external Ask owner delivery",
+    )
+    _ask_shot(driver, tmp_path, "external-02-question")
+    run_id = control.tabs()[0].run_id
+    assert run_id is not None
+    if reject_first:
+        control.answer(run_id, OtherAnswer(value=99))
+        # Rejected native model returns a paused error on the same owner delivery.
+        qt_until(
+            lambda: control.tabs()[0].error is not None,
+            label="rejected answer delivery",
+        )
+        _ask_shot(driver, tmp_path, "external-03-rejected")
+        assert driver.observe(object_name="workflow.answer_status").text == "等待回答"
+        assert driver.observe("Answer").enabled
+    control.answer(run_id, {"value": 29})
+    # This is deliberately an external-caller seam, not a replacement for the
+    # ComponentDriver local Answer/Stop scenarios. The finite segment ends Done.
+    qt_until(lambda: _status(driver, "done"), label="external answer delivery")
+    _ask_shot(driver, tmp_path, "external-04-accepted")
+    assert json.loads(driver.observe(object_name="workflow.answer").text) == {
+        "value": 29
+    }
+    assert driver.observe(object_name="workflow.answer_status").text == "已回答"
+    assert not driver.observe("Answer").enabled
+    assert "authored evidence" in driver.observe(object_name="workflow.ask").text
 
 
 def test_external_facet_open_is_projected_without_gui_selection(
