@@ -95,6 +95,24 @@ class FTFReadoutConfig:
         ):
             raise ValueError("duplicate readout receiver channel across pulse and mux")
 
+    def validate_generators(self, pulse_gen_ch: int, generators: set[int]) -> None:
+        """Reject active pulse and mux generators in one program/request.
+
+        pulse_gen_ch is the pulse source index from settings.readout.drive.
+        generators contains active event generator indices from all templates
+        in the request, or from one standalone template. Drive-line indices do
+        not select a readout path. Raise ValueError naming both readout
+        generators if both are present; separate requests remain independent.
+        """
+        if (
+            self.mux is not None
+            and pulse_gen_ch in generators
+            and self.mux.gen_ch in generators
+        ):
+            raise ValueError(
+                f"FTF program mixes readout generators {pulse_gen_ch} and {self.mux.gen_ch}"
+            )
+
 
 def _receiver_configuration(adc: Receiver) -> FTFReceiverConfig:
     return FTFReceiverConfig(

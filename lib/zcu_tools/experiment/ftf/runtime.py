@@ -454,6 +454,9 @@ class FTFSource:
         Requires nonempty C1 templates and the current RNG stream version. Legacy
         execution timelines are not consumed. ValueError rejects unsupported
         inputs before the engine runs; a closed source raises RuntimeError.
+        Active pulse and mux readout generators are mutually exclusive across
+        all request templates. Mixing them raises ValueError naming both indices.
+        Separate requests may select different readout paths.
         """
         if self._closed:
             raise RuntimeError("FTF source is closed")
@@ -461,6 +464,15 @@ class FTFSource:
             raise ValueError("FTF requires timeline templates")
         if request.rng_version != f"PCG64/SeedSequence-v2/numpy-{np.__version__}":
             raise ValueError("FTF RNG version mismatch")
+        self.readout.validate_generators(
+            self.settings.readout.drive.gen_ch,
+            {
+                event.gen_ch
+                for template in request.templates
+                for event in template.events
+                if np.any(event.active)
+            },
+        )
         if self._session is not None:
             self._session.invalidate()
         self._session = FTFAcquire(self, request)

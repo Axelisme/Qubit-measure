@@ -131,12 +131,9 @@ def _readout_path(
     """Select capabilities from active event generators, rejecting mixed paths."""
     pulse_gen = settings.readout.drive.gen_ch
     generators = {event.gen_ch for event in template.events if np.any(event.active)}
+    config.validate_generators(pulse_gen, generators)
     mux = config.mux
     if mux is not None and mux.gen_ch in generators:
-        if pulse_gen in generators:
-            raise ValueError(
-                f"FTF program mixes readout generators {pulse_gen} and {mux.gen_ch}"
-            )
         return _ReadoutPath(mux.gen_ch, mux.input_per_gain, mux.receivers, True)
     return _ReadoutPath(
         settings.readout.drive.gen_ch,
