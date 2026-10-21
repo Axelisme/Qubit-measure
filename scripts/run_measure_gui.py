@@ -16,6 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from zcu_tools.gui.app.measure import default_startup
 from zcu_tools.gui.launcher import (
     add_runtime_cli_options,
     runtime_options_from_args,
@@ -140,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         startup_script=select_startup_script(
             clean=args.clean,
             script=args.script,
-            default_script=REPO_ROOT / "zcu_lab" / "startup.py",
+            default_script=Path(default_startup.__file__),
         ),
         project_root=str(args.project_root),
     )
