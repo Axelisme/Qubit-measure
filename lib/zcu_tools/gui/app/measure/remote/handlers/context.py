@@ -12,6 +12,7 @@ from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
+from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.value_lookup import ValueInfo
 
 from ._wire_values import context_wire_value
@@ -315,9 +316,15 @@ def h_context_ml_create_from_role(
 ) -> Mapping[str, object]:
     """Create a ModuleLibrary entry from the template ID in wire role_id.
 
-    One-shot: validates captured template Form input and writes its Spec.
-    Edit afterwards via context.ml_edit.
+    Optional edits use context.ml_edit's path/value Form input shape and apply
+    before validating the captured template. Only a valid Spec is written.
+    Invalid paths, values or Form results return invalid_params with
+    data.errors containing path/message pairs; nothing is written.
     """
+    from ..form_observation import form_writes
+
+    raw_edits = params.get("edits")
+    edits = form_writes(raw_edits) if raw_edits is not None else None
     template_id = str(params["role_id"])
     name = str(params["name"])
     # The item kind is a property of the template, not an independent agent input —
@@ -328,7 +335,19 @@ def h_context_ml_create_from_role(
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        adapter.ctrl.create_from_template(item_kind, template_id, name)
+        adapter.ctrl.create_from_template(item_kind, template_id, name, edits=edits)
+    except LibraryEntryInvalid as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason="form_errors",
+            data={
+                "errors": [
+                    {"path": list(path), "message": message}
+                    for path, message in exc.errors.messages.items()
+                ]
+            },
+        ) from exc
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {"created": name}

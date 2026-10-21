@@ -1,5 +1,6 @@
 """Qt-free input editing for Pydantic forms; no host policy or hardware control."""
 
+from ._structure import StructureError
 from .commands import (
     FormCommandContext,
     FormCommandResult,
