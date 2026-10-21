@@ -60,7 +60,7 @@ from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.widgets import secondary_colour, set_foreground
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
-from .figure_pane_layout import FigurePaneLayout
+from .figure_pane_layout import MAX_TILED_FIGURES, FigurePaneLayout
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -215,16 +215,16 @@ class _PreviewCard(QWidget):
             for name, figure in figures.items():
                 card = _PreviewCard(f"{self._source_key}_member", name)
                 render(card, figure)
-                card._title.setVisible(len(figures) <= 4)
+                card._title.setVisible(len(figures) <= MAX_TILED_FIGURES)
                 self._named_stack.addWidget(card)
                 self._named_selector.addItem(name)
             if selected in figures:
                 self._named_selector.setCurrentText(selected)
         finally:
             self._named_selector.blockSignals(False)
-        self._named_selector.setVisible(len(figures) > 4)
+        self._named_selector.setVisible(len(figures) > MAX_TILED_FIGURES)
         self._named_stack.setCurrentIndex(self._named_selector.currentIndex() + 1)
-        self._named_stack.set_tiled(tiled=len(figures) <= 4)
+        self._named_stack.set_tiled(tiled=len(figures) <= MAX_TILED_FIGURES)
         self.setMinimumHeight(360 if len(figures) > 2 else 260)
         self._stack.setCurrentWidget(self._named_page)
 

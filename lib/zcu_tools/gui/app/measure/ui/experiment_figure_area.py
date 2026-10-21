@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 
 from .data_figure_preview_gallery import DataFigurePreviewGallery
-from .figure_pane_layout import FigurePaneLayout
+from .figure_pane_layout import MAX_TILED_FIGURES, FigurePaneLayout
 from .interactive_frontend import InteractiveFrontend
 
 if TYPE_CHECKING:
@@ -437,8 +437,8 @@ class ExperimentFigureArea(QWidget):
                 selector.setCurrentText(selected)
         finally:
             selector.blockSignals(False)
-        selector.setVisible(len(names) > 4)
-        stack.set_tiled(tiled=0 < len(names) <= 4)
+        selector.setVisible(len(names) > MAX_TILED_FIGURES)
+        stack.set_tiled(tiled=0 < len(names) <= MAX_TILED_FIGURES)
         if not names:
             if attach:
                 container.clear_dynamic_canvases()

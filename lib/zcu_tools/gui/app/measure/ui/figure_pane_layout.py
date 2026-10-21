@@ -4,6 +4,8 @@ from qtpy.QtCore import QEvent, QRect
 from qtpy.QtGui import QResizeEvent, QShowEvent
 from qtpy.QtWidgets import QStackedWidget, QWidget
 
+MAX_TILED_FIGURES = 4
+
 
 class FigurePaneLayout(QStackedWidget):
     """Present up to four stack pages together, otherwise only the current page.
@@ -29,7 +31,9 @@ class FigurePaneLayout(QStackedWidget):
 
     def _arrange(self) -> None:
         count = self.count() - 1
-        tiled = self._tiled and 0 < count <= 4 and self.currentIndex() > 0
+        tiled = (
+            self._tiled and 0 < count <= MAX_TILED_FIGURES and self.currentIndex() > 0
+        )
         columns = 2 if count > 1 else 1
         rows = (count + columns - 1) // columns
         for index in range(self.count()):

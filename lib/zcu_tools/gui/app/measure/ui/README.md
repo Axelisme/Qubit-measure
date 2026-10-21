@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
