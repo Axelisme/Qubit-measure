@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-21，startup 初始化 alias、公開 FTF builder 與 GUI／Notebook 成本政策
+**Last updated:** 2026-10-21，pulse／mux 通道佈局與 entry 接線
 
 這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。Startup 與 Notebook 直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
 
@@ -50,9 +50,11 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 再指定該處的 startup。範本與設定按 startup 檔案位置定位，不跟隨 shell cwd。
 要改 entry、point 或 tab 名稱，編輯自己的 startup 副本。
 
-`entry-template.yaml` 使用 `default.yaml` 的 EJ/EC/EL 與 resonator 頻率。Energies 用 GHz，R1/R2 頻率為 7190/7080 MHz。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。範本提供接線與引用，不提供 module library 或校準完成的量測參數。若修改工作副本的模型或接線，也要調整 entry 範本或已建立的 entry。
+模擬用 `entry-template.yaml` 省略 qubit energies 與 R1／R2 的 `freq`，只提供接線、元件關聯與 aliases。物理模型的 energies 與 resonator 頻率由 `ftf.yaml` 提供，不會自動填入 entry。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的頻率與其他輸入，範本不提供 module library 或校準完成的量測參數。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 另外預填示意 energies 與 R1／R2 頻率，不代表模擬 entry 也有這些值。若修改工作副本的接線，也要調整 entry 範本或已建立的 entry。
 
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
+R1／R2 的 wiring 保留 pulse gen0／ADC0。Mux 接線由 `$mux.module.readout` 指向的 `readout/mux` library 模組提供，須設 `gen_ch: 1`，並依 R1／R2 順序設 tone `ro_ch: 1`／`2`。
+範本不附 library assets，也不預填 module key。建立模組、綁定 MG12 與核對 Open／Reset 初值的步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
 初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。
 
 ## 工作副本與調參
@@ -63,7 +65,7 @@ FTF 的 flux drive 只在 DC 附近線性化，不建構大振幅 fast-flux cont
 
 啟動腳本會執行 Python，只載入可信來源。修改腳本或 YAML 後須重啟 GUI。腳本失敗時，GUI 保留已完成操作並顯示腳本位置與錯誤，不自動改跑預設腳本。
 
-`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量由最大索引加一推導，不是綁定條數；樣板保留 readout gen0、f1_charge gen2 與 f2_charge gen3，推導出 4 個 generator，gen1 是未綁定空洞。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
+`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量由最大索引加一推導，不是綁定條數。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen1／PFB ADC1 與 ADC2，以及 f1_charge gen2、f2_charge gen3。這份佈局推導出 4 個 generator 與 3 個 readout。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
 
 [Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 

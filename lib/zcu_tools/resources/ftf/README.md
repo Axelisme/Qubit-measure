@@ -22,13 +22,14 @@
 
 FTF 支援 live DC bias、靜態掃描、charge drive、小訊號線性 flux drive 與 readout。Flux drive 使用固定 DC 工作點的線性模型，適用範圍限於小振幅。`flux_lines` 即使為空 map 也是未知欄位。未綁定 generator 沿用既有處理。共享 `simulate` 引擎的 flux-pulse 路徑維持停用。
 
-`readout.drive.kind` 省略或填 `pulse` 時，`readout.adc` 是既有的一個 receiver object。
-填 `mux` 時，`adc` 必須是 1 至 8 個 receiver 的 list，`ro_ch` 不可重複。
-這包含只有一個 tone 的 mux，不依 receiver 數量推斷 compile profile。
-Program 提供 tones 的頻率、gain、phase 與順序，YAML 只綁定 receiver 校準。
-所有 tone 共用同一 drive 與兩個物理 resonator，不新增 tone-to-qubit mapping。
-預設 pulse kind 不加入序列化結果，既有 pulse settings 與 replay identity 保持不變。
+`readout.drive` 綁定 pulse generator 與 incident amplitude 校準，`readout.adc` 維持單一 receiver object。
+可省略的 `readout.mux` 另綁 `gen_ch`、`input_per_gain` 與 1 至 8 個 receiver 的 `adc` list。
+Mux generator 不可與 pulse 或 drive lines 重複，mux 的 `ro_ch` 彼此唯一，也不可與 pulse ADC 重複。
+省略或設 `mux: null` 只關閉 mux，不影響 pulse。`readout.drive.kind` 已移除，出現時載入會指出該欄位已移除。
+Program 提供 tones 的頻率、gain、phase 與順序，YAML 綁定各路徑的 generator 與 receiver 校準。
+兩條路徑共用兩個物理 resonator，不新增 tone-to-qubit mapping。
+`readout.receivers` 依 pulse、mux 設定順序回傳全部 receiver，不決定 program 輸出順序。
 
-Generator 數量是 drive/readout 最大 generator index 加一，ADC 數量是所有 `ro_ch` 最大值加一。索引空洞不是已綁定的線路。Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。這些設定與固定 QICK profile 的對照見欄位指南。
+Generator 數量是 drive/readout 最大 generator index 加一，ADC 數量是所有 `ro_ch` 最大值加一。索引必須是非負整數，不設固定上限。索引空洞不是已綁定的線路。Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。這些設定與固定 QICK profile 的對照見欄位指南。
 
 [default.yaml](../../../../zcu_lab/simulation_envs/FTF/default.yaml) 的 circuit energies、couplings 與 resonator frequencies 採 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。

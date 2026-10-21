@@ -13,6 +13,7 @@
 
 ## 模擬量測環境
 
+- 2026-10-21 [CKP reduced closure 研究：精度過但成本 42 倍](2026-10-21-ckp-reduced-closure-study.md)：flip 非真空腔激發必須保留；displaced-Fock N2 精度過但成本 41.9 倍，Gaussian 否決；半古典先 partial land，下一步走 joint Fock 性能研究。
 - 2026-10-18 [Dyson 的解析分類、輸入共用與 sparse scan](2026-10-18-dyson-input-reuse.md)：解析 B2 與 post-check 分工，共用前綴收縮輸入，sparse scan 只省 12.6% 因而未採用。
 - 2026-10-18 [Constant-tone period builders 的演進](2026-10-18-constant-period-builders.md)：比較 CF4、Padé7、Sambe 與 gain anchors，保留 carrier continuation 零命中及 RSS 超標的否決紀錄。
 - 2026-10-18 [Shaped periods、gate preparation 與 carrier reuse](2026-10-18-shaped-period-and-gates.md)：採 build-once handoff、phase-adaptive gates 與 narrow carrier interpolation，wide scan 保留 exact bypass。
