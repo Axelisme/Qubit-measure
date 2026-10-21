@@ -45,13 +45,13 @@ def test_picker_shows_four_editable_fields_when_the_list_expands(
             assert f"form.input.tones.0.{field}" in visible
         driver.enter_text(object_name="form.input.tones.0.freq", value="125")
         driver.screenshot(tmp_path / "02-edited-frequency.png")
-        assert driver.observe(object_name="form.input.tones.0.freq").text == "125.0"
+        assert driver.observe(object_name="form.input.tones.0.freq").text == "125"
         driver.click(object_name="form.fold.tones")
         driver.screenshot(tmp_path / "03-list-collapsed.png")
         assert not driver.observe(object_name="form.input.tones.0.freq").visible
         driver.click(object_name="form.fold.tones")
         driver.screenshot(tmp_path / "04-list-reopened.png")
-        assert driver.observe(object_name="form.input.tones.0.freq").text == "125.0"
+        assert driver.observe(object_name="form.input.tones.0.freq").text == "125"
     finally:
         editor.close()
 
@@ -199,7 +199,7 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
         assert driver.observe(object_name="form.input.tones.1.gain").text == "2"
         driver.choose_option(object_name="form.picker.tones", value="0: A")
         snapshot("10-readonly-unchanged")
-        assert driver.observe(object_name="form.input.tones.0.gain").text == "3.0"
+        assert driver.observe(object_name="form.input.tones.0.gain").text == "3"
     finally:
         editor.close()
 
@@ -263,7 +263,7 @@ def test_readonly_refusal_is_visible_and_navigation_still_works(
         driver.enter_text(object_name="form.input.tones.1.gain", value="4")
         driver.enter_text(object_name="form.input.participants", value='["Q4"]')
         driver.screenshot(tmp_path / "04-owner-invalid-participant.png")
-        assert driver.observe(object_name="form.input.tones.1.gain").text == "4.0"
+        assert driver.observe(object_name="form.input.tones.1.gain").text == "4"
         assert "Q4" in driver.observe(object_name="form.row.participants").tooltip
         driver.enter_text(object_name="form.input.participants", value='["B", "A"]')
         driver.screenshot(tmp_path / "05-owner-recovered.png")

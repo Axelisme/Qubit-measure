@@ -29,9 +29,9 @@ chip:
     q_ind: 100000000.0
     xqp: 0.0000002
     aphi: 0.000002
-  g_f1_coupler_ghz: 0.570
-  g_f2_coupler_ghz: 0.560
-  g_f1_f2_ghz: 0.125
+  g_f1_coupler_ghz: 0.157
+  g_f2_coupler_ghz: 0.156
+  g_f1_f2_ghz: 0.055
   temperature_k: 0.05
 
 dc_bias:
@@ -58,7 +58,6 @@ dc_bias:
       initial: 0.0
       ramp_step: 0.000001
       flux_per_unit: { f1: -1, coupler: 2, f2: 122.0 }
-
 
 drive_lines:
   # Illustrative simulation assumptions, not measured line calibrations.
