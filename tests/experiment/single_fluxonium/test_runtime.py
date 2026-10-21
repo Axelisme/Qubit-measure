@@ -1,7 +1,12 @@
 """Public source lifecycle, live snapshots and content-addressed plan reuse."""
 
+from __future__ import annotations
+
 import importlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -10,15 +15,32 @@ from zcu_tools.device import DeviceManager, FakeDevice
 
 from ._inputs import settings, template
 
+if TYPE_CHECKING:
+    from zcu_tools.experiment.single_fluxonium.runtime import SingleFluxoniumSource
+    from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
 
-def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> None:
+
+@contextmanager
+def source_environment() -> Iterator[
+    tuple[SingleFluxoniumSource, FakeDevice, SingleFluxoniumSettings]
+]:
     runtime = importlib.import_module("zcu_tools.experiment.single_fluxonium.runtime")
     config = settings()
     devices = DeviceManager()
-    bias = FakeDevice(fast_mode=True, value_unit="A")
-    devices.register_device(config.dc_bias.source.name, bias)
-    source = runtime.SingleFluxoniumSource(config, devices)
     try:
+        bias = FakeDevice(fast_mode=True, value_unit="A")
+        devices.register_device(config.dc_bias.source.name, bias)
+        source = runtime.SingleFluxoniumSource(config, devices)
+        try:
+            yield source, bias, config
+        finally:
+            source.close()
+    finally:
+        devices.close_all_devices()
+
+
+def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> None:
+    with source_environment() as (source, bias, config):
         first = source.snapshot()
         facts = source.model_facts(first)
         assert facts.model.dc_flux == 0.5
@@ -67,26 +89,14 @@ def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> N
         bias.set_value(2)
         with pytest.raises(ValueError, match="limits"):
             source.snapshot()
-    finally:
-        source.close()
-        devices.close_all_devices()
     with pytest.raises(RuntimeError, match="closed"):
         source.model_facts(first)
 
 
 def test_unconnected_acquisition_fails_without_claiming_a_round_result() -> None:
-    runtime = importlib.import_module("zcu_tools.experiment.single_fluxonium.runtime")
-    config = settings()
-    devices = DeviceManager()
-    bias = FakeDevice(fast_mode=True, value_unit="A")
-    devices.register_device(config.dc_bias.source.name, bias)
-    source = runtime.SingleFluxoniumSource(config, devices)
     request = AcquireRequest("integrated", (1,), 0, (), 123, 0, "test")
-    try:
+    with source_environment() as (source, _, _):
         with pytest.raises(NotImplementedError, match="single-cavity readout"):
             source.open_acquire(request)
         with pytest.raises(NotImplementedError, match="single-cavity readout"):
             source.execute(RoundRequest(request, source.snapshot(), 0))
-    finally:
-        source.close()
-        devices.close_all_devices()
