@@ -30,7 +30,7 @@ from .fit import (
     thermal_photon_gamma_phi_per_us,
     thermal_photon_t2_limit_us,
 )
-from .workflow import (
+from .models import (
     MechanismName,
     MechanismOrParamName,
     ProbeStatistic,
@@ -47,25 +47,31 @@ from .workflow import (
     T2PhotonShotNoiseProbe,
     T2RowDiagnostics,
     T2WindowData,
-    analyze_flux_noise_limit,
-    analyze_photon_shot_noise_limit,
-    build_t2_channel_curves,
+)
+from .preparation import (
     calibrate_t2_flux,
-    collect_t2_curve_result,
-    fit_t2_curve,
     load_t2_curve_context,
-    make_t2_fit_bounds,
-    make_t2_fit_init,
-    mechanisms_to_fixed_params,
+    prepare_t2_dephasing_data,
+)
+from .presentation import (
     plot_flux_noise_probe,
     plot_nth_limit_vs_flux,
     plot_photon_shot_noise_probe,
     plot_t2_channel_analysis,
     plot_t2_dephasing_data,
     plot_t2_flux_calibration,
-    prepare_t2_dephasing_data,
-    run_t2_curve_analysis,
     save_t2_curve_figure,
+)
+from .workflow import (
+    analyze_flux_noise_limit,
+    analyze_photon_shot_noise_limit,
+    build_t2_channel_curves,
+    collect_t2_curve_result,
+    fit_t2_curve,
+    make_t2_fit_bounds,
+    make_t2_fit_init,
+    mechanisms_to_fixed_params,
+    run_t2_curve_analysis,
 )
 
 __all__ = [

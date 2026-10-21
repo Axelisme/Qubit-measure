@@ -137,7 +137,8 @@ class InspectDialog(QDialog):
     alias Save keeps the dialog open on the Aliases page with its error.
     """
 
-    def __init__(
+    # tolerated: Hosts inject distinct context/event, template, ARB, presenter and alias capabilities; no shared options record.
+    def __init__(  # noqa: PLR0913
         self,
         ctrl: ContextControlPort,
         bus: BaseEventBus,

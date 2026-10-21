@@ -23,6 +23,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.plotting.figure_export import render_figure_png
 
 if TYPE_CHECKING:
@@ -468,7 +469,9 @@ def _h_fit_set_params(
         if params["sample_f"] is not None
         else None
     )
-    adapter.ctrl.set_fit_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
+    adapter.ctrl.set_fit_params(
+        search_db, ParamBounds(EJ=EJb, EC=ECb, EL=ELb), transitions, r_f, sample_f
+    )
     return {"fit": _h_fit_result(adapter, {})}
 
 

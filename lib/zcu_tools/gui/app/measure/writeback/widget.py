@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QEvent, Qt
+from qtpy.QtGui import QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -33,7 +34,7 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .edit_dialogs import WritebackEditDialogs, is_scalar_value, module_changes
 from .foregrounds import ThemedForegrounds
-from .items import ModuleWriteback, ParameterWriteback, WritebackItem
+from .items import ModuleWriteback, ParameterWriteback, SampleWriteback, WritebackItem
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -53,12 +54,12 @@ def _is_matrix_value(value: Any) -> bool:
         return False
     if not all(isinstance(row, (list, tuple)) for row in value):
         return False
-    first_len = len(value[0])  # type: ignore[arg-type]
+    first_len = len(value[0])
     if first_len == 0:
         return False
-    if not all(len(row) == first_len for row in value):  # type: ignore[arg-type]
+    if not all(len(row) == first_len for row in value):
         return False
-    for row in value:  # type: ignore[assignment]
+    for row in value:
         for cell in row:
             if isinstance(cell, (list, tuple, dict)):
                 return False
@@ -68,14 +69,14 @@ def _is_matrix_value(value: Any) -> bool:
 def _should_show_table(value: Any) -> bool:
     if not _is_matrix_value(value):
         return False
-    rows = len(value)  # type: ignore[arg-type]
-    cols = len(value[0])  # type: ignore[arg-type]
+    rows = len(value)
+    cols = len(value[0])
     return rows <= 5 and cols <= 5
 
 
 def _bounded_summary(value: Any) -> str:
     if _is_matrix_value(value):
-        return f"{len(value)} \u00d7 {len(value[0])} matrix"  # type: ignore[arg-type]
+        return f"{len(value)} \u00d7 {len(value[0])} matrix"
     if isinstance(value, (list, tuple)):
         return f"list[{len(value)}]"
     if isinstance(value, dict):
@@ -93,28 +94,28 @@ def _make_matrix_table(matrix: Sequence[Sequence[Any]]) -> QTableWidget:
     table.setObjectName("writebackProposedMatrixTable")
     table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-    table.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
-    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
-    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+    table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     vertical_header = table.verticalHeader()
     if vertical_header is not None:
         vertical_header.setVisible(False)
-        vertical_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # type: ignore[attr-defined]
+        vertical_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         vertical_header.setDefaultSectionSize(22)
     horizontal_header = table.horizontalHeader()
     if horizontal_header is not None:
         horizontal_header.setVisible(False)
-        horizontal_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+        horizontal_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
     for row in range(rows):
         for column in range(cols):
             value = matrix[row][column]
             text = f"{value:.4f}" if isinstance(value, float) else str(value)
             item = QTableWidgetItem(text)
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # type: ignore[attr-defined]
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, column, item)
     table.setFixedHeight(rows * 22 + 4)
-    table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)  # type: ignore[attr-defined]
+    table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     table.setMinimumWidth(120)
     return table
 
@@ -137,6 +138,23 @@ def _compact_value(value: Any) -> str:
 def _full_value(value: Any) -> str:
     """Exact text for numbers (tooltips); bounded summaries for other values."""
     return repr(value) if _is_number(value) else _bounded_summary(value)
+
+
+def _sample_summary(item: SampleWriteback, *, compact: bool) -> str:
+    """List every sample field without truncating strings or nested JSON."""
+    fields: list[str] = []
+    for key, value in item.proposed_value.items():
+        if isinstance(value, str):
+            text = value
+        elif _is_number(value):
+            text = _compact_value(value) if compact else _full_value(value)
+        else:
+            text = json.dumps(value, ensure_ascii=False)
+        unit = item.proposed_value.get("dev_unit")
+        if key == "dev_value" and isinstance(unit, str) and unit:
+            text += f" {unit}"
+        fields.append(f"{key}={text}")
+    return "\n".join(fields)
 
 
 class _MiddleElidedLabel(QLabel):
@@ -317,7 +335,7 @@ class WritebackWidget(QWidget):
         self._hint.setWordWrap(True)
         self._hint.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
+            QSizePolicy.Policy.Maximum,
         )
         layout.addWidget(self._hint)
 
@@ -335,15 +353,15 @@ class WritebackWidget(QWidget):
 
         self._rows_container = QFrame()
         self._rows_container.setObjectName("writebackPanel")
-        self._rows_container.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
+        self._rows_container.setFrameShape(QFrame.Shape.NoFrame)
         self._rows_container.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
+            QSizePolicy.Policy.Maximum,
         )
         self._rows_layout = QVBoxLayout(self._rows_container)
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
         self._rows_layout.setSpacing(0)
-        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # type: ignore[attr-defined]
+        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self._rows_container)
         layout.addStretch(1)
 
@@ -395,7 +413,10 @@ class WritebackWidget(QWidget):
         and follows proposed stderr once. Missing current has no unit label;
         unit=None adds no whitespace. Empty items clear the view. Items remain
         the persistent draft objects so checkbox and Edit commands use the same
-        stable identities.
+        stable identities. Sample rows identify the component with a sample suffix,
+        show current as "entry sample", and list every proposed JSON field with
+        device units after dev_value. Sample Copy preserves the complete JSON;
+        samples have no Edit action.
         Local module editing may retain invalid State input. Its row shows proposed as
         "Invalid configuration" and current/path as "Unavailable (invalid
         configuration)", while preserving selection and updating unapplied
@@ -567,7 +588,9 @@ class WritebackWidget(QWidget):
         proposed_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
-        proposed_label.setWordWrap(False)
+        proposed_label.setWordWrap(isinstance(item, SampleWriteback))
+        if isinstance(item, SampleWriteback):
+            proposed_label.setTextFormat(Qt.TextFormat.PlainText)
         table = None
         if is_matrix:
             proposed = self._values[item.session_id].proposed
@@ -581,8 +604,9 @@ class WritebackWidget(QWidget):
             button.setFixedSize(56, 26)
             button.clicked.connect(lambda _=False, it=item: self._edit_item(it))
             return button
-        if isinstance(item, ParameterWriteback) and not is_scalar_value(
-            self._values[item.session_id].proposed
+        if isinstance(item, SampleWriteback) or (
+            isinstance(item, ParameterWriteback)
+            and not is_scalar_value(self._values[item.session_id].proposed)
         ):
             button = QPushButton("Copy")
             button.setFixedSize(56, 26)
@@ -597,12 +621,12 @@ class WritebackWidget(QWidget):
         placeholder.setStyleSheet("background: transparent;")
         return placeholder
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
         self._update_responsive()
 
-    def showEvent(self, event) -> None:  # type: ignore[override]
-        super().showEvent(event)
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
         self._update_responsive()
 
     def _update_responsive(self) -> None:
@@ -673,7 +697,12 @@ class WritebackWidget(QWidget):
         self, item: WritebackItem, checkbox: QCheckBox
     ) -> None:
         applied = self._applied_states.get(item.session_id, False)
-        checkbox.setText(item.target_name if applied else f"{item.target_name}*")
+        target = (
+            f"{item.target_name} · sample"
+            if isinstance(item, SampleWriteback)
+            else item.target_name
+        )
+        checkbox.setText(target if applied else f"{target}*")
         font = checkbox.font()
         font.setBold(not applied)
         checkbox.setFont(font)
@@ -690,6 +719,8 @@ class WritebackWidget(QWidget):
         if item.session_id in self._invalid_modules:
             return "Unavailable (invalid configuration)"
         values = self._values[item.session_id]
+        if isinstance(item, SampleWriteback):
+            return "entry sample"
         if isinstance(item, ModuleWriteback):
             if not compact:
                 return self._module_tooltip(item)
@@ -708,6 +739,8 @@ class WritebackWidget(QWidget):
         if item.session_id in self._invalid_modules:
             return "Invalid configuration"
         values = self._values[item.session_id]
+        if isinstance(item, SampleWriteback):
+            return _sample_summary(item, compact=compact)
         if isinstance(item, ModuleWriteback):
             if not compact:
                 return self._module_tooltip(item)

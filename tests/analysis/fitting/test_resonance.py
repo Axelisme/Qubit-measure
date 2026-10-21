@@ -12,66 +12,17 @@ from zcu_tools.analysis.fitting.resonance import (
     HangerModel,
     TransmissionModel,
     calc_phase,
-    find_edelay_branch,
     fit_circle_params,
-    fit_edelay,
     get_proper_model,
     normalize_signal,
     phase_func,
 )
 
-
-def _hanger_truth(
-    freqs: NDArray[np.float64],
-    *,
-    freq: float,
-    Ql: float,
-    Qc_abs: float,
-    phi: float,
-    a0: complex,
-    edelay: float,
-    bg_amp_slope: float,
-    bg_phase_curvature: float = 0.0,
-) -> NDArray[np.complex128]:
-    """Independent analytic oracle; intentionally does not call production calc."""
-    detuning = Ql * (freqs / freq - 1.0)
-    ideal = a0 * (1.0 - (Ql / Qc_abs) * np.exp(1j * phi) / (1.0 + 2j * detuning))
-    centered = freqs - freq
-    background = np.exp(bg_amp_slope * centered + 1j * bg_phase_curvature * centered**2)
-    delay = np.exp(-1j * 2.0 * np.pi * freqs * edelay)
-    return np.asarray(background * ideal * delay, dtype=np.complex128)
-
-
-def _transmission_truth(
-    freqs: NDArray[np.float64],
-    *,
-    freq: float,
-    Ql: float,
-    a0: complex,
-    edelay: float,
-    bg_amp_slope: float,
-    bg_phase_curvature: float = 0.0,
-) -> NDArray[np.complex128]:
-    """Independent analytic oracle; intentionally does not call production calc."""
-    detuning = Ql * (freqs / freq - 1.0)
-    ideal = a0 / (1.0 + 2j * detuning)
-    centered = freqs - freq
-    background = np.exp(bg_amp_slope * centered + 1j * bg_phase_curvature * centered**2)
-    delay = np.exp(-1j * 2.0 * np.pi * freqs * edelay)
-    return np.asarray(background * ideal * delay, dtype=np.complex128)
-
-
-def _homophasal_like_grid(
-    freq: float, Ql: float, half_span: float, count: int
-) -> NDArray[np.float64]:
-    def theta(value: float) -> float:
-        return 2.0 * np.arctan(2.0 * Ql * (1.0 - value / freq))
-
-    phases = np.linspace(theta(freq - half_span), theta(freq + half_span), count)
-    return np.asarray(
-        freq * (1.0 - np.tan(phases / 2.0) / (2.0 * Ql)),
-        dtype=np.float64,
-    )
+from ._resonance_truth import (
+    hanger_truth,
+    homophasal_like_grid,
+    transmission_truth,
+)
 
 
 @pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
@@ -81,7 +32,7 @@ def test_model_fit_recovers_nonuniform_trace_in_either_direction(
     descending: bool,
 ) -> None:
     freq, Ql = 6000.0, 700.0
-    freqs = _homophasal_like_grid(freq, Ql, 35.0, 301)
+    freqs = homophasal_like_grid(freq, Ql, 35.0, 301)
     if descending:
         freqs = freqs[::-1]
     common = dict(
@@ -92,11 +43,11 @@ def test_model_fit_recovers_nonuniform_trace_in_either_direction(
         bg_amp_slope=0.0,
     )
     if model is HangerModel:
-        signals = _hanger_truth(freqs, Qc_abs=1100.0, phi=0.1, **common)
+        signals = hanger_truth(freqs, Qc_abs=1100.0, phi=0.1, **common)
         params = HangerModel.fit(freqs, signals, edelay=0.02, fit_bg_amp_slope=True)
         fitted = HangerModel.calc_signals(freqs, **params)
     else:
-        signals = _transmission_truth(freqs, **common)
+        signals = transmission_truth(freqs, **common)
         params = TransmissionModel.fit(
             freqs, signals, edelay=0.02, fit_bg_amp_slope=True
         )
@@ -176,202 +127,11 @@ def test_hanger_fit_recovers_nonuniform_grid_with_edelay():
 
 
 @pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
-@pytest.mark.parametrize("descending", [False, True])
-def test_fit_edelay_recovers_large_delay_branch_on_nonuniform_grid(
-    model: type[HangerModel] | type[TransmissionModel],
-    descending: bool,
-) -> None:
-    freq, Ql, edelay = 5549.0, 740.0, 11.299
-    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
-    if descending:
-        freqs = freqs[::-1]
-    if model is HangerModel:
-        signals = _hanger_truth(
-            freqs,
-            freq=freq,
-            Ql=Ql,
-            Qc_abs=1100.0,
-            phi=0.12,
-            a0=1.25 * np.exp(0.31j),
-            edelay=edelay,
-            bg_amp_slope=0.004,
-        )
-    else:
-        signals = _transmission_truth(
-            freqs,
-            freq=freq,
-            Ql=Ql,
-            a0=1.25 * np.exp(0.31j),
-            edelay=edelay,
-            bg_amp_slope=0.004,
-        )
-
-    np.testing.assert_allclose(fit_edelay(freqs, signals), edelay, atol=3e-3)
-
-
-def test_fit_edelay_preserves_uniform_grid_alias_class() -> None:
-    freq, Ql, edelay = 5549.0, 740.0, 11.299
-    freqs = np.linspace(freq - 15.0, freq + 15.0, 301)
-    signals = _hanger_truth(
-        freqs,
-        freq=freq,
-        Ql=Ql,
-        Qc_abs=1100.0,
-        phi=0.12,
-        a0=1.25 * np.exp(0.31j),
-        edelay=edelay,
-        bg_amp_slope=0.004,
-    )
-
-    estimated = fit_edelay(freqs, signals)
-    alias_period = 1.0 / float(freqs[1] - freqs[0])
-    alias_error = (estimated - edelay + 0.5 * alias_period) % alias_period
-    alias_error -= 0.5 * alias_period
-
-    assert abs(alias_error) < 3e-3
-    assert abs(estimated) < 0.5 * alias_period
-
-
-def test_related_uniform_traces_share_alias_across_branch_cut() -> None:
-    edelay = 4.997
-    freqs = np.linspace(5000.0, 5030.0, 301)
-    signals = np.asarray(
-        [
-            _hanger_truth(
-                freqs,
-                freq=freq,
-                Ql=740.0,
-                Qc_abs=1100.0,
-                phi=0.12,
-                a0=1.25 * np.exp(0.31j),
-                edelay=edelay,
-                bg_amp_slope=0.004,
-            )
-            for freq in (5008.0, 5013.0)
-        ]
-    )
-
-    branch_seed = find_edelay_branch(freqs, signals)
-    estimates = np.asarray(
-        [fit_edelay(freqs, row, branch_seed=branch_seed) for row in signals]
-    )
-    alias_period = 1.0 / float(freqs[1] - freqs[0])
-    alias_errors = (estimates - edelay + 0.5 * alias_period) % alias_period
-    alias_errors -= 0.5 * alias_period
-
-    np.testing.assert_allclose(alias_errors, 0.0, atol=3e-3)
-    assert np.ptp(estimates) < 1e-3
-
-
-def test_related_four_point_uniform_traces_align_refined_aliases() -> None:
-    edelay = 0.02
-    freqs = np.linspace(5000.0, 5030.0, 4)
-    signals = np.asarray(
-        [
-            _hanger_truth(
-                freqs,
-                freq=freq,
-                Ql=740.0,
-                Qc_abs=1100.0,
-                phi=0.12,
-                a0=1.25 * np.exp(0.31j),
-                edelay=edelay,
-                bg_amp_slope=0.0,
-            )
-            for freq in (5008.0, 5013.0)
-        ]
-    )
-
-    branch_seed = find_edelay_branch(freqs, signals)
-    estimates = np.asarray(
-        [fit_edelay(freqs, row, branch_seed=branch_seed) for row in signals]
-    )
-    alias_period = 1.0 / float(freqs[1] - freqs[0])
-    mean_error = (np.mean(estimates) - edelay + 0.5 * alias_period) % alias_period
-    mean_error -= 0.5 * alias_period
-
-    assert np.ptp(estimates) < 0.5 * alias_period
-    assert abs(mean_error) < 3e-3
-
-
-@pytest.mark.parametrize("search_radius", [1.5, 20.0])
-def test_fit_edelay_recovers_large_delay_with_bounded_search(
-    search_radius: float,
-) -> None:
-    freq, Ql, edelay = 5549.0, 740.0, 11.299
-    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
-    signals = _hanger_truth(
-        freqs,
-        freq=freq,
-        Ql=Ql,
-        Qc_abs=1100.0,
-        phi=0.12,
-        a0=1.25 * np.exp(0.31j),
-        edelay=edelay,
-        bg_amp_slope=0.004,
-    )
-    estimated = fit_edelay(
-        freqs,
-        signals,
-        search_radius=search_radius,
-        max_search_radius=20.0,
-    )
-
-    assert estimated == pytest.approx(edelay, abs=3e-3)
-
-
-@pytest.mark.parametrize(
-    ("search_radius", "max_search_radius", "error"),
-    [
-        (1.5, None, "search boundary"),
-        (1.5, 3.0, "search boundary"),
-        (1e6, None, "resource limit"),
-    ],
-)
-def test_fit_edelay_rejects_insufficient_or_oversized_search(
-    search_radius: float,
-    max_search_radius: float | None,
-    error: str,
-) -> None:
-    freqs = _homophasal_like_grid(5549.0, 740.0, 15.0, 301)
-    signals = _hanger_truth(
-        freqs,
-        freq=5549.0,
-        Ql=740.0,
-        Qc_abs=1100.0,
-        phi=0.12,
-        a0=1.25 * np.exp(0.31j),
-        edelay=11.299,
-        bg_amp_slope=0.004,
-    )
-
-    with pytest.raises(ValueError, match=error):
-        fit_edelay(
-            freqs,
-            signals,
-            search_radius=search_radius,
-            max_search_radius=max_search_radius,
-        )
-
-
-def test_find_edelay_branch_warns_for_near_tied_nonuniform_peaks() -> None:
-    # Almost-uniform sampling leaves adjacent alias branches nearly indistinguishable.
-    freqs = np.linspace(5000.0, 5030.0, 301) + 1e-5 * np.sin(np.arange(301))
-    edelay = 0.2
-    signals = np.exp(-1j * 2.0 * np.pi * freqs * edelay)
-
-    with pytest.warns(RuntimeWarning, match="branch search is ambiguous"):
-        estimated = find_edelay_branch(freqs, signals)
-
-    assert estimated == pytest.approx(edelay, abs=1e-8)
-
-
-@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
 def test_model_fit_recovers_large_delay_nonuniform_truth(
     model: type[HangerModel] | type[TransmissionModel],
 ) -> None:
     freq, Ql, edelay = 5549.0, 740.0, 11.299
-    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
+    freqs = homophasal_like_grid(freq, Ql, 15.0, 301)
     common = dict(
         freq=freq,
         Ql=Ql,
@@ -380,12 +140,17 @@ def test_model_fit_recovers_large_delay_nonuniform_truth(
         bg_amp_slope=0.004,
     )
     if model is HangerModel:
-        signals = _hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
+        signals = hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
     else:
-        signals = _transmission_truth(freqs, **common)
+        signals = transmission_truth(freqs, **common)
 
     params = model.fit(freqs, signals, fit_bg_amp_slope=True)
-    fitted = model.calc_signals(freqs, **params)  # type: ignore[arg-type]
+    if model is HangerModel:
+        assert "Qc" in params
+        fitted = HangerModel.calc_signals(freqs, **params)
+    else:
+        assert "Qc" not in params
+        fitted = TransmissionModel.calc_signals(freqs, **params)
     nrmse = np.sqrt(np.mean(np.abs(fitted - signals) ** 2)) / np.ptp(np.abs(signals))
 
     np.testing.assert_allclose(params["freq"], freq, atol=0.08)
@@ -398,7 +163,7 @@ def test_model_fit_recovers_large_delay_nonuniform_truth(
 def test_explicit_edelay_bypasses_branch_search(
     model: type[HangerModel] | type[TransmissionModel],
 ) -> None:
-    freqs = _homophasal_like_grid(5549.0, 740.0, 15.0, 301)
+    freqs = homophasal_like_grid(5549.0, 740.0, 15.0, 301)
     common = dict(
         freq=5549.0,
         Ql=740.0,
@@ -407,9 +172,9 @@ def test_explicit_edelay_bypasses_branch_search(
         bg_amp_slope=0.0,
     )
     if model is HangerModel:
-        signals = _hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
+        signals = hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
     else:
-        signals = _transmission_truth(freqs, **common)
+        signals = transmission_truth(freqs, **common)
 
     params = model.fit(
         freqs,
@@ -421,30 +186,6 @@ def test_explicit_edelay_bypasses_branch_search(
     assert params["edelay"] == 11.299
     np.testing.assert_allclose(params["freq"], 5549.0, atol=0.08)
     np.testing.assert_allclose(params["Ql"], 740.0, rtol=0.03)
-
-
-def test_fit_edelay_rejects_nonmonotonic_frequency_grid() -> None:
-    freqs = np.asarray([5000.0, 5000.2, 5000.1, 5000.3])
-    signals = np.exp(-1j * 2.0 * np.pi * freqs * 0.2)
-
-    with pytest.raises(ValueError, match="strictly monotonic"):
-        fit_edelay(freqs, signals)
-
-
-def test_fit_edelay_rejects_branch_seed_with_search_radius() -> None:
-    freqs = np.linspace(4990.0, 5010.0, 101)
-    signals = np.exp(-1j * 2.0 * np.pi * freqs * 0.2)
-
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        fit_edelay(freqs, signals, branch_seed=0.2, search_radius=5.0)
-
-
-def test_fit_edelay_rejects_branch_seed_with_max_search_radius() -> None:
-    freqs = np.linspace(4990.0, 5010.0, 101)
-    signals = np.exp(-1j * 2.0 * np.pi * freqs * 0.2)
-
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        fit_edelay(freqs, signals, branch_seed=0.2, max_search_radius=5.0)
 
 
 @pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
@@ -462,9 +203,9 @@ def test_model_fit_uses_edelay_branch_seed(
         bg_amp_slope=0.0,
     )
     if model is HangerModel:
-        signals = _hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
+        signals = hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
     else:
-        signals = _transmission_truth(freqs, **common)
+        signals = transmission_truth(freqs, **common)
 
     params = model.fit(freqs, signals, edelay_branch_seed=edelay)
 
@@ -486,29 +227,29 @@ def test_get_proper_model_hanger_vs_transmission():
     [
         (
             HangerModel,
-            _hanger_truth,
+            hanger_truth,
             lambda f, q: np.linspace(f - 35.0, f + 35.0, 501),
             0.012,
             True,
         ),
         (
             HangerModel,
-            _hanger_truth,
-            lambda f, q: _homophasal_like_grid(f, q, 35.0, 501),
+            hanger_truth,
+            lambda f, q: homophasal_like_grid(f, q, 35.0, 501),
             -0.009,
             False,
         ),
         (
             TransmissionModel,
-            _transmission_truth,
+            transmission_truth,
             lambda f, q: np.linspace(f - 35.0, f + 35.0, 501),
             -0.011,
             False,
         ),
         (
             TransmissionModel,
-            _transmission_truth,
-            lambda f, q: _homophasal_like_grid(f, q, 35.0, 501),
+            transmission_truth,
+            lambda f, q: homophasal_like_grid(f, q, 35.0, 501),
             0.010,
             True,
         ),
@@ -575,7 +316,7 @@ def test_bg_amp_signal_is_global_positive_real_multiplier() -> None:
 
 def test_disabled_fit_returns_zero_amplitude_slope() -> None:
     freqs = np.linspace(5970.0, 6030.0, 401)
-    signals = _transmission_truth(
+    signals = transmission_truth(
         freqs,
         freq=6000.0,
         Ql=650.0,
@@ -623,7 +364,7 @@ def test_background_options_recover_only_enabled_terms(
     bg_phase_curvature: float,
 ) -> None:
     freq, Ql = 6053.0, 820.0
-    freqs = _homophasal_like_grid(freq, Ql, 35.0, 501)
+    freqs = homophasal_like_grid(freq, Ql, 35.0, 501)
     common = dict(
         freq=freq,
         Ql=Ql,
@@ -633,9 +374,9 @@ def test_background_options_recover_only_enabled_terms(
         bg_phase_curvature=bg_phase_curvature,
     )
     if model is HangerModel:
-        signals = _hanger_truth(freqs, Qc_abs=1150.0, phi=0.13, **common)
+        signals = hanger_truth(freqs, Qc_abs=1150.0, phi=0.13, **common)
     else:
-        signals = _transmission_truth(freqs, **common)
+        signals = transmission_truth(freqs, **common)
 
     params = model.fit(
         freqs,
@@ -673,7 +414,7 @@ def test_seeded_hanger_fit_recovers_resonance_with_phase_curvature(
     count: int, slope: float, curvature: float, noise: float
 ) -> None:
     freqs = np.linspace(5965.0, 6035.0, count)[1:-1]
-    signals = _hanger_truth(
+    signals = hanger_truth(
         freqs,
         freq=6000.0,
         Ql=700.0,
@@ -708,8 +449,8 @@ def test_seeded_hanger_fit_recovers_resonance_with_phase_curvature(
 
 def test_fixed_noise_refinement_reduces_complex_residual() -> None:
     freq, Ql, Qc_abs = 6053.0, 710.0, 1040.0
-    freqs = _homophasal_like_grid(freq, Ql, 45.0, 601)
-    clean = _hanger_truth(
+    freqs = homophasal_like_grid(freq, Ql, 45.0, 601)
+    clean = hanger_truth(
         freqs,
         freq=freq,
         Ql=Ql,
@@ -737,7 +478,7 @@ def test_fixed_noise_refinement_reduces_complex_residual() -> None:
 def test_bound_limited_refinement_warns_and_returns_sequential_result() -> None:
     freqs = np.linspace(5970.0, 6030.0, 401)
     # A resonance outside the scan forces the bounded fit to its frequency limit.
-    signals = _transmission_truth(
+    signals = transmission_truth(
         freqs,
         freq=6040.0,
         Ql=650.0,
@@ -757,8 +498,8 @@ def test_bound_limited_refinement_warns_and_returns_sequential_result() -> None:
 
 def test_refined_corrected_geometry_and_quality_factors_are_consistent() -> None:
     freq, Ql, Qc_abs, phi = 6053.0, 760.0, 1080.0, 0.18
-    freqs = _homophasal_like_grid(freq, Ql, 40.0, 551)[::-1]
-    signals = _hanger_truth(
+    freqs = homophasal_like_grid(freq, Ql, 40.0, 551)[::-1]
+    signals = hanger_truth(
         freqs,
         freq=freq,
         Ql=Ql,
@@ -810,19 +551,31 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
         edelay=0.021,
         bg_amp_slope=g,
     )
-    truth_fn = _hanger_truth if model is HangerModel else _transmission_truth
+    truth_fn = hanger_truth if model is HangerModel else transmission_truth
     signals = truth_fn(freqs, **truth_kwargs, **common)
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=True)
 
     supplied = Figure(figsize=(9, 8))
-    fig = model.visualize_fit(
-        freqs,
-        signals,
-        params,  # type: ignore[arg-type]
-        figure=supplied,
-        fit_bg_amp_slope=True,
-        fit_bg_phase_curvature=False,
-    )
+    if model is HangerModel:
+        assert "Qc" in params
+        fig = HangerModel.visualize_fit(
+            freqs,
+            signals,
+            params,
+            figure=supplied,
+            fit_bg_amp_slope=True,
+            fit_bg_phase_curvature=False,
+        )
+    else:
+        assert "Qc" not in params
+        fig = TransmissionModel.visualize_fit(
+            freqs,
+            signals,
+            params,
+            figure=supplied,
+            fit_bg_amp_slope=True,
+            fit_bg_phase_curvature=False,
+        )
     assert fig is supplied
     try:
         iq_ax, phase_ax, magnitude_ax = fig.axes
@@ -862,7 +615,11 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
         )
         np.testing.assert_allclose(
             np.asarray(total_fit.get_ydata(), dtype=np.float64),
-            np.abs(model.calc_signals(freqs, **params)),  # type: ignore[arg-type]
+            np.abs(
+                HangerModel.calc_signals(freqs, **params)
+                if "Qc" in params
+                else TransmissionModel.calc_signals(freqs, **params)
+            ),
         )
         np.testing.assert_allclose(
             np.asarray(envelope.get_ydata(), dtype=np.float64),
@@ -901,19 +658,31 @@ def test_visualization_omits_background_when_fit_is_disabled(
         edelay=0.021,
         bg_amp_slope=0.0,
     )
-    truth_fn = _hanger_truth if model is HangerModel else _transmission_truth
+    truth_fn = hanger_truth if model is HangerModel else transmission_truth
     signals = truth_fn(freqs, **truth_kwargs, **common)
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=False)
 
     supplied = Figure(figsize=(9, 8))
-    fig = model.visualize_fit(
-        freqs,
-        signals,
-        params,  # type: ignore[arg-type]
-        figure=supplied,
-        fit_bg_amp_slope=False,
-        fit_bg_phase_curvature=False,
-    )
+    if model is HangerModel:
+        assert "Qc" in params
+        fig = HangerModel.visualize_fit(
+            freqs,
+            signals,
+            params,
+            figure=supplied,
+            fit_bg_amp_slope=False,
+            fit_bg_phase_curvature=False,
+        )
+    else:
+        assert "Qc" not in params
+        fig = TransmissionModel.visualize_fit(
+            freqs,
+            signals,
+            params,
+            figure=supplied,
+            fit_bg_amp_slope=False,
+            fit_bg_phase_curvature=False,
+        )
     assert fig is supplied
     try:
         magnitude_ax = fig.axes[2]
@@ -932,7 +701,7 @@ def test_visualization_omits_background_when_fit_is_disabled(
 
 def test_hanger_model_incompatible_qi_keeps_complex_fit() -> None:
     freqs = np.linspace(5965.0, 6035.0, 401)
-    signals = _hanger_truth(
+    signals = hanger_truth(
         freqs,
         freq=6000.0,
         Ql=700.0,
@@ -962,7 +731,7 @@ def test_hanger_model_incompatible_qi_keeps_complex_fit() -> None:
 
 def test_visualization_shows_phase_curvature_only_when_enabled() -> None:
     freqs = np.linspace(5965.0, 6035.0, 401)
-    signals = _transmission_truth(
+    signals = transmission_truth(
         freqs,
         freq=6000.0,
         Ql=700.0,

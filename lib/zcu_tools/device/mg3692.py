@@ -9,10 +9,10 @@ if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
 
-STATUS_MAP = {"on": "1", "off": "0"}
+STATUS_MAP: dict[Literal["on", "off"], str] = {"on": "1", "off": "0"}
 
 
-STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
+STATUS_MAP_INV: dict[str, Literal["on", "off"]] = {v: k for k, v in STATUS_MAP.items()}
 
 
 class AnritsuMG3692Info(BaseDeviceInfo):
@@ -38,7 +38,7 @@ class AnritsuMG3692(BaseDevice[AnritsuMG3692Info]):
         super().__init__(address, rm)
 
     def get_output(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":OUTP?")]  # pyright: ignore[reportReturnType]
+        return STATUS_MAP_INV[self.query(":OUTP?")]
 
     @device_operation
     def set_output(self, status: Literal["on", "off"]) -> None:

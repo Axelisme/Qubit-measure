@@ -2,15 +2,35 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-T_dtype = TypeVar("T_dtype", bound=np.generic)
+T_dtype = TypeVar("T_dtype", bound=np.number)
 SmoothMethod: TypeAlias = Literal["wavelet", "gaussian"]
 WaveletThresholdMode: TypeAlias = Literal["soft", "hard"]
+
+
+@dataclass(frozen=True)
+class SmoothingOptions:
+    """Shared settings for one-axis and separable N-D smoothing.
+
+    method selects wavelet thresholding or a Gaussian filter. sigma is the
+    Gaussian standard deviation in samples, or the wavelet threshold scale.
+    wavelet names the PyWavelets family; wavelet_level=0 selects its maximum
+    valid level. wavelet_threshold overrides sigma only for wavelet smoothing;
+    None uses sigma. threshold_mode selects soft or hard coefficient thresholding.
+    """
+
+    method: SmoothMethod = "wavelet"
+    sigma: float = 1.0
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+    wavelet_threshold: float | None = None
+    threshold_mode: WaveletThresholdMode = "soft"
 
 
 def find_rotate_angle(signals: NDArray[np.complex128]) -> float:
@@ -115,7 +135,7 @@ def minus_median(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
             signals.real -= np.nanmedian(signals.real)
             signals.imag -= np.nanmedian(signals.imag)
         else:
-            signals -= np.nanmedian(signals)  # pyright: ignore[reportArgumentType, reportCallIssue]
+            np.subtract(signals, np.nanmedian(signals), out=signals)
 
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
@@ -127,7 +147,11 @@ def minus_median(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
             val_signals.real -= np.nanmedian(val_signals.real, axis=0, keepdims=True)
             val_signals.imag -= np.nanmedian(val_signals.imag, axis=0, keepdims=True)
         else:
-            val_signals -= np.nanmedian(val_signals, axis=0, keepdims=True)  # pyright: ignore[reportArgumentType, reportCallIssue]
+            np.subtract(
+                val_signals,
+                np.nanmedian(val_signals, axis=0, keepdims=True),
+                out=val_signals,
+            )
         signals[:, val_mask] = val_signals
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
@@ -166,14 +190,20 @@ def minus_mean(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
         return signals
 
     if axis is None:
-        signals -= np.nanmean(signals)  # pyright: ignore[reportArgumentType, reportCallIssue]
+        np.subtract(signals, np.nanmean(signals), out=signals)
 
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         # minus the mean
         val_mask = ~np.all(np.isnan(signals), axis=0)
-        signals[:, val_mask] -= np.nanmean(signals[:, val_mask], axis=0, keepdims=True)  # pyright: ignore[reportArgumentType, reportCallIssue]
+        selected = signals[:, val_mask]
+        np.subtract(
+            selected,
+            np.nanmean(selected, axis=0, keepdims=True),
+            out=selected,
+        )
+        signals[:, val_mask] = selected
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
 
@@ -221,13 +251,20 @@ def rescale(signals: NDArray[T_dtype], axis: int | None = None) -> NDArray[T_dty
 
     if axis is None:
         if np.sum(~np.isnan(signals)) > 1:  # at least 2 non-nan values
-            signals /= np.nanstd(signals)  # pyright: ignore[reportArgumentType, reportCallIssue]
+            np.divide(signals, np.nanstd(signals), out=signals)
 
-    elif isinstance(axis, int):
+    # tolerated: Untyped invalid axes must reach the ValueError branch, not swapaxes.
+    elif isinstance(axis, int):  # pyright: ignore[reportUnnecessaryIsInstance]
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         val_mask = np.sum(~np.isnan(signals), axis=0) > 1
-        signals[:, val_mask] /= np.nanstd(signals[:, val_mask], axis=0, keepdims=True)  # pyright: ignore[reportArgumentType, reportCallIssue]
+        selected = signals[:, val_mask]
+        np.divide(
+            selected,
+            np.nanstd(selected, axis=0, keepdims=True),
+            out=selected,
+        )
+        signals[:, val_mask] = selected
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
     else:
@@ -379,62 +416,63 @@ def wavelet_denoise1d(
 def smooth_signal1d(
     signals: NDArray[Any],
     *,
-    method: SmoothMethod = "wavelet",
-    sigma: float = 1.0,
+    options: SmoothingOptions | None = None,
     axis: int = -1,
-    wavelet: str = "sym4",
-    wavelet_level: int = 0,
-    wavelet_threshold: float | None = None,
-    threshold_mode: WaveletThresholdMode = "soft",
 ) -> NDArray[Any]:
-    """Smooth traces along one axis with a shared method knob."""
-    if method == "gaussian":
-        return cast(NDArray[Any], gaussian_filter1d(signals, sigma=sigma, axis=axis))
-    if method == "wavelet":
+    """Smooth signals along axis, using default settings when options is None.
+
+    Preserve shape and wavelet NaN positions. Unsupported methods raise ValueError.
+    """
+    if options is None:
+        options = SmoothingOptions()
+    if options.method == "gaussian":
+        return gaussian_filter1d(signals, sigma=options.sigma, axis=axis)
+    if options.method == "wavelet":
         return wavelet_denoise1d(
             signals,
             axis=axis,
-            wavelet=wavelet,
-            level=wavelet_level,
-            threshold_scale=sigma if wavelet_threshold is None else wavelet_threshold,
-            threshold_mode=threshold_mode,
+            wavelet=options.wavelet,
+            level=options.wavelet_level,
+            threshold_scale=options.sigma
+            if options.wavelet_threshold is None
+            else options.wavelet_threshold,
+            threshold_mode=options.threshold_mode,
         )
-    raise ValueError(f"Invalid smoothing method: {method}")
+    raise ValueError(f"Invalid smoothing method: {options.method}")
 
 
 def smooth_signal_nd(
     signals: NDArray[Any],
     *,
-    method: SmoothMethod = "wavelet",
-    sigma: float = 1.0,
+    options: SmoothingOptions | None = None,
     axes: Sequence[int] | None = None,
-    wavelet: str = "sym4",
-    wavelet_level: int = 0,
-    wavelet_threshold: float | None = None,
-    threshold_mode: WaveletThresholdMode = "soft",
 ) -> NDArray[Any]:
-    """Smooth an N-D signal; wavelet mode applies separable 1D denoise per axis."""
-    if method == "gaussian":
+    """Smooth signals over axes (all if None), using default options if None.
+
+    Wavelet mode applies separable 1D denoise in axis order and preserves NaNs.
+    Unsupported methods raise ValueError.
+    """
+    if options is None:
+        options = SmoothingOptions()
+    if options.method == "gaussian":
         if axes is None:
-            return cast(NDArray[Any], gaussian_filter(signals, sigma=sigma))
-        return cast(
-            NDArray[Any], gaussian_filter(signals, sigma=sigma, axes=tuple(axes))
-        )
-    if method == "wavelet":
+            return gaussian_filter(signals, sigma=options.sigma)
+        return gaussian_filter(signals, sigma=options.sigma, axes=tuple(axes))
+    if options.method == "wavelet":
         out = np.asarray(signals)
         for axis in _normalize_axes(axes, out.ndim):
             out = wavelet_denoise1d(
                 out,
                 axis=axis,
-                wavelet=wavelet,
-                level=wavelet_level,
-                threshold_scale=sigma
-                if wavelet_threshold is None
-                else wavelet_threshold,
-                threshold_mode=threshold_mode,
+                wavelet=options.wavelet,
+                level=options.wavelet_level,
+                threshold_scale=options.sigma
+                if options.wavelet_threshold is None
+                else options.wavelet_threshold,
+                threshold_mode=options.threshold_mode,
             )
         return out
-    raise ValueError(f"Invalid smoothing method: {method}")
+    raise ValueError(f"Invalid smoothing method: {options.method}")
 
 
 def calculate_noise(signals: NDArray[T_dtype]) -> tuple[float, NDArray[T_dtype]]:
@@ -457,6 +495,7 @@ def calculate_noise(signals: NDArray[T_dtype]) -> tuple[float, NDArray[T_dtype]]
         The smoothed signals obtained by applying Gaussian filtering.
     """
     m_signals = gaussian_filter1d(signals, sigma=1)
+    # tolerated(cast): SciPy's default output keeps input dtype; its inferred type loses T_dtype.
     m_signals = cast(NDArray[T_dtype], m_signals)
 
     return np.abs(np.subtract(signals, m_signals)).mean(), m_signals
@@ -489,7 +528,7 @@ def peak_n_avg(
         raise ValueError(f"n should be positive, but get {n}")
 
     if np.sum(~np.isnan(data)) <= n:
-        return np.nanmean(data)  # pyright: ignore[reportReturnType]
+        return float(np.nanmean(data))
 
     # Replace NaN with a sentinel that loses the argpartition race so NaN
     # positions are never selected as top-n candidates.

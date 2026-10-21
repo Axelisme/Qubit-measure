@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-20，明填模板 bindings、point-local aliases 與預設腳本所有權
+**Last updated:** 2026-10-21，Setup／SoC Run lock 與共用視窗控制權
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -18,6 +18,8 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
 - [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
+  保存中心在全部 artifact 都是 SAVED 時停用 Save All 與各列 Save。
+  任一 artifact 不是 SAVED 時恢復啟用，但仍須符合 idle、可寫與 active context 條件。
 - [`writeback/`](writeback/service.py)：parameter／module／sample proposals、draft、service、control 與 Qt review widget。
 - [`ui/`](ui/main_window.py)：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   feedback widgets；writeback view 由 `writeback/` 擁有，generic cfg form不屬於app package。
@@ -51,7 +53,15 @@ Without a selected script, it opens the shared Setup dialog.
 `build_app_services()` constructs the app-local services and injects their driven
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
-for setup/context/device/predictor/progress domains.
+for setup/soc/context/device/predictor/progress domains.
+
+The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
+result entries and working points; SoC connects the board and displays soccfg
+through `Controller.soc_control`. The named `soc` window supports remote screenshots.
+Session dialogs remain available for inspection during Run or remote control.
+Run disables Setup and SoC submissions. Inspect, Devices and ARB retain their
+existing Run policy. Remote control makes all five shared dialogs read-only;
+Local restores editing subject to each dialog's Run and validation gates.
 
 `Controller.install_soc` / `uninstall_soc` publish a caller-built board on the
 owner thread. `register_device` adopts a built driver through DeviceService.

@@ -382,7 +382,8 @@ def test_connect_sync_rejects_unsupported_request(qapp):
         pass
 
     with pytest.raises(TypeError, match="Unsupported connect request"):
-        svc.connect_sync(Other())  # type: ignore[arg-type]
+        # tolerated: deliberately invalid request verifies rejection before connection work.
+        svc.connect_sync(Other())  # pyright: ignore[reportArgumentType]
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +412,8 @@ def test_start_connect_remote_unsupported_request_raises(qapp):
         pass
 
     with pytest.raises(TypeError, match="Unsupported connect request"):
-        svc.start_connect(Other())  # type: ignore[arg-type]
+        # tolerated: deliberately invalid request verifies rejection before connection work.
+        svc.start_connect(Other())  # pyright: ignore[reportArgumentType]
 
 
 def test_start_connect_rejected_while_run_active(qapp):
@@ -485,7 +487,7 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     fake_bg = _FakeBg()
-    runner = OperationRunner(gate, handles, progress, fake_bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, fake_bg, bus)
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     # start_connect registers the exclusion lease and submits to fake_bg

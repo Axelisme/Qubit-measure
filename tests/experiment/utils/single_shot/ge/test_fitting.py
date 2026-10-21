@@ -3,11 +3,61 @@
 import numpy as np
 import pytest
 from matplotlib.axes import Axes
+from matplotlib.colors import to_rgba
+from matplotlib.container import BarContainer
+from matplotlib.figure import Figure
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
 from zcu_tools.experiment.utils.single_shot import ge
 from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
-from zcu_tools.experiment.utils.single_shot.ge.base import fitting_ge_and_plot
+from zcu_tools.experiment.utils.single_shot.ge.base import (
+    GEFitOptions,
+    fitting_ge_and_plot,
+    hist,
+)
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+
+@pytest.mark.parametrize("title", [None, "Prepared populations"])
+def test_hist_returns_normalized_populations_and_draws_matching_bars(
+    title: str | None,
+) -> None:
+    ground = np.array([-2.0, -2.0, -1.0, 0.0])
+    excited = np.array([0.0, 1.0, 2.0, 2.0, 2.0])
+    ax = Figure().subplots()
+    ax.set_title("Existing title")
+
+    ng, ne, bins = hist(ground, excited, numbins=4, ax=ax, title=title)
+
+    np.testing.assert_allclose(bins, [-2.0, -1.0, 0.0, 1.0, 2.0])
+    np.testing.assert_allclose(ng, [0.5, 0.25, 0.25, 0.0])
+    np.testing.assert_allclose(ne, [0.0, 0.0, 0.2, 0.8])
+    for actual, expected in zip(
+        hist(ground, excited, numbins=4), (ng, ne, bins), strict=True
+    ):
+        np.testing.assert_allclose(actual, expected)
+
+    bars = [
+        container for container in ax.containers if isinstance(container, BarContainer)
+    ]
+    assert len(bars) == 2
+    for container, heights, color in zip(
+        bars, (ng, ne), ((0.0, 0.0, 1.0, 0.5), (1.0, 0.0, 0.0, 0.5)), strict=True
+    ):
+        assert len(container.patches) == 4
+        np.testing.assert_allclose(
+            [bar.get_x() for bar in container.patches], bins[:-1]
+        )
+        np.testing.assert_allclose([bar.get_width() for bar in container.patches], 1.0)
+        np.testing.assert_allclose(
+            [bar.get_height() for bar in container.patches], heights
+        )
+        for bar in container.patches:
+            np.testing.assert_allclose(to_rgba(bar.get_facecolor()), color)
+            assert bar.get_alpha() == 0.5
+    assert ax.get_legend_handles_labels()[1] == ["g", "e"]
+    assert ax.get_xlabel() == "I [ADC levels]"
+    assert ax.get_ylabel() == "Counts"
+    assert ax.get_title() == ("Existing title" if title is None else title)
 
 
 @pytest.mark.parametrize(
@@ -30,13 +80,15 @@ def test_histogram_calibration_retains_centers_populations_and_diagnostics(
     fidelity, populations, result = fitting_ge_and_plot(
         signals,
         lambda *_: {"theta": 0.0},
-        numbins=80,
-        length_ratio=length_ratio,
-        init_p0_g=1.0,
-        init_p0_e=0.0,
-        avg_p=0.5,
-        align_t1=align_t1,
-        logscale=logscale,
+        options=GEFitOptions(
+            numbins=80,
+            length_ratio=length_ratio,
+            init_p0_g=1.0,
+            init_p0_e=0.0,
+            avg_p=0.5,
+            align_t1=align_t1,
+            logscale=logscale,
+        ),
         plots=plots,
     )
     figures = plots.finish(present=False)
@@ -73,7 +125,7 @@ def test_ge_analysis_custom_names_coexist_with_default_owned_figures(selection):
     other_plots = Plots(NonPresentingHost())
     try:
         baseline = singleshot_ge_analysis(
-            signals, plots=plots, length_ratio=0.0, **selection
+            signals, plots=plots, options=GEFitOptions(length_ratio=0.0), **selection
         )
         assert 0.9 < baseline[0] <= 1.0
         np.testing.assert_allclose(baseline[1], [[1.0, 0.0], [0.0, 1.0]], atol=0.03)
@@ -82,7 +134,11 @@ def test_ge_analysis_custom_names_coexist_with_default_owned_figures(selection):
         original = plots["fit"]
         for name in ("fit_0", "fit_2"):
             fitted = singleshot_ge_analysis(
-                signals, plots=plots, figure_name=name, length_ratio=0.0, **selection
+                signals,
+                plots=plots,
+                figure_name=name,
+                options=GEFitOptions(length_ratio=0.0),
+                **selection,
             )
             assert fitted[0] == pytest.approx(baseline[0])
             np.testing.assert_allclose(fitted[1], baseline[1])
@@ -110,7 +166,12 @@ def test_ge_analysis_degenerate_iq_has_named_numerical_error_with_cause(selectio
         with pytest.raises(
             (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError)
         ) as raised:
-            singleshot_ge_analysis(signals, plots=plots, length_ratio=0.0, **selection)
+            singleshot_ge_analysis(
+                signals,
+                plots=plots,
+                options=GEFitOptions(length_ratio=0.0),
+                **selection,
+            )
         assert hasattr(ge, "GENumericalError"), "GE must expose its numerical failure"
         assert isinstance(raised.value, ge.GENumericalError)
         assert isinstance(
@@ -139,7 +200,9 @@ def test_ge_analysis_propagates_original_matplotlib_error(monkeypatch, error_typ
     plots = Plots(NonPresentingHost())
     try:
         with pytest.raises(error_type) as raised:
-            singleshot_ge_analysis(signals, plots=plots, length_ratio=0.0)
+            singleshot_ge_analysis(
+                signals, plots=plots, options=GEFitOptions(length_ratio=0.0)
+            )
         assert raised.value is fault
     finally:
         plots.finish(present=False)

@@ -28,11 +28,31 @@ class ParamMeta:
     decimals: int | None = None
 
 
-def _resolve_field_info(
+def resolve_field_info(
     field: dataclasses.Field[object],
     hints: dict[str, Any],
 ) -> tuple[type, list[Any] | None, str, int | None, bool]:
-    """Return (bare_type, choices, label, decimals, optional)."""
+    """Resolve a dataclass field into its analyze-parameter presentation contract.
+
+    Pass a ``dataclasses.Field`` from the params dataclass and ``hints`` from
+    ``get_type_hints(params_cls, include_extras=True)`` for that same dataclass.
+    The hints mapping must contain ``field.name``.
+
+    Supported annotations are plain bool/int/float/str, nonempty Literal choices
+    sharing one runtime type, and a single Optional[T] of either kind. An outer
+    Annotated may wrap any supported annotation; its first ParamMeta supplies
+    presentation metadata. Literal choices are not restricted to the four plain
+    primitive types.
+
+    Return ``(bare_type, choices, label, decimals, optional)``: the unwrapped type
+    (or the runtime type of the Literal choices), choices in Literal definition
+    order or None, a nonempty metadata label or ``field.name``, the metadata
+    decimals value or None, and whether Optional allows None. Decimals is only
+    presentation metadata; this function does not validate precision or values.
+
+    Raise KeyError for a missing hint. Raise TypeError for unsupported annotations,
+    empty or mixed-type Literals, or unions other than a single Optional[T].
+    """
     hint = hints[field.name]
     origin = get_origin(hint)
     if origin is Annotated:
@@ -88,7 +108,7 @@ def describe_analyze_params(params_cls: type) -> list[dict[str, Any]]:
     """Reflect an analyze-params dataclass into a JSON-safe field spec list.
 
     Each entry: ``{name, type, label, choices?, decimals?, default?}``. Reuses
-    ``_resolve_field_info`` so the description matches the runtime contract.
+    ``resolve_field_info`` so the description matches the runtime contract.
     Returns ``[]`` for non-dataclass types (e.g. ``NoAnalyzeParams``).
     """
     if not dataclasses.is_dataclass(params_cls):
@@ -97,9 +117,7 @@ def describe_analyze_params(params_cls: type) -> list[dict[str, Any]]:
     hints = get_type_hints(params_cls, include_extras=True)
     out: list[dict[str, Any]] = []
     for field in fields:
-        bare_type, choices, label, decimals, optional = _resolve_field_info(
-            field, hints
-        )
+        bare_type, choices, label, decimals, optional = resolve_field_info(field, hints)
         entry: dict[str, Any] = {
             "name": field.name,
             "type": bare_type.__name__,
@@ -137,7 +155,7 @@ def reconstruct_params(params_cls: type[T], form_values: dict[str, Any]) -> T:
 
     kwargs: dict[str, Any] = {}
     for field in fields:
-        bare_type, choices, _, _, optional = _resolve_field_info(field, hints)
+        bare_type, choices, _, _, optional = resolve_field_info(field, hints)
         raw = form_values[field.name]
         if optional and raw is None:
             kwargs[field.name] = None

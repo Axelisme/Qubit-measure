@@ -80,7 +80,8 @@ class DualTransitionRateFitResult:
         return (*self.rates.as_tuple(), *initial)
 
 
-def model_func(
+# tolerated: curve_fit and shared FitTrace unpack six rates plus two initial populations.
+def model_func(  # noqa: PLR0913
     t: NDArray[np.float64],
     T_ge: float,
     T_eg: float,

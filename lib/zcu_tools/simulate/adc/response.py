@@ -98,13 +98,7 @@ class ConditionalReadout:
         also require equal sample counts across reads. The existing single-grid
         response continues to use DOP853.
         """
-        counts = np.array([len(g.times_ns) for g in batch.grids[0]], dtype=np.int64)
-        if any(
-            [len(g.times_ns) for g in grids] != counts.tolist() for grids in batch.grids
-        ):
-            raise ValueError("sample counts must match across grid contents")
-        if batch.include_traces and np.any(counts != counts[0]):
-            raise ValueError("dense traces require equal sample counts across reads")
+        counts = _sample_counts(batch)
         model_key = readout_model_key(batch.model)
         solver = (
             self
@@ -130,11 +124,7 @@ class ConditionalReadout:
             batch.pulses, batch.grids, times_by_content, relative_keys, strict=True
         ):
             key = (model_key, _pulse_key(pulses), _grid_key(grids))
-            flat_mux = (
-                len(pulses) > 1
-                and all(p.envelope is None for p in pulses)
-                and all(p.start_ns == pulses[0].start_ns for p in pulses)
-            )
+            flat_mux = _is_common_start_flat_mux(pulses)
             if not batch.include_traces:
                 if key in self._sums:
                     summed.append(self._sums[key][1])
@@ -553,6 +543,27 @@ class ConditionalReadout:
             raise RuntimeError("readout produced invalid probabilities")
         if not np.allclose(probabilities.sum(axis=0), 1, rtol=0, atol=1e-8):
             raise RuntimeError("readout probabilities do not sum to one")
+
+
+def _sample_counts(batch: ReadoutBatch) -> NDArray[np.int64]:
+    """Validate shared per-read counts and equal read lengths for dense traces."""
+    counts = np.array([len(g.times_ns) for g in batch.grids[0]], dtype=np.int64)
+    if any(
+        [len(g.times_ns) for g in grids] != counts.tolist() for grids in batch.grids
+    ):
+        raise ValueError("sample counts must match across grid contents")
+    if batch.include_traces and np.any(counts != counts[0]):
+        raise ValueError("dense traces require equal sample counts across reads")
+    return counts
+
+
+def _is_common_start_flat_mux(pulses: tuple[ReadoutPulse, ...]) -> bool:
+    """Identify multiple flat carriers sharing the exact same start time."""
+    return (
+        len(pulses) > 1
+        and all(p.envelope is None for p in pulses)
+        and all(p.start_ns == pulses[0].start_ns for p in pulses)
+    )
 
 
 def _pulse_key(pulses: tuple[ReadoutPulse, ...]) -> tuple[object, ...]:

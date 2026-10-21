@@ -35,6 +35,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.process import (
+    SmoothingOptions,
     SmoothMethod,
     minus_background,
     rotate2real,
@@ -222,11 +223,13 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         # 1. Smooth the measured map before selecting a peak.
         signals_smooth = smooth_signal_nd(
             signals,
-            method=options.smooth_method,
-            sigma=options.smooth,
+            options=SmoothingOptions(
+                method=options.smooth_method,
+                sigma=options.smooth,
+                wavelet=options.wavelet,
+                wavelet_level=options.wavelet_level,
+            ),
             axes=(0, 1),
-            wavelet=options.wavelet,
-            wavelet_level=options.wavelet_level,
         )
 
         # 2. Select the largest contrast against the chosen background.

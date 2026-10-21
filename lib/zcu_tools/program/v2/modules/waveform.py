@@ -277,11 +277,11 @@ class QickWaveformKwargs(TypedDict):
 
 class AbsWaveform(ABC):
     name: str
-    waveform_cfg: AbsWaveformCfg
+    waveform_cfg: WaveformCfg
 
     @property
     def length(self) -> float | QickParam:
-        return self.waveform_cfg.length  # type: ignore[attr-defined]
+        return self.waveform_cfg.length
 
     @abstractmethod
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None: ...
@@ -352,7 +352,9 @@ class DragWaveform(AbsWaveform):
 
     @property
     def length(self) -> float:
-        return self.waveform_cfg.length  # type: ignore[return-value]
+        cfg = self.waveform_cfg
+        assert isinstance(cfg, DragWaveformCfg)
+        return cfg.length
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = self.waveform_cfg

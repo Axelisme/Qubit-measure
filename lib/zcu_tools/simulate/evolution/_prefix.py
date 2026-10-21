@@ -49,6 +49,7 @@ def certify(table: SegmentTable) -> SegmentTable:
             table.start_ns[row].tobytes(),
             table.duration_ns[row].tobytes(),
             table.level[row].tobytes(),
+            table.shift(row),
             count.tobytes(),
         )
         if count:
@@ -70,7 +71,7 @@ def certify(table: SegmentTable) -> SegmentTable:
     matches: dict[tuple[bytes, ...], list[int]] = {}
     starts = np.searchsorted(table.timeline, table.timeline[candidates], side="left")
     for row, first in zip(candidates, starts, strict=True):
-        key = (*signatures[first:row], table.level[row].tobytes())
+        key = (*signatures[first:row], table.level[row].tobytes(), table.shift(row))
         waveform, timeline = table.flux_waveform, table.timeline[row]
         available = table.flux_waveform_available
         if waveform is not None and (available is None or available[timeline]):
@@ -102,6 +103,7 @@ def _representative(geometry: Geometry, first: int, stop: int) -> Geometry:
             "start_ns",
             "duration_ns",
             "level",
+            "shift_content",
             "tones",
             "tone_port",
             "tone_frequency_ghz",

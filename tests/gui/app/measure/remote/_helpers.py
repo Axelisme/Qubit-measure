@@ -249,10 +249,8 @@ def dispatch_handler(
     minimal adapter stub so unit tests can drive a single handler without a live
     socket. The lightweight adapter delegates nominal ``ExpectedError`` mapping
     to the production translator; unexpected exceptions escape unchanged.
-    Cast keeps the typed ``Handler`` signature satisfied.
     """
     from types import SimpleNamespace
-    from typing import cast
 
     from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 
@@ -261,21 +259,18 @@ def dispatch_handler(
             return ctrl
         return getattr(ctrl, name, ctrl)
 
-    adapter = cast(
-        RemoteControlAdapter,
-        SimpleNamespace(
-            ctrl=ctrl,
-            tab_control=_facet_or_self("tab_control"),
-            run_analyze_control=_facet_or_self("run_analyze_control"),
-            operation_control=_facet_or_self("operation_control"),
-            save_control=_facet_or_self("save_control"),
-            writeback_control=_facet_or_self("writeback_control"),
-            context_control=_facet_or_self("context_control"),
-            device_control=_facet_or_self("device_control"),
-            predictor_control=_facet_or_self("predictor_control"),
-            cfg_lookup=lambda tab_id: _facet_or_self("cfg_resources").lookup(tab_id),
-            render_view=_facet_or_self("render_view"),
-        ),
+    adapter = SimpleNamespace(
+        ctrl=ctrl,
+        tab_control=_facet_or_self("tab_control"),
+        run_analyze_control=_facet_or_self("run_analyze_control"),
+        operation_control=_facet_or_self("operation_control"),
+        save_control=_facet_or_self("save_control"),
+        writeback_control=_facet_or_self("writeback_control"),
+        context_control=_facet_or_self("context_control"),
+        device_control=_facet_or_self("device_control"),
+        predictor_control=_facet_or_self("predictor_control"),
+        cfg_lookup=lambda tab_id: _facet_or_self("cfg_resources").lookup(tab_id),
+        render_view=_facet_or_self("render_view"),
     )
     try:
         return METHOD_REGISTRY[method].handler(adapter, params)
@@ -323,6 +318,8 @@ def _read_matching_frame(
             if not line:
                 continue
             msg = json.loads(line.decode("utf-8"))
+            if not isinstance(msg, dict):
+                raise ValueError("NDJSON frame must be a JSON object")
             if accept(msg):
                 return msg
             inbox.append(msg)
@@ -341,9 +338,10 @@ def recv_until(
     accept: Callable[[dict[str, object]], bool],
     timeout_s: float = 30.0,
 ) -> dict[str, Any]:
-    """Wait for the first NDJSON line where ``accept(msg)`` is True.
+    """Wait for the first NDJSON object where ``accept(msg)`` is True.
 
-    Lines that ``accept`` rejects are **parked** in a per-socket inbox so a
+    Non-object frames raise ValueError before reaching the matcher or inbox.
+    Objects that ``accept`` rejects are **parked** in a per-socket inbox so a
     later ``recv_*`` call can still observe them — this is important when
     a test waits for a reply that may arrive interleaved with event pushes,
     or vice versa. Runs the Qt owner loop while waiting for socket readiness so
@@ -406,10 +404,13 @@ def reset_inbox(sock: socket.socket) -> None:
 def recv_response(
     sock: socket.socket, rid: str, timeout_s: float = 30.0
 ) -> dict[str, Any]:
-    """Wait for a NDJSON response with ``id == rid``; drops pushes."""
+    """Wait for ``id == rid``; park nonmatches for later ``recv_*`` calls.
+
+    Non-object frames raise ValueError.
+    """
     return recv_until(
         sock,
-        lambda msg: isinstance(msg, dict) and msg.get("id") == rid,
+        lambda msg: msg.get("id") == rid,
         timeout_s,
     )
 
@@ -417,10 +418,13 @@ def recv_response(
 def recv_push(
     sock: socket.socket, event: str, timeout_s: float = 30.0
 ) -> dict[str, Any]:
-    """Wait for a push line whose ``event`` matches; drops replies."""
+    """Wait for the matching ``event``; park nonmatches for later ``recv_*`` calls.
+
+    Non-object frames raise ValueError.
+    """
     return recv_until(
         sock,
-        lambda msg: isinstance(msg, dict) and msg.get("event") == event,
+        lambda msg: msg.get("event") == event,
         timeout_s,
     )
 

@@ -13,7 +13,10 @@ from zcu_tools.gui.session.adapters.thread_pool_background import (
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.ports import (
     DeviceMemoryInfo,
     OperationConflictError,
@@ -48,10 +51,12 @@ def session():
     service = DeviceService(
         bus,
         state,
-        gate,
-        background,
-        OperationRunner(gate, handles, progress, background, bus),
-        handles,
+        OperationInfrastructure(
+            gate=gate,
+            background=background,
+            runner=OperationRunner(gate, handles, progress, background, bus),
+            handles=handles,
+        ),
         device_registry=registry,
     )
     facts: list[DeviceChangedPayload] = []

@@ -145,7 +145,7 @@ def _make_runner(
     h = handles or OperationHandles()
     p = progress or _FakeProgress()
     b = bg or _FakeBg()
-    runner = OperationRunner(g, h, p, b, bus or BaseEventBus())  # type: ignore[arg-type]
+    runner = OperationRunner(g, h, p, b, bus or BaseEventBus())
     return runner, g, h, p, b
 
 

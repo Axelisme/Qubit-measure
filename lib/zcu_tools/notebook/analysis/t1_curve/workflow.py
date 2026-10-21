@@ -1,59 +1,35 @@
+"""Combined T1 fitting and end-to-end orchestration with direct stage re-exports."""
+
 from __future__ import annotations
 
 import os
-import warnings
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from functools import lru_cache
-from typing import Literal, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.notebook.analysis.fit_tools import (
     ErrorResolutionResult,
     FluxResidualWeighting,
     MeasurementErrorPolicy,
-    align_flux_to_window,
-    correct_flux_from_f01,
-    predict_f01_mhz,
 )
-from zcu_tools.progress_bar import make_pbar
 from zcu_tools.resources.qubit_params import (
     QubitParams,
     T1CurveFit,
     T1CurveFitParams,
     T1CurveFitUncertainty,
 )
-from zcu_tools.resources.sample_table import (
-    DeviceValueUnit,
-    JsonlSampleTable,
-    SampleFluxFrame,
-    SampleFluxResolution,
-    resolve_sample_flux,
-    validate_sample_table_v2,
-)
-from zcu_tools.simulate import flux2value
 from zcu_tools.simulate.fluxonium import (
     calculate_eff_t1_vs_flux_fast,
-    calculate_n_oper_vs_flux,
-    calculate_phi_oper_vs_flux,
-    calculate_purcell_t1_vs_flux,
 )
 
 from .base import (
     DEFAULT_TEMP_LOWER_BOUND,
     DEFAULT_TEMP_UPPER_BOUND,
     TempBounds,
-    find_proper_Temp,
-    plot_eff_t1_with_sample,
-    plot_Q_vs_omega,
-    plot_sample_t1,
-    plot_t1_vs_elements,
+    format_parameter,
+    positive_override,
     resolve_Temp_bounds,
 )
 from .fit import (
@@ -65,861 +41,63 @@ from .fit import (
     T1FitResult,
     fit_t1_noise_params,
 )
-from .Qcap import calc_cap_dipole, calc_Qcap_vs_omega
-from .Qind import calc_ind_dipole, calc_Qind_vs_omega
-from .Qqp import calc_qp_dipole, calc_qp_oper, calc_Qqp_vs_omega
-from .utils import freq2omega
-
-MechanismName = Literal["capacitive", "quasiparticle", "inductive"]
-MechanismOrParamName = Literal[
-    "capacitive",
-    "quasiparticle",
-    "inductive",
-    "Q_cap",
-    "x_qp",
-    "Q_ind",
-    "Temp",
-]
-ProbeStatistic = Literal["median", "mean", "min", "max", "p10", "p90"]
-
-_REQUIRED_COLUMNS = ("freq_mhz", "t1_us")
-_MECHANISM_TO_PARAM: dict[MechanismName, NoiseParameterName] = {
-    "capacitive": "Q_cap",
-    "quasiparticle": "x_qp",
-    "inductive": "Q_ind",
-}
-_PARAM_TO_MECHANISM: dict[NoiseParameterName, MechanismName] = {
-    value: key for key, value in _MECHANISM_TO_PARAM.items()
-}
-_NOISE_CHANNELS: dict[NoiseParameterName, tuple[str, str]] = {
-    "Q_cap": ("t1_capacitive", "Q_cap"),
-    "x_qp": ("t1_quasiparticle_tunneling", "x_qp"),
-    "Q_ind": ("t1_inductive", "Q_ind"),
-}
-_Q_LABELS: dict[MechanismName, str] = {
-    "capacitive": r"$Q_{cap}$",
-    "quasiparticle": r"$Q_{qp}=1/x_{qp}$",
-    "inductive": r"$Q_{ind}$",
-}
-_CURVE_LABELS: dict[MechanismName, str] = {
-    "capacitive": "capacitive",
-    "quasiparticle": "quasiparticle",
-    "inductive": "inductive",
-}
-_PURCELL_CACHE_SIZE = 64
-_CACHE_FLOAT_DECIMALS = 12
-
-
-@dataclass(frozen=True, slots=True)
-class PurcellEffectParams:
-    """Positive, finite GHz inputs for the two-level Purcell equilibrium model.
-
-    kappa_ghz is the resonator linewidth kappa_rate/(2*pi), not a decay rate;
-    0.001 means 1 MHz and the kernel uses 2*pi*kappa_ghz in ns^-1.
-    bare_rf is the bare resonator frequency; g is its charge-mode coupling.
-    The kernel thermally averages each qubit direction over resonator photons
-    and returns equilibrium T1=1/(Gamma_eg+Gamma_ge) for 0↔1 only.
-    It excludes leakage to higher qubit states.
-    """
-
-    kappa_ghz: float
-    bare_rf: float
-    g: float
-
-    def __post_init__(self) -> None:
-        if not np.isfinite(self.kappa_ghz) or self.kappa_ghz <= 0.0:
-            raise ValueError("kappa_ghz must be positive and finite")
-        if not np.isfinite(self.bare_rf) or self.bare_rf <= 0.0:
-            raise ValueError("bare_rf must be positive and finite")
-        if not np.isfinite(self.g) or self.g <= 0.0:
-            raise ValueError("g must be positive and finite")
-
-
-@dataclass(frozen=True, slots=True)
-class T1CurveAnalysisConfig:
-    result_dir: str
-    analysis_flux_range: tuple[float, float] = (0.0, 1.0)
-    image_dir: str | None = None
-    samples_filename: str = "samples.jsonl"
-    fallback_frame_unit: DeviceValueUnit = "A"
-    max_abs_flux_correction: float = 0.03
-    correct_flux_from_f01_enabled: bool = True
-    max_rel_t1_err: float = 0.25
-    use_weighted_points_only: bool = False
-    T1_error_policy: MeasurementErrorPolicy = field(
-        default_factory=lambda: MeasurementErrorPolicy(
-            nan_policy="bin_median",
-            relative_floor=0.05,
-            fallback_error=1000.0,
-        )
-    )
-    flux_weighting: FluxResidualWeighting = field(
-        default_factory=lambda: FluxResidualWeighting(
-            mode="equal_flux_bin",
-            bin_width=0.01,
-        )
-    )
-    Temp: float = 60e-3
-    probe_Temp_bounds: TempBounds = (
-        DEFAULT_TEMP_LOWER_BOUND,
-        DEFAULT_TEMP_UPPER_BOUND,
-    )
-    purcell: PurcellEffectParams | None = None
-    active_mechanisms: tuple[MechanismName, ...] = (
-        "capacitive",
-        "quasiparticle",
-        "inductive",
-    )
-    fixed_mechanisms: tuple[MechanismOrParamName, ...] = ()
-    fit_Temp_override: float | None = None
-    fit_Q_cap_override: float | None = None
-    fit_x_qp_override: float | None = None
-    fit_Q_ind_override: float | None = None
-    fit_bounds: FitBounds | None = None
-    residual_mode: ResidualMode = "log"
-    loss: str = "linear"
-    max_nfev: int = 10000
-    t_flux_count: int = 1000
-    progress: bool = True
-    save_figures: bool = True
-    show_figures: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class T1CurveContext:
-    result_dir: str
-    image_dir: str
-    samples_filename: str
-    params: tuple[float, float, float]
-    flux_half: float
-    flux_int: float
-    flux_period: float
-    samples_df: pd.DataFrame
-    params_table: pd.DataFrame
-    samples_preview: pd.DataFrame
-    available_columns: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class T1FluxCalibration:
-    context: T1CurveContext
-    resolution: SampleFluxResolution
-    fallback_frame: SampleFluxFrame | None
-    t1_df: pd.DataFrame
-    freq_rows: pd.DataFrame
-    summary_table: pd.DataFrame
-
-
-@dataclass(frozen=True, slots=True)
-class T1CurveData:
-    fluxs: NDArray[np.float64]
-    raw_fluxs: NDArray[np.float64]
-    integer_shifts: NDArray[np.float64]
-    flux_sources: tuple[str, ...]
-    f01_mhz: NDArray[np.float64]
-    f01_measured: NDArray[np.bool_]
-    f01_correction_applied: NDArray[np.bool_]
-    flux_corrections: NDArray[np.float64]
-    correction_skipped_reason: tuple[str, ...]
-    T1_ns: NDArray[np.float64]
-    T1err_ns: NDArray[np.float64]
-    omegas: NDArray[np.float64]
-
-
-@dataclass(frozen=True, slots=True)
-class T1PreparedData:
-    calibration: T1FluxCalibration
-    analysis_flux_range: tuple[float, float]
-    max_abs_flux_correction: float
-    max_rel_t1_err: float
-    use_weighted_points_only: bool
-    sample: T1CurveData
-    fit: T1CurveData
-    kept_rows: int
-    source_rows: int
-    summary_table: pd.DataFrame
-
-
-@dataclass(frozen=True, slots=True)
-class PurcellCorrectionResult:
-    observed_T1_ns: NDArray[np.float64]
-    observed_T1err_ns: NDArray[np.float64]
-    intrinsic_T1_ns: NDArray[np.float64]
-    intrinsic_T1err_ns: NDArray[np.float64]
-    purcell_T1_ns: NDArray[np.float64]
-    purcell_rate_per_ns: NDArray[np.float64]
-    valid_mask: NDArray[np.bool_]
-
-
-@dataclass(frozen=True, slots=True)
-class T1MechanismProbe:
-    data: T1PreparedData
-    mechanism: MechanismName
-    parameter_name: NoiseParameterName
-    temperature: float
-    omega_range: tuple[float | None, float | None]
-    fit_constant: bool
-    q_values: NDArray[np.float64]
-    q_errors: NDArray[np.float64]
-    fit_omegas: NDArray[np.float64]
-    fit_q_values: NDArray[np.float64]
-    dipoles: NDArray[np.float64]
-    parameter_values: NDArray[np.float64]
-    parameter_init: float
-    parameter_lower: float
-    parameter_upper: float
-    pointwise_table: pd.DataFrame
-    summary_table: pd.DataFrame
-    purcell: PurcellEffectParams | None = None
-    purcell_correction: PurcellCorrectionResult | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class T1CombinedFit:
-    data: T1PreparedData
-    init: T1FitParams
-    bounds: Mapping[str, tuple[float, float]] | None
-    fixed: tuple[ParameterName, ...]
-    residual_mode: ResidualMode
-    loss: str
-    max_nfev: int | None
-    fit_result: T1FitResult
-    params_table: pd.DataFrame
-    summary_table: pd.DataFrame
-    purcell: PurcellEffectParams | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class T1ChannelCurves:
-    fluxs: NDArray[np.float64]
-    T1_effective_ns: NDArray[np.float64]
-    component_T1s_ns: Mapping[str, NDArray[np.float64]]
-    purcell_T1_ns: NDArray[np.float64] | None
-    display_T1_ns: NDArray[np.float64]
-
-
-@dataclass(frozen=True, slots=True)
-class T1ChannelAnalysis:
-    combined_fit: T1CombinedFit
-    curves: T1ChannelCurves
-    flux_range: tuple[float, float]
-    t_flux_count: int
-    summary_table: pd.DataFrame
-
-
-@dataclass(frozen=True, slots=True)
-class T1CurveAnalysisResult:
-    context: T1CurveContext
-    calibration: T1FluxCalibration
-    data: T1PreparedData
-    cap_probe: T1MechanismProbe | None
-    qp_probe: T1MechanismProbe | None
-    ind_probe: T1MechanismProbe | None
-    combined_fit: T1CombinedFit
-    channel_analysis: T1ChannelAnalysis
-    summary_table: pd.DataFrame
-    figure_paths: Mapping[str, str]
-
-
-def load_t1_curve_context(
-    *,
-    result_dir: str,
-    samples_filename: str = "samples.jsonl",
-    image_dir: str | None = None,
-    preview_rows: int = 10,
-) -> T1CurveContext:
-    """Load fluxdep params and latest JSONL sample rows from result_dir.
-
-    samples_filename is relative to result_dir and defaults to samples.jsonl;
-    required measurements are freq_mhz and t1_us. Create image_dir (default
-    result_dir/t1_curve) and return params, rows and preview_rows preview rows.
-    Missing params, invalid JSONL or missing required columns fail fast.
-    """
-    resolved_image_dir = image_dir or os.path.join(result_dir, "t1_curve")
-    os.makedirs(result_dir, exist_ok=True)
-    os.makedirs(resolved_image_dir, exist_ok=True)
-
-    params_file = QubitParams(os.path.join(result_dir, "params.json"), readonly=True)
-    fit_inputs = params_file.require_fluxdep_fit()
-    samples_df = JsonlSampleTable(os.path.join(result_dir, samples_filename)).read()
-    _validate_required_columns(samples_df)
-
-    params = fit_inputs.params
-    params_table = pd.DataFrame(
-        [
-            ("EJ (GHz)", params[0]),
-            ("EC (GHz)", params[1]),
-            ("EL (GHz)", params[2]),
-            ("flux_half", fit_inputs.flux_half),
-            ("flux_int", fit_inputs.flux_int),
-            ("flux_period", fit_inputs.flux_period),
-        ],
-        columns=["parameter", "value"],
-    )
-
-    return T1CurveContext(
-        result_dir=result_dir,
-        image_dir=resolved_image_dir,
-        samples_filename=samples_filename,
-        params=params,
-        flux_half=fit_inputs.flux_half,
-        flux_int=fit_inputs.flux_int,
-        flux_period=fit_inputs.flux_period,
-        samples_df=samples_df,
-        params_table=params_table,
-        samples_preview=samples_df.head(preview_rows),
-        available_columns=tuple(str(column) for column in samples_df.columns),
-    )
-
-
-def load_t1_purcell_params(
-    context: T1CurveContext,
-    *,
-    kappa_ghz: float,
-) -> PurcellEffectParams:
-    params_file = QubitParams(
-        os.path.join(context.result_dir, "params.json"), readonly=True
-    )
-    dispersive_fit = params_file.get_dispersive_fit()
-    if dispersive_fit is None:
-        raise RuntimeError("params.json needs a dispersive section with bare_rf and g")
-    return PurcellEffectParams(
-        kappa_ghz=kappa_ghz,
-        bare_rf=dispersive_fit.bare_rf,
-        g=dispersive_fit.g,
-    )
-
-
-def calibrate_t1_flux(
-    context: T1CurveContext,
-    *,
-    fallback_frame_unit: DeviceValueUnit = "A",
-) -> T1FluxCalibration:
-    samples_df = context.samples_df
-    fallback_frame = SampleFluxFrame(
-        fallback_frame_unit, context.flux_int, context.flux_period
-    )
-    resolution = resolve_sample_flux(
-        samples_df,
-        fallback_frame=fallback_frame,
-    )
-    t1_values = _float_column(samples_df, "t1_us")
-    t1_mask = np.isfinite(t1_values)
-    freq_values = _float_column(samples_df, "freq_mhz")
-    freq_mask = np.isfinite(freq_values)
-    t1_df = cast(pd.DataFrame, samples_df.loc[t1_mask].copy())
-    freq_rows = cast(pd.DataFrame, samples_df.loc[freq_mask].copy())
-    source_counts = {
-        source: sum(1 for item in resolution.sources if item == source)
-        for source in ("explicit", "row-frame", "fallback-frame")
-    }
-    summary_table = pd.DataFrame(
-        [
-            ("samples.jsonl rows", str(len(samples_df))),
-            ("explicit flux rows", str(source_counts["explicit"])),
-            ("row-frame flux rows", str(source_counts["row-frame"])),
-            ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
-            ("fallback frame unit", fallback_frame.dev_unit),
-            ("finite f01 rows", str(len(freq_rows))),
-            ("finite T1 rows", str(len(t1_df))),
-        ],
-        columns=["metric", "value"],
-    )
-    return T1FluxCalibration(
-        context=context,
-        resolution=resolution,
-        fallback_frame=fallback_frame,
-        t1_df=t1_df,
-        freq_rows=freq_rows,
-        summary_table=summary_table,
-    )
-
-
-def prepare_t1_curve_data(
-    calibration: T1FluxCalibration,
-    *,
-    analysis_flux_range: tuple[float, float] = (0.0, 1.0),
-    max_abs_flux_correction: float = 0.03,
-    max_rel_t1_err: float = 0.25,
-    use_weighted_points_only: bool = False,
-    correct_flux_from_f01_enabled: bool = True,
-) -> T1PreparedData:
-    sample = _prepare_t1_data(
-        calibration,
-        analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
-    )
-    fit = _filter_fit_data(
-        sample,
-        max_rel_t1_err=max_rel_t1_err,
-        use_weighted_points_only=use_weighted_points_only,
-    )
-    if len(fit.fluxs) == 0:
-        raise ValueError("No T1 fit rows remain after filtering")
-
-    summary_table = _prepared_summary_table(
-        calibration=calibration,
-        sample=sample,
-        fit=fit,
-        analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        max_rel_t1_err=max_rel_t1_err,
-        use_weighted_points_only=use_weighted_points_only,
-    )
-    return T1PreparedData(
-        calibration=calibration,
-        analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        max_rel_t1_err=max_rel_t1_err,
-        use_weighted_points_only=use_weighted_points_only,
-        sample=sample,
-        fit=fit,
-        kept_rows=len(sample.fluxs),
-        source_rows=len(calibration.t1_df),
-        summary_table=summary_table,
-    )
-
-
-def calculate_purcell_t1_limit(
-    context: T1CurveContext,
-    fluxs: NDArray[np.float64],
-    purcell: PurcellEffectParams,
-    *,
-    Temp: float,
-) -> NDArray[np.float64]:
-    """Return cached 0↔1 Purcell equilibrium T1 in ns on normalized fluxs.
-
-    context supplies fluxonium energies in GHz; purcell supplies GHz resonator
-    inputs. Temp must be positive and finite in K, otherwise raise ValueError.
-    The result has the same shape and order as fluxs. Its reciprocal is the
-    Gamma_eg+Gamma_ge contribution used by fitting and channel curves.
-    """
-    if not np.isfinite(Temp) or Temp <= 0.0:
-        raise ValueError("Temp must be positive and finite")
-    return np.asarray(
-        _calculate_purcell_t1_limit_cached(
-            _float_tuple_cache_key(context.params),
-            _array_cache_key(np.asarray(fluxs, dtype=np.float64), name="fluxs"),
-            _float_cache_key(purcell.bare_rf),
-            _float_cache_key(purcell.kappa_ghz),
-            _float_cache_key(purcell.g),
-            _float_cache_key(Temp),
-        ),
-        dtype=np.float64,
-    )
-
-
-def clear_t1_purcell_cache() -> None:
-    _calculate_purcell_t1_limit_cached.cache_clear()
-
-
-def estimate_purcell_Temp_upper_bound(
-    data: T1PreparedData,
-    purcell: PurcellEffectParams,
-    *,
-    Temp_range: tuple[float, float] = (
-        DEFAULT_TEMP_LOWER_BOUND,
-        DEFAULT_TEMP_UPPER_BOUND,
-    ),
-    tolerance: float = 1e-3,
-    max_iter: int = 12,
-    progress: bool = False,
-) -> float:
-    """Estimate the largest Temp compatible with observed T1 and Purcell loss.
-
-    The constraint is ``T1_Purcell(flux, Temp) >= T1_observed`` for every fit point.
-    A lower bound is not inferred from Purcell; ``Temp_range[0]`` is only the search
-    floor used to verify that a feasible point exists.
-    """
-    _validate_temperature_search(Temp_range, tolerance, max_iter)
-    lower, upper = Temp_range
-
-    fluxs = np.asarray(data.fit.fluxs, dtype=np.float64)
-    observed_T1s = np.asarray(data.fit.T1_ns, dtype=np.float64)
-    valid = np.isfinite(fluxs) & np.isfinite(observed_T1s) & (observed_T1s > 0.0)
-    if not np.any(valid):
-        raise ValueError("data.fit must contain at least one finite positive T1 point")
-    fit_fluxs = fluxs[valid]
-    fit_T1s = observed_T1s[valid]
-
-    pbar = (
-        make_pbar(desc="Purcell Temp upper bound", total=max_iter + 2, leave=False)
-        if progress
-        else None
-    )
-
-    def log_margin(Temp: float) -> float:
-        purcell_T1s = calculate_purcell_t1_limit(
-            data.calibration.context,
-            fit_fluxs,
-            purcell,
-            Temp=Temp,
-        )
-        if (
-            purcell_T1s.shape != fit_T1s.shape
-            or np.any(~np.isfinite(purcell_T1s))
-            or np.any(purcell_T1s <= 0.0)
-        ):
-            raise ValueError("Purcell T1 calculation returned invalid values")
-        margin = float(np.min(np.log(purcell_T1s / fit_T1s)))
-        if pbar is not None:
-            pbar.set_description(
-                f"Purcell Temp={Temp * 1e3:.2f} mK margin={margin:.3g}"
-            )
-            pbar.update()
-        return margin
-
-    try:
-        lower_margin = log_margin(float(lower))
-        if lower_margin < 0.0:
-            raise ValueError(
-                "Purcell T1 is already below observed T1 at Temp_range lower bound"
-            )
-        upper_margin = log_margin(float(upper))
-        if upper_margin >= 0.0:
-            return float(upper)
-
-        feasible_Temp = float(lower)
-        infeasible_Temp = float(upper)
-        for _ in range(max_iter):
-            mid_Temp = 0.5 * (feasible_Temp + infeasible_Temp)
-            mid_margin = log_margin(mid_Temp)
-            if abs(mid_margin) <= tolerance:
-                return float(mid_Temp)
-            if mid_margin >= 0.0:
-                feasible_Temp = mid_Temp
-            else:
-                infeasible_Temp = mid_Temp
-        return float(feasible_Temp)
-    finally:
-        if pbar is not None:
-            pbar.close()
-
-
-def plot_purcell_Temp_upper_bound(
-    data: T1PreparedData,
-    purcell: PurcellEffectParams,
-    *,
-    Temp: float,
-    t_flux_count: int = 1000,
-    flux_range: tuple[float, float] | None = None,
-) -> tuple[Figure, Axes]:
-    if t_flux_count < 2:
-        raise ValueError("t_flux_count must be at least 2")
-    resolved_flux_range = flux_range or data.analysis_flux_range
-    t_fluxs = np.linspace(
-        resolved_flux_range[0], resolved_flux_range[1], t_flux_count, dtype=np.float64
-    )
-    purcell_T1s = calculate_purcell_t1_limit(
-        data.calibration.context,
-        t_fluxs,
-        purcell,
-        Temp=Temp,
-    )
-
-    fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
-    sample = data.sample
-    ax.errorbar(
-        sample.fluxs,
-        sample.T1_ns,
-        yerr=sample.T1err_ns,
-        fmt=".",
-        color="tab:blue",
-        label="T1 samples",
-        zorder=3,
-    )
-    if len(data.fit.fluxs) != len(sample.fluxs) or not np.array_equal(
-        data.fit.fluxs, sample.fluxs
-    ):
-        ax.scatter(
-            data.fit.fluxs,
-            data.fit.T1_ns,
-            color="tab:blue",
-            s=18,
-            label="fit points",
-            zorder=4,
-        )
-    ax.plot(
-        t_fluxs,
-        purcell_T1s,
-        color="tab:red",
-        linestyle="-.",
-        linewidth=2.0,
-        label=f"Purcell upper @ {Temp * 1e3:.2f} mK",
-        zorder=2,
-    )
-    ax.set_xlim(*resolved_flux_range)
-    ax.set_xlabel(r"Flux quanta ($\Phi_{ext}/\Phi_0$)")
-    ax.set_ylabel(r"$T_1$ (ns)")
-    ax.set_yscale("log")
-    ax.grid(alpha=0.3)
-    ax.legend(fontsize="small")
-    return fig, ax
-
-
-def subtract_relaxation_limit(
-    observed_T1_ns: NDArray[np.float64],
-    observed_T1err_ns: NDArray[np.float64] | None,
-    limit_T1_ns: NDArray[np.float64],
-) -> PurcellCorrectionResult:
-    observed_T1s = np.asarray(observed_T1_ns, dtype=np.float64)
-    observed_T1errs = (
-        np.full_like(observed_T1s, np.nan, dtype=np.float64)
-        if observed_T1err_ns is None
-        else np.asarray(observed_T1err_ns, dtype=np.float64)
-    )
-    limit_T1s = np.asarray(limit_T1_ns, dtype=np.float64)
-    if observed_T1s.ndim != 1 or limit_T1s.ndim != 1:
-        raise ValueError("observed_T1_ns and limit_T1_ns must be 1D arrays")
-    if observed_T1errs.shape != observed_T1s.shape:
-        raise ValueError("observed_T1err_ns must have the same shape as observed_T1_ns")
-    if limit_T1s.shape != observed_T1s.shape:
-        raise ValueError("limit_T1_ns must have the same shape as observed_T1_ns")
-
-    observed_rate = _relaxation_rates_from_t1(observed_T1s, name="observed T1")
-    limit_rate = _relaxation_rates_from_t1(limit_T1s, name="limit T1")
-    intrinsic_rate = observed_rate - limit_rate
-    valid_mask = np.isfinite(intrinsic_rate) & (intrinsic_rate > 0.0)
-
-    intrinsic_T1s = np.divide(
-        1.0,
-        intrinsic_rate,
-        out=np.full_like(intrinsic_rate, np.nan, dtype=np.float64),
-        where=valid_mask,
-    )
-    rate_err = np.divide(
-        observed_T1errs,
-        observed_T1s**2,
-        out=np.full_like(observed_T1errs, np.nan, dtype=np.float64),
-        where=np.isfinite(observed_T1errs) & (observed_T1errs > 0.0),
-    )
-    intrinsic_T1errs = np.divide(
-        rate_err,
-        intrinsic_rate**2,
-        out=np.full_like(rate_err, np.nan, dtype=np.float64),
-        where=valid_mask & np.isfinite(rate_err) & (rate_err > 0.0),
-    )
-    return PurcellCorrectionResult(
-        observed_T1_ns=observed_T1s,
-        observed_T1err_ns=observed_T1errs,
-        intrinsic_T1_ns=intrinsic_T1s,
-        intrinsic_T1err_ns=intrinsic_T1errs,
-        purcell_T1_ns=limit_T1s,
-        purcell_rate_per_ns=limit_rate,
-        valid_mask=valid_mask.astype(bool, copy=False),
-    )
-
-
-def analyze_t1_capacitive_limit(
-    data: T1PreparedData,
-    *,
-    Temp: float,
-    purcell: PurcellEffectParams | None = None,
-    omega_range: tuple[float | None, float | None] = (None, None),
-    fit_temperature: bool = False,
-    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
-    fit_constant: bool = True,
-    statistic: ProbeStatistic = "median",
-    parameter_init: float | None = None,
-) -> T1MechanismProbe:
-    return analyze_t1_mechanism_limit(
-        data,
-        mechanism="capacitive",
-        Temp=Temp,
-        purcell=purcell,
-        omega_range=omega_range,
-        fit_temperature=fit_temperature,
-        Temp_bounds=Temp_bounds,
-        fit_constant=fit_constant,
-        statistic=statistic,
-        parameter_init=parameter_init,
-    )
-
-
-def analyze_t1_quasiparticle_limit(
-    data: T1PreparedData,
-    *,
-    Temp: float,
-    purcell: PurcellEffectParams | None = None,
-    omega_range: tuple[float | None, float | None] = (6.0, None),
-    fit_temperature: bool = False,
-    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
-    fit_constant: bool = True,
-    statistic: ProbeStatistic = "median",
-    parameter_init: float | None = None,
-) -> T1MechanismProbe:
-    return analyze_t1_mechanism_limit(
-        data,
-        mechanism="quasiparticle",
-        Temp=Temp,
-        purcell=purcell,
-        omega_range=omega_range,
-        fit_temperature=fit_temperature,
-        Temp_bounds=Temp_bounds,
-        fit_constant=fit_constant,
-        statistic=statistic,
-        parameter_init=parameter_init,
-    )
-
-
-def analyze_t1_inductive_limit(
-    data: T1PreparedData,
-    *,
-    Temp: float,
-    purcell: PurcellEffectParams | None = None,
-    omega_range: tuple[float | None, float | None] = (None, 4.0),
-    fit_temperature: bool = False,
-    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
-    fit_constant: bool = True,
-    statistic: ProbeStatistic = "median",
-    parameter_init: float | None = None,
-) -> T1MechanismProbe:
-    return analyze_t1_mechanism_limit(
-        data,
-        mechanism="inductive",
-        Temp=Temp,
-        purcell=purcell,
-        omega_range=omega_range,
-        fit_temperature=fit_temperature,
-        Temp_bounds=Temp_bounds,
-        fit_constant=fit_constant,
-        statistic=statistic,
-        parameter_init=parameter_init,
-    )
-
-
-def analyze_t1_mechanism_limit(
-    data: T1PreparedData,
-    *,
-    mechanism: MechanismName,
-    Temp: float,
-    purcell: PurcellEffectParams | None = None,
-    omega_range: tuple[float | None, float | None] = (None, None),
-    fit_temperature: bool = False,
-    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
-    fit_constant: bool = True,
-    statistic: ProbeStatistic = "median",
-    parameter_init: float | None = None,
-) -> T1MechanismProbe:
-    _validate_mechanisms((mechanism,))
-    temp = (
-        _fit_mechanism_temperature(
-            data,
-            mechanism,
-            Temp,
-            omega_range,
-            purcell,
-            Temp_bounds=Temp_bounds,
-        )
-        if fit_temperature
-        else Temp
-    )
-    purcell_correction = (
-        _subtract_purcell_from_fit_data(data, purcell, temp)
-        if purcell is not None
-        else None
-    )
-    T1_for_q = (
-        data.fit.T1_ns
-        if purcell_correction is None
-        else purcell_correction.intrinsic_T1_ns
-    )
-    T1err_for_q = (
-        data.fit.T1err_ns
-        if purcell_correction is None
-        else purcell_correction.intrinsic_T1err_ns
-    )
-    q_values, q_errors, dipoles = _calculate_mechanism_arrays(
-        data,
-        mechanism,
-        temp,
-        T1_ns=T1_for_q,
-        T1err_ns=T1err_for_q,
-    )
-    fit_mask = _omega_mask(data.fit.omegas, omega_range)
-    if purcell_correction is not None:
-        fit_mask &= purcell_correction.valid_mask
-    fit_mask &= np.isfinite(q_values) & (q_values > 0.0)
-    if not np.any(fit_mask):
-        raise ValueError(f"No finite positive {mechanism} Q values in omega_range")
-    fit_omegas = data.fit.omegas[fit_mask]
-    q_for_fit = q_values[fit_mask]
-    fit_q_values = _fit_q_values(fit_omegas, q_for_fit, fit_constant=fit_constant)
-    q_center = _positive_statistic(fit_q_values, statistic)
-    q_lower, q_upper = _log_spread_bounds(q_for_fit)
-
-    parameter_name = _MECHANISM_TO_PARAM[mechanism]
-    parameter_values = _parameter_values_from_q(mechanism, q_values)
-    auto_init = _parameter_from_q(mechanism, q_center)
-    param_lower = _parameter_from_q(
-        mechanism, q_upper if mechanism == "quasiparticle" else q_lower
-    )
-    param_upper = _parameter_from_q(
-        mechanism, q_lower if mechanism == "quasiparticle" else q_upper
-    )
-    resolved_init = _positive_override(parameter_init, auto_init, parameter_name)
-    pointwise_columns: dict[str, object] = {
-        "flux": data.fit.fluxs,
-        "omega (rad/ns)": data.fit.omegas,
-        "T1 (ns)": data.fit.T1_ns,
-        "T1err (ns)": data.fit.T1err_ns,
-        "T1 used for Q (ns)": T1_for_q,
-        "T1err used for Q (ns)": T1err_for_q,
-        "dipole": dipoles,
-        "Q": q_values,
-        parameter_name: parameter_values,
-    }
-    if purcell_correction is not None:
-        pointwise_columns.update(
-            {
-                "Purcell T1 (ns)": purcell_correction.purcell_T1_ns,
-                "Purcell rate (1/ns)": purcell_correction.purcell_rate_per_ns,
-                "Purcell subtraction valid": purcell_correction.valid_mask,
-            }
-        )
-    pointwise_table = pd.DataFrame(pointwise_columns)
-    purcell_summary_rows = _purcell_probe_summary_rows(data, purcell_correction)
-    summary_table = pd.DataFrame(
-        [
-            ("mechanism", mechanism),
-            ("parameter", parameter_name),
-            ("Temp", f"{temp * 1e3:.2f} mK"),
-            ("Temp bounds", _format_temperature_bounds(Temp_bounds)),
-            *purcell_summary_rows,
-            ("omega range", _format_range(omega_range)),
-            ("fit constant", str(fit_constant)),
-            ("fit points", str(int(np.count_nonzero(fit_mask)))),
-            ("parameter init", _format_parameter(parameter_name, resolved_init)),
-            ("parameter lower", _format_parameter(parameter_name, param_lower)),
-            ("parameter upper", _format_parameter(parameter_name, param_upper)),
-        ],
-        columns=["metric", "value"],
-    )
-    return T1MechanismProbe(
-        data=data,
-        mechanism=mechanism,
-        parameter_name=parameter_name,
-        temperature=temp,
-        omega_range=omega_range,
-        fit_constant=fit_constant,
-        q_values=q_values,
-        q_errors=q_errors,
-        fit_omegas=fit_omegas,
-        fit_q_values=fit_q_values,
-        dipoles=dipoles,
-        parameter_values=parameter_values,
-        parameter_init=resolved_init,
-        parameter_lower=param_lower,
-        parameter_upper=param_upper,
-        pointwise_table=pointwise_table,
-        summary_table=summary_table,
-        purcell=purcell,
-        purcell_correction=purcell_correction,
-    )
-
-
-def make_t1_fit_init(
+from .models import (
+    CURVE_LABELS,
+    NOISE_CHANNELS,
+    PARAM_TO_MECHANISM,
+    MechanismName,
+    MechanismOrParamName,
+    ProbeStatistic,
+    PurcellCorrectionResult,
+    PurcellEffectParams,
+    T1ChannelAnalysis,
+    T1ChannelCurves,
+    T1CombinedFit,
+    T1CurveAnalysisConfig,
+    T1CurveAnalysisResult,
+    T1CurveContext,
+    T1CurveData,
+    T1FluxCalibration,
+    T1MechanismOptions,
+    T1MechanismProbe,
+    T1PreparedData,
+    validate_t1_mechanisms,
+)
+from .preparation import (
+    calibrate_t1_flux,
+    load_t1_curve_context,
+    prepare_t1_curve_data,
+)
+from .presentation import (
+    plot_purcell_Temp_upper_bound,
+    plot_t1_channel_analysis,
+    plot_t1_curve_data,
+    plot_t1_flux_calibration,
+    plot_t1_mechanism_dipole,
+    plot_t1_mechanism_limit,
+    plot_t1_mechanism_probe,
+    save_t1_curve_figure,
+    t1_parameter_text,
+)
+from .probes import (
+    analyze_t1_capacitive_limit,
+    analyze_t1_inductive_limit,
+    analyze_t1_mechanism_limit,
+    analyze_t1_quasiparticle_limit,
+)
+from .purcell import (
+    calculate_purcell_t1_limit,
+    clear_t1_purcell_cache,
+    combine_t1_limits,
+    estimate_purcell_Temp_upper_bound,
+    load_t1_purcell_params,
+    relaxation_rates_from_t1,
+    subtract_relaxation_limit,
+)
+
+
+# tolerated: Notebook keywords select active channels, probe fallbacks and explicit value overrides.
+def make_t1_fit_init(  # noqa: PLR0913
     *,
     active_mechanisms: tuple[MechanismName, ...],
     Temp: float,
@@ -930,14 +108,14 @@ def make_t1_fit_init(
     x_qp: float | None = None,
     Q_ind: float | None = None,
 ) -> T1FitParams:
-    _validate_mechanisms(active_mechanisms)
+    validate_t1_mechanisms(active_mechanisms)
     probe_by_param = {
         "Q_cap": cap_probe,
         "x_qp": qp_probe,
         "Q_ind": ind_probe,
     }
     return T1FitParams(
-        Temp=_positive_override(None, Temp, "Temp"),
+        Temp=positive_override(None, Temp, "Temp"),
         Q_cap=(
             _fit_init_value(Q_cap, probe_by_param["Q_cap"], "Q_cap")
             if "capacitive" in active_mechanisms
@@ -976,7 +154,8 @@ def mechanisms_to_fixed_params(
     return tuple(fixed)
 
 
-def make_t1_fit_bounds(
+# tolerated: Notebook keywords control Q and x_qp limits separately from temperature and span.
+def make_t1_fit_bounds(  # noqa: PLR0913
     init: T1FitParams,
     *,
     factor: float = 100.0,
@@ -1023,7 +202,8 @@ def _normalize_t1_fit_bounds(
     return normalized
 
 
-def fit_t1_curve(
+# tolerated: Notebook fit keywords keep init/fixed/bounds, error weighting and optimizer controls.
+def fit_t1_curve(  # noqa: PLR0913
     data: T1PreparedData,
     *,
     init: T1FitParams,
@@ -1115,7 +295,7 @@ def build_t1_channel_curves(
     fit_params = combined_fit.fit_result.params
     noise_channels = t1_noise_channels_from_params(fit_params)
     component_t1s = {
-        _CURVE_LABELS[_PARAM_TO_MECHANISM[param_name]]: calculate_eff_t1_vs_flux_fast(
+        CURVE_LABELS[PARAM_TO_MECHANISM[param_name]]: calculate_eff_t1_vs_flux_fast(
             context.params,
             grid_fluxs,
             [(channel_name, dict(options))],
@@ -1139,7 +319,7 @@ def build_t1_channel_curves(
             Temp=fit_params.Temp,
         )
         component_t1s = {**component_t1s, "Purcell": purcell_T1s}
-        display_T1s = _combine_t1_limits(mechanism_T1s, purcell_T1s)
+        display_T1s = combine_t1_limits(mechanism_T1s, purcell_T1s)
 
     curves = T1ChannelCurves(
         fluxs=grid_fluxs,
@@ -1170,7 +350,8 @@ def build_t1_channel_curves(
     )
 
 
-def collect_t1_curve_result(
+# tolerated: Notebook callers explicitly collect stage records and saved paths by keyword.
+def collect_t1_curve_result(  # noqa: PLR0913
     *,
     context: T1CurveContext,
     calibration: T1FluxCalibration,
@@ -1213,337 +394,6 @@ def collect_t1_curve_result(
     )
 
 
-def plot_t1_curve_data(data: T1PreparedData) -> tuple[Figure, Axes]:
-    context = data.calibration.context
-    return plot_sample_t1(
-        flux2value(data.sample.fluxs, context.flux_half, context.flux_period),
-        data.sample.T1_ns,
-        data.sample.T1err_ns,
-        context.flux_half,
-        context.flux_period,
-    )
-
-
-def plot_t1_flux_calibration(data: T1PreparedData) -> tuple[Figure, Axes]:
-    sample = data.sample
-    if len(sample.fluxs) == 0:
-        raise ValueError("No T1 samples are available for flux calibration plotting")
-
-    raw_fluxs = np.asarray(sample.raw_fluxs, dtype=np.float64)
-    corrected_fluxs = raw_fluxs + np.asarray(sample.flux_corrections, dtype=np.float64)
-    aligned_fluxs = np.asarray(sample.fluxs, dtype=np.float64)
-    corrected_mask = sample.f01_correction_applied
-    sources = np.asarray(sample.flux_sources, dtype=object)
-    reasons = np.asarray(sample.correction_skipped_reason, dtype=object)
-    not_corrected = ~corrected_mask
-    explicit_mask = not_corrected & (sources == "explicit")
-    missing_mask = not_corrected & (reasons == "missing_f01") & ~sample.f01_measured
-    disabled_mask = not_corrected & (reasons == "disabled")
-    rejected_mask = not_corrected & ~explicit_mask & ~missing_mask & ~disabled_mask
-    f01_mhz = sample.f01_mhz
-    fig_height = float(np.clip(1.8 + 0.18 * len(aligned_fluxs), 3.0, 8.0))
-    fig, ax = plt.subplots(figsize=(7.2, fig_height))
-    lower, upper = data.analysis_flux_range
-    ax.axvspan(lower, upper, color="tab:green", alpha=0.08, label="analysis window")
-
-    for f01_freq_mhz, raw_flux, corrected_flux, aligned_flux, is_corrected in zip(
-        f01_mhz,
-        raw_fluxs,
-        corrected_fluxs,
-        aligned_fluxs,
-        corrected_mask,
-        strict=True,
-    ):
-        line_color = "tab:blue" if is_corrected else "tab:gray"
-        # Stage 1: raw -> f01-corrected (pre-alignment).
-        ax.plot(
-            [raw_flux, corrected_flux],
-            [f01_freq_mhz, f01_freq_mhz],
-            color=line_color,
-            alpha=0.55,
-            linewidth=1.0,
-        )
-        # Stage 2: f01-corrected -> integer-aligned (final analysis flux).
-        ax.plot(
-            [corrected_flux, aligned_flux],
-            [f01_freq_mhz, f01_freq_mhz],
-            color="tab:green",
-            alpha=0.55,
-            linewidth=1.0,
-            linestyle=":",
-        )
-
-    ax.scatter(
-        raw_fluxs,
-        f01_mhz,
-        marker="o",
-        facecolors="none",
-        edgecolors="tab:gray",
-        s=34,
-        label="raw flux",
-        zorder=3,
-    )
-    if np.any(corrected_mask):
-        ax.scatter(
-            corrected_fluxs[corrected_mask],
-            f01_mhz[corrected_mask],
-            marker="o",
-            color="tab:blue",
-            s=20,
-            label="f01 corrected flux",
-            zorder=4,
-        )
-    if np.any(explicit_mask):
-        ax.scatter(
-            corrected_fluxs[explicit_mask],
-            f01_mhz[explicit_mask],
-            marker="o",
-            color="tab:purple",
-            s=20,
-            label="explicit flux (uncorrected)",
-            zorder=4,
-        )
-    if np.any(missing_mask):
-        ax.scatter(
-            corrected_fluxs[missing_mask],
-            f01_mhz[missing_mask],
-            marker="s",
-            color="tab:cyan",
-            s=24,
-            label="missing f01 (model freq)",
-            zorder=4,
-        )
-    if np.any(disabled_mask):
-        ax.scatter(
-            corrected_fluxs[disabled_mask],
-            f01_mhz[disabled_mask],
-            marker="^",
-            color="tab:brown",
-            s=30,
-            label="correction disabled",
-            zorder=4,
-        )
-    if np.any(rejected_mask):
-        ax.scatter(
-            corrected_fluxs[rejected_mask],
-            f01_mhz[rejected_mask],
-            marker="x",
-            color="tab:orange",
-            s=38,
-            label="kept raw (rejected)",
-            zorder=4,
-        )
-    ax.scatter(
-        aligned_fluxs,
-        f01_mhz,
-        marker="D",
-        facecolors="none",
-        edgecolors="tab:green",
-        s=28,
-        label="integer aligned flux",
-        zorder=5,
-    )
-
-    ax.set_xlabel(r"Flux quanta ($\Phi_{ext}/\Phi_0$)")
-    ax.set_ylabel("f01 frequency (MHz)")
-    ax.set_title("f01 flux correction and branch alignment")
-    ax.grid(axis="x", alpha=0.25)
-    ax.legend(loc="best", fontsize="small")
-    return fig, ax
-
-
-def plot_t1_mechanism_probe(probe: T1MechanismProbe) -> tuple[Figure, Axes]:
-    fig, ax = plot_Q_vs_omega(
-        probe.data.fit.omegas,
-        probe.q_values,
-        probe.q_errors,
-        Qname=_Q_LABELS[probe.mechanism],
-    )
-    ax.plot(
-        probe.fit_omegas,
-        probe.fit_q_values,
-        label=f"{_CURVE_LABELS[probe.mechanism]} probe",
-    )
-    _set_log_y_limits_to_three_sigma(ax, probe.q_values)
-    ax.legend(fontsize="small")
-    return fig, ax
-
-
-def plot_t1_mechanism_dipole(probe: T1MechanismProbe) -> tuple[Figure, Axes]:
-    T1_for_q = (
-        probe.data.fit.T1_ns
-        if probe.purcell_correction is None
-        else probe.purcell_correction.intrinsic_T1_ns
-    )
-    T1err_for_q = (
-        probe.data.fit.T1err_ns
-        if probe.purcell_correction is None
-        else probe.purcell_correction.intrinsic_T1err_ns
-    )
-    valid = _omega_mask(probe.data.fit.omegas, probe.omega_range)
-    if probe.purcell_correction is not None:
-        valid &= probe.purcell_correction.valid_mask
-    valid &= (
-        np.isfinite(probe.dipoles)
-        & (probe.dipoles > 0.0)
-        & np.isfinite(T1_for_q)
-        & (T1_for_q > 0.0)
-        & np.isfinite(probe.q_values)
-        & (probe.q_values > 0.0)
-    )
-    if not np.any(valid):
-        raise ValueError(f"No finite positive {probe.mechanism} dipole points to plot")
-
-    Q_name = (
-        r"$x_{qp}$"
-        if probe.mechanism == "quasiparticle"
-        else _Q_LABELS[probe.mechanism]
-    )
-    product2val: Callable[[float], float] = (
-        (lambda product: 1.0 / product)
-        if probe.mechanism == "quasiparticle"
-        else (lambda product: product)
-    )
-    fig, ax = plot_t1_vs_elements(
-        probe.dipoles[valid],
-        T1_for_q[valid],
-        T1err_for_q[valid],
-        Q_name=Q_name,
-        product2val=product2val,
-    )
-    return fig, ax
-
-
-def plot_t1_mechanism_limit(
-    probe: T1MechanismProbe,
-    *,
-    t_flux_count: int = 1000,
-    flux_range: tuple[float, float] | None = None,
-    purcell: PurcellEffectParams | None = None,
-) -> tuple[Figure, Axes]:
-    data = probe.data
-    context = data.calibration.context
-    resolved_purcell = probe.purcell if purcell is None else purcell
-    resolved_flux_range = flux_range or data.analysis_flux_range
-    t_fluxs = np.linspace(
-        resolved_flux_range[0], resolved_flux_range[1], t_flux_count, dtype=np.float64
-    )
-    channel_name, option_name = _NOISE_CHANNELS[probe.parameter_name]
-    values = {
-        "lower": probe.parameter_lower,
-        "probe": probe.parameter_init,
-        "upper": probe.parameter_upper,
-    }
-    mechanism_curves = {
-        f"{_CURVE_LABELS[probe.mechanism]} {label}": calculate_eff_t1_vs_flux_fast(
-            context.params,
-            t_fluxs,
-            [(channel_name, {option_name: value})],
-            probe.temperature,
-        )
-        for label, value in values.items()
-    }
-    probe_curve_name = f"{_CURVE_LABELS[probe.mechanism]} probe"
-    display_T1s = mechanism_curves[probe_curve_name]
-    mechanism_label = _CURVE_LABELS[probe.mechanism]
-    lower_curve_name = f"{mechanism_label} lower"
-    upper_curve_name = f"{mechanism_label} upper"
-    component_t1s = {
-        "- lower": mechanism_curves[lower_curve_name],
-        "- upper": mechanism_curves[upper_curve_name],
-    }
-    plot_label = mechanism_label
-    parameter_lines = [
-        _format_parameter(probe.parameter_name, probe.parameter_init),
-        f"Temp = {probe.temperature * 1e3:.2f} mK",
-    ]
-    if resolved_purcell is not None:
-        purcell_T1s = calculate_purcell_t1_limit(
-            context,
-            t_fluxs,
-            resolved_purcell,
-            Temp=probe.temperature,
-        )
-        combined_curves = {
-            key: _combine_t1_limits(value, purcell_T1s)
-            for key, value in mechanism_curves.items()
-        }
-        display_T1s = combined_curves[probe_curve_name]
-        component_t1s = {
-            "- lower": combined_curves[lower_curve_name],
-            "- upper": combined_curves[upper_curve_name],
-        }
-        component_t1s = {**component_t1s, "Purcell": purcell_T1s}
-        plot_label = f"{plot_label} + Purcell"
-    band_label = f"{mechanism_label} bounds"
-    component_bands = {
-        band_label: (
-            component_t1s["- lower"],
-            component_t1s["- upper"],
-        )
-    }
-    fig, ax = plot_eff_t1_with_sample(
-        flux2value(data.sample.fluxs, context.flux_half, context.flux_period),
-        data.sample.T1_ns,
-        data.sample.T1err_ns,
-        display_T1s,
-        context.flux_half,
-        context.flux_period,
-        t_fluxs,
-        label=plot_label,
-        component_t1s=component_t1s,
-        component_bands=component_bands,
-        parameter_text="\n".join(parameter_lines),
-    )
-    ax.set_xlim(*resolved_flux_range)
-    return fig, ax
-
-
-def plot_t1_channel_analysis(
-    channel_analysis: T1ChannelAnalysis,
-    *,
-    parameter_text: str | None = None,
-) -> tuple[Figure, Axes]:
-    combined_fit = channel_analysis.combined_fit
-    data = combined_fit.data
-    context = data.calibration.context
-    if parameter_text is None:
-        parameter_text = t1_parameter_text(combined_fit.fit_result)
-    fig, ax = plot_eff_t1_with_sample(
-        flux2value(data.sample.fluxs, context.flux_half, context.flux_period),
-        data.sample.T1_ns,
-        data.sample.T1err_ns,
-        channel_analysis.curves.display_T1_ns,
-        context.flux_half,
-        context.flux_period,
-        channel_analysis.curves.fluxs,
-        label="effective T1",
-        component_t1s=channel_analysis.curves.component_T1s_ns,
-        parameter_text=parameter_text,
-    )
-    ax.set_xlim(*channel_analysis.flux_range)
-    return fig, ax
-
-
-def save_t1_curve_figure(
-    fig: Figure,
-    context: T1CurveContext,
-    filename: str,
-    *,
-    show: bool = True,
-    close: bool = True,
-    bbox_inches: str | None = None,
-    dpi: int = 160,
-) -> str:
-    path = os.path.join(context.image_dir, filename)
-    fig.savefig(path, dpi=dpi, bbox_inches=bbox_inches)
-    if show:
-        plt.show()
-    if close:
-        plt.close(fig)
-    return path
-
-
 def write_t1_curve_fit(combined_fit: T1CombinedFit) -> None:
     result = combined_fit.fit_result
     params = result.params
@@ -1582,24 +432,6 @@ def write_t1_curve_fit(combined_fit: T1CombinedFit) -> None:
             bounds=combined_fit.bounds or {},
         )
     )
-
-
-def t1_parameter_text(
-    fit_result: T1FitResult,
-    *,
-    extra_lines: tuple[str, ...] = (),
-) -> str:
-    lines: list[str] = []
-    params = fit_result.params
-    if params.Q_cap is not None:
-        lines.append(_format_parameter("Q_cap", params.Q_cap))
-    if params.x_qp is not None:
-        lines.append(_format_parameter("x_qp", params.x_qp))
-    if params.Q_ind is not None:
-        lines.append(_format_parameter("Q_ind", params.Q_ind))
-    lines.append(f"Temp = {params.Temp * 1e3:.2f} mK")
-    lines.extend(extra_lines)
-    return "\n".join(lines)
 
 
 def run_t1_curve_analysis(
@@ -1716,163 +548,6 @@ def run_t1_curve_analysis(
     )
 
 
-def _validate_required_columns(samples_df: pd.DataFrame) -> None:
-    validate_sample_table_v2(samples_df, allow_empty=True)
-    missing = [
-        column for column in _REQUIRED_COLUMNS if column not in samples_df.columns
-    ]
-    if missing:
-        raise ValueError(f"samples.jsonl missing required columns: {missing}")
-
-
-def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:
-    if column not in frame.columns:
-        return np.full(len(frame), np.nan, dtype=np.float64)
-    values = pd.to_numeric(cast(pd.Series, frame[column]), errors="coerce")
-    return np.asarray(values, dtype=np.float64)
-
-
-def _prepare_t1_data(
-    calibration: T1FluxCalibration,
-    *,
-    analysis_flux_range: tuple[float, float],
-    max_abs_flux_correction: float,
-    correct_flux_from_f01_enabled: bool,
-) -> T1CurveData:
-    context = calibration.context
-    samples_df = context.samples_df
-
-    t1_values = _float_column(samples_df, "t1_us")
-    eligible = np.isfinite(t1_values) & (t1_values > 0.0)
-    if not np.any(eligible):
-        raise ValueError("no finite positive T1 rows are available for analysis")
-
-    resolved_values = calibration.resolution.values
-    sources = calibration.resolution.sources
-    raw_fluxs = np.asarray(resolved_values[eligible], dtype=np.float64)
-    row_sources = tuple(sources[index] for index in np.flatnonzero(eligible))
-    f01_observed = _float_column(samples_df, "freq_mhz")
-    f01_observed = f01_observed[eligible]
-    f01_measured = np.isfinite(f01_observed)
-    T1_ns = 1e3 * t1_values[eligible]
-    T1err_ns = 1e3 * _float_column(samples_df, "t1_err_us")[eligible]
-
-    corrected_fluxs = np.asarray(raw_fluxs, dtype=np.float64).copy()
-    applied = np.zeros(len(raw_fluxs), dtype=bool)
-    flux_corrections = np.zeros(len(raw_fluxs), dtype=np.float64)
-    reasons: list[str] = []
-    if correct_flux_from_f01_enabled:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            correction = correct_flux_from_f01(
-                raw_fluxs,
-                1e-3 * f01_observed,
-                context.params,
-                max_abs_flux_correction=max_abs_flux_correction,
-            )
-        candidate_fluxs = correction.corrected_fluxs
-        accepted = correction.accepted
-        for index, source in enumerate(row_sources):
-            if source == "explicit":
-                reasons.append("explicit_flux")
-                continue
-            if not f01_measured[index]:
-                reasons.append("missing_f01")
-                continue
-            if accepted[index]:
-                corrected_fluxs[index] = candidate_fluxs[index]
-                flux_corrections[index] = candidate_fluxs[index] - raw_fluxs[index]
-                applied[index] = True
-                reasons.append("")
-            else:
-                reasons.append("rejected")
-    else:
-        reasons.extend("disabled" for _ in row_sources)
-
-    aligned_fluxs, shifts, in_window = align_flux_to_window(
-        corrected_fluxs, analysis_flux_range
-    )
-    order = np.argsort(aligned_fluxs[in_window])
-
-    def take[T: np.generic](values_arr: NDArray[T]) -> NDArray[T]:
-        return np.asarray(values_arr)[in_window][order]
-
-    aligned_taken = take(aligned_fluxs)
-    measured_taken = take(f01_measured)
-    observed_taken = take(f01_observed)
-    f01_used = np.where(
-        measured_taken, observed_taken, predict_f01_mhz(context.params, aligned_taken)
-    )
-    return T1CurveData(
-        fluxs=aligned_taken,
-        raw_fluxs=take(raw_fluxs),
-        integer_shifts=take(shifts),
-        flux_sources=tuple(take(np.asarray(row_sources, dtype=object)).tolist()),
-        f01_mhz=f01_used,
-        f01_measured=measured_taken,
-        f01_correction_applied=take(applied),
-        flux_corrections=take(flux_corrections),
-        correction_skipped_reason=tuple(
-            take(np.asarray(reasons, dtype=object)).tolist()
-        ),
-        T1_ns=take(T1_ns),
-        T1err_ns=take(T1err_ns),
-        omegas=np.asarray(freq2omega(1e-3 * f01_used), dtype=np.float64),
-    )
-
-
-def _filter_fit_data(
-    sample: T1CurveData,
-    *,
-    max_rel_t1_err: float,
-    use_weighted_points_only: bool,
-) -> T1CurveData:
-    finite_err = np.isfinite(sample.T1err_ns) & (sample.T1err_ns > 0.0)
-    bounded_err = finite_err & (sample.T1err_ns <= max_rel_t1_err * sample.T1_ns)
-    if use_weighted_points_only:
-        valid = bounded_err
-    else:
-        valid = np.isnan(sample.T1err_ns) | bounded_err
-    return _take_t1_data(sample, valid)
-
-
-def _take_t1_data(data: T1CurveData, mask: NDArray[np.bool_]) -> T1CurveData:
-    return T1CurveData(
-        fluxs=data.fluxs[mask],
-        raw_fluxs=data.raw_fluxs[mask],
-        integer_shifts=data.integer_shifts[mask],
-        flux_sources=tuple(
-            source for source, keep in zip(data.flux_sources, mask, strict=True) if keep
-        ),
-        f01_mhz=data.f01_mhz[mask],
-        f01_measured=data.f01_measured[mask],
-        f01_correction_applied=data.f01_correction_applied[mask],
-        flux_corrections=data.flux_corrections[mask],
-        correction_skipped_reason=tuple(
-            reason
-            for reason, keep in zip(data.correction_skipped_reason, mask, strict=True)
-            if keep
-        ),
-        T1_ns=data.T1_ns[mask],
-        T1err_ns=data.T1err_ns[mask],
-        omegas=data.omegas[mask],
-    )
-
-
-def _subtract_purcell_from_fit_data(
-    data: T1PreparedData,
-    purcell: PurcellEffectParams,
-    Temp: float,
-) -> PurcellCorrectionResult:
-    purcell_T1s = calculate_purcell_t1_limit(
-        data.calibration.context,
-        data.fit.fluxs,
-        purcell,
-        Temp=Temp,
-    )
-    return subtract_relaxation_limit(data.fit.T1_ns, data.fit.T1err_ns, purcell_T1s)
-
-
 def _purcell_rate_fn(
     data: T1PreparedData,
     purcell: PurcellEffectParams,
@@ -1884,25 +559,12 @@ def _purcell_rate_fn(
             purcell,
             Temp=float(params.Temp),
         )
-        return _relaxation_rates_from_t1(
+        return relaxation_rates_from_t1(
             purcell_T1s,
             name="Purcell T1",
         )
 
     return extra_rate
-
-
-def _purcell_probe_summary_rows(
-    data: T1PreparedData,
-    correction: PurcellCorrectionResult | None,
-) -> list[tuple[str, str]]:
-    if correction is None:
-        return [("Purcell", "off")]
-    invalid_count = len(data.fit.fluxs) - int(np.count_nonzero(correction.valid_mask))
-    return [
-        ("Purcell", "on"),
-        ("Purcell invalid rows", str(invalid_count)),
-    ]
 
 
 def _purcell_fit_summary_rows(
@@ -1937,288 +599,6 @@ def _resolve_channel_purcell(
     return combined_fit.purcell
 
 
-def _validate_t1_limit(
-    T1_ns: NDArray[np.float64],
-    *,
-    name: str,
-) -> NDArray[np.float64]:
-    values = np.asarray(T1_ns, dtype=np.float64)
-    if values.ndim != 1:
-        raise ValueError(f"{name} must be a 1D array")
-    if np.any(~np.isfinite(values)) or np.any(values <= 0.0):
-        raise ValueError(f"{name} must be finite and positive")
-    return values
-
-
-def _relaxation_rates_from_t1(
-    T1_ns: NDArray[np.float64],
-    *,
-    name: str,
-) -> NDArray[np.float64]:
-    T1s = _validate_t1_limit(T1_ns, name=name)
-    return np.divide(
-        1.0,
-        T1s,
-        out=np.full_like(T1s, np.nan, dtype=np.float64),
-        where=np.isfinite(T1s) & (T1s > 0.0),
-    )
-
-
-def _combine_t1_limits(
-    *limits: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    if not limits:
-        raise ValueError("at least one T1 limit is required")
-    first = np.asarray(limits[0], dtype=np.float64)
-    total_rate = np.zeros_like(first, dtype=np.float64)
-    for limit in limits:
-        rates = _relaxation_rates_from_t1(
-            np.asarray(limit, dtype=np.float64), name="T1"
-        )
-        if rates.shape != first.shape:
-            raise ValueError("all T1 limits must have the same shape")
-        total_rate += rates
-    return np.divide(
-        1.0,
-        total_rate,
-        out=np.full_like(total_rate, np.nan, dtype=np.float64),
-        where=np.isfinite(total_rate) & (total_rate > 0.0),
-    )
-
-
-@lru_cache(maxsize=_PURCELL_CACHE_SIZE)
-def _calculate_purcell_t1_limit_cached(
-    params: tuple[float, float, float],
-    fluxs: tuple[float, ...],
-    bare_rf: float,
-    kappa: float,
-    g: float,
-    Temp: float,
-) -> tuple[float, ...]:
-    values = _validate_t1_limit(
-        calculate_purcell_t1_vs_flux(
-            np.asarray(fluxs, dtype=np.float64),
-            bare_rf=bare_rf,
-            kappa=kappa,
-            g=g,
-            Temp=Temp,
-            params=params,
-            progress=False,
-        ),
-        name="Purcell T1",
-    )
-    return tuple(float(value) for value in values)
-
-
-def _float_tuple_cache_key(values: tuple[float, ...]) -> tuple[float, ...]:
-    return tuple(_float_cache_key(value) for value in values)
-
-
-def _array_cache_key(values: NDArray[np.float64], *, name: str) -> tuple[float, ...]:
-    if values.ndim != 1:
-        raise ValueError(f"{name} must be a 1D array")
-    if np.any(~np.isfinite(values)):
-        raise ValueError(f"{name} must be finite")
-    return tuple(_float_cache_key(value) for value in values)
-
-
-def _float_cache_key(value: float) -> float:
-    return round(float(value), _CACHE_FLOAT_DECIMALS)
-
-
-def _calculate_mechanism_arrays(
-    data: T1PreparedData,
-    mechanism: MechanismName,
-    Temp: float,
-    *,
-    T1_ns: NDArray[np.float64] | None = None,
-    T1err_ns: NDArray[np.float64] | None = None,
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    params = data.calibration.context.params
-    T1s = data.fit.T1_ns if T1_ns is None else np.asarray(T1_ns, dtype=np.float64)
-    T1errs = (
-        data.fit.T1err_ns
-        if T1err_ns is None
-        else np.asarray(T1err_ns, dtype=np.float64)
-    )
-    if T1s.shape != data.fit.T1_ns.shape:
-        raise ValueError("T1_ns must have the same shape as fit T1 data")
-    if T1errs.shape != data.fit.T1err_ns.shape:
-        raise ValueError("T1err_ns must have the same shape as fit T1err data")
-    if mechanism == "capacitive":
-        _, n_elements = calculate_n_oper_vs_flux(params, data.fit.fluxs)
-        q_values, q_errors = calc_Qcap_vs_omega(
-            params, data.fit.omegas, T1s, n_elements, T1errs, Temp
-        )
-        dipoles = calc_cap_dipole(params, n_elements, data.fit.omegas, Temp)
-    elif mechanism == "quasiparticle":
-        sin2_elements = np.asarray(
-            [calc_qp_oper(params, float(flux)) for flux in data.fit.fluxs],
-            dtype=np.complex128,
-        )
-        q_values, q_errors = calc_Qqp_vs_omega(
-            params,
-            data.fit.omegas,
-            T1s,
-            sin2_elements,
-            T1errs,
-            Temp,
-        )
-        dipoles = calc_qp_dipole(params, sin2_elements, data.fit.omegas, Temp)
-    elif mechanism == "inductive":
-        _, phi_elements = calculate_phi_oper_vs_flux(params, data.fit.fluxs)
-        q_values, q_errors = calc_Qind_vs_omega(
-            params,
-            data.fit.omegas,
-            T1s,
-            phi_elements,
-            T1errs,
-            Temp,
-        )
-        dipoles = calc_ind_dipole(params, phi_elements, data.fit.omegas, Temp)
-    else:
-        raise ValueError(f"unknown T1 mechanism: {mechanism}")
-    return (
-        np.asarray(q_values, dtype=np.float64),
-        np.asarray(q_errors, dtype=np.float64),
-        np.asarray(dipoles, dtype=np.float64),
-    )
-
-
-def _fit_mechanism_temperature(
-    data: T1PreparedData,
-    mechanism: MechanismName,
-    Temp: float,
-    omega_range: tuple[float | None, float | None],
-    purcell: PurcellEffectParams | None,
-    *,
-    Temp_bounds: TempBounds,
-) -> float:
-    mask = _omega_mask(data.fit.omegas, omega_range)
-
-    def calc_Q_fn(candidate_Temp: float) -> NDArray[np.float64]:
-        purcell_correction = (
-            _subtract_purcell_from_fit_data(data, purcell, candidate_Temp)
-            if purcell is not None
-            else None
-        )
-        T1_for_q = (
-            data.fit.T1_ns
-            if purcell_correction is None
-            else purcell_correction.intrinsic_T1_ns
-        )
-        T1err_for_q = (
-            data.fit.T1err_ns
-            if purcell_correction is None
-            else purcell_correction.intrinsic_T1err_ns
-        )
-        q_values, _, _ = _calculate_mechanism_arrays(
-            data,
-            mechanism,
-            candidate_Temp,
-            T1_ns=T1_for_q,
-            T1err_ns=T1err_for_q,
-        )
-        finite = mask & np.isfinite(q_values) & (q_values > 0.0)
-        if purcell_correction is not None:
-            finite &= purcell_correction.valid_mask
-        return q_values[finite]
-
-    return find_proper_Temp(Temp, calc_Q_fn, Temp_bounds=Temp_bounds)
-
-
-def _omega_mask(
-    omegas: NDArray[np.float64],
-    omega_range: tuple[float | None, float | None],
-) -> NDArray[np.bool_]:
-    mask = np.ones_like(omegas, dtype=bool)
-    lower, upper = omega_range
-    if lower is not None:
-        mask &= omegas >= lower
-    if upper is not None:
-        mask &= omegas <= upper
-    return mask
-
-
-def _fit_q_values(
-    omegas: NDArray[np.float64],
-    q_values: NDArray[np.float64],
-    *,
-    fit_constant: bool,
-) -> NDArray[np.float64]:
-    if fit_constant:
-        return np.full_like(omegas, _geometric_mean(q_values), dtype=np.float64)
-    slope, intercept = np.polyfit(np.log(omegas), np.log(q_values), 1)
-    return np.asarray(np.exp(intercept) * omegas**slope, dtype=np.float64)
-
-
-def _geometric_mean(values: NDArray[np.float64]) -> float:
-    finite = _finite_positive(values)
-    return float(np.exp(np.nanmean(np.log(finite))))
-
-
-def _log_spread_bounds(values: NDArray[np.float64]) -> tuple[float, float]:
-    finite = _finite_positive(values)
-    logs = np.log(finite)
-    center = float(np.nanmean(logs))
-    spread = float(np.nanstd(logs))
-    return float(np.exp(center - 2.0 * spread)), float(np.exp(center + 2.0 * spread))
-
-
-def _parameter_values_from_q(
-    mechanism: MechanismName,
-    q_values: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    if mechanism == "quasiparticle":
-        return np.divide(
-            1.0,
-            q_values,
-            out=np.full_like(q_values, np.nan, dtype=np.float64),
-            where=np.isfinite(q_values) & (q_values > 0.0),
-        )
-    return q_values
-
-
-def _parameter_from_q(mechanism: MechanismName, q_value: float) -> float:
-    if mechanism == "quasiparticle":
-        return float(1.0 / q_value)
-    return float(q_value)
-
-
-def _positive_statistic(
-    values: NDArray[np.float64], statistic: ProbeStatistic
-) -> float:
-    finite = _finite_positive(values)
-    if statistic == "median":
-        return float(np.nanmedian(finite))
-    if statistic == "mean":
-        return float(np.nanmean(finite))
-    if statistic == "min":
-        return float(np.nanmin(finite))
-    if statistic == "max":
-        return float(np.nanmax(finite))
-    if statistic == "p10":
-        return float(np.nanpercentile(finite, 10.0))
-    if statistic == "p90":
-        return float(np.nanpercentile(finite, 90.0))
-    raise ValueError(f"unknown probe statistic: {statistic}")
-
-
-def _finite_positive(values: NDArray[np.float64]) -> NDArray[np.float64]:
-    arr = np.asarray(values, dtype=np.float64)
-    finite = arr[np.isfinite(arr) & (arr > 0.0)]
-    if finite.size == 0:
-        raise ValueError("no positive finite values")
-    return finite
-
-
-def _positive_override(override: float | None, fallback: float, name: str) -> float:
-    value = fallback if override is None else override
-    if not np.isfinite(value) or value <= 0.0:
-        raise ValueError(f"{name} must be positive and finite")
-    return float(value)
-
-
 def _fit_init_value(
     override: float | None,
     probe: T1MechanismProbe | None,
@@ -2230,18 +610,7 @@ def _fit_init_value(
         raise ValueError(
             f"{name} needs an explicit value or a completed mechanism probe"
         )
-    return _positive_override(None, value, name)
-
-
-def _validate_mechanisms(active_mechanisms: tuple[MechanismName, ...]) -> None:
-    if not active_mechanisms:
-        raise ValueError("at least one T1 mechanism must be active")
-    if len(set(active_mechanisms)) != len(active_mechanisms):
-        raise ValueError("active_mechanisms contains duplicates")
-    known = {"capacitive", "quasiparticle", "inductive"}
-    unknown = set(active_mechanisms) - known
-    if unknown:
-        raise ValueError(f"unknown active mechanism(s): {sorted(unknown)}")
+    return positive_override(None, value, name)
 
 
 def t1_noise_channels_from_params(
@@ -2271,13 +640,13 @@ def _iter_noise_channel_values(
 ) -> list[tuple[NoiseParameterName, str, str, float]]:
     values: list[tuple[NoiseParameterName, str, str, float]] = []
     if params.Q_cap is not None:
-        channel_name, option_name = _NOISE_CHANNELS["Q_cap"]
+        channel_name, option_name = NOISE_CHANNELS["Q_cap"]
         values.append(("Q_cap", channel_name, option_name, params.Q_cap))
     if params.x_qp is not None:
-        channel_name, option_name = _NOISE_CHANNELS["x_qp"]
+        channel_name, option_name = NOISE_CHANNELS["x_qp"]
         values.append(("x_qp", channel_name, option_name, params.x_qp))
     if params.Q_ind is not None:
-        channel_name, option_name = _NOISE_CHANNELS["Q_ind"]
+        channel_name, option_name = NOISE_CHANNELS["Q_ind"]
         values.append(("Q_ind", channel_name, option_name, params.Q_ind))
     return values
 
@@ -2296,7 +665,7 @@ def _fit_params_table(init: T1FitParams, fit_result: T1FitResult) -> pd.DataFram
                 "init": init_value,
                 "fit": fit_value,
                 "stderr": stderr,
-                "display": _format_parameter(name, fit_value),
+                "display": format_parameter(name, fit_value),
             }
         )
     return pd.DataFrame(rows)
@@ -2332,118 +701,10 @@ def _error_fill_summary(result: ErrorResolutionResult | None) -> str:
     )
 
 
-def _prepared_summary_table(
-    *,
-    calibration: T1FluxCalibration,
-    sample: T1CurveData,
-    fit: T1CurveData,
-    analysis_flux_range: tuple[float, float],
-    max_abs_flux_correction: float,
-    max_rel_t1_err: float,
-    use_weighted_points_only: bool,
-) -> pd.DataFrame:
-    peak_idx = int(np.nanargmax(sample.T1_ns))
-    source_counts = {
-        source: sum(1 for item in sample.flux_sources if item == source)
-        for source in ("explicit", "row-frame", "fallback-frame")
-    }
-    observed_count = int(np.count_nonzero(sample.f01_measured))
-    model_count = len(sample.fluxs) - observed_count
-    skip_reasons: dict[str, int] = {}
-    for reason in sample.correction_skipped_reason:
-        if reason:
-            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
-    shift_counts: dict[str, int] = {}
-    for shift in sample.integer_shifts:
-        key = f"{int(round(float(shift)))}"
-        shift_counts[key] = shift_counts.get(key, 0) + 1
-    shift_summary = (
-        " ".join(f"k={k}:{count}" for k, count in sorted(shift_counts.items()))
-        if shift_counts
-        else "0"
-    )
-    return pd.DataFrame(
-        [
-            (
-                "analysis flux range",
-                f"{analysis_flux_range[0]:.3f}..{analysis_flux_range[1]:.3f}",
-            ),
-            ("max abs flux correction", f"{max_abs_flux_correction:.3g}"),
-            ("max relative T1err", f"{max_rel_t1_err:.3g}"),
-            ("use weighted points only", str(use_weighted_points_only)),
-            ("window T1 rows", f"{len(sample.fluxs)}/{len(calibration.t1_df)}"),
-            ("fit rows", str(len(fit.fluxs))),
-            (
-                "flux sources (explicit/row/fallback)",
-                f"{source_counts['explicit']}/{source_counts['row-frame']}/"
-                f"{source_counts['fallback-frame']}",
-            ),
-            ("f01 source (observed/model)", f"{observed_count}/{model_count}"),
-            (
-                "f01 correction skipped reasons",
-                " ".join(f"{reason}={count}" for reason, count in skip_reasons.items())
-                or "none",
-            ),
-            ("integer shifts", shift_summary),
-            (
-                "sample peak",
-                f"flux={sample.fluxs[peak_idx]:.6f}, T1={1e-3 * sample.T1_ns[peak_idx]:.3f} us",
-            ),
-            (
-                "f01 corrections applied",
-                f"{int(np.count_nonzero(sample.f01_correction_applied))}/{len(sample.fluxs)}",
-            ),
-        ],
-        columns=["metric", "value"],
-    )
-
-
 def _stage_table(stage: str, table: pd.DataFrame) -> pd.DataFrame:
     stage_table = table.copy()
     stage_table.insert(0, "stage", stage)
     return stage_table
-
-
-def _format_range(value_range: tuple[float | None, float | None]) -> str:
-    lower, upper = value_range
-    lower_text = "-inf" if lower is None else f"{lower:g}"
-    upper_text = "inf" if upper is None else f"{upper:g}"
-    return f"{lower_text}..{upper_text}"
-
-
-def _format_temperature_bounds(Temp_bounds: TempBounds) -> str:
-    lower_raw, _upper_raw = Temp_bounds
-    lower, upper = resolve_Temp_bounds(Temp_bounds)
-    lower_text = "default" if lower_raw is None else f"{lower * 1e3:.2f}"
-    return f"{lower_text}..{upper * 1e3:.2f} mK"
-
-
-def _set_log_y_limits_to_three_sigma(
-    ax: Axes,
-    values: NDArray[np.float64],
-) -> None:
-    positive = np.asarray(values, dtype=np.float64)
-    positive = positive[np.isfinite(positive) & (positive > 0.0)]
-    if positive.size < 2:
-        return
-    log_values = np.log(positive)
-    spread = float(np.std(log_values))
-    if not np.isfinite(spread) or spread <= 0.0:
-        return
-    center = float(np.mean(log_values))
-    ax.set_ylim(
-        float(np.exp(center - 3.0 * spread)), float(np.exp(center + 3.0 * spread))
-    )
-
-
-def _format_parameter(name: str, value: float) -> str:
-    return f"{name} = {_format_parameter_value(name, value)}"
-
-
-def _format_parameter_value(name: str, value: float) -> str:
-    if name == "Temp":
-        return f"{value * 1e3:.2f} mK"
-    return f"{value:.3e}"
 
 
 __all__ = [
@@ -2460,6 +721,7 @@ __all__ = [
     "T1CurveContext",
     "T1CurveData",
     "T1FluxCalibration",
+    "T1MechanismOptions",
     "T1MechanismProbe",
     "T1PreparedData",
     "analyze_t1_capacitive_limit",
@@ -2493,21 +755,3 @@ __all__ = [
     "t1_parameter_text",
     "write_t1_curve_fit",
 ]
-
-
-def _validate_temperature_search(
-    Temp_range: tuple[float, float], tolerance: float, max_iter: int
-) -> None:
-    """Require a positive temperature bracket, finite tolerance and iteration budget."""
-    lower, upper = Temp_range
-    if (
-        not np.isfinite(lower)
-        or not np.isfinite(upper)
-        or lower <= 0.0
-        or upper <= lower
-    ):
-        raise ValueError("Temp_range must be positive finite (lower, upper)")
-    if tolerance <= 0.0 or not np.isfinite(tolerance):
-        raise ValueError("tolerance must be positive and finite")
-    if max_iter < 1:
-        raise ValueError("max_iter must be at least 1")

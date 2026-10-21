@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QLineEdit, QPushButton
+from qtpy.QtWidgets import QComboBox, QLineEdit, QPushButton
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -28,6 +28,11 @@ from tests.gui.app.measure._form_fakes import (
     make_form,
 )
 from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
+from tests.gui.app.measure.ui._figure_presentation_support import (
+    gallery,
+    right_page,
+    right_stack,
+)
 
 
 @dataclass
@@ -151,23 +156,10 @@ def make_snapshot(
 
 
 @pytest.fixture
-def exp_tab_widget(qapp, monkeypatch, make_ctrl):
+def exp_tab_widget(qapp, make_ctrl):
     """Provide ExpTabWidget with cfg population stubbed for isolation."""
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    # Mock figure attachment to avoid host lifecycle
-    orig_attach = mod.attach_existing_figure_to_container
-
-    def mock_attach(fig, container):
-        from qtpy.QtWidgets import QWidget
-
-        w = QWidget()
-        w.figure = fig  # type: ignore[attr-defined]
-        container.attach_canvas(w)
-        w.draw = lambda: None  # type: ignore[attr-defined]
-        return w
-
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     owned_tabs: list[mod.ExpTabWidget] = []
 
     def create_tab(
@@ -183,7 +175,6 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
         for tab in owned_tabs:
             tab.deleteLater()
         owned_tabs.clear()
-        monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
 @pytest.mark.parametrize("post", [False, True])
@@ -277,11 +268,17 @@ def test_no_analysis_capability_constructs_only_run_data_and_guide(
         == 1
     )
     assert not hasattr(tab_none, "_analysis_panel")
-    assert not hasattr(tab_none, "_analysis_container")
+    assert not any(
+        widget.accessibleName() == "Analysis figure"
+        for widget in tab_none.findChildren(QComboBox)
+    )
     assert not hasattr(tab_none, "post_analyze_form")
     assert not hasattr(tab_none, "post_writeback_widget")
     assert not hasattr(tab_none, "_post_panel")
-    assert not hasattr(tab_none, "_post_container")
+    assert not any(
+        widget.accessibleName() == "Post-analysis figure"
+        for widget in tab_none.findChildren(QComboBox)
+    )
     with pytest.raises(RuntimeError, match="does not support analysis"):
         tab_none.get_analysis_container()
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
@@ -403,7 +400,6 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     captured = tab.prepare_analysis_container()
     assert captured is ana_c
     tab._left_tabs.setCurrentWidget(tab._save_panel)
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     snap_busy = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, is_analyzing=True
     )
@@ -428,7 +424,7 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True
-    )  # type: ignore[call-arg]
+    )
     state.add_tab(
         "tab-1",
         Session(
@@ -466,7 +462,7 @@ def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure
     tab.show_analysis_figures(old_analysis)
     assert tab.get_current_figure_for_pane("analysis") is fig_a_old
     fig_a_new = Figure()
-    tab._post_container.clear_dynamic_canvases()
+    tab.get_post_container().clear_dynamic_canvases()
     tab.show_analysis_figures(ready_figures(fig_a_new))
     assert tab.get_current_figure_for_pane("analysis") is fig_a_new
     assert tab.get_current_figure_for_pane("post_analysis") is None
@@ -584,21 +580,17 @@ def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
     center.save_all_button.click()
     assert [call.args for call in actions.save_all.call_args_list] == [("tab-1",)]
     tab._left_tabs.setCurrentWidget(tab._save_panel)
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._data_gallery
+    assert right_stack(tab).currentWidget() is gallery(tab)
     tab._left_tabs.setCurrentWidget(tab._guide_panel)
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._right_placeholder
+    assert right_stack(tab).currentWidget() is right_page(tab, "guide")
     fig_a = Figure()
     fig_p = Figure()
     tab.show_analysis_figures(ready_figures(fig_a))
     tab.show_post_analysis_figures(ready_figures(fig_p))
     tab._left_tabs.setCurrentWidget(tab._analysis_panel)
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._analysis_panel_right
+    assert right_stack(tab).currentWidget() is right_page(tab, "analysis")
     tab._left_tabs.setCurrentWidget(tab._post_panel)
-    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._post_panel_right
+    assert right_stack(tab).currentWidget() is right_page(tab, "post_analysis")
     assert tab.get_current_figure_for_pane("analysis") is fig_a
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p
     tab.detach()
@@ -807,7 +799,7 @@ def test_render_host_routes_to_correct_pane_container(qapp):
         post_analyze=post_svc,
         render_host=lambda: host,
         owner_scheduler=ManualOwnerScheduler(),
-    )  # type: ignore[arg-type]
+    )
     facet.start_run("tab-1")
     assert log[-1] == "run"
     facet.analyze("tab-1", MagicMock())

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from qtpy.QtCore import QRectF, QSize, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QColor, QPainter, QPen  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QSizePolicy, QWidget  # type: ignore[attr-defined]
+from qtpy.QtCore import QRectF, QSize, Qt
+from qtpy.QtGui import QColor, QPainter, QPen
+from qtpy.QtWidgets import QSizePolicy, QWidget
 
 
 class LightweightProgressBar(QWidget):
@@ -66,7 +66,8 @@ class LightweightProgressBar(QWidget):
         self._format = fmt
         self.update()
 
-    def setTextVisible(self, visible: bool) -> None:
+    # tolerated: Preserve QProgressBar's public setTextVisible(visible) positional API.
+    def setTextVisible(self, visible: bool) -> None:  # noqa: FBT001
         visible = bool(visible)
         if self._text_visible == visible:
             return

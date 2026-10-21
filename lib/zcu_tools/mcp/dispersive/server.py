@@ -39,13 +39,20 @@ _BOOTSTRAP["bootstrap_standalone_server"](
 
 # NOTE: absolute imports (NOT relative) — this module is launched as a script
 # (``python .../server.py`` per .mcp.json), so it has no parent package.
+# tolerated: Method contracts need standalone lib setup and qtpy preflight first.
 from zcu_tools.gui.app.dispersive.remote.method_specs import (  # noqa: E402
     METHOD_SPECS,
 )
+
+# tolerated: Wire version imports must follow lib setup and qtpy preflight.
 from zcu_tools.gui.app.dispersive.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
+
+# tolerated: Bridge imports must follow standalone lib setup and qtpy preflight.
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
+
+# tolerated: Readonly assembly needs standalone lib setup and qtpy preflight first.
 from zcu_tools.mcp.core.readonly_server import (  # noqa: E402
     READONLY_MCP_VERSION,
     build_readonly_server,

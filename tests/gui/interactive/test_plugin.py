@@ -30,6 +30,8 @@ def _plugin() -> tuple[
     command = Command[Pick](
         "move_half",
         (ParamSpec("position", JsonType.NUMBER),),
+        # tolerated(cast): Command erases validated NUMBER values to object;
+        # retain the exact value passed to the shared float action.
         lambda session, args: action.execute(session, cast(float, args["position"])),
     )
 

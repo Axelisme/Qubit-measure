@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from importlib import import_module
-from typing import Literal, cast
+from typing import Literal
 
 from zcu_tools.gui.remote.method_spec import (
     BoundMethod,
@@ -120,14 +120,14 @@ def _resolve_handler_ref(handler_ref: str) -> Handler:
             f"for handler ref {handler_ref!r}"
         ) from exc
     try:
-        handler = getattr(module, function_name)
+        handler: Handler = getattr(module, function_name)
     except AttributeError as exc:
         raise RuntimeError(
             f"remote handler ref {handler_ref!r} does not name an attribute"
         ) from exc
     if not callable(handler):
         raise RuntimeError(f"remote handler ref {handler_ref!r} is not callable")
-    return cast(Handler, handler)
+    return handler
 
 
 def _parse_handler_ref(handler_ref: str) -> tuple[str, str]:

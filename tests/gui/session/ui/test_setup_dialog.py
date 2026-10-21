@@ -10,13 +10,11 @@ import pytest
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
-    QGroupBox,
     QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QPushButton,
-    QSpinBox,
 )
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.measure.controller import Controller
@@ -31,11 +29,7 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.events import DeviceChangedPayload
-from zcu_tools.gui.session.services.connection import (
-    ConnectRemoteRequest,
-)
 from zcu_tools.gui.session.services.project_settings import (
-    ConnectionPreferences,
     SetupPreferences,
 )
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
@@ -74,46 +68,6 @@ def _make_ctrl(**overrides: object) -> MagicMock:
     for k, v in overrides.items():
         getattr(ctrl, k).return_value = v
     return ctrl
-
-
-def test_setup_dialog_connect_remote_dispatches_request(qapp):
-    ctrl = _make_ctrl()
-    dialog = SetupDialog(ctrl)
-
-    connection = next(
-        group
-        for group in dialog.findChildren(QGroupBox)
-        if group.title() == "ZCU Connection"
-    )
-    ip = connection.findChild(QLineEdit)
-    port = connection.findChild(QSpinBox)
-    assert ip is not None and port is not None
-    ip.setText("10.0.0.1")
-    port.setValue(7000)
-    entry_button(dialog, "Connect").click()
-
-    ctrl.start_connect.assert_called_once()
-    (req,) = ctrl.start_connect.call_args.args
-    assert isinstance(req, ConnectRemoteRequest)
-    assert req.ip == "10.0.0.1"
-    assert req.port == 7000
-    ctrl.remember_connection.assert_called_once_with(
-        ConnectionPreferences(ip="10.0.0.1", port=7000)
-    )
-
-
-def test_setup_dialog_connect_failure_signal_updates_status(qapp):
-    ctrl = _make_ctrl()
-    dialog = SetupDialog(ctrl)
-
-    connect = entry_button(dialog, "Connect")
-    connect.click()
-    assert not connect.isEnabled()
-    on_failed = ctrl.bind_connection_outcome.call_args.args[1]
-    on_failed("network bad")
-
-    assert any("network bad" in label.text() for label in dialog.findChildren(QLabel))
-    assert connect.isEnabled()
 
 
 @pytest.fixture
@@ -550,7 +504,6 @@ def test_long_status_message_wraps_without_widening_dialog(
     dialog, _controller, _state = entry_dialog
     dialog.resize(900, 600)
     qapp.processEvents()
-    ip = dialog.findChild(QLineEdit)
     widths = (dialog.width(), dialog.minimumSizeHint().width())
     combo = entry_selector(dialog)
     combo.addItem("missing_" + "x" * 160)
@@ -562,7 +515,6 @@ def test_long_status_message_wraps_without_widening_dialog(
     assert status.wordWrap()
     assert dialog.width() == widths[0]
     assert dialog.minimumSizeHint().width() <= max(widths[1], 900)
-    assert ip is not None
 
 
 def test_entry_paths_elide_middle_keep_name_and_open_folder(
@@ -693,17 +645,15 @@ def test_missing_result_root_shows_hint_instead_of_error(
         qapp.processEvents()
 
 
-@pytest.mark.parametrize("action", ["Open", "Connect"])
-def test_setup_error_uses_theme_foreground(qapp, window_palette, action):
+def test_setup_error_uses_theme_foreground(qapp, window_palette):
     ctrl = _make_ctrl()
     ctrl.open_entry.side_effect = RuntimeError("entry failed")
-    ctrl.start_connect.side_effect = RuntimeError("connection failed")
     dialog = SetupDialog(ctrl)
     try:
         dialog.setPalette(window_palette)
         entry_selector(dialog).addItem("missing")
         entry_selector(dialog).setCurrentText("missing")
-        entry_button(dialog, action).click()
+        entry_button(dialog, "Open").click()
         label = next(
             label for label in dialog.findChildren(QLabel) if "failed" in label.text()
         )

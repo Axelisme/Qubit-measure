@@ -24,7 +24,7 @@ def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
                 "x180_f2": Slot("$f2.module.x180", copy=True),
                 "x90_f1": Slot("$f1.module.x90", copy=True),
                 "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": Slot("$mux.module.readout", copy=True)
+                "readout": Slot("$mux.module.readout")
                 if ctx.has("$mux.module.readout")
                 else Template("readout/mux:blank"),
             },

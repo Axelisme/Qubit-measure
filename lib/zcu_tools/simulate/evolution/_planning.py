@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from .engine import DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
 from .kernel import SegmentTable
-from .secular import FluxWaveform, ModelSource
+from .secular import FluxWaveform, ModelSource, ShiftOrderingError
 
 
 @dataclass(frozen=True)
@@ -134,6 +134,8 @@ def _boundaries(batch: TimelineBatch, tracks: Sequence[_TrackGeometry]):
         _events(point, batch.end_ns),
         _events(flux_point, batch.flux.start_ns),
     ]
+    for point_index, times in enumerate(batch.segment_boundaries):
+        events.append(_events(np.full(len(times), point_index), np.asarray(times)))
     for track in tracks:
         for support in (track.pulse, *(p for p, _ in track.plateaus)):
             for boundary in (support.start, support.end):
@@ -307,11 +309,17 @@ def _waveform_varies(batch: TimelineBatch, point, start, end):
     return count[last] > count[first]
 
 
+def batch_boundaries(batch: TimelineBatch, plateau_cache: _PlateauCache):
+    """Single authority for public queries and evolve event geometry."""
+    tracks = tuple(_track_geometry(track, plateau_cache) for track in batch.tracks)
+    return _boundaries(batch, tracks)
+
+
 def _batch_geometry(
     batch: TimelineBatch, source: ModelSource, plateau_cache: _PlateauCache
 ) -> Geometry:
     tracks = tuple(_track_geometry(track, plateau_cache) for track in batch.tracks)
-    events, end, flux_point = _boundaries(batch, tracks)
+    events, end, flux_point = batch_boundaries(batch, plateau_cache)
     point, start = events["timeline"], events["time"]
     duration = end - start
     flux_events = _events(flux_point, batch.flux.start_ns)
@@ -336,8 +344,30 @@ def _batch_geometry(
         offset,
         envelopes,
         batch.flux_waveform,
+        shift_content=_shift_contents(batch, point, start, level, source),
     )
     return Geometry(table, batch.points, flux_drive)
+
+
+def _shift_contents(batch, point, start, levels, source):
+    contents = np.zeros(len(point), dtype="S64")
+    for index, shifts in enumerate(batch.segment_shifts):
+        for shift in shifts:
+            row = np.flatnonzero((point == index) & (start == shift.start_ns))
+            contents[row] = source.register_shift(shift)
+            for selected in row:
+                # Shape/order validation precedes any kernel preparation.
+                try:
+                    source.shifted_model(
+                        tuple(int(v) for v in levels[selected]),
+                        bytes(contents[selected]),
+                    )
+                except ShiftOrderingError as error:
+                    raise ValueError(
+                        f"point {batch.points[index]} segment "
+                        f"[{shift.start_ns}, {shift.end_ns}] ns: {error}"
+                    ) from error
+    return contents
 
 
 def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
@@ -393,6 +423,7 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
         duration_ns=np.concatenate(columns["duration_ns"]),
         level=np.concatenate(columns["level"]),
         tones=np.concatenate(columns["tones"]),
+        shift_content=np.concatenate(columns["shift_content"]),
         tone_port=np.concatenate(columns["tone_port"]),
         tone_frequency_ghz=np.concatenate(columns["tone_frequency_ghz"]),
         tone_amplitude=np.concatenate(columns["tone_amplitude"]),

@@ -55,7 +55,9 @@ def test_ftf_workers_reach_engine_and_preserve_small_acquire(monkeypatch):
                 modules=[pulse.build("drive"), readout.build("ro")],
                 sweep=[("freq", 2)],
             )
-            results.append(program.acquire_decimated(env.soc, progress=False)[0])
+            acquired = program.acquire_decimated(env.soc, progress=False)
+            assert acquired is not None
+            results.append(acquired[0])
         finally:
             env.devices.close_all_devices()
     assert widths == [1, 2]

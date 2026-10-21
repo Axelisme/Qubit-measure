@@ -36,6 +36,7 @@ class DeadLabelEliminationPass(AbsChunkListPass):
     def process(
         self,
         chunks: ChunkList,
+        # tolerated: AbsChunkListPass.process requires ctx; labels use only chunks.
         ctx: PipeLineContext,  # noqa: ARG002
     ) -> tuple[ChunkList, bool]:
         referenced = collect_referenced_labels(chunks)

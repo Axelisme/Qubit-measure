@@ -8,7 +8,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.startup import StartupChangedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -19,10 +19,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionFact,
 )
 from zcu_tools.gui.app.measure.ui.main_window_events import (
-    _CONTENT_REACTIONS,
-    _INTERACTION_REACTIONS,
     MainWindowEventCoordinator,
-    _validate_reaction_matrix,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.events import ContextSwitchedPayload, MlChangedPayload
@@ -151,34 +148,12 @@ def _coordinator(
     ctrl = RecordingCtrl(log, snapshot=snapshot)
     host = RecordingHost(log)
     return (
+        # tolerated(cast): RecordingCtrl logs calls with object snapshot tokens, not the concrete Controller.
         MainWindowEventCoordinator(cast(Any, ctrl), host),
         log,
         ctrl,
         host,
     )
-
-
-def test_reaction_matrices_cover_every_closed_fact_exactly() -> None:
-    assert set(_INTERACTION_REACTIONS) == set(TabInteractionFact)
-    assert set(_CONTENT_REACTIONS) == set(TabContentFact)
-
-
-def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
-    missing = dict(_INTERACTION_REACTIONS)
-    missing.pop(TabInteractionFact.SAVE_FAILED)
-    with pytest.raises(
-        RuntimeError,
-        match=r"missing=\['save_failed'\], extra=\[\]",
-    ):
-        _validate_reaction_matrix("test", TabInteractionFact, missing)
-
-    extra = cast(Any, dict(_CONTENT_REACTIONS))
-    extra["unexpected"] = ()
-    with pytest.raises(
-        RuntimeError,
-        match=r"missing=\[\], extra=\[\"'unexpected'\"\]",
-    ):
-        _validate_reaction_matrix("test", TabContentFact, extra)
 
 
 @pytest.mark.parametrize(
@@ -248,6 +223,10 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
             ],
+        ),
+        (
+            TabInteractionFact.SAVE_DRAFT_COMMITTED,
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.SAVE_STARTED,
@@ -563,10 +542,12 @@ def test_run_started_refreshes_invalidated_content_once(
 def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     from qtpy.QtWidgets import QTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.control_identity import ControlIdentity
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = BaseEventBus()
     ctrl.get_running_tab_id.return_value = "tab-a"
+    ctrl.control_identity = ControlIdentity()
     ctrl.get_active_tab_id.return_value = None
     ctrl.active_operation_count.return_value = 0
     ctrl.has_tab.return_value = True
@@ -578,8 +559,10 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     window = MainWindow(ctrl, templates=lambda: {})
     tab_a = _TabStub()
     tab_b = _TabStub()
-    window._tab_widgets["tab-a"] = tab_a  # type: ignore[assignment]
-    window._tab_widgets["tab-b"] = tab_b  # type: ignore[assignment]
+    # tolerated: The injected tab fixture supplies only the run-marker interaction surface exercised here.
+    window._tab_widgets["tab-a"] = tab_a  # pyright: ignore[reportArgumentType, reportPrivateUsage]
+    # tolerated: The injected tab fixture supplies only the run-marker interaction surface exercised here.
+    window._tab_widgets["tab-b"] = tab_b  # pyright: ignore[reportArgumentType, reportPrivateUsage]
     tabs = window.findChild(QTabWidget)
     assert tabs is not None
     tabs.addTab(tab_a, "A")

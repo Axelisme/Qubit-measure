@@ -53,15 +53,13 @@ from zcu_tools.gui.event_bus import BaseEventBus, EventSubscriptions
 from zcu_tools.gui.session.events import ConnectionFinishedPayload
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.device_models import DeviceEntry
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
         SoCConnectionService,
     )
     from zcu_tools.gui.session.services.context import ContextService
-    from zcu_tools.gui.session.services.device import (
-        DeviceEntry,
-        DeviceService,
-    )
+    from zcu_tools.gui.session.services.device import DeviceService
     from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
@@ -99,7 +97,7 @@ class SessionControllerMixin:
     ) -> tuple[ValueInfo, ScalarValue]:
         return self._ctx_svc.read_value_source(key, type_name)
 
-    # --- setup dialog: connection ----------------------------------------
+    # --- SoC dialog: connection ----------------------------------------
     def start_connect(self, req: ConnectRequest) -> int:
         return self._soc_svc.start_connect(req)
 
@@ -108,7 +106,7 @@ class SessionControllerMixin:
         on_finished: Callable[[], None],
         on_failed: Callable[[str], None],
     ) -> None:
-        """Replace the single SetupDialog connection-outcome observer."""
+        """Replace the single SocDialog connection-outcome observer."""
         subscriptions = getattr(self, "_connection_outcome_subscriptions", None)
         if subscriptions is not None:
             subscriptions.unsubscribe_all()

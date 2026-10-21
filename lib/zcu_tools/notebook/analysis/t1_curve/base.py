@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from functools import partial
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -184,7 +183,8 @@ def plot_t1_vs_elements(
     return fig, ax
 
 
-def plot_sample_t1(
+# tolerated: The sample plot keeps device calibration and axis controls in its documented API.
+def plot_sample_t1(  # noqa: PLR0913
     s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
@@ -211,11 +211,9 @@ def plot_sample_t1(
     if show_value_axis:
         ax2 = ax.secondary_xaxis(
             "top",
-            functions=(  # type: ignore[arg-type]
-                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-                # is inferred from the float overload; runtime is correct (vectorises).
-                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            functions=(
+                lambda values: flux2value(np.asarray(values), flux_half, flux_period),
+                lambda values: value2flux(np.asarray(values), flux_half, flux_period),
             ),
         )
         ax2.set_xlabel(xlabel, fontsize=14)
@@ -223,7 +221,8 @@ def plot_sample_t1(
     return fig, ax
 
 
-def plot_t1_with_sample(
+# tolerated: The documented positional sample API and per-channel noise controls remain separate.
+def plot_t1_with_sample(  # noqa: PLR0913
     s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
@@ -283,11 +282,9 @@ def plot_t1_with_sample(
     if show_value_axis:
         ax2 = ax.secondary_xaxis(
             "top",
-            functions=(  # type: ignore[arg-type]
-                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-                # is inferred from the float overload; runtime is correct (vectorises).
-                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            functions=(
+                lambda values: flux2value(np.asarray(values), flux_half, flux_period),
+                lambda values: value2flux(np.asarray(values), flux_half, flux_period),
             ),
         )
         ax2.set_xlabel(xlabel, fontsize=14)
@@ -295,7 +292,8 @@ def plot_t1_with_sample(
     return fig, ax
 
 
-def plot_eff_t1_with_sample(
+# tolerated: Notebook and test callers use positional samples and separate component/axis keywords.
+def plot_eff_t1_with_sample(  # noqa: PLR0913
     s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
@@ -392,13 +390,7 @@ def plot_eff_t1_with_sample(
 
     range = np.ptp(s_fluxs)
     ax.set_xlim(s_fluxs.min() - 0.01 * range, s_fluxs.max() + 0.01 * range)
-    ax.set_ylim(
-        *_t1_plot_ylim(
-            np.asarray(s_T1s, dtype=np.float64),
-            t1_effs,
-            component_t1s,
-        )
-    )
+    ax.set_ylim(*_t1_plot_ylim(np.asarray(s_T1s, dtype=np.float64)))
     ax.set_xlabel(r"$\phi_{ext}/\phi_0$")
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
@@ -426,11 +418,9 @@ def plot_eff_t1_with_sample(
     if show_value_axis:
         ax2 = ax.secondary_xaxis(
             "top",
-            functions=(  # type: ignore[arg-type]
-                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-                # is inferred from the float overload; runtime is correct (vectorises).
-                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            functions=(
+                lambda values: flux2value(np.asarray(values), flux_half, flux_period),
+                lambda values: value2flux(np.asarray(values), flux_half, flux_period),
             ),
         )
         ax2.set_xlabel(xlabel, fontsize=14)
@@ -471,13 +461,57 @@ def _t1_component_style(label: str) -> dict[str, Any]:
     }
 
 
-def _t1_plot_ylim(
-    sample_T1s: NDArray[np.float64],
-    effective_T1s: NDArray[np.float64],  # noqa: ARG001
-    component_T1s: Mapping[str, NDArray[np.float64]] | None,  # noqa: ARG001
-) -> tuple[float, float]:
+def _t1_plot_ylim(sample_T1s: NDArray[np.float64]) -> tuple[float, float]:
     values = np.asarray(sample_T1s, dtype=np.float64)
     values = values[np.isfinite(values) & (values > 0.0)]
     if values.size == 0:
         raise ValueError("T1 plot needs at least one positive finite sample T1 value")
     return 0.5 * float(np.min(values)), 3.0 * float(np.max(values))
+
+
+def omega_mask(
+    omegas: NDArray[np.float64],
+    omega_range: tuple[float | None, float | None],
+) -> NDArray[np.bool_]:
+    """Select omegas in the inclusive omega_range, both in rad/ns.
+
+    Each None endpoint leaves that side open. Return a boolean array matching
+    omegas; NaNs follow NumPy comparison semantics (an entirely open range keeps
+    every element). This selection does not validate or mutate the inputs.
+    """
+    mask = np.ones_like(omegas, dtype=bool)
+    lower, upper = omega_range
+    if lower is not None:
+        mask &= omegas >= lower
+    if upper is not None:
+        mask &= omegas <= upper
+    return mask
+
+
+def format_parameter(name: str, value: float) -> str:
+    """Format a T1 parameter as ``name = value`` without changing its value.
+
+    Temp is supplied in K and displayed in mK; Q_cap, Q_ind, x_qp and other
+    names use scientific notation in their input units. Nonfinite values are
+    displayed as such, not rejected.
+    """
+    return f"{name} = {_format_parameter_value(name, value)}"
+
+
+def _format_parameter_value(name: str, value: float) -> str:
+    if name == "Temp":
+        return f"{value * 1e3:.2f} mK"
+    return f"{value:.3e}"
+
+
+def positive_override(override: float | None, fallback: float, name: str) -> float:
+    """Resolve an optional positive finite parameter in the caller's units.
+
+    Use fallback only when override is None. Return a Python float; raise
+    ValueError naming the parameter if the selected value is nonpositive or
+    nonfinite. Neither value is converted to a different physical unit.
+    """
+    value = fallback if override is None else override
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be positive and finite")
+    return float(value)

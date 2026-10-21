@@ -10,7 +10,7 @@ from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiProjection,
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.plotting.singleshot_rabi import plot_rabi_joint
+from zcu_tools.plotting.singleshot_rabi import RabiJointPlotOptions, plot_rabi_joint
 
 
 def _fit(*, valid: bool) -> RabiJointFitResult:
@@ -66,10 +66,12 @@ def test_chart_uses_explicit_duration_size_and_coordinate_labels(
             np.array([0.0, 1.0]),
             np.array([[-1.0, 1.0], [-1.0, 1.0]], dtype=np.complex128),
             _fit(valid=True),
-            ro_length_us,
-            sweep=sweep,
+            RabiJointPlotOptions(
+                ro_length_us=ro_length_us,
+                sweep=sweep,
+                figsize=(6.0, 4.0),
+            ),
             plots=plots,
-            figsize=(6.0, 4.0),
         )
         assert tuple(plots) == ("fit",)
         fig = plots["fit"]
@@ -97,10 +99,12 @@ def test_invalid_fit_retains_measured_histogram_and_unavailable_calibration() ->
             np.array([0.0, 1.0]),
             np.array([[-1.0, 1.0], [-1.0, 1.0]], dtype=np.complex128),
             _fit(valid=False),
-            2.0,
-            sweep="length",
+            RabiJointPlotOptions(
+                ro_length_us=2.0,
+                sweep="length",
+                figsize=(6.0, 4.0),
+            ),
             plots=plots,
-            figsize=(6.0, 4.0),
         )
         population, histogram, confusion = plots["fit"].axes
         assert population.get_title() == "Rabi joint fit invalid"

@@ -129,9 +129,9 @@ class TransitionsForm(QWidget):
 
     def get_transitions(self) -> TransitionDict:
         """Parse the fields back to a ``TransitionDict`` (empty categories dropped)."""
-        result: dict[str, list[tuple[int, int]]] = {}
+        result: TransitionDict = {}
         for cat, edit in self._fields.items():
             pairs = parse_pairs(edit.text())
             if pairs:
                 result[cat] = pairs
-        return TransitionDict(result)  # type: ignore[arg-type]
+        return result

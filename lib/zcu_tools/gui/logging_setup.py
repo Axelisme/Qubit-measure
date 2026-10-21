@@ -102,7 +102,8 @@ def _remove_managed_handlers(kind: str | None = None) -> None:
                 closed.add(ident)
 
 
-def setup_gui_logging(
+# tolerated: Runtime and MCP inject paths/namespaces directly; handler enablement, override and retention have no shared caller-owned options record.
+def setup_gui_logging(  # noqa: PLR0913
     *,
     app_name: str,
     log_root: Path,

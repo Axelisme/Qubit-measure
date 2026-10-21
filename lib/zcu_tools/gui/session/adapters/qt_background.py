@@ -29,14 +29,15 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any
 
-from qtpy.QtCore import (  # type: ignore[attr-defined]
+from qtpy.QtCore import (
     QEventLoop,
     QObject,
     QRunnable,
     QThread,
     QThreadPool,
     QTimer,
-    Signal,  # type: ignore[reportPrivateImportUsage]
+    # tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
+    Signal,  # pyright: ignore[reportPrivateImportUsage]
 )
 
 # Sentinel distinguishing "the thunk never produced a value" from "the thunk

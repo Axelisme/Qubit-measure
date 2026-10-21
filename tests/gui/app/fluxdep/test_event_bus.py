@@ -30,7 +30,10 @@ def test_emit_routes_by_payload_type_only():
 def test_unsubscribe_stops_delivery():
     bus = EventBus()
     seen = []
-    cb = lambda p: seen.append(p.name)  # noqa: E731
+
+    def cb(p: SpectrumAddedPayload) -> None:
+        seen.append(p.name)
+
     bus.subscribe(SpectrumAddedPayload, cb)
     bus.unsubscribe(SpectrumAddedPayload, cb)
     bus.emit(SpectrumAddedPayload(name="a"))

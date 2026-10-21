@@ -420,7 +420,8 @@ def annotate_best_point(fig, data: pd.DataFrame) -> tuple[float, float, float]:
     return EJ, EC, EL
 
 
-def add_real_sample(
+# tolerated: Documented sample source, noise model and SNR controls remain explicit.
+def add_real_sample(  # noqa: PLR0913
     fig: go.Figure,
     result_dir: str,
     noise_channels: list[tuple[str, dict[str, Any]]],

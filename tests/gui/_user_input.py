@@ -5,7 +5,6 @@ tests send the same Qt events through QApplication.sendEvent instead.
 """
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
@@ -36,6 +35,20 @@ from PyQt6.QtWidgets import (
     QTreeWidgetItem,
     QWidget,
 )
+
+from ._observations import DialogObservation as DialogObservation
+from ._observations import LegendObservation as LegendObservation
+from ._observations import ListRowObservation as ListRowObservation
+from ._observations import PlotAxesObservation as PlotAxesObservation
+from ._observations import PlotObservation as PlotObservation
+from ._observations import ScrollObservation as ScrollObservation
+from ._observations import StatusObservation as StatusObservation
+from ._observations import TableRowObservation as TableRowObservation
+from ._observations import TabObservation as TabObservation
+from ._observations import TextInputObservation as TextInputObservation
+from ._observations import TreeRowObservation as TreeRowObservation
+from ._observations import VisibleObservation as VisibleObservation
+from ._observations import WidgetObservation as WidgetObservation
 
 
 def key_click(
@@ -70,121 +83,6 @@ def mouse_click(widget: QWidget, at: QPoint) -> None:
                 kind, local, screen, left, buttons, Qt.KeyboardModifier.NoModifier
             ),
         )
-
-
-@dataclass(frozen=True)
-class WidgetObservation:
-    """Displayed text, effective availability, identity and hover help of a widget."""
-
-    kind: str  # Qt widget class name, e.g. QPushButton or QLabel.
-    text: str  # Rendered widget value/caption; empty when hidden or without text.
-    enabled: bool  # Effective Qt enabled flag, including disabled ancestors.
-    visible: bool  # On-screen Qt region exists, including ancestor/viewport clipping.
-    fully_visible: bool  # Entire widget rectangle survives ancestor/viewport clipping.
-    object_name: str  # Stable objectName if provided by the UI, otherwise empty.
-    tooltip: str  # Hover help; empty when hidden or without a tooltip.
-    checked: (
-        bool | None
-    )  # Visible checkable button state; None if hidden or not checkable.
-
-
-@dataclass(frozen=True)
-class TreeRowObservation:
-    """One on-screen tree row; fully clipped/hidden cells have empty captions.
-
-    Paths retain their depth and columns retain their original indices even when
-    column-zero captions are not on screen. Empty captions are not wildcards.
-    """
-
-    tree_name: str  # Containing tree's objectName; empty if the UI provides none.
-    path: tuple[str, ...]  # Root-to-row column-zero captions; unseen levels empty.
-    columns: tuple[
-        str, ...
-    ]  # Original column indices; unseen cells empty, units unchanged.
-    expanded: bool  # Whether the row currently exposes its children.
-
-
-@dataclass(frozen=True)
-class ListRowObservation:
-    """Rendered caption, hover help and selection of one visible list row."""
-
-    text: str
-    tooltip: str
-    selected: bool
-
-
-@dataclass(frozen=True)
-class TableRowObservation:
-    """Visible table row captions, hover help and selection in column order."""
-
-    columns: tuple[str, ...]  # Fully clipped cells have empty captions.
-    tooltips: tuple[str, ...]  # Hover help for the corresponding visible cells.
-    selected: bool  # Whether this row contains a selected item.
-
-
-@dataclass(frozen=True)
-class VisibleObservation:
-    """Visible widgets only, each described without retaining a Qt object."""
-
-    widgets: tuple[WidgetObservation, ...]
-    tree_rows: tuple[
-        TreeRowObservation, ...
-    ]  # Rows intersecting visible tree viewports.
-
-
-@dataclass(frozen=True)
-class StatusObservation:
-    """Text currently visible in the window's bottom status bar."""
-
-    text: str
-
-
-@dataclass(frozen=True)
-class DialogObservation:
-    """A visible dialog's captions and placement on its current screen."""
-
-    title: str
-    texts: tuple[str, ...]  # Visible widget texts, in widget-tree order.
-    frame_within_screen: bool  # Entire frame lies within available screen bounds.
-    height_fraction: float  # Client height divided by available screen height.
-
-
-@dataclass(frozen=True)
-class ScrollObservation:
-    """Visible scroll affordances of one scroll area."""
-
-    vertical_scrollable: bool  # Visible vertical scrollbar has a nonempty range.
-
-
-@dataclass(frozen=True)
-class TabObservation:
-    """Selected tab caption and all captions in the matched visible tab bar."""
-
-    current: str
-    captions: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class LegendObservation:
-    """Visible legend captions from visible matplotlib canvases, in draw order."""
-
-    texts: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class PlotAxesObservation:
-    """Visible axis labels and rendered line-curve count for one matplotlib axes."""
-
-    xlabel: str  # Horizontal label text; empty if the label or axis is hidden.
-    ylabel: str  # Vertical label text; empty if the label or axis is hidden.
-    visible_curves: int  # Nontransparent stroked line paths intersecting the axes.
-
-
-@dataclass(frozen=True)
-class PlotObservation:
-    """Visible axes in canvas/axes order, without retaining artists or result data."""
-
-    axes: tuple[PlotAxesObservation, ...]  # Empty when no plot axes are visible.
 
 
 def _display_text(widget: QWidget) -> str:
@@ -601,6 +499,22 @@ class ComponentDriver:
             mouse_click(widget, point)
         QApplication.processEvents()
 
+    def click_tooltip(self, tooltip: str) -> None:
+        """Click the unique on-screen control with this exact tooltip.
+
+        Missing or ambiguous matches raise LookupError. Disabled, clipped or
+        modal-blocked controls are no-ops, just as with caption-based click.
+        """
+        candidates = [
+            widget
+            for widget in self._widgets()
+            if self._on_screen(widget) and widget.toolTip() == tooltip
+        ]
+        widget = _unique(tooltip, candidates, [w.objectName() for w in candidates])
+        if self._can_interact(widget):
+            mouse_click(widget, widget.rect().center())
+        QApplication.processEvents()
+
     def _field_control(self, text: str | None, object_name: str | None) -> QWidget:
         if (text is None) == (object_name is None):
             raise ValueError("Supply exactly one of text or object_name")
@@ -884,6 +798,22 @@ class ComponentDriver:
             key_click(popup, Qt.Key.Key_Escape)
         chooser.click("&Open")
 
+    def text_input(self, *, object_name: str) -> TextInputObservation:
+        """Observe a named line edit; hidden controls expose no text or hints.
+
+        Raise TypeError for a control that is not a QLineEdit.
+        """
+        widget = self._find(None, object_name, editable=True)
+        if not isinstance(widget, QLineEdit):
+            raise TypeError("Expected a line edit")
+        visible = self._on_screen(widget)
+        return TextInputObservation(
+            text=widget.text() if visible else "",
+            focused=visible and widget.hasFocus(),
+            read_only=widget.isReadOnly(),
+            description=widget.accessibleDescription() if visible else "",
+        )
+
     def enter_text(
         self,
         text: str | None = None,
@@ -897,9 +827,40 @@ class ComponentDriver:
         if self._can_interact(widget):
             mouse_click(widget, widget.rect().center())
             key_click(widget, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
-            type_text(widget, value)
+            if value == "":
+                key_click(widget, Qt.Key.Key_Backspace)
+            else:
+                type_text(widget, value)
             if commit:
                 key_click(widget, Qt.Key.Key_Return)
+        QApplication.processEvents()
+
+    def press_key(
+        self,
+        key: Qt.Key,
+        text: str | None = None,
+        *,
+        object_name: str | None = None,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ) -> None:
+        """Send a real key with modifiers without assigning keyboard focus.
+
+        With no selector, use the window's actual Qt focus, or the window when
+        no child has focus. Otherwise, supply either text (a visible field label
+        or caption) or object_name (an existing Qt objectName) to target a control.
+        Tab uses Qt's normal focus traversal. Hidden, disabled and fully clipped
+        targets are not driven. Process pending Qt events after the key.
+
+        Raise ValueError if both selectors are supplied, or LookupError if a
+        selector does not identify exactly one control.
+        """
+        widget = (
+            self._window.focusWidget() or self._window
+            if text is None and object_name is None
+            else self._field_control(text, object_name)
+        )
+        if self._can_interact(widget):
+            key_click(widget, key, modifiers)
         QApplication.processEvents()
 
     def select_combo(self, value: str, *, object_name: str) -> None:

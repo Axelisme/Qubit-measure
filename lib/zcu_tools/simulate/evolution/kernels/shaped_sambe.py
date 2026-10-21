@@ -349,7 +349,9 @@ class ShapedSambeKernel:
         families: dict[RampFamilyPlan, _SpectralFamily] = {}
         compact: dict[int, CompactPolynomial] = {}
         for index, key in enumerate(keys):
-            model = source.model(tuple(int(v) for v in key["level"]))
+            model = source.shifted_model(
+                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+            )
             port, f, bound = (
                 int(key["port"]),
                 float(key["frequency"]),

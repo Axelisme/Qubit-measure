@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 
@@ -77,7 +78,13 @@ def test_filter_masks_follow_spectrum_points_not_joint_positions(
     ctrl.state.put_spectrum(_entry("A", [4.0, 5.0, 6.0]))
     ctrl.state.put_spectrum(_entry("B", [6.0, 7.0]))
     ctrl.set_selection(np.array([True, True, False, False, True]), 0.08)
-    ctrl.set_fit_params("synthetic.hdf5", (2, 15), (0.2, 2), (0.1, 2), {}, None, None)
+    ctrl.set_fit_params(
+        "synthetic.hdf5",
+        ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
+        {},
+        None,
+        None,
+    )
     client = route_harness.client()
 
     if change in ("reset", "set"):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.measure.adapter import PostAnalyzeRequest, PostWritebackRequest
 from zcu_tools.gui.app.measure.events.tab import TabInteractionFact
@@ -15,7 +15,7 @@ from zcu_tools.resources.entry.ledger_models import JsonObject
 
 from ..writeback import WritebackDraft
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
-from .staged_analyze import _StagedAnalyzeService
+from .staged_analyze import StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class _PostAnalyzeCapture:
     plots: Plots
 
 
-class PostAnalyzeService(_StagedAnalyzeService):
+class PostAnalyzeService(StagedAnalyzeService):
     """Second-layer analysis service — mirrors :class:`AnalyzeService`.
 
     Runs a tab's ``adapter.post_analyze`` off the main thread on top of the
@@ -49,7 +49,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
     the main thread (the State main-thread invariant). Like FIT analyze, it takes
     a handle only (no exclusion, ADR-0066): post-analysis is a pure CPU recompute
     that never conflicts with hardware. The handle lifecycle + failure path live in
-    the shared :class:`_StagedAnalyzeService` base.
+    the shared :class:`StagedAnalyzeService` base.
 
     Gate: the primary analyze result must exist; ``start_post_analyze`` fast-fails
     otherwise (the post-analysis builds on the primary fit it carries).
@@ -188,7 +188,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
                 adapter.get_post_writeback_items(
                     PostWritebackRequest(
                         run_result=run_result,
-                        analyze_result=cast(Any, analyze_result),
+                        analyze_result=analyze_result,
                         post_analyze_result=post_result,
                         ctx=ctx,
                     )

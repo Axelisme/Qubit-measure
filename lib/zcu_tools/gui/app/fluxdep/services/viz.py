@@ -448,14 +448,12 @@ def render_fit_result(
         flux_period=aligned.flux_period if aligned else None,
         title=title,
         attribution=fit.result,
-        xlim=display.xlim,
-        ylim=display.ylim,
-        show_const_freq=display.show_const_freq,
-        plot_transitions=display.plot_transitions,
+        display=display,
     )
 
 
-def render_fit_figure(
+# tolerated: Numeric layers, calibration and attribution have no shared multi-caller record.
+def render_fit_figure(  # noqa: PLR0913
     figure: Figure,
     spectrums: Mapping[str, SpectrumEntry | SearchSpectrumBackground],
     t_fluxs: NDArray[np.float64],
@@ -469,10 +467,7 @@ def render_fit_figure(
     flux_half: float | None = None,
     flux_period: float | None = None,
     title: str = "",
-    xlim: tuple[float, float] | None = None,
-    ylim: tuple[float, float] | None = None,
-    show_const_freq: bool = True,
-    plot_transitions: TransitionDict | None = None,
+    display: FitDisplay | None = None,
     attribution: DatabaseSearchResult | None = None,
 ) -> None:
     """Render the full fit visualisation onto ``figure`` (cleared first).
@@ -482,7 +477,8 @@ def render_fit_figure(
     fit points. ``flux_half`` / ``flux_period`` drive the dev-value secondary axis
     (omit to skip it).
 
-    Show-tab controls:
+    display holds the Show-tab controls; None uses the default FitDisplay,
+    preserving all fit lines:
     - ``xlim`` / ``ylim`` set the axis limits; ``None`` (default) derives them via
       :func:`derive_auto_limits` (matching the notebook's ``auto_derive_limits``).
     - ``show_const_freq`` toggles the r_f / sample_f reference lines.
@@ -492,6 +488,8 @@ def render_fit_figure(
       transition_indices supply compiled-slot colors; outlier_mask supplies
       hollow markers. None draws plain points, never synthetic residual marks.
     """
+    if display is None:
+        display = FitDisplay()
     figure.clear()
     ax = figure.add_subplot(1, 1, 1)
 
@@ -499,7 +497,9 @@ def render_fit_figure(
     # that use them; inject the provided ones so a 'mirror' / 'red side' display
     # subset never raises a missing-key error.
     sim_transitions = transitions_with_freqs(
-        plot_transitions if plot_transitions is not None else transitions,
+        display.plot_transitions
+        if display.plot_transitions is not None
+        else transitions,
         r_f,
         sample_f,
     )
@@ -546,7 +546,7 @@ def render_fit_figure(
             zorder=3,
             label="_outliers",
         )
-    if show_const_freq:
+    if display.show_const_freq:
         _plot_constant_freqs(ax, r_f, sample_f)
 
     ax.set_xlabel("Flux")
@@ -569,8 +569,8 @@ def render_fit_figure(
 
     # Limits: explicit override, else auto (notebook auto_derive_limits parity).
     auto_x, auto_y = derive_auto_limits(spectrums, s_fluxs, s_freqs, r_f, sample_f)
-    ax.set_xlim(*(xlim if xlim is not None else auto_x))
-    ax.set_ylim(*(ylim if ylim is not None else auto_y))
+    ax.set_xlim(*(display.xlim if display.xlim is not None else auto_x))
+    ax.set_ylim(*(display.ylim if display.ylim is not None else auto_y))
 
     if flux_half is not None and flux_period:
         _add_dev_value_axis(ax, flux_half, flux_period)

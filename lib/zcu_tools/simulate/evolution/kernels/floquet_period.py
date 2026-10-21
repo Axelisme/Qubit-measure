@@ -16,6 +16,7 @@ from . import _period_sambe
 from ._cf4_grid import coarse_count, finer_count, spectral_width
 from ._cf4_spectral import CF4Nodes, build_nodes, spectral_prefixes
 from ._dop853 import Tolerances, integrate_dense
+from ._period_channel import advance, advance_segments
 from ._secular import secular_operators
 from ._workload_facts import split_rate
 
@@ -407,6 +408,20 @@ def _build_anchor(
     return PeriodAnchor(period, interaction)
 
 
+def _dependencies_reusable(
+    dependencies: list[tuple[float, ResourceHandle[PeriodAnchor]]], consumer: float
+) -> bool:
+    """Return whether every dependency can still serve this consumer."""
+    return bool(dependencies) and all(
+        not handle.released
+        and (
+            consumer in handle.remaining_consumers
+            or (not handle.sealed and consumer not in handle.actual_consumers)
+        )
+        for _, handle in dependencies
+    )
+
+
 def _prepare_entry(
     model: SecularModel, tone: _Tone, context: KernelContext
 ) -> PeriodData:
@@ -446,14 +461,7 @@ def _prepare_entry(
     else:
         dependencies = []
     # Repeated keys never reopen a handed-off or released dependency.
-    reusable = dependencies and all(
-        not handle.released
-        and (
-            consumer in handle.remaining_consumers
-            or (not handle.sealed and consumer not in handle.actual_consumers)
-        )
-        for _, handle in dependencies
-    )
+    reusable = _dependencies_reusable(dependencies, consumer)
     if not reusable:
         return _build(model, tone, context.budget, builder, work_plan=context.work_plan)
     for _, handle in dependencies:
@@ -598,135 +606,6 @@ def _dense(times, coefficients, time):
 
 
 @njit(nogil=True, cache=True)
-def _dissipate_into(rho, population, coherence, result, diagonal, updated):
-    for i in range(len(rho)):
-        diagonal[i] = rho[i, i]
-        for j in range(len(rho)):
-            result[i, j] = rho[i, j] * coherence[i, j]
-    np.dot(population, diagonal, out=updated)
-    for i in range(len(rho)):
-        result[i, i] = updated[i]
-
-
-@njit(nogil=True, cache=True)
-def _advance_loop(rho, unitary, population, coherence, count):
-    # Preserve each GEMM and half-bath rounding while reusing worker-local buffers.
-    adjoint = unitary.conj().T.copy()
-    state = rho.copy()
-    first = np.empty(rho.shape, dtype=np.complex128)
-    second = np.empty(rho.shape, dtype=np.complex128)
-    diagonal = np.empty(len(rho), dtype=np.complex128)
-    updated = np.empty(len(rho), dtype=np.complex128)
-    for _ in range(count):
-        _dissipate_into(state, population, coherence, first, diagonal, updated)
-        np.dot(unitary, first, out=second)
-        np.dot(second, adjoint, out=state)
-        _dissipate_into(state, population, coherence, first, diagonal, updated)
-        state, first = first, state
-    return state
-
-
-@njit(nogil=True, cache=True)
-def _hermitian_coordinates(size):
-    # Diagonal entries, then real/imaginary off-diagonal basis pairs.
-    a = np.empty(size * size, dtype=np.int64)
-    b = np.empty(size * size, dtype=np.int64)
-    kind = np.zeros(size * size, dtype=np.int64)
-    for i in range(size):
-        a[i] = b[i] = i
-    index = size
-    for i in range(size):
-        for j in range(i + 1, size):
-            a[index] = a[index + 1] = i
-            b[index] = b[index + 1] = j
-            kind[index] = 1
-            kind[index + 1] = 2
-            index += 2
-    return a, b, kind
-
-
-@njit(nogil=True, cache=True)
-def _real_channel(unitary, population, coherence, coordinates):
-    # U(.)U† in a Hermitian basis is real. Apply both secular half maps to
-    # its input/output coordinates, without commuting dissipation through U.
-    a, b, kind = coordinates
-    size = len(unitary)
-    matrix = np.empty((size * size, size * size), dtype=np.float64)
-    for r in range(len(a)):
-        for c in range(len(a)):
-            z = unitary[a[r], a[c]] * unitary[b[r], b[c]].conjugate()
-            if kind[c] == 1:
-                z += unitary[a[r], b[c]] * unitary[b[r], a[c]].conjugate()
-            elif kind[c] == 2:
-                z = 1j * (z - unitary[a[r], b[c]] * unitary[b[r], a[c]].conjugate())
-            matrix[r, c] = z.imag if kind[r] == 2 else z.real
-    p = population.real.copy()
-    matrix[:size, :] = p @ matrix[:size, :].copy()
-    matrix[:, :size] = matrix[:, :size].copy() @ p
-    for r in range(size, len(a)):
-        for c in range(len(a)):
-            matrix[r, c] *= coherence[a[r], b[r]]
-    for c in range(size, len(a)):
-        for r in range(len(a)):
-            matrix[r, c] *= coherence[a[c], b[c]]
-    return matrix
-
-
-@njit(nogil=True, cache=True)
-def _advance_power(rho, unitary, population, coherence, count):
-    coordinates = _hermitian_coordinates(len(rho))
-    a, b, kind = coordinates
-    matrix = _real_channel(unitary, population, coherence, coordinates)
-    state = np.empty(len(a), dtype=np.float64)
-    residual = np.empty(len(a), dtype=np.float64)
-    for i in range(len(a)):
-        if kind[i] == 0:
-            z = rho[a[i], b[i]]
-        elif kind[i] == 1:
-            z = (rho[a[i], b[i]] + rho[b[i], a[i]]) / 2
-        else:
-            z = (rho[a[i], b[i]] - rho[b[i], a[i]]) / (2j)
-        # Complex coordinates span arbitrary matrices, not just Hermitian
-        # density. Keep their imaginary part as a second real right-hand side.
-        state[i] = z.real
-        residual[i] = z.imag
-    while count:
-        if count & 1:
-            state = matrix @ state
-            residual = matrix @ residual
-        count //= 2
-        if count:
-            matrix = matrix @ matrix
-    result = np.empty_like(rho)
-    for i in range(len(a)):
-        z = state[i] + 1j * residual[i]
-        if kind[i] == 0:
-            result[a[i], b[i]] = z
-        elif kind[i] == 1:
-            w = state[i + 1] + 1j * residual[i + 1]
-            result[a[i], b[i]] = z + 1j * w
-            result[b[i], a[i]] = z - 1j * w
-    return result
-
-
-@njit(nogil=True, cache=True)
-def _advance(rho, unitary, population, coherence, count):
-    if count == 0:
-        return rho
-    if len(rho) == 16 and count >= 4096:
-        return _advance_power(rho, unitary, population, coherence, count)
-    return _advance_loop(rho, unitary, population, coherence, count)
-
-
-@njit(nogil=True, cache=True)
-def _advance_segments(rho, unitaries, population, coherence, count):
-    for _ in range(count):
-        for unitary in unitaries:
-            rho = _advance(rho, unitary, population, coherence, 1)
-    return rho
-
-
-@njit(nogil=True, cache=True)
 def _dense_fundamental(times, coefficients, unitary, time):
     period = times[-1]
     local = time % period
@@ -747,12 +626,12 @@ def _dense_row(entry, origin, duration, rho, tail_bath):
     period = entry.times[-1]
     count = int(duration // period)
     tail = duration - count * period
-    result = _advance(rho, unitary, entry.population_half, entry.coherence_half, count)
+    result = advance(rho, unitary, entry.population_half, entry.coherence_half, count)
     if tail > 0:
         end = _dense_fundamental(
             entry.times, entry.coefficients, entry.unitary, origin + tail
         )
-        result = _advance(result, end @ start.conj().T, tail_bath[0], tail_bath[1], 1)
+        result = advance(result, end @ start.conj().T, tail_bath[0], tail_bath[1], 1)
     return result
 
 
@@ -810,14 +689,14 @@ def _subdivided_row(
     population = expm(entry.generator * step / 2).astype(complex)
     coherence = np.exp(-entry.decay * step / 2)
     count = int(duration // period)
-    result = _advance_segments(rho, unitaries, population, coherence, count)
+    result = advance_segments(rho, unitaries, population, coherence, count)
     tail = duration - count * period
     whole = min(int(tail // step), subdivisions - 1)
-    result = _advance_segments(result, unitaries[:whole], population, coherence, 1)
+    result = advance_segments(result, unitaries[:whole], population, coherence, 1)
     residual = tail - whole * step
     if residual > 0:
         unitary = _fundamental(entry, origin + tail) @ boundaries[whole].conj().T
-        result = _advance(
+        result = advance(
             result,
             unitary,
             expm(entry.generator * residual / 2).astype(complex),
@@ -861,12 +740,12 @@ def _row(
     unitary = start @ entry.unitary @ start.conj().T
     count = int(duration // period)
     tail = duration - count * period
-    result = _advance(rho, unitary, entry.population_half, entry.coherence_half, count)
+    result = advance(rho, unitary, entry.population_half, entry.coherence_half, count)
     if tail > 0:
         end = origin + tail
         tail_unitary = _fundamental(entry, end)
         tail_unitary = tail_unitary @ start.conj().T
-        result = _advance(
+        result = advance(
             result,
             tail_unitary,
             expm(entry.generator * tail / 2).astype(complex),
@@ -937,7 +816,7 @@ class FloquetPeriodKernel:
             frequency = float(table.tone_frequency_ghz[row, 0])
             if envelope.kind != "constant" or abs(frequency) < _MIN_FREQUENCY_GHZ:
                 continue
-            model = source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(source, row)
             estimate = table.duration_ns[row] * split_rate(
                 model,
                 int(table.tone_port[row, 0]),
@@ -957,12 +836,14 @@ class FloquetPeriodKernel:
             len(rows),
             dtype=[
                 ("level", "<i8", table.level.shape[1]),
+                ("shift", "S64"),
                 ("port", "<i8"),
                 ("frequency", "<f8"),
                 ("gain", "<f8"),
             ],
         )
         keys["level"] = table.level[rows]
+        keys["shift"] = table.shift_content[rows]
         if len(rows):
             if np.any(table.tones[rows] != 1):
                 raise ValueError("Floquet period keys require one tone")
@@ -998,7 +879,9 @@ class FloquetPeriodKernel:
             raise ValueError("Floquet period representatives must pass guard")
         entries = []
         for key in keys:
-            model = source.model(tuple(int(v) for v in key["level"]))
+            model = source.shifted_model(
+                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+            )
             port, frequency, gain = (
                 int(key["port"]),
                 float(key["frequency"]),

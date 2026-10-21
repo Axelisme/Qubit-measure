@@ -15,213 +15,11 @@ from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
     FluxSchedule,
     ModelSource,
-    SecularModel,
 )
-from zcu_tools.simulate.evolution.cache import RESIDENT_METADATA_BYTES
 from zcu_tools.simulate.evolution.kernel import ApplyContext, GuardResult, KernelContext
 
-from ._engine import Payload, RecordingKernel, batch, run, source, track
+from ._engine import Payload, RecordingKernel, TimelineKernel, batch, run, source, track
 from .contract.kernel_suite import synthetic_model
-
-
-def test_geometry_preserves_track_order_mux_plateaus_and_flux_levels():
-    from zcu_tools.simulate.evolution.kernels import REGISTRY
-
-    base = synthetic_model()
-    model = replace(base, drives=(base.drives[0], replace(base.drives[0], name="mux")))
-    src = ModelSource(
-        source().initial_density, lambda level: replace(model, level=level)
-    )
-    env = EnvelopeSpec(
-        "sampled", np.array([0, 1j, 1j, 0], complex), np.array([0.0, 2.0, 12.0, 14.0])
-    )
-    pulse = replace(track(1, env, duration=20), frequency_ghz=np.array([-0.1]))
-    mux = replace(
-        track(1, EnvelopeSpec("constant"), start=4, duration=12),
-        port="mux",
-        phase_rad=np.array([0.7]),
-    )
-    silent = replace(track(1, env, start=1, duration=22), amplitude=np.zeros(1))
-    timeline = replace(
-        batch(1, duration=24),
-        tracks=(pulse, silent, mux),
-        flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 8.0]), np.array([[0], [1]])),
-    )
-    kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
-    result = run(Engine(1, 0, kernels=kernels), src, (timeline,))
-    observations = {
-        float(table.start_ns[row]): (table, int(row), kernel.name)
-        for kernel in kernels
-        for table, rows, _ in kernel.calls
-        for row in rows
-    }
-    assert sorted(observations) == [0.0, 2.0, 4.0, 8.0, 12.0, 16.0, 20.0]
-    for start, (table, row, family) in observations.items():
-        count = (start < 20) + (4 <= start < 16)
-        assert table.tones[row] == count
-        assert table.level[row].tolist() == [int(start >= 8)]
-        assert family == ("flux_dop853" if count else "t4")
-        if count:
-            assert table.tone_port[row, :count].tolist() == (
-                [0, 1] if count == 2 else [0]
-            )
-            flat = 2 <= start < 12
-            assert table.envelopes[table.tone_envelope[row, 0]].kind == (
-                "constant" if flat else "sampled"
-            )
-            assert table.tone_envelope_offset_ns[row, 0] == (0 if flat else start)
-            assert table.tone_theta_rad[row, 0] == (
-                2 * np.pi * -0.1 * start + (np.pi / 2 if flat else 0)
-            )
-            if count == 2:
-                assert table.tone_envelope_offset_ns[row, 1] == start - 4
-                assert table.tone_theta_rad[row, 1] == 2 * np.pi * 0.1 * start + 0.7
-    np.testing.assert_array_equal(result.densities[0], src.initial_density)
-
-
-@pytest.mark.parametrize(
-    ("times", "values"),
-    [
-        ([0.0, 10.0, 30.0, 240.0], [0.0, 1j, 1j, 0.3j]),
-        ([0.0, 12.0, 32.0, 240.0], [0.0, 1j, 1j, 0.3j]),
-        ([0.0, 10.0, 30.0, 240.0], [0.0, 1j, 1j, 0.4j]),
-    ],
-)
-def test_equal_waveform_copies_keep_physical_rows_across_batches(times, values):
-    from zcu_tools.simulate.evolution.kernels import REGISTRY
-
-    base = synthetic_model()
-    drives = (base.drives[0], replace(base.drives[0], name="mux"))
-
-    def model(level):
-        return replace(
-            base, level=level, drives=drives if level == (0,) else drives[::-1]
-        )
-
-    src = ModelSource(source().initial_density, model)
-    batches = []
-    for point, duration in enumerate((254.0, 256.0, 254.0, 256.0)):
-        # Equal content is deliberately reconstructed as a distinct record.
-        env = EnvelopeSpec("sampled", np.array(values), np.array(times))
-        batches.append(
-            replace(
-                batch(1, duration=duration),
-                points=np.array([point]),
-                flux=FluxSchedule(
-                    np.array([0, 2]),
-                    np.array([0.0, 100.0]),
-                    np.array([[0], [1]]),
-                ),
-                tracks=(
-                    replace(
-                        track(1, env, duration=duration),
-                        phase_rad=np.array([point * 0.13]),
-                    ),
-                    replace(
-                        track(1, env, duration=duration),
-                        port="absent",
-                        active=np.array([False]),
-                    ),
-                    replace(
-                        track(1, EnvelopeSpec("constant"), start=4, duration=238),
-                        port="mux",
-                    ),
-                ),
-            )
-        )
-    kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
-    result = run(Engine(1, 0, kernels=kernels), src, tuple(batches))
-    observations = {
-        (int(table.timeline[row]), float(table.start_ns[row])): (table, int(row))
-        for kernel in kernels
-        for table, rows, _ in kernel.calls
-        for row in rows
-    }
-    for point, duration in enumerate((254.0, 256.0, 254.0, 256.0)):
-        boundaries = [0.0, 4.0, times[1], times[2], 100.0, 240.0, 242.0, duration]
-        assert (
-            sorted(start for p, start in observations if p == point) == boundaries[:-1]
-        )
-        for start, end in zip(boundaries[:-1], boundaries[1:], strict=True):
-            table, row = observations[point, start]
-            assert table.duration_ns[row] == end - start
-            count = 1 + (4 <= start < 242)
-            level = int(start >= 100)
-            assert table.level[row].tolist() == [level]
-            assert table.tones[row] == count
-            assert (
-                table.tone_port[row, :count].tolist()
-                == ([0, 1] if not level else [1, 0])[:count]
-            )
-            physical = table.envelopes[table.tone_envelope[row, 0]]
-            flat = times[1] <= start < times[2] or start >= 240
-            assert physical.kind == ("constant" if flat else "sampled")
-            if flat:
-                value = values[-1] if start >= 240 else 1j
-                assert table.tone_amplitude[row, 0] == abs(value)
-                assert table.tone_envelope_offset_ns[row, 0] == 0
-                assert table.tone_theta_rad[
-                    row, 0
-                ] == 2 * np.pi * 0.1 * start + point * 0.13 + np.angle(value)
-            else:
-                np.testing.assert_array_equal(physical.samples, values)
-                np.testing.assert_array_equal(physical.sample_ns, times)
-                assert table.tone_envelope_offset_ns[row, 0] == start
-    np.testing.assert_array_equal(result.points, np.arange(4))
-    np.testing.assert_array_equal(
-        result.densities, np.repeat(src.initial_density[None], 4, axis=0)
-    )
-
-
-def test_waveform_time_and_complex_samples_remain_distinct_in_one_acquire():
-    envelopes = (
-        EnvelopeSpec("sampled", np.array([0.2, 1j]), np.array([0.0, 2.0])),
-        EnvelopeSpec("sampled", np.array([0.2, 1j]), np.array([0.0, 3.0])),
-        EnvelopeSpec("sampled", np.array([0.2, -1j]), np.array([0.0, 2.0])),
-    )
-    timelines = tuple(
-        replace(
-            batch(1),
-            points=np.array([point]),
-            tracks=(track(1, env),),
-        )
-        for point, env in enumerate(envelopes)
-    )
-    direct = RecordingKernel("dop853")
-    src = source()
-    result = run(Engine(1, 0, kernels=(direct,)), src, timelines)
-    for table, rows, _ in direct.calls:
-        for row in rows:
-            expected = envelopes[table.timeline[row]]
-            physical = table.envelopes[table.tone_envelope[row, 0]]
-            np.testing.assert_array_equal(physical.samples, expected.samples)
-            np.testing.assert_array_equal(physical.sample_ns, expected.sample_ns)
-    np.testing.assert_array_equal(
-        result.densities, np.repeat(src.initial_density[None], 3, axis=0)
-    )
-
-
-def test_active_unknown_port_raises_value_error():
-    timeline = replace(
-        batch(1),
-        tracks=(replace(track(1, EnvelopeSpec("constant")), port="absent"),),
-    )
-    with (
-        closing(Engine(1, 0, kernels=(RecordingKernel("t6"),))) as engine,
-        pytest.raises(ValueError, match="absent"),
-    ):
-        engine.evolve(source(), (timeline,), cancel=Event())
-
-
-class TimelineKernel(RecordingKernel):
-    """Conservative timeline keys, optionally shared by equivalent copies."""
-
-    def __init__(self, name, *, copies=1):
-        super().__init__(name)
-        self.copies = copies
-
-    def prepare_keys(self, table, rows, context: KernelContext):
-        return (table.timeline[rows] // self.copies).copy().view("V8")
 
 
 def test_idle_reference_and_worker_chunk_batch_independence():
@@ -246,174 +44,6 @@ def test_idle_reference_and_worker_chunk_batch_independence():
     np.testing.assert_allclose(c.densities, a.densities, atol=1e-13)
     assert a.paths.segments_by_kernel == {"t4": 12}
     assert a.paths.points_by_class == {"t4": 12}
-
-
-def test_flux_basis_changes_and_readout_truncation():
-    from zcu_tools.simulate.evolution.kernels.t4 import T4
-
-    zero = np.zeros((2, 2))
-    swap = np.array([[0, 1], [1, 0]], dtype=complex)
-
-    def build(level):
-        return SecularModel(
-            level,
-            str(level),
-            np.zeros(2),
-            np.eye(2, dtype=complex) if level == (0,) else swap,
-            (),
-            zero,
-            zero,
-        )
-
-    src = ModelSource(np.diag([1.0, 0.0]).astype(complex), build)
-    b = replace(
-        batch(1),
-        flux=FluxSchedule(
-            np.array([0, 3]), np.array([0.0, 1.0, 100.0]), np.array([[0], [1], [99]])
-        ),
-        tracks=(replace(track(1, EnvelopeSpec("constant"), start=20), port="absent"),),
-    )
-    result = run(Engine(1, 1000, kernels=(T4(),)), src, (b,))
-    np.testing.assert_allclose(result.densities[0], src.initial_density, atol=1e-14)
-    assert result.paths.segments_by_kernel == {"t4": 2}
-
-
-def test_flat_top_split_phase_offset_and_small_plateau():
-    envelope = EnvelopeSpec(
-        "sampled", np.array([0, 1j, 1j, 0], complex), np.array([0.0, 2.0, 12.0, 14.0])
-    )
-    direct, t6 = RecordingKernel("dop853"), RecordingKernel("t6")
-    result = run(
-        Engine(
-            1,
-            1000,
-            kernels=(
-                direct,
-                RecordingKernel("dyson", accepts=False),
-                RecordingKernel("floquet_period", accepts=False),
-                t6,
-            ),
-        ),
-        source(),
-        (replace(batch(1, duration=14), tracks=(track(1, envelope, duration=14),)),),
-    )
-    assert result.paths.segments_by_kernel == {"dop853": 2, "t6": 1}
-    table, rows, _ = t6.calls[0]
-    assert table.start_ns[rows].tolist() == [2.0]
-    assert table.duration_ns[rows].tolist() == [10.0]
-    np.testing.assert_allclose(
-        table.tone_theta_rad[rows, 0], 2 * np.pi * 0.1 * 2 + np.pi / 2
-    )
-    assert table.envelopes[table.tone_envelope[rows[0], 0]].kind == "constant"
-    assert direct.calls[-1][0].tone_envelope_offset_ns[
-        direct.calls[-1][1], 0
-    ].tolist() == [12.0]
-    short = replace(envelope, sample_ns=np.array([0.0, 2.0, 11.0, 14.0]))
-    k = RecordingKernel("dop853")
-    result = run(
-        Engine(1, 0, kernels=(k,)),
-        source(),
-        (replace(batch(1, duration=14), tracks=(track(1, short, duration=14),)),),
-    )
-    assert result.paths.segments_by_kernel == {"dop853": 1}
-
-
-@pytest.mark.parametrize("kind", ["sampled", "constant"])
-def test_pulse_support_ends_at_its_absolute_event(kind):
-    envelope = (
-        EnvelopeSpec("sampled", np.array([0.2, 1.0]), np.array([0.0, 0.8]))
-        if kind == "sampled"
-        else EnvelopeSpec("constant")
-    )
-    idle, direct, constant, flux = (
-        RecordingKernel(name) for name in ("t4", "dop853", "t6", "flux_dop853")
-    )
-    timeline = replace(
-        batch(1, duration=4.0),
-        # A level switch exactly at the first pulse's end does not overlap it.
-        flux=FluxSchedule(
-            np.array([0, 3]),
-            np.array([0.0, 2.8, 3.2]),
-            np.array([[0], [1], [1]]),
-        ),
-        tracks=(
-            track(1, envelope, start=2.0, duration=0.8),
-            track(1, envelope, start=3.2, duration=0.8),
-        ),
-    )
-    result = run(
-        Engine(
-            1,
-            0,
-            kernels=(
-                idle,
-                direct,
-                constant,
-                flux,
-                RecordingKernel("dyson", accepts=False),
-                RecordingKernel("floquet_period", accepts=False),
-            ),
-        ),
-        source(),
-        (timeline,),
-    )
-    observations = sorted(
-        (float(table.start_ns[row]), int(table.tones[row]))
-        for kernel in (idle, direct, constant, flux)
-        for table, rows, _ in kernel.calls
-        for row in rows
-    )
-    assert observations == [(0.0, 0), (2.0, 1), (2.8, 0), (3.2, 1)]
-    driven = direct if kind == "sampled" else constant
-    assert result.paths.segments_by_kernel == {"t4": 2, driven.name: 2}
-    for table, rows, _ in driven.calls:
-        np.testing.assert_array_equal(table.tone_envelope_offset_ns[rows, 0], 0.0)
-
-
-@pytest.mark.parametrize(
-    ("start", "plateau_start", "plateau_end", "duration"),
-    [(2.0, 0.8, 10.8, 12.8), (0.1, 0.8, 20.8, 22.8)],
-)
-def test_plateau_support_uses_absolute_events(
-    start, plateau_start, plateau_end, duration
-):
-    envelope = EnvelopeSpec(
-        "sampled",
-        np.array([0.0, 1j, 1j, 0.0]),
-        np.array([0.0, plateau_start, plateau_end, duration]),
-    )
-    direct, constant = RecordingKernel("dop853"), RecordingKernel("t6")
-    result = run(
-        Engine(
-            1,
-            0,
-            kernels=(
-                RecordingKernel("t4"),
-                direct,
-                constant,
-                RecordingKernel("dyson", accepts=False),
-                RecordingKernel("floquet_period", accepts=False),
-            ),
-        ),
-        source(),
-        (
-            replace(
-                batch(1, duration=start + duration),
-                tracks=(track(1, envelope, start=start, duration=duration),),
-            ),
-        ),
-    )
-    assert result.paths.segments_by_kernel == {"t4": 1, "dop853": 2, "t6": 1}
-    table, rows, _ = constant.calls[0]
-    np.testing.assert_allclose(table.start_ns[rows], start + plateau_start)
-    np.testing.assert_allclose(table.duration_ns[rows], plateau_end - plateau_start)
-    np.testing.assert_array_equal(table.tone_envelope_offset_ns[rows, 0], 0.0)
-    offsets = sorted(
-        float(table.tone_envelope_offset_ns[row, 0])
-        for table, rows, _ in direct.calls
-        for row in rows
-    )
-    np.testing.assert_allclose(offsets, [0.0, plateau_end])
 
 
 @pytest.mark.parametrize(
@@ -527,167 +157,6 @@ def test_missing_kernel_names_segment_and_flux_overlap():
             engine.evolve(source(), (b,), cancel=Event())
     finally:
         engine.close()
-
-
-def test_shared_cache_namespace_budget_eviction_and_singletons():
-    k = RecordingKernel("t4")
-    # Include metadata for the intended resident working set.
-    engine = Engine(1, 16 + RESIDENT_METADATA_BYTES, kernels=(k,))
-    src = source()
-    try:
-        for duration in [3.0, 3.0, 4.0, 3.0]:
-            engine.evolve(src, (batch(2, duration=duration),), cancel=Event())
-        assert k.preparations == 3
-        engine.evolve(src, (batch(2),), budget=1e-6, cancel=Event())
-        assert k.preparations == 4
-        other = ModelSource(
-            src.initial_density,
-            lambda level: replace(src.model(level), identity="different-source"),
-        )
-        engine.evolve(other, (batch(2),), cancel=Event())
-        assert k.preparations == 5
-        for _ in range(2):
-            engine.evolve(src, (batch(1, duration=8),), cancel=Event())
-        assert k.preparations == 6, "the second singleton evolve must reuse its payload"
-    finally:
-        engine.close()
-        engine.close()
-    with pytest.raises(RuntimeError, match="closed"):
-        engine.evolve(src, (batch(),), cancel=Event())
-
-
-@pytest.mark.parametrize("workers", [1, 2])
-def test_singleton_residents_reuse_payloads_across_evolves(workers):
-    kernel = TimelineKernel("t4")
-    src = source()
-    # Include metadata for the intended resident working set.
-    with closing(
-        Engine(workers, 128 + 8 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
-    ) as engine:
-        first = engine.evolve(src, (batch(8),), cancel=Event())
-        assert kernel.preparations == 8
-        second = engine.evolve(src, (batch(8),), cancel=Event())
-        assert kernel.preparations == 8, "resident singletons must not rebuild"
-        np.testing.assert_array_equal(second.densities, first.densities)
-        assert second.paths == first.paths
-
-
-def test_oversize_local_payload_does_not_evict_fitting_singleton():
-    class SizedKernel(RecordingKernel):
-        def prepare(self, keys, table, rows, context: KernelContext):
-            super().prepare(keys, table, rows, context)
-            return Payload(2 if table.duration_ns[rows[0]] == 4 else 1)
-
-    kernel = SizedKernel("t4")
-    src = source()
-    # Include metadata for the intended resident working set.
-    with closing(Engine(1, 16 + RESIDENT_METADATA_BYTES, kernels=(kernel,))) as engine:
-        engine.evolve(src, (batch(1),), cancel=Event())
-        for point in range(2):
-            # Distinct points avoid result memo after including retention metadata.
-            timeline = replace(batch(1, duration=4), points=np.array([point]))
-            engine.evolve(src, (timeline,), cancel=Event())
-        engine.evolve(src, (batch(1),), cancel=Event())
-        assert kernel.preparations == 3, (
-            "oversize products must stream without eviction"
-        )
-
-
-def test_singleton_stream_preserves_current_shared_hit_and_fills_only_spare_bytes():
-    kernel = RecordingKernel("t4")
-    src = source()
-    shared = batch(2)
-    stream = replace(batch(3), points=np.arange(2, 5), end_ns=np.array([4.0, 5.0, 6.0]))
-    # Include metadata for the intended resident working set.
-    with closing(
-        Engine(
-            1, 32 + 2 * RESIDENT_METADATA_BYTES, kernels=(kernel,), chunks_per_worker=1
-        )
-    ) as engine:
-        engine.evolve(src, (shared,), cancel=Event())
-        engine.evolve(src, (shared, stream), cancel=Event())
-        assert kernel.preparations == 4
-        engine.evolve(src, (shared,), cancel=Event())
-        assert kernel.preparations == 4, "streaming misses must not evict shared hits"
-        engine.evolve(src, (batch(1, duration=4),), cancel=Event())
-        assert kernel.preparations == 4, "the fitting local product must persist"
-
-
-def test_new_source_singleton_replaces_previous_source_resident():
-    kernel = RecordingKernel("t4")
-    src = source()
-    other = ModelSource(
-        src.initial_density,
-        lambda level: replace(src.model(level), identity="next-flux"),
-    )
-    # Include metadata for the intended resident working set.
-    with closing(Engine(1, 16 + RESIDENT_METADATA_BYTES, kernels=(kernel,))) as engine:
-        for current in (src, src, other, other, src):
-            engine.evolve(current, (batch(1),), cancel=Event())
-        assert kernel.preparations == 3, "old flux residents must yield to new ones"
-
-
-@pytest.mark.parametrize(
-    ("repeated", "name"),
-    [(False, "t4"), (False, "dop853"), (True, "t4"), (True, "flux_dop853")],
-)
-def test_timeline_local_payloads_are_released_before_the_next_timeline(repeated, name):
-    from zcu_tools.simulate.evolution.kernel import GuardPreparation
-
-    class LifetimeKernel(TimelineKernel):
-        guard_builds = True
-
-        def __init__(self):
-            super().__init__(name)
-            self.live = 0
-            self.peak_live = 0
-
-        def release(self, count):
-            self.live -= count
-
-        def prepare(self, keys, table, rows, context: KernelContext):
-            payload = super().prepare(keys, table, rows, context)
-            self.live += len(keys)
-            self.peak_live = max(self.peak_live, self.live)
-            weakref.finalize(payload, self.release, len(keys))
-            return payload
-
-        def guard_prepared(self, table, rows, context: KernelContext):
-            keys, first = np.unique(
-                self.prepare_keys(table, rows, context), return_index=True
-            )
-            payload = self.prepare(keys, table, rows[first], context)
-            return GuardResult(
-                self.guard(table, rows, context),
-                (GuardPreparation(keys, payload),),
-            )
-
-    n = 8
-    b = batch(n)
-    if repeated:
-        b = replace(
-            b,
-            flux=FluxSchedule(
-                2 * np.arange(n + 1),
-                np.tile([0.0, 1.0], n),
-                np.tile([[0], [1]], (n, 1)),
-            ),
-        )
-    if name != "t4":
-        b = replace(
-            b, tracks=tuple(track(n, EnvelopeSpec("constant")) for _ in range(3))
-        )
-    kernel = LifetimeKernel()
-    src = source()
-    result = run(Engine(1, 0, kernels=(kernel,), chunks_per_worker=1), src, (b,))
-    np.testing.assert_array_equal(
-        result.densities, np.repeat(src.initial_density[None], n, axis=0)
-    )
-    assert kernel.preparations == n, "same-timeline repeats must prepare only once"
-    assert kernel.peak_live == 1, (
-        "local payloads must not accumulate in A-stage or chunks"
-    )
-    assert kernel.live == 0, "the evolve call must release all local payloads"
 
 
 def test_guard_pool_preserves_dispatch_and_density_and_skips_small_key_sets():
@@ -837,53 +306,6 @@ def test_local_guard_tables_build_once_and_match_shared_guard_first_fallback(
         outputs.append(result.densities[::copies])
     for densities in outputs[1:]:
         np.testing.assert_array_equal(densities, outputs[0])
-
-
-def test_local_singletons_keep_shared_apply_waves_and_release_each_payload():
-    from threading import get_ident
-
-    caller = get_ident()
-    for workers in (1, 2):
-
-        class Idle(TimelineKernel):
-            def __init__(self):
-                super().__init__("t4")
-                self.live = 0
-                self.peak = 0
-                self.guarded = set()
-
-            def guard(self, table, rows, context: KernelContext):
-                self.guarded.add(get_ident())
-                return super().guard(table, rows, context)
-
-            def release(self):
-                self.live -= 1
-
-            def prepare(self, keys, table, rows, context: KernelContext):
-                payload = super().prepare(keys, table, rows, context)
-                self.live += 1
-                self.peak = max(self.peak, self.live)
-                weakref.finalize(payload, self.release)
-                return payload
-
-        idle, driven = Idle(), RecordingKernel("dop853")
-        b = replace(
-            batch(8),
-            tracks=tuple(
-                track(8, EnvelopeSpec("constant"), duration=1) for _ in range(3)
-            ),
-        )
-        result = run(
-            Engine(workers, 0, kernels=(idle, driven), chunks_per_worker=1),
-            source(),
-            (b,),
-        )
-        assert result.paths.segments_by_kernel == {"t4": 8, "dop853": 8}
-        assert idle.guarded == {caller}
-        assert any(len(rows) > 1 for _, rows, _ in driven.calls)
-        assert idle.preparations == 8
-        assert idle.peak <= workers
-        assert idle.live == 0
 
 
 def test_deferred_guards_do_not_retry_caller_rejections():
@@ -1254,6 +676,59 @@ def test_empty_evolve_has_zero_trace_diagnostic():
     assert getattr(result.paths, "max_trace_error", None) == 0.0
 
 
+@pytest.mark.parametrize(
+    ("closed", "budget", "error", "message"),
+    [
+        pytest.param(
+            True,
+            np.nan,
+            RuntimeError,
+            r"\Aengine is closed\Z",
+            id="closed-before-budget",
+        ),
+        pytest.param(
+            False,
+            np.nan,
+            ValueError,
+            r"\Abudget must be finite and positive\Z",
+            id="nan-budget-before-cancel",
+        ),
+        pytest.param(
+            False,
+            np.inf,
+            ValueError,
+            r"\Abudget must be finite and positive\Z",
+            id="infinite-budget-before-cancel",
+        ),
+        pytest.param(
+            False,
+            0.0,
+            ValueError,
+            r"\Abudget must be finite and positive\Z",
+            id="zero-budget-before-cancel",
+        ),
+        pytest.param(
+            False,
+            -1.0,
+            ValueError,
+            r"\Abudget must be finite and positive\Z",
+            id="negative-budget-before-cancel",
+        ),
+        pytest.param(False, 1e-3, Cancelled, None, id="cancel-before-empty"),
+    ],
+)
+def test_empty_evolve_preserves_preflight_error_order(
+    closed: bool, budget: float, error: type[Exception], message: str | None
+) -> None:
+    cancel = Event()
+    cancel.set()
+    with closing(Engine(1, 0, kernels=())) as engine:
+        if closed:
+            engine.close()
+        with pytest.raises(error, match=message):
+            engine.evolve(source(), (), budget=budget, cancel=cancel)
+
+
 def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
     from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
@@ -1488,118 +963,3 @@ def test_shared_prefix_paths_and_exceedances_count_each_adopting_timeline():
     assert "3 segments (shaped_sambe: 3)" in str(caught[0].message)
     assert direct.guarded_rows == 0, "adopted prefix rows must not be reclassified"
     assert not gate.preparations, "adopted prefix rows must not be prepared again"
-
-
-class InventoryKernel(RecordingKernel):
-    """Observe whole-allocation ownership without retaining numerical payloads."""
-
-    def __init__(self, name="t4"):
-        super().__init__(name)
-        self.payloads: list[weakref.ReferenceType[Payload]] = []
-        self.live_before_build: list[int] = []
-
-    @property
-    def live_bytes(self):
-        return sum(payload.nbytes for ref in self.payloads if (payload := ref()))
-
-    def prepare(self, keys, table, rows, context: KernelContext):
-        self.live_before_build.append(self.live_bytes)
-        payload = super().prepare(keys, table, rows, context)
-        self.payloads.append(weakref.ref(payload))
-        return payload
-
-
-@pytest.mark.parametrize("changed_model", [False, True])
-def test_complete_inventory_releases_stale_on_offer_before_next_build(changed_model):
-    kernel = InventoryKernel()
-    src = source()
-    other = (
-        ModelSource(
-            src.initial_density,
-            lambda level: replace(src.model(level), identity="adjacent-flux"),
-        )
-        if changed_model
-        else src
-    )
-    # Include metadata for the intended resident working set.
-    with closing(
-        Engine(
-            1, 32 + 2 * RESIDENT_METADATA_BYTES, kernels=(kernel,), chunks_per_worker=2
-        )
-    ) as engine:
-        seed = replace(batch(4), end_ns=np.array([3.0, 3.0, 7.0, 7.0]))
-        engine.evolve(src, (seed,), cancel=Event())
-        assert kernel.live_bytes == 32
-        misses = replace(batch(3), end_ns=np.array([4.0, 5.0, 6.0]))
-        engine.evolve(other, (misses,), cancel=Event())
-        # One inline worker may own a 16-byte active build above the account.
-        # Once offered, it must release stale before the next build starts.
-        assert kernel.live_before_build[2:] == [32, 32, 32], (
-            "resident plus pending must fit after every offer"
-        )
-        assert kernel.live_bytes <= 32
-
-
-def test_inventory_keeps_unused_residents_when_new_products_fit():
-    kernel = InventoryKernel()
-    src = source()
-    # Include metadata for the intended resident working set.
-    with closing(
-        Engine(1, 64 + 4 * RESIDENT_METADATA_BYTES, kernels=(kernel,))
-    ) as engine:
-        engine.evolve(src, (batch(2),), cancel=Event())
-        unused = kernel.payloads[0]
-        engine.evolve(src, (batch(2, duration=4),), cancel=Event())
-        assert unused() is not None, "spare capacity must preserve stale reuse"
-        again = replace(batch(2), points=np.arange(2) + 10)
-        engine.evolve(src, (again,), cancel=Event())
-        assert kernel.preparations == 2
-
-
-def test_inventory_protects_whole_borrowed_batches_and_bounds_pending():
-    kernel = InventoryKernel()
-    src = source()
-    # Keep one whole three-key batch, including its metadata, protected.
-    with closing(
-        Engine(1, 48 + RESIDENT_METADATA_BYTES, kernels=(kernel,), chunks_per_worker=2)
-    ) as engine:
-        # One indivisible allocation owns both keys, even when only 3 ns is used.
-        seed = replace(batch(6), end_ns=np.array([3.0, 3.0, 7.0, 7.0, 8.0, 8.0]))
-        engine.evolve(src, (seed,), cancel=Event())
-        borrowed = kernel.payloads[0]
-        assert borrowed() is not None
-        mixed = replace(batch(4), end_ns=np.array([3.0, 4.0, 5.0, 6.0]))
-        engine.evolve(src, (mixed,), cancel=Event())
-        assert borrowed() is not None, "a partial hit must keep its entire batch"
-        assert kernel.preparations == 6, "borrowed keys must not rebuild"
-        assert kernel.live_bytes <= 48, "resident plus pending share one budget"
-        assert max(kernel.live_before_build) <= 48
-
-
-def test_prefix_pending_shares_capacity_with_future_suffix_hits():
-    idle, driven = InventoryKernel(), InventoryKernel("dyson")
-    src = source()
-    # Include metadata for two separately retained products.
-    with closing(
-        Engine(
-            1,
-            32 + 2 * RESIDENT_METADATA_BYTES,
-            kernels=(idle, driven),
-            chunks_per_worker=1,
-        )
-    ) as engine:
-        # This hit belongs to the later suffix, not the representative prefix.
-        engine.evolve(src, (batch(2),), cancel=Event())
-        suffix = idle.payloads[0]
-        pulses = tuple(
-            track(2, EnvelopeSpec("constant"), start=start, duration=1)
-            for start in (1, 2)
-        )
-        timeline = replace(batch(2, duration=6), tracks=pulses)
-        result = engine.evolve(src, (timeline,), cancel=Event())
-        assert result.paths.segments_by_kernel == {"t4": 4, "dyson": 4}
-        assert suffix() is not None, "prefix work must protect later suffix hits"
-        assert idle.preparations == 2, "prefix work must not evict suffix keys"
-        assert idle.live_bytes + driven.live_bytes <= 32, (
-            "prefix products, suffix residents and worker offers share capacity"
-        )

@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-15, seeded hanger background initialization
+**Last updated:** 2026-10-18, shared electrical-delay alignment interface
 
 `singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics，不讀 cfg 或建立圖。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
@@ -66,6 +66,8 @@ canonical alias；多 trace 的 local aliases 以該週期作 circular aggregati
 在 `±1/(2Δf)` branch cut 做錯誤線性平均；各 trace 局部精修後也會對齊到共用
 seed 最近的等價 alias，讓下游的 median/mean 不會混合相鄰週期，而不宣稱得到唯一物理
 cable delay。
+Alias alignment 由 fitting 的 `resonance.base` 擁有，既有 `resonance` facade 提供
+`align_uniform_edelay_aliases` 共用 interface，供 scalar fit 與 dispersive 的獨立局部精修使用。
 未啟用 adaptive expansion 或擴張到 cap 後，非等距 candidate 的最佳點仍碰到 search
 boundary，以及搜尋規模超過資源上限或輸入無效時，皆 raise `ValueError`；可分辨的
 local maxima 近 tie 時發出 `RuntimeWarning` 並使用最高

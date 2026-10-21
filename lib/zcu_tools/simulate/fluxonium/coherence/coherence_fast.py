@@ -201,7 +201,8 @@ def _t1_operators(
     return lc_diag, cos_phi, sin_phi, n_op, phi_op, cos_half, sin_half, float(fx.EJ)
 
 
-def calculate_eff_t1_vs_flux_fast(
+# tolerated: Notebook fits tune noise/Temp separately from basis size and i/j.
+def calculate_eff_t1_vs_flux_fast(  # noqa: PLR0913
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     noise_channels: Sequence[NoiseChannel],
@@ -307,7 +308,8 @@ def calculate_eff_t1_vs_flux_fast(
     return out.astype(np.float64, copy=False)
 
 
-def calculate_eff_t1_fast(
+# tolerated: Public scalar T1 preserves the sweep's basis and transition keywords.
+def calculate_eff_t1_fast(  # noqa: PLR0913
     flux: float,
     params: tuple[float, float, float],
     noise_channels: Sequence[NoiseChannel],

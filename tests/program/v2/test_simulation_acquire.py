@@ -51,6 +51,7 @@ def test_explicit_zero_noise_preserves_shapes_and_raw():
     env = environment(std_adc=0, seed=123)
     prog = program(env, rounds=2)
     result = prog.acquire(env.soc, progress=False)
+    assert result is not None
     assert result[0].shape == (1, 2)
     np.testing.assert_array_equal(result[0], 0)
     raw = prog.get_raw()
@@ -58,6 +59,7 @@ def test_explicit_zero_noise_preserves_shapes_and_raw():
     assert raw[0].shape == (2, 1, 2)
     assert raw[0].dtype == np.int64
     dec = prog.acquire_decimated(env.soc, progress=False)
+    assert dec is not None
     assert dec[0].shape == (2, 16, 2)
     np.testing.assert_array_equal(dec[0], 0)
 
@@ -153,6 +155,7 @@ def test_decimated_companion_raw_uses_same_trace_and_adc_order():
     env = environment(std_adc=3, seed=91, n_gens=2, n_readouts=2)
     prog = program(env, channels=(1, 0), reps=3, samples=7)
     traces = prog.acquire_decimated(env.soc, progress=False)
+    assert traces is not None
     raw = raw_of(prog)
     for trace, accumulated in zip(traces, raw, strict=True):
         np.testing.assert_array_equal(
@@ -275,6 +278,7 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     env.soc.binding.capture_snapshot = snapshot
     env.soc.binding.execute = source
     averaged = prog.acquire(env.soc, progress=False, round_hook=hook)
+    assert averaged is not None
     np.testing.assert_array_equal(raw_of(prog)[0], [[[2, 4]]])
     np.testing.assert_array_equal(raw_of(prog)[1], [[[12, 14]]])
     np.testing.assert_array_equal(averaged[0], [[0.25, 0.75]])

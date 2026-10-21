@@ -2,21 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.v2.utils.snr import calc_snr, snr_as_signal
-
-
-@dataclass
-class _FakeTracker:
-    """Minimal stand-in exposing the MomentTracker fields used by snr_as_signal."""
-
-    mean: NDArray[np.float64]
-    covariance: NDArray[np.float64]
-    third_moment: NDArray[np.float64]
+from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 
 
 def _moments(
@@ -74,9 +66,9 @@ def test_snr_as_signal_broadcasts_sweep_axis() -> None:
     mean = np.stack([item[0] for item in moments], axis=0)
     cov = np.stack([item[1] for item in moments], axis=0)
     m3 = np.stack([item[2] for item in moments], axis=0)
-    raw = [_FakeTracker(mean=mean, covariance=cov, third_moment=m3)]
+    raw = [MagicMock(spec=MomentTracker, mean=mean, covariance=cov, third_moment=m3)]
 
-    out = snr_as_signal(raw, ge_axis=1)  # type: ignore[arg-type]
+    out = snr_as_signal(raw, ge_axis=1)
 
     assert out.shape == (3,)
     assert out == pytest.approx(separations)

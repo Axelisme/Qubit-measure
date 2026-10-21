@@ -53,7 +53,7 @@ def coefficient_keys(
     keys = np.empty(len(rows), dtype="V32")
     for index, row in enumerate(rows):
         count = int(table.tones[row])
-        model = source.model(tuple(int(v) for v in table.level[row]))
+        model = table.model(source, row)
         digest = sha256(repr((dc, model.identity, COMMON_FRAME_POLICY)).encode())
         for values in (
             table.level[row],

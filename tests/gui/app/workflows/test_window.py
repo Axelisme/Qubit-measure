@@ -11,6 +11,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.remote import FormWrite
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -42,10 +43,12 @@ def test_window_services_run_and_progress_share_session(
         harness.state,
         harness.services,
         harness.owner,
-        templates={},
-        alias_presets=None,
-        registrations=catalog_source.catalog.attachments,
-        loader=catalog_source.loader,
+        composition=WorkflowComposition(
+            templates={},
+            alias_presets=None,
+            registrations=catalog_source.catalog.attachments,
+            loader=catalog_source.loader,
+        ),
         parent=None,
         on_close=lambda: closed.append("closed"),
     )

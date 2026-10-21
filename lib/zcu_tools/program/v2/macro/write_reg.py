@@ -33,6 +33,7 @@ class WriteRegOp(Macro):
     """
 
     # fields: dst (str), lhs (str), op (str), rhs (int | str | None)
+    # tolerated: QICK Macro.expand is inferred as None, but translate iterates the returned macro list.
     def expand(self, prog):  # pyright: ignore[reportIncompatibleMethodOverride]
         dst = prog._get_reg(self.dst)
         op_str = format_alu_op(prog, self.lhs, self.op, self.rhs)

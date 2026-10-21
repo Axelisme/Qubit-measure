@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-19，instruction owners
 
 本模塊負責把 QICK ASM V2 程式表示成可分析、可優化、可再降階回 assembler 輸入的 IR。
 
@@ -13,14 +13,18 @@
    - 負責 `list[Instruction] ↔ list[BasicBlockNode | MetaInst]`。
    - `MetaInst` 永遠作為 chunked stream 的獨立元素存在，不屬於任何 `BasicBlockNode`。
 3. `IRParser` ([factory.py](factory.py))
-   - 負責 `list[BasicBlockNode | MetaInst] ↔ BlockNode`。
-   - `unparse()` 是唯一的降階入口：把 IR tree 降階回 chunked stream（含結構 MetaInst），與 `parse()` 形成 round-trip 反函數（`IRDispatch` 例外，它是 pass 才生成的葉節點，不會被 `parse` 重建）。
+   - `parse()` 把 `list[BasicBlockNode | MetaInst]` 建構為 `BlockNode` 根節點。
+   - `unparse(root: IRNode)` 是唯一的降階入口，接受 tree pass 替換後的任意合法 IR 根節點，輸出含結構 MetaInst 的 chunked stream。原有 `BlockNode` tree 與 `parse()` 保持 round-trip（`IRDispatch` 例外，它是 pass 才生成的葉節點，不會被 `parse` 重建）。
 4. [dispatch.py](dispatch.py)
    - 提供 loop / branch 共用的 dispatch-table lowering 原語。
 
 [operands.py](operands.py) 擁有 operand 型別與 parse factories。
-[instructions.py](instructions.py) 擁有指令與 QICK dictionary 的互轉。
-[node.py](node.py) 擁有 IR tree 節點與 `clone_renamed`。
+[instructions.py](instructions.py) 擁有指令基底、compute／control／time 指令與中央 QICK dispatcher。
+[io_instructions.py](io_instructions.py) 擁有完整的 memory／port 指令及其 QICK dictionary 互轉。
+[instruction_fields.py](instruction_fields.py) 擁有兩組指令共用的有限值契約、QICK 欄位解析與 label reference remap。
+[node.py](node.py) 擁有 IR tree 節點、`clone_renamed` 與唯讀共用 interface
+`collect_subtree_names`。Clone、parser 與 passes 共用此 interface 收集子樹定義的 label names
+及 structure names，名稱配置仍由 [labels.py](labels.py) 擁有。
 [labels.py](labels.py) 擁有 label value objects 與名稱配置。
 硬體角色性常量集中在 [hw_semantics.py](hw_semantics.py)，避免 magic string 散落各處。
 [analysis.py](analysis.py) 提供 cost/size 估算 helper 與 liveness 工具，pass 端優先使用。

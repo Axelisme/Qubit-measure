@@ -1,6 +1,6 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-18，mux receiver 與 charge/flux drive 設定
+**Last updated:** 2026-10-21，腔驅動模型與 CKP 適用範圍
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
@@ -156,7 +156,15 @@ Flux operator 在每 round 的 live DC 工作點用解析導數求值，經固�
 
 Resonator 的頻率、full-charge coupling 與 linewidth 決定物理響應。ADC 的 gain、phase、offset 與 noise 決定接收模型。把 ADC gain 調大不會改變 resonator photon number、物理 linewidth 或另外設定的 ADC noise PSD。
 
-FTF 在 readout 使用該 DC 工作點的模型與 energy-basis populations。Readout 開始前的 charge/flux drive controls 會演化狀態；readout 期間及之後的 drive controls 不納入讀出計算。Pulse 模式每個 point 必須有恰好一個 active readout pulse。Mux 模式允許 1 至 8 個共用起點的 tone，每個 tone 有自己的 ADC。各 ADC 可有自己的 trigger windows，同一 shot index 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。所有 tone 都進入同一條 line，每個 ADC 解調總場，不把 tone 固定對應到 r1 或 r2。模型假設 weak dispersive readout，強驅動下的適用性要另行確認。
+FTF 在 terminal readout 使用該 DC 工作點的模型與 energy-basis populations。Terminal 起點是每個 point 的 readout generator 上最晚 active block 的起點，首個 ADC trigger 不得早於它。Pulse 模式每個 point 必須恰好有一個 active terminal readout pulse。Mux 模式允許 1 至 8 個共用 terminal 起點的 tone，每個 tone 有自己的 ADC。各 ADC 可有自己的 trigger windows，同一 shot index 的全部 ADC 共用一次 joint-state 抽樣，receiver noise 各自獨立。所有 tone 都進入同一條 line，每個 ADC 解調總場，不把 tone 固定對應到 r1 或 r2。
+
+Readout generator 上的非終端脈衝是腔驅動，必須在 terminal 起點前或恰好於該起點結束。跨越 terminal 起點的脈衝會引發 `ValueError`。腔驅動使用相同的 `input_per_gain` 換算，由 `simulate.adc` 求解線性、能階相依的複數腔場。每個聯合能階 s、resonator r 的光子數是 `n[s,r] = |alpha[s,r]|²`。Stark 能量頻移是 `sum_r chi[s,r] * n[s,r]`，單位 GHz。這裡的 chi 是模型的能階相依腔頻減裸腔頻，不是另外輸入的校準值。能階分支的輸出場差異產生 photon-shot-noise 去相位，包含共用線路的干涉與各腔的 internal loss。這份驅動去相位與殘餘 thermal-photon 去相位分開計算。
+
+FTF 將腔驅動起迄加入演化切分，對每個最終 segment 使用平均 Stark 頻移與平均驅動去相位率。段內不逐時套用瞬時場。脈衝結束後保留 ringdown，不清空腔場。Readout 開始前的 charge/flux drive controls 仍會演化狀態，terminal readout 期間及之後的 drive controls 不納入讀出計算。
+
+條件腔場依 qubit 能階自 t=0 各自從真空演化。Probe 不繼承 prepared 分支的腔場。這個近似讓 CKP 的 g/e preparation 分支給出相同腔中心，因此不支援 preparation-resolved χ 校準。
+
+模型假設 weak dispersive coupling，不包含 MIST 躍遷或其 onset。只施加腔驅動、沒有 qubit drive 時，這些新增頻移與去相位不改變能階 populations。若 Stark 頻移讓能量排序反轉，演化會報錯並指出 point 與 segment，不重排能階。未報錯不代表強驅動、截斷或色散近似已通過適用性驗證。
 
 ### Drive
 

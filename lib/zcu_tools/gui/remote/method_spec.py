@@ -61,10 +61,13 @@ class McpMethodPolicy:
         )
 
     def __post_init__(self) -> None:
-        if not isinstance(self.exposure, McpExposure):
+        # tolerated: Untyped callers must supply an enum instance, not a matching raw string.
+        if not isinstance(self.exposure, McpExposure):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"unknown MCP exposure policy: {self.exposure!r}")
         if any(
-            not isinstance(name, str) or not name for name in self.override_tool_names
+            # tolerated: Reject non-string names from untyped callers before checking emptiness.
+            not isinstance(name, str) or not name  # pyright: ignore[reportUnnecessaryIsInstance]
+            for name in self.override_tool_names
         ):
             raise ValueError("override MCP tool names must be non-empty strings")
         if (

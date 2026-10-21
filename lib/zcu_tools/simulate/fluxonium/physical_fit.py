@@ -115,7 +115,8 @@ def fit_local_fluxonium_model(
             max_nfev=200,
             x_scale="jac",
         )
-    except Exception as exc:
+    # tolerated: Optimizer/model callback failures return a rejected fit with the original base.
+    except Exception as exc:  # noqa: BLE001
         return _rejected(
             base, f"least_squares failed: {exc}", fluxes.size, base_rms, math.nan
         )

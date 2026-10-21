@@ -242,7 +242,8 @@ class HeatmapPlot:
 class HeatmapLinePlot:
     """Update a named 2D heatmap and its most recent scan lines on one owner."""
 
-    def __init__(  # noqa: PLR0913 - retain the owner and both segment/axis pairs
+    # tolerated: One factory supplies owner, two axes/segments and scan direction; no shared parameter group.
+    def __init__(  # noqa: PLR0913
         self,
         host: PlotHost,
         figure: Figure,
@@ -492,7 +493,8 @@ class Plots(FigureCollection):
 
         return self._host.call(start)
 
-    def liveplot_1d(  # noqa: PLR0913 - explicit style and optional native axes
+    # tolerated: Preserve public labels, style, owner-side configuration and existing-axes options.
+    def liveplot_1d(  # noqa: PLR0913
         self,
         name: str,
         xlabel: str,
@@ -556,7 +558,8 @@ class Plots(FigureCollection):
 
         return self._host.call(create)
 
-    def liveplot_2d(  # noqa: PLR0913 - explicit heatmap choices and optional native axes
+    # tolerated: Preserve public labels, grid choice, color limits and existing-axes options.
+    def liveplot_2d(  # noqa: PLR0913
         self,
         name: str,
         xlabel: str,
@@ -590,7 +593,8 @@ class Plots(FigureCollection):
 
         return self._host.call(create)
 
-    def liveplot_2d_with_line(  # noqa: PLR0913 - keep scan/axis choices explicit
+    # tolerated: Preserve public scan direction/count, grid choice, labels and paired-axes options.
+    def liveplot_2d_with_line(  # noqa: PLR0913
         self,
         name: str,
         xlabel: str,
@@ -660,7 +664,8 @@ class Plots(FigureCollection):
             for recording in self._recordings.values():
                 try:
                     recording.finish()
-                except Exception as error:  # noqa: BLE001 - finish all recordings
+                # tolerated: Isolate arbitrary writer/host failures so every recording is tried, then report all.
+                except Exception as error:  # noqa: BLE001
                     errors.append(error)
             if errors:
                 raise ExceptionGroup("Failed to finish movie recordings", errors)
@@ -688,7 +693,8 @@ class Plots(FigureCollection):
                     continue
                 try:
                     self._host.release(figure)
-                except Exception as error:  # noqa: BLE001 - report all cleanup failures together
+                # tolerated: Try every host release, aggregate failures and leave failed figures retryable.
+                except Exception as error:  # noqa: BLE001
                     errors.append(error)
                 else:
                     self._released.add(figure)

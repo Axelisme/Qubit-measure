@@ -48,7 +48,8 @@ def _fixed_decimals(dev_values: NDArray[np.float64]) -> int:
 class TwoLinePicker:
     """Matplotlib-backed state machine for half/int flux line selection."""
 
-    def __init__(
+    # tolerated: Notebook/Qt callers use positional spectrum arrays, not FluxPickInputs.
+    def __init__(  # noqa: PLR0913
         self,
         figure: Figure,
         signals: NDArray[np.complex128],

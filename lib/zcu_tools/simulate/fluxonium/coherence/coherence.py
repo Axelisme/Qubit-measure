@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 def calculate_eff_t1_with(
     flux: float,
-    noise_channels: list[tuple[str, dict[str, Any]]],
+    noise_channels: list[str] | list[tuple[str, dict[str, Any]]],
     Temp: float,
     fluxonium: Fluxonium,
     esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
@@ -24,7 +24,7 @@ def calculate_eff_t1_with(
 ) -> float:
     """Return effective 1→0 T1 in ns, setting ``fluxonium.flux`` to ``flux``.
 
-    ``Temp`` is K and ``flux`` is Φ/Φ₀. Channel tuples contain scqubits names and
+    ``Temp`` is K and ``flux`` is Φ/Φ₀. Channel names or tuples contain scqubits names and
     per-channel options. Optional ``esys`` reuses eigenpairs at this flux.
     Other options pass to scqubits; ``total`` defaults to True (both directions).
     """
@@ -40,7 +40,7 @@ def calculate_eff_t1_with(
 
 def calculate_eff_t1(
     flux: float,
-    noise_channels: list[tuple[str, dict[str, Any]]],
+    noise_channels: list[str] | list[tuple[str, dict[str, Any]]],
     Temp: float,
     params: tuple[float, float, float],
     cutoff: int = 40,
@@ -50,7 +50,7 @@ def calculate_eff_t1(
     """Return effective 1→0 T1 in ns for ``params=(EJ, EC, EL)`` in GHz.
 
     ``flux`` is Φ/Φ₀, ``Temp`` is K, and ``cutoff``/``evals_count`` select the
-    oscillator basis/retained levels. Channel tuples and additional options
+    oscillator basis/retained levels. Channel names or tuples and additional options
     use scqubits conventions; ``total`` defaults to True (both directions).
     """
     from scqubits.core.fluxonium import Fluxonium
@@ -64,7 +64,7 @@ def calculate_eff_t1(
 
 def calculate_eff_t1_vs_flux_with(
     fluxs: NDArray[np.float64],
-    noise_channels: list[tuple[str, dict[str, Any]]],
+    noise_channels: list[str] | list[tuple[str, dict[str, Any]]],
     Temp: float,
     fluxonium: Fluxonium,
     spectrum_data: SpectrumData | None = None,
@@ -74,7 +74,7 @@ def calculate_eff_t1_vs_flux_with(
 
     ``fluxs`` must be a 1D array of shape ``(N,)`` in Φ/Φ₀. The output has shape
     ``(N,)`` and preserves the input flux order. ``Temp`` is K.
-    Channel tuples and additional options use scqubits conventions;
+    Channel names or tuples and additional options use scqubits conventions;
     ``total`` defaults to True (both directions).
     Optional ``spectrum_data`` must match this flux grid. This call sets
     ``fluxonium.flux`` to each successive flux, ending at the last point.
@@ -110,7 +110,7 @@ def calculate_eff_t1_vs_flux_with(
 
 def calculate_eff_t1_vs_flux(
     fluxs: NDArray[np.float64],
-    noise_channels: list[tuple[str, dict[str, Any]]],
+    noise_channels: list[str] | list[tuple[str, dict[str, Any]]],
     Temp: float,
     params: tuple[float, float, float],
     cutoff: int = 40,
@@ -123,7 +123,7 @@ def calculate_eff_t1_vs_flux(
     ``(N,)`` and preserves the input flux order.
     ``params=(EJ, EC, EL)`` are GHz and ``Temp`` is K.
     ``cutoff``/``evals_count`` select the oscillator basis/retained levels.
-    Channel tuples and additional options use scqubits conventions;
+    Channel names or tuples and additional options use scqubits conventions;
     ``total`` defaults to True (both directions).
     """
     from scqubits.core.fluxonium import Fluxonium

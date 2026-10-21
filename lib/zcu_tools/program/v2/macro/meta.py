@@ -11,10 +11,10 @@ if TYPE_CHECKING:
 class MetaMacro(Macro):
     """A macro that emits a meta instruction for the IR builder.
 
-    regs maps info keys to register names that need to be resolved to hardware
-    addresses at translate time via prog._get_reg().  This is necessary when
-    the caller only knows a logical name (e.g. a loop name like "reset_sel")
-    that QICK registers under reg_dict, not a bare ASM address like "r0".
+    regs maps info keys to register names resolved by the compiler at translate
+    time. Use it for logical names (e.g. a loop name like "reset_sel"), ASM
+    addresses or QICK aliases. Resolved addresses overwrite matching info keys
+    without mutating the inputs.
     """
 
     # fields: type (str), name (str), info (dict), regs (dict)
@@ -28,7 +28,4 @@ class MetaMacro(Macro):
         super().__init__(type=type, name=name, info=info or {}, regs=regs or {})
 
     def translate(self, prog: IRCompileMixin):
-        resolved_info = dict(self.info)
-        for key, reg_name in self.regs.items():
-            resolved_info[key] = prog._get_reg(reg_name)
-        prog._add_meta(type=self.type, name=self.name, info=resolved_info)
+        prog.record_meta(type=self.type, name=self.name, info=self.info, regs=self.regs)

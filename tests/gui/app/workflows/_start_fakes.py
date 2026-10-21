@@ -8,7 +8,10 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -112,11 +115,13 @@ class StartHarness:
         self.services = build_session_services(
             state=self.state,
             bus=self.bus,
-            gate=self.gate,
-            handles=self.handles,
-            background=self.background,
+            operations=OperationInfrastructure(
+                gate=self.gate,
+                background=self.background,
+                runner=self.runner,
+                handles=self.handles,
+            ),
             progress=self.progress,
-            runner=self.runner,
             bind_assets=ArbWaveformDatabase.info_at,
             device_registry=self.devices,
         )

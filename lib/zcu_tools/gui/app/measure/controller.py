@@ -1,3 +1,9 @@
+# tolerated(file-size): Services and control facets own domain work. This owner
+# keeps app composition, diagnostic/render-host wiring, the application facade,
+# and drain -> script callbacks -> hardware close ordering together. Another
+# facade/mixin or moving view protocols would hide no new behavior and only
+# scatter the same composition contract.
+
 from __future__ import annotations
 
 import logging
@@ -21,6 +27,7 @@ from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
+from zcu_tools.gui.session.device_models import ActiveDeviceOperation
 from zcu_tools.gui.session.events import (
     DeviceOperationFinishedPayload,
     DeviceSetupFinishedPayload,
@@ -39,7 +46,6 @@ from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
 )
-from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.types import ParameterContext
 
 from .adapter import AdapterGuide, SessionEnv
@@ -87,7 +93,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
     from .artifacts import SaveControlPort
@@ -275,7 +281,8 @@ class Controller(SessionControllerMixin):
     instead of this facade.
     """
 
-    def __init__(
+    # tolerated: View/state wiring and storage, reload, predictor and device injections have distinct owners; no shared input bundle.
+    def __init__(  # noqa: PLR0913
         self,
         state: State,
         registry: Registry,
@@ -400,6 +407,7 @@ class Controller(SessionControllerMixin):
         self._ctx_svc = services.context
         self._context_control = services.context_control
         self._setup_control = services.setup_control
+        self._soc_control = services.soc_control
         self._tab_forms = services.tab_forms
         self._tab_svc = services.tab
         self._tab_control = services.tab_control
@@ -588,6 +596,11 @@ class Controller(SessionControllerMixin):
     @property
     def setup_control(self) -> SetupControlPort:
         return self._setup_control
+
+    @property
+    def soc_control(self) -> SocControlPort:
+        """Return the session's owner-thread SoC dialog command/query facet."""
+        return self._soc_control
 
     @property
     def cfg_resources(self) -> TabFormResources:

@@ -54,7 +54,8 @@ def calc_noise_f(
     return noise_f / np.sum(noise_f)
 
 
-def calc_population_pdf(
+# tolerated: GE optimizer vectors and fitting_ge_and_plot unpack this public seven-scalar order.
+def calc_population_pdf(  # noqa: PLR0913
     xs: NDArray[np.float64],
     sg: float,
     se: float,
@@ -236,7 +237,8 @@ class _PopulationCoordinates:
         return self.decode(encoded), jacobian @ covariance @ jacobian.T
 
 
-def _fit_population_simplex(
+# tolerated: Joint/row fits have different parameter layouts; initial/bounds/fixed and sigma stay distinct.
+def _fit_population_simplex(  # noqa: PLR0913
     xs: NDArray[np.float64],
     data: NDArray[np.float64],
     model: Callable[..., NDArray[np.float64]],

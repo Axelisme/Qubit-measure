@@ -7,7 +7,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget
+from zcu_tools.gui.widgets.dialog_presenter import DestructiveConfirmation
 
 DialogKind = Literal[
     "information",
@@ -123,24 +124,20 @@ class RecordingDialogPresenter:
     def destructive_confirm(
         self,
         parent: QWidget,
-        title: str,
-        message: str,
+        confirmation: DestructiveConfirmation,
         *,
-        action_text: str,
         on_decision: Callable[[bool], None],
-        default: bool = False,
-        cancel_text: str = "Cancel",
     ) -> None:
         """Record labels; only an explicit positive decision accepts the action."""
         del parent
         self.calls.append(
             DialogCall(
                 "destructive_confirm",
-                title,
-                message,
-                action_text=action_text,
-                default=default,
-                cancel_text=cancel_text,
+                confirmation.title,
+                confirmation.message,
+                action_text=confirmation.action_text,
+                default=confirmation.default,
+                cancel_text=confirmation.cancel_text,
             )
         )
         if self._destructive_answers:
@@ -148,7 +145,7 @@ class RecordingDialogPresenter:
             return
         raise AssertionError(
             "Unexpected destructive confirmation dialog without a queued answer: "
-            f"title={title!r}, message={message!r}, action_text={action_text!r}"
+            f"title={confirmation.title!r}, message={confirmation.message!r}, action_text={confirmation.action_text!r}"
         )
 
     def messages(self, kind: DialogKind | None = None) -> list[str]:

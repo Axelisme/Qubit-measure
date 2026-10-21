@@ -88,8 +88,8 @@ from ...node import (
     BlockNode,
     IRLoop,
     IRNode,
-    _collect_subtree_names,
     clone_renamed,
+    collect_subtree_names,
 )
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ...pipeline import AbsIRTreePass, PipeLineContext
@@ -110,7 +110,7 @@ class UnrollAnalysis:
 
 def _seed_allocated_with_body_names(nodes: list[IRNode], allocated: set[str]) -> None:
     body_block = BlockNode(insts=list(nodes))
-    label_names, struct_names = _collect_subtree_names(body_block)
+    label_names, struct_names = collect_subtree_names(body_block)
     allocated.update(label_names)
     allocated.update(struct_names)
 

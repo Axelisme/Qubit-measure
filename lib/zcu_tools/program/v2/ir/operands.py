@@ -407,8 +407,9 @@ def parse_label(val: Label | LabelRef | str | None) -> LabelRef | None:
     name = val[1:] if val.startswith("&") else val
     if not name:
         return None
-    if name in PSEUDO_LABELS:
-        return LabelRef(name)  # type: ignore[arg-type]
+    for pseudo in PSEUDO_LABELS:
+        if name == pseudo:
+            return LabelRef(pseudo)
     return LabelRef(Label(name))
 
 
@@ -514,7 +515,8 @@ def parse_addr(val: Register | MemAddr | str | None) -> AddrType | None:
     if isinstance(val, (Register, MemAddr)):
         return val
 
-    if isinstance(val, str):
+    # tolerated: Non-string values from QICK dictionaries must fall back to None, not strip().
+    if isinstance(val, str):  # pyright: ignore[reportUnnecessaryIsInstance]
         val_s = val.strip()
         # &N (numeric) → MemAddr
         mem = parse_mem_addr(val_s)
@@ -553,7 +555,8 @@ def parse_src(val: SrcKeyword | Register | str | None) -> SrcType | None:
         return val
     if isinstance(val, Register):
         return val
-    if isinstance(val, str):
+    # tolerated: Non-string QICK values must return None without keyword/register parsing.
+    if isinstance(val, str):  # pyright: ignore[reportUnnecessaryIsInstance]
         try:
             return SrcKeyword(val)
         except ValueError:

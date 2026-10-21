@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -230,6 +230,36 @@ large-amplitude flux controls, filtering or flux-tail paths. Version 2 settings
 group physical values, named DC/drive lines, readout and numerics. Version 1 is
 not accepted.
 
+Nonterminal pulses on the readout generator are cavity drives. At each point,
+the latest active readout-channel block starts the terminal readout. Every earlier
+readout-channel pulse must end by that start, and the first ADC trigger must not
+precede it. A pulse that crosses the terminal start raises `ValueError`.
+
+`simulate.adc` solves the linear, state-conditioned cavity fields. The incident
+amplitude uses the same `input_per_gain` conversion as terminal readout.
+For state s and resonator r, the photon number is `n[s,r] = |alpha[s,r]|²`.
+The Stark energy shift in GHz is `sum_r chi[s,r] * n[s,r]`, where chi is the
+joint model's state-dependent cavity frequency minus its bare frequency.
+Differences between state-conditioned outgoing fields cause photon-shot-noise
+dephasing, including shared-line interference and independent internal losses.
+These driven contributions are separate from residual thermal-photon dephasing.
+
+FTF queries evolution's final spans and averages the Stark energy shifts and
+driven dephasing rates over each span. Fields retain ringdown after pulse
+switch-off. The averages enter evolution as neutral `SegmentShift` values;
+evolution owns segmentation and propagation, not the cavity field equations.
+Within a span, evolution uses these averages rather than the instantaneous field.
+
+Each state-conditioned cavity field evolves independently from vacuum at t=0.
+The probe does not inherit the cavity field of the prepared qubit branch.
+This approximation gives the same cavity centre for CKP's g/e preparation branches
+and does not support preparation-resolved chi calibration.
+
+A Stark shift that reverses state-energy order raises a point/segment-specific
+error because it exceeds the dispersive model's validity. States are not reordered.
+The linear dispersive cavity model has no measurement-induced state transitions
+and does not model MIST onset.
+
 Readout uses the DC model and populations in its energy basis. FTF explicitly
 calls ADC's `normalize_populations` once after `batch_populations`, before
 conditional responses or sampling. ADC owns the 1e-6 probability tolerance,
@@ -241,12 +271,13 @@ preparations retain zero rejected rows. The source retains the latest
 evolve diagnostics even when this preparation fails, including the engine's
 report-only maximum trace error. Raw evolution densities remain unchanged.
 It ignores drive-line controls during or after readout. Earlier control portions still evolve
-normally. Pulse readout requires exactly one active incident pulse per point, including
-mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
+normally. Pulse readout requires exactly one active terminal incident pulse per
+point, including mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
 a common pulse start. Every ADC observes the total shared-line field through its
 own demodulation, calibration, delay and sample grid. The physical resonator pair
 is unchanged; tones are not assigned to individual resonators. Controls evolve
-to the common readout start only. Separate readout blocks are not supported.
+to the common terminal readout start only. Multiple terminal readout blocks are
+not supported.
 Constant readout envelope values
 fold into amplitude with `envelope=None`, enabling the exact field solution.
 Nonconstant samples become ADC `PiecewiseLinearEnvelope` inputs without changing
@@ -307,14 +338,14 @@ memory. They need only agree with direct means in expectation, not realization.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
-The backend is `ftf-segment-v11`. Integrated raw and decimated traces resolve
+The backend is `ftf-segment-v12`. Integrated raw and decimated traces resolve
 continuous CTMC jump times and cavity memory, with one physical path per shot
-shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v10`
-and earlier backends fail explicitly because their raw sampling is incompatible.
+shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v11`
+and earlier backends fail explicitly because they predate cavity-drive evolution.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal
-seed, inputs and recorded versions. Evolution's numeric version is unchanged.
+seed, inputs and recorded versions. Evolution uses `segment-engine-v5`.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

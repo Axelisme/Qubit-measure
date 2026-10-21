@@ -68,13 +68,15 @@ import dataclasses
 from ...hw_semantics import TIMED_BASE_REG
 from ...instructions import (
     BaseInst,
+    RegWriteInst,
+    TimeInst,
+    WaitInst,
+)
+from ...io_instructions import (
     DmemReadInst,
     DmemWriteInst,
     DportWriteInst,
     PortWriteInst,
-    RegWriteInst,
-    TimeInst,
-    WaitInst,
     WmemWriteInst,
 )
 from ...node import BasicBlockNode
@@ -141,7 +143,8 @@ def _fold_anchored_time(
         result.append(inst)
         return pending_lit
 
-    time = getattr(inst, "time")
+    # tolerated: BaseInst lacks time; caller dynamically guards TimeOffset fields.
+    time = getattr(inst, "time")  # noqa: B009
     assert isinstance(time, TimeOffset)
     if pending_lit > 0:
         if time.value + pending_lit > TIMED_LIT_MAX:

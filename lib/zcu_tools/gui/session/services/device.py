@@ -1,3 +1,9 @@
+# tolerated(file-size): The adapter catalog owns driver creation, OperationRunner
+# owns generic execution, and State and request/read models have separate owners.
+# This service keeps per-device inflight/prior, registry/cache commits, rollback
+# and handle settlement in one transition. Terminal paths commit State before
+# settlement and emit device-change and outcome facts afterward. Splitting
+# callbacks scatters that transition; short helpers/projections add no new owner.
 from __future__ import annotations
 
 import logging
@@ -8,7 +14,6 @@ from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
-    cast,
 )
 
 from zcu_tools.device import DeviceActivity, DeviceInfo
@@ -16,6 +21,15 @@ from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
+from zcu_tools.gui.session.device_models import (
+    ActiveDeviceOperation,
+    ConnectDeviceRequest,
+    DeviceEntry,
+    DeviceSetupSnapshot,
+    DeviceSnapshot,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.devices import device_adapters, get_device_adapter
 from zcu_tools.gui.session.devices.base import DeviceProtocol
 from zcu_tools.gui.session.events import (
@@ -24,21 +38,19 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
-from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
     ExclusionRequest,
-    OperationRunner,
+    OperationInfrastructure,
     OperationSpec,
     SettleFn,
 )
 from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
-    BackgroundExecutor,
     DeviceMemoryInfo,
     DeviceRegistryPort,
     DriverFactoryPort,
-    ExclusionGate,
     OperationConflictError,
     OperationKind,
 )
@@ -50,84 +62,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.state import SessionState
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class ConnectDeviceRequest:
-    type_name: str
-    name: str
-    address: str
-    remember: bool = True
-
-
-@dataclass(frozen=True)
-class DisconnectDeviceRequest:
-    name: str
-    remember: bool = True
-
-
-@dataclass(frozen=True)
-class SetupDeviceRequest:
-    name: str
-    info: BaseDeviceInfo
-
-
-@dataclass(frozen=True)
-class DeviceSnapshot:
-    """Read-time projection of a device for View / remote readers.
-
-    Assembled by ``DeviceService._project`` from the State-owned ``DeviceState``
-    (name/type/address/status/info/error). Live setup progress is not spliced
-    here — it is polled separately via ``operation.progress`` (by operation_id,
-    ProgressService). It is never stored — State is the device-state SSOT.
-    """
-
-    name: str
-    type_name: str
-    address: str
-    status: DeviceStatus
-    info: BaseDeviceInfo | None = None
-    error: str | None = None
-
-
-@dataclass(frozen=True)
-class DeviceEntry:
-    name: str
-    type_name: str
-    # Fine-grained lifecycle status (DeviceStatus.value) rather than a coarse
-    # bool, so the list view matches the snapshot/active-operations projections
-    # (single-status SSOT; FC7). One of: memory_only | connecting | connected |
-    # disconnecting | setting_up.
-    status: str
-
-
-@dataclass(frozen=True)
-class DeviceSetupSnapshot:
-    # Live progress is polled via operation.progress (by operation_id, ADR-0068
-    # device↔run alignment), not carried here — this names *which* device is
-    # setting up.
-    device_name: str
-
-
-@dataclass(frozen=True)
-class ActiveDeviceOperation:
-    """One in-flight device operation in the concurrent-enumeration view.
-
-    Phase C runs operations for different devices in parallel, so the read-only
-    "what is in flight" surface is a *set*, not a single op. Each entry pairs the
-    device-state projection with the operation ``kind`` (connect / disconnect /
-    setup) so an agent knows both which device and which kind of operation is
-    live without re-deriving it from ``status``. ``device_name`` mirrors
-    ``snapshot.name`` for callers that only need the key.
-    """
-
-    device_name: str
-    kind: OperationKind
-    snapshot: DeviceSnapshot
-    # The operation handle (runner token), so a concurrent-enumeration reader can
-    # await each in-flight GUI operation by token, or expose it through MCP
-    # status() as an agent handle, without re-resolving by device name.
-    token: int
 
 
 @dataclass(frozen=True)
@@ -176,14 +110,17 @@ class DeviceService:
         self,
         bus: BaseEventBus,
         state: SessionState,
-        gate: ExclusionGate,
-        bg: BackgroundExecutor,
-        runner: OperationRunner,
-        handles: OperationHandles,
+        operations: OperationInfrastructure,
         *,
         driver_factory: DriverFactoryPort | None = None,
         device_registry: DeviceRegistryPort | None = None,
     ) -> None:
+        """Use state/bus on their owner thread with shared operation owners.
+
+        ``operations`` forwards the same gate, executor, runner and handles used
+        by the app composition. The optional factory creates drivers; an omitted
+        registry creates a session-owned DeviceManager, never a global registry.
+        """
         self._bus = bus
         self._state = state
         self._owner_guard = OwnerThreadGuard()
@@ -192,12 +129,12 @@ class DeviceService:
         # await + cancel for setup). OperationRunner owns the mechanism (ADR-0066);
         # gate is kept directly for is_device_mutating / _reject_mutating_read;
         # bg is kept directly for poll_device_info (best-effort read, not a runner op).
-        self._gate = gate
-        self._bg = bg
-        self._runner = runner
+        self._gate = operations.gate
+        self._bg = operations.background
+        self._runner = operations.runner
         # handles is kept for cancel_device_operation (handles.cancel) — the same
         # instance that runner holds internally.
-        self._handles = handles
+        self._handles = operations.handles
         self._driver_factory = driver_factory or _default_driver_factory
         from zcu_tools.device import DeviceManager
 
@@ -374,7 +311,7 @@ class DeviceService:
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             if bg.ok:
-                _on_connect_succeeded(cast(BaseDeviceInfo, bg.result), settle)
+                _on_connect_succeeded(bg.result, settle)
             else:
                 assert bg.error is not None
                 _on_operation_failed(str(bg.error), settle)
@@ -558,7 +495,7 @@ class DeviceService:
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
         current = self._require_connected_device(req.name)
-        driver = cast(DeviceProtocol, self._registry.get_device(req.name))
+        driver: DeviceProtocol = self._registry.get_device(req.name)
         # Single owner of the cancellation flag: passed to both the gate (set on
         # cancel) and the worker (polls it / self-judges 'cancelled').
         stop_event = threading.Event()
@@ -582,7 +519,7 @@ class DeviceService:
                 if stop_event.is_set():
                     _on_setup_cancelled(settle)
                 else:
-                    _on_setup_finished(cast(BaseDeviceInfo, bg.result), settle)
+                    _on_setup_finished(bg.result, settle)
             else:
                 assert bg.error is not None
                 _on_setup_failed(str(bg.error), settle)
@@ -988,7 +925,7 @@ class DeviceService:
         if dev is None or dev.is_memory_only():
             return None
         try:
-            info = cast(BaseDeviceInfo, self._registry.get_info(name))
+            info: BaseDeviceInfo = self._registry.get_info(name)
         except ValueError:
             return None
         # Read-time cache refresh: silent when unchanged (no bump), but if the
@@ -1021,15 +958,15 @@ class DeviceService:
 
         def read_work() -> BaseDeviceInfo:
             # Worker thread: pure driver read, no State touch, no emit.
-            return cast(BaseDeviceInfo, self._registry.get_info(name))
+            return self._registry.get_info(name)
 
-        def on_read(info: object) -> None:
+        def on_read(info: BaseDeviceInfo) -> None:
             # Main thread: the device may have gone away or started a non-setup
             # mutation between submit and delivery; re-check before the cache
             # refresh so a late poll result never bumps that State.
             if not self._can_poll_device_info(name):
                 return
-            if self._state.refresh_device_info_cache(name, cast(BaseDeviceInfo, info)):
+            if self._state.refresh_device_info_cache(name, info):
                 self._emit_device_changed(name)
 
         def on_read_failed(exc: Exception) -> None:

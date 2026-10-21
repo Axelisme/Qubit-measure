@@ -26,6 +26,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
 from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+from zcu_tools.gui.app.workflows.composition import WorkflowComposition
 from zcu_tools.gui.app.workflows.remote import FormWrite
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import Display, FormEnv, FormModel
@@ -344,10 +345,12 @@ class WindowSession:
             self.harness.state,
             self.harness.services,
             self.harness.owner,
-            templates={},
-            alias_presets=None,
-            registrations=self.source.catalog.attachments,
-            loader=self.source.loader,
+            composition=WorkflowComposition(
+                templates={},
+                alias_presets=None,
+                registrations=self.source.catalog.attachments,
+                loader=self.source.loader,
+            ),
         )
 
     def fresh_catalog(self) -> WorkflowCatalog[None]:

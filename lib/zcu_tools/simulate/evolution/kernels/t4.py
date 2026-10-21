@@ -67,9 +67,14 @@ class T4:
         del context
         keys = np.empty(
             len(rows),
-            dtype=[("level", "<i8", table.level.shape[1]), ("duration", "<f8")],
+            dtype=[
+                ("level", "<i8", table.level.shape[1]),
+                ("shift", "S64"),
+                ("duration", "<f8"),
+            ],
         )
         keys["level"] = table.level[rows]
+        keys["shift"] = table.shift_content[rows]
         keys["duration"] = table.duration_ns[rows]
         return keys
 
@@ -90,7 +95,9 @@ class T4:
         del table, rows, budget
         populations, coherences = [], []
         for key in keys:
-            model = source.model(tuple(int(v) for v in key["level"]))
+            model = source.shifted_model(
+                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+            )
             duration = float(key["duration"])
             populations.append(
                 expm(duration * population_generator(model.rates_per_ns))

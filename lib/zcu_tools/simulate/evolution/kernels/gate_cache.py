@@ -124,6 +124,7 @@ class GateCacheKernel:
         dtype = np.dtype(
             [
                 ("level", "<i8", (table.level.shape[1],)),
+                ("shift", "S64"),
                 ("port", "<i8"),
                 ("envelope", "S64"),
                 ("offset", "<f8"),
@@ -137,6 +138,7 @@ class GateCacheKernel:
             # A table without tones has no tone columns to index.
             return keys
         keys["level"] = table.level[rows]
+        keys["shift"] = table.shift_content[rows]
         keys["port"] = table.tone_port[rows, 0]
         identities = np.array(
             [envelope.identity for envelope in table.envelopes], dtype="S64"
@@ -188,7 +190,7 @@ class GateCacheKernel:
             )
         coefficients, populations, coherences = [], [], []
         for row, adaptive in zip(rows, phase_adaptive, strict=True):
-            model = source.model(tuple(int(v) for v in table.level[row]))
+            model = table.model(source, row)
             half_step = float(table.duration_ns[row]) / (2 * GATE_SUBSEGMENTS)
             population = expm(half_step * population_generator(model.rates_per_ns))
             coherence = np.exp(-half_step * coherence_decay(model))

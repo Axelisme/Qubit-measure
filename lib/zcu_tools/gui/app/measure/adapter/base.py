@@ -5,7 +5,7 @@ from abc import ABC
 from collections.abc import Callable, Sequence
 from inspect import signature
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal
 
 from zcu_tools.datafile import AnalysisDocument, StoredRun
 from zcu_tools.experiment.context import RunContext
@@ -96,7 +96,9 @@ def _validated_capabilities(value: object, adapter_name: str) -> AdapterCapabili
     return value
 
 
-class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
+class BaseAdapter(
+    ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams, T_PostAnalyzeResult]
+):
     """Shared implementation for experiment adapters.
 
     Concrete adapters subclass this and fill in the experiment-specific knowledge
@@ -104,9 +106,12 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     ``get_analyze_params``/``analyze``). Run delegation and persistence payload
     preparation are provided here once.
 
-    The class is generic over the four experiment types. Adapters without analysis
-    omit the last two parameters (PEP 696 defaults fill in ``NoAnalysisResult`` /
-    ``NoAnalyzeParams``) and inherit the raising no-op analysis below; they declare
+    The first four generic parameters describe the experiment's cfg, result,
+    analysis result and analysis params. The optional fifth parameter types the
+    post-analysis writeback result and defaults to ``NoAnalysisResult``.
+    Adapters without analysis omit the analysis parameters (PEP 696 defaults fill
+    in ``NoAnalysisResult`` / ``NoAnalyzeParams``) and inherit the raising no-op
+    analysis below; they declare
     ``capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)`` so the
     framework never routes analysis to them.
 
@@ -334,7 +339,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del result, ctx
         params_cls = type(self).analyze_params_cls()
         if _can_construct_without_args(params_cls):
-            return params_cls()  # type: ignore[return-value]
+            return params_cls()
         raise NotImplementedError(
             f"{type(self).__name__} declares analysis with params "
             f"{params_cls.__name__} that need values, but does not override "
@@ -390,7 +395,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
         try:
             hints = typing.get_type_hints(cls.get_post_analyze_params)
-        except Exception:
+        # tolerated: Adapter annotation evaluation can raise any error; keep the empty post schema.
+        except Exception:  # noqa: BLE001
             return NoAnalyzeParams
         return hints.get("return", NoAnalyzeParams)
 
@@ -447,7 +453,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
         try:
             hints = typing.get_type_hints(cls.get_analyze_params)
-        except Exception:
+        # tolerated: Adapter annotations execute arbitrary code; recover the declared generic schema.
+        except Exception:  # noqa: BLE001
             return _analyze_params_generic_arg(cls)
         ret = hints.get("return", T_AnalyzeParams)
         if isinstance(ret, typing.TypeVar):
@@ -470,7 +477,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         Core execution failures propagate to the operation owner.
         """
         del req
-        return cast(T_Result, self.exp_cls().run(cfg, context=context))
+        return self.exp_cls().run(cfg, context=context)
 
     def restore(self, stored: StoredRun) -> RestoredRun[T_Result]:
         """Restore already-read native data through the core's from_stored contract.

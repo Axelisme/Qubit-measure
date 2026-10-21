@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-20，完整 run_id 路徑與 metadata 身分權威
+**Last updated:** 2026-10-20，Labber reader／writer／format owners、metadata 契約、獨立 logs 與 device snapshot；native 2.1、grouped independent layout 與完整 run_id 路徑
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -78,6 +78,9 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
   inner-first axes 的 Labber dataset。
 - `DataVariable`、`GroupedLabberData` 描述 grouped Labber 衍生輸出：同一 Labber file 內含多個 variable payload，metadata 共用。正規 Experiment Data File 的 variable 分組由 native payload 表示。
 - `save_labber_data` / `load_labber_data` 處理 single-variable file。
+  `save_labber_data`、`save_labber_trace_data` 與 `LabberData` 接受既有
+  `LabberMetadata` 的 `metadata=`，統一傳入 comment、tags、project、user 與 creation_time；
+  timestamps 仍屬於 payload。傳入的 metadata 保持同一物件，省略時建立預設值。
 - `load_labber_logs` 唯讀拆出未標記檔案的 root、Log_2、Log_3 等，各自保留
   signal、inner-first axes、獨立 grid 與 epoch timestamps，不堆疊、不指定 domain variable。
   Caller 明示順序對應與 schema；reader 拒絕不一致的已存 step dimensions。
@@ -118,6 +121,10 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 - `format_ext` / `remove_ext` 只處理檔名 suffix，不改路徑中段的 `.h5` /
   `.hdf5` 子串；`reserve_labber_filepath` 保留 Labber-style numeric sequence，
   但孤立的數字尾碼可作為 caller 命名的一部分。
+
+`labber.py` 擁有 uniform／trace writer，`labber_reader.py` 擁有完整讀取與 log 解碼。
+`labber_format.py` 集中 Labber 1.8.6 bookkeeping labels、compound dtypes 與 attribute／string 轉換，
+由 writer、reader、grouped 與 streaming 共用。`labber_writer.py` 保留 ExperimentPayload 到 Labber 的投影。
 
 `datafile/` 內部 module 是責任拆分，不是額外 public import path。
 

@@ -48,6 +48,7 @@ def fitlor(
     # guess initial parameters
     if any([p is None for p in fitparams]):
         assign_init_p(fitparams, _guess_lorentzian_params(xdata, ydata))
+    # tolerated(cast): Lorentzian guesses fill five unset slots and preserve supplied values; in-place filling cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
     # bounds
@@ -88,6 +89,7 @@ def fit_asym_lor(
         alpha = 0
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma, alpha])
+    # tolerated(cast): Lorentzian/zero-asymmetry guesses fill unset slots and preserve supplied values; mutation cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
     # bounds

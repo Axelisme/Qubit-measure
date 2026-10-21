@@ -13,7 +13,10 @@ from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTrans
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -52,10 +55,9 @@ def rename_session(qapp) -> Iterator[RenameSession]:
     device = DeviceService(
         bus,
         state,
-        gate,
-        background,
-        runner,
-        handles,
+        OperationInfrastructure(
+            gate=gate, background=background, runner=runner, handles=handles
+        ),
         driver_factory=lambda type_name, address: FakeDevice(fast_mode=True),
         device_registry=FakeDeviceRegistry(),
     )

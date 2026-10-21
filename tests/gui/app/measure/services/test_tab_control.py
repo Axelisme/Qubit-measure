@@ -96,9 +96,13 @@ def _facet(
     bus = RecordingBus(log)
     return (
         TabControlFacet(
+            # tolerated(cast): ID/query recorder is not the concrete State.
             state=cast(Any, state),
+            # tolerated(cast): TabService snapshots exclude this object identity token.
             tab=cast(Any, tab),
+            # tolerated(cast): Lifecycle recorder is not the concrete WorkspaceService.
             workspace=cast(Any, workspace),
+            # tolerated(cast): Payload recorder omits BaseEventBus delivery machinery.
             bus=cast(Any, bus),
             load_tab_result=Mock() if load_tab_result is None else load_tab_result,
         ),

@@ -1,9 +1,9 @@
-"""SetupDialog — explicit result entry binding and ZCU connection."""
+"""SetupDialog — explicit result entry and working-point binding."""
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt, QUrl
 from qtpy.QtGui import QColor, QDesktopServices, QResizeEvent, QShowEvent
@@ -19,10 +19,8 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
-    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -35,7 +33,6 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
     PointUseRequest,
 )
-from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
 from zcu_tools.gui.widgets import (
     error_colour,
     reset_foreground,
@@ -44,7 +41,6 @@ from zcu_tools.gui.widgets import (
     success_colour,
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
-from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
@@ -109,15 +105,8 @@ class _ElidedPathLabel(QLabel):
         )
 
 
-@runtime_checkable
-class SocConfigProtocol(Protocol):
-    """Protocol for QICK Soc configuration objects (dict-style field access)."""
-
-    def __getitem__(self, key: str) -> object: ...
-
-
 class SetupDialog(QDialog):
-    """Resizable result-entry and connection form over SetupControlPort.
+    """Resizable result-entry and working-point form over SetupControlPort.
 
     Showing/reopening only prefills cached preferences and queries; it does not
     open an entry or connect hardware. New/Open publish the owner binding and
@@ -140,32 +129,29 @@ class SetupDialog(QDialog):
         super().__init__(parent)
         self._ctrl = controller
         self._read_only = False
-        self._connecting = False
         self.setWindowTitle("Setup")
         self.resize(900, 680)
 
         root_layout = QVBoxLayout(self)
 
-        # ── horizontal splitter: left = project, right = connection ──────
+        # Entry and creation form on the left; working-point browser on the right.
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         root_layout.addWidget(splitter, stretch=1)
 
-        # ── Left panel: Project ──────────────────────────────────────────
+        # Entry and new working point.
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(4, 4, 4, 4)
 
         left_layout.addWidget(self._build_entry_group())
 
-        left_layout.addWidget(self._build_point_list(), stretch=1)
-
         left_layout.addWidget(self._build_new_point_group())
 
-        # project status label
+        left_layout.addStretch()
         splitter.addWidget(left_widget)
-
-        splitter.addWidget(self._build_connection_panel())
+        splitter.addWidget(self._build_point_list())
+        splitter.setStretchFactor(1, 1)
 
         splitter.setSizes([450, 450])
 
@@ -182,18 +168,15 @@ class SetupDialog(QDialog):
         self._prefill_from_preferences()
         self._refresh_device_list()
         self._refresh_context_list()
-        self._maybe_show_current_cfg()
 
         # EventBus subscriptions for live updates
         from zcu_tools.gui.session.events import (
             ContextSwitchedPayload,
             DeviceChangedPayload,
-            SocChangedPayload,
         )
 
         bus = controller.get_bus()
         bus.subscribe(ContextSwitchedPayload, self._on_bus_context_switched)
-        bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
         bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
         self._bus_subs_active = True
         self.finished.connect(self._cleanup_bus_subscriptions)
@@ -298,51 +281,10 @@ class SetupDialog(QDialog):
         new_form.addRow("", self._new_ctx_btn)
         return new_group
 
-    def _build_connection_panel(self) -> QWidget:
-        # ── Right panel: Connection ──────────────────────────────────────
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(4, 4, 4, 4)
-
-        conn_group = QGroupBox("ZCU Connection")
-        conn_form = QFormLayout(conn_group)
-
-        self._ip_edit = QLineEdit("192.168.10.1")
-        # Keep any IPv4 address fully visible when the dialog is narrow.
-        self._ip_edit.setMinimumWidth(
-            self._ip_edit.fontMetrics().horizontalAdvance("255.255.255.255 ") + 12
-        )
-        conn_form.addRow("IP address:", self._ip_edit)
-
-        self._port_spin = QSpinBox()
-        self._port_spin.setRange(1, 65535)
-        self._port_spin.setValue(8887)
-        conn_form.addRow("Port:", self._port_spin)
-
-        right_layout.addWidget(conn_group)
-
-        self._connect_btn = QPushButton("Connect")
-        self._connect_btn.clicked.connect(self._on_connect_clicked)
-        right_layout.addWidget(self._connect_btn)
-
-        self._conn_status = _wrapping_label()
-        right_layout.addWidget(self._conn_status)
-
-        # soccfg description — hidden until connection succeeds
-        self._cfg_text = QPlainTextEdit()
-        self._cfg_text.setReadOnly(True)
-        self._cfg_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self._cfg_text.setVisible(False)
-        right_layout.addWidget(self._cfg_text, stretch=1)
-
-        right_layout.addStretch()
-        return right_widget
-
     def set_read_only(self, *, read_only: bool) -> None:
-        """Gate entry/point/connection edits while preserving browsing and Close.
+        """Gate entry and point edits while preserving browsing and Close.
 
-        The host owns this policy. Event refreshes and connection completion keep
-        it applied; returning writable does not enable an in-flight Connect.
+        The host owns this policy; cached event refreshes preserve it.
         """
         self._read_only = read_only
         for button in (
@@ -352,15 +294,10 @@ class SetupDialog(QDialog):
             self._switch_btn,
         ):
             button.setEnabled(not read_only)
-        for field in (self._label_edit, self._description_edit, self._ip_edit):
+        for field in (self._label_edit, self._description_edit):
             field.setReadOnly(read_only)
-        self._port_spin.setReadOnly(read_only)
         for combo in (self._entry_combo, self._device_combo, self._clone_combo):
             combo.setEnabled(not read_only)
-        self._refresh_connect_enabled()
-
-    def _refresh_connect_enabled(self) -> None:
-        self._connect_btn.setEnabled(not self._read_only and not self._connecting)
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         if not self._bus_subs_active:
@@ -369,17 +306,15 @@ class SetupDialog(QDialog):
         from zcu_tools.gui.session.events import (
             ContextSwitchedPayload,
             DeviceChangedPayload,
-            SocChangedPayload,
         )
 
         bus = self._ctrl.get_bus()
         bus.unsubscribe(ContextSwitchedPayload, self._on_bus_context_switched)
-        bus.unsubscribe(SocChangedPayload, self._on_bus_soc_changed)
         bus.unsubscribe(DeviceChangedPayload, self._on_bus_device_changed)
         self._bus_subs_active = False
 
     def showEvent(self, a0: QShowEvent | None) -> None:
-        """Re-seed entry/connection inputs from cached preferences on show.
+        """Re-seed entry inputs from cached preferences on show.
 
         Reopening the dialog after a close (``show()`` on the kept instance)
         replaces any previously-typed-but-never-applied draft with the
@@ -408,17 +343,6 @@ class SetupDialog(QDialog):
             self._select_entry_name(info.name)
             self._show_entry_paths(info)
 
-    def _on_bus_soc_changed(self, payload: object) -> None:
-        from zcu_tools.gui.session.events import SocChangedPayload
-
-        self._refresh_connect_enabled()
-        if isinstance(payload, SocChangedPayload) and payload.soc is not None:
-            self._set_conn_status("Connected", error=False)
-            self._maybe_show_current_cfg()
-        else:
-            self._set_conn_status("Disconnected", error=False)
-            self._cfg_text.setVisible(False)
-
     def _on_bus_device_changed(self, payload: object) -> None:
         del payload
         self._refresh_device_list()
@@ -431,10 +355,6 @@ class SetupDialog(QDialog):
         data = self._ctrl.get_setup_preferences()
         if data.entry_name:
             self._select_entry_name(data.entry_name)
-        if data.ip:
-            self._ip_edit.setText(data.ip)
-        if data.port:
-            self._port_spin.setValue(data.port)
         info = self._ctrl.get_entry_info()
         if info is not None:
             self._show_entry_paths(info)
@@ -571,7 +491,7 @@ class SetupDialog(QDialog):
         if item is None:
             self._set_project_status("Select a working point first", error=True)
             return
-        label = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        label = item.data(Qt.ItemDataRole.UserRole)
         try:
             self._ctrl.use_point(PointUseRequest(label))
         except Exception as exc:
@@ -678,62 +598,3 @@ class SetupDialog(QDialog):
         label.setText(_breakable(msg))
         label.setToolTip(msg)
         set_foreground(label, color)
-
-    # ------------------------------------------------------------------
-    # Connection panel handlers
-    # ------------------------------------------------------------------
-
-    def _maybe_show_current_cfg(self) -> None:
-        soccfg = self._ctrl.get_soccfg()
-        if isinstance(soccfg, SocConfigProtocol):
-            self._show_cfg(describe_soc(soccfg))
-            self._set_conn_status("Currently connected", error=False)
-
-    def _on_connect_clicked(self) -> None:
-        if self._read_only or self._connecting:
-            return
-        from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
-
-        self._ctrl.bind_connection_outcome(
-            self._on_connect_finished, self._on_connect_failed
-        )
-        self._ctrl.remember_connection(
-            ConnectionPreferences(
-                ip=self._ip_edit.text().strip(), port=self._port_spin.value()
-            )
-        )
-        self._connecting = True
-        self._refresh_connect_enabled()
-        self._set_conn_status("Connecting…", error=False)
-        try:
-            self._ctrl.start_connect(
-                ConnectRemoteRequest(
-                    ip=self._ip_edit.text().strip(), port=self._port_spin.value()
-                )
-            )
-        except Exception as exc:  # noqa: BLE001 — restore the button on admission rejection
-            self._on_connect_failed(str(exc))
-
-    def _on_connect_finished(self) -> None:
-        self._connecting = False
-        self._refresh_connect_enabled()
-        self._set_conn_status("Connected", error=False)
-        soccfg = self._ctrl.get_soccfg()
-        if isinstance(soccfg, SocConfigProtocol):
-            self._show_cfg(describe_soc(soccfg))
-
-    def _on_connect_failed(self, message: str) -> None:
-        self._connecting = False
-        self._refresh_connect_enabled()
-        self._set_conn_status(message, error=True)
-
-    def _show_cfg(self, text: str) -> None:
-        self._cfg_text.setPlainText(text)
-        self._cfg_text.setVisible(True)
-
-    def _set_conn_status(self, msg: str, *, error: bool = False) -> None:
-        self._show_status(
-            self._conn_status,
-            msg,
-            error_colour(self) if error else success_colour(self),
-        )

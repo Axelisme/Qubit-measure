@@ -96,9 +96,9 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
         program = ModularProgramV2(
             env.soccfg, ProgramV2Cfg(reps=2048), modules=[readout.build("ro")]
         )
-        averaged = np.asarray(program.acquire(env.soc, progress=False)[0]).reshape(
-            -1, 2
-        )[0]
+        acquired = program.acquire(env.soc, progress=False)
+        assert acquired is not None
+        averaged = np.asarray(acquired[0]).reshape(-1, 2)[0]
         request = env.soc.binding.last_request
         if request is None:
             raise AssertionError("completed simulation retains its numeric request")
@@ -153,14 +153,14 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
             gain=0.0,
             waveform=ConstWaveformCfg(length=0.04),
             ro_length=0.06,
-            trig_offset=-0.01,
+            trig_offset=0.01,
         )
         program = ModularProgramV2(
             env.soccfg, ProgramV2Cfg(reps=256), modules=[readout.build("ro")]
         )
-        values = np.asarray(
-            program.acquire_decimated(env.soc, progress=False)[0]
-        ).reshape(-1, 2)
+        acquired = program.acquire_decimated(env.soc, progress=False)
+        assert acquired is not None
+        values = np.asarray(acquired[0]).reshape(-1, 2)
         request = env.soc.binding.last_request
         if request is None:
             raise AssertionError("completed simulation retains its numeric request")

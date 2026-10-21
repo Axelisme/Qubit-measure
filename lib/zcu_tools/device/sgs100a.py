@@ -8,10 +8,10 @@ from .base import BaseDevice, BaseDeviceInfo, device_operation
 if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
-STATUS_MAP = {"on": "1", "off": "0"}
+STATUS_MAP: dict[Literal["on", "off"], str] = {"on": "1", "off": "0"}
 
 
-STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
+STATUS_MAP_INV: dict[str, Literal["on", "off"]] = {v: k for k, v in STATUS_MAP.items()}
 
 
 class RohdeSchwarzSGS100AInfo(BaseDeviceInfo):
@@ -29,7 +29,7 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
         super().__init__(address, rm)
 
     def get_output(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":OUTPut?")]  # pyright: ignore[reportReturnType]
+        return STATUS_MAP_INV[self.query(":OUTPut?")]
 
     @device_operation
     def set_output(self, status: Literal["on", "off"]) -> None:
@@ -48,7 +48,7 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
     # ==========================================================================#
 
     def get_IQ_state(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":IQ:STAT?")]  # pyright: ignore[reportReturnType]
+        return STATUS_MAP_INV[self.query(":IQ:STAT?")]
 
     @device_operation
     def set_IQ_state(self, state: Literal["on", "off"]) -> None:

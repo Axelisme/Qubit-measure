@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-20, retained-graph RWA density support
+**Last updated:** 2026-10-20, retained-graph RWA density support and two-tone Floquet k=0 numerical ownership
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -16,7 +16,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
 | Engine model source | `ModelSource`, `SecularModel`, `SecularDrive` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
-| Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec` |
+| Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
 | Control description | `ControlPulse`, `ControlSequence`, `Envelope`, `PhaseEvent`, `quantize_ns` |
 | Fixed-coordinate model records | `NumericModel`, `DriveSource` |
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
@@ -32,6 +32,16 @@ Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
 directional rates and pure dephasing in each quantized flux level's energy
 basis. The model builder owns physical applicability. Records own read-only
 array copies and reject invalid shapes or numeric invariants.
+
+`TimelineBatch.segment_boundaries` adds point-aligned absolute ns boundaries.
+`segment_spans(batch)` is a pure query of the same final partition used by
+`evolve`, including active microwave plateaus and flux events. Callers can
+average external energy shifts and dephasing over these spans, then attach
+point-aligned `SegmentShift` values through `segment_shifts`. Each supplied span
+must match one queried span exactly; missing spans have zero shift. Shifts do
+not add boundaries, rotate bases or change physical `FluxLevel` values. Model,
+prepare, result and gate-usage identities include shift content. Without shifts,
+the original model source, initial state and reuse semantics remain unchanged.
 
 `EvolutionResult` contains densities at readout start in the DC eigenbasis.
 The environment explicitly converts them to populations, then calls ADC's
@@ -578,7 +588,9 @@ class's methods.
 | Ordinary density endpoint advancement | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py), used by ordinary DOP853 apply and period fractional tails with an explicitly supplied frame. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
-| Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py), with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. Separate from two-tone Floquet frames. |
+| Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
+| RWA Fourier coefficients, omission estimates and retained-graph dimension | [kernels/_rwa_fourier.py](kernels/_rwa_fourier.py), shared by ordinary multitone, single-constant and shaped-gate RWA through [kernels/multitone_rwa.py](kernels/multitone_rwa.py). Row admission, WorkPlan facts, retention orchestration and playback remain in `multitone_rwa`. |
+| Two-tone k=0 admission and propagation, shared Fourier frame evaluation | [kernels/_floquet_k0.py](kernels/_floquet_k0.py) owns omission/Dyson admission, modal Dyson and periodic channels. Both k=0 and retained-sideband apply use its Fourier frame evaluation. Stark frame construction and row plans remain in [floquet](kernels/floquet.py); retained-sideband equations remain in `_floquet_sidebands`. Separate from single-constant-tone `_period_channel`. |
 | Two-tone retained-sideband certificates and equations | [kernels/_floquet_sidebands.py](kernels/_floquet_sidebands.py), used by [floquet](kernels/floquet.py) guard admission and apply. |
 | Common-carrier frame, SW2 beat channels, omitted-channel indicators and dressed CF4/secular propagation | [kernels/common_frame.py](kernels/common_frame.py), the model-only numerical owner with row-local admission. [kernels/common_frame_kernel.py](kernels/common_frame_kernel.py) hands charged products to the engine; [_common_frame_dispatch.py](_common_frame_dispatch.py) owns cold variant pricing. |
 

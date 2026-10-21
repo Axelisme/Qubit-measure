@@ -7,8 +7,8 @@ import time
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer
+from qtpy.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
@@ -26,6 +26,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.session.device_models import (
+    ConnectDeviceRequest,
+    DeviceSnapshot,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
+)
 from zcu_tools.gui.session.devices import device_adapters, get_device_adapter
 from zcu_tools.gui.session.devices.base import DevicePanelProtocol
 from zcu_tools.gui.session.events import (
@@ -33,13 +39,7 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
-from zcu_tools.gui.session.services.device import (
-    ConnectDeviceRequest,
-    DeviceSnapshot,
-    DeviceStatus,
-    DisconnectDeviceRequest,
-    SetupDeviceRequest,
-)
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import (
     accent_colour,
@@ -363,7 +363,7 @@ class DeviceDialog(QDialog):
             else:
                 item = QListWidgetItem(f"{label} [not connected]")
                 item.setForeground(secondary_colour(self))
-            item.setData(Qt.ItemDataRole.UserRole, entry.name)  # type: ignore[attr-defined]
+            item.setData(Qt.ItemDataRole.UserRole, entry.name)
             self._list.addItem(item)
         self._empty_hint.setVisible(self._list.count() == 0)
         self._refresh_activity_markers()
@@ -372,7 +372,7 @@ class DeviceDialog(QDialog):
         if target is not None:
             for row in range(self._list.count()):
                 it = self._list.item(row)
-                if it is not None and it.data(Qt.ItemDataRole.UserRole) == target:  # type: ignore[attr-defined]
+                if it is not None and it.data(Qt.ItemDataRole.UserRole) == target:
                     self._list.setCurrentRow(row)
                     break
 
@@ -424,7 +424,7 @@ class DeviceDialog(QDialog):
         item = self._list.currentItem()
         if item is None:
             return None
-        return item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        return item.data(Qt.ItemDataRole.UserRole)
 
     def _on_selection_changed(self, _row: int) -> None:
         # Selection-scoped poller decision: a change in what is selected (or to
@@ -438,7 +438,7 @@ class DeviceDialog(QDialog):
             self._refresh_button_states(None)
             return
 
-        name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        name = item.data(Qt.ItemDataRole.UserRole)
         snapshot = self._dev.get_device_snapshot(name)
         if snapshot is None:
             return
@@ -657,7 +657,7 @@ class DeviceDialog(QDialog):
         item = self._list.currentItem()
         if item is None:
             return
-        name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        name = item.data(Qt.ItemDataRole.UserRole)
         if self._dev.is_memory_device(name):
             # Remove from memory entirely — won't appear after restart
             self._dev.forget_device(name)
@@ -668,7 +668,7 @@ class DeviceDialog(QDialog):
     def _on_refresh_clicked(self) -> None:
         item = self._list.currentItem()
         if item is not None:
-            name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+            name = item.data(Qt.ItemDataRole.UserRole)
             self._dev.get_device_info(name)
         self._on_selection_changed(self._list.currentRow())
 
@@ -676,7 +676,7 @@ class DeviceDialog(QDialog):
         item = self._list.currentItem()
         if item is None:
             return
-        name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        name = item.data(Qt.ItemDataRole.UserRole)
 
         # Phase C: the button means Stop only for the selected device's OWN
         # in-flight setup (the same device that shows the red Stop). A different
@@ -735,7 +735,8 @@ class DeviceDialog(QDialog):
         if any(isinstance(v, EvalRef) for v in updates.values()):
             try:
                 parameters = self._parameter_provider()
-            except Exception as exc:
+            # tolerated: Injected capture failures must reject Apply and display their original message.
+            except Exception as exc:  # noqa: BLE001
                 self._show_error(f"{name}: {exc}")
                 return None
             resolved_updates: dict[str, object] = {}
@@ -745,7 +746,8 @@ class DeviceDialog(QDialog):
                         coerced = coerce_eval_result(
                             evaluate_numeric_expr(val.expr, parameters), val.type_
                         )
-                    except Exception as exc:
+                    # tolerated: Captured sources can raise arbitrary errors; reject Apply without submitting.
+                    except Exception as exc:  # noqa: BLE001
                         self._show_error(f"{name}: field '{key}': {exc}")
                         return None
                     # Bounds check: eval must respect the same inclusive range as
@@ -836,9 +838,7 @@ class DeviceDialog(QDialog):
             owner = next(iter(sorted(live)))
             for row in range(self._list.count()):
                 item = self._list.item(row)
-                if (
-                    item is not None and item.data(Qt.ItemDataRole.UserRole) == owner  # type: ignore[attr-defined]
-                ):
+                if item is not None and item.data(Qt.ItemDataRole.UserRole) == owner:
                     self._list.setCurrentRow(row)
                     break
         # Subscribe newly-started setups.

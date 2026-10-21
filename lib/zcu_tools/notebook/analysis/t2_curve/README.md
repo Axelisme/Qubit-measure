@@ -1,6 +1,6 @@
 # `t2_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-16，純 dephasing 公式由數值 owner 共用
+**Last updated:** 2026-10-19，分階段流程的資料準備與呈現分工
 
 Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us`、`t1_err_us`、`t2e_us`、`t2e_err_us` 與 `t2r_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
@@ -25,7 +25,9 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 - `plot_t2e_vs_flux(...)`、`plot_thermal_photon_t2_limit(...)`、`plot_flux_noise_sensitivity(...)`、`plot_t2_channel_curves(...)`：回傳 `(fig, ax)`，notebook 只負責決定存檔路徑與是否顯示。`plot_t2_channel_curves` 支援 `parameter_text`，讓圖內 legend 保留短機制名。
 - `t2_parameter_text(fit_result, ...)`：產生放在座標軸外側的 fit parameter summary。
 
-### `workflow.py` — staged T2 fitting workflow
+### Staged T2 workflow
+
+`models.py` 共用各 stage 的 records 與預設值。`preparation.py` 負責資料載入、flux 校正、window selection 與逐 row 診斷。`presentation.py` 負責繪圖、保存與表格顯示。`workflow.py` 保留單機制 probe、combined fit、channel curves 與一鍵編排。各 owner 以 records 交接，既有 package 與 workflow 逐步 API 不變。
 
 - 固定 notebook 使用逐步 API，而不是單一黑盒：`load_t2_curve_context(...)` → `calibrate_t2_flux(...)` → `prepare_t2_dephasing_data(...)` → 單機制 probe → `fit_t2_curve(...)` → `build_t2_channel_curves(...)`。`calibrate_t2_flux()` 以 `resolve_sample_flux`（explicit → row-frame → caller-declared fallback）取得 normalized flux，不再猜測 current scale；同時以 positional boolean masks（`T2FluxCalibration.t2e_mask` / `t2r_mask`，長度等於 `samples_df`）記錄 T2e/T2r selection，row identity 不依賴 DataFrame index labels，duplicate labels 不會擴增 selection。
 - `plot_t2_flux_calibration(data)` 將 fit window 內每個 sample 的 raw flux 與 f01-corrected flux 畫在同一列，供檢查 half-flux 附近是否發生不合理 branch jump。

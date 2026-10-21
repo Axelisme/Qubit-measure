@@ -45,6 +45,7 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
                     freq=6000.0,
                     gain=0.1,
                     pre_delay=0.01,
+                    trig_offset=0.02,
                     waveform=ConstWaveformCfg(length=0.04),
                     ro_length=0.04,
                 ).build("ro")

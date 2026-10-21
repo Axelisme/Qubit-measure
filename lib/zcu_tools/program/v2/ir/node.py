@@ -31,12 +31,17 @@ class IRNode(ABC):
         """
         ...
 
-    def _into_str(self, indent: int = 0) -> str:
-        """Helper for __str__ that takes an indent level."""
+    def format_tree(self, indent: int = 0) -> str:
+        """Return this node's tree representation as a string without mutation.
+
+        indent is the initial indentation level, with four spaces per level.
+        Child nodes use the next level; node-specific spacing and newlines
+        are preserved. The default level is zero, as used by str(node).
+        """
         return f"{'    ' * indent}{self.__class__.__name__}()"
 
     def __str__(self) -> str:
-        return self._into_str()
+        return self.format_tree()
 
 
 @dataclass
@@ -92,7 +97,8 @@ class BasicBlockNode(IRNode):
             size += self.branch.addr_inc
         return size
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return block text without mutation, using four spaces per indent level."""
         prefix = "    " * indent
         lines = []
         if self.disable_opt:
@@ -122,10 +128,11 @@ class BlockNode(IRNode):
         idx = self.insts.index(old)
         self.insts[idx] = new
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return container text with children one four-space indent level deeper."""
         prefix = "    " * indent
         return f"{prefix} {self.__class__.__name__}()\n" + "\n".join(
-            i._into_str(indent + 1) for i in self.insts
+            i.format_tree(indent + 1) for i in self.insts
         )
 
 
@@ -145,7 +152,8 @@ class IRLoop(IRNode):
     range_hint: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.body, BlockNode):
+        # tolerated: Untyped callers must still get TypeError for non-BlockNode bodies.
+        if not isinstance(self.body, BlockNode):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(
                 f"IRLoop.body must be BlockNode, got {type(self.body).__name__}"
             )
@@ -165,11 +173,12 @@ class IRLoop(IRNode):
                 f"IRLoop.replace_child: {old!r} is not a child of this node"
             )
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return loop text with its body one four-space indent level deeper."""
         prefix = "    " * indent
         return (
             f"{prefix} IRLoop(name={self.name}, n={self.n}, counter={str(self.counter_reg)}, range_hint={self.range_hint})\n"
-            + self.body._into_str(indent + 1)
+            + self.body.format_tree(indent + 1)
         )
 
 
@@ -194,11 +203,12 @@ class IRBranch(IRNode):
         idx = self.cases.index(old)
         self.cases[idx] = new
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return branch text with cases one four-space indent level deeper."""
         prefix = "    " * indent
         return (
             f"{prefix} IRBranch(name={self.name}, compare_reg={str(self.compare_reg)})\n"
-            + "\n".join(i._into_str(indent + 1) for i in self.cases)
+            + "\n".join(i.format_tree(indent + 1) for i in self.cases)
         )
 
 
@@ -239,7 +249,8 @@ class IRDispatch(IRNode):
     def replace_child(self, old: IRNode, new: IRNode) -> None:
         raise TypeError("IRDispatch is a leaf node and has no children")
 
-    def _into_str(self, indent: int = 0) -> str:
+    def format_tree(self, indent: int = 0) -> str:
+        """Return dispatch text without mutation, using four spaces per indent level."""
         prefix = "    " * indent
         targets = ", ".join(str(lbl) for lbl in self.target_labels)
         return f"{prefix} IRDispatch(name={self.name}, value_reg={self.value_reg}, targets=[{targets}])\n"
@@ -250,13 +261,24 @@ class IRDispatch(IRNode):
 # ---------------------------------------------------------------------------
 
 
-def _collect_subtree_names(node: IRNode) -> tuple[set[str], set[str]]:
-    """Return (defined label names, structure node names) in a subtree.
+def collect_subtree_names(node: IRNode) -> tuple[set[str], set[str]]:
+    """Read ``node`` as a finite, acyclic IR subtree and collect its names.
 
-    Defined label names: every ``LabelInst.name`` inside any BasicBlockNode.
-    Structure names: ``name`` of every IRLoop / IRBranch / IRDispatch — these
-    drive the labels that unparse() will synthesise (``{name}_start`` etc.),
-    so they must also be uniquified when a subtree is duplicated.
+    Return two fresh, deduplicated sets, in order: defined label names and
+    structure names. BasicBlockNode labels contribute ``str(label.name)``.
+    BlockNode children, IRLoop bodies and IRBranch cases are read recursively;
+    each IRLoop, IRBranch and IRDispatch contributes its own ``name`` to the
+    structure set. These structure names drive labels synthesised by unparse.
+    Dispatch targets and instruction references are not definitions and do
+    not contribute names. Unknown IRNode subclasses contribute no names.
+
+    This operation does not allocate names or mutate the tree or allocated
+    state. It adds no tree validation or coercion beyond stringifying defined
+    label names; errors from reading or traversing the input propagate to the
+    caller. Cyclic trees are not supported.
+
+    For example, ``collect_subtree_names(BlockNode(insts=[]))`` returns
+    ``(set(), set())``.
     """
     labels: set[str] = set()
     structs: set[str] = set()
@@ -265,18 +287,18 @@ def _collect_subtree_names(node: IRNode) -> tuple[set[str], set[str]]:
             labels.add(str(lbl.name))
     elif isinstance(node, BlockNode):
         for child in node.insts:
-            sub_l, sub_s = _collect_subtree_names(child)
+            sub_l, sub_s = collect_subtree_names(child)
             labels |= sub_l
             structs |= sub_s
     elif isinstance(node, IRLoop):
         structs.add(node.name)
-        sub_l, sub_s = _collect_subtree_names(node.body)
+        sub_l, sub_s = collect_subtree_names(node.body)
         labels |= sub_l
         structs |= sub_s
     elif isinstance(node, IRBranch):
         structs.add(node.name)
         for case in node.cases:
-            sub_l, sub_s = _collect_subtree_names(case)
+            sub_l, sub_s = collect_subtree_names(case)
             labels |= sub_l
             structs |= sub_s
     elif isinstance(node, IRDispatch):
@@ -349,7 +371,7 @@ def clone_renamed(node: IRNode, allocated: set[str]) -> IRNode:
     """
     from .labels import make_label
 
-    label_names, struct_names = _collect_subtree_names(node)
+    label_names, struct_names = collect_subtree_names(node)
     label_remap = {n: make_label(n, allocated) for n in label_names}
     name_remap = {n: make_label(n, allocated).name for n in struct_names}
     return _clone_node(node, label_remap, name_remap)

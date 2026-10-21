@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-20，SignalBuffer 終局更新交付
+**Last updated:** 2026-10-20，program builder owner；SignalBuffer 終局更新交付
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -108,7 +108,9 @@ with Schedule(cfg, signals_buffer) as sched:
 
 ### `ProgramBuilder`
 
-`ProgramBuilder` 是 QICK program 的 builder 與 acquire adapter。`acquire_cancel.py` 擁有 acquire-local stop 與借用 run stop 的合成旗標，讓 data-driven early stop 不會改變 run outcome。
+`program_builder.py` 擁有完整的 QICK program 組裝與同步 acquire：`ProgramBuilder`、`ModuleFacade`、`AcquireOptions`、producer 型別契約與 raw conversion。`schedule.py` 保留 Schedule／Step、buffer／slot 與 run lifecycle。Builder 透過 Schedule 的公開合作方法選擇 slot、記錄 outcome 與處理 retry reset。Runtime package 入口仍匯出既有公開名稱。
+
+`acquire_cancel.py` 擁有 acquire-local stop 與借用 run stop 的合成旗標，讓 data-driven early stop 不會改變 run outcome。
 
 - `build()` 建立並回傳 program。
 - `run_program(program)` 執行 caller 傳入的 integrated-acquire program。
@@ -125,8 +127,10 @@ with Schedule(cfg, signals_buffer) as sched:
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
   預設使用 `default_decimated_raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
-- `progress_label=` 可覆寫 acquire rounds progress bar label；`progress_leave=` 可覆寫
-  root-vs-step 預設 close/retain policy。
+- 四個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
+  progress=False、progress_label="rounds"、progress_leave=None、stop_condition=None。
+  `progress_label` 覆寫 rounds bar label；`progress_leave=None` 保留 root-vs-step 的
+  close/retain policy。`progress` 控制 native acquisition progress，不控制 rounds bar。
 
 ---
 
@@ -141,7 +145,7 @@ with Schedule(cfg, signals_buffer) as sched:
   stop，但 `round_hook` 內的 data stop 只停止目前 program acquire，不會污染 `Schedule.outcome`。
   `StopSignal` 對外只暴露 external cancel flag contract：`is_set()` / `set()`；retry reset
   仍使用 `clear_stop()` 清除 stop flag 與 transient error cause。
-- `ProgramBuilder` 的 data-driven early stop 走 `stop_condition=`：internal
+- `ProgramBuilder` 的 data-driven early stop 走 `AcquireOptions(stop_condition=...)`：internal
   round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
   仍是 `completed`。
@@ -155,8 +159,8 @@ with Schedule(cfg, signals_buffer) as sched:
   measure-gui run policy）在 experiment adapter 回傳後呼叫 `raise_if_error()`，把
   runner 內部錯誤轉成 operation failure。`stopped` 不記錄 error cause；retry reset 會同時
   清掉 stop flag 與 transient error cause。
-- `ProgramBuilder.build_and_acquire(..., retry=N)` /
-  `run_program(..., retry=N)` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
+- `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
+  `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。
 - Program build/acquire 在每次 attempt 前與 failed attempt retry 前都重新檢查
   `StopSignal`；stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。

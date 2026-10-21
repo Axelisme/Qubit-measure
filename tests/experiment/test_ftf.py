@@ -31,7 +31,7 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
         PulseEvent(2, 0.5, 0.5, 20.0, 90.0, -0.2),
         PulseEvent(0, 2.0, 0.5, 6000.0, 90.0, 0.1),
     )
-    window = ReadoutWindow(0, 0, 10, 100.0, (1.9,), (6000.0,), (45.0,), (0,))
+    window = ReadoutWindow(0, 0, 10, 100.0, (2.1,), (6000.0,), (45.0,), (0,))
     template = single_point_template(PointTimeline((), events, (window,), 2.5))
     plan = plan_template(settings, snapshot, template)
     np.testing.assert_array_equal(plan.batch.end_ns, [2000.0])
@@ -45,7 +45,7 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     np.testing.assert_array_equal(track.amplitude, [-0.2])
     np.testing.assert_allclose(
         plan.readouts[0].batch.grids[0][0].times_ns,
-        1900 + 10 * np.arange(10),
+        2100 + 10 * np.arange(10),
         atol=1e-12,
         rtol=0,
     )
@@ -129,7 +129,7 @@ def _readout() -> PulseReadoutCfg:
         gain=0.1,
         waveform=ConstWaveformCfg(length=0.04),
         ro_length=0.06,
-        trig_offset=-0.01,
+        trig_offset=0.01,
     )
 
 
@@ -164,6 +164,7 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
         result = program.acquire_decimated(
             env.soc, progress=False, round_hook=change_bias
         )
+        assert result is not None
         rounds = env.soc.binding.rounds
         assert rounds[0].snapshot.values == (("bias", 0.2),)
         assert rounds[1].snapshot.values == (("bias", 0.4),)
@@ -176,7 +177,9 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
             ProgramV2Cfg(reps=2, rounds=1),
             modules=[pulse.build("charge2"), _readout().build("ro2")],
         )
-        trace = np.asarray(program2.acquire_decimated(env.soc, progress=False)[0])
+        acquired = program2.acquire_decimated(env.soc, progress=False)
+        assert acquired is not None
+        trace = np.asarray(acquired[0])
         raw_channels = program2.get_raw()
         if raw_channels is None:
             raise AssertionError("decimated acquisition must retain companion raw")

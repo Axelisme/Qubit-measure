@@ -23,7 +23,10 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import SoCConnectionService
@@ -67,7 +70,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
 
     from ..writeback import WritebackControlPort
     from .operation_control import OperationControlPort
@@ -88,6 +91,11 @@ class AppServices:
     exclusion) so operation_id / await / cancel are uniform (ADR-0066).
     A single OperationRunner (the kind-agnostic lifecycle mechanism, ADR-0066)
     is shared by run / analyze / post-analyze / device-setup operations.
+
+    soc_control is the non-null session control facet for the shared SoC dialog.
+    Use it on the GUI owner thread for connection commands, cached preferences,
+    configuration reads and outcome subscriptions. Unlike soc_connection, the
+    owning connection service, this facet exposes only the dialog's narrow port.
     """
 
     startup: StartupService
@@ -109,6 +117,7 @@ class AppServices:
     context: ContextService
     context_control: ContextControlPort
     setup_control: SetupControlPort
+    soc_control: SocControlPort
     tab: TabService
     tab_forms: TabFormResources
     tab_control: TabControlPort
@@ -126,7 +135,8 @@ class AppServices:
     arb_waveform: ArbWaveformService
 
 
-def build_app_services(
+# tolerated: State/registry, rendering ports and storage/reload/predictor/device injections have no reusable common input record.
+def build_app_services(  # noqa: PLR0913
     *,
     state: State,
     bus: EventBus,
@@ -172,11 +182,13 @@ def build_app_services(
         bus=bus,
         device_registry=device_registry,
         driver_factory=driver_factory,
-        gate=operation_gate,
-        handles=handles,
-        background=background,
+        operations=OperationInfrastructure(
+            gate=operation_gate,
+            background=background,
+            runner=runner,
+            handles=handles,
+        ),
         progress=progress,
-        runner=runner,
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
         alias_rows=() if alias_presets is None else alias_presets["default"],
@@ -326,6 +338,7 @@ def build_app_services(
         context=context,
         context_control=session.context_control,
         setup_control=session.setup_control,
+        soc_control=session.soc_control,
         tab=tab,
         tab_forms=tab_forms,
         tab_control=tab_control,

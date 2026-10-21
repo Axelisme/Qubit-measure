@@ -42,6 +42,7 @@ def test_integrated_upload_skips_lists_and_still_rejects_invalid_dtype():
             "addr": 0,
         }
         result = program.acquire(env.soc, progress=False)
+        assert result is not None
         assert np.all(result[0] == 0)
         contents["extra"] = {"data": np.zeros((16, 2), dtype=np.float64), "addr": 0}
         with pytest.raises(AssertionError):
@@ -73,6 +74,7 @@ def test_integrated_weight_upload_validates_without_serializing():
             ObservedData
         )
         result = program.acquire(env.soc, progress=False)
+        assert result is not None
         assert np.all(result[0] == 0)
         program.ro_chs[0]["weights"] = np.zeros((8, 2), dtype=np.float64)
         with pytest.raises(AssertionError):

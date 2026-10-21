@@ -1,17 +1,15 @@
 """Generic workflow GUI composition behind the shared process runtime."""
 
-from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar
 
-from zcu_tools.cfg_model import TemplateDef
 from zcu_tools.device.manager import DeviceManager
 from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputCodec,
     WorkflowInputRestoreReport,
     WorkflowInputSnapshot,
 )
-from zcu_tools.gui.catalog_loader import SourceCatalogLoader
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.runtime import GuiAssembly, GuiRuntimeBehavior, GuiRuntimeSpec
@@ -21,7 +19,10 @@ from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTrans
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
 from zcu_tools.gui.session.ports import DriverFactoryPort
 from zcu_tools.gui.session.services.build import SessionServices, build_session_services
@@ -30,8 +31,8 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from .attachment import Attachment
 from .catalog import WorkflowCatalog
+from .composition import WorkflowComposition
 from .window import WorkflowWindow
 
 
@@ -57,10 +58,7 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
     def __init__(
         self,
         *,
-        registrations: Sequence[Attachment[C]],
-        templates: Mapping[str, TemplateDef],
-        loader: SourceCatalogLoader[WorkflowCatalog[C]] | None = None,
-        alias_presets: AliasPresets | None = None,
+        composition: WorkflowComposition[C],
         project_root: str = "",
         clean: bool = False,
         cache_dir: Path | None = None,
@@ -68,7 +66,8 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
     ) -> None:
         """Configure roots and input restoration without I/O or Qt construction.
 
-        registrations is a nonempty ordered collection of coherent workflow/form
+        composition supplies registrations, templates, loader and alias_presets.
+        Its registrations are a nonempty ordered collection of coherent workflow/form
         attachments sharing opaque context C. The first is default; empty or
         duplicate names raise ValueError before assembly. loader optionally loads
         replacement WorkflowCatalog[C] instances through the same registry;
@@ -96,12 +95,12 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         Component definitions must be registered before Setup opens an entry.
         An existing QApplication is required for assemble, not for this call.
         """
-        validate_alias_presets(alias_presets)
-        self._registrations = tuple(registrations)
-        WorkflowCatalog(self._registrations)
-        self._loader = loader
-        self._templates = templates
-        self.alias_presets: AliasPresets | None = alias_presets
+        validate_alias_presets(composition.alias_presets)
+        self._composition = replace(
+            composition, registrations=tuple(composition.registrations)
+        )
+        WorkflowCatalog(tuple(self._composition.registrations))
+        self.alias_presets: AliasPresets | None = composition.alias_presets
         self._project_root = project_root
         self._clean = clean
         self._cache_dir = cache_dir
@@ -137,11 +136,13 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
         self.services = build_session_services(
             state=self.state,
             bus=self._bus,
-            gate=self._gate,
-            handles=self._handles,
-            background=self._background,
+            operations=OperationInfrastructure(
+                gate=self._gate,
+                background=self._background,
+                runner=self._runner,
+                handles=self._handles,
+            ),
             progress=self._progress,
-            runner=self._runner,
             bind_assets=ArbWaveformDatabase.info_at,
             project_root=self._project_root,
             device_registry=self._devices,
@@ -154,10 +155,7 @@ class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
             self.state,
             self.services,
             self._owner,
-            registrations=self._registrations,
-            templates=self._templates,
-            alias_presets=self.alias_presets,
-            loader=self._loader,
+            composition=replace(self._composition, alias_presets=self.alias_presets),
             on_close=self._close,
         )
         self._caretaker = SingleFileCaretaker(

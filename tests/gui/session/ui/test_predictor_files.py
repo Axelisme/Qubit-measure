@@ -38,7 +38,7 @@ def test_entry_files_load_and_remain_manually_editable(qapp, tmp_path: Path):
     entry.predictors_path.mkdir()
     for filename, params in (
         ("fluxonium.json", FluxoniumParams(EJ=4.5)),
-        ("transmon.json", TransmonParams(EJmax=17.0, d=0.1)),
+        ("transmon.json", TransmonParams(EJmax=17.0)),
     ):
         save_predictor_file(
             entry.predictors_path / filename,
@@ -65,6 +65,9 @@ def test_entry_files_load_and_remain_manually_editable(qapp, tmp_path: Path):
         ui.click("Load")
         ui.screenshot(evidence / "02-loaded-fluxonium.png")
         assert ui.observe(object_name="predictor_input_EJ").text == "4.5"
+        el = ui.observe(object_name="predictor_input_EL")
+        assert el.text == "" and el.enabled
+        assert ui.observe(object_name="predictor_input_half").text == ""
         assert (
             ui.observe(object_name="predictor_status").text
             == "Loaded predictor file into local trial"
@@ -82,7 +85,9 @@ def test_entry_files_load_and_remain_manually_editable(qapp, tmp_path: Path):
         ui.click("Load")
         ui.screenshot(evidence / "06-loaded-transmon.png")
         assert ui.observe(object_name="predictor_input_EJmax").text == "17.0"
-        assert ui.observe(object_name="predictor_input_d").text == "0.1"
+        asymmetry = ui.observe(object_name="predictor_input_d")
+        assert asymmetry.text == "" and asymmetry.enabled
+        assert ui.observe(object_name="predictor_input_bias").text == ""
         ui.click("Refresh files")
         ui.screenshot(evidence / "07-refreshed.png")
         assert ui.observe(object_name="predictor_file").text == "transmon.json"

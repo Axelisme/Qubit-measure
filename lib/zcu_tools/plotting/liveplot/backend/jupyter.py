@@ -30,14 +30,23 @@ def instant_plot(fig: Figure) -> None:
 
     figsize = fig.get_size_inches()
 
+    # tolerated: ipympl defines toolbar visibility, not Figure.canvas's backend-neutral type.
     canvas.toolbar_visible = False  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: ipympl defines header visibility, not Figure.canvas's backend-neutral type.
     canvas.header_visible = False  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: ipympl defines footer visibility, not Figure.canvas's backend-neutral type.
     canvas.footer_visible = False  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: Widget layout is not in FigureCanvasBase; non-widget calls must fail here.
     canvas.layout.width = f"{int(figsize[0] * fig.dpi)}px"  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: Widget layout is not in FigureCanvasBase; retain the displayed pixel height.
     canvas.layout.height = f"{int(figsize[1] * fig.dpi)}px"  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: ipympl's refresh handshake has no backend-neutral canvas API.
     canvas._handle_message(canvas, {"type": "refresh"}, [])  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: ipympl's draw handshake has no backend-neutral canvas API.
     canvas._handle_message(canvas, {"type": "draw"}, [])  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: ipympl's image-mode handshake has no backend-neutral canvas API.
     canvas._handle_message(canvas, {"type": "send_image_mode"}, [])  # pyright: ignore[reportAttributeAccessIssue]
+    # tolerated: ipympl's initialized handshake has no backend-neutral canvas API.
     canvas._handle_message(canvas, {"type": "initialized"}, [])  # pyright: ignore[reportAttributeAccessIssue]
 
     display(canvas)
@@ -62,6 +71,7 @@ def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None
 
     # Save the figure data to the sink, using the frame format and dpi.
     writer.fig.savefig(
+        # tolerated: Matplotlib's stubs omit the live pipe; public grab_frame would resize.
         writer._proc.stdin,  # pyright: ignore[reportAttributeAccessIssue]
         format=writer.frame_format,
         dpi=writer.dpi,

@@ -7,8 +7,8 @@ collection). The panel owns the pipeline; the window just frames it.
 
 from __future__ import annotations
 
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QMainWindow, QWidget  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent
+from qtpy.QtWidgets import QMainWindow, QWidget
 
 from zcu_tools.gui.app.dispersive.controller import Controller
 
@@ -27,10 +27,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._panel)
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        """Quiesce the pipeline panel's background runner before Qt tears down the
-        widget tree.  ``PipelinePanelWidget`` owns a ``BackgroundRunner`` for the
-        preprocess / predict / auto-tune pool workers; any in-flight worker's
-        queued done-delivery must be flushed while the carrier is still alive.
-        """
-        self._panel._runner.quiesce()
+        """Attempt the panel's default background drain before continuing Qt close."""
+        # Preserve the existing close policy: a drain timeout does not veto close.
+        self._panel.quiesce_background_work()
         super().closeEvent(a0)

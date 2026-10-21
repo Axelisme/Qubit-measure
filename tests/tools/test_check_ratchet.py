@@ -411,6 +411,52 @@ def test_widening_a_per_file_ignore_is_a_regression(
     assert regressions[0]["after"] == 2
 
 
+@pytest.mark.parametrize(
+    ("candidate", "expected"),
+    [
+        pytest.param(
+            '[tool.ruff.lint]\nignore = ["E501"]\nextend-select = ["C901"]\n',
+            [
+                {
+                    "path": "pyproject.toml[tool.ruff].lint.extend-select",
+                    "before": ["PLR0913"],
+                    "after": ["C901"],
+                },
+                {
+                    "path": "pyproject.toml[tool.ruff].lint.ignore",
+                    "before": None,
+                    "after": ["E501"],
+                },
+                {
+                    "path": "pyproject.toml[tool.ruff].lint.pylint.max-args",
+                    "before": 6,
+                    "after": None,
+                },
+            ],
+            id="added-removed-and-changed-settings-in-path-order",
+        ),
+        pytest.param(
+            "[tool.ruff.lint.pylint]\nmax-args = 6\n\n"
+            '[tool.ruff.lint]\nextend-select = ["PLR0913"]\n',
+            [],
+            id="unchanged-settings-despite-table-order",
+        ),
+    ],
+)
+def test_configuration_report_compares_flattened_values_in_path_order(
+    repository: Path,
+    command_receipts: CommandReceipts,
+    candidate: str,
+    expected: list[dict[str, object]],
+) -> None:
+    command_receipts.changed = "pyproject.toml\n"
+    (repository / "pyproject.toml").write_text(candidate, encoding="utf-8")
+
+    report = ratchet.run(repository, "HEAD", ["ruff"])
+
+    assert report["configuration_changes"] == expected
+
+
 def test_a_candidate_that_changes_only_configuration_is_still_judged(
     repository: Path, command_receipts: CommandReceipts
 ) -> None:

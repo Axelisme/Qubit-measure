@@ -243,6 +243,15 @@ def _module_converters(
     return {(name,): field.converter(env) for name, field in fields.items()}
 
 
+def _core_field_names(core: type[BaseModel], field_order: tuple[str, ...]) -> list[str]:
+    """Keep core order, defer program base fields, then promote field_order stably."""
+    program_fields = ProgramV2Cfg.model_fields if issubclass(core, ProgramV2Cfg) else {}
+    names = [name for name in core.model_fields if name not in program_fields] + [
+        name for name in core.model_fields if name in program_fields
+    ]
+    return [*field_order, *(name for name in names if name not in field_order)]
+
+
 class Section:
     """Generate a recursive input section from a native model and authored tree.
 
@@ -280,14 +289,7 @@ class Section:
         self.modules: dict[str, ModuleField] = {}
         namespace: dict[str, object] = {"__module__": "zcu_tools.gui.form_adapter.form"}
         annotations: dict[str, object] = {}
-        program_fields = (
-            ProgramV2Cfg.model_fields if issubclass(core, ProgramV2Cfg) else {}
-        )
-        names = [name for name in core.model_fields if name not in program_fields] + [
-            name for name in core.model_fields if name in program_fields
-        ]
-        names = [*field_order, *(name for name in names if name not in field_order)]
-        for name in names:
+        for name in _core_field_names(core, field_order):
             info = core.model_fields[name]
             node = tree.get(name)
             if isinstance(node, Hidden):
@@ -425,23 +427,7 @@ class Section:
         if get_origin(info.annotation) is list:
             element_type = get_args(info.annotation)[0]
             if isinstance(element_type, type) and issubclass(element_type, ConfigBase):
-                child = Section(element_type, {}, (*self.path, name))
-                self.lists[name] = child
-                if node is not None:
-                    if not isinstance(node, list) or any(
-                        not isinstance(item, Mapping) for item in node
-                    ):
-                        raise TypeError(
-                            f"{(*self.path, name)!r}: expected a list of element trees"
-                        )
-                    for index, item in enumerate(node):
-                        _check_position_seed(item, (*self.path, name, index))
-                    self.element_seeds[name] = tuple(
-                        Section(element_type, item, (*self.path, name))
-                        for item in node
-                        if isinstance(item, Mapping)
-                    )
-                return list[child.model]
+                return self._model_list_annotation(name, element_type, node)
         child_core = _section_type(info.annotation)
         if child_core is None:
             return info.annotation
@@ -453,6 +439,39 @@ class Section:
             if type(None) in _members(info.annotation)
             else child.model
         )
+
+    def _model_list_annotation(
+        self, name: str, element_type: type[ConfigBase], node: FormNode
+    ) -> object:
+        """Build the runtime list annotation for the native model field ``name``.
+
+        ``element_type`` is the ConfigBase subclass shared by all elements.
+        ``node`` is None or a list of per-position mapping trees. Register the
+        shared child in ``self.lists`` before validating position trees, then
+        register their Sections in ``self.element_seeds`` when node is supplied.
+        Position values never change the shared element declaration.
+
+        Return list[child.model] as a runtime annotation. Reject malformed trees
+        with TypeError and declaration-changing position seeds with ValueError;
+        indexed rejection paths and child Section errors propagate unchanged.
+        """
+        child = Section(element_type, {}, (*self.path, name))
+        self.lists[name] = child
+        if node is not None:
+            if not isinstance(node, list) or any(
+                not isinstance(item, Mapping) for item in node
+            ):
+                raise TypeError(
+                    f"{(*self.path, name)!r}: expected a list of element trees"
+                )
+            for index, item in enumerate(node):
+                _check_position_seed(item, (*self.path, name, index))
+            self.element_seeds[name] = tuple(
+                Section(element_type, item, (*self.path, name))
+                for item in node
+                if isinstance(item, Mapping)
+            )
+        return list[child.model]
 
     def _sweep_defaults(self) -> dict[str, JsonValue]:
         """Select Range + Expts for fresh, otherwise unauthored sweep fields."""

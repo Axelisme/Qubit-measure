@@ -26,6 +26,7 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._app_launch import (
     LaunchedMeasureApp,
     click_toolbar_setup,
@@ -98,6 +99,31 @@ def test_setup_screenshot_uses_visible_gui_dialog_through_mcp(
         )
         assert path.is_file() and path.read_bytes().startswith(b"\x89PNG")
         assert app.window.list_open_dialogs() == expected
+
+
+@pytest.mark.uses_wall_clock
+def test_soc_named_screenshot_through_mcp(qapp: QApplication, tmp_path: Path) -> None:
+    with launched_measure_app(qapp, tmp_path) as app:
+        ui = ComponentDriver(app.window)
+        ui.click("Close")
+        assert any(w.text == "SoC…" for w in ui.visible().widgets), (
+            "SoC toolbar entry missing"
+        )
+        ui.click("SoC…")
+        reply = app.invoke(
+            "rpc_call",
+            {
+                "method": "dialog.screenshot",
+                "params": {"name": "soc", "out_path": str(tmp_path / "soc.png")},
+            },
+        )
+        assert Path(reply["saved_to"]).read_bytes().startswith(b"\x89PNG")
+        ui.click("Close")
+        with pytest.raises(RuntimeError, match="not currently open"):
+            app.invoke(
+                "rpc_call",
+                {"method": "dialog.screenshot", "params": {"name": "soc"}},
+            )
 
 
 def _inspect_screenshot(app: LaunchedMeasureApp, tmp_path: Path) -> Path:

@@ -46,7 +46,8 @@ class SocCfgProtocol(Protocol):
         /,
         gen_ch: Any = None,
         ro_ch: Any = None,
-        as_float: bool = False,
+        # tolerated: QICK us2cycles accepts as_float=False positionally after gen_ch/ro_ch.
+        as_float: bool = False,  # noqa: FBT001, FBT002
     ) -> Any: ...
     def freq2reg(self, freq: Any, /, gen_ch: Any = None, ro_ch: Any = None) -> Any: ...
     def reg2freq(self, reg: Any, /, gen_ch: Any = None) -> Any: ...

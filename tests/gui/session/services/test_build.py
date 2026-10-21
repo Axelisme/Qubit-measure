@@ -12,7 +12,10 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.operation_runner import (
+    OperationInfrastructure,
+    OperationRunner,
+)
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
@@ -32,11 +35,13 @@ def test_shared_build_preserves_session_infrastructure_instances(field: str) -> 
     services = build_session_services(
         state=SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         bus=bus,
-        gate=gate,
-        handles=handles,
-        background=background,
+        operations=OperationInfrastructure(
+            gate=gate,
+            background=background,
+            runner=runner,
+            handles=handles,
+        ),
         progress=progress,
-        runner=runner,
         bind_assets=ArbWaveformDatabase.info_at,
     )
 
@@ -50,11 +55,13 @@ def test_shared_build_routes_entry_and_point_commands_to_real_owners(
     services = build_session_services(
         state=state,
         bus=BaseEventBus(),
-        gate=MagicMock(),
-        handles=MagicMock(),
-        background=MagicMock(),
+        operations=OperationInfrastructure(
+            gate=MagicMock(),
+            background=MagicMock(),
+            runner=MagicMock(),
+            handles=MagicMock(),
+        ),
         progress=MagicMock(),
-        runner=MagicMock(),
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=str(tmp_path),
     )

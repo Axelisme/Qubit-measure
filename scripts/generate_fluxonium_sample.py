@@ -52,9 +52,14 @@ from collections.abc import Callable
 for _blas_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_blas_var, "1")
 
-import h5py as h5
-import numpy as np
-from numpy.typing import NDArray
+# tolerated: h5py can load NumPy, so BLAS defaults must already be set.
+import h5py as h5  # noqa: E402
+
+# tolerated: NumPy initializes BLAS on import; set caller-respecting defaults first.
+import numpy as np  # noqa: E402
+
+# tolerated: numpy.typing also loads NumPy and must follow BLAS defaults.
+from numpy.typing import NDArray  # noqa: E402
 
 # Preset (EJb, ECb, ELb) bounding boxes — the notebook's named ranges (GHz).
 PRESETS: dict[
@@ -238,7 +243,7 @@ def build_database(
     GIL-holding Python ops, so thread workers contend and run slower than serial.
     ``n_jobs=-1`` (default) uses all cores; ``n_jobs=1`` forces serial.
     """
-    rows = [tuple(float(v) for v in p) for p in params]
+    rows = [(float(ej), float(ec), float(el)) for ej, ec, el in params]
 
     if n_jobs == 1:
         iterator = rows
@@ -246,11 +251,11 @@ def build_database(
             from tqdm.auto import tqdm
 
             iterator = tqdm(rows, desc="Calculating")
-        energies = [energy_fn(p) for p in iterator]  # type: ignore[arg-type]
+        energies = [energy_fn(p) for p in iterator]
     else:
         from joblib import Parallel, delayed
 
-        energies = Parallel(n_jobs=n_jobs, backend="loky")(  # type: ignore[assignment]
+        energies = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(energy_fn)(p) for p in rows
         )
 

@@ -36,7 +36,8 @@ def _validate_inputs(
         raise ValueError("points must be at least two")
 
 
-def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
+# tolerated: Public gain Rabi keywords must match the handwritten input_schema.
+def amplitude_rabi(  # noqa: PLR0913
     session: RecipeSession,
     *,
     target: str | None = None,

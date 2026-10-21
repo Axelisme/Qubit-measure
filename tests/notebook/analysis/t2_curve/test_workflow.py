@@ -26,7 +26,12 @@ from zcu_tools.notebook.analysis.t2_curve import (
     prepare_t2_dephasing_data,
     thermal_photon_gamma_phi_per_us,
 )
-from zcu_tools.resources.sample_table import SampleTableV2Error
+from zcu_tools.resources.sample_table import (
+    SampleFluxFrame,
+    SampleFluxResolution,
+    SampleTableV2Error,
+    resolve_sample_flux,
+)
 
 _KAPPA_OVER_2PI_MHZ = 14.754
 
@@ -637,11 +642,11 @@ def _synthetic_dephasing_data(
     )
     calibration = T2FluxCalibration(
         context=context,
-        resolution=workflow.SampleFluxResolution(
+        resolution=SampleFluxResolution(
             values=np.asarray(fluxs, dtype=np.float64),
             sources=("row-frame",) * len(fluxs),
         ),
-        fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0),
+        fallback_frame=SampleFluxFrame("A", 0.5, 1.0),
         t2e_df=pd.DataFrame(),
         t2r_df=pd.DataFrame(),
         t2e_mask=np.zeros(0, dtype=bool),
@@ -718,13 +723,13 @@ def _synthetic_calibration(samples: pd.DataFrame) -> T2FluxCalibration:
         samples_preview=samples,
         available_columns=tuple(samples.columns),
     )
-    resolution = workflow.resolve_sample_flux(
-        samples, fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0)
+    resolution = resolve_sample_flux(
+        samples, fallback_frame=SampleFluxFrame("A", 0.5, 1.0)
     )
     return T2FluxCalibration(
         context=context,
         resolution=resolution,
-        fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0),
+        fallback_frame=SampleFluxFrame("A", 0.5, 1.0),
         t2e_df=samples,
         t2r_df=pd.DataFrame(),
         t2e_mask=np.ones(len(samples), dtype=bool),

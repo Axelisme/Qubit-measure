@@ -103,9 +103,7 @@ def search_case(
     )
     ctrl.set_fit_params(
         search_database_hdf5,
-        (2, 15),
-        (0.2, 2),
-        (0.1, 2),
+        ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
         {"transitions": [(0, 1)]},
         6.0,
         None,
@@ -410,7 +408,9 @@ def test_native_search_admission_errors_do_not_open_handles(
 ) -> None:
     h = search_case.harness
     if reason == "no_search_db":
-        h.ctrl.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2), {}, None, None)
+        h.ctrl.set_fit_params(
+            "", ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)), {}, None, None
+        )
     elif reason == "no_selected_points":
         h.ctrl.set_selection(np.zeros(4, dtype=np.bool_))
     else:

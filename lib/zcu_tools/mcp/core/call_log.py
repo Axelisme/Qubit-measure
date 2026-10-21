@@ -105,8 +105,10 @@ def _get_log_file() -> TextIO | None:
     try:
         path = _log_path()
         _purge_old_call_logs(path.parent, _DEFAULT_RETAIN)
+        # tolerated: The process-lifetime singleton stays open for later tool calls; a local with would close it.
         _log_file = open(path, "w", encoding="utf-8")  # noqa: SIM115
-    except Exception as exc:  # noqa: BLE001 - log setup must not break tools
+    # tolerated: Any log setup failure must leave tool execution available without a log file.
+    except Exception as exc:  # noqa: BLE001
         if not _internal_error_reported:
             _internal_error_reported = True
             print(
@@ -127,10 +129,12 @@ def _safe_dumps(obj: Any) -> str:
     """Serialize ``obj`` to a JSON string, falling back to repr on failure."""
     try:
         return json.dumps(obj, default=str)
-    except Exception:  # noqa: BLE001 - arbitrary __str__ can fail during logging
+    # tolerated: Handler objects can raise arbitrary exceptions in __str__; still try repr for the log.
+    except Exception:  # noqa: BLE001
         try:
             return repr(obj)
-        except Exception:  # noqa: BLE001 - arbitrary __repr__ can fail too
+        # tolerated: Handler objects can also raise arbitrary exceptions in __repr__; keep logging best-effort.
+        except Exception:  # noqa: BLE001
             return "<unrepresentable>"
 
 
@@ -181,7 +185,8 @@ def _write_entry(entry: dict[str, Any]) -> None:
         line = json.dumps(entry, default=str) + "\n"
         fh.write(line)
         fh.flush()
-    except Exception as exc:  # noqa: BLE001 - all log failures are isolated
+    # tolerated: Serialization or log I/O failures must not replace a tool result or exception.
+    except Exception as exc:  # noqa: BLE001
         if not _internal_error_reported:
             _internal_error_reported = True
             print(f"[call_log] Write failed: {exc}", file=sys.stderr)
