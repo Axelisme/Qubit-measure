@@ -7,7 +7,6 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qtpy.QtWidgets import QDialog
 from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
@@ -127,10 +126,6 @@ def noise_run(qapp, tmp_path, outcome):
         finally:
             # The board and its source resources remain caller-owned.
             env.devices.close_all_devices()
-        for dialog in window.findChildren(QDialog):
-            dialog.reject()
-        window.dispose_control_watches()
-        window.deleteLater()
         sys.excepthook = old_hook
         qapp.processEvents()
 

@@ -7,7 +7,6 @@ from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
@@ -37,9 +36,6 @@ def assembled_app(qapp, tmp_path):
         yield behavior, assembly
     finally:
         behavior.close(assembly)
-        if isinstance(assembly.window, MainWindow):
-            assembly.window.dispose_control_watches()
-            assembly.window.deleteLater()
         sys.excepthook = old_hook
         qapp.processEvents()
 

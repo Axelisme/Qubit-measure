@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -73,6 +73,16 @@ MainWindow close, programmatic shutdown and the runtime fallback use this same
 ordering. Drain timeout preserves resources and raises for retry. Callback and
 driver failures are logged without skipping the remaining cleanup. Boards remain
 caller-owned and have no required close method.
+
+The runtime's `MeasureGuiBehavior.close()` delegates to its owner-thread
+`dispose()`. After successful `finish_close()`, it stops the remote adapter and
+calls `MainWindow.dispose()` to release view subscriptions and destroy the Qt
+tree before QApplication/Python exit. Partial assembly retains the window for
+this same cleanup. A drain timeout leaves the window and adapter intact for
+retry. View disposal finishes hidden named dialogs through `QDialog.done()` so
+their owners release subscriptions, detaches tabs, then explicitly delivers the
+window's DeferredDelete even when the main event loop has already returned.
+Successful disposal is idempotent; closing/hiding a window alone is not disposal.
 
 [`StartupContext`](startup_context.py) exposes typed soc, device, setup, context
 and tab commands. Public signatures, thread restrictions and failure semantics
