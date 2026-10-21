@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-20，launch-only startup、來源 Refresh、錯誤歸因與 Predictor entry-local filenames
+**Last updated:** 2026-10-21，library role creation 的初始 edits 與欄位錯誤
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -58,6 +58,10 @@ parameter errors retain their existing predictor reasons in `method_entries`.
 ## Fixed element paths
 
 `tab.describe_cfg` 與 `tab.edit_cfg` 接受 str 欄位名與 FixedList 的 int index，例如 `["tones", 1, "gain"]`。Description 的 elements 列出原始 index、captured name 與 typed path，非固定 list 時為 null。數字字串不當成 index。Unknown、inactive、越界與 bool index 由 Form 拒絕，describe 的 form_path 保留完整請求路徑。Read 不改 input，也不抓取來源。Wire 的 values、errors、command target／inputs 都保留 typed paths，不把 index 轉成字串。
+
+## Library creation
+
+`context.ml_create_from_role(role_id, name, edits=...)` 先將可選的 Form path/value edits 套入 template input，再驗證及寫入。需要必填欄位的 role，例如 readout/mux:blank 的 tones，使用 edits 補齊。路徑、值或整體 Form 無效時回 invalid_params，data.errors 列出 path/message，library 不變。
 
 ## Form commands
 
