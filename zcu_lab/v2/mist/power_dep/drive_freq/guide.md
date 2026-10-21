@@ -1,18 +1,23 @@
 # MIST probe frequency and gain
 
+**Readers:** operator, agent. Measure the MIST response over probe frequency and gain from the GUI or MCP.
+
+**Last updated:** 2026-10-21
+
 ## Measurement
 
 Open `mist/power_dep/drive_freq` to map the readout response after a probe pulse.
 Each repetition performs reset, the optional initialization pulse, the probe,
 then readout. Both probe frequency and gain sweep on the board.
-The saved result is mean complex IQ shaped [frequency, gain], not classified
-populations or a calibrated leakage probability.
+The saved result is mean complex IQ shaped [frequency, gain]. Use a
+classified-population experiment for calibrated populations or leakage
+probabilities.
 
 ## Sources and defaults
 
-Open and Reset capture the current aliases, parameters and module library.
-Reset discards edits and captures sources again. Run uses the displayed cfg;
-changing an alias does not silently update an existing form.
+Open and Reset capture the current aliases, parameter sources and module
+selections. Reset discards edits and captures sources again. Run uses the
+displayed configuration. Open or Reset again to apply alias changes.
 
 - Optional reset and initialization use `$qubit.module.reset` and
   `$qubit.module.x180`. Missing slots leave these modules disabled.
@@ -29,27 +34,30 @@ changing an alias does not silently update an existing form.
   Invalid stored T1 leaves the delay empty. All these values remain editable.
 
 Review probe duration, channels, gain range, readout and waiting time before Run.
-These are starting values, not hardware safety limits. Choose the frequency
-range for the line of interest; do not infer its location from simulator truth.
+Set safe ranges using the limits of your hardware. Choose the frequency
+range for the line of interest using measured resonances.
 
 ## Analysis and saving
 
 Analyze subtracts one complex reference pooled over every frequency and the
 first 5% of gain points (at least one), then plots the magnitude as `fit`.
-Gain ordering therefore determines the reference region. The plot does not fit
-a transition or produce a population calibration. There is no writeback.
+Gain ordering therefore determines the reference region. The result is a
+response-magnitude map. Calibration parameters remain unchanged. Use a
+classified-population experiment for population calibration.
 
-Save uses the existing native persistence format. Frequencies are MHz in
-memory and Hz on disk. Load and Analyze use the saved record, not the current
-form; analysis also accepts a record without cfg.
+Save uses the native data format. Frequencies are MHz in memory and Hz on disk.
+Load and Analyze use the saved record while the current form keeps its settings.
+Analysis also accepts records with missing historical configuration.
 
 The `mist_drive_frequency` recipe takes explicit two-endpoint `freq_range`
 (MHz) and `gain_range` (normalized amplitude), plus optional `target` and
-`points`. It uses captured GUI module/averaging defaults, runs once, saves raw IQ,
-analyzes and captures a preview. Cancellation stops before save and analysis.
+`points`. It uses captured GUI module selections and averaging defaults, runs
+once, saves raw IQ, analyzes and captures a preview. Cancellation stops before
+save and analysis.
 
 ## Offline checks
 
-A white-noise simulation can exercise compilation, acquisition, plots and
-persistence without hardware. It does not model MIST physics, heating or
-leakage, so a flat/noisy map is not evidence for a physical threshold.
+A white-noise simulation exercises pulse execution, acquisition, plots and
+saving with a simulated device. Its output is noise only. Establish physical
+MIST, heating or leakage thresholds with a suitable physical model or hardware
+measurement.
