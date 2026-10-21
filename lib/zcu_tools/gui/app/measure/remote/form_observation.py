@@ -42,6 +42,41 @@ class FormObservation(TypedDict):
     errors: list[FormError]
 
 
+class EditPathHints(TypedDict):
+    """Active canonical leaves and selectors for correcting a rejected cfg edit.
+
+    editable_paths excludes hidden, fixed and readonly subtrees. selection_paths
+    identifies active option fields; module choices use select_recipe_module
+    with logical paths rather than replacing them with a key string.
+    """
+
+    editable_paths: list[list[str | int]]
+    selection_paths: list[list[str | int]]
+
+
+def edit_path_hints(resource: TabFormResource) -> EditPathHints:
+    """List active editable paths from owner descriptions without evaluating input.
+
+    resource is the current fixed tab Form. Paths remain canonical, including
+    generated wrappers. Ref/disabled descendants are not editable; their selector
+    path is listed instead. This never changes selections or captures sources.
+    """
+    hints: EditPathHints = {"editable_paths": [], "selection_paths": []}
+    pending: list[FormWritePath] = [()]
+    while pending:
+        description = resource.describe(pending.pop())
+        for field in description.children:
+            if field.hidden or field.readonly or field.fixed:
+                continue
+            if field.options is not None:
+                hints["selection_paths"].append(list(field.path))
+            if field.can_expand:
+                pending.append(field.path)
+            elif field.options is None:
+                hints["editable_paths"].append(list(field.path))
+    return hints
+
+
 def observe_form(resource: TabFormResource) -> FormObservation:
     """Project current input/preview/errors without capture or mutation."""
     return _observation(

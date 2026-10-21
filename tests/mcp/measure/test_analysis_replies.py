@@ -81,6 +81,39 @@ T1_DEFINITION = replace(
 )
 
 
+@pytest.mark.parametrize("saved", [False, True])
+def test_analysis_summary_retains_owner_raw_save_state_without_saving_raw(
+    tmp_path, clients, saved
+):
+    raw_data = {"run_id": "original-run", "saved": saved}
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {**_start_reply({"skip": 1}, []), "raw_data": raw_data}
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method == "tab.get_analyze_result":
+            reply = _result_reply("analysis", [], {"skip": 1})
+            reply["operation_state"]["raw_data"] = raw_data
+            return reply
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report("analysis"))
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    reply = client.call("tab_analyze", {"tab": "t"})
+    assert reply.data.get("raw_data") == {"run_id": "original-run", "saved": saved}
+    assert reply.data["steps"]["raw_save"] is None
+    assert "tab.save_data" not in _methods(client)
+    raw_data["saved"] = not saved
+    assert client.call("status", {"execution": reply.data["execution"]})[
+        "raw_data"
+    ] == {
+        "run_id": "original-run",
+        "saved": saved,
+    }
+
+
 @pytest.mark.parametrize("stage", ["primary", "post"])
 def test_analysis_captures_all_owner_writeback_without_live_queries(
     tmp_path, clients, stage

@@ -32,6 +32,21 @@ _SOURCES = (
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "predictor.list_files",
+        "predictor:h_predictor_list_files",
+        MethodSpec(
+            5.0,
+            "Read-only discovery of the opened entry's predictor files. Returns "
+            "{files: [filename, ...]} sorted by filename, including .json, relative "
+            "to that entry's predictors directory. Use a filename with predictor.info, "
+            "predictor.predict or predictor.calibrate. No selected point is required. "
+            "No entry or absent directory returns {files: []}. Listing does not read "
+            "or validate content and never creates files or directories. Other I/O "
+            "failures propagate as unexpected errors.",
+            readonly=True,
+        ),
+    ),
+    method_entry(
         "predictor.predict",
         "predictor:h_predictor_predict",
         MethodSpec(

@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-21，pulse／mux 通道佈局與 entry 接線
+**Last updated:** 2026-10-22，獨立 design 頻率初猜
 
 這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。Startup 與 Notebook 直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
 
@@ -56,6 +56,27 @@ Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` �
 R1／R2 的 wiring 保留 pulse gen0／ADC0。Mux 接線由 `$mux.module.readout` 指向的 `readout/mux` library 模組提供，須設 `gen_ch: 1`，並依 R1／R2 順序設 tone `ro_ch: 1`／`2`。
 範本不附 library assets，也不預填 module key。建立模組、綁定 MG12 與核對 Open／Reset 初值的步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
 初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。
+
+## 設計初猜與 predictor
+
+環境作者可在 `ftf.yaml` 的 `design:` 填寫獨立標稱值。這是設計圖的頻率初猜，不是
+`chip` 或 DC 校準真值，也不是量測結果。樣板為 Q1、Q2 各填一筆，數值刻意與物理模型不同。
+每筆必填 `ej_ghz`、`ec_ghz`、`el_ghz`、`flux_unit`、`flux_half`、
+`flux_period`、`flux_bias`。欄位意義與單位見[欄位指南](field-guide.md#design設計初猜)。
+
+Startup 以 entry-template 的 qubit 名稱驗證 design，並檢查 `flux_unit` 與其
+`flux_source` 的 device 單位一致。未知 qubit 或單位不符會報錯。
+Startup 經 resources 的 `save_predictor_file` 建立 entry 的 `predictors/Q1.json`、
+`predictors/Q2.json`，只寫缺失的檔案。既有 predictor 與手動調整保留不變。
+標稱值一對一交給 predictor，不從物理模型或 DC 校準推算或補值，也不填入 entry 的頻率。
+
+省略 `design` 或填 `design: {}` 時，環境照常啟動，不建立 predictor。
+狀態列會顯示「design 未提供，未建立 predictor」。既有檔案不會刪除。
+提供的每筆若缺欄位，`ftf()` 載入時會指出欄位路徑，例如 `design.Q1.flux_period`。
+
+MCP 先呼叫 `predictor.list_files` 發現檔案，再使用
+`predictor.predict(filename="Q1.json", device_value=1.2e-3)` 取得標稱頻率。
+樣板的 device 原生單位是 A，這個輸入表示 1.2 mA。初猜仍須由量測驗證。
 
 ## 工作副本與調參
 

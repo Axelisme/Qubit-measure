@@ -515,6 +515,7 @@ def project_execution(
         {
             "execution": snapshot["execution"],
             "run_id": run_id,
+            "raw_data": (current_execution or {}).get("raw_data"),
             "recipe": snapshot["recipe"],
             "tab": snapshot["tab"],
             "op": snapshot["op"],

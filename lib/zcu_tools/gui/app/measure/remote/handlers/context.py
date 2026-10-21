@@ -14,6 +14,7 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.value_lookup import ValueInfo
+from zcu_tools.resources.entry import document_value
 
 from ._wire_values import context_wire_value
 
@@ -66,7 +67,9 @@ def h_context_set_parameter(
 
     Fix the target and before value with one pre-write capture. Missing/null
     request values are rejected by the method entry; nested YAML null is valid.
-    Before is null for both unset and explicit null. Return the submitted value,
+    Module slots, including missing slots, use their stored point value rather
+    than materializing the referenced module. Before is null for both unset and
+    explicit null. Return the submitted value,
     not a post-write readback. No ledger, dialog, selection or retry effects.
     Owner errors propagate. Run uses its fixed capture, so direct writes during
     Run are allowed without changing that capture.
@@ -83,7 +86,14 @@ def h_context_set_parameter(
             ErrorCode.INVALID_PARAMS, f"invalid parameter value: {exc}"
         ) from exc
     capture = adapter.context_control.read_context()
-    before = context_wire_value(capture.lookup_point(path).value)
+    if path.split(".")[1:2] == ["module"]:
+        # Slots are stored point values, not materialized library parameters.
+        try:
+            before = context_wire_value(document_value(capture.document(), path))
+        except AttributeError:
+            before = None
+    else:
+        before = context_wire_value(capture.lookup_point(path).value)
     adapter.context_control.set_parameter(capture.target, path, value, metadata=None)
     return {"path": path, "before": before, "value": value}
 

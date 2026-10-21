@@ -92,6 +92,31 @@ def prepare_files(controller: Controller) -> Path:
     return directory
 
 
+def test_predictor_file_discovery_is_readonly_and_follows_the_opened_entry(
+    simulator, tmp_path: Path, request
+) -> None:
+    controller, adapter, sock = simulator
+    empty = call(sock, "predictor.list_files")
+    assert empty["ok"], empty
+    assert empty["result"] == {"files": []}
+    prepare_files(controller)
+    bridge, invoke = mcp_client(adapter.port, tmp_path, request=request)
+    try:
+        invoke("connect", {"port": adapter.port, "mode": "readonly"})
+        files = invoke("rpc_call", {"method": "predictor.list_files"})
+        assert files == {"files": ["complete.json", "partial.json", "transmon.json"]}
+        info = invoke(
+            "rpc_call",
+            {"method": "predictor.info", "params": {"filename": files["files"][1]}},
+        )
+        assert info["params"]["EJ"] == 4.1
+        assert controller.context_control.current_point_label() is None
+        controller.setup_control.new_entry(EntryRequest("empty"))
+        assert invoke("rpc_call", {"method": "predictor.list_files"}) == {"files": []}
+    finally:
+        bridge.disconnect()
+
+
 def test_filename_queries_and_calibration_preserve_files_without_a_point(
     simulator,
 ) -> None:

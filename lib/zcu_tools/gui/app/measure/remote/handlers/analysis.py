@@ -14,6 +14,7 @@ from zcu_tools.gui.app.measure.adapter.analyze_params import (
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
+from ..save_types import project_raw_data_state
 from ._common import follow_tab
 from .tab import tab_operation_state
 
@@ -172,8 +173,13 @@ def h_tab_analyze(
         if snap.post_analysis.has_writeback_draft:
             invalidated.append("post.writeback")
     follow_tab(adapter, tab_id, "analysis")
+    raw_data = project_raw_data_state(
+        snap.artifacts,
+        run_id=None if snap.run is None else snap.run.acquisition_run_id,
+    )
     operation_id = control.analyze(tab_id, updated, run_operation_id=run_operation_id)
     return {
+        "raw_data": raw_data.model_dump(mode="json"),
         "operation_id": operation_id,
         "interactive": snap.capabilities.analysis is AnalysisMode.INTERACTIVE,
         "params": dataclasses.asdict(updated),

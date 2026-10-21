@@ -279,7 +279,10 @@ class TabFormResource:
         use_inline copies that capture; existing inline is a guarded no-op.
         Missing/disabled/unresolved selections never create defaults. Return
         changed, not validity. Failures preserve input/base/publication; changed
-        candidates notify once. Subsequent commands are not a transaction.
+        candidates notify once. The candidate's logical field observation is
+        prepared before installation so a projection failure cannot leave a
+        successful selection behind an error reply. Subsequent commands are not
+        a transaction.
         """
         with self._mutation():
             if action == "use_library":
@@ -300,6 +303,7 @@ class TabFormResource:
                 )
             else:
                 raise ValueError(f"Unknown selector action: {action}")
+            self._form.read_logical_field(candidate.input, path, self._sources.env)
             return self._install_recipe_candidate(candidate)
 
     def recipe_errors(self) -> FormErrors | None:
