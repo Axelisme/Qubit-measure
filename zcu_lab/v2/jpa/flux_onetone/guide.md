@@ -1,19 +1,21 @@
 ## Behavior
 
-JPA flux × readout-frequency 2D survey: sweeps the JPA flux device value (outer axis) against the readout frequency (inner axis) and records the one-tone resonator response, so you can see by eye how the JPA response changes with flux and frequency. There is no automatic optimum analysis — judge the 2D map directly. Runs on real hardware and commands the selected JPA flux device. WARNING: review the selected flux device and both sweep ranges before running — the seeded bounds are bring-up defaults, not certified safety limits. The JPA pump is NOT controlled by this experiment: if the pump must be on for the measurement, confirm its state yourself (in the Devices interface) before running.
+**Readers:** operator, agent. Run a 2D JPA flux and readout-frequency survey from the GUI or MCP and inspect the map. The outer axis sweeps the JPA flux device value, and the inner axis sweeps readout frequency. Inspect the one-tone resonator response map by eye to choose useful settings. WARNING: this run commands the selected flux device on real hardware. Review that device and both sweep ranges before running. Treat the seeded bounds as bring-up defaults only, and establish safe limits for the connected hardware. The pump state stays under your control. If the measurement requires the pump on, confirm its state in the Devices interface before running.
 
-## Expects (parameter context)
+## Parameter sources
 
-Uses the resonator and jpa (amplifier/jpa) aliases. Bounds use `$resonator.freq`, `$resonator.kappa` and `$jpa.flux.` The required JPA flux device resolves flux_dev once at Open or Reset; an unbound alias leaves the form Invalid. flux_unit starts as A with no conversion. The qubit alias supplies an optional reset module.
+Uses the resonator and jpa (`amplifier/jpa`) aliases. Bounds use `$resonator.freq`, `$resonator.kappa` and `$jpa.flux`. Opening or resetting the form selects the required JPA flux device from `flux_dev`; an unbound alias marks the form Invalid. `flux_unit` starts as A, and the device receives the entered values unchanged. The qubit alias supplies an optional reset module.
 
-## Expects (ModuleLibrary)
+## Module slots
 
-Readout starts as a fresh readout template, not a library copy. Its inline pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05. Run replaces both frequencies from the sweep. Readout library keys remain selectable. Optional reset uses `$qubit.module.reset`; an unset slot disables reset.
+Readout starts from the readout template. Its pulse uses `$resonator.freq` and `$resonator.wiring.ch`; acquisition uses `$resonator.freq`, `$resonator.wiring.ro_ch` and `$resonator.ext.time_of_fly` + 0.05. The sweep sets both frequencies during the run. You can also select a saved readout module. Optional reset uses `$qubit.module.reset`; an empty slot disables reset.
 
 ## Typical writeback
 
-No writeback — this adapter has no analysis step (the underlying experiment has no optimum analysis yet). It produces a 2D map for visual inspection only; read off useful flux / frequency settings by eye and update parameters in another step.
+The result is a 2D map for visual inspection. Choose useful flux and frequency settings by eye, then update stored parameters in a separate step.
 
 ## Recommended
 
-No analysis options. Typical sweep: JPA flux device value ~101 points around the seeded centre (`$jpa.flux`), readout frequency ~101 points spanning 1.5 linewidths around `$resonator.freq.` Confirm the JPA pump state before every run. Survey the map wide first, then narrow the ranges around the response you want to inspect.
+A typical sweep uses about 101 JPA flux points around `$jpa.flux` and about 101 readout-frequency points spanning 1.5 linewidths around `$resonator.freq`. Confirm the JPA pump state before every run. Survey a wide map first, then narrow the ranges around the response you want to inspect.
+
+**Last updated:** 2026-10-21

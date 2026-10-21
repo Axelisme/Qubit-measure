@@ -1,34 +1,41 @@
 ## Behavior
 
-One-tone resonator flux dependence: a 2D sweep of an external flux-bias device value versus readout frequency, tracing how the resonator frequency moves with flux. The basis for locating a Fluxonium's flux sweet spots (half-flux and integer-flux points). Runs on real hardware; requires a SoC connection and a configured flux-bias device.
+**Readers:** operator, agent. How to measure one-tone resonator flux dependence from the GUI or MCP and locate flux sweet spots.
 
-## Expects (parameter context)
+The 2D sweep varies an external flux-bias device value and readout frequency to trace how the resonator frequency moves with flux. Use the map to locate a Fluxonium's half-flux and integer-flux sweet spots. The measurement runs on real hardware and requires a SoC connection and a configured flux-bias device.
 
-Opening a tab or Reset evaluates Form starting expressions once against captured parameters into direct input. Range.around seeds 101 frequency points at `$resonator.freq` ± `$resonator.kappa`, in MHz. The inline readout reads `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch` for its tones and channels. `$resonator.ext.default_probe_length` - 0.1 us seeds the ADC window; `$resonator.ext.time_of_fly` + 0.05 us seeds trigger timing. Range.between seeds 101 flux points from 1.1 * `$qubit.flux_int` - 0.1 * `$qubit.flux_half` to 1.1 * `$qubit.flux_half` - 0.1 * `$qubit.flux_int`, in the selected device unit. Missing or invalid required sources leave the affected fields empty and Invalid, without a numeric sweep fallback. For first bring-up without calibration, enter safe, user-approved frequency and flux bounds. The picker separately reads captured `$qubit.flux_half`/`$qubit.flux_int`; absent/null leaves use its default line positions. Choose sweet spots from the measured map.
+**Last updated:** 2026-10-21
 
-## Expects (ModuleLibrary)
+## Parameter sources
 
-Starts with a fresh inline pulse readout and const waveform. It does not adopt a library module or named waveform.
+Opening a tab or pressing Reset takes a fixed copy of the current parameters and evaluates starting expressions once into editable input values. The frequency sweep starts with 101 points at `$resonator.freq` ± `$resonator.kappa`, in MHz. The readout uses `$resonator.freq`, `$resonator.wiring.ch`, and `$resonator.wiring.ro_ch` for its frequency and channels. The ADC window starts at `$resonator.ext.default_probe_length` minus 0.1 us, and trigger timing starts at `$resonator.ext.time_of_fly` plus 0.05 us.
 
-## Typical writeback
+The flux sweep starts with 101 points from 1.1 × `$qubit.flux_int` − 0.1 × `$qubit.flux_half` to 1.1 × `$qubit.flux_half` − 0.1 × `$qubit.flux_int`, in the selected device unit. Missing or invalid required sources leave the affected fields empty and Invalid, blocking the run until valid values are supplied. For first bring-up before calibration, enter safe, user-approved frequency and flux bounds.
 
-Interactive analysis (not a fit): after the run, the user drags two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then clicks Done. The preview proposes qubit.flux_half, qubit.flux_int, and qubit.flux_period (= 2·|qubit.flux_int − qubit.flux_half|) through the captured role binding. The picking is user/agent judgement from the measured map, not simulator truth; apply writeback only after reviewing the figure.
+The sweet-spot picker reads `$qubit.flux_half` and `$qubit.flux_int` from the saved parameters. Missing or null values use the picker's default line positions. Choose sweet spots from the measured map.
+
+## Readout module
+
+The readout starts as a fresh inline pulse with a `const` waveform. Configure its pulse settings directly in the tab.
+
+## Calibration updates
+
+After the run, drag two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then click Done. This is an interactive pick based on operator or agent judgement of the measured map. The preview proposes `qubit.flux_half`, `qubit.flux_int`, and `qubit.flux_period` = 2 × |`qubit.flux_int` − `qubit.flux_half`| for the qubit bound when the tab was opened or reset. Review the figure before applying these updates.
 
 ## MCP recipe
 
-`onetone_spectrum_over_flux` requires explicit `flux_device`, `flux_unit`,
-`flux_range` and `flux_points`. None can be null. The range contains two distinct
-device-native endpoints, and flux_points must be at least 2. The unit must
-exactly match the cached device snapshot, including an explicit `native` when
-that is the device unit. The recipe does not convert coordinates or connect
-devices.
+`onetone_spectrum_over_flux` requires explicit, non-null `flux_device`, `flux_unit`, `flux_range`, and `flux_points`. The range contains two distinct device-native endpoints, and `flux_points` must be at least 2. The unit must exactly match the cached device snapshot, including an explicit `native` when that is the device unit. Supply coordinates in that unit and connect the device before running the recipe.
 
-The recipe can omit `center_mhz` and `span_mhz`. Omitted center uses current
-`$resonator.freq`; omitted span uses 2 times current `$resonator.kappa` for the
-full frequency span. The recipe reads these values during preparation and writes
-numeric endpoints at center ± span/2, not live formulas. Omitted `freq_points`
-retains the GUI count.
+The recipe can omit `center_mhz` and `span_mhz`. Omitted center uses current `$resonator.freq`; omitted span uses 2 times current `$resonator.kappa` for the full frequency span. The recipe reads these values during preparation and sets fixed numeric endpoints at center ± span/2. Omitted `freq_points` retains the GUI count.
 
-## Recommended
+## Recommended use
 
-Run after lookback and an initial onetone/freq, before any twotone flux mapping, to find `$qubit.flux_int` / period from the resonator map. Interactive flux-line pick (no fit). Review 'flux_dev': opening a tab or Reset resolves `$flux_dev` once from the alias table to a direct connected-device name, with no fallback. A missing/unbound alias leaves the required field empty and Invalid. Confirm the device and 'flux_unit', which starts as 'A' and does not convert values. The calibrated sweep uses 101 flux points across the padded interval between `$qubit.flux_int` and `$qubit.flux_half`, and 101 frequency points at `$resonator.freq` ± `$resonator.kappa` MHz. Start at a low readout gain (~0.005) to stay below punch-out so the dip tracks cleanly; if the dip is hard to see (poor SNR), raise the gain toward ~0.05 while keeping the frequency window tight. Survey wide, then narrow around a sweet spot — and if the resonator's flux dispersion (dispersive shift) looks small, narrow the frequency window early instead of keeping a broad default span. For consecutive flux sweeps, reverse the sweep direction (swap start/stop) on the next run so the current source need not ramp all the way back across the full range first. Inspect the 2D map with gui_tab_get_figure (subtab_id='run') to judge window / SNR / shift. After accepting `$qubit.flux_int`, move the flux device there and re-run onetone/freq at that flux before twotone/freq.
+Run after lookback and an initial onetone/freq, before any twotone flux mapping, to find `$qubit.flux_int` and the period from the resonator map.
+
+Review `flux_dev`. Opening a tab or pressing Reset resolves `$flux_dev` once from the alias table to a connected-device name. A missing or unbound alias leaves the required field empty and Invalid. Confirm the device and `flux_unit`, which starts as `A`. The selected unit labels the values as entered. Supply device-native values in that unit.
+
+The calibrated sweep uses 101 flux points across the padded interval between `$qubit.flux_int` and `$qubit.flux_half`, and 101 frequency points at `$resonator.freq` ± `$resonator.kappa` MHz. Start at a low readout gain, about 0.005, to stay below punch-out so the dip tracks cleanly. If poor SNR makes the dip hard to see, raise the gain toward 0.05 while keeping the frequency window tight.
+
+Survey wide, then narrow around a sweet spot. If the resonator's flux dispersion, or dispersive shift, looks small, narrow the frequency window early. For consecutive flux sweeps, reverse the sweep direction by swapping start and stop on the next run. This reduces the current source's return ramp across the full range.
+
+Inspect the 2D map with `gui_tab_get_figure` and `subtab_id='run'` to judge the frequency window, SNR, and shift. After accepting `$qubit.flux_int`, move the flux device there and rerun onetone/freq at that flux before twotone/freq.
