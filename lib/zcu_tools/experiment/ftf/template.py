@@ -8,16 +8,20 @@ from numpy.typing import NDArray
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
     EventSlot,
-    ReadoutSlot,
     TimelineTemplate,
+)
+from zcu_tools.experiment.readout_plan import (
+    ReadoutDrive,
+    classify_readout,
+    envelope_specs,
+    local_readout_pulses,
+    readout_contents,
 )
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.simulate.adc import (
-    PiecewiseLinearEnvelope,
     ReadoutBatch,
     ReadoutPulse,
     Receiver,
-    SampleGrid,
 )
 from zcu_tools.simulate.evolution import (
     DriveTrack,
@@ -115,27 +119,6 @@ class FTFTemplatePlan:
     cavity_drives: tuple[tuple[ReadoutPulse, ...], ...]
 
 
-def _envelopes(
-    event: EventSlot, memo: dict[int, EnvelopeSpec]
-) -> tuple[EnvelopeSpec, ...]:
-    """Reuse immutable specs by identity while the template retains all inputs."""
-    specs = []
-    for envelope in event.envelopes:
-        key = id(envelope)
-        if key not in memo:
-            memo[key] = (
-                EnvelopeSpec("constant")
-                if envelope is None
-                else EnvelopeSpec(
-                    "sampled",
-                    samples=np.array(envelope.values, dtype=np.complex128),
-                    sample_ns=np.array(envelope.sample_us) * 1000,
-                )
-            )
-        specs.append(memo[key])
-    return tuple(specs)
-
-
 def _track(event: EventSlot, port: str, memo: dict[int, EnvelopeSpec]) -> DriveTrack:
     start = event.start_us * 1000
     # Match the old numeric owner's absolute nearest-2-ns support, ties even.
@@ -149,7 +132,7 @@ def _track(event: EventSlot, port: str, memo: dict[int, EnvelopeSpec]) -> DriveT
         np.deg2rad(event.phase_deg)
         - 2 * np.pi * event.frequency_mhz * event.phase_reference_us,
         event.gain,
-        _envelopes(event, memo),
+        envelope_specs(event, memo),
         event.envelope_index,
         event.active,
     )
@@ -179,190 +162,6 @@ def _timeline_batch(
         points=len(template.points),
     )
     return TimelineBatch(template.points, tuple(drives), fixed_dc, end_ns)
-
-
-def _classify_readout(
-    settings: FTFSettings,
-    template: TimelineTemplate,
-    config: FTFReadoutConfig,
-    memo: dict[int, EnvelopeSpec],
-) -> tuple[tuple[EventSlot, ...], tuple[tuple[ReadoutPulse, ...], ...]]:
-    """Partition active readout-generator slots at each point's latest start."""
-    slots = tuple(
-        event
-        for event in template.events
-        if event.gen_ch == settings.readout.drive.gen_ch
-    )
-    if not slots:
-        raise ValueError("FTF requires one terminal readout pulse per point")
-    latest = np.max([np.where(e.active, e.start_us, -np.inf) for e in slots], axis=0)
-    if not np.isfinite(latest).all():
-        raise ValueError("FTF requires one terminal readout pulse per point")
-    terminals = []
-    drives: list[list[ReadoutPulse]] = [[] for _ in template.points]
-    for event in slots:
-        terminal = event.active & (event.start_us == latest)
-        earlier = event.active & ~terminal
-        if np.any(earlier & (event.start_us + event.duration_us > latest)):
-            if config.kind == "mux":
-                raise ValueError(
-                    "FTF mux tones require a common pulse start; blocks overlap"
-                )
-            raise ValueError("FTF cavity drive crosses terminal readout start")
-        terminals.append(replace(event, active=terminal))
-        envelopes = list(_envelopes(event, memo))
-        rows = np.column_stack(
-            (
-                event.start_us,
-                event.duration_us,
-                event.frequency_mhz,
-                event.phase_deg - 360 * event.frequency_mhz * event.phase_reference_us,
-                event.gain,
-                event.envelope_index,
-            )
-        )
-        for index in np.flatnonzero(earlier):
-            drives[index].append(_readout_pulse(settings, rows[index], envelopes))
-    return tuple(terminals), _local_readout_pulses(tuple(tuple(p) for p in drives), 0.0)
-
-
-def _readout_contents(
-    settings: FTFSettings,
-    template: TimelineTemplate,
-    config: FTFReadoutConfig,
-    window: ReadoutSlot,
-    memo: dict[int, EnvelopeSpec],
-) -> tuple[
-    NDArray[np.float64],
-    tuple[tuple[ReadoutPulse, ...], ...],
-    tuple[tuple[SampleGrid, ...], ...],
-    NDArray[np.int64],
-]:
-    """Merge mutually exclusive readout slots, then deduplicate their point rows."""
-    slots = tuple(
-        e for e in template.events if e.gen_ch == settings.readout.drive.gen_ch
-    )
-    count = np.sum([e.active for e in slots], axis=0)
-    if not slots or np.any(count == 0):
-        raise ValueError("FTF requires one terminal readout pulse per point")
-    if config.kind == "pulse" and np.any(count != 1):
-        raise ValueError("FTF requires one terminal readout pulse per point")
-    tones = int(count[0])
-    if tones > 8 or np.any(count != tones):
-        raise ValueError("FTF mux requires a fixed 1..8 tone count per point")
-    if not window.trigger_us.shape[1] or np.any(
-        window.generator_channels != settings.readout.drive.gen_ch
-    ):
-        raise ValueError("FTF requires ADC timing and its bound readout generator")
-    fields = ("start_us", "duration_us", "frequency_mhz", "phase_deg", "gain")
-    values = np.zeros((len(template.points), tones, 6))
-    rows = np.arange(len(template.points))
-    ranks = np.cumsum([e.active for e in slots], axis=0) - 1
-    envelopes = []
-    for event, rank in zip(slots, ranks, strict=True):
-        for col, name in enumerate(fields):
-            values[rows, rank, col] += np.where(event.active, getattr(event, name), 0)
-        # Retain the program's common-origin phase until the model reference
-        # frequency is known; ADC pulse-local conversion happens below.
-        values[rows, rank, 3] -= np.where(
-            event.active, 360 * event.frequency_mhz * event.phase_reference_us, 0
-        )
-        values[rows, rank, 5] += np.where(
-            event.active, event.envelope_index + len(envelopes), 0
-        )
-        envelopes.extend(_envelopes(event, memo))
-    if np.any(values[:, :, 0] != values[:, :1, 0]):
-        raise ValueError("FTF mux tones require a common pulse start per point")
-    if np.any(window.trigger_us[:, 0] < values[:, 0, 0]):
-        raise ValueError(
-            "FTF first ADC trigger must not precede terminal readout start"
-        )
-    features = np.column_stack(
-        (
-            values.reshape(len(template.points), -1),
-            window.trigger_us,
-            window.frequency_mhz,
-            window.phase_deg,
-        )
-    )
-    _, representatives, inverse = np.unique(
-        features, axis=0, return_index=True, return_inverse=True
-    )
-    pulses = []
-    grids = []
-    dt = 1000 / window.sample_rate_mhz
-    for index in representatives:
-        pulses.append(
-            tuple(_readout_pulse(settings, row, envelopes) for row in values[index])
-        )
-        grids.append(
-            tuple(
-                SampleGrid(
-                    trigger * 1000 + dt * np.arange(window.samples),
-                    frequency / 1000,
-                    float(np.deg2rad(phase)),
-                )
-                for trigger, frequency, phase in zip(
-                    window.trigger_us[index],
-                    window.frequency_mhz[index],
-                    window.phase_deg[index],
-                    strict=True,
-                )
-            )
-        )
-    return values[:, 0, 0] * 1000, tuple(pulses), tuple(grids), inverse.astype(np.int64)
-
-
-def _readout_pulse(
-    settings: FTFSettings, row: NDArray[np.float64], envelopes: list[EnvelopeSpec]
-) -> ReadoutPulse:
-    start, duration, freq, phase, gain, envelope_index = row
-    envelope = envelopes[int(envelope_index)]
-    amplitude = complex(settings.readout.drive.input_per_gain * gain)
-    callback = None
-    corners = ()
-    if envelope.kind == "sampled":
-        if np.all(envelope.samples == envelope.samples[0]):
-            amplitude *= envelope.samples[0]
-        else:
-            callback = PiecewiseLinearEnvelope(envelope.sample_ns, envelope.samples)
-            corners = tuple(
-                start * 1000 + t for t in envelope.sample_ns if 0 < t < duration * 1000
-            )
-    return ReadoutPulse(
-        start * 1000,
-        (start + duration) * 1000,
-        amplitude,
-        freq / 1000,
-        float(np.deg2rad(phase)),
-        callback,
-        corners,
-    )
-
-
-def _local_readout_pulses(
-    contents: tuple[tuple[ReadoutPulse, ...], ...], reference_frequency_ghz: float
-) -> tuple[tuple[ReadoutPulse, ...], ...]:
-    """Convert common-origin phases to ADC's negative pulse-local carrier.
-
-    Demodulation keeps absolute time, so the incident field needs the phase
-    accumulated from zero to pulse start in the model's rotating frame.
-    Leave the reference carrier untouched to retain single-tone output bits.
-    """
-    local_contents = []
-    for pulses in contents:
-        local_pulses = []
-        for pulse in pulses:
-            detuning_ghz = pulse.frequency_ghz - reference_frequency_ghz
-            if detuning_ghz != 0:
-                pulse = replace(
-                    pulse,
-                    phase_rad=pulse.phase_rad
-                    - 2 * np.pi * detuning_ghz * pulse.start_ns,
-                )
-            local_pulses.append(pulse)
-        local_contents.append(tuple(local_pulses))
-    return tuple(local_contents)
 
 
 def _cavity_batch(
@@ -442,26 +241,28 @@ def plan_template(
     # Identity lookup is safe: template keeps every input envelope alive for
     # this call. No memo survives a plan or retains compiled program buffers.
     memo: dict[int, EnvelopeSpec] = {}
-    terminal_slots, cavity_drives = _classify_readout(settings, template, config, memo)
-    terminal_template = replace(template, events=terminal_slots)
+    drive = ReadoutDrive(
+        settings.readout.drive.gen_ch,
+        settings.readout.drive.input_per_gain,
+        config.kind,
+    )
+    partition = classify_readout(template, drive, memo)
+    cavity_drives = partition.cavity_drives
+    terminal_template = replace(template, events=partition.terminal_slots)
     contents = []
     for window in template.readouts:
         if window.channel not in receivers:
             raise ValueError(f"unbound FTF receiver {window.channel}")
-        contents.append(
-            _readout_contents(settings, terminal_template, config, window, memo)
-        )
-    end_ns = contents[0][0]
+        contents.append(readout_contents(terminal_template, drive, window, memo))
+    end_ns = contents[0].end_ns
     if facts is None:
         facts = FTFModelFacts(settings, snapshot)
     elif not facts.matches(settings, snapshot):
         raise ValueError("FTF physical facts do not match settings/snapshot/revision")
     joint, source, physical = facts.joint, facts.source, facts.readout
-    reference_frequency_ghz = contents[0][1][0][0].frequency_ghz
+    reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
     readouts = []
-    for window, (_, pulses, grids, inverse) in zip(
-        template.readouts, contents, strict=True
-    ):
+    for window, content in zip(template.readouts, contents, strict=True):
         adc = receivers[window.channel]
         dt = 1000 / window.sample_rate_mhz
         receiver = Receiver(
@@ -490,9 +291,9 @@ def plan_template(
                 window.channel,
                 ReadoutBatch(
                     model,
-                    _local_readout_pulses(pulses, reference_frequency_ghz),
-                    grids,
-                    inverse,
+                    local_readout_pulses(content.pulses, reference_frequency_ghz),
+                    content.grids,
+                    content.inverse,
                 ),
             )
         )
