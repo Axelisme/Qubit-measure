@@ -39,6 +39,14 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 
 ## Predictor sources
 
+`predictor.list_files` returns `{files: [filename, ...]}` from the current entry's
+predictor owner. Filenames include `.json`, are sorted, and are relative to its
+`predictors/` directory. No selected point is required. No entry or absent
+directory returns `{files: []}`. Listing does not validate file content, create
+directories or write files. Other I/O failures retain unexpected-error diagnostics.
+Use a returned filename with `predictor.info`, `predictor.predict` or
+`predictor.calibrate`.
+
 `predictor.info`, `predictor.predict` and `predictor.calibrate` require exactly one
 non-null source, `filename` or inline `params`. Omission and null both mean no
 source. A filename includes `.json` and names a file in

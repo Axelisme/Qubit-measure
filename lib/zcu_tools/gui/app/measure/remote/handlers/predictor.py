@@ -8,7 +8,7 @@ Computations never read a dialog, cache, component, alias or installed model.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -21,6 +21,29 @@ from zcu_tools.simulate.predictor import PredictorInputError
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+
+class PredictorFilesReply(TypedDict):
+    """files lists sorted *.json filenames relative to the opened entry's predictors/.
+
+    An unopened entry or absent directory yields an empty list. Content is not
+    loaded or validated, so listing a filename does not prove it can be used.
+    """
+
+    files: list[str]
+
+
+def h_predictor_list_files(
+    adapter: RemoteControlAdapter, _params: Mapping[str, object]
+) -> PredictorFilesReply:
+    """Return {files: [filename, ...]} without requiring a selected point.
+
+    params is empty. Filenames include .json and are relative to the opened
+    entry's predictors directory, suitable for predictor.info/predict/calibrate.
+    No entry or absent directory returns {files: []}. Other I/O failures
+    propagate. Listing neither reads file contents nor changes session state.
+    """
+    return {"files": list(adapter.predictor_control.list_files())}
 
 
 def _source_params(
