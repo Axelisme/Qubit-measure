@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.script_host import CallResult
@@ -34,9 +34,8 @@ def host_module():
     return importlib.import_module("zcu_tools.experiment.script_host")
 
 
-def test_stop_tree_inherits_stop_and_propagates_first_error() -> None:
+def test_stop_tree_inherits_stop_and_releases_completed_scopes() -> None:
     root = StopSignal()
-    assert hasattr(root, "child"), "StopSignal has no child scope contract"
     child = root.child()
     sibling = root.child()
     child.set()
@@ -45,14 +44,44 @@ def test_stop_tree_inherits_stop_and_propagates_first_error() -> None:
     root.set()
     assert sibling.is_set()
     assert root.child().is_set()
-    child.set_error("failed", "acquire failed", ValueError("bad point"))
-    assert root.error is not None
-    assert root.error.reason == "acquire failed"
     child.release()
     root.clear_stop()
     root.set()
     child.clear_stop()
     assert not child.is_set(), "Released operation scopes must be detached"
+
+
+def test_child_error_stops_only_its_scope_and_preserves_first_error() -> None:
+    root = StopSignal()
+    iteration = root.child()
+    operation = iteration.child()
+    sibling = iteration.child()
+    descendant = operation.child().child()
+    cause = ValueError("bad point")
+
+    operation.set_error("failed", "acquire failed", cause)
+    first_error = operation.error
+    operation.set_error("interrupted", "later interruption", None)
+
+    assert operation.is_set()
+    assert descendant.is_set()
+    assert descendant.error is None
+    assert operation.error is first_error
+    with pytest.raises(ScheduleOutcomeError, match="acquire failed") as raised:
+        operation.raise_if_error()
+    assert raised.value is first_error
+    assert raised.value.status == "failed"
+    assert raised.value.exception is cause
+    assert raised.value.__cause__ is cause
+    inherited = operation.child()
+    assert inherited.is_set()
+    assert inherited.error is first_error
+
+    next_sibling = iteration.child()
+    for unaffected in (root, iteration, sibling, next_sibling):
+        assert not unaffected.is_set()
+        assert unaffected.error is None
+        unaffected.raise_if_error()
 
 
 def test_call_runs_in_executor_and_author_finally_stays_on_worker() -> None:
