@@ -1,11 +1,31 @@
 """Ordered resonator and optional qubit bindings for a mux module owner."""
 
-from typing import Self
+from typing import Annotated, Self
 
-from pydantic import Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from zcu_tools.resources.entry.schema import validate_component_name
 
 from .base import BuiltinComponent
+
+
+class MuxWiringSchema(BaseModel):
+    """Mux generator and ordered per-tone ADC channels, separate from pulse wiring."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gen_ch: int | None = Field(
+        default=None, ge=0, strict=True, description="Mux generator channel, if known."
+    )
+    ro_ch: list[Annotated[int, Field(ge=0, strict=True)]] = Field(
+        description="ADC channels aligned with the group resonators, one per full tone."
+    )
 
 
 class MuxGroupSchema(BuiltinComponent):
@@ -18,6 +38,9 @@ class MuxGroupSchema(BuiltinComponent):
     never changes this group's inherited module slots or ext ownership.
     """
 
+    wiring: MuxWiringSchema = Field(
+        description="Mux generator and ADC wiring in full resonator order."
+    )
     resonators: list[str] = Field(
         min_length=1,
         max_length=8,
@@ -43,6 +66,16 @@ class MuxGroupSchema(BuiltinComponent):
                         f"{info.field_name}[{index}]={name!r}: {exc}"
                     ) from exc
         return value
+
+    @model_validator(mode="after")
+    def validate_wiring_length(self) -> Self:
+        """Reject ADC lists that do not cover exactly the full resonator list."""
+        if len(self.wiring.ro_ch) != len(self.resonators):
+            raise ValueError(
+                "wiring.ro_ch/resonators: lengths differ; "
+                f"ro_ch={self.wiring.ro_ch!r}, resonators={self.resonators!r}"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_qubit_structure(self) -> Self:

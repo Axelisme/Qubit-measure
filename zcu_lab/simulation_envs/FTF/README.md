@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-22，獨立 design 頻率初猜
+**Last updated:** 2026-10-23，mux group wiring
 
 這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。Startup 與 Notebook 直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
 
@@ -53,8 +53,8 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 模擬用 `entry-template.yaml` 省略 qubit energies 與 R1／R2 的 `freq`，只提供接線、元件關聯與 aliases。物理模型的 energies 與 resonator 頻率由 `ftf.yaml` 提供，不會自動填入 entry。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的頻率與其他輸入，範本不提供 module library 或校準完成的量測參數。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 另外預填示意 energies 與 R1／R2 頻率，不代表模擬 entry 也有這些值。若修改工作副本的接線，也要調整 entry 範本或已建立的 entry。
 
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
-R1／R2 的 wiring 保留 pulse gen0／ADC0。Mux 接線由 `$mux.module.readout` 指向的 `readout/mux` library 模組提供，須設 `gen_ch: 1`，並依 R1／R2 順序設 tone `ro_ch: 1`／`2`。
-範本不附 library assets，也不預填 module key。建立模組、綁定 MG12 與核對 Open／Reset 初值的步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
+R1／R2 的 wiring 保留 pulse gen0／ADC0。MG12 的 mux wiring 填 `gen_ch: 1`、`ro_ch: [1, 2]`，依序對應 R1／R2，不讀 resonator 的 pulse ADC。
+範本不附 library assets，也不預填 module key。八張 mux 表單缺 readout slot 時，Open／Reset 從 group wiring 補通道，tone gain 補 0.1，其餘缺失的必填輸入仍保持 Invalid。有 slot 時沿既有 library 路徑，細節與核對步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
 初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。
 
 ## 設計初猜與 predictor

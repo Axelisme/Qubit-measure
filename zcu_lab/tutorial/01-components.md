@@ -22,7 +22,9 @@ class CouplerSchema(BuiltinComponent):
 
 `Frequency` 的工作單位是 MHz，`Duration` 是 us，`Energy` 是 GHz。`Flux` 沒有固定單位，caller 必須交代使用的座標與單位。這些型別允許 `None`，但 `default=None` 才讓欄位可以省略。不要把未知校準值填成 `0.0`。單位與 global／local flux 的區別見 [component 欄位單位](../README.md#component-欄位單位)。
 
-`BuiltinComponent` 已提供 `ext`、`wiring` 與 `module`。未宣告的輸入欄位，包括巢狀 model 裡的未知欄位，會移到 `ext.migrated` 的元件相對路徑，並寫出 warning。例如 `freqq: 4800.0` 會變成 `ext.migrated.freqq`，不會填入 `freq`。再次輸入同一路徑會覆蓋該 migrated 值，其他 ext 值保留。已宣告欄位的非法值仍報驗證錯誤。載入不立即改寫檔案，保存行為見 [保存與版本](../../lib/zcu_tools/resources/entry/README.md#保存與版本)。
+`BuiltinComponent` 只提供 `ext` 與 `module`，不提供 wiring。需要通道的 kind 必須自己宣告 wiring model 與欄位，沒有讀取者就不加。內建 resonator 宣告 `WiringSchema(ch, ro_ch)`，qubit 宣告 `QubitWiringSchema(ch, lo_flux_ch)`，mux group 宣告 `MuxWiringSchema(gen_ch, ro_ch)`，其中 mux `ro_ch` 是與 resonators 同序、等長的列表。上面的 coupler 範例沒有通道讀取者，因此不宣告 wiring。
+
+未宣告的輸入欄位，包括巢狀 model 裡的未知欄位，會移到 `ext.migrated` 的元件相對路徑，並寫出 warning。例如 `freqq: 4800.0` 會變成 `ext.migrated.freqq`，不會填入 `freq`。再次輸入同一路徑會覆蓋該 migrated 值，其他 ext 值保留。已宣告欄位的非法值仍報驗證錯誤。載入不立即改寫檔案，保存行為見 [保存與版本](../../lib/zcu_tools/resources/entry/README.md#保存與版本)。
 
 ## 2. 註冊 kind
 
