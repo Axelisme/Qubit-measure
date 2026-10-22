@@ -4,7 +4,7 @@ import json
 
 import numpy as np
 import pytest
-from zcu_tools.datafile import AnalysisDocument, encode_analysis_document
+from zcu_tools.experiment.artifacts import AnalysisDocument, encode_analysis_document
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])

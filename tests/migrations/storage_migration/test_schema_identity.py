@@ -10,17 +10,14 @@ import numpy as np
 import pytest
 from pydantic import TypeAdapter
 from zcu_tools.datafile import (
-    AxisSchema,
     CfgSnapshot,
     DataVariable,
-    ExperimentPayload,
     LabberMetadata,
-    LabberPayload,
-    VariableSchema,
-    load_run_data,
-    write_labber,
+    encode_labber_comment,
+    save_labber_data,
 )
 
+from migrations.legacy_labber import LegacyAxisSchema, LegacyVariableSchema
 from migrations.storage_migration import (
     LegacyRunEvidence,
     MigrationInputError,
@@ -29,6 +26,7 @@ from migrations.storage_migration import (
     load_run_evidence,
     migrate_storage,
 )
+from tests.migrations.storage_migration.containers import read_migrated
 from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
@@ -79,7 +77,7 @@ def test_unconvertible_cfg_version_is_pending_and_can_be_corrected(
     )
     assert result.entry_id == report.entry_id
     assert len(result.converted_files) == len(result.moved_labber_files) == 1
-    stored = load_run_data(result.converted_files[0].destination)
+    stored = read_migrated(result.converted_files[0].destination)
     assert stored.cfg.values == document["entries"][0]["cfg"]["values"]
     assert stored.cfg.schema_version == "1.0"
     assert result.moved_labber_files[0].destination.read_bytes() == before
@@ -120,7 +118,7 @@ def test_converter_preserves_raw_cfg_during_validation(
         assert not (request.results_root / request.name).exists()
     else:
         assert len(report.converted_files) == 1
-        stored = load_run_data(report.converted_files[0].destination)
+        stored = read_migrated(report.converted_files[0].destination)
         assert stored.cfg == before.entries[0].cfg
         assert report.moved_labber_files[0].destination.read_bytes() == source_bytes
 
@@ -442,22 +440,13 @@ def test_same_tag_selects_distinct_cfg_type_schemas_and_callbacks(
     cfg = CfgSnapshot(
         values={"other": 3}, cfg_type="AlternateCfg", schema_version="1.0"
     )
-    write_labber(
-        second_source,
-        ExperimentPayload(
-            variables={
-                DataVariable("signal"): LabberPayload(
-                    ("signal", "V", np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])),
-                    [
-                        ("y", "s", np.array([0.0, 1.0, 2.0])),
-                        ("x", "s", np.array([0.0, 1.0])),
-                    ],
-                )
-            },
-            metadata=LabberMetadata(tags=["synthetic_scan"]),
-            representation="single",
+    save_labber_data(
+        str(second_source),
+        z=("signal", "V", np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])),
+        axes=[("y", "s", np.array([0.0, 1.0, 2.0])), ("x", "s", np.array([0.0, 1.0]))],
+        metadata=LabberMetadata(
+            tags=["synthetic_scan"], comment=encode_labber_comment(cfg.values)
         ),
-        cfg=cfg,
     )
     with second_source.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
@@ -475,11 +464,11 @@ def test_same_tag_selects_distinct_cfg_type_schemas_and_callbacks(
     schemas = {
         **mapping.data_schemas,
         ("synthetic_scan", "AlternateCfg"): (
-            VariableSchema(
+            LegacyVariableSchema(
                 variable=DataVariable("signal"),
                 axes=(
-                    AxisSchema(name="y", unit="s", dtype=np.dtype("float64")),
-                    AxisSchema(name="x", unit="s", dtype=np.dtype("float64")),
+                    LegacyAxisSchema(name="y", unit="s", dtype=np.dtype("float64")),
+                    LegacyAxisSchema(name="x", unit="s", dtype=np.dtype("float64")),
                 ),
                 signal_name="signal",
                 signal_unit="V",
@@ -490,12 +479,12 @@ def test_same_tag_selects_distinct_cfg_type_schemas_and_callbacks(
     observed: dict[str, tuple[int, ...]] = {}
 
     def validate(path: Path, tag: str, cfg_type: str) -> None:
-        stored = load_run_data(path)
+        stored = read_migrated(path)
         assert tag == "synthetic_scan"
         expected_tag = native_tag if cfg_type == "AlternateCfg" else tag
         assert stored.metadata.experiment == expected_tag
         assert cfg_type == stored.cfg.cfg_type
-        observed[cfg_type] = stored.payload.variables[DataVariable("signal")].z.shape
+        observed[cfg_type] = stored.container.vars["signal"].values.shape
 
     report = migrate_storage(
         replace(request, part="data", run_evidence=load_run_evidence(evidence_path)),

@@ -50,10 +50,13 @@ def test_grouped_export_preserves_arrays_and_explicit_labber_metadata(
     datafile.write_labber(path, container, metadata=metadata)
     loaded = datafile.load_grouped_labber_data(str(path))
     np.testing.assert_array_equal(
-        loaded.variables["first"].z, container.vars["first"].values
+        loaded.variables[datafile.DataVariable("first")].z,
+        container.vars["first"].values,
     )
     assert loaded.metadata == metadata
-    assert [axis.name for axis in loaded.variables["first"].axes] == [
+    assert [
+        axis.name for axis in loaded.variables[datafile.DataVariable("first")].axes
+    ] == [
         "frequency",
         "power",
     ]
@@ -87,10 +90,12 @@ def test_independent_export_keeps_each_grid_and_rank(tmp_path: Path) -> None:
     datafile.write_labber(path, original, grouped_layout="independent")
     loaded = datafile.load_grouped_labber_data(str(path))
     for name, variable in original.vars.items():
-        np.testing.assert_array_equal(loaded.variables[name].z, variable.values)
-        assert [axis.name for axis in loaded.variables[name].axes] == [
-            axis.name for axis in reversed(variable.axes)
-        ]
+        np.testing.assert_array_equal(
+            loaded.variables[datafile.DataVariable(name)].z, variable.values
+        )
+        assert [
+            axis.name for axis in loaded.variables[datafile.DataVariable(name)].axes
+        ] == [axis.name for axis in reversed(variable.axes)]
 
 
 def test_common_grid_failure_does_not_affect_native_save(tmp_path: Path) -> None:
