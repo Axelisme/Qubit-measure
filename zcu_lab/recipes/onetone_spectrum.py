@@ -1,139 +1,155 @@
 """Resonator frequency sweep, spectral fit and reviewed calibration."""
 
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
-from zcu_tools.mcp.measure.recipe import (
-    RecipeDefinition,
-    RecipeGenerator,
-    RecipeNeedsParameters,
-    RecipeSession,
-    ask,
-)
+from pydantic import BaseModel, Field
+from zcu_tools.gui.form import FormModel
+from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 
 from .helpers import (
     FrequencySweepCalibration,
+    FrequencySweepRange,
+    report_number,
     retain_scalar,
     set_frequency_sweep,
 )
 
 
-# tolerated: Public resonator spectrum keywords must match the handwritten input_schema.
-def onetone_spectrum(  # noqa: PLR0913
-    session: RecipeSession,
-    *,
-    target: str | None = None,
-    reuse_tab_id: str | None = None,
-    readout_ref: str | None = None,
-    center_mhz: float | None = None,
-    span_mhz: float | None = None,
-    gain: float | None = None,
-    points: int | None = None,
-    reps: int | None = None,
-    rounds: int | None = None,
-) -> RecipeGenerator:
+class OnetoneSpectrumInputs(FormModel):
+    """Inputs for onetone spectrum; all units and null policies are declared per
+    field."""
+
+    target: str | None = Field(
+        None,
+        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
+    )
+    reuse_tab_id: str | None = Field(
+        None,
+        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
+    )
+    readout_ref: str | None = Field(
+        None,
+        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    )
+    center_mhz: float | None = Field(
+        None, description="Sweep center in MHz. Null reads $resonator.freq."
+    )
+    span_mhz: float | None = Field(
+        None,
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Null uses 3 times $resonator.kappa as the full span.",
+    )
+    gain: float | None = Field(
+        None,
+        description="Fixed pulse amplitude in native gain units; null keeps the GUI value.",
+    )
+    points: int | None = Field(
+        None, description="Sweep sample count; null keeps the GUI count when optional."
+    )
+    reps: int | None = Field(
+        None, description="Acquisition repetition count; null keeps the GUI value."
+    )
+    rounds: int | None = Field(
+        None, description="Averaging round count; null keeps the GUI value."
+    )
+
+
+class OnetoneSpectrumReport(FormModel):
+    """Completed onetone spectrum results; cancellation returns no report."""
+
+    frequency_mhz: float | None = Field(
+        description="Fitted resonator frequency in MHz; null means not estimable."
+    )
+    linewidth_mhz: float | None = Field(
+        description="Fitted full linewidth in MHz; null means not estimable."
+    )
+    writeback_applied: bool = Field(
+        description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+
+class OnetoneSpectrumSummary(BaseModel):
+    """Author view of owner summary fields; no missing values are invented."""
+
+    freq: float | None = Field(
+        description="Owner freq in MHz; null retains an unavailable estimate."
+    )
+
+    fwhm: float | None = Field(
+        description="Owner fwhm in MHz; null retains an unavailable estimate."
+    )
+
+
+@recipe(
+    "onetone_spectrum",
+    description="Run one onetone spectrum and save raw data and Primary analysis.",
+)
+async def onetone_spectrum(
+    session: RecipeSession, inputs: OnetoneSpectrumInputs
+) -> OnetoneSpectrumReport:
     """Sweep readout frequency to locate the resonator response.
 
     At each frequency, apply the readout pulse and average its IQ signal.
     Primary fits the spectrum to estimate resonator frequency and linewidth.
-    Save raw data and analysis, then ask before applying the calibration.
+    Ask before applying the calibration, then save raw data and analysis.
 
-    session is driver-supplied. target overrides the qubit alias for this Reset;
-    None uses global aliases. reuse_tab_id resets a named idle onetone/freq tab.
-    readout_ref selects a library module; None retains its GUI selection.
-    center_mhz and positive span_mhz use MHz; omitted values use resonator
-    frequency and three linewidths for the full span. gain is native amplitude,
-    points is the sweep count, and reps/rounds control averaging.
-    Other None values retain GUI defaults. Blank references or invalid ranges
-    fail; missing calibration reports needs_parameters. Cfg/native failures
-    propagate. Cancellation stops later steps; skipped writeback changes nothing.
+    Inputs declare native units and GUI-retention policies. The session supplies
+    fixed Form sources. Return the typed report after completion.
+    The runtime owns cancellation. Owner, acquisition, save and analysis errors
+    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    Missing calibration raises RecipeNeedsParameters before Run.
     """
-    # 1. Validate inputs before selecting the measurement sources.
-    for name, value in (("reuse_tab_id", reuse_tab_id), ("readout_ref", readout_ref)):
-        if value is not None and not value.strip():
+    for name, value in (
+        ("reuse_tab_id", inputs.reuse_tab_id),
+        ("readout_ref", inputs.readout_ref),
+    ):
+        if value is not None and (not value.strip()):
             raise ValueError(f"{name} must be a non-empty string or null")
-    if span_mhz is not None and span_mhz <= 0:
+    if inputs.span_mhz is not None and inputs.span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
-
-    # 2. Open/reset the tab and select the pulse libraries.
+    # Select the captured sources before editing measurement fields.
     tab = session.open_tab(
         "onetone/freq",
-        aliases=None if target is None else {"qubit": target},
-        reuse=reuse_tab_id,
+        aliases=None if inputs.target is None else {"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    tab.use_library(("modules", "readout"), readout_ref)
-
-    # 3. Set the scan range and averaging for the resonator response.
+    tab.select(("modules", "readout"), ref=inputs.readout_ref)
     missing = set_frequency_sweep(
         tab,
         ("sweep", "freq"),
         calibration=FrequencySweepCalibration(
             "$resonator.freq", "$resonator.kappa", 3.0
         ),
-        center_mhz=center_mhz,
-        span_mhz=span_mhz,
-        expts=points,
+        session=session,
+        scan=FrequencySweepRange(
+            center_mhz=inputs.center_mhz, span_mhz=inputs.span_mhz, expts=inputs.points
+        ),
     )
     if missing:
         raise RecipeNeedsParameters(missing)
-    if gain is not None:
-        tab.use_inline(("modules", "readout"))
-        tab.set(("modules", "readout", "gain"), gain)
+    if inputs.gain is not None:
+        tab.select(("modules", "readout"), inline=True)
+        tab.set(("modules", "readout", "gain"), inputs.gain)
     else:
         retain_scalar(tab, ("modules", "readout", "gain"))
-    tab.set(("reps",), reps)
-    tab.set(("rounds",), rounds)
+    tab.set(("reps",), inputs.reps)
+    tab.set(("rounds",), inputs.rounds)
 
-    # 4. Acquire and save the raw IQ sweep.
-    result = yield from tab.run_step()
-    run = result.run
-    if result.status == "cancelled" or run is None:
-        return
-    run.save_raw()
+    # Acquire before analysis; the finally block saves raw and artifacts.
+    await tab.run()
+    try:
+        # Analyze the acquisition with the GUI parameters.
+        analysis = await tab.analyze("primary", result=OnetoneSpectrumSummary)
 
-    # 5. Fit the resonator frequency and linewidth.
-    analysis = yield from run.analyze_step("primary")
-    if analysis.status == "cancelled":
-        return
+        # Write only the proposal items selected in the answer.
+        decision = await tab.ask_writeback()
+        if decision.accepted:
+            tab.accept_writeback(decision.items)
+        return OnetoneSpectrumReport(
+            frequency_mhz=report_number(analysis.result.freq),
+            linewidth_mhz=report_number(analysis.result.fwhm),
+            writeback_applied=decision.accepted,
+        )
+    finally:
+        tab.save()
 
-    # 6. Ask before applying the proposed calibration.
-    decision = yield from ask(run.propose_writeback())
-    if decision.status == "cancelled":
-        return
-    if decision.decision == "accepted":
-        tab.accept()
 
-
-DEFINITION = RecipeDefinition(
-    name="onetone_spectrum",
-    description="Run one onetone spectrum and save raw data and Primary analysis.",
-    input_schema={
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "target": {"type": ["string", "null"], "minLength": 1},
-            **{
-                name: {"type": ["string", "null"], "minLength": 1}
-                for name in ("reuse_tab_id", "readout_ref")
-            },
-            **{
-                name: {"type": ["number", "null"]}
-                for name in ("center_mhz", "span_mhz")
-            },
-            **{name: {"type": ["integer", "null"]} for name in ("reps", "rounds")},
-            "gain": {"type": ["number", "null"]},
-            "points": {"type": ["integer", "null"]},
-        },
-    },
-    run=onetone_spectrum,
-    adapter_name="onetone/freq",
-    summary_parameters=(
-        SummaryParameter("frequency_sweep", ("sweep", "freq"), "MHz"),
-        SummaryParameter("gain", ("modules", "readout", "gain")),
-        SummaryParameter("readout_ref", ("modules", "readout")),
-        SummaryParameter("reps", ("reps",)),
-        SummaryParameter("rounds", ("rounds",)),
-    ),
-    summary_estimates=(
-        SummaryEstimate("freq", ("freq",), unit="MHz"),
-        SummaryEstimate("fwhm", ("fwhm",), unit="MHz"),
-    ),
-)
+DEFINITION = onetone_spectrum

@@ -1,174 +1,181 @@
 """Probe-off/on IQ shots with Primary and Post discrimination analysis."""
 
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
-from zcu_tools.mcp.measure.recipe import (
+from typing import Literal
+
+from pydantic import BaseModel, Field
+from zcu_tools.gui.form import FormModel
+from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
-    RecipeDefinition,
-    RecipeGenerator,
     RecipeNeedsParameters,
-    RecipeSession,
-    ask,
 )
 
-from .helpers import apply_frequency, choose_frequency
+from .helpers import (
+    FrequencyCalibration,
+    apply_frequency,
+    choose_frequency,
+    report_number,
+    require_pi,
+    select_or_disable,
+)
 
 
-def _validate_inputs(
-    references: tuple[tuple[str, str | None], ...], shots: int | None
-) -> None:
-    """Reject blank references and nonpositive shots before opening a tab."""
-    for name, value in references:
-        if value is not None and not value.strip():
-            raise ValueError(f"{name} must be a non-empty string or null")
-    if shots is not None and shots <= 0:
-        raise ValueError("shots must be a positive integer or null")
+class SingleshotGEInputs(FormModel):
+    """Inputs for singleshot ge; all units and null policies are declared per
+    field."""
+
+    target: str | None = Field(
+        None,
+        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
+    )
+    reuse_tab_id: str | None = Field(
+        None,
+        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
+    )
+    readout_ref: str | None = Field(
+        None,
+        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    )
+    pi_ref: str | None = Field(
+        None,
+        description="Calibrated pi-pulse library key; null keeps the GUI selection, which must be a valid reference.",
+    )
+    use_reset: str | Literal["off"] = Field(
+        "off",
+        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+    )
+    init_pulse_ref: str | Literal["off"] = Field(
+        "off",
+        description="Initialization library key, or off to disable preparation. Omission disables it; null is rejected.",
+    )
+    shots: int | None = Field(
+        None, description="Probe-off/on shot count; null keeps the GUI value."
+    )
 
 
-# tolerated: Public GE single-shot keywords must match the handwritten input_schema.
-def singleshot_ge(  # noqa: PLR0913
-    session: RecipeSession,
-    *,
-    target: str | None = None,
-    reuse_tab_id: str | None = None,
-    readout_ref: str | None = None,
-    pi_ref: str | None = None,
-    use_reset: str | None = None,
-    init_pulse_ref: str | None = None,
-    shots: int | None = None,
-) -> RecipeGenerator:
+class SingleshotGEReport(FormModel):
+    """Completed singleshot ge results; cancellation returns no report."""
+
+    fidelity: float | None = Field(
+        description="Ground/excited discrimination fidelity; null means not estimable."
+    )
+    theta: float | None = Field(
+        description="IQ rotation angle in radians; null means not estimable."
+    )
+    threshold: float | None = Field(
+        description="Rotated-IQ discrimination threshold; null means not estimable."
+    )
+    ge_radius: float | None = Field(
+        description="Post-analysis classification radius in IQ units; null means not estimable."
+    )
+    confusion: list[list[float]] = Field(
+        description="Post-analysis confusion matrix in state order."
+    )
+    writeback_applied: bool = Field(
+        description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+
+class GESummary(BaseModel):
+    """Author view of owner summary fields; no missing values are invented."""
+
+    fidelity: float | None = Field(
+        description="Owner fidelity in dimensionless; null retains an unavailable estimate."
+    )
+
+    theta: float | None = Field(
+        description="Owner theta in rad; null retains an unavailable estimate."
+    )
+
+    threshold: float | None = Field(
+        description="Owner threshold in ADC units; null retains an unavailable estimate."
+    )
+
+
+class GEPostSummary(BaseModel):
+    """Author view of owner summary fields; no missing values are invented."""
+
+    ge_radius: float | None = Field(
+        description="Owner ge_radius in ADC units; null retains an unavailable estimate."
+    )
+
+    confusion: list[list[float]] = Field(description="Owner confusion values.")
+
+
+@recipe(
+    "singleshot_ge",
+    description="Run GE single-shot calibration with Primary and Post analysis.",
+)
+async def singleshot_ge(
+    session: RecipeSession, inputs: SingleshotGEInputs
+) -> SingleshotGEReport:
     """Measure probe-off/on IQ clouds for ground/excited discrimination.
 
     Apply optional reset/init pulses, then acquire shots without and with the
-    calibrated pi probe before readout. Primary estimates IQ rotation, threshold,
-    cloud width and discrimination fidelity; Post adds classification
-    radius and confusion diagnostics. Save raw shots and both analyses, then
-    ask before applying their calibration proposals in Primary-to-Post order.
+    calibrated pi probe before readout. Primary estimates IQ rotation,
+    threshold, cloud width and discrimination fidelity; Post adds classification
+    radius and confusion diagnostics. Ask before applying their calibration
+    proposals in Primary-to-Post order, then save raw shots and both analyses.
 
-    session is driver-supplied. target overrides the qubit alias for this Reset;
-    None uses global aliases. reuse_tab_id resets an idle singleshot/ge tab.
-    readout_ref and pi_ref select library modules; None retains GUI selections.
-    Readout frequency uses a valid library value, then resonator calibration.
-    None disables reset/init_pulse; named references select those modules.
-    shots is a positive acquisition count; None retains the GUI default.
-    Missing readout/pi calibration reports both names in needs_parameters.
-    Invalid inputs/cfg/native failures propagate. Cancellation stops later
-    steps; skipped writeback changes nothing.
+    Inputs declare native units and GUI-retention policies. The session supplies
+    fixed Form sources. Return the typed report after completion.
+    The runtime owns cancellation. Owner, acquisition, save and analysis errors
+    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    Missing calibration raises RecipeNeedsParameters before Run.
     """
-    # 1. Validate inputs before selecting the measurement sources.
-    _validate_inputs(
-        (
-            ("reuse_tab_id", reuse_tab_id),
-            ("readout_ref", readout_ref),
-            ("pi_ref", pi_ref),
-            ("use_reset", use_reset),
-            ("init_pulse_ref", init_pulse_ref),
-        ),
-        shots,
-    )
-
-    # 2. Open/reset the tab and select the pulse libraries.
+    # Select the captured sources before editing measurement fields.
     tab = session.open_tab(
         "singleshot/ge",
-        aliases=None if target is None else {"qubit": target},
-        reuse=reuse_tab_id,
+        aliases=None if inputs.target is None else {"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    if use_reset is None:
-        tab.disable_library(("modules", "reset"))
-    else:
-        tab.use_library(("modules", "reset"), use_reset)
-    if init_pulse_ref is None:
-        tab.disable_library(("modules", "init_pulse"))
-    else:
-        tab.use_library(("modules", "init_pulse"), init_pulse_ref)
-    tab.use_library(("modules", "readout"), readout_ref)
-
-    # 3. Resolve readout frequency and require the calibrated pi probe.
-    # Report both absent calibrations before Run.
+    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
+    select_or_disable(tab, ("modules", "init_pulse"), inputs.init_pulse_ref)
+    tab.select(("modules", "readout"), ref=inputs.readout_ref)
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        calibration="$resonator.freq",
-        required="readout_ref",
+        session,
+        calibration=FrequencyCalibration(
+            path="$resonator.freq", required="readout_ref"
+        ),
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline(("modules", "readout"))
+        tab.select(("modules", "readout"), inline=True)
         apply_frequency(tab, frequency.edit)
     if (
-        parameter := tab.use_library(
-            ("modules", "probe_pulse"), pi_ref, required="pi_ref"
+        parameter := require_pi(
+            tab, ("modules", "probe_pulse"), inputs.pi_ref, required="pi_ref"
         )
     ) is not None:
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set(("shots",), shots, source="explicit")
+    tab.set(("shots",), inputs.shots)
 
-    # 4. Acquire and save raw probe-off/on shots.
-    result = yield from tab.run_step()
-    run = result.run
-    if result.status == "cancelled" or run is None:
-        return
-    run.save_raw()
+    # Acquire before analysis; the finally block saves raw and artifacts.
+    await tab.run()
+    try:
+        # Fit IQ clouds before deriving Post diagnostics.
+        primary = await tab.analyze("primary", result=GESummary)
+        analysis = await tab.analyze("post", result=GEPostSummary)
 
-    # 5. Fit the IQ clouds before the Post classification diagnostics.
-    analysis = yield from run.analyze_step("primary")
-    if analysis.status == "cancelled":
-        return
-
-    # 6. Derive classification radius and confusion diagnostics from Primary.
-    analysis = yield from run.analyze_step("post")
-    if analysis.status == "cancelled":
-        return
-
-    # 7. Ask before applying the proposed calibration.
-    decision = yield from ask(run.propose_writeback())
-    if decision.status == "cancelled":
-        return
-    if decision.decision == "accepted":
-        tab.accept()
+        # Write only the proposal items selected in the answer.
+        decision = await tab.ask_writeback()
+        if decision.accepted:
+            tab.accept_writeback(decision.items)
+        return SingleshotGEReport(
+            fidelity=report_number(primary.result.fidelity),
+            theta=report_number(primary.result.theta),
+            threshold=report_number(primary.result.threshold),
+            ge_radius=report_number(analysis.result.ge_radius),
+            confusion=analysis.result.confusion,
+            writeback_applied=decision.accepted,
+        )
+    finally:
+        tab.save()
 
 
-DEFINITION = RecipeDefinition(
-    name="singleshot_ge",
-    description="Run GE single-shot calibration with Primary and Post analysis.",
-    input_schema={
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "target": {"type": ["string", "null"], "minLength": 1},
-            **{
-                name: {"type": ["string", "null"], "minLength": 1}
-                for name in (
-                    "reuse_tab_id",
-                    "readout_ref",
-                    "pi_ref",
-                    "use_reset",
-                    "init_pulse_ref",
-                )
-            },
-            "shots": {"type": ["integer", "null"]},
-        },
-    },
-    run=singleshot_ge,
-    adapter_name="singleshot/ge",
-    summary_parameters=(
-        SummaryParameter(
-            "readout_frequency_mhz",
-            ("modules", "readout", "freq"),
-            "MHz",
-        ),
-        SummaryParameter("readout_ref", ("modules", "readout")),
-        SummaryParameter("use_reset", ("modules", "reset")),
-        SummaryParameter("shots", ("shots",)),
-        SummaryParameter("pi_ref", ("modules", "probe_pulse")),
-        SummaryParameter("init_pulse_ref", ("modules", "init_pulse")),
-    ),
-    summary_estimates=(
-        SummaryEstimate("fidelity", ("fidelity",)),
-        SummaryEstimate("theta", ("theta",)),
-        SummaryEstimate("threshold", ("threshold",)),
-        SummaryEstimate("ge_s", ("ge_s",)),
-    ),
-)
+DEFINITION = singleshot_ge

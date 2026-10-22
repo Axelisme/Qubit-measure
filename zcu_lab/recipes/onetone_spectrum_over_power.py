@@ -1,136 +1,147 @@
 """Resonator frequency/gain map with raw save and Run preview only."""
 
-from zcu_tools.mcp.measure.execution_reply import SummaryParameter
-from zcu_tools.mcp.measure.recipe import (
-    RecipeDefinition,
-    RecipeGenerator,
-    RecipeNeedsParameters,
-    RecipeSession,
-)
+from pydantic import Field
+from zcu_tools.gui.form import FormModel
+from zcu_tools.gui.form_adapter.sweep import LinRange
+from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 
 from .helpers import (
     FrequencySweepCalibration,
+    FrequencySweepRange,
     retain_scalar,
     set_frequency_sweep,
 )
 
 
-# tolerated: Public frequency/gain survey keywords must match the handwritten input_schema.
-def onetone_spectrum_over_power(  # noqa: PLR0913
-    session: RecipeSession,
-    *,
-    target: str | None = None,
-    reuse_tab_id: str | None = None,
-    readout_ref: str | None = None,
-    center_mhz: float | None = None,
-    span_mhz: float | None = None,
-    freq_points: int | None = None,
-    gain_points: int | None = None,
-    gain_range: list[float] | None = None,
-    reps: int | None = None,
-    rounds: int | None = None,
-) -> RecipeGenerator:
+class OnetoneSpectrumOverPowerInputs(FormModel):
+    """Inputs for onetone spectrum over power; all units and null policies are
+    declared per field."""
+
+    target: str | None = Field(
+        None,
+        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
+    )
+    reuse_tab_id: str | None = Field(
+        None,
+        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
+    )
+    readout_ref: str | None = Field(
+        None,
+        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    )
+    center_mhz: float | None = Field(
+        None, description="Sweep center in MHz. Null reads $resonator.freq."
+    )
+    span_mhz: float | None = Field(
+        None,
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Null uses 3 times $resonator.kappa as the full span.",
+    )
+    freq_points: int | None = Field(
+        None, description="Frequency sample count; null keeps the GUI count."
+    )
+    gain_points: int | None = Field(
+        None, description="Gain sample count; null keeps the GUI count."
+    )
+    gain_range: list[float] | None = Field(
+        None, description="Two native gain endpoints; null keeps the GUI range."
+    )
+    reps: int | None = Field(
+        None, description="Acquisition repetition count; null keeps the GUI value."
+    )
+    rounds: int | None = Field(
+        None, description="Averaging round count; null keeps the GUI value."
+    )
+
+
+class OnetoneSpectrumOverPowerReport(FormModel):
+    """Completed onetone spectrum over power results; cancellation returns no
+    report."""
+
+    map_acquired: bool = Field(
+        description="Whether the frequency/gain map completed and reached raw save; this is not a save receipt."
+    )
+
+
+@recipe(
+    "onetone_spectrum_over_power",
+    description="Run one frequency/gain survey, save raw and return its Run preview. No analysis or writeback.",
+)
+async def onetone_spectrum_over_power(
+    session: RecipeSession, inputs: OnetoneSpectrumOverPowerInputs
+) -> OnetoneSpectrumOverPowerReport:
     """Map the resonator response versus readout frequency and gain.
 
     At each gain, sweep readout frequency and average IQ to show how the
-    resonance changes with drive amplitude. Save the raw map and capture its
-    Run preview only; this survey performs no analysis or writeback.
+    resonance changes with drive amplitude. Save the raw map and capture its Run
+    preview only; this survey performs no analysis or writeback.
 
-    session is driver-supplied. target overrides the qubit alias for this Reset;
-    None uses global aliases. reuse_tab_id resets an idle onetone/power_dep tab.
-    readout_ref selects a library module; None retains its GUI selection.
-    center_mhz and positive span_mhz use MHz; omitted values use resonator
-    frequency and three linewidths for the full span. gain_range has two native
-    amplitude endpoints; freq_points/gain_points count each sweep axis.
-    reps/rounds control averaging. Other None values retain GUI defaults.
-    Missing calibration reports needs_parameters; invalid inputs/cfg/native/PNG
-    failures propagate. A cancelled Run stops before save and preview.
+    Inputs declare native units and GUI-retention policies. The session supplies
+    fixed Form sources. Return the typed report after completion.
+    The runtime owns cancellation. Owner, acquisition, save and analysis errors
+    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    Missing calibration raises RecipeNeedsParameters before Run.
     """
-    # 1. Validate inputs before selecting the measurement sources.
-    for name, value in (("reuse_tab_id", reuse_tab_id), ("readout_ref", readout_ref)):
-        if value is not None and not value.strip():
+    for name, value in (
+        ("reuse_tab_id", inputs.reuse_tab_id),
+        ("readout_ref", inputs.readout_ref),
+    ):
+        if value is not None and (not value.strip()):
             raise ValueError(f"{name} must be a non-empty string or null")
-    if span_mhz is not None and span_mhz <= 0:
+    if inputs.span_mhz is not None and inputs.span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
-
-    # 2. Open/reset the tab and select the pulse libraries.
+    # Select the captured sources before editing measurement fields.
     tab = session.open_tab(
         "onetone/power_dep",
-        aliases=None if target is None else {"qubit": target},
-        reuse=reuse_tab_id,
+        aliases=None if inputs.target is None else {"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    tab.use_library(("modules", "readout"), readout_ref)
-
-    # 3. Set the scan range and averaging for the resonator response.
+    tab.select(("modules", "readout"), ref=inputs.readout_ref)
     missing = set_frequency_sweep(
         tab,
         ("sweep", "freq"),
         calibration=FrequencySweepCalibration(
             "$resonator.freq", "$resonator.kappa", 3.0
         ),
-        center_mhz=center_mhz,
-        span_mhz=span_mhz,
-        expts=freq_points,
+        session=session,
+        scan=FrequencySweepRange(
+            center_mhz=inputs.center_mhz,
+            span_mhz=inputs.span_mhz,
+            expts=inputs.freq_points,
+        ),
     )
     if missing:
         raise RecipeNeedsParameters(missing)
-    tab.set_sweep(
-        ("sweep", "gain"),
-        start=None if gain_range is None else gain_range[0],
-        stop=None if gain_range is None else gain_range[1],
-        expts=gain_points,
-    )
+    if inputs.gain_range is not None and inputs.gain_points is not None:
+        tab.set(
+            ("sweep", "gain"),
+            LinRange(
+                start=inputs.gain_range[0],
+                stop=inputs.gain_range[1],
+                n=inputs.gain_points,
+            ),
+        )
+    else:
+        tab.set(
+            ("sweep", "gain", "start"),
+            None if inputs.gain_range is None else inputs.gain_range[0],
+        )
+        tab.set(
+            ("sweep", "gain", "stop"),
+            None if inputs.gain_range is None else inputs.gain_range[1],
+        )
+        tab.set(("sweep", "gain", "n"), inputs.gain_points)
     retain_scalar(tab, ("modules", "readout", "gain"))
-    tab.set(("reps",), reps)
-    tab.set(("rounds",), rounds)
+    tab.set(("reps",), inputs.reps)
+    tab.set(("rounds",), inputs.rounds)
 
-    # 4. Acquire and save the raw IQ sweep.
-    result = yield from tab.run_step()
-    run = result.run
-    if result.status == "cancelled" or run is None:
-        return
-    run.save_raw()
-
-    # 5. Capture the map preview without fitting or changing calibration.
-    run.preview()
+    # Acquire before analysis; the finally block saves raw and artifacts.
+    await tab.run()
+    try:
+        tab.preview()
+        return OnetoneSpectrumOverPowerReport(map_acquired=True)
+    finally:
+        tab.save()
 
 
-DEFINITION = RecipeDefinition(
-    name="onetone_spectrum_over_power",
-    description="Run one frequency/gain survey, save raw and return its Run preview. No analysis or writeback.",
-    input_schema={
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "target": {"type": ["string", "null"], "minLength": 1},
-            **{
-                name: {"type": ["string", "null"], "minLength": 1}
-                for name in ("reuse_tab_id", "readout_ref")
-            },
-            **{
-                name: {"type": ["number", "null"]}
-                for name in ("center_mhz", "span_mhz")
-            },
-            **{name: {"type": ["integer", "null"]} for name in ("reps", "rounds")},
-            "freq_points": {"type": ["integer", "null"]},
-            "gain_points": {"type": ["integer", "null"]},
-            "gain_range": {
-                "type": ["array", "null"],
-                "items": {"type": "number"},
-                "minItems": 2,
-                "maxItems": 2,
-            },
-        },
-    },
-    run=onetone_spectrum_over_power,
-    adapter_name="onetone/power_dep",
-    summary_parameters=(
-        SummaryParameter("frequency_sweep", ("sweep", "freq"), "MHz"),
-        SummaryParameter("gain", ("modules", "readout", "gain")),
-        SummaryParameter("readout_ref", ("modules", "readout")),
-        SummaryParameter("reps", ("reps",)),
-        SummaryParameter("rounds", ("rounds",)),
-        SummaryParameter("gain_sweep", ("sweep", "gain")),
-    ),
-    summary_estimates=(),
-)
+DEFINITION = onetone_spectrum_over_power

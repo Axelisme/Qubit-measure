@@ -1,17 +1,17 @@
 """Resonator frequency/flux map and interactive flux calibration."""
 
-from zcu_tools.mcp.measure.execution_reply import SummaryParameter
-from zcu_tools.mcp.measure.recipe import (
+from pydantic import BaseModel, Field
+from zcu_tools.gui.form import FormModel
+from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
-    RecipeDefinition,
-    RecipeGenerator,
     RecipeNeedsParameters,
-    RecipeSession,
-    ask,
 )
 
 from .helpers import (
     FrequencySweepCalibration,
+    FrequencySweepRange,
+    report_number,
     retain_scalar,
     set_flux_sweep,
     set_frequency_sweep,
@@ -19,71 +19,131 @@ from .helpers import (
 )
 
 
-# tolerated: Public frequency/flux survey keywords must match the handwritten input_schema.
-def onetone_spectrum_over_flux(  # noqa: PLR0913
-    session: RecipeSession,
-    *,
-    target: str | None = None,
-    reuse_tab_id: str | None = None,
-    readout_ref: str | None = None,
-    center_mhz: float | None = None,
-    span_mhz: float | None = None,
-    gain: float | None = None,
-    flux_device: str,
-    flux_unit: str,
-    freq_points: int | None = None,
-    flux_points: int,
-    flux_range: list[float],
-    reps: int | None = None,
-    rounds: int | None = None,
-) -> RecipeGenerator:
+class OnetoneSpectrumOverFluxInputs(FormModel):
+    """Inputs for onetone spectrum over flux; all units and null policies are
+    declared per field."""
+
+    target: str | None = Field(
+        None,
+        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
+    )
+    reuse_tab_id: str | None = Field(
+        None,
+        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
+    )
+    readout_ref: str | None = Field(
+        None,
+        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    )
+    center_mhz: float | None = Field(
+        None, description="Sweep center in MHz. Null reads $resonator.freq."
+    )
+    span_mhz: float | None = Field(
+        None,
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Null uses 2 times $resonator.kappa as the full span.",
+    )
+    gain: float | None = Field(
+        None,
+        description="Fixed pulse amplitude in native gain units; null keeps the GUI value.",
+    )
+    flux_device: str = Field(
+        description="Registered flux-device name; read only its cached snapshot, without connecting."
+    )
+    flux_unit: str = Field(
+        description="Exact cached device unit, including native; no coordinate conversion occurs."
+    )
+    freq_points: int | None = Field(
+        None, description="Frequency sample count; null keeps the GUI count."
+    )
+    flux_points: int = Field(
+        description="Required native-flux sample count, at least two."
+    )
+    flux_range: list[float] = Field(
+        description="Two distinct device-native flux endpoints, in either direction; no conversion occurs."
+    )
+    reps: int | None = Field(
+        None, description="Acquisition repetition count; null keeps the GUI value."
+    )
+    rounds: int | None = Field(
+        None, description="Averaging round count; null keeps the GUI value."
+    )
+
+
+class OnetoneSpectrumOverFluxReport(FormModel):
+    """Completed onetone spectrum over flux results; cancellation returns no
+    report."""
+
+    flux_half: float | None = Field(
+        description="Accepted half-flux line in device-native coordinates; null means not estimable."
+    )
+    flux_integer: float | None = Field(
+        description="Accepted integer-flux line in device-native coordinates; null means not estimable."
+    )
+    flux_period: float | None = Field(
+        description="Flux period in device-native coordinates; null means not estimable."
+    )
+    writeback_applied: bool = Field(
+        description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+
+class FluxPickSummary(BaseModel):
+    """Author view of owner summary fields; no missing values are invented."""
+
+    flx_half: float | None = Field(
+        description="Owner flx_half in native flux coordinate; null retains an unavailable estimate."
+    )
+
+    flx_int: float | None = Field(
+        description="Owner flx_int in native flux coordinate; null retains an unavailable estimate."
+    )
+
+    flx_period: float | None = Field(
+        description="Owner flx_period in native flux coordinate; null retains an unavailable estimate."
+    )
+
+
+@recipe(
+    "onetone_spectrum_over_flux",
+    description="Run one frequency/flux survey with explicit native flux range/count. Save raw and Primary analysis. flux_unit must match the cached device snapshot.",
+)
+async def onetone_spectrum_over_flux(
+    session: RecipeSession, inputs: OnetoneSpectrumOverFluxInputs
+) -> OnetoneSpectrumOverFluxReport:
     """Map the resonator spectrum across a native flux range.
 
-    At each flux value, sweep the readout frequency and average IQ.
-    Primary lets the user pick half- and integer-flux lines to estimate flux
-    calibration. Save the raw map and analysis, then ask before applying it.
+    At each flux value, sweep the readout frequency and average IQ. Primary lets
+    the user pick half- and integer-flux lines to estimate flux calibration.
+    Ask before applying it, then save the raw map and analysis.
 
-    session is driver-supplied. target overrides the qubit alias for this Reset;
-    None uses global aliases. reuse_tab_id resets an idle onetone/flux_dep tab.
-    readout_ref selects a library module; None retains its GUI selection.
-    center_mhz and positive span_mhz use MHz; omitted values use resonator
-    frequency and two linewidths for the full span. gain is native amplitude;
-    freq_points counts frequencies and reps/rounds control averaging.
-    Required flux_range has two distinct device-native endpoints; flux_points
-    must be >=2. Required flux_device names a registered device; flux_unit must
-    exactly match its cached unit, including native. No coordinates are converted
-    or devices connected. Other None values retain GUI defaults.
-    Missing frequency/linewidth reports needs_parameters; invalid device/unit
-    fails before Run. Invalid inputs/cfg/native failures propagate.
-    Cancellation stops later steps; skipped writeback changes nothing.
+    Inputs declare native units and GUI-retention policies. The session supplies
+    fixed Form sources. Return the typed report after completion.
+    The runtime owns cancellation. Owner, acquisition, save and analysis errors
+    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    Missing calibration raises RecipeNeedsParameters before Run.
     """
-    # 1. Validate inputs before selecting the measurement sources.
     if (
-        not flux_device
-        or not flux_device.strip()
-        or not flux_unit
-        or not flux_unit.strip()
+        not inputs.flux_device
+        or not inputs.flux_device.strip()
+        or (not inputs.flux_unit)
+        or (not inputs.flux_unit.strip())
     ):
         raise ValueError("flux_device and flux_unit must be non-empty strings")
     for name, value in (
-        ("reuse_tab_id", reuse_tab_id),
-        ("readout_ref", readout_ref),
+        ("reuse_tab_id", inputs.reuse_tab_id),
+        ("readout_ref", inputs.readout_ref),
     ):
-        if value is not None and not value.strip():
+        if value is not None and (not value.strip()):
             raise ValueError(f"{name} must be a non-empty string or null")
-    if span_mhz is not None and span_mhz <= 0:
+    if inputs.span_mhz is not None and inputs.span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
-
-    # 2. Open/reset the tab and select the pulse libraries.
+    # Select the captured sources before editing measurement fields.
     tab = session.open_tab(
         "onetone/flux_dep",
-        aliases=None if target is None else {"qubit": target},
-        reuse=reuse_tab_id,
+        aliases=None if inputs.target is None else {"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    tab.use_library(("modules", "readout"), readout_ref)
-
-    # 3. Set frequency and native flux axes before acquisition.
-    # Report independent missing sources together before Run.
+    tab.select(("modules", "readout"), ref=inputs.readout_ref)
     missing: list[MissingParameter] = []
     missing.extend(
         set_frequency_sweep(
@@ -92,95 +152,51 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913
             calibration=FrequencySweepCalibration(
                 "$resonator.freq", "$resonator.kappa", 2.0
             ),
-            center_mhz=center_mhz,
-            span_mhz=span_mhz,
-            expts=freq_points,
+            session=session,
+            scan=FrequencySweepRange(
+                center_mhz=inputs.center_mhz,
+                span_mhz=inputs.span_mhz,
+                expts=inputs.freq_points,
+            ),
         )
     )
-    use_flux_device(tab, flux_device, unit=flux_unit)
+    use_flux_device(tab, inputs.flux_device, unit=inputs.flux_unit)
     set_flux_sweep(
         tab,
         ("sweep", "flux"),
-        start=flux_range[0],
-        stop=flux_range[1],
-        expts=flux_points,
+        start=inputs.flux_range[0],
+        stop=inputs.flux_range[1],
+        expts=inputs.flux_points,
     )
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    if gain is not None:
-        tab.use_inline(("modules", "readout"))
-        tab.set(("modules", "readout", "gain"), gain)
+    if inputs.gain is not None:
+        tab.select(("modules", "readout"), inline=True)
+        tab.set(("modules", "readout", "gain"), inputs.gain)
     else:
         retain_scalar(tab, ("modules", "readout", "gain"))
-    tab.set(("reps",), reps)
-    tab.set(("rounds",), rounds)
+    tab.set(("reps",), inputs.reps)
+    tab.set(("rounds",), inputs.rounds)
 
-    # 4. Acquire and save the raw IQ sweep.
-    result = yield from tab.run_step()
-    run = result.run
-    if result.status == "cancelled" or run is None:
-        return
-    run.save_raw()
+    # Acquire before analysis; the finally block saves raw and artifacts.
+    await tab.run()
+    try:
+        analysis = await tab.analyze(
+            "primary", result=FluxPickSummary, interactive=True
+        )
 
-    # 5. Let the user select half- and integer-flux lines.
-    analysis = yield from run.analyze_step("primary")
-    if analysis.status == "cancelled":
-        return
+        # Write only the proposal items selected in the answer.
+        decision = await tab.ask_writeback()
+        if decision.accepted:
+            tab.accept_writeback(decision.items)
+        return OnetoneSpectrumOverFluxReport(
+            flux_half=report_number(analysis.result.flx_half),
+            flux_integer=report_number(analysis.result.flx_int),
+            flux_period=report_number(analysis.result.flx_period),
+            writeback_applied=decision.accepted,
+        )
+    finally:
+        tab.save()
 
-    # 6. Ask before applying the proposed calibration.
-    decision = yield from ask(run.propose_writeback())
-    if decision.status == "cancelled":
-        return
-    if decision.decision == "accepted":
-        tab.accept()
 
-
-DEFINITION = RecipeDefinition(
-    name="onetone_spectrum_over_flux",
-    description="Run one frequency/flux survey with explicit native flux range/count. Save raw and Primary analysis. flux_unit must match the cached device snapshot.",
-    input_schema={
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["flux_device", "flux_unit", "flux_range", "flux_points"],
-        "properties": {
-            "target": {"type": ["string", "null"], "minLength": 1},
-            **{
-                name: {"type": ["string", "null"], "minLength": 1}
-                for name in ("reuse_tab_id", "readout_ref")
-            },
-            **{
-                name: {"type": ["number", "null"]}
-                for name in ("center_mhz", "span_mhz")
-            },
-            **{name: {"type": ["integer", "null"]} for name in ("reps", "rounds")},
-            "gain": {"type": ["number", "null"]},
-            "flux_device": {"type": "string", "minLength": 1},
-            "flux_unit": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Required exact cached-snapshot unit assertion without conversion, including explicit native coordinates.",
-            },
-            "freq_points": {"type": ["integer", "null"]},
-            "flux_points": {"type": "integer"},
-            "flux_range": {
-                "type": "array",
-                "items": {"type": "number"},
-                "minItems": 2,
-                "maxItems": 2,
-            },
-        },
-    },
-    run=onetone_spectrum_over_flux,
-    adapter_name="onetone/flux_dep",
-    summary_parameters=(
-        SummaryParameter("frequency_sweep", ("sweep", "freq"), "MHz"),
-        SummaryParameter("gain", ("modules", "readout", "gain")),
-        SummaryParameter("readout_ref", ("modules", "readout")),
-        SummaryParameter("reps", ("reps",)),
-        SummaryParameter("rounds", ("rounds",)),
-        SummaryParameter("flux_sweep", ("sweep", "flux")),
-        SummaryParameter("flux_device", ("flux_dev",)),
-        SummaryParameter("flux_unit", ("flux_unit",)),
-    ),
-    summary_estimates=(),
-)
+DEFINITION = onetone_spectrum_over_flux

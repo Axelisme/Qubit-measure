@@ -1,179 +1,172 @@
 """Measure excited-state relaxation versus delay to estimate T1."""
 
-from math import isfinite
+from typing import Literal
 
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
-from zcu_tools.mcp.measure.recipe import (
+from pydantic import BaseModel, Field
+from zcu_tools.gui.form import FormModel
+from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
-    RecipeDefinition,
-    RecipeGenerator,
     RecipeNeedsParameters,
-    RecipeSession,
-    ask,
 )
 
-from .helpers import apply_frequency, choose_frequency
+from .helpers import (
+    FrequencyCalibration,
+    apply_frequency,
+    choose_frequency,
+    report_number,
+    require_pi,
+    select_or_disable,
+)
 
 
-def _validate_inputs(
-    references: tuple[tuple[str, str | None], ...],
-    max_delay_us: float | None,
-    points: int | None,
-) -> None:
-    """Reject blank references, nonpositive delays and undersized sweeps."""
-    for name, value in references:
-        if value is not None and not value.strip():
-            raise ValueError(f"{name} must be non-empty or null")
-    if max_delay_us is not None and (not isfinite(max_delay_us) or max_delay_us <= 0):
-        raise ValueError("max_delay_us must be positive and finite or null")
-    if points is not None and points < 2:
-        raise ValueError("points must be at least two")
+class T1Inputs(FormModel):
+    """Inputs for t1; all units and null policies are declared per field."""
+
+    target: str | None = Field(
+        None,
+        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
+    )
+    reuse_tab_id: str | None = Field(
+        None,
+        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
+    )
+    readout_ref: str | None = Field(
+        None,
+        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    )
+    use_reset: str | Literal["off"] = Field(
+        "off",
+        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+    )
+    pi_ref: str | None = Field(
+        None,
+        description="Calibrated pi-pulse library key; null keeps the GUI selection, which must be a valid reference.",
+    )
+    max_delay_us: float | None = Field(
+        None, description="Delay sweep stop in us; null keeps the GUI stop and start."
+    )
+    points: int | None = Field(
+        None, description="Sweep sample count; null keeps the GUI count when optional."
+    )
+    reps: int | None = Field(
+        None, description="Acquisition repetition count; null keeps the GUI value."
+    )
+    rounds: int | None = Field(
+        None, description="Averaging round count; null keeps the GUI value."
+    )
 
 
-# tolerated: Public T1 delay keywords must match the handwritten input_schema.
-def t1(  # noqa: PLR0913
-    session: RecipeSession,
-    *,
-    target: str | None = None,
-    reuse_tab_id: str | None = None,
-    readout_ref: str | None = None,
-    use_reset: str | None = None,
-    pi_ref: str | None = None,
-    max_delay_us: float | None = None,
-    points: int | None = None,
-    reps: int | None = None,
-    rounds: int | None = None,
-) -> RecipeGenerator:
+class T1Report(FormModel):
+    """Completed t1 results; cancellation returns no report."""
+
+    t1_us: float | None = Field(
+        description="Relaxation time in us; null means not estimable."
+    )
+    t1_err_us: float | None = Field(
+        description="Relaxation uncertainty in us; null means not estimable."
+    )
+    t1b_us: float | None = Field(
+        description="Second relaxation time in us; null without a second fit or when not estimable."
+    )
+    t1b_err_us: float | None = Field(
+        description="Second relaxation uncertainty in us; null without a second fit or when not estimable."
+    )
+    writeback_applied: bool = Field(
+        description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+
+class T1Summary(BaseModel):
+    """Author view of owner summary fields; no missing values are invented."""
+
+    t1: float | None = Field(
+        description="Owner t1 in us; null retains an unavailable estimate."
+    )
+
+    t1_err: float | None = Field(
+        description="Owner t1_err in us; null retains an unavailable estimate."
+    )
+
+    t1b: float | None = Field(
+        description="Owner t1b in us; null retains an unavailable estimate."
+    )
+
+    t1b_err: float | None = Field(
+        description="Owner t1b_err in us; null retains an unavailable estimate."
+    )
+
+
+@recipe(
+    "t1",
+    description="Run one calibrated T1 delay sweep and save raw and Primary analysis.",
+)
+async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     """Measure T1 from the decay of the qubit's excited-state population.
 
-    After optional reset, apply a calibrated pi pulse, wait the swept delay,
-    and read out the qubit. Fit the decay to estimate the relaxation time, save
-    raw IQ, and ask before applying the proposed T1; skipping writes nothing.
+    After optional reset, apply a calibrated pi pulse, wait the swept delay, and
+    read out the qubit. Fit the decay to estimate the relaxation
+    time, and ask before applying the proposed T1; skipping writes nothing.
 
-    session is supplied by the recipe driver. target selects the qubit alias
-    without changing GUI focus; omission uses focus. reuse_tab_id resets an idle
-    twotone/t1 tab and must not be combined with target.
-    readout_ref/pi_ref select calibrated library modules; None retains the GUI
-    selection, which must provide a calibrated pi pulse rather than a custom
-    pulse. Readout frequency uses a usable library value, then resonator
-    calibration. use_reset selects a library reset module; None disables reset.
-    max_delay_us is a positive finite delay sweep stop in us; points is at least
-    2. reps/rounds are integer counts. Omitted sweep/scalar values retain GUI
-    defaults and expressions.
-
-    Invalid inputs raise ValueError before opening a tab. Missing readout/pi
-    calibration raises RecipeNeedsParameters with every missing input; invalid
-    cfg or measurement/analysis failures propagate from the failing step.
+    Inputs declare native units and GUI-retention policies. The session supplies
+    fixed Form sources. Return the typed report after completion.
+    The runtime owns cancellation. Owner, acquisition, save and analysis errors
+    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    Missing calibration raises RecipeNeedsParameters before Run.
     """
-    # 1. Reject invalid overrides before preparing the measurement.
-    _validate_inputs(
-        (
-            ("reuse_tab_id", reuse_tab_id),
-            ("readout_ref", readout_ref),
-            ("use_reset", use_reset),
-            ("pi_ref", pi_ref),
-        ),
-        max_delay_us,
-        points,
-    )
-
-    # 2. Choose the qubit tab, readout and optional reset modules.
+    # Select the captured sources before editing measurement fields.
     tab = session.open_tab(
         "twotone/t1",
-        aliases=None if target is None else {"qubit": target},
-        reuse=reuse_tab_id,
+        aliases=None if inputs.target is None else {"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    if use_reset is None:
-        tab.disable_library(("modules", "reset"))
-    else:
-        tab.use_library(("modules", "reset"), use_reset)
-    tab.use_library(("modules", "readout"), readout_ref)
-
-    # 3. Require calibrated pulses and a readout frequency before acquisition.
+    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
+    tab.select(("modules", "readout"), ref=inputs.readout_ref)
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        calibration="$resonator.freq",
-        required="readout_ref",
+        session,
+        calibration=FrequencyCalibration(
+            path="$resonator.freq", required="readout_ref"
+        ),
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline(("modules", "readout"))
+        tab.select(("modules", "readout"), inline=True)
         apply_frequency(tab, frequency.edit)
     if (
-        parameter := tab.use_library(("modules", "pi_pulse"), pi_ref, required="pi_ref")
+        parameter := require_pi(
+            tab, ("modules", "pi_pulse"), inputs.pi_ref, required="pi_ref"
+        )
     ) is not None:
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
+    tab.set(("sweep", "length", "stop"), inputs.max_delay_us)
+    tab.set(("sweep", "length", "n"), inputs.points)
+    tab.set(("reps",), inputs.reps)
+    tab.set(("rounds",), inputs.rounds)
 
-    # 4. Set the waiting-time sweep after the pi pulse.
-    tab.set_sweep(
-        ("sweep", "length"),
-        stop=max_delay_us,
-        expts=points,
-        sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
-    )
-    tab.set(("reps",), reps, source="explicit")
-    tab.set(("rounds",), rounds, source="explicit")
+    # Acquire before analysis; the finally block saves raw and artifacts.
+    await tab.run()
+    try:
+        # Analyze the acquisition with the GUI parameters.
+        analysis = await tab.analyze("primary", result=T1Summary)
 
-    # 5. Acquire the sweep and save raw IQ before fitting.
-    result = yield from tab.run_step()
-    run = result.run
-    if result.status == "cancelled" or run is None:
-        return
-    run.save_raw()
-
-    # 6. Fit the population decay to estimate the relaxation time T1.
-    analysis = yield from run.analyze_step("primary")
-    if analysis.status == "cancelled":
-        return
-
-    # 7. Apply the proposed calibration only after explicit acceptance.
-    decision = yield from ask(run.propose_writeback())
-    if decision.status == "cancelled":
-        return
-    if decision.decision == "accepted":
-        tab.accept()
+        # Write only the proposal items selected in the answer.
+        decision = await tab.ask_writeback()
+        if decision.accepted:
+            tab.accept_writeback(decision.items)
+        return T1Report(
+            t1_us=report_number(analysis.result.t1),
+            t1_err_us=report_number(analysis.result.t1_err),
+            t1b_us=report_number(analysis.result.t1b),
+            t1b_err_us=report_number(analysis.result.t1b_err),
+            writeback_applied=decision.accepted,
+        )
+    finally:
+        tab.save()
 
 
-DEFINITION = RecipeDefinition(
-    name="t1",
-    description="Run one calibrated T1 delay sweep and save raw and Primary analysis.",
-    input_schema={
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "target": {"type": ["string", "null"], "minLength": 1},
-            **{
-                name: {"type": ["string", "null"], "minLength": 1}
-                for name in ("reuse_tab_id", "readout_ref", "pi_ref", "use_reset")
-            },
-            "max_delay_us": {"type": ["number", "null"]},
-            **{
-                name: {"type": ["integer", "null"]}
-                for name in ("points", "reps", "rounds")
-            },
-        },
-    },
-    run=t1,
-    adapter_name="twotone/t1",
-    summary_parameters=(
-        SummaryParameter(
-            "readout_frequency_mhz",
-            ("modules", "readout", "freq"),
-            "MHz",
-        ),
-        SummaryParameter("readout_ref", ("modules", "readout")),
-        SummaryParameter("use_reset", ("modules", "reset")),
-        SummaryParameter("reps", ("reps",)),
-        SummaryParameter("rounds", ("rounds",)),
-        SummaryParameter("delay", ("sweep", "length"), "us"),
-        SummaryParameter("pi_ref", ("modules", "pi_pulse")),
-    ),
-    summary_estimates=(
-        SummaryEstimate("t1", ("t1",), ("t1_err",), "us"),
-        SummaryEstimate("t1b", ("t1b",), ("t1b_err",), "us"),
-    ),
-)
+DEFINITION = t1
