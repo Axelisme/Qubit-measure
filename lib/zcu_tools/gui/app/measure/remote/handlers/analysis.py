@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from math import isfinite
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.adapter.analyze_params import (
@@ -20,6 +20,8 @@ from ._common import follow_tab
 from .tab import tab_operation_state
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.services.ports import TabSnapshot
+
     from ..service import RemoteControlAdapter
 
 
@@ -56,6 +58,18 @@ def _params_to_wire(params: object) -> dict[str, object] | None:
     if not is_dataclass(params) or isinstance(params, type):
         return {}
     return asdict(params)
+
+
+def _presentation(
+    snapshot: TabSnapshot, stage: Literal["primary", "post"]
+) -> AnalysisPresentation:
+    pane = snapshot.analysis if stage == "primary" else snapshot.post_analysis
+    return AnalysisPresentation(
+        run_id=None if snapshot.run is None else snapshot.run.acquisition_run_id,
+        stage=stage,
+        figure_names=list(() if pane is None else pane.figures or ()),
+        figures_replaced=False if pane is None else pane.figures_replaced,
+    )
 
 
 def h_analyze_cancel(
@@ -96,12 +110,7 @@ def h_tab_get_analyze_result(
         snap = control.get_tab_snapshot(tab_id)
         pane = snap.analysis
         reply.update(
-            presentation=AnalysisPresentation(
-                run_id=None if snap.run is None else snap.run.acquisition_run_id,
-                stage="primary",
-                figure_names=list(() if pane is None else pane.figures or ()),
-                figures_replaced=False if pane is None else pane.figures_replaced,
-            ),
+            presentation=_presentation(snap, "primary"),
             params=_params_to_wire(None if pane is None else pane.result_params),
             operation_id=operation_id,
             operation_state=tab_operation_state(adapter, tab_id),
@@ -220,12 +229,7 @@ def h_tab_get_post_analyze_result(
         snap = control.get_tab_snapshot(tab_id)
         pane = snap.post_analysis
         reply.update(
-            presentation=AnalysisPresentation(
-                run_id=None if snap.run is None else snap.run.acquisition_run_id,
-                stage="post",
-                figure_names=list(() if pane is None else pane.figures or ()),
-                figures_replaced=False if pane is None else pane.figures_replaced,
-            ),
+            presentation=_presentation(snap, "post"),
             params=_params_to_wire(None if pane is None else pane.result_params),
             operation_id=operation_id,
             operation_state=tab_operation_state(adapter, tab_id),
