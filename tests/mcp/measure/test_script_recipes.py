@@ -707,6 +707,65 @@ def test_full_recipe_status_retains_run_conditions_analysis_and_writeback(
         client.context.session.close()
 
 
+def test_recipe_full_preserves_native_estimate_uncertainty_and_operation_source(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+    summary = {
+        "estimate": 3.5,
+        "stderr": 0.125,
+        "unit": "native",
+        "element": {"index": 2, "name": "Q3"},
+    }
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.get_analyze_result":
+            return {
+                "summary": summary,
+                "invalid": [{"path": "secondary", "reason": "non_finite"}],
+            }
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Retain the analysis owner's native estimate facts")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        full = client.call(
+            "status", {"execution": execution.snapshot().execution, "detail": "full"}
+        )
+        detail = full["details"][0]
+        assert (detail["tab"], detail["run_id"], detail["op"]) == (
+            "tab-1",
+            "native-1",
+            1,
+        )
+        analysis = detail["analyses"][0]
+        assert (analysis["stage"], analysis["op"]) == ("primary", 2)
+        assert analysis["summary"] == {
+            "estimate": 3.5,
+            "stderr": 0.125,
+            "unit": "native",
+            "element": {"index": 2, "name": "Q3"},
+        }
+        assert analysis["invalid"] == [{"path": "secondary", "reason": "non_finite"}]
+        summary["estimate"] = 99
+        assert (
+            client.call("status", {"execution": full["execution"], "detail": "full"})[
+                "details"
+            ][0]["analyses"][0]["summary"]["estimate"]
+            == 3.5
+        )
+    finally:
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("answer_state", ["stale", "none"])
 def test_mcp_rejected_answer_preserves_question_and_reports_pending_id(
     tmp_path: Path, answer_state: str

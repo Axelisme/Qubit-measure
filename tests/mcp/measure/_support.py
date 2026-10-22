@@ -17,16 +17,12 @@ from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
-from zcu_tools.mcp.measure.recipe import RecipeDefinition
-from zcu_tools.mcp.measure.recipe_execution import RecipeExecution, RecipeExecutions
 from zcu_tools.mcp.measure.session import (
     MeasureMcpSession,
     PortIsOpenFn,
     ResolveConnectPortFn,
 )
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-
-from ._pipeline_recipe import PIPELINE
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
@@ -114,19 +110,6 @@ class MeasureClient:
         return self.tools[name]["handler"](arguments)
 
 
-def start_legacy_execution(
-    executions: RecipeExecutions,
-    tools: MeasureToolContext,
-    recipe: str,
-    arguments: Mapping[str, object],
-) -> RecipeExecution:
-    """Start a legacy recipe and fail if the registry selects the script host."""
-    execution = executions.start(tools, recipe, arguments)
-    if not isinstance(execution, RecipeExecution):
-        raise AssertionError("Expected a legacy RecipeExecution")
-    return execution
-
-
 def full_execution_reply(client: MeasureClient, reply: ToolReply) -> ToolReply:
     """Read explicit full detail for tests of captured native facts."""
     data = client.call(
@@ -159,7 +142,7 @@ def make_client(
     tmp_path: Path,
     responder: RpcResponder | None = None,
     *,
-    recipes: Sequence[RecipeDefinition | RecipeDeclaration] = (PIPELINE,),
+    recipes: Sequence[RecipeDeclaration] = (),
     recipe_host_factory: RecipeHostFactory | None = None,
     resolve_connect_port: ResolveConnectPortFn | None = None,
     port_is_open: PortIsOpenFn | None = None,

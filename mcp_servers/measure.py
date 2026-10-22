@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Compose user recipe definitions into the measure MCP stdio server."""
+"""Inject authored async recipe declarations into the measure MCP stdio server."""
 
 from zcu_tools.mcp.measure.server import main as run_measure_mcp
 from zcu_tools.resources.entry.registry import component_registry

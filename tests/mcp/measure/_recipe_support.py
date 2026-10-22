@@ -1,7 +1,6 @@
 """Recording GUI collaborator for public recipe contract tests."""
 
 import base64
-from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, ClassVar
 
@@ -41,8 +40,6 @@ from zcu_tools.resources.entry.schema import (
     PointGeneral,
 )
 
-from ._support import make_client
-
 
 class FormulaComponent(ComponentSchema):
     low: float | None = None
@@ -58,15 +55,6 @@ PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
     "+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
-
-
-@contextmanager
-def recipe_client(tmp_path, respond):
-    client = make_client(tmp_path, respond)
-    try:
-        yield client
-    finally:
-        client.context.session.close()
 
 
 class RecipeModules(ConfigBase):
@@ -88,26 +76,6 @@ class RecipeControlsBase(ConfigBase):
 
 
 class RecipeControls(RecipeControlsBase):
-    range: SweepCfg
-    sweep: SweepCfg
-
-
-class ExecutionModules(ConfigBase):
-    """Nullable module collaborators, not native reset or init pulse execution."""
-
-    reset: PulseReadoutCfg | None = None
-    init_pulse: PulseCfg | None = None
-    readout: PulseReadoutCfg
-
-
-class ExecutionControls(ConfigBase):
-    """Execution collaborator values; reset is only a disabled-null module seam."""
-
-    rounds: int = 3
-    fixed: int = 2
-    modules: ExecutionModules
-    dev: RecipeDevices = RecipeDevices()
-    flux_unit: str = "A"
     range: SweepCfg
     sweep: SweepCfg
 
@@ -511,9 +479,3 @@ class LookbackGui:
                 "destination_context": {"active_label": "sample"},
             }
         raise AssertionError(method)
-
-
-class ExecutionGui(LookbackGui):
-    """Record execution phases without unrelated native reset family schemas."""
-
-    cfg_cls: ClassVar[type[ConfigBase]] = ExecutionControls

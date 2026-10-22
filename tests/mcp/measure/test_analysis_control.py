@@ -93,13 +93,11 @@ def test_cancel_latches_intent_and_retains_original_terminal(
         "status",
         "phase",
         "cancel_requested",
-        "finish_early_requested",
         "gui_cancel",
     }
     assert data["op"] == started["op"]
     assert data["run_op"] is None
     assert data["status"] == "running"
-    assert data["finish_early_requested"] is False
     assert data["execution"] == started["execution"]
     assert data["cancel_requested"] is True
     assert data["gui_cancel"]["status"] == (

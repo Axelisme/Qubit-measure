@@ -80,6 +80,11 @@ def interact(
             "Interactive analysis has been replaced", reason="result_superseded"
         )
     figure = reply.pop("figure", None)
+    recipe = ctx.session.recipes.for_op(reply["handle"])
+    if done and recipe is not None:
+        # The recipe runtime already drains this GUI operation. Do not admit a
+        # standalone completion runner, which would repeat result/save work.
+        return recipe.wait(300.0)
     execution = ctx.session.executions.for_op(reply["handle"])
     if done:
         if execution is None:
@@ -95,8 +100,7 @@ def interact(
                 interaction=reply,
             )
         execution.observe_interaction(ToolReply(reply), done=True)
-        recipe = ctx.session.recipes.for_op(reply["handle"])
-        return recipe.wait(300.0) if recipe is not None else execution.wait(2.0)
+        return execution.wait(2.0)
     images: tuple[PngImage, ...] = ()
     delivery_error = False
     try:
