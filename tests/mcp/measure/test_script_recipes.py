@@ -53,7 +53,11 @@ class SyntheticGui:
             self.cancelled.set()
             return {"status": "requested"}
         if method == "tab.snapshot":
-            return {"tabs": [{"tab_id": "tab-1", "adapter_name": "synthetic", "interaction": {"is_running": False, "is_analyzing": False}, "result_state": {"available": True, "run_id": f"native-{self.runs}", "source_operation_id": f"run-op-{self.runs}"}}]}
+            return {"tabs": [{"tab_id": "tab-1", "adapter_name": "synthetic", "interaction": {"is_running": False, "is_analyzing": False}, "raw_data": {"run_id": f"native-{self.runs}", "saved": False}, "result_state": {"available": True, "source_operation_id": f"run-op-{self.runs}"}}]}
+        if method == "tab.writeback_preview":
+            return {"has_draft": True, "items": [{"id": "param-0", "target_name": "Q1.freq", "actual_path": "Q1.freq", "proposed": 3.5, "current": 2.0, "stderr": None, "note": None, "kind": "parameter"}], "destination_context": {"active_label": "preview-context"}}
+        if method == "tab.writeback_write":
+            return {"written": [{"id": "param-0", "target_name": "Q1.freq"}]}
         if method == "tab.get_analyze_result":
             return {"summary": {"estimate": 3.5}, "invalid": []}
         if method in {"tab.save_data", "tab.save_artifacts"}:
@@ -174,5 +178,66 @@ def test_invalid_inputs_fail_before_binding_gui(tmp_path: Path) -> None:
         execution.wait(3)
         assert execution.snapshot().status == "failed"
         assert client.transport.sent == []
+    finally:
+        client.context.session.close()
+
+
+def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> None:
+    gui = SyntheticGui()
+
+    @recipe("synthetic", "Ask before writing")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        decision = await tab.ask_writeback()
+        assert decision is not None
+        if decision.accepted:
+            receipt = tab.accept_writeback(decision.items)
+            assert receipt.status == "completed"
+            assert receipt.items[0].destination.path == "Q1.freq"
+            assert receipt.items[0].destination.label == "preview-context"
+        tab.save()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        pending = execution.snapshot().pending_question
+        assert pending is not None
+        question = pending.question
+        items = question.model_dump(mode="json")["proposal"]["items"]
+        with pytest.raises((ValueError, ValidationError)):
+            execution.answer({"request_id": pending.request_id, "answer": {"accepted": True, "items": [{**items[0], "name": "unknown"}]}})
+        assert execution.snapshot().pending_question is not None
+        reply = execution.answer({"request_id": pending.request_id, "answer": {"accepted": True, "items": items}})
+        assert reply.data["outcome"]["status"] == "completed"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.index("tab.writeback_write") < methods.index("tab.save_data")
+    finally:
+        client.context.session.close()
+
+
+def test_analysis_summary_missing_authored_field_fails_without_repair(tmp_path: Path) -> None:
+    class RequiredFit(BaseModel):
+        absent: float
+
+    @recipe("synthetic", "Decode the exact owner summary")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=RequiredFit)
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        snapshot = execution.snapshot()
+        assert snapshot.status == "failed"
+        assert snapshot.error is not None
+        assert snapshot.error.type == "ValidationError"
+        assert "absent" in snapshot.error.message
     finally:
         client.context.session.close()
