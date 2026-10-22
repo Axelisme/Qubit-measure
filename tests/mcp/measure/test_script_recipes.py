@@ -462,3 +462,108 @@ def test_run_cancel_during_analysis_does_not_stop_analysis(tmp_path: Path) -> No
     finally:
         release_analysis.set()
         client.context.session.close()
+
+
+def test_context_reads_session_source_before_opening_any_tab(tmp_path: Path) -> None:
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        assert method == "value.read"
+        assert params == {"key": "device.synthetic.value"}
+        return {
+            "key": "device.synthetic.value",
+            "type": "int",
+            "owner": "synthetic",
+            "description": "Synthetic source",
+            "value": 31,
+        }
+
+    @recipe("synthetic", "Read a registered source without opening a tab")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        value = session.context.read("device.synthetic.value")
+        assert value == 31
+        return Report(count=31)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        outcome = execution.snapshot().outcome
+        assert outcome is not None and outcome.report == Report(count=31)
+    finally:
+        client.context.session.close()
+
+
+def test_interactive_analysis_hands_off_then_continues_after_owner_completion(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+    finished = Event()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.analyze":
+            return {"operation_id": 100, "interactive": True}
+        if (
+            method == "operation.await"
+            and params["operation_id"] == 100
+            and not finished.is_set()
+        ):
+            return {"reason": "timeout"}
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Wait for the GUI-owned interactive operation")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        fit = await tab.analyze("primary", result=Fit, interactive=True)
+        assert fit is not None and fit.result.estimate == 3.5
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(1)
+        snapshot = execution.snapshot()
+        assert snapshot.status == "interactive"
+        handoff = snapshot.pending_analysis
+        assert handoff is not None
+        assert (handoff.tab, handoff.stage) == ("tab-1", "primary")
+        assert handoff.op > 0
+        finished.set()
+        execution.join()
+        assert execution.snapshot().status == "completed"
+    finally:
+        finished.set()
+        client.context.session.close()
+
+
+def test_save_preserves_raw_receipt_when_artifact_dispatch_fails(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.save_artifacts":
+            raise OSError("Artifact transport failed")
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Retain confirmed raw Save before a later failure")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        tab.save()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        snapshot = execution.snapshot()
+        assert snapshot.status == "failed"
+        outcome = snapshot.outcome
+        assert outcome is not None
+        saved = outcome.runs[0].saves
+        assert len(saved) == 1
+        assert saved[0].status == "failed"
+        assert saved[0].outputs[0].status == "saved"
+        assert saved[0].outputs[0].format == "data_h5"
+    finally:
+        client.context.session.close()
