@@ -137,11 +137,6 @@ def h_tab_writeback_preview(
         raise entry_invalid_to_remote(exc) from exc
     return {
         "has_draft": pane.has_writeback_draft,
-        "revision": adapter.writeback_control.get_writeback_revision_for_pane(
-            tab_id, subtab_id
-        )
-        if pane.has_writeback_draft
-        else None,
         "unavailable_reasons": list(pane.unavailable_reasons),
         "items": [
             {
@@ -286,9 +281,10 @@ def h_tab_writeback_accept(
 ) -> Mapping[str, object]:
     """Submit all captured panes in one owner dispatch, without editing them.
 
-    stages contains subtab_id, expected_revision and ids for each selected pane.
-    All revisions/IDs are checked before the first write. Return stage-qualified
-    confirmed IDs and the first write diagnostic; stale submissions raise.
+    stages contains subtab_id and ids for each selected pane. All IDs are checked
+    before the first write. Values and destinations come from current owner drafts.
+    Return stage-qualified confirmed IDs and the first write diagnostic, not a
+    snapshot of the written values.
     """
     tab_id = str(params["tab_id"])
     try:

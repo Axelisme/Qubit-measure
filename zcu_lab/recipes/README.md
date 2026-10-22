@@ -74,10 +74,12 @@ Analyze 不會自動保存。各 recipe 在已有 Run 結果後進入 `try/final
 ## 問答與取消
 
 `ask_writeback()` 捕捉當次候選，再等待回答。回答本身不寫入校準。
-只有 `accept_writeback(decision.items)` 寫入被選擇且未變更的候選。
-略過時不寫入。原始目的地來自 Run 的 capture，不改用目前 aliases。
-接受時 owner 一次核對 Primary／Post 全部選定 draft revisions，任何候選改動或替換都拒絕整批。
+只有 `accept_writeback(decision.items)` 以選定候選 IDs 寫入 owner 當下 draft 的值與目的地。
+略過時不寫入。Draft 的初始目的地來自 Run capture，後續 retarget 編輯以 draft 為準，不重新套用目前 aliases。
+接受時 owner 一次核對 Primary／Post 全部選定 IDs，unknown／duplicate 在第一筆寫入前拒絕。
+問答期間的 draft 編輯與替換會被接受，不還原舊 proposal，見 ADR-0075 的 2026-10-23 使用者裁定。
 `accept_writeback` 回 `WritebackReceipt`，失敗收據保留已確認項目與錯誤。
+Receipt.items 是成功 ID 對應的原捕捉候選，不是寫入值快照。實際值與目的地取 owner 當下 draft。
 作者呼叫 `receipt.raise_for_error()` 將失敗交給 execution，`finally` 仍 Save。
 報告的 `writeback_applied` 只依完成收據中的已確認項目，不依回答的 accepted。
 
