@@ -16,6 +16,7 @@ def startup(ctx: StartupContext) -> None:
     Use its project roots, not the shell cwd. A new entry gets the adjacent
     entry-template.yaml components in setup, then an initial point with those
     components and persisted aliases. Existing FTF/initial is opened unchanged.
+    The template seeds MG12 mux gen1 and ADCs [1, 2] in resonator order.
     No SoC or device commands run, and no close callback is registered.
 
     A partial entry raises RuntimeError with recovery instructions. Missing

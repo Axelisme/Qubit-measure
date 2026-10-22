@@ -1,6 +1,6 @@
 # Components
 
-**Last updated:** 2026-10-21，kind、角色與字串引用索引
+**Last updated:** 2026-10-23，依 kind 宣告 wiring
 
 **讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
 
@@ -9,11 +9,26 @@
 | Kind | 代表什麼 | 哪些實驗讀它 |
 | --- | --- | --- |
 | `resonator` | Readout resonator 的頻率、linewidth 與 wiring。 | `onetone/*`、`twotone/*`、`jpa/*` 與 mux tone 初值。 |
-| `group/mux` | 1 至 8 個有序 resonators 與可選、等長且不重複的 qubits，擁有 mux module 槽。 | `mux/*` 與 `ftf/*` 的表單。 |
-| `device/current_source` | Flux bias 來源的 component 記錄，只有共用 ext、wiring、module。 | 不代替 driver；flux 實驗讀 device alias 指向的已連線裝置。 |
+| `group/mux` | 1 至 8 個有序 resonators 與可選、等長且不重複的 qubits，擁有 mux wiring 與 module 槽。 | `mux/*` 與 `ftf/*` 的表單。 |
+| `device/current_source` | Flux bias 來源的 component 記錄，只有共用 ext、module，沒有 wiring。 | 不代替 driver；flux 實驗讀 device alias 指向的已連線裝置。 |
 | `amplifier/jpa` | JPA pump frequency、power 與 flux bias 校準。 | `jpa/*` 的表單與 writeback。 |
 | `qubit/fluxonium` | 共用 qubit 校準加上 EJ、EC、EL。 | `twotone/*` 與其他讀 qubit 校準的表單；mux／FTF 表單也可經 group 讀取。 |
 | `qubit/transmon` | 共用 qubit 校準加上 EJmax、EC、無因次 d。 | 讀 qubit 校準的表單；FTF 可將它綁為 coupler。 |
+
+## Wiring
+
+`BuiltinComponent` 只提供 `ext`、`module` 與未知欄位 migration。Wiring 由各 kind 宣告，不從基底繼承。
+
+| Kind | Wiring 欄位 | 用途 |
+| --- | --- | --- |
+| `resonator` | `ch`、`ro_ch` | 單 tone generator 與 ADC。 |
+| `qubit/fluxonium`、`qubit/transmon` | `ch`、`lo_flux_ch` | Drive generator 與 local flux channel，由 `QubitBaseSchema` 宣告。 |
+| `group/mux` | `gen_ch`、`ro_ch` 列表 | Mux generator 與逐 tone ADC，`ro_ch[i]` 對應 `resonators[i]`，長度必須相同。 |
+| `amplifier/jpa`、`device/current_source` | 無 | 表單透過 device alias 使用已連線 driver，不讀 component channel。 |
+
+Mux wiring 不從各 resonator 的單 tone wiring 推導。FTF 的 R1／R2 使用 pulse ADC0，MG12 則使用 mux ADC1／ADC2。
+
+Mux generator 未知時可省略 `gen_ch` 或填 null，但 group 必須提供 wiring 與等長的 `ro_ch` 列表。未宣告的 wiring 輸入沿既有規則移到 `ext.migrated`，不會成為有效通道。設計依據見 [ADR-0072](../../docs/adr/0072-module-boundaries.md#使用者元件與模擬環境的放置)。
 
 ## 角色與引用
 

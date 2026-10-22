@@ -9,7 +9,7 @@ from zcu_lab.components.mux import MuxGroupSchema
 from zcu_lab.templates import TEMPLATES
 
 from .ctx_helpers import t1_initial_time
-from .mux_bindings import require_mux_qubits
+from .mux_bindings import require_mux_group, require_mux_qubits
 
 READOUT_ELEMENTS = FixedElements(("modules", "readout", "module", "tones"))
 
@@ -26,11 +26,14 @@ def mux_readout_initial(
 
     With a readout slot and wait_for_ringup=False, return a library reference,
     preserving all stored tones and scalar settings. Without a slot, seed the
-    blank template with each resonator's calibration frequency and name label.
-    Channels, gain and durations remain required and unfilled. Missing/invalid
-    frequency also leaves required input blank. The operator supplies wiring,
-    gain and timing before Run. Missing capture or a non-MuxGroup
-    source raises ValueError; alias/source faults propagate.
+    blank template with each resonator's calibration frequency and name label,
+    generator from $mux.wiring.gen_ch, tone ADCs from $mux.wiring.ro_ch in group
+    order, and gain 0.1. Generator and frequency use Expr seeds; tone ADCs
+    are detached integers from the captured group wiring because scalar Expr
+    does not support indexing. Missing/invalid Expr sources leave required input
+    blank. The operator confirms wiring, gain and timing before Run; durations
+    remain unfilled. Missing capture, mux alias or
+    group/mux raises ValueError; other alias/source faults propagate.
 
     wait_for_ringup opts spectroscopy into an editable Open/Reset timing seed.
     Ignore absent/null member kappas; all unset leaves trig_offset equal to
@@ -46,13 +49,10 @@ def mux_readout_initial(
     timing; subsequent cfg output retains the operator's edits. No source is
     mutated. Other mux consumers keep their original timing.
     """
+    group = require_mux_group(ctx.parameters)
     parameters = ctx.parameters
     if parameters is None:
-        raise ValueError("Mux Forms require a parameter capture")
-    name = parameters.resolve_path("$mux")
-    group = parameters.document().components.get(name)
-    if not isinstance(group, MuxGroupSchema):
-        raise ValueError(f"$mux={name!r}: expected group/mux")
+        raise ValueError("Mux forms require a parameter capture")
     has_readout = ctx.has("$mux.module.readout")
     if not wait_for_ringup and has_readout:
         return Slot("$mux.module.readout")
@@ -70,12 +70,15 @@ def mux_readout_initial(
         if has_readout:
             # Preserve the existing ringup-copy defaults; only blank input changes.
             tone.update({"gain": 0.1, "ro_ch": index})
+        else:
+            tone.update({"gain": 0.1, "ro_ch": group.wiring.ro_ch[index]})
         tones.append(tone)
     seeds: dict[str, TemplateSeed] = {"tones": tones}
     if wait_for_ringup:
         seeds.update(_ringup_timing(ctx, group))
     if has_readout:
         return Slot("$mux.module.readout", copy=True, set=seeds)
+    seeds["gen_ch"] = Expr("$mux.wiring.gen_ch")
     return Template("readout/mux:blank", set=seeds)
 
 
