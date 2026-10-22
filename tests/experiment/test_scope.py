@@ -24,6 +24,30 @@ def make_root() -> Scope:
     return Scope(kind="run")
 
 
+@pytest.mark.parametrize("name", ["", "bad/name", "bad#name", "bad:name"])
+def test_root_and_branch_names_reject_unparseable_paths(name: str) -> None:
+    root = make_root()
+    from zcu_tools.experiment import Scope
+
+    with pytest.raises(ValueError):
+        Scope("workflow", name=name)
+    with pytest.raises(ValueError):
+        root.branch("operation", name=name)
+    with pytest.raises(ValueError):
+        root.branch("schedule", name=name)
+
+
+def test_named_script_root_has_no_birth_sequence() -> None:
+    make_root()
+    from zcu_tools.experiment import Scope
+
+    with Scope("workflow", name="calibration") as workflow:
+        assert workflow.active_path == "workflow:calibration"
+        with workflow.branch("iteration"):
+            assert workflow.active_path == "workflow:calibration/iteration#1"
+        assert workflow.cancel("workflow").cancelled
+
+
 def test_child_lifetime_and_birth_numbers_survive_exception() -> None:
     root = make_root()
     assert root.active_path == "run"
