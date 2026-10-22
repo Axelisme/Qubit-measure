@@ -133,7 +133,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         )
 
         # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
                 modules = step.cfg.modules
                 modules.readout.set_param("ro_length", step.value)

@@ -7,18 +7,17 @@ from pathlib import Path
 from uuid import UUID
 
 from zcu_tools.datafile import (
-    CfgSnapshot,
-    ExperimentPayload,
+    Container,
     JsonObject,
+    LabberMetadata,
     LabberSnapshotError,
-    RunMetadata,
-    RunSnapshot,
     decode_labber_comment,
     json_values_equal,
+    load,
     load_labber_device_snapshot,
-    load_run_data,
-    save_run_data,
+    save,
 )
+from zcu_tools.experiment.metadata import CfgSnapshot, RunMetadata, RunSnapshot
 from zcu_tools.resources.entry import (
     ArtifactKey,
     ResultEntry,
@@ -68,8 +67,8 @@ def _run_metadata(
     assignment: RunAssignment,
     entry_id: UUID,
     native_tag: str,
-    labber_path: str,
     device_snapshot: dict[str, JsonObject] | None,
+    labber: LabberMetadata | None,
 ) -> RunMetadata:
     snapshot = legacy.snapshot
     return RunMetadata(
@@ -78,7 +77,6 @@ def _run_metadata(
         started_at=legacy.started_at,
         finished_at=None if legacy.started_at is None else legacy.finished_at,
         completion="unknown" if legacy.started_at is None else legacy.completion,
-        labber_path=labber_path,
         snapshot=RunSnapshot(
             entry_id=entry_id,
             entry_name=snapshot.entry_name,
@@ -88,6 +86,7 @@ def _run_metadata(
         ),
         provenance=legacy.provenance,
         device_snapshot=device_snapshot,
+        labber=labber,
     )
 
 
@@ -97,7 +96,7 @@ def _load_payload(
     session: MigrationSession,
     entry: ResultEntry | None,
     mapping: MigrationMapping,
-) -> ExperimentPayload:
+) -> tuple[Container, LabberMetadata]:
     if legacy.cfg is None:
         raise ValueError("cfg.cfg_type: missing explicit historical identity")
     identity = (legacy.experiment, legacy.cfg.cfg_type)
@@ -109,18 +108,18 @@ def _load_payload(
             "source_hash: acquisition evidence disagrees with source bytes"
         )
     _check_evidence(legacy, entry)
-    payload = load_legacy_labber_payload(source, schema=schema)
-    tags = set(payload.metadata.tags) & {tag for tag, _cfg_type in mapping.data_schemas}
+    payload, metadata = load_legacy_labber_payload(source, schema=schema)
+    tags = set(metadata.tags) & {tag for tag, _cfg_type in mapping.data_schemas}
     if tags and tags != {legacy.experiment}:
         raise ValueError(
             f"experiment: evidence {legacy.experiment!r} disagrees with file tags {sorted(tags)!r}"
         )
-    comment = decode_labber_comment(payload.metadata.comment)
+    comment = decode_labber_comment(metadata.comment)
     if comment.cfg is not None and not json_values_equal(
         comment.cfg, legacy.cfg.values
     ):
         raise ValueError("cfg: evidence disagrees with file comment.cfg")
-    return payload
+    return payload, metadata
 
 
 def _assignment(
@@ -160,7 +159,7 @@ def _validate_native(
     if native.native_validated:
         return native
     try:
-        load_run_data(native.destination)
+        load(native.destination)
         validate_native(native.destination, experiment, cfg_type)
         session.verify_destination(native)
         native = replace(native, native_validated=True)
@@ -193,10 +192,11 @@ def _convert_run(
         return
     native = session.state(source, "native")
     payload = None
+    labber = None
     device_snapshot = None
     if native is None or native.phase == "planned":
         try:
-            payload = _load_payload(source, legacy, session, entry, mapping)
+            payload, labber = _load_payload(source, legacy, session, entry, mapping)
             validate_cfg(legacy.experiment, cfg)
         except MigrationInputError:
             raise
@@ -240,7 +240,7 @@ def _convert_run(
                     old_file=source,
                     old_key="snapshot.entry_id",
                     new_file=native_path,
-                    new_path="/meta/snapshot/entry_id",
+                    new_path="/docs/metadata/snapshot/entry_id",
                     action="value",
                     reason="Assign the new entry UUID; the legacy system did not record this historical UUID.",
                 ),
@@ -248,7 +248,7 @@ def _convert_run(
                     old_file=source,
                     old_key="run_id",
                     new_file=native_path,
-                    new_path="/meta/run_id",
+                    new_path="/docs/metadata/run_id",
                     action="value",
                     reason=(
                         f"遷移賦值: {assignment.run_id}; allocated by new_run_id, not a historical ID or acquisition time."
@@ -260,10 +260,10 @@ def _convert_run(
                     old_file=source,
                     old_key="started_at",
                     new_file=native_path,
-                    new_path="/meta/started_at",
+                    new_path="/docs/metadata/started_at",
                     action="value",
                     reason=(
-                        "Unproven start: native 2.1 started_at=None, completion=unknown, finished_at=None. Original evidence retained in migration manifest."
+                        "Unproven start: container metadata started_at=None, completion=unknown, finished_at=None. Original evidence retained in migration manifest."
                         if legacy.started_at is None
                         else "Preserve proven historical times and completion; do not infer from the assigned ID."
                     ),
@@ -276,16 +276,29 @@ def _convert_run(
         assignment,
         session.manifest.identity.entry_id,
         mapping.native_tags.get((legacy.experiment, cfg.cfg_type), legacy.experiment),
-        (Path("Labber") / legacy.source).as_posix(),
         device_snapshot,
-    )
+        labber,
+    ).model_dump(mode="json")
 
     def build(path: Path) -> None:
         if payload is None:
             raise MigrationInputError(
                 f"{source}: missing payload for native publication"
             )
-        save_run_data(path, payload, metadata, cfg=cfg)
+        save(
+            path,
+            replace(
+                payload,
+                docs={
+                    "cfg": {
+                        "values": cfg.values,
+                        "cfg_type": cfg.cfg_type,
+                        "schema_version": cfg.schema_version,
+                    },
+                    "metadata": metadata,
+                },
+            ),
+        )
 
     native = session.publish(source, native_path, operation="native", build=build)
     if session.dry_run:

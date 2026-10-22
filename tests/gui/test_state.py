@@ -9,12 +9,13 @@ from uuid import UUID
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile.native_models import (
+from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.experiment.metadata import (
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
 )
-from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.state import (
     DeviceState,
     DeviceStatus,
@@ -27,6 +28,7 @@ from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._form_fakes import make_form
+from tests.gui.app.measure._record_support import require_record
 
 
 def _plots_for(figure: Figure) -> Plots:
@@ -222,7 +224,7 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     state.update_tab_analyze_param_instance("t1", _AnalyzeParams(threshold=0.5))
     fig = Figure()
     state.update_tab_analyze("t1", object(), _plots_for(fig))
-    state.update_tab_result("t1", object())
+    state.update_tab_result("t1", RunRecord(None, object()))
     tab = state.get_tab("t1")
     assert tab.run.source_path is None
     assert tab.analysis.result is None
@@ -234,14 +236,13 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
     state = State(_make_ctx())
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
-    result = object()
+    result = RunRecord(None, object())
     metadata = RunMetadata(
         run_id="20261008T000000Z-a1b2c3",
         experiment="test/native",
         started_at="2026-10-08T00:00:00+00:00",
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
-        labber_path="/historical/measurement.hdf5",
         snapshot=RunSnapshot(
             entry_id=UUID("00000000-0000-0000-0000-000000000001"),
             entry_name="historical-entry",
@@ -258,11 +259,12 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
             hostname="historical-host",
         ),
     )
-    state.update_tab_loaded_result("t1", result, "/tmp/loaded.hdf5", metadata=metadata)
+    historical = replace(result, metadata=metadata)
+    state.update_tab_loaded_result("t1", historical, "/tmp/loaded.hdf5")
 
     tab = state.get_tab("t1")
-    assert tab.run.result is result
-    assert tab.run.metadata == metadata
+    assert tab.run.result is historical
+    assert require_record(tab.run).metadata == metadata
     assert tab.run.source_path == "/tmp/loaded.hdf5"
     assert state.version.get("tab:t1:result") == 1
     assert state.version.get("tab:t1:analyze") == 1
@@ -471,5 +473,5 @@ def test_tab_state_predicates():
 
     tab.is_analyzing = True
     tab.is_analyzing = False
-    tab.run.result = object()
+    tab.run.result = RunRecord(None, object())
     assert tab.has_run_result() is True

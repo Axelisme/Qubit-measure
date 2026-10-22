@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabClosedPayload
@@ -96,7 +97,7 @@ def test_reload_preserves_config_order_selection_and_uses_new_instances(
     first = app.controls.new_tab("demo")
     second = app.controls.new_tab("demo")
     app.state.set_active_tab(first)
-    app.state.get_tab(first).run.result = object()
+    app.state.get_tab(first).run.result = RunRecord(None, object())
     draft = object()
     app.state.get_tab(first).analysis.writeback_draft = draft
     expected = app.workspace.capture_session()
@@ -134,7 +135,7 @@ def test_confirmation_cannot_discard_changed_state(app: App, change: str) -> Non
     elif change == "version":
         app.state.version.bump("context")
     else:
-        app.state.get_tab(first).run.result = object()
+        app.state.get_tab(first).run.result = RunRecord(None, object())
     ids = app.state.list_tab_ids()
     with pytest.raises(FailedPreconditionError, match="changed while confirming"):
         app.reload.reload_confirmed(preview)

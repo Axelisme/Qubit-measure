@@ -8,7 +8,7 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.workflows import EnginePorts, RunIdentity, RunPaths
 from zcu_tools.experiment.workflows.declaration import (
     WorkflowScript,

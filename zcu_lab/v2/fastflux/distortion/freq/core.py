@@ -142,7 +142,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             length_param = sweep2param("length", sched.cfg.sweep.length)
             modules.qub_pulse.set_param(

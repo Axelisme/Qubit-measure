@@ -163,7 +163,11 @@ GUI root 的序號可在下一 Run 重用。跨 Run 精確取消要用
 Generic cancel(op=17) 維持整個 script Stop 語意。
 
 Ack 保留 execution／workflow snapshot，另帶 cancelled、reason、active_path 與 candidates。
-Cancelled=True 只證明已設 token，不證明 operation 或 cleanup 已 drain，終局仍讀 wait/status。
+Cancelled=True 表示 owner 已接受命令，不證明 operation 或 cleanup 已 drain，終局仍讀 wait/status。
+Workflow 根取消且 expected=None 時，Stop owner lock 先寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root，持久化不進 control callback。
+這個分支的 accepted ack 表示 owner 已接受並記錄 Stop；host 若仍活則同時設 token。
+Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled。
+其他 selector 直接由 host 核對。Terminal workflow 對合法 scope 回 scope not active，錯誤語法仍回 invalid_params。
 
 根 recipe／workflow 取消在下一個 await 丟共用 ScriptCancelled，普通 Exception 子類，
 不是 asyncio.CancelledError。進行中的 Run 先合作 drain、保留 run_id／partial／completion facts，再讓 await raise。

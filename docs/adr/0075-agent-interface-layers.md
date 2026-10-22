@@ -77,6 +77,12 @@ L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 wo
 
 作者的 env 就是 workflow 根。每個 child 提供相同的 run／call／setup_device／wait_until／dir／commit 能力。作者用 `with env.scope(label) as scope` 與 `for item, iteration in zip(items, env.iterations())` 明填 parent，沒有隱式 current scope。
 
+Workflow 根取消且 expected=None 時，Stop owner lock 先寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root。持久化不進 control callback。此分支的 cancelled=True 表示 owner 已接受並記錄 Stop；host 若仍活則同時設 token，不保證 drain。Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled，不以 host.cancel 的 refusal 推翻 owner 的接受。其他 selector 直接由 host.cancel 核對，不寫 Stop 意圖。Terminal workflow 對合法請求回 typed scope-not-active refusal，錯誤語法仍 fail fast。持久化失敗保留 failed 與原始 cause，不偽裝成 accepted。
+
+Host 首次根取消在自己的 owner lock 內 latch bit 並記 typed ack，不等待 loop 通知。重複取消回第一次 ack，不再排 loop 工作。這避免作者 finally 阻塞 loop 時，控制端也被迫等待。Ack 表示 token 已設，不表示工作已 drain。
+
+Recipe runtime 用公開 control(fn) 在同一 loop 回合檢查與停止當前 Run token，避免 check／ack race。Analysis、Ask 或閒置時的 run cancel 回 cancelled=False、reason="no run in progress"，不停止下一個 operation。
+
 Iteration generator 的 next 釋放前一趟，close 釋放最後一趟。Host 不建隱式 iteration，也不以 commit 更換 iteration。Recipe 無作者 iteration，路徑直接是 `recipe:<name>/operation#N`。
 
 Commit 是同步 snapshot 寫檔，不經 pause gate。它不啟動硬體工作，取消收尾也必須能存已有成果。Async operation／ask 才經 pause gate。Iteration.cancelled 只退出目前 point，主 for 用 continue，point helper 用 return。Point 的 try/finally 同步 commit 一次，不在 finally await，根 ScriptCancelled 繼續往上傳播。

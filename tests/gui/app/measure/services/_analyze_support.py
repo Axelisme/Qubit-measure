@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
@@ -38,7 +39,7 @@ def make_state(tab_id: str = "tab1") -> State:
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     # Provide a fake run_result so the tab is not empty
-    state.update_tab_result(tab_id, object())
+    state.update_tab_result(tab_id, RunRecord(None, object()))
     return state
 
 
@@ -109,5 +110,5 @@ def make_two_tab_state() -> State:
         "tab2",
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_result("tab2", object())
+    state.update_tab_result("tab2", RunRecord(None, object()))
     return state

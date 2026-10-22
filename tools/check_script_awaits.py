@@ -1,7 +1,7 @@
 """Check lab author await boundaries without importing or executing lab modules.
 
 This is an AST guardrail, not a type checker: framework receivers use the literal
-names env/tab/session. Assignment aliases, dynamic dispatch and wrappers are not
+names env/tab/session/scope/iteration. Assignment aliases, dynamic dispatch and wrappers are not
 tracked. Direct imports (including relative imports) resolve against definitions,
 so an external callable is never accepted just for looking like a lab helper.
 """
@@ -20,7 +20,7 @@ from typing import Final
 from _support import SKIPPED_DIRS, dotted_name, import_bindings
 
 _FORBIDDEN: Final = frozenset({"create_task", "gather", "wait_for", "TaskGroup"})
-_RECEIVERS: Final = frozenset({"env", "tab", "session"})
+_RECEIVERS: Final = frozenset({"env", "tab", "session", "scope", "iteration"})
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,7 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
     """Check repo-relative Python sources beneath zcu_lab using one uniform rule.
 
     Every async function is checked, whether decorated, called or unused. Await
-    accepts env/tab/session calls or statically resolved lab function definitions,
+    accepts env/tab/session/scope/iteration calls or statically resolved lab function definitions,
     whether defined with def or async def. Within async functions, direct asyncio
     calls and create_task/gather/wait_for/TaskGroup are rejected even without await.
     Other async contexts and iterators are not banned.

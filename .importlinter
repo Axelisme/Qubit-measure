@@ -24,6 +24,30 @@ source_modules =
 forbidden_modules =
     scripts
 
+# ADR-0080: datafile can be imported without any other framework package.
+[importlinter:contract:datafile-standalone]
+name = datafile is a standalone container and codec package
+type = forbidden
+source_modules =
+    zcu_tools.datafile
+forbidden_modules =
+    zcu_tools.analysis
+    zcu_tools.cfg_model
+    zcu_tools.core
+    zcu_tools.device
+    zcu_tools.experiment
+    zcu_tools.format_version
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
+    zcu_tools.plotting
+    zcu_tools.program
+    zcu_tools.progress_bar
+    zcu_tools.qick_remote
+    zcu_tools.resources
+    zcu_tools.simulate
+    zcu_tools.utils
+
 # Runtime code must not depend on offline data migration tools.
 [importlinter:contract:runtime-no-migrations]
 name = C20: zcu_tools does not depend on offline migrations

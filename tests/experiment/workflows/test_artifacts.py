@@ -9,6 +9,7 @@ from threading import RLock
 
 import pytest
 from pydantic import TypeAdapter
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Actor, Live, RunPaths, WorkflowEnv
 from zcu_tools.experiment.workflows.artifacts import RunArtifacts
 from zcu_tools.experiment.workflows.journal import (
@@ -104,9 +105,11 @@ def test_relative_unicode_roots_remain_absolute_after_cwd_change(
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    directory = artifacts.new_commit_dir()
+    scope = Scope("workflow", name="test")
+    with scope.branch("iteration") as iteration:
+        directory = artifacts.directory(iteration)
     artifacts.set_lifecycle("done")
-    assert directory == tmp_path / "data 資料/commits/000001"
+    assert directory == tmp_path / "data 資料/iteration-000001"
     assert directory.is_dir()
     assert artifacts.paths.metadata_root == tmp_path / "metadata 資料"
     assert not tuple(elsewhere.iterdir())
@@ -262,24 +265,33 @@ def test_second_root_creation_failure_keeps_first_root(
 
 def test_commit_document_matches_journal_and_retains_read_revisions(rig: Rig) -> None:
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        first = tun.current
-        rig.engine.update_tunables(
-            "run", Tunables(value=8), expected_revision=0, actor=Actor("agent", "test")
-        )
-        latest = tun.current
-        await env.commit(Point(value=first.value + latest.value))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            first = tun.current
+            rig.engine.update_tunables(
+                "run",
+                Tunables(value=8),
+                expected_revision=0,
+                actor=Actor("agent", "test"),
+            )
+            latest = tun.current
+            iteration.commit(Point(value=first.value + latest.value))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
-    path = rig.paths.data_root / "commits/000001/record.json"
+    path = rig.paths.data_root / "iteration-000001/record.json"
     document = json.loads(path.read_text())
     committed = next(
         event for event in rig.events() if event["kind"] == "record_committed"
     )
     assert document["record"] == committed["encoded_record"]
     assert document["commit_seq"] == committed["commit_seq"] == 1
-    assert document["directory"] == committed["directory"] == "commits/000001"
+    assert document["directory"] == committed["directory"] == "iteration-000001"
     assert document["committed_at"] == committed["committed_at"]
     assert document["started"]["revisions"] == [0, 1]
     assert document["record_type"] == committed["record_type"]
@@ -291,19 +303,25 @@ def test_record_output_failure_keeps_commits_and_author_continues(
     reached: list[int] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        for index in range(plan.count):
-            directory = env.new_commit_dir()
-            if index == 0:
-                (directory / "record.json").mkdir()
-            reached.append(index)
-            await env.commit(Point(value=index), directory)
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            for index in range(plan.count):
+                directory = iteration.dir
+                if index == 0:
+                    (directory / "record.json").mkdir()
+                reached.append(index)
+                iteration.commit(Point(value=index))
+                iteration = next(iterations)
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
     assert final.committed_seq == 2 and reached == [0, 1]
-    assert (rig.paths.data_root / "commits/000001/record.json").is_dir()
-    assert (rig.paths.data_root / "commits/000002/record.json").is_file()
+    assert (rig.paths.data_root / "iteration-000001/record.json").is_dir()
+    assert (rig.paths.data_root / "iteration-000002/record.json").is_file()
     assert [r.commit_seq for r in rig.engine.records("run")] == [1, 2]
     assert any(
         "record" in record.getMessage().lower() and record.exc_info is not None
@@ -316,14 +334,20 @@ def test_commit_publication_replaces_instead_of_editing_destination(rig: Rig) ->
     external.write_text("unrelated file")
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        directory = env.new_commit_dir()
-        symlink_or_skip(directory / "record.json", external)
-        await env.commit(Point(value=1), directory)
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            directory = iteration.dir
+            symlink_or_skip(directory / "record.json", external)
+            iteration.commit(Point(value=1))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
-    path = rig.paths.data_root / "commits/000001/record.json"
+    path = rig.paths.data_root / "iteration-000001/record.json"
     assert not path.is_symlink()
     assert json.loads(path.read_text())["record"]["value"] == {"value": 1}
     assert external.read_text() == "unrelated file"

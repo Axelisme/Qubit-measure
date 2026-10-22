@@ -7,12 +7,11 @@ import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from tempfile import mkdtemp
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.device import FakeDevice
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
@@ -56,7 +55,7 @@ from tests.gui._controller_adapter import (
     RecordingCfg,
 )
 from tests.gui._qt_waits import qt_until as _wait_for
-from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._load_support import historical_metadata, write_native_file
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -330,7 +329,7 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     captured: dict[str, RecordingCfg] = {}
     real_adapter = cf.state.get_tab(tab_id).adapter
 
-    acquired = object()
+    acquired = RunRecord(None, object())
 
     def _capture_run(req, accepted: RecordingCfg, *, context):
         captured["cfg"] = accepted
@@ -407,7 +406,7 @@ def test_result_commit_survives_analysis_preparation_failure(
     def fail_params(*_args):
         raise ValueError("analysis defaults unavailable")
 
-    loaded = SimpleNamespace(cfg_snapshot=None)
+    loaded = RunRecord(None, object(), historical_metadata())
     monkeypatch.setattr(adapter, "get_analyze_params", fail_params)
     monkeypatch.setattr(adapter, "restore", lambda _stored: RestoredRun(loaded, None))
     cf.state.update_tab_analyze_param_instance(tab_id, object())
@@ -475,7 +474,9 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     no_analysis = MagicMock(spec=RecordingAdapter)
-    no_analysis.run.return_value = object()  # any non-NO_RESULT run result
+    no_analysis.run.return_value = RunRecord(
+        None, object()
+    )  # any non-NO_RESULT run result
     no_analysis.capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
     no_analysis.experiment_tag = None
     no_analysis.get_analyze_params.side_effect = NotImplementedError(
@@ -503,6 +504,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
 
 def test_run_failed_shows_status_message(cf):
     bad_adapter = MagicMock(spec=RecordingAdapter)
+    bad_adapter.experiment_tag = None
     bad_adapter.run.side_effect = RuntimeError("boom")
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
@@ -518,6 +520,7 @@ def test_run_failed_shows_status_message(cf):
 
 def test_run_failed_clears_run_lock(cf):
     bad_adapter = MagicMock(spec=RecordingAdapter)
+    bad_adapter.experiment_tag = None
     bad_adapter.run.side_effect = RuntimeError("oops")
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
@@ -613,7 +616,7 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
             parameters=None,
         )
     )
-    loaded = object()
+    loaded = RunRecord(None, object(), historical_metadata())
     adapter = MagicMock()
     # Final contract requires explicit load_data capability; RecordingAdapter's
     # default lacks it, so set load_data True for the driving path.
@@ -636,7 +639,7 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
         threshold=0.7
     )
     stored = adapter.restore.call_args.args[0]
-    assert stored.metadata == metadata
+    assert metadata_from_container(stored) == metadata
     assert outcome.has_analyze_params is True
     cf.bus.emit.assert_any_call(
         TabContentChangedPayload(tab_id, TabContentFact.LOADED_RESULT_COMMITTED)

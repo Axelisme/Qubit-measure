@@ -15,18 +15,24 @@ def test_engine_reuses_plots_across_commits_and_saves_figure(tmp_path: Path) -> 
     seen: list[object] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        viewer = env.plots.liveplot_1d("trace", "Time", "Signal")
-        for index in range(plan.count):
-            seen.append(env.plots)
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            viewer = env.plots.liveplot_1d("trace", "Time", "Signal")
+            for index in range(plan.count):
+                seen.append(env.plots)
 
-            def acquire(ctx: CallContext, index: int = index) -> int:
-                viewer.update(np.array([0.0, 1.0]), np.array([1.0, 3.0]) + index)
-                return index
+                def acquire(ctx: CallContext, index: int = index) -> int:
+                    viewer.update(np.array([0.0, 1.0]), np.array([1.0, 3.0]) + index)
+                    return index
 
-            result = completed(await env.call(acquire))
-            directory = env.new_commit_dir()
-            env.plots.save("trace", directory / "trace.png")
-            await env.commit(Point(value=result.value), directory)
+                result = completed(await iteration.call(acquire))
+                directory = iteration.dir
+                env.plots.save("trace", directory / "trace.png")
+                iteration.commit(Point(value=result.value))
+                iteration = next(iterations)
+        finally:
+            iterations.close()
 
     try:
         rig.start(script)
@@ -53,23 +59,29 @@ def test_projection_error_is_not_a_recoverable_acquire_failure(
     delivered: list[object] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        if dimensions == 1:
-            viewer = env.plots.liveplot_1d("trace", "x", "y")
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            if dimensions == 1:
+                viewer = env.plots.liveplot_1d("trace", "x", "y")
 
-            def project(ctx: CallContext) -> None:
-                viewer.update(np.array([0.0]), np.array([2.0]))
-                raise cause
-        else:
-            grid = env.plots.liveplot_2d("trace", "x", "y")
+                def project(ctx: CallContext) -> None:
+                    viewer.update(np.array([0.0]), np.array([2.0]))
+                    raise cause
+            else:
+                grid = env.plots.liveplot_2d("trace", "x", "y")
 
-            def project(ctx: CallContext) -> None:
-                grid.update(
-                    np.array([0.0, 1.0]), np.array([1.0, 2.0]), np.full((2, 2), 2.0)
-                )
-                raise cause
+                def project(ctx: CallContext) -> None:
+                    grid.update(
+                        np.array([0.0, 1.0]), np.array([1.0, 2.0]), np.full((2, 2), 2.0)
+                    )
+                    raise cause
 
-        delivered.append(await env.call(project))
-        await env.commit(Point(value=1))
+            delivered.append(await iteration.call(project))
+            iteration.commit(Point(value=1))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     try:
         rig.start(script)

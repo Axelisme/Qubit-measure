@@ -111,8 +111,8 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
     np.testing.assert_allclose(results[1], [3.0])
     assert produced == ([] if before_data else [(1, 1)]) + [(2, 1), (2, 2), (2, 3)]
     assert paths == [
-        "workflow:test/iteration#1/operation#1/schedule#1/acquire#1",
-        "workflow:test/iteration#1/operation#1/schedule#1/acquire#2",
+        "workflow:test/operation#1/schedule#1/acquire#1",
+        "workflow:test/operation#1/schedule#1/acquire#2",
     ]
 
 

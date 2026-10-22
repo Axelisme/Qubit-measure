@@ -120,7 +120,7 @@ def test_missing_stale_and_replayed_ids_preserve_current_question(
     assert records[0].get("operations") == [], (
         "Wire records retain the native operation facts"
     )
-    assert records[0]["directory"] == "commits/000001"
+    assert records[0]["directory"] == "."
     assert records[0]["revisions"] == [0]
     with pytest.raises(GuiRpcError) as replay:
         client.call(

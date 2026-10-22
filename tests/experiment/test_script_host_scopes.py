@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    "scope", ["acquire", "schedule", "operation", "run", "iteration", "workflow"]
+    "scope", ["acquire", "schedule", "operation", "run", "iteration"]
 )
-def test_cancel_scope_preserves_parent_and_commit_starts_clean_iteration(
+def test_cancel_scope_preserves_parent_and_next_iteration_starts_clean(
     scope: str,
 ) -> None:
     host = ScriptHost(Scope("workflow", name="test"))
@@ -39,10 +39,15 @@ def test_cancel_scope_preserves_parent_and_commit_starts_clean_iteration(
         return ctx.scope.cancelled
 
     async def script() -> None:
-        completions.append(await host.call(first))
-        completions.append(await host.call(lambda ctx: ctx.scope.cancelled))
-        await host.commit()
-        completions.append(await host.call(lambda ctx: ctx.scope.cancelled))
+        with host.root.branch("iteration") as iteration:
+            completions.append(await host.call(first, scope=iteration))
+            completions.append(
+                await host.call(lambda ctx: ctx.scope.cancelled, scope=iteration)
+            )
+        with host.root.branch("iteration") as iteration:
+            completions.append(
+                await host.call(lambda ctx: ctx.scope.cancelled, scope=iteration)
+            )
 
     host.run(script())
     assert acknowledgements[0] is not None, "cancel must return a typed acknowledgement"
@@ -73,7 +78,7 @@ def test_stale_segment_and_expected_refuse_current_acquire_without_stopping_pare
         old.release()
         current = schedule.branch("acquire")
         try:
-            path = "workflow:test/iteration#1/operation#1/schedule#1/acquire#2"
+            path = "workflow:test/operation#1/schedule#1/acquire#2"
             for scope, expected in [("acquire#1", None), ("acquire", 1)]:
                 result = host.cancel(scope=scope, expected=expected)
                 assert asdict(result) == {
@@ -110,14 +115,14 @@ def test_root_has_no_sequence_and_inactive_label_returns_current_path() -> None:
                 "cancelled": False,
                 "reason": "sequence mismatch",
                 "candidates": [],
-                "active_path": "workflow:test/iteration#1",
+                "active_path": "workflow:test",
             }
         result = host.cancel(scope="acquire")
         assert asdict(result) == {
             "cancelled": False,
             "reason": "scope not active",
             "candidates": [],
-            "active_path": "workflow:test/iteration#1",
+            "active_path": "workflow:test",
         }
 
     host.run(script())

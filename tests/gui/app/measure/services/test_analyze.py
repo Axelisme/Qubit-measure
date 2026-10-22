@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 import zcu_tools.experiment as experiment
 from matplotlib.figure import Figure
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -85,7 +86,9 @@ def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
     ).bind_aliases((AliasRow("qubit", "Q1"),), {})
     state = make_state()
     state.update_tab_result(
-        "tab1", object(), parameters=captured if has_run_source else None
+        "tab1",
+        RunRecord(None, object()),
+        parameters=captured if has_run_source else None,
     )
     point.components["Q1"] = QubitSchema(kind="qubit/fluxonium", freq=4300.0)
     current = ParameterContext(

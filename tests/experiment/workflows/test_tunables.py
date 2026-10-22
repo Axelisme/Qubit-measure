@@ -6,7 +6,7 @@ from threading import RLock
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     Live,
@@ -50,10 +50,10 @@ def rig(tmp_path: Path) -> Rig:
 
     @workflow("whole-model", "Whole-model live updates")
     async def step(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        for _ in range(plan.count):
+        for _, iteration in zip(range(plan.count), env.iterations(), strict=False):
             captured = tun.current
-            await env.wait_until(env.started_at + timedelta(seconds=1))
-            await env.commit(Point(value=captured.reps))
+            await iteration.wait_until(env.started_at + timedelta(seconds=1))
+            iteration.commit(Point(value=captured.reps))
 
     rig.engine.start(
         step,

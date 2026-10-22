@@ -7,6 +7,7 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, Expr, PulseCfg, Template
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -19,6 +20,7 @@ from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui._qt_waits import qt_until
+from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure.remote._helpers import Fixture
 
 
@@ -28,7 +30,7 @@ class TraceCfg(ExpCfgModel):
     amount: float = 1.0
 
 
-class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
+class TraceAdapter(BaseAdapter[TraceCfg, RunRecord[TraceCfg, TraceCfg]]):
     """Return accepted cfg without devices, acquisition or result persistence."""
 
     @staticmethod
@@ -46,8 +48,8 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
         cfg: TraceCfg,
         *,
         context: RunContext,
-    ) -> TraceCfg:
-        return cfg
+    ) -> RunRecord[TraceCfg, TraceCfg]:
+        return RunRecord(cfg, cfg)
 
 
 class FactoryCfg(ConfigBase):
@@ -156,7 +158,9 @@ def test_open_edit_run_and_reset_use_public_form_authority(
             subscription.unsubscribe()
         assert finished, "Run must reach a terminal notification before timeout"
         assert not application.state.is_run_active()
-        assert application.state.get_tab(tab_id).run.result == TraceCfg(amount=6.0)
+        assert require_record(application.state.get_tab(tab_id).run).result == TraceCfg(
+            amount=6.0
+        )
         resource.reset()
         assert resource.result() == TraceCfg(amount=5.0)
         resource.write({("amount",): {"expr": "unfinished +"}})

@@ -21,16 +21,17 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from zcu_tools.datafile import (
-    AxisSchema,
+    Axis as ContainerAxis,
+)
+from zcu_tools.datafile import (
     DataVariable,
-    ExperimentPayload,
     LabberMetadata,
     LabberPayload,
-    VariableSchema,
+    Variable,
     cast_labber_values,
+    encode_labber_comment,
     format_ext,
     save_grouped_labber_data,
-    validate_labber_payload,
     write_labber,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -271,94 +272,93 @@ class VariableSpec:
                 f"(has {sorted(result_fields)})"
             )
 
-    def native_schema(self) -> VariableSchema:
-        """Return this mapping's SI disk labels, units and numeric dtypes.
+    def variable_from_result(self, result: object, *, context: str) -> Variable:
+        """Map Result arrays to SI values and NumPy-ordered container axes.
 
-        NumPy scalar multiplication determines disk dtype after memory casting.
-        Generated arange axes keep their declared integer dtype without scaling.
-        This declaration does not inspect Result values or modify arrays.
+        context labels missing fields, invalid dtype/index or shape errors.
+        The declaration's inner-first axes reverse once; values never transpose.
+        No Labber grid restrictions or metadata capture occurs.
         """
-        return VariableSchema(
-            variable=self.data_variable,
-            axes=tuple(
-                AxisSchema(
-                    name=axis.label,
-                    unit=axis.unit,
-                    dtype=(
-                        np.dtype(axis.dtype)
-                        if axis.generated == "arange"
-                        else (np.empty(0, dtype=axis.dtype) * axis.scale).dtype
-                    ),
-                )
-                for axis in self.axes
-            ),
-            signal_name=self.z.label,
-            signal_unit=self.z.unit,
-            signal_dtype=(np.empty(0, dtype=self.z.dtype) * self.z.scale).dtype,
-        )
-
-    def payload_from_result(self, result: object, *, context: str) -> LabberPayload:
-        """Map declared Result arrays into disk units; context labels validation errors.
-
-        Missing fields raise AttributeError. Invalid dtype, index or axis/array
-        shape raises ValueError. The returned payload retains inner-first axes.
-        """
-        z_values = self._z_from_result(result, context=context)
-        axes = [
-            (
+        values = self._z_from_result(result, context=context)
+        axes = tuple(
+            ContainerAxis(
                 axis.label,
                 axis.unit,
                 self._axis_from_result(
                     result,
                     axis,
-                    z_shape=z_values.shape,
+                    z_shape=values.shape,
                     axis_index=index,
                     context=context,
                 ),
             )
             for index, axis in enumerate(self.axes)
-        ]
-        self._validate_shape(
-            z_values, [axis_values for _, _, axis_values in axes], context
         )
-        return LabberPayload((self.z.label, self.z.unit, z_values), axes=axes)
+        self._validate_shape(values, [axis.values for axis in axes], context)
+        return Variable(values, tuple(reversed(axes)), self.z.unit)
 
-    def loaded_from_payload(
-        self, payload: LabberPayload, *, context: str
-    ) -> LoadedVariableData:
-        """Validate persisted labels/units/shape and restore memory units and dtypes.
+    def payload_from_result(self, result: object, *, context: str) -> LabberPayload:
+        """Map a Result to the inner-first payload used by low-level Labber exports.
 
-        context labels ValueError for invalid labels, units, arrays or generated
-        indices. Return loaded arrays for this mapping\'s variable identity.
+        context labels dtype, index and shape errors. The returned signal keeps
+        the declaration's label and unit; no file or metadata is created.
         """
-        validate_labber_payload(payload, schema=self.native_schema(), context=context)
+        variable = self.variable_from_result(result, context=context)
+        return LabberPayload(
+            (self.z.label, variable.unit, variable.values),
+            [(axis.name, axis.unit, axis.values) for axis in reversed(variable.axes)],
+        )
 
-        loaded_axes: list[np.ndarray] = []
-        for index, (loaded_axis, expected_axis) in enumerate(
-            zip(payload.axes, self.axes, strict=True)
-        ):
-            axis_values = _cast_memory_values(
-                np.asarray(loaded_axis.values) / expected_axis.scale,
-                expected_axis.dtype,
-                context=f"{context} axis {index}",
+    def loaded_from_variable(
+        self, variable: Variable, *, context: str
+    ) -> LoadedVariableData:
+        """Validate container coordinates/units/dtypes and restore memory units.
+
+        context labels malformed numeric arrays, axis names/units/lengths, value
+        unit and generated-coordinate errors. Container axes are NumPy ordered;
+        the returned loaded axes are declaration ordered (inner-first).
+        No cfg or metadata is interpreted and input arrays are not changed.
+        """
+        if variable.values.dtype.kind not in "iufc":
+            raise ValueError(f"{context}: signal requires a numeric dtype")
+        if len(variable.axes) != len(self.axes):
+            raise ValueError(f"{context}: wrong number of axes")
+        if variable.unit != self.z.unit:
+            raise ValueError(
+                f"{context}: signal unit {variable.unit!r} != {self.z.unit!r}"
             )
-            if expected_axis.generated == "arange":
-                expected_values = np.arange(
-                    axis_values.shape[0], dtype=axis_values.dtype
+        loaded_axes: list[np.ndarray] = []
+        for actual, expected in zip(reversed(variable.axes), self.axes, strict=True):
+            if actual.name != expected.label or actual.unit != expected.unit:
+                raise ValueError(
+                    f"{context}: axis {actual.name!r}/{actual.unit!r} != {expected.label!r}/{expected.unit!r}"
                 )
-                if not np.array_equal(axis_values, expected_values):
-                    raise ValueError(f"{context} axis {index} must equal arange(N)")
-            loaded_axes.append(axis_values)
-
-        z_values = _cast_memory_values(
-            np.asarray(payload.z) / self.z.scale,
+            if actual.values.dtype.kind not in "iufc":
+                raise ValueError(f"{context}: axis requires a numeric dtype")
+            if actual.values.ndim != 1:
+                raise ValueError(f"{context}: axis must be 1D")
+            values = _cast_memory_values(
+                actual.values / expected.scale,
+                expected.dtype,
+                context=f"{context} axis",
+            )
+            if expected.generated == "arange" and not np.array_equal(
+                values, np.arange(len(values), dtype=values.dtype)
+            ):
+                raise ValueError(f"{context}: axis must equal arange(N)")
+            loaded_axes.append(values)
+        self._validate_shape(
+            variable.values, [axis.values for axis in reversed(variable.axes)], context
+        )
+        values = _cast_memory_values(
+            variable.values / self.z.scale,
             self.z.dtype,
-            context=f"{context} z channel",
+            context=f"{context} signal",
         )
         return LoadedVariableData(
             variable=self.data_variable,
             axes=tuple(loaded_axes),
-            z=z_values,
+            z=values,
         )
 
     def _z_from_result(self, result: object, *, context: str) -> np.ndarray:
@@ -414,7 +414,8 @@ class VariableSpec:
         expected_shape = tuple(axis.shape[0] for axis in reversed(axis_values))
         if z_values.shape != expected_shape:
             raise ValueError(
-                f"{context} z shape {z_values.shape} != expected {expected_shape}"
+                f"{context}: axis lengths disagree with z dimensions; "
+                f"z shape {z_values.shape} != expected {expected_shape}"
             )
 
 
@@ -514,23 +515,16 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         """
         if source.cfg is None:
             raise ValueError("Cannot save a RunRecord without cfg")
-        from zcu_tools.experiment.utils import make_labber_cfg_snapshot
+        from zcu_tools.experiment.native_persistence import prepare_run_data
 
-        payload = ExperimentPayload(
-            variables={
-                DataVariable(variable): signal
-                for variable, signal in self.payloads_from_result(source.result).items()
-            },
-            metadata=LabberMetadata(tags=tag or self.tag),
-            representation="grouped",
-        )
+        prepared = prepare_run_data(source, spec=self, comment=comment or "")
         write_labber(
             Path(format_ext(str(destination))),
-            payload,
-            cfg=make_labber_cfg_snapshot(
-                source.cfg, schema_version=self.cfg_schema_version
+            prepared.container,
+            metadata=LabberMetadata(
+                comment=encode_labber_comment(prepared.cfg.values, comment),
+                tags=tag or self.tag,
             ),
-            comment=comment,
             grouped_layout=self.labber_layout,
         )
 

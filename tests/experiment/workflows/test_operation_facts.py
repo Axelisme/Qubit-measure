@@ -5,11 +5,11 @@ from datetime import timedelta
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
-from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import saved_run
 from zcu_tools.plotting.plots import NonPresentingHost
@@ -69,18 +69,27 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
     async def script(
         env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Tunables]
     ) -> None:
-        await env.call(lambda ctx: 1)
-        first = await env.run(acquire, cfg)
-        assert isinstance(first, w.Completed)
-        assert first.value.cfg is not None
-        assert first.value.cfg.value == 8
-        assert first.value.result == 9
-        await env.wait_until(START + timedelta(seconds=4))
-        await env.commit(Record(value=1))
-        await env.setup_device("flux", FakeDeviceInfo(address="memory", value=7))
-        await env.run(acquire, cfg)
-        await env.commit(Record(value=2))
-        await env.run(acquire, cfg)
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            await iteration.call(lambda ctx: 1)
+            first = await iteration.run(acquire, cfg)
+            assert isinstance(first, w.Completed)
+            assert first.value.cfg is not None
+            assert first.value.cfg.value == 8
+            assert first.value.result == 9
+            await iteration.wait_until(START + timedelta(seconds=4))
+            iteration.commit(Record(value=1))
+            iteration = next(iterations)
+            await iteration.setup_device(
+                "flux", FakeDeviceInfo(address="memory", value=7)
+            )
+            await iteration.run(acquire, cfg)
+            iteration.commit(Record(value=2))
+            iteration = next(iterations)
+            await iteration.run(acquire, cfg)
+        finally:
+            iterations.close()
 
     try:
         engine.start(

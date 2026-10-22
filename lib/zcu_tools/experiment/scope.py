@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Generator
+from datetime import datetime
+from pathlib import Path
 from threading import RLock
 from types import TracebackType
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Protocol, Self
+
+from pydantic import BaseModel
+
+from zcu_tools.device import BaseDeviceInfo
+
+from .cfg_model import ExpCfgModel
+from .operations import Completed, Failed, MissingCapability, RunFunction, RunIdentity
+from .records import RunRecord
+
+if TYPE_CHECKING:
+    from .script_host import CallContext
 
 from .stop_signal import CancelResult, StopSignal
 
@@ -42,6 +56,10 @@ def parse_cancel_scope(
         raise ValueError("scope must be a nonempty selector")
     if "/" in scope:
         return scope, expected
+    root_kind, separator, root_name = scope.partition(":")
+    if separator and root_kind in {"workflow", "recipe", "run"}:
+        _validate_name(root_name)
+        return scope, expected
     label, separator, suffix = scope.partition("#")
     if separator:
         if not suffix.isascii() or not suffix.isdecimal() or int(suffix) <= 0:
@@ -62,6 +80,64 @@ def _validate_name(name: str | None) -> None:
         raise ValueError("Scope name must be nonempty and must not contain #, / or :")
 
 
+def _validate_record(record: object) -> None:
+    if not isinstance(record, BaseModel):
+        raise TypeError("Scope record must be a BaseModel")
+
+
+class ScopeRuntime(Protocol):
+    """Host capabilities shared by a root and its explicitly selected children.
+
+    Implementations own operation execution and record persistence. Each method
+    receives its exact receiver scope, never an implicit current boundary.
+    """
+
+    def directory(self, scope: Scope) -> Path:
+        """Create and return the scope's mirrored data directory."""
+        ...
+
+    def read_identity(self) -> RunIdentity:
+        """Read detached startup provenance, or raise MissingCapability."""
+        ...
+
+    def read_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Read one detached full device settings model."""
+        ...
+
+    async def execute_call[T](
+        self, scope: Scope, fn: Callable[[CallContext], T], *, name: str | None = None
+    ) -> Completed[T] | Failed:
+        """Execute blocking work under scope and return attempt facts."""
+        ...
+
+    async def execute_run[Cfg: ExpCfgModel, Result](
+        self,
+        scope: Scope,
+        experiment: RunFunction[Cfg, Result],
+        cfg: Cfg,
+        *,
+        name: str | None = None,
+    ) -> Completed[RunRecord[Cfg, Result]] | Failed:
+        """Execute a core callable with an owned cfg and borrowed RunContext."""
+        ...
+
+    async def execute_setup(
+        self, scope: Scope, name: str, cfg: BaseDeviceInfo
+    ) -> Completed[None] | Failed:
+        """Apply a captured complete settings model cooperatively."""
+        ...
+
+    async def execute_wait(
+        self, scope: Scope, target: datetime
+    ) -> Completed[None] | Failed:
+        """Wait cooperatively for an aware absolute deadline."""
+        ...
+
+    def execute_commit(self, scope: Scope, record: BaseModel) -> None:
+        """Persist a record snapshot once for the receiver scope."""
+        ...
+
+
 class Scope:
     """One explicit control boundary with child lifetimes and subtree selectors.
 
@@ -76,7 +152,12 @@ class Scope:
     """
 
     def __init__(
-        self, kind: RootKind, name: str | None = None, stop: StopSignal | None = None
+        self,
+        kind: RootKind,
+        name: str | None = None,
+        stop: StopSignal | None = None,
+        *,
+        runtime: ScopeRuntime | None = None,
     ) -> None:
         if kind not in {"workflow", "recipe", "run"}:
             raise ValueError("Root scope kind must be workflow, recipe or run")
@@ -90,6 +171,8 @@ class Scope:
         self._sequences: dict[str, int] = {}
         self._lock = RLock()
         self._closed = False
+        self._runtime = runtime
+        self._committed = False
 
     @property
     def kind(self) -> str:
@@ -168,6 +251,7 @@ class Scope:
                 raise RuntimeError("Cannot add children to a released scope")
             # The public constructor accepts roots; specialize its shared state here.
             child = Scope("run", stop=self.stop.child(boundary=kind == "operation"))
+            child._runtime = self._runtime
             child._kind = kind
             child._name = name
             child._parent = self
@@ -176,6 +260,96 @@ class Scope:
             self._sequences[kind] = child.sequence
             self._children[child] = None
             return child
+
+    @property
+    def parent(self) -> Scope | None:
+        """The explicit parent boundary, or None for the root."""
+        return self._parent
+
+    @property
+    def iteration_sequence(self) -> int:
+        """Birth number of the nearest iteration ancestor; zero outside iterations."""
+        if self.kind == "iteration":
+            return self.sequence
+        return self.parent.iteration_sequence if self.parent is not None else 0
+
+    def _capabilities(self) -> ScopeRuntime:
+        if self._runtime is None:
+            raise MissingCapability("scope runtime")
+        return self._runtime
+
+    @property
+    def dir(self) -> Path:
+        """Create the mirrored scope directory on first use; require a bound host."""
+        return self._capabilities().directory(self)
+
+    @property
+    def identity(self) -> RunIdentity:
+        """Detached root startup identity, inherited by all child scopes."""
+        return self._capabilities().read_identity()
+
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Live-read detached full device settings; unknown name/I/O errors propagate."""
+        return self._capabilities().read_device_cfg(name)
+
+    async def call[T](
+        self, fn: Callable[[CallContext], T], *, name: str | None = None
+    ) -> Completed[T] | Failed:
+        """Run fn(CallContext) off-loop under this scope, with optional operation name.
+
+        Acquire failure returns Failed; unexpected errors propagate. Descendant
+        cancellation delivers partial values, while root cancellation raises
+        ScriptCancelled after work drains and completion facts are recorded.
+        """
+        return await self._capabilities().execute_call(self, fn, name=name)
+
+    async def run[Cfg: ExpCfgModel, Result](
+        self, experiment: RunFunction[Cfg, Result], cfg: Cfg, *, name: str | None = None
+    ) -> Completed[RunRecord[Cfg, Result]] | Failed:
+        """Run a core (cfg, *, context) callable with a copied cfg, without saving.
+
+        The host captures device settings and supplies borrowed hardware and
+        operation plots. Pause retries the same captured request. Completion
+        carries RunRecord and immutable attempt facts; acquire failure is Failed.
+        """
+        return await self._capabilities().execute_run(self, experiment, cfg, name=name)
+
+    async def setup_device(
+        self, name: str, cfg: BaseDeviceInfo
+    ) -> Completed[None] | Failed:
+        """Apply complete copied settings through the device owner; preserve its errors."""
+        return await self._capabilities().execute_setup(self, name, cfg)
+
+    async def wait_until(self, target: datetime) -> Completed[None] | Failed:
+        """Wait for an aware absolute deadline; reject naive dates and cooperate on stop."""
+        return await self._capabilities().execute_wait(self, target)
+
+    def commit(self, record: BaseModel) -> None:
+        """Snapshot one BaseModel into this scope's record.json; second commit raises.
+
+        Publication is synchronous and bypasses Pause, including root-cancel cleanup.
+        Later mutation of record does not change the committed snapshot.
+        """
+        _validate_record(record)
+        if self._committed:
+            raise ValueError("Scope is already committed")
+        self._capabilities().execute_commit(self, record)
+        self._committed = True
+
+    def scope(self, label: str) -> Scope:
+        """Attach an authored boundary; use with to release it after work drains."""
+        return self.child(label)
+
+    def iterations(self) -> Generator[Scope, None, None]:
+        """Yield fresh iterations, releasing each at next() or generator close.
+
+        Use a temporary generator in zip(values, env.iterations()) so break or
+        an exception drops it and closes the yielded boundary. A retained
+        generator must be explicitly closed by its owner.
+        """
+        while True:
+            with self.branch("iteration") as iteration:
+                yield iteration
 
     def _walk(self) -> list[Scope]:
         nodes: list[Scope] = [self]
@@ -199,7 +373,7 @@ class Scope:
             if self._closed:
                 return CancelResult(False, "scope not active", path)
             nodes = self._walk()
-            if "/" in label:
+            if "/" in label or label == self.path:
                 matches = [
                     node for node in nodes if node.path == label and not node._children
                 ]

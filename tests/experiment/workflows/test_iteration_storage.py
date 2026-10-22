@@ -18,21 +18,27 @@ def test_allocated_directory_and_author_files_survive_pause(tmp_path: Path) -> N
     attempts: list[int] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        directory = env.new_commit_dir()
-        assert directory.is_absolute() and directory.is_dir()
-        directories.append(directory)
-        (directory / "author.txt").write_text("author-owned", encoding="utf-8")
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            directory = iteration.dir
+            assert directory.is_absolute() and directory.is_dir()
+            directories.append(directory)
+            (directory / "author.txt").write_text("author-owned", encoding="utf-8")
 
-        def operation(ctx: CallContext) -> int:
-            attempts.append(1)
-            if len(attempts) == 1:
-                entered.set()
-                assert ctx.scope.stop.event.wait(10), "Pause stops the operation"
-            return 42
+            def operation(ctx: CallContext) -> int:
+                attempts.append(1)
+                if len(attempts) == 1:
+                    entered.set()
+                    assert ctx.scope.stop.event.wait(10), "Pause stops the operation"
+                return 42
 
-        result = completed(await env.call(operation))
-        assert (directory / "author.txt").read_text() == "author-owned"
-        await env.commit(Point(value=result.value), directory)
+            result = completed(await iteration.call(operation))
+            assert (directory / "author.txt").read_text() == "author-owned"
+            iteration.commit(Point(value=result.value))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     try:
         rig.start(script)
@@ -47,7 +53,7 @@ def test_allocated_directory_and_author_files_survive_pause(tmp_path: Path) -> N
         assert final.lifecycle == "done", final.reason
         assert len(directories) == 1
         assert attempts == [1, 1]
-        assert rig.engine.records("run")[0].directory == "commits/000001"
+        assert rig.engine.records("run")[0].directory == "iteration-000001"
         assert (directories[0] / "record.json").is_file()
     finally:
         rig.close()
@@ -64,7 +70,12 @@ def test_acquisition_without_writer_returns_run_record_without_committing(
         return 42
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        outcomes.append(completed(await env.run(acquire, Cfg())))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            outcomes.append(completed(await iteration.run(acquire, Cfg())))
+        finally:
+            iterations.close()
 
     try:
         rig.start(script)

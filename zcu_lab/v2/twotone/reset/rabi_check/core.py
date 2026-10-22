@@ -115,7 +115,7 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
             (3, len(gains)),
             on_update=lambda data: viewer.update(gains, reset_rabi_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             # 3. Both drives use the same gain sweep but distinct module names.
             modules = sched.cfg.modules
             modules.rabi_pulse.set_param(

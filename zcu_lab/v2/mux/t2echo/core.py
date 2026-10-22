@@ -59,7 +59,7 @@ from zcu_lab.v2.mux.t2echo import MuxT2EchoExp
 
 core = MuxT2EchoExp()
 result = core.run(cfg, context=context)
-context.cancel_signal.raise_if_error()
+context.scope.stop.raise_if_error()
 source = RunRecord(cfg=cfg, result=result)
 outcomes = core.analyze(
     source, core.Options(fit_method="fringe", fit_phase=True), plots=analysis_plots
@@ -294,7 +294,7 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 viewer.update(times, np.abs(data[row]))
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
-        with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals, scope=context.scope) as sched:
             # 3. Join each pulse stage so both shared waits start after all drives.
             length = sweep2param("length", cfg.delay)
             builder = (

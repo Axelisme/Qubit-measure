@@ -189,7 +189,7 @@ Readout DAC tones 與 ADC 頻率保持固定。Freq 座標按硬體 start/span/s
 Program 擁有 reps/rounds 平均；取資料時只經初始化後的 `MuxReadout.collect_iq` 取得平均 IQ。
 Freq 的 round hook 保留全 sweep 已完成 rounds 的平均；第一個 round 未完成時保留 NaN。
 Amp Rabi 的 round hook 保留目前點已完成 rounds 的平均，取消後未寫入點仍是 NaN。RunContext 的
-`cancel_signal.raise_if_error()` 區分 acquisition failure 與正常取消；有 partial data 不代表成功。
+`context.scope.stop.raise_if_error()` 區分 acquisition failure 與正常取消；有 partial data 不代表成功。
 Plots 以原始 index 命名 `measurement_i`，每條曲線用自己的座標，不靠 label 去重。
 Caller 負責 finish/release、組成含完整 cfg 的 RunRecord，以及保存 completion 狀態。
 
@@ -315,7 +315,7 @@ matrix的估計流程。
 1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
 2. 從 `context.plots.liveplot_1d("measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
 3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 使用 runner-owned cfg 副本，透過 `ProgramBuilder` acquire 並寫回 buffer。
-4. Schedule 接 `stop=context.cancel_signal`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.cancel_signal`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
+4. Schedule 接 `scope=context.scope`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.scope.stop`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
 
 Schedule／ProgramBuilder 的 buffer、program cfg、retry 與 partial-result 規則見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
@@ -348,7 +348,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 只有兩類「副本外操作」是有意保留的：
 
-- **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.cancel_signal)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
+- **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.scope.stop)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
 - **raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 另建 `ProgramV2Cfg(reps=cfg.shots, rounds=1, ...)`，保留原始 initial／relax delay，再交給 builder。Lookback 同樣另建 program cfg，固定 reps=1，rounds 沿用可編輯的實驗欄位。這些 runtime 固定值不出現在 Form。
 
 ---
@@ -417,7 +417,7 @@ distinct depths 時分析明確失敗。
 
 ## 外部中斷支援（cancel_flag）
 
-新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但本次 `RunContext.cancel_signal` 會攜帶第一個非取消錯誤 cause，GUI 與 Notebook 在提交成果前呼叫 `raise_if_error()`，不將失敗的 partial data 當成成功；retry 成功會清除 transient failure cause。
+新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但本次 `RunContext.scope.stop` 會攜帶第一個非取消錯誤 cause，GUI 與 Notebook 在提交成果前呼叫 `raise_if_error()`，不將失敗的 partial data 當成成功；retry 成功會清除 transient failure cause。
 
 - `AcquireOptions` 從 `zcu_tools.experiment.v2.runtime` 匯入。若使用 SNR early stop，將 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 傳給 `ProgramBuilder(...).build_and_acquire(options=AcquireOptions(stop_condition=...))`；runner 只在 completed round 寫入 buffer 後檢查，命中時呼叫 acquire-local `cancel_flag.set()`，保留目前 round 並讓 `Schedule.outcome` 維持 `completed`。
 - `singleshot/ge/core.py`、`singleshot/check/core.py` 的 raw-shot acquire path 不經 `ProgramBuilder.run_program(...)`，因此在實驗邊界直接傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。

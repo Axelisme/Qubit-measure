@@ -189,7 +189,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             dtype=np.complex128,
             on_update=update_view,
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for length, step in sched.scan("length", lengths.tolist()):
                 modules = step.cfg.modules
                 modules.qub_pulse.set_param("length", length)

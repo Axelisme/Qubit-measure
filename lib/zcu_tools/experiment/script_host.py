@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from zcu_tools.core.script_protocol import Answer, Question
 
-from .scope import Scope, parse_cancel_scope
+from .scope import Scope, ScriptCancelled, parse_cancel_scope
 from .stop_signal import CancelResult
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ class ScriptHost:
     """Run one authored coroutine on a caller-owned worker, without task cancel.
 
     scope is the caller-created workflow or recipe root with its catalog name.
-    The host creates and releases iteration/operation children under that root.
+    The host creates and releases operation children under the explicit receiver.
     on_change runs on the worker after pending-question/status changes; it must
     not block or reenter run(). It may notify an owner's condition/event.
     Constructing the host starts neither a thread nor an event loop. One host
@@ -95,7 +95,6 @@ class ScriptHost:
     ) -> None:
         self._on_change = on_change
         self._root = scope
-        self._iteration = self._root.branch("iteration")
         self._active: Scope | None = None
         self._epoch = 0
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -108,6 +107,7 @@ class ScriptHost:
         self._answer: asyncio.Future[Answer | None] | None = None
         self._gate: asyncio.Event | None = None
         self._paused = False
+        self._root_ack: CancelResult | None = None
 
     @property
     def status(self) -> ScriptStatus:
@@ -126,6 +126,16 @@ class ScriptHost:
         """Read the answerable request, or None before/after the explicit ask."""
         with self._lock:
             return self._pending
+
+    @property
+    def root(self) -> Scope:
+        """The caller-supplied root, identical to the workflow author's env."""
+        return self._root
+
+    @property
+    def live_paths(self) -> list[str]:
+        """Complete paths of every live leaf under the root."""
+        return self._root.live_paths
 
     @property
     def active_path(self) -> str:
@@ -160,6 +170,8 @@ class ScriptHost:
                     if not self._paused or self._root.cancelled:
                         self._gate.set()
                 return runner.run(self._execute(script))
+        except ScriptCancelled:
+            raise
         except BaseException as error:
             with self._lock:
                 self._error = error
@@ -174,23 +186,44 @@ class ScriptHost:
                     if self._error is not None
                     else "completed"
                 )
-                self._iteration.release()
             try:
                 self._changed()
             finally:
                 self._done.set()
 
-    async def call[T](self, fn: Callable[[CallContext], T]) -> CallResult[T]:
-        """Await fn(ctx) in an executor, always starting even with a stopped token.
+    async def call[T](
+        self,
+        fn: Callable[[CallContext], T],
+        *,
+        scope: Scope | None = None,
+        name: str | None = None,
+        on_completed: Callable[[CallResult[T]], None] | None = None,
+    ) -> CallResult[T]:
+        """Await cooperative executor work unless the root has been cancelled.
 
         Call only from this host's authored coroutine. fn must cooperatively
         drain before returning and preserve genuine failures. Returned partial
         values belong to the operation owner, not the scheduler. Every call gets
-        a fresh child token which is detached when that invocation completes.
+        a fresh child token under scope (root if omitted), detached on completion.
+        name explicitly labels that operation; no callable reflection occurs.
+        on_completed is a framework recording hook, not author control: after
+        fn returns, the owner loop invokes it once with the atomic CallResult,
+        before releasing the operation or raising ScriptCancelled for root stop.
+        It cannot await or reenter the host. fn failures skip the hook; fn/hook
+        failures propagate unchanged and take precedence over cancellation.
+        Root stop before admission raises without invoking fn or the hook.
         """
         loop = self._require_loop()
         await self.wait_until_resumed()
-        token = self._iteration.branch("operation")
+        if self._root.cancelled:
+            raise ScriptCancelled()
+        parent = self._root if scope is None else scope
+        ancestor = parent
+        while ancestor.parent is not None:
+            ancestor = ancestor.parent
+        if ancestor is not self._root:
+            raise ValueError("Call scope must belong to this host")
+        token = parent.branch("operation", name=name)
         self._active = token
         context = CallContext(token, self._epoch)
 
@@ -202,21 +235,27 @@ class ScriptHost:
                 )
 
         try:
-            return await loop.run_in_executor(None, invoke)
+            result = await loop.run_in_executor(None, invoke)
+            if on_completed is not None:
+                on_completed(result)
+            if self._root.cancelled:
+                raise ScriptCancelled()
+            return result
         finally:
             self._active = None
             token.release()
 
-    async def ask[A: Answer](self, question: Question[A]) -> A | None:
-        """Await a request-id-bound validated answer, or None after script cancel.
+    async def ask[A: Answer](self, question: Question[A]) -> A:
+        """Await a request-id-bound answer, raising ScriptCancelled on root stop.
 
         No timeout or default answer exists. A stopped script does not publish a
         question. Invalid answers leave the same request pending. Asking never
         authorizes writes. Nested/concurrent asks raise RuntimeError.
         """
         loop = self._require_loop()
+        await self.wait_until_resumed()
         if self._root.cancelled:
-            return None
+            raise ScriptCancelled()
         if self._pending is not None:
             raise RuntimeError("A question is already pending")
         expected = question.answer_type()
@@ -228,7 +267,9 @@ class ScriptHost:
         self._changed()
         try:
             answer = await future
-            return None if answer is None else question.parse_answer(answer)
+            if answer is None or self._root.cancelled:
+                raise ScriptCancelled()
+            return question.parse_answer(answer)
         finally:
             with self._lock:
                 self._pending = None
@@ -264,16 +305,6 @@ class ScriptHost:
 
         self._command(deliver)
 
-    async def commit(self) -> None:
-        """Wait for the pause gate, then detach and replace the iteration scope.
-
-        Recipe callers do not use this method. Script cancellation opens the
-        gate, so cleanup can commit without waiting for a subsequent Resume.
-        """
-        await self.wait_until_resumed()
-        self._iteration.release()
-        self._iteration = self._root.branch("iteration")
-
     async def wait_until_resumed(self) -> None:
         """Wait on the worker pause gate; script cancellation also opens it.
 
@@ -290,7 +321,8 @@ class ScriptHost:
 
         The iteration token stays clean. In-flight call still returns one
         CallResult with its starting epoch; workflow env owns discard/retry
-        policy. New calls and commit wait for Resume. No author task is cancelled.
+        policy. New async work waits for Resume; synchronous commit does not.
+        No author task is cancelled.
         """
 
         def apply() -> None:
@@ -317,30 +349,62 @@ class ScriptHost:
     def cancel(
         self, scope: str | None = None, *, expected: int | None = None
     ) -> CancelResult:
-        """Match and stop a live scope on the loop, acknowledging without drain.
+        """Acknowledge accepted cancellation, independently of author drain.
 
-        scope is a kind, kind#N, operation:name or exact live leaf path.
-        None selects the root kind; expected optionally guards its birth number.
-        run aliases the current operation. A successful root request also opens
-        the gate and releases Ask with None. Other targets leave parents running.
-        Invalid syntax raises ValueError; inactive/stale targets return a refusal.
-        Before run, script stop is retained; terminal hosts refuse further stops.
+        Child selectors match on the loop. Root requests latch the bit and the
+        typed root-path acknowledgement under this host's lock, then only post a
+        loop notification. The first caller never waits for that notification;
+        repeated requests return the same acknowledgement without posting again.
+        None selects the root; expected optionally guards its birth number.
+        run aliases the current operation. Root notification opens the gate and
+        releases Ask; the next async boundary raises ScriptCancelled. Other
+        targets leave parents running. Invalid syntax raises ValueError and
+        inactive/stale targets refuse. Terminal hosts still refuse further stops.
+        Completion and finally drain remain the responsibility of run()/close().
         """
         selector = self._root.kind if scope is None else scope
         label, _sequence = parse_cancel_scope(selector, expected)
+        if scope is None or (
+            label != "run" and label in {self._root.kind, self._root.path}
+        ):
+            return self._cancel_root(scope, expected=expected)
 
         def stop() -> CancelResult:
             if self._done.is_set():
                 return CancelResult(False, "scope not active", self.active_path)
-            result = self._root.cancel(selector, expected=expected)
-            if result.cancelled and label == self._root.kind:
-                if self._gate is not None:
-                    self._gate.set()
-                if self._answer is not None and not self._answer.done():
-                    self._answer.set_result(None)
-            return result
+            return self._root.cancel(selector, expected=expected)
 
         return self._command(stop, allow_idle=True)
+
+    def _cancel_root(
+        self, selector: str | None, *, expected: int | None
+    ) -> CancelResult:
+        with self._lock:
+            if self._done.is_set():
+                return CancelResult(False, "scope not active", self.active_path)
+            if selector is None:
+                if expected is not None and expected != self._root.sequence:
+                    return CancelResult(False, "sequence mismatch", self.active_path)
+                self._root.stop.set()
+            else:
+                result = self._root.cancel(selector, expected=expected)
+                if not result.cancelled:
+                    return result
+            if self._root_ack is None:
+                self._root_ack = CancelResult(
+                    True, "scope cancellation requested", self._root.path
+                )
+                if self._loop is not None:
+                    self._loop.call_soon_threadsafe(self._wake_root)
+            return self._root_ack
+
+    def _wake_root(self) -> None:
+        """Notify asyncio resources on their owner without reentering the author."""
+        with self._lock:
+            if self._gate is not None:
+                self._gate.set()
+            if self._answer is not None and not self._answer.done():
+                self._answer.set_result(None)
 
     def close(self) -> None:
         """Request script stop and cooperatively drain before returning off-worker.

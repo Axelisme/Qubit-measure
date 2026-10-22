@@ -117,7 +117,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
         )
 
         # 2. Bind the board gain sweep without changing the other probe settings.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.probe_pulse.set_param(
                 "gain", sweep2param("gain", sched.cfg.sweep.gain)

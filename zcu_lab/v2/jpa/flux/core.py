@@ -134,14 +134,14 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
         )
 
         # 2. Move the external flux bias before each readout comparison.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
                 if step.cfg.jpa_flux_dev is not None:
                     set_flux(
                         context.devices[step.cfg.jpa_flux_dev],
                         jpa_flux,
                         unit=step.cfg.flux_unit,
-                        stop=context.cancel_signal,
+                        stop=context.scope.stop,
                         progress=False,
                     )
 

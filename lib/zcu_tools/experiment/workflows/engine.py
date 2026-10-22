@@ -118,17 +118,21 @@ class Engine[C]:
         return self._current(run_id).resume()
 
     def stop(self, run_id: str) -> RunStatus:
-        """Stop cooperatively; release Ask with None and permit author cleanup."""
+        """Record Stop, set root and wake Ask without awaiting author cleanup."""
         return self._current(run_id).stop()
 
     def cancel(
-        self, run_id: str, scope: str = "script", *, expected: int | None = None
+        self, run_id: str, scope: str = "workflow", *, expected: int | None = None
     ) -> CancelResult:
         """Acknowledge a matching live scope; stale run IDs raise RunMismatch.
 
-        scope/expected use ScriptHost's label or label#N contract. Script requests
-        retain Stop lifecycle/journal semantics; narrower requests leave the
-        workflow running. Acknowledgement does not wait for cleanup.
+        scope defaults to the workflow root; scope/expected use Scope selectors.
+        Bare workflow Stop is accepted when the owner records and latches it,
+        then signals a still-live host. Acceptance survives host exit before owner
+        finalization. Numbered workflow and other scopes use atomic match/set; narrower
+        requests leave the workflow running. Valid terminal requests return a
+        typed scope-not-active refusal; invalid syntax raises ValueError. Storage
+        errors propagate and fail the run. No acknowledgement waits for cleanup.
         """
         return self._current(run_id).cancel(scope, expected=expected)
 

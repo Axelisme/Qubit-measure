@@ -371,7 +371,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             (2, cfg.shots),
             on_update=lambda data: draw_ge_scatter(context.plots, "measurement", data),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
                 modules = step.cfg.modules
                 probe_cfg = modules.probe_pulse if with_probe else None

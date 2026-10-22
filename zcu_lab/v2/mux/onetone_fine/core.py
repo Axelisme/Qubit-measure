@@ -169,7 +169,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
         context supplies connected soc/soccfg, plots and cancellation. The live
         plot shows one magnitude curve per selected tone. Returned complex IQ is
         averaged over reps and rounds, in active_tones order; unmeasured points
-        stay NaN after a stop. Call context.cancel_signal.raise_if_error() to
+        stay NaN after a stop. Call context.scope.stop.raise_if_error() to
         distinguish acquisition failure from a successful or stopped return.
         Invalid cfg or program settings raise.
         """
@@ -204,7 +204,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
         signals_buffer = SignalBuffer((len(dfs), len(tone_indices)), on_update=update)
 
         # 3. Rebuild reset -> mux readout at each offset, always from the base tones.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for df, step in sched.scan("df", dfs.tolist()):
                 readout = active_readout.with_updates(
                     tones=[

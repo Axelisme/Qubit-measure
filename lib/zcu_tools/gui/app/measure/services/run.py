@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from zcu_tools.datafile import RunMetadata
 from zcu_tools.device.base import BaseDevice
 from zcu_tools.experiment.acquisition import (
     capture_device_snapshot,
@@ -16,6 +15,8 @@ from zcu_tools.experiment.acquisition import (
     new_run_id,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadata
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope, parse_cancel_scope
 from zcu_tools.experiment.stop_signal import (
     CancelResult,
@@ -41,6 +42,7 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorageBinding
 
+from ..state import RunPaneState
 from .guard import RunInputs
 from .operation_gate import OperationKind
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
@@ -76,7 +78,6 @@ class _RunOperation:
     adapter_name: str
     storage: PointStorageBinding | None
     parameters: ParameterContext | None
-    metadata: RunMetadata | None = None
     partial_result: bool = False
 
 
@@ -184,7 +185,6 @@ class RunService:
                 op.tab_id,
                 result,
                 source_operation_id=self._active_token,
-                metadata=op.metadata,
                 parameters=op.parameters,
                 partial_result=op.partial_result,
             )
@@ -211,7 +211,7 @@ class RunService:
             return False
         return True
 
-    def _append_acquired(self, op: _RunOperation, result: object) -> None:
+    def _append_acquired(self, op: _RunOperation, result: RunRecord[Any, Any]) -> None:
         if result is NO_RESULT:
             return
         if op.storage is None:
@@ -221,7 +221,7 @@ class RunService:
                 op.tab_id,
             )
             return
-        metadata = op.metadata
+        metadata = result.metadata
         if metadata is None:
             logger.warning(
                 "Acquired omitted: tab_id=%r has no native acquisition evidence",
@@ -270,8 +270,8 @@ class RunService:
         logger.info("_on_run_cancelled: tab_id=%r", op.tab_id)
         # A cancelled run may still carry a partial result.
         if result is NO_RESULT:
-            retired = self._state.update_tab_result(
-                op.tab_id, None, partial_result=op.stop_signal.partial_result
+            retired = self._state.replace_run_pane(
+                op.tab_id, RunPaneState(partial_result=op.stop_signal.partial_result)
             )
             self._teardown_retired(retired)
             self._discard_plots(op, "Cancelled")
@@ -392,23 +392,23 @@ class RunService:
             else None
         )
 
-        def work(factory: Any) -> object:
+        def work(factory: Any) -> RunRecord[Any, Any]:
             # OperationRunner has acquired the hardware lease before submission.
             # A failed read rejects acquisition, including adapters without metadata.
             device_snapshot = capture_device_snapshot(context.devices)
+            metadata = None
             # Provenance uses only software/host and the cached SoC config.
             if (
                 snapshot is not None
                 and experiment_tag is not None
                 and run_id is not None
             ):
-                operation.metadata = RunMetadata(
+                metadata = RunMetadata(
                     run_id=run_id,
                     experiment=experiment_tag,
                     started_at=started_at.isoformat(),
                     finished_at=None,
                     completion="partial",
-                    labber_path=None,
                     snapshot=snapshot,
                     provenance=capture_software_provenance(context=context),
                     device_snapshot=device_snapshot,
@@ -421,12 +421,14 @@ class RunService:
             operation.partial_result = stop_signal.partial_result
             completion = "stopped" if operation.partial_result else "complete"
             finished_at = datetime.now(UTC)
-            if operation.metadata is not None:
-                operation.metadata = replace(
-                    operation.metadata,
-                    finished_at=finished_at.isoformat(),
-                    completion=completion,
+            if metadata is not None:
+                metadata = metadata.model_copy(
+                    update={
+                        "finished_at": finished_at.isoformat(),
+                        "completion": completion,
+                    }
                 )
+                return replace(result, metadata=metadata)
             return result
 
         spec = OperationSpec(

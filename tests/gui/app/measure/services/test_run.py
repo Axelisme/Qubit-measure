@@ -88,7 +88,7 @@ def test_run_started_and_terminal_events_keep_operation_origin(
     with bg.bus.origin(origin):
         token = svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
     assert bg.last_on_done is not None
-    bg.last_on_done(object())
+    bg.last_on_done(RunRecord(None, object()))
 
     assert [type(payload) for payload, _meta in observed] == [
         RunStartedPayload,
@@ -119,13 +119,15 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     q1, q2 = result_sources
     captured = None if context_free else q1
     tab = state.get_tab(tab_id)
-    state.update_tab_result(tab_id, object(), parameters=q2, source_operation_id=91)
+    state.update_tab_result(
+        tab_id, RunRecord(None, object()), parameters=q2, source_operation_id=91
+    )
     state.update_tab_analyze(tab_id, object(), None)
     state.set_context(replace(state.session_env, parameters=captured))
     inputs = make_inputs(state, tab_id, adapter)
     assert inputs.parameters is captured
     service, gate, background, _handles = make_run_service(state)
-    result = object()
+    result = RunRecord(None, object())
     adapter.run.return_value = result
     token = service.start_run(inputs, plots=make_plots())
 
@@ -169,7 +171,9 @@ def test_cancelled_run_without_data_keeps_no_previous_source(
     state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
     q1, q2 = result_sources
     tab = state.get_tab(tab_id)
-    state.update_tab_result(tab_id, object(), parameters=q1, source_operation_id=91)
+    state.update_tab_result(
+        tab_id, RunRecord(None, object()), parameters=q1, source_operation_id=91
+    )
     state.set_context(replace(state.session_env, parameters=q2))
     inputs = make_inputs(state, tab_id, adapter)
     service, _gate, background, _handles = make_run_service(state)
@@ -212,7 +216,7 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     state.get_tab(tab_id).cfg = cfg
     inputs = make_inputs(state, tab_id, adapter)
     svc, gate, bg, _ = make_run_service(state)
-    result = object()
+    result = RunRecord(None, object())
     adapter.run.return_value = result
     plots = make_plots()
 
@@ -332,7 +336,7 @@ def test_run_finished_emits_outcome_finished():
 
     # Trigger on_done without cancel → finished
     assert bg.last_on_done is not None
-    bg.last_on_done(object())
+    bg.last_on_done(RunRecord(None, object()))
 
     payload = last_run_finished_payload(bg.events)
     assert payload.tab_id == tab_id
@@ -360,7 +364,7 @@ def test_result_commit_failure_settles_run_as_failed(
     if cancel_requested:
         assert svc.cancel_run()
     assert bg.last_on_done is not None
-    bg.last_on_done(object())
+    bg.last_on_done(RunRecord(None, object()))
 
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
@@ -405,7 +409,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
                 .add(NoopModule("readout"))
                 .build_and_acquire()
             )
-        return object()
+        return RunRecord(None, object())
 
     adapter.run.side_effect = run_with_schedule_failure
     svc, _gate, bg, handles = make_run_service(state)
@@ -447,7 +451,7 @@ def test_cancel_run_stops_selected_flux_before_first_write():
                 progress=False,
                 stop_event=context.scope.stop.event,
             )
-        return object()
+        return RunRecord(None, object())
 
     adapter.run.side_effect = run_flux
     svc, _gate, bg, handles = make_run_service(state, devices={"run-dev": dev})
@@ -480,7 +484,7 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
             )
         if len(contexts) == 1:
             context.scope.stop.set_error("failed", "first run failed", None)
-        return object()
+        return RunRecord(None, object())
 
     adapter.run.side_effect = run_flux
     service, gate, background, handles = make_run_service(state, devices=devices)
@@ -514,7 +518,7 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
 
     # Simulate: cancel sets stop_event, then worker returns partial result
     svc.cancel_run()
-    partial = object()
+    partial = RunRecord(None, object())
     assert bg.last_on_done is not None
     bg.last_on_done(partial)
 
@@ -544,7 +548,7 @@ def test_bg_done_without_cancel_reports_finished():
     state, tab_id, adapter = make_state()
     svc, _gate, bg, _ = make_run_service(state)
     svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
-    result = object()
+    result = RunRecord(None, object())
 
     assert bg.last_on_done is not None
     bg.last_on_done(result)
@@ -560,7 +564,7 @@ def test_bg_done_after_cancel_reports_cancelled_with_partial():
     svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     svc.cancel_run()  # sets the captured stop_event
-    partial = object()
+    partial = RunRecord(None, object())
     assert bg.last_on_done is not None
     bg.last_on_done(partial)
 
@@ -571,7 +575,7 @@ def test_bg_done_after_cancel_reports_cancelled_with_partial():
 
 def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
     state, tab_id, adapter = make_state()
-    partial = object()
+    partial = RunRecord(None, object())
 
     def run_after_retry_reset(*_args: Any, context: RunContext) -> object:
         context.scope.stop.clear_stop()

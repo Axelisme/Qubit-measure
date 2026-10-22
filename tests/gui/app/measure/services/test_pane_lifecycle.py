@@ -60,6 +60,7 @@ from tests.gui.app.measure._pane_adapter import (
     PaneResult,
     PostResult,
 )
+from tests.gui.app.measure._record_support import require_record
 
 
 @pytest.fixture
@@ -134,7 +135,7 @@ def _state() -> tuple[State, str, MagicMock, SessionEnv]:
             cfg=make_form(Form(SavingCfg, {}), state=state),
         ),
     )
-    state.update_tab_result("tab", "run", parameters=ctx.parameters)
+    state.update_tab_result("tab", RunRecord(None, "run"), parameters=ctx.parameters)
     return state, "tab", adapter, ctx
 
 
@@ -407,12 +408,12 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
 
     new_ctx = SessionEnv(parameters=parameter_capture(), soc=None, soccfg=None)
     state.set_context(new_ctx)
-    state.get_tab(tab_id).run.result = "changed-after-start"
+    state.get_tab(tab_id).run.result = RunRecord(None, "changed-after-start")
     result = object()
     bg.on_done(result)
 
     request = adapter.get_writeback_items.call_args.args[0]
-    assert request.run_result == "run"
+    assert request.run_result.result == "run"
     assert request.ctx.parameters is captured_run_parameters
     assert state.get_tab(tab_id).analysis.result is result
     assert state.get_tab(tab_id).analysis.plots is plots
@@ -467,9 +468,11 @@ def analysis_panes(native_session: NativeSaveSession):
     state.get_tab(tab_id).adapter = adapter
     state.update_tab_result(
         tab_id,
-        _pane_source_with_excited_initial_state(),
-        metadata=replace(
-            native_session.metadata, experiment=SavingCore().persistence_spec().tag
+        replace(
+            _pane_source_with_excited_initial_state(),
+            metadata=native_session.metadata.model_copy(
+                update={"experiment": SavingCore().persistence_spec().tag}
+            ),
         ),
         parameters=_pane_capture(state.get_tab(tab_id).run.parameters),
     )
@@ -687,4 +690,4 @@ def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
     # tolerated: This load-capability fixture implements only the adapter surface exercised by the service.
     state.get_tab(tab_id).adapter = EnabledAdapter()  # pyright: ignore[reportAttributeAccessIssue]
     GuardService(state).check_load(tab_id)
-    assert state.get_tab(tab_id).run.result == "run"
+    assert require_record(state.get_tab(tab_id).run).result == "run"

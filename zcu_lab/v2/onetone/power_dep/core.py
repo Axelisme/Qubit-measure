@@ -135,7 +135,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
                 title=f"snr = {current_snr:.1f}" if current_snr else None,
             ),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
                 modules = cfg.modules

@@ -202,7 +202,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             on_update=lambda data: viewer.update(freqs, freq_signal2real(data)),
         )
 
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             modules = cfg.modules
 

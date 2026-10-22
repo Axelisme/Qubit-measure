@@ -84,7 +84,7 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
         Return repetition-averaged IQ in (round, seed, arm, depth) order for
         decay-ratio target-error analysis; unfinished slots remain NaN.
         Each seed/arm program is cached, with hardware depth/reps and host rounds.
-        Acquisition errors are recorded on context.cancel_signal.
+        Acquisition errors are recorded on context.scope.stop.
         """
         # 1. Pair both arms on the same reproducible seeds and depth axis.
         run_cfg = deepcopy(cfg)
@@ -111,7 +111,7 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
         )
         cache: dict[tuple[int, int], ModularProgramV2] = {}
         program_cfg = run_cfg.with_updates(rounds=1)
-        with Schedule(run_cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(run_cfg, buffer, scope=context.scope) as sched:
             for round_index, round_step in sched.repeat("round", run_cfg.rounds):
                 for seed_index, (seed, seed_step) in enumerate(
                     round_step.scan("seed", seeds.tolist())

@@ -43,7 +43,7 @@ Recipe 的 Report 由作者選欄位，不另宣告 SummaryElements 或 estimate
 
 所有 lab async def 的 await 只允許 env／tab／session 呼叫或靜態解析到 lab 定義的 async helper，helper 可以再呼叫 helper。Quality gate 全掃本文，不分 recipe、workflow 或 helper。明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫不論有無 await 都拒絕，其他 async with／async for 不另禁。這是 AST guardrail，不追蹤 assignment aliases、動態分派或包裝，不是完整 type checker。作者仍須遵守序列執行契約，詳見 [recipes](recipes/README.md)。
 
-Run scope cancel 回 partial 後繼續；script cancel 無結果的 Analyze／Ask raise 普通 RecipeCancelled，不是 CancelledError。作者不寫取消分支，已有 Run 的 finally 仍可同步 Save。取消終態回 cancelled、report=null 與 runs，不把 await 結果改成 Optional。
+Run scope cancel 回 partial 後繼續；script cancel 無結果的 Analyze／Ask raise 普通 ScriptCancelled，不是 CancelledError。作者不寫取消分支，已有 Run 的 finally 仍可同步 Save。取消終態回 cancelled、report=null 與 runs，不把 await 結果改成 Optional。
 
 [`v2`](v2/README.md) 是實驗的使用者 namespace。每個實驗的 core 與可選 GUI、notebook 附件放在同一資料夾。Core 不依賴 GUI。
 
