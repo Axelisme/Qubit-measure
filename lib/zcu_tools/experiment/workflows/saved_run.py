@@ -155,6 +155,28 @@ class SavedPoint[P]:
         return self.record_path.parent
 
 
+def read_summary(run: Path) -> EncodedRecord | None:
+    """Read the author's encoded return from the exact metadata run directory.
+
+    A missing summary.json means no persisted return and yields None. A missing
+    run directory raises FileNotFoundError; a nondirectory raises
+    NotADirectoryError. Malformed data raises ValueError naming summary.json.
+    Other I/O errors propagate. No journal or native data files are inspected.
+    """
+    directory = run.resolve(strict=True)
+    if not directory.is_dir():
+        raise NotADirectoryError(directory)
+    source = directory / "summary.json"
+    try:
+        payload = source.read_bytes()
+    except FileNotFoundError:
+        return None
+    try:
+        return TypeAdapter(EncodedRecord).validate_json(payload)
+    except ValueError as error:
+        raise ValueError(f"{source}: {error}") from error
+
+
 def read_manifest(run: Path, workflow: str) -> SavedManifest:
     """Read run/manifest.json and reject wrong workflow/roots/UTC identity.
 
