@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from inspect import isfunction
-from typing import Protocol
+from inspect import iscoroutinefunction, signature
+from typing import Protocol, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from .env import InitEnv, WorkflowEnv
+from .env import WorkflowEnv
 from .models import Step
+from .tunables import Live
 
 _METADATA_ATTRIBUTE = "__workflow_definition__"
 
@@ -27,68 +27,101 @@ class WorkflowStep[P, T, S, R, C](Protocol):
     ) -> Step[S, R]: ...
 
 
+class WorkflowScript[P, T, Summary: BaseModel | None, C](Protocol):
+    """An async author receiving fixed plan and live tunables, returning a summary.
+
+    Await env operations and commit BaseModel records explicitly. Unhandled
+    exceptions fail the run; returning a value completes it without a new record.
+    """
+
+    async def __call__(self, env: WorkflowEnv[C], plan: P, tun: Live[T]) -> Summary: ...
+
+
 @dataclass(frozen=True)
-class WorkflowDefinition[P: BaseModel, T: BaseModel, S, R, C]:
+class WorkflowDefinition[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
     """Declaration-owner metadata retaining the callable's generic pairing.
 
     name is the nonempty catalog name. plan/tunables are validated model types.
-    init builds deepcopy-able state from InitEnv and plan without effects.
-    Its return and step's signature supply the state/record generic pairing;
-    no runtime state or record type declaration is required. step is the original
-    decorated function. The owner retrieves metadata; callers never cast it.
+    description is authored catalog help. script is the original coroutine;
+    its annotations infer plan/tunables and preserve the returned Summary type.
+    Record types belong to individual commit calls, not the declaration.
     """
 
     name: str
     plan: type[P]
     tunables: type[T]
-    init: Callable[[InitEnv[C], P], S]
-    step: WorkflowStep[P, T, S, R, C]
+    description: str
+    script: WorkflowScript[P, T, Summary, C]
 
 
-def workflow[P: BaseModel, T: BaseModel, S, R, C](
-    name: str,
-    *,
-    plan: type[P],
-    tunables: type[T],
-    init: Callable[[InitEnv[C], P], S],
-) -> Callable[[WorkflowStep[P, T, S, R, C]], WorkflowStep[P, T, S, R, C]]:
-    """Declare a workflow without wrapping its function or running init.
+def workflow(name: str, description: str) -> WorkflowDecorator:
+    """Attach signature-derived metadata without executing or wrapping a script.
 
-    name must be nonempty. plan must be a frozen extra-forbid Pydantic model.
-    All tunables model layers must forbid extras and contain only JSON scalar
-    leaves, nested models, lists, or tuples. init's return and step's signature
-    infer state/record types; state only needs to support deepcopy at runtime.
-    Port availability is not guaranteed: authors may check it at step entry,
-    and missing ports fail when accessed. Invalid declarations raise ValueError;
-    a non-function step raises TypeError. No global catalog is populated.
+    The coroutine must take exactly (env, plan, tun), annotated WorkflowEnv[C],
+    frozen extra-forbid Plan, and Live[extra-forbid Tunables], and annotate its
+    return. Tunables contain JSON scalar leaves, nested models, lists or tuples.
+    Invalid models/signatures raise ValueError; non-coroutines raise TypeError.
+    name must be nonempty. No global registry is populated.
     """
-    _validate_declaration(name, plan, tunables)
-
-    def decorate(
-        step: WorkflowStep[P, T, S, R, C],
-    ) -> WorkflowStep[P, T, S, R, C]:
-        if not isfunction(step):
-            raise TypeError("Workflow step must be a Python function")
-        if getattr(step, _METADATA_ATTRIBUTE, None) is not None:
-            raise ValueError("Workflow step is already declared")
-        definition = WorkflowDefinition(name, plan, tunables, init, step)
-        setattr(step, _METADATA_ATTRIBUTE, definition)
-        return step
-
-    return decorate
+    return WorkflowDecorator(name, description)
 
 
-def workflow_definition[P: BaseModel, T: BaseModel, S, R, C](
-    step: WorkflowStep[P, T, S, R, C],
-) -> WorkflowDefinition[P, T, S, R, C]:
+@dataclass(frozen=True)
+class WorkflowDecorator:
+    """Preserve each script's generic pairing while checking runtime annotations.
+
+    name and description become catalog metadata on the original coroutine.
+    This callable is returned by workflow; it does not register or execute code.
+    """
+
+    name: str
+    description: str
+
+    def __call__[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C](
+        self, script: WorkflowScript[P, T, Summary, C]
+    ) -> WorkflowScript[P, T, Summary, C]:
+        """Validate the async author signature and attach its declaration once."""
+        if not iscoroutinefunction(script):
+            raise TypeError("Workflow author must be a coroutine function")
+        if getattr(script, _METADATA_ATTRIBUTE, None) is not None:
+            raise ValueError("Workflow script is already declared")
+        parameters = tuple(signature(script).parameters)
+        if parameters != ("env", "plan", "tun"):
+            raise ValueError("Workflow signature must be (env, plan, tun)")
+        hints = get_type_hints(script)
+        if get_origin(hints.get("env")) is not WorkflowEnv:
+            raise ValueError("Workflow env must be annotated WorkflowEnv[C]")
+        if "plan" not in hints:
+            raise ValueError("Workflow plan must be annotated with a model")
+        plan = hints["plan"]
+        live = hints.get("tun")
+        if get_origin(live) is not Live or len(get_args(live)) != 1:
+            raise ValueError("Workflow tun must be annotated Live[Tunables]")
+        tunables = get_args(live)[0]
+        if "return" not in hints:
+            raise ValueError("Workflow must annotate its returned summary")
+        _validate_declaration(self.name, plan, tunables)
+        definition = WorkflowDefinition(
+            self.name, plan, tunables, self.description, script
+        )
+        setattr(script, _METADATA_ATTRIBUTE, definition)
+        return script
+
+
+def workflow_definition[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C](
+    script: WorkflowScript[P, T, Summary, C],
+) -> WorkflowDefinition[P, T, Summary, C]:
     """Retrieve declaration metadata tied to this exact original callable.
 
     Undeclared functions, copied metadata, and invalid attributes raise ValueError.
     Reflection and heterogeneous metadata stay in this owner; the caller's
     callable signature supplies the generic pairing, without a cast.
     """
-    definition = getattr(step, _METADATA_ATTRIBUTE, None)
-    if not isinstance(definition, WorkflowDefinition) or definition.step is not step:
+    definition = getattr(script, _METADATA_ATTRIBUTE, None)
+    if (
+        not isinstance(definition, WorkflowDefinition)
+        or definition.script is not script
+    ):
         raise ValueError("Workflow function is not declared")
     return definition
 
@@ -103,11 +136,11 @@ class WorkflowRegistry:
     def __init__(self) -> None:
         self._names: dict[str, None] = {}
 
-    def add[P: BaseModel, T: BaseModel, S, R, C](
-        self, step: WorkflowStep[P, T, S, R, C]
+    def add[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C](
+        self, script: WorkflowScript[P, T, Summary, C]
     ) -> None:
-        """Register a declared function; reject undeclared or duplicate names."""
-        definition = workflow_definition(step)
+        """Register a declared coroutine; reject undeclared or duplicate names."""
+        definition = workflow_definition(script)
         if definition.name in self._names:
             raise ValueError(f"Duplicate workflow name: {definition.name!r}")
         self._names[definition.name] = None
@@ -119,18 +152,23 @@ class WorkflowRegistry:
 
 def _validate_declaration(
     name: str,
-    plan: type[object],
-    tunables: type[object],
+    plan: object,
+    tunables: object,
 ) -> None:
     if not name.strip():
         raise ValueError("Workflow name must not be empty")
-    if not issubclass(plan, BaseModel) or (
-        plan.model_config.get("frozen") is not True
-        or plan.model_config.get("extra") != "forbid"
+    if (
+        not isinstance(plan, type)
+        or not issubclass(plan, BaseModel)
+        or (
+            plan.model_config.get("frozen") is not True
+            or plan.model_config.get("extra") != "forbid"
+        )
     ):
         raise ValueError("Workflow plan must be a frozen extra-forbid model")
     if (
-        not issubclass(tunables, BaseModel)
+        not isinstance(tunables, type)
+        or not issubclass(tunables, BaseModel)
         or tunables.model_config.get("extra") != "forbid"
     ):
         raise ValueError("Workflow tunables must be an extra-forbid model")
