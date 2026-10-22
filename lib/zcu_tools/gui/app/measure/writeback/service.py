@@ -3,8 +3,7 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
-from itertools import count
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import JsonValue
@@ -32,8 +31,6 @@ from .items import ModuleWriteback, ParameterWriteback, SampleWriteback, Writeba
 logger = logging.getLogger(__name__)
 
 _GUI_ORIGIN = CommandOrigin("gui")
-# Process-local monotonic revisions also distinguish replacement drafts.
-_REVISIONS = count(1)
 
 
 # Kind prefixes are deliberately draft-local. Two independent drafts can both
@@ -120,7 +117,6 @@ class _DraftEntry:
     """
 
     item: WritebackItem
-    revision: int = field(default_factory=lambda: next(_REVISIONS))
     form: ModuleEntryForm | None = None
     # S2 display-only baseline — not on WritebackItem, not persisted/wire.
     current_summary: str | None = None
@@ -155,7 +151,6 @@ class WritebackDraft:
         "_parameters",
         "_run_source",
         "_unavailable_reasons",
-        "_revision",
     )
 
     def __init__(
@@ -173,16 +168,6 @@ class WritebackDraft:
         self._entries = entries
         self._parameters = parameters
         self._closed = False
-        self._revision = next(_REVISIONS)
-
-    @property
-    def revision(self) -> int:
-        """Process-local draft revision; edits and replacement never reuse a value.
-
-        Module Form writes and commands advance it through their subscription.
-        Preview reads do not advance it. It is evidence, not write permission.
-        """
-        return max((self._revision, *(entry.revision for entry in self._entries)))
 
     @property
     def parameters(self) -> ParameterContext | None:
@@ -254,7 +239,6 @@ class WritebackDraft:
         """
         self.require_owner(service, allow_closed=True)
         self._closed = True
-        self._revision = next(_REVISIONS)
 
     @property
     def is_active(self) -> bool:
@@ -534,7 +518,6 @@ class WritebackService:
         item = entry.item
         if selected is not None and selected != item.selected:
             item.selected = selected
-            entry.revision = next(_REVISIONS)
         if target_name is not None and target_name != item.target_name:
             item.target_name = target_name
             self._mark_unapplied(entry)
@@ -713,28 +696,18 @@ class WritebackService:
 
         Call synchronously on the owner thread; no yield separates validation
         from application. Unknown/duplicate IDs, foreign/closed/repeated drafts
-        and stale revisions raise before any write. A stale error lists changed
-        draft revisions. Do not edit or restore proposals here. Write failures
+        raise before any write. Use current draft values and destinations;
+        do not edit or restore proposals here. Write failures
         return the confirmed prefix and diagnostic, without retry or rollback.
         """
         seen: set[WritebackDraft] = set()
-        changed: list[str] = []
-        for index, selection in enumerate(selections):
+        for selection in selections:
             draft = selection.draft
             self._require_draft(draft)
             if draft in seen:
                 raise InvalidInputError("Repeated captured writeback draft")
             seen.add(draft)
             _entries_to_apply(draft.entries_for(self), selection.ids)
-            if draft.revision != selection.expected_revision:
-                changed.append(
-                    f"group {index} IDs {selection.ids}: revision {selection.expected_revision} -> {draft.revision}"
-                )
-        if changed:
-            raise FailedPreconditionError(
-                "writeback draft changed: " + "; ".join(changed),
-                reason_code="writeback_changed",
-            )
         applied: list[tuple[str, ...]] = [() for _ in selections]
         for index, selection in enumerate(selections):
             try:
@@ -995,4 +968,3 @@ class WritebackService:
     @staticmethod
     def _mark_unapplied(entry: _DraftEntry) -> None:
         entry.applied = False
-        entry.revision = next(_REVISIONS)

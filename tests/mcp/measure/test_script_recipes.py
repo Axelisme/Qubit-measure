@@ -809,7 +809,6 @@ def test_mapping_writeback_round_trips_without_guessing_or_mutating_owner_values
         if method == "tab.writeback_preview":
             return {
                 "has_draft": True,
-                "revision": 1,
                 "items": [
                     {
                         "id": "param-0",
@@ -855,8 +854,6 @@ def test_mapping_writeback_round_trips_without_guessing_or_mutating_owner_values
             for method, params in client.transport.sent
             if method == "tab.writeback_accept"
         ]
-        assert writes == [
-            [{"subtab_id": "analysis", "expected_revision": 1, "ids": ["param-0"]}]
-        ]
+        assert writes == [[{"subtab_id": "analysis", "ids": ["param-0"]}]]
     finally:
         client.context.session.close()

@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0075 — Agent 介面分層
 
-**狀態：** accepted。使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層及已落實的 recipe 契約；workflow 的 agent yield 仍是方向，見「現況與後續」。不新增工具、不改 method policy，也不授權硬體操作。
+**狀態：** accepted。使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層、recipe 與 workflow 的共用 async host、Ask 及取消契約。不新增工具、不改 method policy，也不授權硬體操作。
 **關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [[0062]]。
 
 ## 問題
@@ -26,20 +26,20 @@ Measure、workflows、fluxdep 與 dispersive 的 MCP 各自提供工具，[[0068
 | L0 實驗環境與硬體 | SoC、儀器 driver、program 執行 | 沒有直接入口，只能經由 L1 的 owner | 不適用 |
 | L1 GUI／Notebook | 儀器控制、實驗建立、完整 cfg、實驗參數、單次分析與保存 | Measure 的 `rpc_list`／`rpc_describe`／`rpc_call`、`device_setup`、`simulation_initialize`、`tab_analyze`、`tab_interact`、`apply_writeback` | 一次實驗是多步流程，agent 可以在任兩步之間介入 |
 | L2 Recipe | 操作 GUI tab 的腳本，可串多個 tab 與實驗 | Measure 的各 recipe 工具，搭配 `recipe_guide`、`status`、`wait`、`answer`、`cancel(scope)` | Agent 控制輸入、接受輸出，中途只在 recipe 明確提問或互動交接時協作 |
-| L3 Workflow | 一次設定，執行跨多組實驗的流程，例如 overnight、T1 over flux | Workflows MCP 的 Start、Pause、Resume、Stop 與 tunables | 現行以 Pause／Stop 和 tunables 介入；由 workflow 明確 yield 給 agent 是尚未落實的方向 |
+| L3 Workflow | 一次設定，執行跨多組實驗的流程，例如 overnight、T1 over flux | Measure MCP 的 workflow 工具與 answer | Workflow 以 Ask 決定提問位置；agent 另可用 Pause／Resume／Stop 與 tunables 介入 |
 | L3 跨實驗整合分析 | 整合多次量測的資料做聯合分析，例如 flux-dependence fit | Fluxdep MCP 的決策點工具；dispersive MCP 只讀 | 分析步驟由 agent 驅動，順序不固定；agent 的判斷落在宣告的決策點，程式能判斷的事不交給 agent |
 
 Notebook 是使用者在 L1 的入口，agent 目前不經 Notebook 操作。
 
 ### Agent 介入點
 
-正常使用時，agent 只提供真正需要它判斷的資訊。自動推導得出的參數由 recipe 或 workflow 補齊，agent 不必逐一傳入。Recipe 在已宣告的判斷交接處停下，把資訊和選項交給 agent。Workflow 的同類 agent 交接尚未落實。
+正常使用時，agent 只提供真正需要它判斷的資訊。自動推導得出的參數由 recipe 或 workflow 補齊，agent 不必逐一傳入。Recipe 與 workflow 在作者明填的 Ask 處停下，把問題與 answer schema 交給 agent。
 
 L1 與 L2 的差別在於誰決定介入點。L1 由 agent 決定，它可以在任兩步之間停下、讀取或修改。L2 由 recipe 決定，只在明確需要 agent 的位置交還控制權，其餘步驟自動執行。交接可以落在輸入端（缺少必要參數）、中途（互動分析交接 tab，agent 以 `tab_interact` 完成選取）或輸出端（寫回確認）。Agent 需要在 recipe 沒有交接的位置調整步驟時，改用 L1。
 
 Recipe 作者以 `await tab.run()` 與 `await tab.analyze(stage, result=T)` 等待工作結果，不表示每一步都要 agent 回答。互動分析以 `interactive=True` 明確交接 GUI tab。`await tab.ask_writeback()` 或 `await session.ask(question)` 才是等待 agent 或使用者回答的提問。回答本身不寫入資料，作者接受寫回時另呼叫同步 `tab.accept_writeback(items)`。取消不回傳 cancelled 分支給作者，作者以 `finally` 保存已有的 Run，終態與 runs 由 runtime 回報。
 
-L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 workflow 決定在哪裡交還控制權。一次執行跨越多次實驗，交接可出現在實驗之間或之內。現行 `yield from env.<effect>` 是交給 Engine 的工作請求，不是交給 agent 的提問，也不表示 workflow 已提供 `ask`。
+L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次實驗，交接可出現在實驗之間或之內。`await env.run(...)` 等待 Engine 執行工作，`await env.ask(question)` 才是交給 agent 的提問。
 
 2026-10-21 使用者修正 L2 與 L3 的定位與協作模型。以下保留當時的協定術語，現行 async 契約見下節。推導見 [Recipe 接口重設計](../discussions/2026-10-21-recipe-interface-redesign.md)、[三角色協定](../discussions/2026-10-21-three-role-protocol.md)、[Workflow 定位與承載](../discussions/2026-10-21-workflow-positioning-and-hosting.md)。
 
@@ -48,7 +48,7 @@ L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 wo
 - Recipe 執行分兩層：驅動引擎與實驗語義解耦，只處理 yield 流程；便利層提供 `run`／`analyze`／`ask_writeback` 等語法。原話：「recipe執行要分兩層，一層是驅動引擎，與實驗語義解耦，只負責處理yield的流程。另外一層利用前者，提供run/analysis/ask_writeback等便利語法」。Recipe inputs 的欄位由作者定義意義，框架不設帶 overrides 的基底。原話：「overrides不該出現在base class中，超過負責的範疇了」。
 - Workflow 由 measure-gui 承載（同程序、同 session、同 RUN lease、同 MCP server），步驟不經 measure tab 執行。原話：「我也傾向B+D」（B 嵌入 measure-gui）。
 
-以上保留 2026-10-21 的討論原話。當時的 `Wait`／`Ask`／`Signal` 與 yield 描述已由下節的 async host 契約取代。Recipe 的公開契約見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)。尚未遷移的 workflow 仍使用原有 Engine，後 land 的遷移負責移除舊 driver。
+以上保留 2026-10-21 的討論原話。當時的 `Wait`／`Ask`／`Signal` 與 yield 描述已由下節的 async host 契約取代。Recipe 的公開契約見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)，workflow 的作者面見 [workflow README](../../lib/zcu_tools/experiment/workflows/README.md)。
 
 跨實驗整合分析與 workflow 同屬 L3，但不由 workflow 決定 yield。Fluxdep 是獨立、可選的分析 app，不併入 measure 或 workflows。Agent 在資料可用性、對齊、採樣、躍遷假設、驗收與剔除六個決策點介入，各步可以重做。程式處理前置條件、計算與發布；agent 判讀證據並選下一步。人與 agent 共駕同一份 application state，寫入由 [[0070]] 的 holder 控制。
 
@@ -128,20 +128,23 @@ Agent 可以讀這些狀態來判斷，但後續實驗取用參數時，以共�
 
 ### Captured writeback acceptance
 
-Recipe 的問答只接受捕捉時的候選，不接受回答時已改動的 GUI draft。
-Preview 回 owner 的 draft revision。Recipe 將各 pane 的 revision 與穩定 item IDs 一次交給
-`tab.writeback_accept`，GUI owner 在同一次提交檢查全部 Primary／Post drafts，通過才寫第一筆。
-編輯 target、parameter value、selection 或 module Form 都升號，替換 draft 不重用 revision。
-任一過期就拒絕整批，不把 draft 改回舊值。通過後按 Primary、Post、各 pane 的候選順序寫，
+Recipe 的問答捕捉候選，接受時以穩定 item IDs 寫入 owner 當下 draft 的值與目的地。
+GUI／MCP 採所有權模型。問答期間的 draft 編輯或替換是 holder 的意圖，不觸發 stale 拒絕。
+Preview 不回 revision，`tab.writeback_accept` 不帶 `expected_revision`，也不還原捕捉時的 proposal。
+Recipe 將全部 Primary／Post 選定 IDs 一次交給這個 RPC。GUI owner 在同一次提交檢查全部 IDs，
+unknown／duplicate 在第一筆寫入前拒絕。通過後按 Primary、Post、各 pane 的候選順序寫入，
 首錯停止，收據保留成功前綴與診斷，不 retry／rollback。
 單 pane L1 `writeback_set`／`writeback_write` 繼續編輯並寫入當前 draft。
 
 收據用 owner item ID 關聯確認項目，不將 authored alias 名稱與 concrete target 比較。
+`WritebackReceipt.items` 是成功 ID 對應的原捕捉候選，不是實際寫入值快照。
+RPC 回覆仍只確認成功 IDs。實際值與目的地取提交當下的 owner draft，不擴 wire 回 actual value。
 作者處理 failed receipt，或以 `raise_for_error()` 保留診斷並終止流程，finally 仍 Save。
 Report 不以 answer.accepted 宣稱已寫入。Full execution details 保留每次接受收據。
 
-2026-10-22 設計代裁：「任何一筆被 `writeback_set` 改過或被替換 → 整批拒絕並回報哪些變了，不覆蓋回舊值強寫。」
-同日補充：「recipe 的 `accept_writeback` 只走 `writeback_accept`。」
+2026-10-23 使用者裁定：「0464沒意義，目前gui/mcp是所有權模型，如果中途改了writeback那就是agent有意的」「那本來就該接受。」
+本裁定取代 2026-10-22 的 revision 綁定與 stale 拒絕。跨 pane 一次提交保留，recipe 的 `accept_writeback` 只走 `writeback_accept`。
+Tunables Apply 的 revision 是另一機制，見 [[0062]]，不受本裁定影響。
 
 ### 自動推導的 owner
 
@@ -220,8 +223,8 @@ Skill 放流程與完成條件，每個決策點保留最小判準，並指向�
 
 ## 現況與後續
 
-- Workflow 的 agent yield 尚未落實。現行 L3 workflow 把接受度寫在 workflow 定義與 tunables 中，校準失敗或 fit 不被接受時提交具名 reason，agent 可用 Pause／Stop 與 tunables 介入，不能回答 workflow 的 agent 提問。2026-10-12 使用者說明另有 task 正在重構 workflow 並實作此協作。Yield 的介面以該實作為準，本篇不先行規定。
-- 核准方向是無人回應時停在 yield。2026-10-12 使用者裁定：「就卡住，有需求再加設計。」Workflow yield 後沒有 agent 或使用者回應時，流程停在該處等待。套用預設決定、逾時或跳過等機制，等有具體需求再設計。因此含 yield 的 workflow 在無人值守時可能整段停住，overnight 流程要靠宣告的接受度減少 yield。
+- Recipe 與 workflow 共用 Ask。Agent 用 request_id 回答同一 worker 上的問題，不另起 execution segment。GUI 與 MCP 投影同一 pending question，錯誤或過期回答不消耗問題。
+- 無人回應時，Ask 停在原處等待。2026-10-12 使用者裁定：「就卡住，有需求再加設計。」Ask 不套預設決定、不逾時或跳過。根取消以 ScriptCancelled 解開等待。因此含 Ask 的 workflow 在無人值守時可能整段停住，overnight 流程要靠宣告的接受度減少提問。
 - L0 邊界只靠政策維持。Agent 有 shell 時，技術上仍可繞過 MCP 碰觸硬體。目前由 MEASUREMENT 角色規則約束「不以分析腳本旁路控制硬體」。2026-10-12 使用者裁定：「有需要再加設計。」出現具體失敗類別時，再升級成權限設定或執行期強制。
 
 ## 取捨

@@ -112,7 +112,6 @@ class SyntheticGui:
         if method == "tab.writeback_preview":
             return {
                 "has_draft": True,
-                "revision": 1,
                 "items": [
                     {
                         "id": "param-0",

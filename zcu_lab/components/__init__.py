@@ -17,7 +17,7 @@ from .base import (
 )
 from .fluxonium import QubitSchema
 from .jpa import JpaSchema
-from .mux import MuxGroupSchema
+from .mux import MuxGroupSchema, MuxWiringSchema
 from .qubit import QubitBaseSchema, QubitWiringSchema
 from .resonator import ResonatorSchema
 from .transmon import TransmonSchema
@@ -30,6 +30,7 @@ __all__ = [
     "Frequency",
     "JpaSchema",
     "MuxGroupSchema",
+    "MuxWiringSchema",
     "PumpPower",
     "QubitBaseSchema",
     "QubitSchema",

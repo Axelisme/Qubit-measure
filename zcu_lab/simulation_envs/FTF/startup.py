@@ -29,6 +29,7 @@ from zcu_lab.components.fluxonium import QubitSchema
 def startup(ctx: StartupContext) -> None:
     """Select ftf-demo/initial, seeding it from the template on first use.
 
+    The template seeds MG12 mux gen1 and ADCs [1, 2] in resonator order.
     The GUI is then ready for the user to open experiment tabs.
 
     ctx is the GUI's typed startup capability, called on its background worker
