@@ -69,6 +69,7 @@ class RecordEnvelope:
     directory is data-root-relative commits/<allocation number>. committed_at
     is UTC. started retains scope identity and actual tunables reads.
     record_type keys the informational manifest schema. record is encoded JSON.
+    operations lists actual executor attempts in this committed scope.
     format/version identify the record file schema.
     """
 

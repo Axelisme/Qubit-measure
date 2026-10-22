@@ -46,8 +46,9 @@ logger = logging.getLogger(__name__)
 class PendingQuestion(TypedDict):
     """Detached Ask envelope for GUI and wire consumers.
 
-    question_type is the authored class name. question contains only authored
-    fields. answer_schema is the driver's declared Answer model JSON schema.
+    request_id is the exact host question ID required by answer. question_type
+    is the authored class name. question contains only authored fields.
+    answer_schema is the declared Answer model JSON schema.
     None, rather than an empty envelope, denotes no currently answerable Ask.
     """
 
@@ -75,7 +76,7 @@ class QuestionExchange:
 def _answer_model[C](
     engine: Engine[C], run_id: str, value: Answer | JsonValue, *, request_id: str
 ) -> Answer:
-    """Decode only the answer carrier; Engine/driver own model field validation."""
+    """Decode the carrier; Engine owns exact request matching and field validation."""
     if isinstance(value, Answer):
         return value
     if not isinstance(value, dict):
@@ -139,7 +140,7 @@ class WorkflowController[F: FormModel, C]:
         acceptance) and the original producer error, if any. Terminal cleanup
         fixes the native handle outcome and releases admission/lease/progress
         before notification. View errors are logged and do not alter outcome or
-        binding. Paused notification retains ownership. Callback reentry may
+        binding. Pause and Ask retain the original worker until terminal delivery. Callback reentry may
         Stop, or Start a replacement after terminal cleanup; no old binding is
         written after notification. No instrument call occurs here.
         """

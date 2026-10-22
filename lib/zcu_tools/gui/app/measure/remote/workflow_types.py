@@ -4,7 +4,9 @@ from typing import Literal, TypedDict
 
 from pydantic import JsonValue
 
-from zcu_tools.experiment.workflows import CommittedRecord, RunStatus
+from zcu_tools.datafile import JsonObject
+from zcu_tools.experiment.workflows import CommittedRecord, OperationFact, RunStatus
+from zcu_tools.experiment.workflows.models import OperationKind, OperationOutcome
 
 
 class EncodedRecordReply(TypedDict):
@@ -13,6 +15,22 @@ class EncodedRecordReply(TypedDict):
     mode: Literal["json", "repr"]
     value: JsonValue
     error: str | None
+
+
+class OperationReply(TypedDict):
+    """One native attempt; UTC timestamps are ISO text, snapshot is JSON or None.
+
+    kind identifies the operation helper; attempt counts actual executor starts
+    within this commit scope. outcome/reason retain native delivery classification.
+    """
+
+    kind: OperationKind
+    attempt: int
+    started_at: str
+    finished_at: str
+    device_snapshot: dict[str, JsonObject] | None
+    outcome: OperationOutcome
+    reason: str | None
 
 
 class RecordReply(TypedDict):
@@ -33,6 +51,7 @@ class RecordReply(TypedDict):
     committed_at: str
     revisions: list[int]
     record_type: str
+    operations: list[OperationReply]
 
 
 class ProgressReply(TypedDict):
@@ -80,6 +99,22 @@ def project_record(record: CommittedRecord) -> RecordReply:
         "committed_at": record.committed_at.isoformat(),
         "revisions": list(record.revisions),
         "record_type": record.record_type,
+        "operations": [project_operation(operation) for operation in record.operations],
+    }
+
+
+def project_operation(operation: OperationFact) -> OperationReply:
+    """Project one detached native attempt without reading devices or files."""
+    return {
+        "kind": operation.kind,
+        "attempt": operation.attempt,
+        "started_at": operation.started_at.isoformat(),
+        "finished_at": operation.finished_at.isoformat(),
+        "device_snapshot": None
+        if operation.device_snapshot is None
+        else dict(operation.device_snapshot),
+        "outcome": operation.outcome,
+        "reason": operation.reason,
     }
 
 

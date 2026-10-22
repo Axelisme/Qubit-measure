@@ -170,6 +170,7 @@ class CommittedRecord:
     actually read, deduplicated in read order. encoded_record is detached JSON.
     directory is relative to data_root, e.g. commits/000007. committed_at is UTC.
     record_type is the model's module-qualified name, keyed in manifest schemas.
+    operations retains this scope's actual executor attempts in start order.
     """
 
     commit_seq: int

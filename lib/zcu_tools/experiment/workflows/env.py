@@ -108,10 +108,12 @@ class Displays:
 class EnvHooks:
     """Keep iteration storage and lifecycle policy in the execution owner.
 
-    iteration_dir reads the current root. commit persists one model atomically
-    with record publication. boundary acknowledges a reached suspension point.
-    stopping reads explicit run cancellation. experiment_failed journals a
-    callback name, reason and original acquisition cause.
+    new_commit_dir allocates a fresh author directory. commit persists a model
+    before record publication. boundary acknowledges suspension or raises the
+    original control I/O error. stopping reads explicit cancellation; question
+    marks Ask suspension/return. next_attempt numbers actual executor starts and
+    operation_finished persists their facts. experiment_failed retains acquire
+    causes; device_setup retains the requested full typed settings.
     """
 
     new_commit_dir: Callable[[], Path]
@@ -126,7 +128,7 @@ class EnvHooks:
 
 
 class WorkflowEnv[C]:
-    """One async author's capabilities, committed iteration root and operations.
+    """One async author's capabilities, commit allocation and operations.
 
     started_at is aware UTC. ports borrows native handles without connecting or
     copying them. host owns loop/executor and scope tokens. displays retains
@@ -307,7 +309,7 @@ class WorkflowEnv[C]:
         Schedule acquire failure returns Failed; other exceptions propagate.
         Stop delivers a partial/empty record. Pause retries the captured cfg.
         Framework journal/commit envelopes retain attempt facts and snapshots;
-        provenance stays in the workflow manifest, not a per-operation identity.
+        provenance stays in workflow startup metadata, not a per-operation identity.
         """
         _validate_model(cfg, ExpCfgModel, "env.run cfg")
         captured = deepcopy(cfg)

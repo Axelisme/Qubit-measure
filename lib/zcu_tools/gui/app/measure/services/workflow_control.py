@@ -356,22 +356,23 @@ class WorkflowControlFacet:
     def pending_question(self, run_id: str) -> PendingQuestion | None:
         """Read a detached question/type/schema envelope, or None outside Ask.
 
-        Only delivered Ask pauses are answerable. Reads do not consume questions,
-        execute author code or change selection. Stale targets raise RunMismatch.
+        The original worker remains pending while the question is answerable.
+        Reads do not consume it, execute author code or change selection. Stale
+        run targets raise RunMismatch.
         """
         return self._run_tab(run_id).run.pending_question(run_id)
 
     def answer(
         self, run_id: str, answer: Answer | JsonValue, *, request_id: str
     ) -> int:
-        """Submit an Ask answer under the original operation token and RUN lease.
+        """Deliver the rendered question ID under the original token and RUN lease.
 
-        JSON objects pass Engine.parse_answer before submission; invalid fields
-        raise ValidationError. Native Answer models pass Engine.answer on the
-        worker. Wrong-model TypeError is a recoverable paused delivery, not a
-        terminal failure. Duplicate/in-flight/non-Ask calls raise InvalidRunState;
-        stale targets raise RunMismatch. Return the same pending token as Start.
-        Author code never runs on this owner thread. No Resume/Execute follows.
+        Engine matches request_id before parsing JSON fields. Stale or absent
+        questions raise QuestionMismatch with the current pending ID. Invalid
+        fields/model types raise ValidationError/TypeError without consumption.
+        Stale run targets raise RunMismatch. Return the same pending token as
+        Start, not terminal completion. Author code stays on its original worker;
+        no new Resume/Execute or Runner continuation follows.
         """
         result = self._run_tab(run_id).run.answer(run_id, answer, request_id=request_id)
         self._notify()
