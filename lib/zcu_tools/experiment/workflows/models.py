@@ -62,7 +62,12 @@ class RunStatus:
     revision is the latest tunables version. reason describes failure or None.
     progress is display-only. pending holds the exact request id, authored
     question and declared answer type while an Ask is answerable, otherwise None.
-    active_path identifies the current live scopes as label/label#sequence.
+    active_path is the root-to-first-fork path through the live scope tree.
+    live_paths lists every live leaf's full root-to-leaf scope path in child
+    birth order, including the root itself when it has no children. It defaults
+    to an empty list, never None.
+    Both use slash-separated kind:name#seq segments, omitting :name when unnamed
+    and #seq for the root. Author children use their label in place of kind.
     """
 
     run_id: str

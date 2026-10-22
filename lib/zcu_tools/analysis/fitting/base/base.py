@@ -86,8 +86,8 @@ def fit_func(
     values with numbers and free values with None. kwargs goes to curve_fit,
     including its evaluation budget. Return parameters and covariance, never a
     fallback seed. Known insufficient observations and optimizer nonconvergence
-    raise AnalysisFailed. Model callback and invalid configuration errors keep
-    their original exception and identity.
+    raise AnalysisFailed. Model and callable Jacobian errors, as well as invalid
+    configuration errors, keep their original exception and identity.
     """
     has_fixedparams = fixedparams is not None and any(
         p is not None for p in fixedparams
@@ -120,6 +120,19 @@ def fit_func(
     # SciPy infers parameter count from the original callable when no p0 is given.
     # In that case signature preservation keeps its public initialization contract.
     model = wraps(fitfunc)(model)
+    if callable(kwargs.get("jac")):
+        jac: Callable[..., NDArray[np.float64]] = kwargs["jac"]
+
+        def jacobian(xs: NDArray[np.generic], *params: float) -> NDArray[np.float64]:
+            nonlocal callback_error
+            try:
+                return jac(xs, *params)
+            except RuntimeError as error:
+                # A user Jacobian failure is not optimizer nonconvergence either.
+                callback_error = error
+                raise
+
+        kwargs["jac"] = jacobian
     try:
         pOpt, pCov = sp.optimize.curve_fit(
             model,

@@ -52,7 +52,7 @@ Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準�
 子層取消讓 operation 回 partial。作者先保存 Completed raw，再檢查 partial_result，保留原有拒絕原因，不進擬合或接受。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，只跳過目前點。Helper 以 return 退出該點。
 根 Stop 在 async operation 或 Ask raise ScriptCancelled。Finally 提交已有成果，不改 status，例外繼續向上傳播。
-分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 明示的 non-convergence fallback warning 與 scipy 非有限 array 錯誤也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
+分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 的具名 AnalysisFailed 與訊息恰為 `array must not contain infs or NaNs` 的 scipy ValueError 也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
 Shape、grid、detune、cfg 與其他程式錯誤仍 raise。其他 warning 沿原政策處理。完整資料的投影、fit 選擇、接受門檻與 history 政策不變。
 沒有 stage checkpoint、原始檔 reader、檔案追蹤或 rollback 保證。Unexpected adapter、fit、writer 或 plot 例外停止 run，不改標為正常失敗。
 

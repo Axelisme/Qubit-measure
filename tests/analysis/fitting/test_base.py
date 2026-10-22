@@ -229,7 +229,7 @@ def test_fit_func_preserves_jacobian_programming_errors(method: str) -> None:
     def jacobian(x, slope, intercept):
         raise error
 
-    with pytest.raises(Exception) as failure:
+    with pytest.raises(Exception, match="broken Jacobian") as failure:
         fit_func(
             x,
             2.0 * x + 1.0,

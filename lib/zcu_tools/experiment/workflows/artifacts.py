@@ -70,6 +70,14 @@ class RecordEnvelope:
     directory is data-root-relative and mirrors the committed scope. committed_at
     is UTC. started retains scope identity and actual tunables reads.
     record_type keys the informational manifest schema. record is encoded JSON.
+    scope_path is the committed scope's full path from the workflow root, using
+    slash-separated kind:name#seq segments. Unnamed scopes omit :name; the root
+    omits #seq. Author children use their label in place of kind.
+    name is this scope's optional explicit name: the workflow catalog name at
+    the root, or a caller-supplied built-in scope name (for example an operation
+    name). It is None for unnamed scopes, including author-labeled children;
+    an author label belongs to scope_path, not name. Non-None names are nonempty
+    and contain none of #, / or :.
     operations lists actual executor attempts in this committed scope.
     format/version identify the record file schema.
     """

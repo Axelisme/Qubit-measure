@@ -16,7 +16,6 @@ def test_root_cancel_reuses_acceptance_while_first_loop_notification_is_pending(
     root = Scope("workflow", name="synthetic")
     host = ScriptHost(root)
     entered, cleanup_entered, release_cleanup = Event(), Event(), Event()
-    second_returned = Event()
     cleanup_threads: list[int] = []
     hold = LoopHold(phase="before")
     hold.install(monkeypatch)
@@ -39,24 +38,16 @@ def test_root_cancel_reuses_acceptance_while_first_loop_notification_is_pending(
         hold.thread = get_ident()
         return host.cancel()
 
-    def second_cancel():
-        try:
-            return host.cancel()
-        finally:
-            second_returned.set()
-
     with ThreadPoolExecutor(max_workers=3) as pool:
         execution = pool.submit(host.run, author())
         assert entered.wait(5), "The author has admitted its executor call"
         first = pool.submit(first_cancel)
         try:
             assert hold.entered.wait(5), "First root notification is queued but held"
-            second = pool.submit(second_cancel)
-            assert second_returned.wait(2), (
-                "A repeated root cancel must not wait for loop delivery"
-            )
-            assert first.done(), "First acceptance also completes at the owner latch"
-            first_ack, second_ack = first.result(), second.result()
+            second = pool.submit(host.cancel)
+            # Both acknowledgements complete at the latch, before loop delivery.
+            first_ack = first.result(timeout=2)
+            second_ack = second.result(timeout=2)
             assert first_ack == second_ack
             assert (first_ack.cancelled, first_ack.active_path, root.cancelled) == (
                 True,
