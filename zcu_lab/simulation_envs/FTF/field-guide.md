@@ -369,17 +369,19 @@ readout_count = max(pulse ADC, all mux receivers if configured) + 1
 | F2 charge line | `drive_lines.f2_charge.gen_ch: 3` | `Q2.wiring.ch: 3` |
 | Pulse readout drive | `readout.drive.gen_ch: 0` | `R1.wiring.ch: 0`、`R2.wiring.ch: 0` |
 | Pulse ADC | `readout.adc.ro_ch: 0` | `R1.wiring.ro_ch: 0`、`R2.wiring.ro_ch: 0` |
-| Mux readout drive | `readout.mux.gen_ch: 1` | `$mux.module.readout` 指向的 library 模組 `gen_ch: 1` |
-| Mux R1 receiver | `readout.mux.adc[0].ro_ch: 1` | 同模組 `tones[0].ro_ch: 1`，對應 `MG12.resonators[0]: R1` |
-| Mux R2 receiver | `readout.mux.adc[1].ro_ch: 2` | 同模組 `tones[1].ro_ch: 2`，對應 `MG12.resonators[1]: R2` |
+| Mux readout drive | `readout.mux.gen_ch: 1` | `MG12.wiring.gen_ch: 1` |
+| Mux R1 receiver | `readout.mux.adc[0].ro_ch: 1` | `MG12.wiring.ro_ch[0]: 1`，對應 `MG12.resonators[0]: R1` |
+| Mux R2 receiver | `readout.mux.adc[1].ro_ch: 2` | `MG12.wiring.ro_ch[1]: 2`，對應 `MG12.resonators[1]: R2` |
 | Resonator 身分 | `readout.resonators.r1`、`.r2` | `R1`、`R2`；`Q1.resonator: R1`、`Q2.resonator: R2` |
 
-兩份 entry 範本保留 R1／R2 的 pulse wiring，不附 mux module 或 library key。Entry template 只攜帶元件與 aliases；`module.readout` 是既有 library key，不接受內嵌 readout 設定。
+兩份 entry 範本保留 R1／R2 的 pulse wiring，另在 MG12 填 mux `gen_ch: 1`、`ro_ch: [1, 2]`。`ro_ch` 列表必須與 resonators 等長、同序。八張 mux 表單缺 slot 時從這些欄位補通道，tone gain 補 0.1。範本不附 mux module 或 library key；`module.readout` 是既有 library key，不接受內嵌 readout 設定。
+
+需要沿用完整校準模組時，另做以下設定：
 
 1. 在 Library 建立 `readout/mux` 模組。設 `gen_ch: 1`，依 R1／R2 順序填兩筆 tones，`ro_ch` 分別為 1／2，初始 `freq` 可用 7190／7080 MHz。填入有效的 `nqz`、`mixer_freq`、各 tone gain／phase、共用 `length`、`ro_length` 與 `trig_offset`。時間欄位使用 us，receiver 的 YAML 延遲使用 ns，不可直接照抄數字。
 2. 在 Inspect 把該 library key 填入 `MG12.module.readout`。Startup 已把 `mux` alias 指向 MG12，不需更改 R1／R2 的 pulse wiring。
-3. Open 或 Reset `mux/twotone_spectrum` 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，不能直接視為已接線。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
-4. Open 或 Reset `mux/onetone_fine` 時，表單複製模組 scalar 設定，但按 group 重新產生 tones，`ro_ch` 初值是 0／1。每次都要核對並改為 R1→1、R2→2，再確認 frequency、gain 與 timing。此表單不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
+3. Open 或 Reset `mux/twotone_spectrum` 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，通道來自 MG12 wiring，gain 為 0.1；其餘必填輸入仍須補齊。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
+4. Open 或 Reset `mux/onetone_fine` 時，有 slot 會複製模組 scalar 設定，但按 group 重新產生 tones，沿既有路徑設 `ro_ch` 初值 0／1。缺 slot 則從 MG12 wiring 補 1／2，gain 為 0.1。每次都要核對 R1→1、R2→2，必要時修正，再確認 frequency、gain 與 timing。有 slot 的副本不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
 
 Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_source` 就替它填快速 flux channel。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
 

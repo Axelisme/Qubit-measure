@@ -55,6 +55,7 @@ cp zcu_lab/kickstart/FTF/startup.py \
 
 - `format: zcu.entry-template` 與 `format_version: "1.0"` 標示範本格式。
 - `components` 把 `Q1`、`Q2`、`coupler`、`R1`、`R2`、`MG12` 等名稱對應到元件資料。每個元件的 `kind` 選擇已註冊 model，其餘欄位由該 model 驗證。
+- `MG12.wiring` 填 `gen_ch: 1`、`ro_ch: [1, 2]`，逐項對應 `MG12.resonators: [R1, R2]`。列表長度不同會在載入時報錯。R1／R2 自己的 `wiring.ch: 0`、`wiring.ro_ch: 0` 是單 tone 接線，不是 mux ADC。Qubit 的 `freq` 保留 null，接線不能替代未知的量測頻率。
 - `aliases` 是完整的內層文件，使用 `format: zcu.aliases`、`format_version: "1.0"` 與另一層 `aliases` mapping。內層 mapping 保留列順序與原始字串，不先解析連結。
 
 完整格式與載入限制見 [可攜 entry 範本](../../lib/zcu_tools/resources/entry/README.md#可攜-entry-範本)。新增 kind 的流程見 [component 教學](01-components.md)。

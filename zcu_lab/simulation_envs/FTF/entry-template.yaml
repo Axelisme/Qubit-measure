@@ -38,11 +38,10 @@ components:
     kind: group/mux
     resonators: [R1, R2]
     qubits: [Q1, Q2]
-    # Keep R1/R2 wiring on pulse gen0/ADC0.
-    # For mux, create a readout/mux library module with gen_ch: 1 and
-    # tones ordered R1 ro_ch: 1, R2 ro_ch: 2; set module.readout to its key.
+    wiring:
+      gen_ch: 1
+      ro_ch: [1, 2] # R1/R2 mux ADCs; pulse wiring remains gen0/ADC0.
     # No module slot is supplied because this template carries no library assets.
-    # Mux onetone reseeds tone channels at Open/Reset; verify ro_ch: 1, 2 again.
 aliases:
   format: zcu.aliases
   format_version: "1.0"

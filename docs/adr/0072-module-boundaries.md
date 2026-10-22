@@ -64,7 +64,13 @@ status: accepted
 
 ### 使用者元件與模擬環境的放置
 
-`zcu_lab.components` 是 package。共用欄位型別、通用 wiring 與基礎元件放在 `base.py`；qubit 共用定義與參數轉換放在 `qubit.py`。Fluxonium、transmon、resonator、JPA 與 mux 各自擁有一個子模組。Package 入口保留明確的 `register_all()` 與公開匯出，不作 import-time 註冊。
+`zcu_lab.components` 是 package。共用欄位型別、resonator wiring 型別與基礎元件放在 `base.py`；qubit 共用定義與參數轉換放在 `qubit.py`。Fluxonium、transmon、resonator、JPA 與 mux 各自擁有一個子模組。Package 入口保留明確的 `register_all()` 與公開匯出，不作 import-time 註冊。
+
+2026-10-23，元件 wiring 依 kind 宣告。`BuiltinComponent` 只提供 `ext`、`module` 與 unsupported-field migration。Resonator 自宣告 `WiringSchema(ch, ro_ch)`，qubit 經 `QubitBaseSchema` 保留 `QubitWiringSchema(ch, lo_flux_ch)`。JPA 與 current source 沒有通道讀取者，不宣告 wiring。
+
+Mux group 自宣告 `MuxWiringSchema`，以 `gen_ch` 表示 mux generator，以 `ro_ch[i]` 表示 `resonators[i]` 的 ADC，並驗證兩列表等長。這些 ADC 不從 resonator 的單 tone `wiring.ro_ch` 推導。
+
+使用者指出：「mux group的屬性沒有寫好，simulation/FTF 的startup忘了寫mux group的gen_ch，而ro_ch沒有意義，因為有多個ro_ch」，並要求：「為什麼BuiltinComponent有那麼多無用的欄位，他不該是……儘量空的嗎？」
 
 GUI／Notebook 共用的模擬參數檔與 startup 範例放在 `zcu_lab/simulation_envs/`，不放在 Notebook 文件目錄。FTF 沒有離線建庫入口。GUI 以 caller 選定的路徑執行可信 startup 腳本，不自動探索這個目錄；Notebook 可直接呼叫公開 `experiment.ftf.ftf(...)`。C14 與 C16 繼續禁止框架反向 import 使用者定義。
 
@@ -85,7 +91,7 @@ Component 的 module slot 指向下游實驗要使用的模組，不用來為每
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
-它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits` 和一般 module／ext。
+它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits`、必填的 mux wiring 和一般 module／ext。
 Group 自己擁有 readout module，重排 resonators 不改 owner。
 使用者於 2026-10-16 對專屬 group component 方案裁定：「我選B」。
 

@@ -32,7 +32,6 @@ from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAdapter
 from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
 from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
-from zcu_lab.v2.mux.onetone_find.gui import MuxOnetoneFindAdapter
 from zcu_lab.v2.mux.onetone_fine.gui import MuxOnetoneAdapter
 from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEAdapter
 from zcu_lab.v2.mux.t1.gui import MuxT1Adapter
@@ -42,6 +41,7 @@ from zcu_lab.v2.mux.twotone_spectrum.gui import MuxFreqAdapter
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
+from zcu_lab.v2.onetone.range_find.gui import RangeFindAdapter
 from zcu_lab.v2.singleshot.ac_stark.gui import SsAcStarkAdapter
 from zcu_lab.v2.singleshot.amp_rabi.gui import SsAmpRabiAdapter
 from zcu_lab.v2.singleshot.check.gui import CheckAdapter
@@ -142,7 +142,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/reset/bath/phase": BathPhaseAdapter,
     "twotone/reset/check": RabiCheckAdapter,
     "mux/onetone_fine": MuxOnetoneAdapter,
-    "mux/onetone_find": MuxOnetoneFindAdapter,
+    "onetone/range_find": RangeFindAdapter,
     "mux/twotone_spectrum": MuxFreqAdapter,
     "mux/len_rabi": MuxLenRabiAdapter,
     "mux/amp_rabi": MuxAmpRabiAdapter,

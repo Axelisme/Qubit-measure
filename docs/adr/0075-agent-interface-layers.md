@@ -126,20 +126,23 @@ Agent 可以讀這些狀態來判斷，但後續實驗取用參數時，以共�
 
 ### Captured writeback acceptance
 
-Recipe 的問答只接受捕捉時的候選，不接受回答時已改動的 GUI draft。
-Preview 回 owner 的 draft revision。Recipe 將各 pane 的 revision 與穩定 item IDs 一次交給
-`tab.writeback_accept`，GUI owner 在同一次提交檢查全部 Primary／Post drafts，通過才寫第一筆。
-編輯 target、parameter value、selection 或 module Form 都升號，替換 draft 不重用 revision。
-任一過期就拒絕整批，不把 draft 改回舊值。通過後按 Primary、Post、各 pane 的候選順序寫，
+Recipe 的問答捕捉候選，接受時以穩定 item IDs 寫入 owner 當下 draft 的值與目的地。
+GUI／MCP 採所有權模型。問答期間的 draft 編輯或替換是 holder 的意圖，不觸發 stale 拒絕。
+Preview 不回 revision，`tab.writeback_accept` 不帶 `expected_revision`，也不還原捕捉時的 proposal。
+Recipe 將全部 Primary／Post 選定 IDs 一次交給這個 RPC。GUI owner 在同一次提交檢查全部 IDs，
+unknown／duplicate 在第一筆寫入前拒絕。通過後按 Primary、Post、各 pane 的候選順序寫入，
 首錯停止，收據保留成功前綴與診斷，不 retry／rollback。
 單 pane L1 `writeback_set`／`writeback_write` 繼續編輯並寫入當前 draft。
 
 收據用 owner item ID 關聯確認項目，不將 authored alias 名稱與 concrete target 比較。
+`WritebackReceipt.items` 是成功 ID 對應的原捕捉候選，不是實際寫入值快照。
+RPC 回覆仍只確認成功 IDs。實際值與目的地取提交當下的 owner draft，不擴 wire 回 actual value。
 作者處理 failed receipt，或以 `raise_for_error()` 保留診斷並終止流程，finally 仍 Save。
 Report 不以 answer.accepted 宣稱已寫入。Full execution details 保留每次接受收據。
 
-2026-10-22 設計代裁：「任何一筆被 `writeback_set` 改過或被替換 → 整批拒絕並回報哪些變了，不覆蓋回舊值強寫。」
-同日補充：「recipe 的 `accept_writeback` 只走 `writeback_accept`。」
+2026-10-23 使用者裁定：「0464沒意義，目前gui/mcp是所有權模型，如果中途改了writeback那就是agent有意的」「那本來就該接受。」
+本裁定取代 2026-10-22 的 revision 綁定與 stale 拒絕。跨 pane 一次提交保留，recipe 的 `accept_writeback` 只走 `writeback_accept`。
+Tunables Apply 的 revision 是另一機制，見 [[0062]]，不受本裁定影響。
 
 ### 自動推導的 owner
 

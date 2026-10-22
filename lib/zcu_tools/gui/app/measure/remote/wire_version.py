@@ -10,10 +10,10 @@ from __future__ import annotations
 # Writeback previews include adapter-authored initial selection and notes.
 # Library/recipe diagnostics, explicit raw-save observations and predictor files.
 # Async recipe declarations use request-scoped answers and script/run cancellation.
-# Captured acceptance checks all pane revisions before any write.
+# Writeback acceptance checks all pane IDs, then writes current owner drafts.
 # Scoped Run control and result_state.partial_result preserve inner cancellation.
-WIRE_VERSION = 118
+WIRE_VERSION = 119
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 151
+GUI_VERSION = 152

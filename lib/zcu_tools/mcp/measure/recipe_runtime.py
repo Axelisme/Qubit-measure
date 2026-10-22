@@ -108,7 +108,6 @@ class _DestinationContext(BaseModel):
 
 
 class _Preview(BaseModel):
-    revision: int | None
     has_draft: bool
     items: tuple[_Candidate, ...]
     destination_context: _DestinationContext
@@ -150,7 +149,6 @@ class RecipeRuntime:
         self._run_ops: dict[str, int] = {}
         self._analysis_ops: dict[tuple[str, str], int] = {}
         self._candidates: dict[str, tuple[tuple[WritebackItem, str], ...]] = {}
-        self._writeback_revisions: dict[tuple[str, str], int] = {}
         self._pending_analysis: PendingAnalysis | None = None
         self._on_change = on_change
         self._images: list[PngImage] = []
@@ -502,12 +500,6 @@ class RecipeRuntime:
                     operation_handle=op,
                 )
             )
-            if preview.has_draft:
-                if preview.revision is None:
-                    raise GuiRpcError(
-                        "Writeback draft has no revision", reason="incompatible_wire"
-                    )
-                self._writeback_revisions[(tab, stage)] = preview.revision
             for candidate in preview.items if preview.has_draft else ():
                 item = WritebackItem(
                     candidate.target_name,
@@ -532,7 +524,11 @@ class RecipeRuntime:
     def accept_writeback(
         self, tab: str, items: Sequence[WritebackItem]
     ) -> WritebackReceipt:
-        """Validate captured candidates before writing; preserve confirmed stage prefixes."""
+        """Select captured IDs, then write current owner draft values/destinations.
+
+        Receipt items are the original captured candidates for confirmed IDs,
+        not snapshots of actual written values. Preserve confirmed stage prefixes.
+        """
         captured = self._candidates.get(tab, ())
         chosen = tuple(items)
         if len({item.name for item in chosen}) != len(chosen) or any(
@@ -550,7 +546,6 @@ class RecipeRuntime:
                 stages.append(
                     {
                         "subtab_id": pane,
-                        "expected_revision": self._writeback_revisions[(tab, stage)],
                         "ids": ids,
                     }
                 )
