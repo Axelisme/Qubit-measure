@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
 from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleResult
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 from ._form_rpc import FormRpc, ModuleRpcAdapter, ModuleRpcCfg
 from ._helpers import Fixture
@@ -452,64 +452,6 @@ def test_extras_errors_keep_authored_input_and_other_preview_values(form_rpc) ->
         assert leaves[("gain",)] == 0.1
     finally:
         fixture.ctrl.tab_control.close_tab(tab)
-
-
-def test_recipe_with_real_form_and_adapter_preserves_acquisition_result(
-    form_rpc, tmp_path
-) -> None:
-    from contextlib import closing
-
-    from zcu_tools.experiment.records import RunRecord
-    from zcu_tools.mcp.measure.execution_reply import SummaryParameter
-    from zcu_tools.mcp.measure.recipe import RecipeSession
-    from zcu_tools.mcp.measure.session import GuiRpcError
-
-    from tests.mcp.measure._support import make_client
-
-    fixture, tab, rpc = form_rpc
-
-    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
-        reply = rpc.call(method, params)
-        if not reply["ok"]:
-            error = reply["error"]
-            raise GuiRpcError(error["message"], reason=error.get("reason"))
-        return reply["result"]
-
-    client = make_client(tmp_path, respond)
-    with closing(client.context.session):
-        session = RecipeSession(
-            client.context, summary_parameters=(SummaryParameter("gain", ("gain",)),)
-        )
-        prepared = session.open_tab("fake", reuse=tab)
-        prepared.set(("gain",), 0.75)
-        operation = prepared.run()
-        fixture.ctrl.close()
-        completed, status = operation.complete_in_current_worker()
-        assert status == "completed"
-        if completed is None:
-            raise TypeError("Expected completed recipe Run")
-        assert completed.snapshot().actual["fields"]["gain"]["value"] == 0.75
-        snapshot = fixture.ctrl.tab_control.get_tab_snapshot(tab)
-        if snapshot.run is None or not isinstance(snapshot.run.result, RunRecord):
-            raise TypeError("Expected a completed RunRecord")
-        record = snapshot.run.result
-        assert SampleCfg.model_validate(record.cfg).gain == 0.75
-        if not isinstance(record.result, SampleResult):
-            raise TypeError("Expected synthetic acquisition data")
-        assert record.result.data.tolist() == [0.1, 0.2, 0.3]
-        effects = [
-            (method, params)
-            for method, params in client.transport.sent
-            if method in ("tab.reset_cfg", "tab.edit_recipe_fields", "tab.run_start")
-        ]
-        assert effects == [
-            ("tab.reset_cfg", {"tab_id": tab}),
-            (
-                "tab.edit_recipe_fields",
-                {"tab_id": tab, "edits": [{"path": ["gain"], "value": 0.75}]},
-            ),
-            ("tab.run_start", {"tab_id": tab}),
-        ]
 
 
 def test_run_aliases_rejected_before_view_or_operation_effects(form_rpc) -> None:

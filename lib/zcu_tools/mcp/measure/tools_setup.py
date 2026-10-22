@@ -13,7 +13,6 @@ from typing import Any, Literal, NotRequired, TypedDict
 from zcu_tools.gui.app.measure.remote.guide_types import AdapterGuideView
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
-from zcu_tools.mcp.measure.recipe import RecipeDefinition
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_operation import wait
@@ -189,12 +188,10 @@ type SetupResult = DeviceSetupResult
 
 
 class _RecipeGuideResult(TypedDict):
-    """Recipe registry identity and its adapter's unmodified wire guide."""
+    """Adapter identity and its unmodified wire guide."""
 
-    recipe: str
-    """Registered recipe name requested by the caller."""
     adapter: str
-    """Adapter name declared by that recipe's definition."""
+    """Registered adapter requested by the caller."""
     guide: AdapterGuideView
     """Complete Markdown and absolute resource directory string or null."""
 
@@ -238,35 +235,23 @@ def device_setup(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
 def recipe_guide(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> _RecipeGuideResult:
-    """Read the guide for arguments['recipe'] on ctx's existing GUI connection.
+    """Read a registered adapter's complete Markdown on the existing connection.
 
-    recipe must name an entry in the authoritative recipe registry (for example
-    t1). Returns recipe, its declared adapter name and guide containing complete
-    Markdown and an absolute resource directory string or null. Images use
-    relative paths; the agent can read them from resource_dir when needed.
-    This tool does not read or attach images. No mutation, operation, attach or
-    reconnect occurs. A missing/unknown recipe
-    raises ValueError before GUI access; native query/connection errors raise
-    GuiRpcError. Guide contents and adapter mapping are not guessed or rewritten.
+    arguments contains only adapter, its nonblank catalog name. Returns adapter
+    and guide with markdown/resource_dir. No recipe-to-adapter mapping is inferred:
+    a recipe can operate several adapters. Images are not read or attached.
+    Invalid arguments fail before GUI access; native lookup errors propagate.
     """
-    recipe = arguments.get("recipe")
-    if not isinstance(recipe, str):
-        raise ValueError("recipe must be a string")
-    definition = next(
-        (entry for entry in ctx.session.recipes.definitions if entry.name == recipe),
-        None,
-    )
-    if definition is None:
-        raise ValueError(f"unknown recipe: {recipe!r}")
-    if not isinstance(definition, RecipeDefinition):
-        raise ValueError("Script recipes do not declare a single adapter guide")
+    adapter = arguments.get("adapter")
+    if (
+        set(arguments) != {"adapter"}
+        or not isinstance(adapter, str)
+        or not adapter.strip()
+    ):
+        raise ValueError("adapter must be a nonblank string")
     ctx = ctx.bound(require_connected=True)
-    reply = ctx.send_gui_rpc("adapter.guide", {"adapter_name": definition.adapter_name})
-    return {
-        "recipe": recipe,
-        "adapter": definition.adapter_name,
-        "guide": reply["guide"],
-    }
+    reply = ctx.send_gui_rpc("adapter.guide", {"adapter_name": adapter})
+    return {"adapter": adapter, "guide": reply["guide"]}
 
 
 def _initial_progress() -> _Progress:
@@ -438,15 +423,11 @@ def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
         },
         "recipe_guide": {
             "handler": partial(recipe_guide, ctx),
-            "description": "Read a registered recipe adapter's complete Markdown guide "
-            "and absolute resource_dir string (null when no guide is declared). "
-            "Images use relative paths; read them yourself from resource_dir when needed. "
-            "This tool does not read or attach images. Uses the authoritative recipe "
-            "registry; does not run a recipe or mutate the GUI.",
+            "description": "Read the named adapter's complete Markdown guide and resource_dir. Images remain relative to that directory and are not attached. Does not run a recipe, infer an adapter mapping or mutate the GUI.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"recipe": {"type": "string", "minLength": 1}},
-                "required": ["recipe"],
+                "properties": {"adapter": {"type": "string", "minLength": 1}},
+                "required": ["adapter"],
                 "additionalProperties": False,
             },
         },

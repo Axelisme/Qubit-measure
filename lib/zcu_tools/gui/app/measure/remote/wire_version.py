@@ -9,8 +9,10 @@ from __future__ import annotations
 # Workflow Ask answers require the exact request ID; records expose commit directories.
 # Writeback previews include adapter-authored initial selection and notes.
 # Library/recipe diagnostics, explicit raw-save observations and predictor files.
-WIRE_VERSION = 115
+# Async recipe declarations use request-scoped answers and script/run cancellation.
+# Captured acceptance checks all pane revisions before any write.
+WIRE_VERSION = 117
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 148
+GUI_VERSION = 150

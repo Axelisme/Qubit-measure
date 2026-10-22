@@ -1,4 +1,4 @@
-"""Bind injected generator recipes and their captured-question answers."""
+"""Bind injected async declarations and request-scoped question answers."""
 
 from collections.abc import Sequence
 from functools import partial
@@ -6,9 +6,7 @@ from functools import partial
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.execution_reply import project_execution
-from zcu_tools.mcp.measure.recipe import RecipeDefinition
 from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
-from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 INITIAL_WAIT_SECONDS = 300.0
@@ -16,87 +14,44 @@ INITIAL_WAIT_SECONDS = 300.0
 
 def run_recipe(
     tools: MeasureToolContext,
-    definition: RecipeDefinition | RecipeDeclaration,
+    definition: RecipeDeclaration,
     arguments: dict[str, object],
 ) -> ToolReply:
-    """Start the injected tool name with schema-validated keyword arguments.
+    """Validate authored inputs and wait at most 300 seconds for the next handoff.
 
-    Invalid arguments or busy/closed admission fail before GUI work. Wait at most
-    300 seconds for the next handoff; timeout leaves the generator running.
-    Return captured summary/images and preserve any delivery or execution failure.
+    Terminal replies contain only status/report/runs. Nonterminal replies expose
+    execution and pending question/analysis for further control. Timeout leaves
+    work running. Busy/closed admission fails before GUI work.
     """
     execution = tools.session.recipes.start(tools, definition.name, arguments)
     reply = execution.wait(INITIAL_WAIT_SECONDS)
     return ToolReply(
-        {
-            **project_execution(
-                reply.data,
-                definition=definition,
-                recipes=tools.session.recipes.definitions,
-            ),
-            "elapsed_s": reply.data["elapsed_s"],
-        },
+        project_execution(reply.data),
         reply.images,
         reply.is_error,
     )
 
 
 def answer(tools: MeasureToolContext, arguments: dict[str, object]) -> ToolReply:
-    """Answer one session-local recipe question without granting write permission.
+    """Answer exactly execution/request_id/answer without granting write permission.
 
-    Legacy recipes take recipe=<execution ID> and decision=accepted/skipped.
-    Script declarations take execution=<ID> and answer=<named Answer fields>.
-    The two routes cannot be mixed. Invalid fields preserve the pending question.
-    Unknown IDs, repeated answers and non-question states fail without GUI writes.
-    Wait up to 300 seconds for the recipe's continuation; only its explicit
-    tab.accept applies anything. Return the same captured summary as done/wait.
+    request_id must identify the current question; stale/absent requests return
+    accepted=False, reason and pending_request_id without consuming a question.
+    Invalid named answer fields raise and preserve the pending request. Accepted
+    answers wait up to 300 seconds for continuation; only authored writes apply.
     """
-    if "execution" in arguments or "answer" in arguments:
-        if set(arguments) != {"execution", "answer"}:
-            raise ValueError("Script answers require exactly execution and answer")
-        key, fields = arguments["execution"], arguments["answer"]
-        if not isinstance(key, str) or not key:
-            raise ValueError("execution must be a non-empty execution ID")
-        if not isinstance(fields, dict) or not all(
-            isinstance(key, str) for key in fields
-        ):
-            raise ValueError("answer must be an object with string field names")
-        execution = tools.session.recipes.get(key)
-        if not isinstance(execution, ScriptRecipeExecution):
-            raise ValueError("execution/answer requires a script recipe")
-        reply = execution.answer(fields)
-        return ToolReply(
-            project_execution(reply.data, recipes=tools.session.recipes.definitions),
-            is_error=reply.is_error,
-        )
-    unknown = set(arguments) - {"recipe", "decision"}
-    if unknown:
-        raise ValueError(f"Unexpected answer fields: {', '.join(sorted(unknown))}")
-    recipe = arguments.get("recipe")
-    decision = arguments.get("decision")
-    if not isinstance(recipe, str) or not recipe:
-        raise ValueError("recipe must be a non-empty execution ID")
-    if decision not in ("accepted", "skipped"):
-        raise ValueError("decision must be accepted or skipped")
-    execution = tools.session.recipes.get(recipe)
-    if isinstance(execution, ScriptRecipeExecution):
-        raise ValueError("Script recipes require execution and answer")
-    # Explicit branches narrow the dynamic JSON value to the declared decision.
-    reply = execution.answer("accepted" if decision == "accepted" else "skipped")
-    definition = next(
-        item
-        for item in tools.session.recipes.definitions
-        if item.name == reply.data["recipe"]
+    if set(arguments) != {"execution", "request_id", "answer"}:
+        raise ValueError("Answers require exactly execution, request_id and answer")
+    key = arguments["execution"]
+    if not isinstance(key, str) or not key:
+        raise ValueError("execution must be a non-empty execution ID")
+    reply = tools.session.recipes.get(key).answer(
+        {"request_id": arguments["request_id"], "answer": arguments["answer"]}
     )
+    if reply.data.get("accepted") is False:
+        return reply
     return ToolReply(
-        {
-            **project_execution(
-                reply.data,
-                definition=definition,
-                recipes=tools.session.recipes.definitions,
-            ),
-            "elapsed_s": reply.data["elapsed_s"],
-        },
+        project_execution(reply.data),
         reply.images,
         reply.is_error,
     )
@@ -105,52 +60,27 @@ def answer(tools: MeasureToolContext, arguments: dict[str, object]) -> ToolReply
 def build_recipe_tools(
     context: MeasureToolContext,
     *,
-    recipes: Sequence[RecipeDefinition | RecipeDeclaration],
+    recipes: Sequence[RecipeDeclaration],
 ) -> ToolTable:
-    """Bind already validated session definitions plus the fixed answer tool.
+    """Generate input schemas from admitted models and bind the fixed answer tool.
 
-    recipes is the same injected sequence admitted by build_measure_tools. Recipe
-    names cannot collide with answer; assembly rejects every duplicate tool name.
+    recipes must match the session declarations. Assembly rejects tool-name
+    collisions; schemas and invocation validation share each inputs model.
     """
     if any(definition.name == "answer" for definition in recipes):
         raise RuntimeError("duplicate MCP tool 'answer'")
     return {
         "answer": {
             "handler": partial(answer, context),
-            "description": "Answer a script question with execution and named answer fields, "
-            "following status.pending_question.answer_schema, or answer a legacy "
-            "writeback question with recipe and decision. Never mix routes. "
-            "decision is accepted or skipped, not permission or proof of a write. "
-            "Only the recipe's explicit tab.accept writes the current draft. "
-            "Wait up to 300 seconds for its next summary; timeout does not cancel.",
+            "description": "Answer the current question using its request_id and named answer fields from pending_question.answer_schema. A stale answer never consumes a question or writes. Only the recipe's explicit accept_writeback writes. Wait up to 300 seconds for the next handoff; timeout never cancels.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "recipe": {"type": "string", "minLength": 1},
-                    "decision": {"type": "string", "enum": ["accepted", "skipped"]},
                     "execution": {"type": "string", "minLength": 1},
+                    "request_id": {"type": "string", "minLength": 1},
                     "answer": {"type": "object"},
                 },
-                "oneOf": [
-                    {
-                        "required": ["recipe", "decision"],
-                        "not": {
-                            "anyOf": [
-                                {"required": ["execution"]},
-                                {"required": ["answer"]},
-                            ]
-                        },
-                    },
-                    {
-                        "required": ["execution", "answer"],
-                        "not": {
-                            "anyOf": [
-                                {"required": ["recipe"]},
-                                {"required": ["decision"]},
-                            ]
-                        },
-                    },
-                ],
+                "required": ["execution", "request_id", "answer"],
                 "additionalProperties": False,
             },
         },
@@ -158,20 +88,8 @@ def build_recipe_tools(
             definition.name: {
                 "handler": partial(run_recipe, context, definition),
                 "description": definition.description
-                + (
-                    " Returns a host-owned outcome with authored report and acquisition history. "
-                    "Explicit questions pause until answer(execution, answer); waiting never cancels."
-                    if isinstance(definition, RecipeDeclaration)
-                    else " Execution summaries retain whole-artifact Save reports, "
-                    "including JSON-only analysis and every output status/error. "
-                    "Current replies may include in-memory MCP images, not session PNG files. "
-                    "Use status(execution, detail=full) for captured native detail."
-                ),
-                "inputSchema": (
-                    definition.inputs.model_json_schema()
-                    if isinstance(definition, RecipeDeclaration)
-                    else definition.input_schema
-                ),
+                + " Returns status, authored report and runs. Explicit questions require answer(execution, request_id, answer). Interactive analysis hands off pending(tab,stage,op). Use status(execution, detail=full) for captured owner evidence; waiting never cancels.",
+                "inputSchema": definition.inputs.model_json_schema(),
             }
             for definition in recipes
         },

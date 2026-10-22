@@ -1,306 +1,53 @@
-"""MCP-only projections of captured execution facts; never read the live GUI."""
+"""MCP projections of captured facts; queries never read the live GUI."""
 
-from __future__ import annotations
-
-from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import TypeAdapter
+from pydantic_core import to_jsonable_python
 
 from zcu_tools.core.element import ElementIdentity
-from zcu_tools.mcp.measure.recipe_capture import RecipeActual
-from zcu_tools.mcp.measure.recipe_form import RecipeFieldPath, field_path
-
-if TYPE_CHECKING:
-    from zcu_tools.mcp.measure.recipe import RecipeDefinition
-    from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
+from zcu_tools.format_version import YamlValue
 
 ReplyDetail = Literal["summary", "full"]
 
 
-@dataclass(frozen=True)
-class SummaryParameter:
-    """One recipe-owned cfg fact selected for fixed Run capture and public summary.
-
-    name is the public actual mapping key, not a position. field is a nonempty
-    tuple of str field names and int original list indexes captured at Run.
-    Numeric strings remain literal names. unit is its native unit label, or None for no
-    declared label. It never requests a value conversion.
-    """
-
-    name: str
-    field: RecipeFieldPath
-    unit: str | None = None
-
-    def __post_init__(self) -> None:
-        field_path(self.field)
-
-
-@dataclass(frozen=True)
-class SummaryEstimate:
-    """One scalar analysis estimate declared by the recipe owner.
-
-    name is its public key, never a position. value_key/error_key are nonempty
-    tuples of str field names and int original list indexes into native summary.
-    Numeric strings stay names. Missing paths are omitted; present null stays null.
-    error_key=None means no uncertainty field. unit labels the native value, or
-    None when the recipe declares no unit. No conversion occurs. element_key
-    optionally selects an author-provided ElementIdentity in that same native
-    summary. Missing identity is omitted, never inferred from value_key or name.
-    """
-
-    name: str
-    value_key: RecipeFieldPath
-    error_key: RecipeFieldPath | None = None
-    unit: str | None = None
-    element_key: RecipeFieldPath | None = None
-
-    def __post_init__(self) -> None:
-        field_path(self.value_key)
-        if self.error_key is not None:
-            field_path(self.error_key)
-        if self.element_key is not None:
-            field_path(self.element_key)
-
-
-@dataclass(frozen=True)
-class SummaryElements:
-    """Capture declared leaves for every original model-list element at each Run.
-
-    name prefixes opaque public keys "name/index/parameter.name"; these keys are
-    labels, not field paths. field is the nonempty canonical model-list path.
-    parameters declares nonempty relative logical leaf paths, units and labels,
-    shared by every element. source is a nonblank author-chosen fallback label
-    for leaves without a recorded origin (for example "default"). It never
-    replaces missing/invalid values or an explicit/derived recorded origin.
-    Names come only from the owner's FixedElements capture, never participants.
-    """
-
-    name: str
-    field: RecipeFieldPath
-    parameters: tuple[SummaryParameter, ...]
-    source: str
-
-    def __post_init__(self) -> None:
-        field_path(self.field)
-        if not self.parameters or not self.source.strip():
-            raise ValueError("Element summaries require leaves and a source label")
-
-
-@dataclass(frozen=True)
-class SummaryEstimateRows:
-    """Project relative scalar declarations for each captured native summary row.
-
-    name prefixes opaque keys "name/row/estimate.name"; row is the summary list
-    position, NOT an ElementIdentity. rows_key selects a native summary list;
-    missing/null lists contribute no estimates, non-list values raise ValueError.
-    estimates supplies relative value/error/element paths for each row in native
-    order. Only an explicit author-provided ElementIdentity at element_key is
-    projected. No position/name fields, participants or row indexes are inferred.
-    """
-
-    name: str
-    rows_key: RecipeFieldPath
-    estimates: tuple[SummaryEstimate, ...]
-
-    def __post_init__(self) -> None:
-        field_path(self.rows_key)
-        if not self.estimates:
-            raise ValueError("Row summaries require estimate declarations")
-
-
-class StepReply(TypedDict):
-    status: str
-    reason: NotRequired[str]
-
-
-class ParameterReply(TypedDict):
-    """One captured condition, including explicitly supplied values.
-
-    value is the resolved native value. source preserves the author\'s label or
-    per-component sweep labels. unit, when present, is a native display label.
-    element, when present, is the declaring owner\'s captured original identity.
-    """
-
-    value: Any
-    source: Any
-    unit: NotRequired[str]
-    element: NotRequired[ElementIdentity]
-
-
-class EstimateReply(TypedDict):
-    """One author-provided scalar estimate from the captured native summary.
-
-    value is the estimate, including an author-provided null. stderr is the
-    declared uncertainty or None. unit is a native label or None. element is
-    optional author-supplied identity; absence never triggers identity lookup.
-    """
-
-    value: Any
-    stderr: Any
-    unit: str | None
-    element: NotRequired[ElementIdentity]
-
-
 def project_control(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Keep control intent and GUI acknowledgement apart from execution results."""
-    return {
-        "execution": snapshot["execution"],
-        "op": snapshot.get("op"),
-        "run_op": snapshot.get("run_op"),
-        "status": snapshot["status"],
-        "phase": snapshot["phase"],
-        "cancel_requested": snapshot.get("cancel_requested", False),
-        "finish_early_requested": snapshot.get("finish_early_requested", False),
-        "gui_cancel": deepcopy(snapshot.get("gui_cancel")),
+    """Return stop acknowledgement, not proof of operation completion."""
+    result = {
+        key: snapshot[key]
+        for key in (
+            "execution",
+            "status",
+            "phase",
+            "cancel_requested",
+            "op",
+            "gui_cancel",
+            "cancelled",
+            "reason",
+        )
+        if key in snapshot
     }
+    result["run_op"] = snapshot.get("run_op")
+    return deepcopy(result)
 
 
-def _step(status: str, outcome: dict[str, Any] | None = None) -> StepReply:
-    step: StepReply = {"status": status}
-    if outcome and outcome.get("reason") is not None:
-        step["reason"] = outcome["reason"]
-    return step
-
-
-def _actual(
-    captured: RecipeActual | None, definition: RecipeDefinition | None
-) -> dict[str, Any]:
-    fields = captured["fields"] if captured is not None else {}
-    parameters: dict[str, ParameterReply] = {}
-    static = (
-        {
-            parameter.name: parameter
-            for parameter in definition.summary_parameters
-            if isinstance(parameter, SummaryParameter)
-        }
-        if definition
-        else {}
-    )
-    for name, fact in fields.items():
-        source = fact.get("source")
-        projected: ParameterReply = {
-            "value": deepcopy(fact["value"]),
-            "source": deepcopy(source),
-        }
-        if "element" in fact:
-            projected["element"] = deepcopy(fact["element"])
-        unit = fact.get("unit", static[name].unit if name in static else None)
-        if unit is not None:
-            projected["unit"] = unit
-        parameters[name] = projected
-    return parameters
-
-
-def _summary_value(summary: dict[str, Any], path: RecipeFieldPath) -> tuple[bool, Any]:
-    value: Any = summary
-    for segment in path:
-        if isinstance(segment, str) and isinstance(value, dict) and segment in value:
-            value = value[segment]
-            continue
-        if (
-            type(segment) is int
-            and isinstance(value, list)
-            and 0 <= segment < len(value)
-        ):
-            value = value[segment]
-            continue
-        return False, None
-    return True, value
-
-
-def _expand_estimates(
-    summary: dict[str, Any],
-    declarations: tuple[SummaryEstimate | SummaryEstimateRows, ...],
-) -> tuple[SummaryEstimate, ...]:
-    expanded: list[SummaryEstimate] = []
-    for declaration in declarations:
-        if isinstance(declaration, SummaryEstimate):
-            expanded.append(declaration)
-            continue
-        present, rows = _summary_value(summary, declaration.rows_key)
-        if not present or rows is None:
-            continue
-        if not isinstance(rows, list):
-            raise ValueError(f"Estimate rows {declaration.rows_key!r} must be a list")
-        for index in range(len(rows)):
-            prefix = (*declaration.rows_key, index)
-            for estimate in declaration.estimates:
-                expanded.append(
-                    SummaryEstimate(
-                        f"{declaration.name}/{index}/{estimate.name}",
-                        (*prefix, *estimate.value_key),
-                        (*prefix, *estimate.error_key)
-                        if estimate.error_key is not None
-                        else None,
-                        estimate.unit,
-                        (*prefix, *estimate.element_key)
-                        if estimate.element_key is not None
-                        else None,
-                    )
-                )
-    return tuple(expanded)
-
-
-def _summary_estimates(
-    details: dict[str, Any],
-    definition: RecipeDefinition | None,
-    recipes: Sequence[RecipeDefinition],
-) -> tuple[SummaryEstimate, ...]:
-    if definition is not None:
-        return _expand_estimates(details, definition.summary_estimates)
-    # Analysis-only carries no recipe identity. Only unambiguous declarations
-    # may project present scalar keys; never infer an experiment or read the GUI.
-    by_key: dict[RecipeFieldPath, SummaryEstimate] = {}
-    for recipe in recipes:
-        for estimate in _expand_estimates(details, recipe.summary_estimates):
-            if not _summary_value(details, estimate.value_key)[0]:
-                continue
-            previous = by_key.setdefault(estimate.value_key, estimate)
-            if previous != estimate:
-                raise ValueError(
-                    f"Ambiguous analysis estimate {estimate.value_key!r}: "
-                    "recipe declarations disagree"
-                )
-    return tuple(by_key.values())
-
-
-def _pane(
-    execution: dict[str, Any] | None,
-    definition: RecipeDefinition | None,
-    recipes: Sequence[RecipeDefinition],
-) -> dict[str, Any] | None:
+def _pane(execution: dict[str, Any] | None) -> dict[str, Any] | None:
     if execution is None:
         return None
     result = execution.get("result") or {}
-    summary = result.get("summary")
-    estimates: dict[str, EstimateReply] = {}
-    if isinstance(summary, dict):
-        for estimate in _summary_estimates(summary, definition, recipes):
-            present, value = _summary_value(summary, estimate.value_key)
-            if not present:
-                continue
-            estimates[estimate.name] = {
-                "value": value,
-                "stderr": _summary_value(summary, estimate.error_key)[1]
-                if estimate.error_key is not None
-                else None,
-                "unit": estimate.unit,
-            }
-            if estimate.element_key is not None:
-                present, element = _summary_value(summary, estimate.element_key)
-                if present and element is not None:
-                    estimates[estimate.name]["element"] = TypeAdapter(
-                        ElementIdentity
-                    ).validate_python(element, strict=True)
     return {
         "params": result.get("params", execution.get("params")),
-        "estimates": estimates,
-        "summary": summary,
+        "summary": result.get("summary"),
         "invalid": result.get("invalid", []),
     }
+
+
+def _step(status: str, outcome: dict[str, Any] | None = None) -> dict[str, Any]:
+    step: dict[str, Any] = {"status": status}
+    if outcome and outcome.get("reason") is not None:
+        step["reason"] = outcome["reason"]
+    return step
 
 
 def _module_summary(value: Any) -> dict[str, Any] | None:
@@ -398,7 +145,7 @@ def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 def _analysis_step(
     execution: dict[str, Any] | None, start: dict[str, Any] | None
-) -> StepReply:
+) -> dict[str, Any]:
     if execution is None:
         return _step(start["status"] if start else "not_started", start)
     outcome = execution.get("operation_outcome")
@@ -413,7 +160,7 @@ def _analysis_step(
     )
 
 
-def _analysis_save_step(execution: dict[str, Any] | None) -> StepReply:
+def _analysis_save_step(execution: dict[str, Any] | None) -> dict[str, Any]:
     return _step(execution["save_status"] if execution else "not_started")
 
 
@@ -429,7 +176,6 @@ def _analysis_envelope(snapshot: dict[str, Any]) -> dict[str, Any]:
         "status": snapshot["status"],
         "phase": snapshot["phase"],
         "cancel_requested": snapshot["cancel_requested"],
-        "finish_early_requested": False,
         "run_start": {"status": "not_started"},
         "raw_save": None,
         "analysis_stage": stage,
@@ -442,73 +188,59 @@ def _analysis_envelope(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _script_execution(snapshot: dict[str, object]) -> dict[str, object]:
-    """Encode the new dataclass snapshot's native models at the reply boundary."""
-    projected = deepcopy(snapshot)
-    pending = projected.get("pending_question")
-    if isinstance(pending, dict):
-        question = pending["question"]
-        if isinstance(question, BaseModel):
-            pending["question"] = question.model_dump(mode="json")
+def _script_execution(
+    snapshot: dict[str, YamlValue], detail: ReplyDetail
+) -> dict[str, YamlValue]:
+    projected = TypeAdapter(dict[str, YamlValue]).validate_python(snapshot)
+    if detail == "full":
+        return projected
+    status = projected["status"]
+    if status == "needs_parameters":
+        return {"status": status, "missing": projected["missing"], "outcome": None}
     outcome = projected.get("outcome")
     if isinstance(outcome, dict):
-        report = outcome["report"]
-        if isinstance(report, BaseModel):
-            outcome["report"] = report.model_dump(mode="json")
-        outcome["runs"] = list(outcome["runs"])
-    return projected
+        return {key: outcome[key] for key in ("status", "report", "runs")}
+    result: dict[str, YamlValue] = {
+        "status": status,
+        "execution": projected["execution"],
+    }
+    if projected.get("pending_question") is not None:
+        result["pending_question"] = projected["pending_question"]
+    if projected.get("pending_analysis") is not None:
+        result["pending"] = projected["pending_analysis"]
+    return result
 
 
 def project_execution(
     snapshot: dict[str, Any],
     *,
-    recipes: Sequence[RecipeDefinition | RecipeDeclaration],
-    definition: RecipeDefinition | RecipeDeclaration | None = None,
     detail: ReplyDetail = "summary",
 ) -> dict[str, Any]:
-    """Project local captures using injected declarations, without any GUI read.
+    """Project a recipe outcome or standalone analysis without external reads.
 
-    recipes supplies the owning session declarations for analysis-only estimates.
-    definition selects one recipe's actual/estimate fields; None means standalone
-    analysis. Conflicting present estimate keys raise ValueError. detail selects
-    the operator summary or detached native detail. Both expose recipe actual as
-    a flat summary-name mapping of value/source/unit, including explicit inputs
-    and individually labeled sweep components. Internal cfg refs never appear
-    in actual or candidates. Each analysis pane
-    exposes params, declared scalar estimates, unchanged native summary and
-    unchanged native invalid entries. No fit_quality interpretation occurs.
-    artifacts preserves each captured native Save report's section/member/output
-    evidence, and run_id comes from the latest captured report. Summary interaction
-    comes from analysis_stage; full retains both stages. No identity is inferred.
-    steps.raw_save is None without a SaveReport; failed calls retain their cause
-    only in error. No admission state is inferred from missing reports.
-    Queries perform no RPC, image read, filesystem check or guard refresh.
+    Recipe terminal summaries contain only status/report/runs. Nonterminal
+    replies add execution and explicit pending question/analysis. Missing
+    parameters return needs_parameters/missing/outcome=None. Full replies retain
+    the complete snapshot, including detached per-Run conditions, native analysis
+    estimates/invalid paths, explicit writeback candidates and errors.
+    Estimates remain at each stage\'s owner-native summary, with original values,
+    stderr, units and element identities only when supplied by that owner.
+    Standalone analysis retains the same native summary without recipe labels.
     """
-    from zcu_tools.mcp.measure.recipe import RecipeDefinition
-
     if "pending_question" in snapshot:
-        return _script_execution(snapshot)
-    return _legacy_execution(
-        snapshot,
-        recipes=tuple(item for item in recipes if isinstance(item, RecipeDefinition)),
-        definition=definition if isinstance(definition, RecipeDefinition) else None,
-        detail=detail,
-    )
+        encoded = TypeAdapter(dict[str, YamlValue]).validate_python(
+            to_jsonable_python(snapshot)
+        )
+        return _script_execution(encoded, detail)
+    return _analysis_execution(snapshot, detail=detail)
 
 
-def _legacy_execution(
-    snapshot: dict[str, Any],
-    *,
-    recipes: Sequence[RecipeDefinition],
-    definition: RecipeDefinition | None,
-    detail: ReplyDetail,
+def _analysis_execution(
+    snapshot: dict[str, Any], *, detail: ReplyDetail
 ) -> dict[str, Any]:
-    """Project legacy recipe or analysis captures with legacy-only declarations."""
+    """Project standalone analysis captures without recipe declarations."""
     if detail == "full":
-        full = deepcopy(snapshot)
-        if "recipe" in snapshot:
-            full["actual"] = _actual(snapshot.get("actual"), definition)
-        return full
+        return deepcopy(snapshot)
     if "recipe" not in snapshot:
         snapshot = _analysis_envelope(snapshot)
     primary_execution = snapshot.get("analysis")
@@ -519,8 +251,8 @@ def _legacy_execution(
         else primary_execution
     )
     interaction = (current_execution or {}).get("interaction")
-    primary = _pane(primary_execution, definition, recipes)
-    post = _pane(post_execution, definition, recipes)
+    primary = _pane(primary_execution)
+    post = _pane(post_execution)
     invalid = [
         *(primary or {}).get("invalid", []),
         *(post or {}).get("invalid", []),
@@ -561,7 +293,6 @@ def _legacy_execution(
             "status": snapshot["status"],
             "phase": snapshot["phase"],
             "cancel_requested": snapshot["cancel_requested"],
-            "finish_early_requested": snapshot["finish_early_requested"],
             "steps": {
                 "run": run,
                 "raw_save": raw_step,
@@ -579,7 +310,7 @@ def _legacy_execution(
                     "post": _analysis_save_step(post_execution),
                 },
             },
-            "actual": _actual(snapshot.get("actual"), definition),
+            "actual": {},
             "analysis": {
                 "stage": snapshot.get("analysis_stage"),
                 "primary": primary,
@@ -597,9 +328,9 @@ def _legacy_execution(
     )
 
 
-def _raw_save_step(raw: dict[str, Any] | None) -> StepReply | None:
+def _raw_save_step(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     """Describe raw Save evidence without inferring admission from absent reports."""
-    raw_step: StepReply | None = None
+    raw_step: dict[str, Any] | None = None
     if raw is not None:
         raw_artifacts = [
             artifact

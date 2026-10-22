@@ -10,8 +10,6 @@ import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.measure.analysis_execution import AnalysisWriteback
 from zcu_tools.mcp.measure.assembly import build_measure_tools
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate
-from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeSession
 from zcu_tools.mcp.measure.session import GuiConnection
 
 from ._analyze_support import (
@@ -47,7 +45,6 @@ from ._analyze_support import (
 from ._analyze_support import (
     stdio_data as _data,
 )
-from ._recipe_execution_support import definition
 from ._save_report_support import analysis_report
 from ._support import MeasureClient
 
@@ -67,18 +64,6 @@ def release_pending_receipt(
             client.transport.on_closed(None)
     finally:
         client.context.bridge.disconnect()
-
-
-def forbidden_recipe(_session: RecipeSession) -> RecipeGenerator:
-    """Fail if an analysis-only tool tries to start any recipe."""
-    raise AssertionError("Analysis-only must not execute a recipe")
-    yield from ()  # The callback must be a generator even though advancing it fails.
-
-
-T1_DEFINITION = replace(
-    definition(forbidden_recipe),
-    summary_estimates=(SummaryEstimate("t1", ("t1",), ("t1_err",), "us"),),
-)
 
 
 @pytest.mark.parametrize("saved", [False, True])
@@ -210,49 +195,6 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
         == 27.5
     )
     assert client.transport.sent == before
-
-
-@pytest.mark.parametrize(
-    "declaration",
-    [
-        SummaryEstimate("other", ("t1",), ("t1_err",), "us"),
-        SummaryEstimate("t1", ("t1",), ("other_err",), "us"),
-        SummaryEstimate("t1", ("t1",), ("t1_err",), "ns"),
-    ],
-)
-def test_analysis_only_rejects_conflicting_estimate_declarations(
-    tmp_path, clients, declaration
-):
-    conflict = replace(
-        T1_DEFINITION,
-        name="conflicting-t1",
-        summary_estimates=(declaration,),
-    )
-
-    def respond(method, params):
-        if method == "tab.analyze":
-            return _start_reply({}, [])
-        if method == "operation.await":
-            return {"reason": "completed", "status": "finished"}
-        if method == "tab.get_analyze_result":
-            result = _result_reply("analysis", [], {})
-            result["summary"] = {
-                "t1": 25.0,
-                "fit_quality": {
-                    "fit": {
-                        "r2": 0.9,
-                        "normalized_residual_rms": 0.02,
-                        "relative_parameter_errors": {},
-                        "invalid": [],
-                    }
-                },
-            }
-            return result
-        raise AssertionError(method)
-
-    client = _client(tmp_path, clients, respond, recipes=(T1_DEFINITION, conflict))
-    with pytest.raises(ValueError, match="Ambiguous analysis estimate"):
-        client.call("tab_analyze", {"tab": "t"})
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
