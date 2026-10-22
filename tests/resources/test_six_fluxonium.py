@@ -1,25 +1,24 @@
 """External six-cavity documents fail before allocating simulation resources."""
 
-from importlib import import_module
 from pathlib import Path
 
 import pytest
 import yaml
+from zcu_tools.resources import six_fluxonium as api
 
 from ._six_fluxonium_data import six_document
 
 
-def resource_api():
+def parse(document):
     try:
-        return import_module("zcu_tools.resources.six_fluxonium")
-    except ModuleNotFoundError:
-        pytest.fail("six-fluxonium documents need a public parser and loader")
+        return api.parse_six_fluxonium(document)
+    except NotImplementedError:
+        pytest.fail("six-fluxonium parser must validate complete independent material")
 
 
 def test_parse_and_load_preserve_complete_independent_material(tmp_path: Path):
-    api = resource_api()
     document = six_document()
-    parsed = api.parse_six_fluxonium(document)
+    parsed = parse(document)
     path = tmp_path / "material.yaml"
     path.write_text(yaml.safe_dump(document), encoding="utf-8")
     loaded = api.load_six_fluxonium(path)
@@ -37,9 +36,8 @@ def test_parse_and_load_preserve_complete_independent_material(tmp_path: Path):
         ("unknown", "surprise"),
         ("version", "version"),
         ("drive", "drive_line.gen_ch"),
-        ("flux", "flux_line.gen_ch"),
         ("adc", "readout.adc.ro_ch"),
-        ("source", "dc_bias.source.name"),
+        ("source", "dc_source.name"),
         ("mux", "mux_gen_ch"),
         ("pulse", "pulse_gen_ch"),
         ("pulse_adc", "pulse_ro_ch"),
@@ -59,17 +57,15 @@ def test_invalid_topology_or_material_is_rejected(defect, diagnostic):
     elif defect in ("mux", "pulse", "pulse_adc"):
         field = {"mux": "mux_gen_ch", "pulse": "pulse_gen_ch", "pulse_adc": "pulse_ro_ch"}[defect]
         document[field] = 99
+    elif defect == "source":
+        document["dc_source"]["name"] = "other"
     else:
         q = document["qubits"]["Q2"]
         if defect == "drive":
             q["drive_line"]["gen_ch"] = 12
-        elif defect == "flux":
-            q["flux_line"]["gen_ch"] = 11
         elif defect == "adc":
             q["readout"]["adc"]["ro_ch"] = 0
-        elif defect == "source":
-            q["dc_bias"]["source"]["name"] = "flux_bias_1"
         else:
             q["readout"]["resonator"]["frequency_ghz"] = float("nan")
     with pytest.raises(ValueError, match=diagnostic):
-        resource_api().parse_six_fluxonium(document)
+        parse(document)
