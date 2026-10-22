@@ -113,3 +113,7 @@ Workflow 等裝置設定完成時，agent 可能送出停止命令，這就是�
 - `lib/zcu_tools/experiment/workflows/execution.py`、`env.py`、`effects.py`、`models.py`、`clock.py`
 - `docs/adr/0053-owner-scheduler-and-gate-presence.md`
 - 2026-10-06 的 autofluxdep workflow 引擎提案（未入庫）：使用者當時否決「workflow 寫成普通函式」，要求保留 `yield` 控制 workflow 的進行，見上文「現況」。
+
+## 後記（2026-10-22）
+
+本文否決 async 的三個理由已不適用：driver 與 host 在 2026-10-22 的協定簡化後本來就要重寫；硬體阻塞需要合作式 token 在兩種模型都成立；loop 只跑在 worker thread，不碰 ADR-0053 的 GUI scheduler。原型 `prototype/async-protocol`（8dc5df757）證明簡化後的協定可用 asyncio 寫成且作者看不到 CancelledError。使用者裁定作者面改為 `async def`／`await`，理由是原生語法比框架的 yield 協定易上手。見 [Workflow 改為單一 generator](2026-10-22-workflow-single-generator.md) 的後記與 ADR-0075。
