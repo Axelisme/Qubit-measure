@@ -94,7 +94,7 @@ def test_inspect_reports_schema_without_reading_values(tmp_path: Path) -> None:
     assert info.vars["v"].dtype == np.dtype("int16")
     assert info.vars["v"].unit == "A"
     assert info.docs == ("note",)
-    assert info.attrs["producer"] == "test"
+    assert info.attrs.producer == "test"
 
 
 def test_append_rows_replace_whole_document_and_finalize(tmp_path: Path) -> None:
@@ -108,7 +108,7 @@ def test_append_rows_replace_whole_document_and_finalize(tmp_path: Path) -> None
     np.testing.assert_array_equal(partial.vars["v"].values[0], [10, 11, 12])
     assert np.isnan(partial.vars["v"].values[1]).all()
     assert partial.docs == {"progress": {"row": 1}}
-    assert not partial.attrs["finalized"]
+    assert not partial.attrs.extra["finalized"]
     with datafile.open_append(tmp_path / "complete.h5", vars={"v": schema}, producer="test") as writer:
         with pytest.raises(ValueError, match="shape"):
             writer.write_row("v", 0, np.ones(2))
@@ -117,7 +117,55 @@ def test_append_rows_replace_whole_document_and_finalize(tmp_path: Path) -> None
         writer.finalize()
         with pytest.raises(ValueError, match="finalized"):
             writer.write_row("v", 0, np.ones(3))
-    assert datafile.load(tmp_path / "complete.h5").attrs["finalized"]
+    assert datafile.load(tmp_path / "complete.h5").attrs.extra["finalized"]
+
+
+def test_forward_minor_attrs_and_explicit_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "future.h5"
+    attrs = datafile.ContainerAttrs("3.7", "original", "original-kind", {"unknown": "保留", "count": 2})
+    datafile.save(path, vars={}, docs={}, attrs=attrs)
+    loaded = datafile.load(path)
+    assert loaded.attrs == attrs
+    rewritten = tmp_path / "rewritten.h5"
+    datafile.save(rewritten, vars=loaded.vars, docs=loaded.docs, groups=loaded.groups, attrs=loaded.attrs, producer="new")
+    assert datafile.load(rewritten).attrs == datafile.ContainerAttrs("3.7", "new", "original-kind", {"unknown": "保留", "count": 2})
+    datafile.save(rewritten, vars={}, docs={}, attrs=attrs, kind="new-kind", replace=True)
+    assert datafile.load(rewritten).attrs.kind == "new-kind"
+    for version in ("2.1", "4.0", "3.invalid"):
+        with pytest.raises(datafile.FormatError, match="version|major"):
+            datafile.save(tmp_path / "invalid-version.h5", vars={}, docs={}, attrs=datafile.ContainerAttrs(version, "x", None, {}))
+
+
+def test_legacy_native_converts_to_container_and_rewrites_major_three(tmp_path: Path) -> None:
+    source = tmp_path / "legacy.h5"
+    with h5py.File(source, "w") as file:
+        file.attrs.update(format="zcu.experiment-data", format_version="2.9", run_id="historic", experiment="synthetic", started_at="", finished_at="", completion="unknown", labber_path="")
+        cfg = file.create_dataset("cfg", data='{"parameter": 7}')
+        cfg.attrs.update(cfg_type="synthetic.Cfg", cfg_schema_version="1.2")
+        file.create_dataset("context", data='{"point": "P", "future": [1, 2]}')
+        file.create_dataset("device", data='{"device": {"value": 1.0}}')
+        file.create_group("provenance").attrs.update(software_versions='{"python": "3"}', git_dirty="unknown", git_commit="abc")
+        file.create_dataset("future", data=[8, 9])
+        data = file.create_group("data")
+        data.attrs.update(representation="single", metadata='{"comment": "old"}')
+        variable = data.create_group("signal")
+        variable.attrs.update(signal="voltage", axes='["x"]')
+        x = variable.create_dataset("x", data=[2, 4])
+        x.attrs["units"] = "s"
+        x.make_scale("x")
+        values = variable.create_dataset("voltage", data=[10.0, 20.0])
+        values.attrs["units"] = "V"
+        values.dims[0].attach_scale(x)
+    loaded = datafile.load(source)
+    assert loaded.docs["cfg"] == {"values": {"parameter": 7}, "cfg_type": "synthetic.Cfg", "schema_version": "1.2"}
+    assert loaded.docs["metadata"]["snapshot"] == {"point": "P", "future": [1, 2]}
+    assert loaded.docs["metadata"]["started_at"] is None
+    np.testing.assert_array_equal(loaded.vars["signal"].values, [10, 20])
+    destination = tmp_path / "converted.h5"
+    datafile.save(destination, vars=loaded.vars, docs=loaded.docs, groups=loaded.groups, attrs=loaded.attrs)
+    assert datafile.load(destination).attrs.format_version == "3.0"
+    with h5py.File(destination, "r") as file:
+        np.testing.assert_array_equal(file["groups/legacy/future"], [8, 9])
 
 
 def test_unsupported_major_and_nonfinite_wire_json(tmp_path: Path) -> None:
