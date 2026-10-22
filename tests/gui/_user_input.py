@@ -1092,8 +1092,13 @@ class ComponentDriver:
             if not widget.grab().save(str(output), "PNG"):
                 raise OSError(f"Could not save screenshot: {output}")
         popup = QApplication.activePopupWidget()
-        if popup is not None and popup.isVisible() and self._window.isAncestorOf(popup):
-            output = path.with_stem(f"{path.stem}-popup")
-            if not popup.grab().save(str(output), "PNG"):
-                raise OSError(f"Could not save screenshot: {output}")
+        if popup is not None and popup.isVisible():
+            # isAncestorOf excludes child windows, so follow Qt's public parent chain.
+            parent = popup.parentWidget()
+            while parent is not None and parent is not self._window:
+                parent = parent.parentWidget()
+            if parent is self._window:
+                output = path.with_stem(f"{path.stem}-popup")
+                if not popup.grab().save(str(output), "PNG"):
+                    raise OSError(f"Could not save screenshot: {output}")
         return path
