@@ -25,11 +25,14 @@ class Completed[T]:
 
     value is fn's payload; env.run uses the existing RunRecord with cfg/data.
     partial_result is True when the token was stopped at completion, not a
-    scientific completeness check or a persistence guarantee.
+    scientific completeness check or a persistence guarantee. facts is the required
+    OperationFacts captured for this delivered attempt, also written to journal
+    and the enclosing commit. Its stopped bit equals partial_result.
     """
 
     value: T
-    partial_result: bool = False
+    partial_result: bool
+    facts: OperationFacts
 
 
 @dataclass(frozen=True)
@@ -143,23 +146,28 @@ type OperationOutcome = Literal["completed", "partial", "discarded", "failed", "
 
 
 @dataclass(frozen=True)
-class OperationFact:
+class OperationFacts:
     """One actual executor attempt, retained even when Pause discards its value.
 
-    kind names run/call/setup_device/wait_until. attempt counts from one within
-    the current commit scope, including retries. started_at/finished_at are UTC
+    kind names run/call/setup_device/wait_until. iteration starts at one and
+    advances only after successful commit, not directory allocation. attempt
+    counts from one within that scope, including retries. started_at/finished_at are UTC
     worker boundaries. device_snapshot is detached pre-call driver JSON for run,
     otherwise None. outcome is completed, partial, discarded by Pause, failed
     acquire, or raised exception. reason is a diagnostic or None on completion.
+    stopped is the operation token's completion-time stop bit, including failed,
+    raised and discarded attempts; it is not inferred from later run state.
     """
 
     kind: OperationKind
+    iteration: int
     attempt: int
     started_at: datetime
     finished_at: datetime
     device_snapshot: Mapping[str, JsonObject] | None
     outcome: OperationOutcome
     reason: str | None
+    stopped: bool
 
 
 @dataclass(frozen=True)
@@ -182,7 +190,7 @@ class CommittedRecord:
     committed_at: datetime
     revisions: tuple[int, ...]
     record_type: str
-    operations: tuple[OperationFact, ...] = ()
+    operations: tuple[OperationFacts, ...] = ()
 
 
 class QuestionMismatch(ValueError):

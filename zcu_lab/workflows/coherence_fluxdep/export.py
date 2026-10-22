@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from pydantic import TypeAdapter
 from zcu_tools.datafile import (
     Axis,
     CfgSnapshot,
@@ -21,10 +20,9 @@ from zcu_tools.experiment.workflows.export import (
     write_outputs,
 )
 from zcu_tools.experiment.workflows.saved_run import (
-    SavedManifest,
-    SavedPoint,
+    SavedRecord,
     read_manifest,
-    read_points,
+    read_records,
 )
 from zcu_tools.resources.entry.storage import bind_sample_table
 
@@ -43,10 +41,11 @@ from zcu_lab.workflows.coherence_fluxdep.workflow import CoherencePlan, Coherenc
 
 @dataclass(frozen=True)
 class CoherenceExportReport:
-    """This call's writer receipts, optional samples receipt and all absent records.
+    """This call's writer receipts and optional samples receipt.
 
-    missing_records lists exact record.json paths; those invocations cannot be
-    recovered. outputs retains independent selected native/Labber failures.
+    missing_records remains an empty tuple: saved_run only returns committed
+    records and does not reconstruct missing ones. outputs retains independent
+    selected native/Labber failures.
     Samples I/O failure raises SampleExportError with successful prefix instead.
     """
 
@@ -77,10 +76,8 @@ def _validate_lifetime_evidence(item: LifetimeResult) -> None:
         raise ValueError("Nonaccepted lifetime cannot carry accepted scalars")
 
 
-def _points(
-    manifest: SavedManifest, plan: CoherencePlan
-) -> tuple[tuple[SavedPoint[CoherencePoint], ...], tuple[Path, ...]]:
-    points, missing = read_points(manifest, TypeAdapter(CoherencePoint))
+def _points(run: Path, plan: CoherencePlan) -> tuple[SavedRecord[CoherencePoint], ...]:
+    points = read_records(run, CoherencePoint)
     seen: set[int] = set()
     expected = tuple(
         kind
@@ -92,7 +89,7 @@ def _points(
         if enabled
     )
     for saved in points:
-        point = saved.point
+        point = saved.record
         try:
             if (
                 point.index < 0
@@ -112,12 +109,12 @@ def _points(
                 _validate_lifetime_evidence(item)
         except ValueError as error:
             raise ValueError(f"{saved.record_path}: {error}") from error
-    return points, missing
+    return points
 
 
 def _channels(
     plan: CoherencePlan,
-    points: tuple[SavedPoint[CoherencePoint], ...],
+    points: tuple[SavedRecord[CoherencePoint], ...],
     kind: LifetimeKind,
 ) -> dict[DataVariable, LabberPayload]:
 
@@ -125,7 +122,7 @@ def _channels(
     lifetimes = np.full(len(fluxes), np.nan)
     traces: dict[int, LabberPayload] = {}
     for saved in points:
-        point = saved.point
+        point = saved.record
         fluxes[point.index] = point.flux
         item = next(item for item in point.measurements if item.kind == kind)
         if item.file is None:
@@ -153,7 +150,7 @@ def _channels(
 
 
 def prepare_export(
-    plan: CoherencePlan, points: tuple[SavedPoint[CoherencePoint], ...]
+    plan: CoherencePlan, points: tuple[SavedRecord[CoherencePoint], ...]
 ) -> PreparedFluxdepExport:
     """Prepare each enabled, actually measured lifetime on its own index grid.
 
@@ -203,7 +200,7 @@ def export_run(
     labber. Samples requires explicit entry result; Labber explicit Database;
     merged needs neither. Missing destinations reject before ANY write. Fixed
     manifest identity/plan/roots/times and structured iteration records provide
-    input; missing records are listed in the receipt, never recovered. Malformed
+    input; absent records are not reconstructed or listed. Malformed
     input/native data raises source-named errors before output allocation. Prepare
     ALL selected data/rows first. Writers fail independently; samples append
     retains prefix/count/cause and latest-wins through its existing owner.
@@ -218,7 +215,7 @@ def export_run(
             raise ValueError("Plan snapshot entry and manifest identity differ")
     except ValueError as error:
         raise ValueError(f"{run}/manifest.json: {error}") from error
-    points, missing = _points(manifest, plan)
+    points = _points(run, plan)
     rows = (
         prepare_samples(manifest.identity.run_id, plan, points)
         if "samples" in outputs
@@ -248,11 +245,11 @@ def export_run(
             manifest.identity.run_id, rows=rows, table=table, point=plan.snapshot.point
         )
     )
-    return CoherenceExportReport(written, samples, missing)
+    return CoherenceExportReport(written, samples, ())
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI shell over export_run; print missing records and writer results.
+    """CLI shell over export_run; print writer and samples results.
 
     argv omits the executable name. Select --samples/--merged/--labber explicitly;
     no selection is a CLI error. --result/--database are required only when used.

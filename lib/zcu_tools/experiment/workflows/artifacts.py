@@ -17,7 +17,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from zcu_tools.utils import atomic_replace
 
 from .journal import JournalPayload, RecordCommitted, RunMetadata, RunStarted
-from .models import EncodedRecord, Lifecycle, OperationFact, RunIdentity, RunPaths
+from .models import EncodedRecord, Lifecycle, OperationFacts, RunIdentity, RunPaths
 from .ports import Clock
 
 _logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ class RecordEnvelope:
     started: RecordStarted
     record_type: str
     record: EncodedRecord
-    operations: tuple[OperationFact, ...] = ()
+    operations: tuple[OperationFacts, ...] = ()
     format: Literal["zcu-workflow-record"] = field(
         default="zcu-workflow-record", init=False
     )

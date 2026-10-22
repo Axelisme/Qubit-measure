@@ -1,6 +1,6 @@
 """Environment capabilities and retained displays through an async author."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
@@ -10,18 +10,22 @@ from threading import Event
 import numpy as np
 import pytest
 from qick import QickConfig
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
 from zcu_tools.experiment.workflows import (
     Engine,
     EnginePorts,
     Live,
     MissingCapability,
-    OperationFact,
+    OperationFacts,
+    RunIdentity,
     WorkflowEnv,
+    saved_run,
+    workflow,
 )
 from zcu_tools.experiment.workflows.env import Displays, EnvHooks
 
-from ._engine_fakes import START, Plan, Point, Rig, Tunables, completed
+from ._engine_fakes import START, Cfg, Plan, Point, Rig, Tunables, completed, identity
 
 
 @pytest.fixture
@@ -51,7 +55,7 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
 ) -> None:
     host = PauseOnCompletionHost()
     at_boundary = Event()
-    facts: list[OperationFact] = []
+    facts: list[OperationFacts] = []
     calls: list[CallContext] = []
     deliveries: list[int] = []
 
@@ -62,7 +66,7 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
         stopping=lambda: False,
         experiment_failed=lambda name, reason, error: pytest.fail(reason),
         question=lambda phase: pytest.fail("This script does not ask"),
-        next_attempt=lambda: len(facts) + 1,
+        next_attempt=lambda: (1, len(facts) + 1),
         operation_finished=facts.append,
         device_setup=lambda name, cfg: pytest.fail(
             "This script does not set up devices"
@@ -74,6 +78,7 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
         host,
         Displays(rig.progress),
         hooks,
+        identity=identity(),
     )
 
     def acquire(ctx: CallContext) -> int:
@@ -84,9 +89,13 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
     async def script() -> None:
         first = completed(await env.call(acquire))
         assert not first.partial_result
+        assert first.facts is facts[0]
+        assert first.facts.stopped is first.partial_result
         deliveries.append(first.value)
         second = completed(await env.call(acquire))
         assert not second.partial_result
+        assert second.facts is facts[1]
+        assert second.facts.stopped is second.partial_result
         deliveries.append(second.value)
 
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -110,6 +119,7 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
     assert deliveries == [1, 2]
     assert [ctx.epoch for ctx in calls] == [0, 1]
     assert [fact.outcome for fact in facts] == ["completed", "completed"]
+    assert [(fact.iteration, fact.attempt) for fact in facts] == [(1, 1), (1, 2)]
     assert all(not ctx.stop_signal.is_set() for ctx in calls)
 
 
@@ -138,6 +148,67 @@ def test_original_start_context_and_injected_handles_are_shared(rig: Rig) -> Non
     assert rig.engine.execute("run").lifecycle == "done"
     assert observed == [START, 7, soc, rig.devices, rig.plots]
     assert rig.devices.values == []
+
+
+def test_author_identity_matches_supplied_run_and_saved_manifest(rig: Rig) -> None:
+    supplied = replace(identity(), entry_id="point-7", entry_label="Sample point")
+    observed: list[RunIdentity] = []
+
+    @workflow("identity", "Expose the existing workflow run identity to savers")
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        assert hasattr(env, "identity"), "Authors must receive the existing RunIdentity"
+        observed.append(env.identity)
+        author_copy = env.identity
+        versions = author_copy.provenance.software_versions
+        if isinstance(versions, MutableMapping):
+            versions["author-only"] = "changed"
+        assert env.identity == supplied
+        await env.call(lambda ctx: None)
+        await env.commit(Point(value=1))
+        observed.append(env.identity)
+
+    rig.engine.start(
+        script,
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=supplied,
+    )
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert observed == [supplied, supplied]
+    assert saved_run.read_manifest(rig.paths.metadata_root).identity == supplied
+
+
+def test_run_accepts_typed_bound_callable_with_config_parameter(rig: Rig) -> None:
+    class Experiment:
+        def run(self, config: Cfg, *, context: RunContext) -> int:
+            assert context.plots is rig.plots
+            assert context.devices == {}
+            return config.value + 4
+
+    rig.engine = Engine(
+        EnginePorts(
+            rig.plots,
+            rig.progress,
+            rig.clock,
+            soc=object(),
+            soccfg=QickConfig({}),
+            devices=rig.devices,
+        )
+    )
+    experiment = Experiment()
+    results: list[int] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        outcome = completed(await env.run(experiment.run, Cfg(value=3)))
+        assert outcome.value.cfg == Cfg(value=3)
+        results.append(outcome.value.result)
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert results == [7]
 
 
 @pytest.mark.parametrize("capability", ["context", "soc", "devices"])
