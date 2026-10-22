@@ -72,7 +72,7 @@ def test_load_predictor_reads_energies_and_affine_flux(analysis_target, onetone_
     ctrl.load_onetone(path)
     assert state.onetone is not None
     np.testing.assert_allclose(
-        state.onetone.raw.fluxs, (dev_values - 0.25) / -2.0 + 0.5
+        state.onetone.raw["fluxs"], (dev_values - 0.25) / -2.0 + 0.5
     )
 
 
