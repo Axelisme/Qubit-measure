@@ -36,6 +36,44 @@ def metadata_path(tmp_path: Path, metadata_doc: datafile.JsonObject) -> Path:
     return path
 
 
+def test_metadata_from_container_returns_typed_evidence_without_io(
+    metadata_doc: datafile.JsonObject,
+) -> None:
+    metadata_doc["future"] = {"unknown": [True, None]}
+    container = datafile.Container(
+        {},
+        {"metadata": metadata_doc},
+        {},
+        datafile.ContainerAttrs("3.0", "synthetic", "experiment-run", {}),
+    )
+    actual = native_persistence.metadata_from_container(container)
+    assert actual == native_metadata()
+    assert container.docs["metadata"]["future"] == {"unknown": [True, None]}
+
+
+def test_metadata_from_container_rejects_missing_metadata() -> None:
+    container = datafile.Container(
+        {}, {}, {}, datafile.ContainerAttrs("3.0", "synthetic", None, {})
+    )
+    with pytest.raises(ValueError, match="/docs/metadata"):
+        native_persistence.metadata_from_container(container)
+
+
+@pytest.mark.parametrize("completion", ["saved", "", 4])
+def test_metadata_from_container_rejects_invalid_metadata(
+    metadata_doc: datafile.JsonObject, completion: datafile.JsonScalar
+) -> None:
+    metadata_doc["completion"] = completion
+    container = datafile.Container(
+        {},
+        {"metadata": metadata_doc},
+        {},
+        datafile.ContainerAttrs("3.0", "synthetic", None, {}),
+    )
+    with pytest.raises(ValueError, match="/docs/metadata"):
+        native_persistence.metadata_from_container(container)
+
+
 def test_read_run_metadata_returns_typed_evidence_despite_unreadable_vars(
     metadata_path: Path,
 ) -> None:
