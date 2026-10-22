@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-22，metadata-only 讀取
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -67,6 +67,7 @@ physical models, evolution and sampling.
 - `records.py` 的 `RunRecord` 將 nullable cfg、純 Result 與 optional `metadata` 配對。建立時 deepcopy cfg 與 metadata，Result 保留 caller 的陣列引用。宿主完成量測後以 `replace(record, metadata=...)` 裝入歷史事實。`metadata.py` 擁有 frozen Pydantic `RunMetadata`、frozen dataclass `RunSnapshot`／`SoftwareProvenance` 與 `CfgSnapshot`。`RunMetadata.labber` 可保存載入的 comment、tags、project、user 與 creation_time，輸出 Labber path 只在 SaveReport 與 ledger 中。宿主以 `model_copy` 更新 metadata，公開保存入口會重新驗證。
 - `base.py` 的 `PersistableExperiment` 透過 `AXES_SPEC` 提供 stateless `save(source, destination)`／`load(source)`，路徑使用本機 `Path`，公開介面不提供 server_ip／port。保存接明確 `RunRecord`，cfg 缺失時拒絕。載入回傳 `RunRecord`。`save` 是單檔 Labber 匯出，`load` 讀 native `data.h5` 並透過公開 `from_stored` 還原 typed record。歷史 cfg 不相容時發出 `CfgUnavailableWarning` 並保留有效資料，缺 cfg envelope 或壞資料仍拒絕。只有 Labber 的舊檔須先用既有 `migrations/` 工具離線轉換，不提供 fallback。核心不保存上次結果；NotebookExperiment 管理各實驗的便利引用，NotebookAdapter 只綁定可重用環境。
 - `native_persistence.py` 的 `prepare_run_data` 將明確 RunRecord/spec 映射為 `PreparedRunData`，持有 SI `Container`、`CfgSnapshot`、原始 `LabberMetadata` 與 Labber layout。準備不做 I/O，也不要求 metadata 或 Labber common grid。`to_container(record.metadata)` 驗證 metadata，再加入 `docs/cfg={values,cfg_type,schema_version}` 與 `docs/metadata`。Metadata 以 `model_dump(mode="json")` 序列化，load 以 `TypeAdapter(RunMetadata)` 驗證。非法文件的錯誤指出來源檔。`save_run` 只收 record，不另收 metadata；缺 metadata 即拒絕。`load_run_with_metadata` 回 record，`load_run` 保留 record／snapshot tuple。
+- `native_persistence.read_run_metadata(path)` 用 datafile 的 `read_doc` 只讀歷史 metadata，不載 vars 或 cfg，也不回退到全檔 load。saved-runs 清單與 load 對話框可取得 typed `RunMetadata`，不受壞 vars 阻礙。缺文件 raise 指名來源的 `KeyError`，非法文件或 metadata raise 指名來源的 `ValueError`。已載 Container 的 Load、export 與 samples 使用 `metadata_from_container(container)`，不重讀檔案。兩個入口與 restore 共用 RunMetadata 驗證；Container 入口缺失或非法時 raise 指名 `/docs/metadata` 的 `ValueError`，caller 在轉譯錯誤時附來源路徑。
 - 公開 `restore_run(container, spec=...)` 不做 I/O。它先核對 metadata/tag 與宣告的 variables、axes、units、dtype、shape，再重建 Result 與 typed cfg。`VariableSpec.variable_from_result`／`loaded_from_variable` 負責 Result 與 `datafile.Variable` 的映射。Container axes 按 NumPy 維度順序，spec 與 loaded axes 為 inner-first，數值陣列不 transpose。`PersistableExperiment.from_stored` 與 native load 共用 restore。合法 cfg envelope 的 type、schema major 或 concrete validation 不相容時，record.cfg=None，`RestoredRun.cfg_issue` 與 `CfgUnavailableWarning` 說明同一原因。缺 cfg 或非法 envelope 仍拒絕。Record 保留 metadata；unknown vars/docs/groups 與 raw cfg 由原 Container 保真，不塞進 typed record。
 - `artifacts` 的 `save_artifacts(artifacts, *, record, ...)` 編排一次保存。它只取 `record.metadata`，缺失或非法時在寫檔前拒絕。正規資料寫入 `Database/<name>/runs/<experiment>_<run_id>/data.h5`，run_id 保留完整值。Run 圖片與窗格 JSON 共用此目錄；Result 的 point／全域圖片副本為 `<experiment>_<run_id>_<圖名>.png`。實驗名中的 `/` 轉 `_`。`SaveLayout` 只計算路徑，writer 在首次 Save 建立所需 Database 目錄，entry create／open 不建立它。Labber 維持日期樹內的 `<experiment>_<id6>_<序號>.hdf5`，每次另產新檔。同 run 重存覆寫 native、PNG 與窗格 JSON，不覆寫 Labber。
 

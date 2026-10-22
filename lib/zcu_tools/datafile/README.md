@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-22，metadata-only 讀取
 
 **讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 
@@ -55,6 +55,13 @@ save(Path("copy.h5"), loaded)
 載入的 GroupSource 持有 detached file image，原檔刪除或改名後仍能寫回。
 Caller 也可以用 `GroupSource(existing_path, "/subtree")` 提供自己的子樹。
 若改變 vars 的形狀，groups 指向該 var 的 HDF5 references 不保證仍有效。
+
+`read_doc(path, name)` 回傳一份 detached `JsonObject`，只讀 header 與指定文件。
+它不讀 vars、其他 docs 或 groups。壞 vars 不阻礙合法文件讀取。
+名稱遵守命名空間的路徑段限制。缺文件 raise `KeyError`，錯誤包含來源檔與文件名。
+格式或文件非法 raise 指名來源檔的 `FormatError`，I/O 錯誤原樣傳遞。
+此入口與 load 接受相同的 3.x／2.x 格式；舊檔只提供相同投影的 cfg 與 metadata。
+讀到合法文件不代表整份容器可由 load 成功載入。
 
 `inspect(path)` 回傳 `ContainerInfo`，只讀 header、var schema 與 doc/group 名稱。
 它不載入數值或座標陣列，回傳 axes 的 values 為空陣列。
