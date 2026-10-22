@@ -336,7 +336,7 @@ def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(
         env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
     ) -> None:
         def experiment(cfg: Cfg, *, context: RunContext) -> int:
-            assert context.plots is env.plots
+            assert context.plots is not env.plots
             assert not context.cancel_signal.is_set()
             cfg.value = 8
             return cfg.value + 1

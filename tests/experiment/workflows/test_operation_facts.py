@@ -57,7 +57,7 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         contexts.append(context)
-        assert context.plots is plots
+        assert context.plots is not plots
         assert context.soc is board.soc
         assert context.soccfg is board.soccfg
         assert context.devices["flux"] is devices.drivers["flux"]
