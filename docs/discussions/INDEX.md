@@ -13,6 +13,7 @@
 - 2026-10-21 [Recipe 接口重設計](2026-10-21-recipe-interface-redesign.md)：兩層執行（驅動引擎只懂 Wait／Ask／return，便利層包 GUI RPC）；輸入是作者定義的 FormModel、原生型別、兩態 None 保留；`@recipe` 取代 DEFINITION；回覆為作者 report 的包裝。
 - 2026-10-21 [三角色協定：Wait／Ask／Signal](2026-10-21-three-role-protocol.md)：agent、腳本、runtime 三角色；recipe 與 workflow Engine 底層同一份協定，effect 與 env 方法都是糖；Signal 第一版只有內建 kind 由 host 處理。
 - 2026-10-21 [Workflow 定位、承載與執行基底](2026-10-21-workflow-positioning-and-hosting.md)：recipe 操作 GUI tab 可多實驗，workflow 跑 Engine；workflow 由 measure-gui 承載；維持 helper，helper 搬到實驗目錄並列 core，共用零件不共用流程。
+- 2026-10-22 [Workflow 改為單一 generator：取消、Signal、step 模型與回退](2026-10-22-workflow-single-generator.md)：recipe 取消統一 return；協定移除 Signal；workflow 由 step 函式改為單一 generator 並刪 Effect，Pause 立即打斷並於 Resume 重跑 operation；回退走新 run 組合，engine 不提供整點重做。
 
 ## 模擬量測環境
 

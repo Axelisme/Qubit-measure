@@ -10,6 +10,7 @@ from typing import Literal, get_args, get_origin
 from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
 
+from ._display import field_display
 from ._json import default_json
 from ._sources import local_choices
 from ._structure import (
@@ -20,7 +21,6 @@ from ._structure import (
     model_types,
 )
 from .model import (
-    Display,
     FormEnv,
     FormModel,
     FormPath,
@@ -385,14 +385,7 @@ class Field:
                 selections=self.level.selections,
                 converters=converters,
                 items=tuple(value) if isinstance(value, list) else (),
-                element_label=next(
-                    (
-                        item.element_label
-                        for item in reversed(self.info.metadata)
-                        if isinstance(item, Display)
-                    ),
-                    None,
-                ),
+                element_label=field_display(self.info).element_label,
             )
         return Level(
             model,

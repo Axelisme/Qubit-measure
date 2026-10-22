@@ -2,7 +2,6 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import replace
 from functools import partial
 from types import new_class
 from typing import Annotated, get_args, get_origin
@@ -170,7 +169,7 @@ def _field_info(info: FieldInfo) -> FieldInfo:
     result = deepcopy(info)
     display = field_display(info)
     if SweepCfg in _members(info.annotation):
-        display = replace(display or Display(), decimals=None, selector=False)
+        display = (display or Display()).overlay(Display(decimals=None, selector=False))
     if display is not None:
         result.metadata.append(display)
     return result
@@ -476,7 +475,7 @@ class Section:
     def _sweep_defaults(self) -> dict[str, JsonValue]:
         """Select Range + Expts for fresh, otherwise unauthored sweep fields."""
         return {
-            name: static_defaults(LinRange)
+            name: {"kind": "linrange"}
             for name, info in self.core.model_fields.items()
             if name in self.model.model_fields and SweepCfg in _members(info.annotation)
         }

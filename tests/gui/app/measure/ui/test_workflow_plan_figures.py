@@ -40,7 +40,7 @@ class Plan(FormModel):
 
 class SweepPlan(FormModel):
     fluxes: Annotated[SweepInput, Display(label="Fluxes", selector=False)] = Field(
-        default_factory=LinRange
+        default_factory=lambda: LinRange(start=0, stop=1, n=3)
     )
 
 
@@ -278,15 +278,24 @@ def test_required_sweep_without_default_is_editable_like_experiment(
     driver = ComponentDriver(required_plan_window)
     driver.select_menu("New Tab ▾", ("sweep-experiment",))
     _snapshot(driver, tmp_path, "required-01-experiment")
-    driver.click(object_name="form.fold.sweep")
-    _snapshot(driver, tmp_path, "required-01a-expanded-experiment")
+    if not driver.observe(object_name="form.input.sweep.start").visible:
+        driver.click(object_name="form.fold.sweep")
+        _snapshot(driver, tmp_path, "required-01a-expanded-experiment")
     fresh_experiment_values = tuple(
         driver.observe(object_name=f"form.input.sweep.{field}").text
         for field in ("start", "stop", "n")
     )
+    assert fresh_experiment_values == ("", "", "")
+    for field in ("start", "stop", "n"):
+        assert (
+            "Field required"
+            in driver.observe(object_name=f"form.row.sweep.{field}").tooltip
+        )
+    assert not driver.observe("Run").enabled
     for field, value in (("start", "0.1"), ("stop", "0.3"), ("n", "3")):
         driver.enter_text(object_name=f"form.input.sweep.{field}", value=value)
         _snapshot(driver, tmp_path, f"required-02-experiment-{field}")
+    assert driver.observe("Run").enabled
     driver.click("Run")
     qt_until(
         lambda: (
@@ -317,6 +326,18 @@ def test_required_sweep_without_default_is_editable_like_experiment(
         )
         == fresh_experiment_values
     )
+    for field in ("start", "stop", "n"):
+        assert (
+            "Field required"
+            in driver.observe(object_name=f"form.row.fluxes.{field}").tooltip
+        )
+    driver.click(object_name="form.fold.fluxes")
+    _snapshot(driver, tmp_path, "required-04b-collapsed-missing-workflow")
+    driver.click("Start")
+    _snapshot(driver, tmp_path, "required-04c-missing-workflow-refused")
+    assert "Field required" in driver.observe(object_name="workflow.message").text
+    driver.click(object_name="form.fold.fluxes")
+    _snapshot(driver, tmp_path, "required-04d-reopened-missing-workflow")
     for field, value in (("start", "0.1"), ("stop", "0.3"), ("n", "3")):
         driver.enter_text(object_name=f"form.input.fluxes.{field}", value=value)
         _snapshot(driver, tmp_path, f"required-05-workflow-{field}")

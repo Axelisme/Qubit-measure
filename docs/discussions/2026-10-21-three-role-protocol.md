@@ -55,3 +55,7 @@ Recipe 驅動器與 workflow Engine 各有一套 yield 協定，作者要學兩�
 
 - 現行 recipe driver 與 Engine effect 的行為見 related 的 ADR 與各 module README；本文不複製。
 - 定位與承載的推導見 [Workflow 定位與承載](2026-10-21-workflow-positioning-and-hosting.md)。
+
+## 後記（2026-10-22）
+
+`Signal` 原語於 2026-10-22 移除：五種 kind 只有 cancel 曾被建立，其餘控制都由 host 自己的機制處理。協定剩 `Wait`、`Ask` 與 return；effect 不再是糖，env helpers 直接 yield `Wait`。帶資料的邊界訊息若出現需求，形狀是作者宣告的接收點，見 [Workflow 改為單一 generator](2026-10-22-workflow-single-generator.md)。
