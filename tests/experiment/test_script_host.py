@@ -1,15 +1,21 @@
 """Public async host contracts, independent of GUI and experiment definitions."""
 
+from __future__ import annotations
+
 import asyncio
 import importlib
 import importlib.util
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, get_ident
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.stop_signal import StopSignal
+
+if TYPE_CHECKING:
+    from zcu_tools.experiment.script_host import CallResult
 
 
 class Approval(Answer):
@@ -170,7 +176,7 @@ def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() ->
     host = module.ScriptHost()
     entered = Event()
     delivered = Event()
-    attempts: list[object] = []
+    attempts: list[CallResult[int | bool]] = []
 
     def blocking(ctx) -> int:
         entered.set()
@@ -210,7 +216,7 @@ def test_natural_completion_snapshot_is_not_retroactively_stopped_by_pause() -> 
     module = host_module()
     changed = Event()
     host = module.ScriptHost(on_change=changed.set)
-    completions: list[object] = []
+    completions: list[CallResult[int]] = []
 
     async def script() -> None:
         completions.append(await host.call(lambda ctx: 19))
@@ -235,7 +241,9 @@ def test_natural_completion_snapshot_is_not_retroactively_stopped_by_pause() -> 
     ]
 
 
-def test_public_control_serializes_on_worker_returns_value_and_transports_errors() -> None:
+def test_public_control_serializes_on_worker_returns_value_and_transports_errors() -> (
+    None
+):
     module = host_module()
     changed = Event()
     host = module.ScriptHost(on_change=changed.set)
@@ -257,7 +265,9 @@ def test_public_control_serializes_on_worker_returns_value_and_transports_errors
         future = pool.submit(lambda: host.run(script()))
         try:
             assert changed.wait(3)
-            assert hasattr(host, "control"), "Host has no public memory-only control primitive"
+            assert hasattr(host, "control"), (
+                "Host has no public memory-only control primitive"
+            )
             assert host.control(lambda: (get_ident(), 23)) == (worker_ids[0], 23)
             with pytest.raises(ControlFailure) as caught:
                 host.control(broken)

@@ -69,6 +69,9 @@ class SyntheticGui:
         if method in {"tab.cancel", "tab.analyze_cancel", "operation.cancel"}:
             self.cancelled.set()
             return {"status": "requested"}
+        return self._snapshots(method, params)
+
+    def _snapshots(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "tab.snapshot":
             return {
                 "tabs": [
