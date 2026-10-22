@@ -229,9 +229,7 @@ def test_seed_diagnostics_distinguish_model_fields_from_scalar_envelopes() -> No
 
     scalar = Form(EnvelopeSeeds, {"amount": Expr("2 * 3"), "phase": 1 + 2j})
     scalar_input = scalar.default_input(env)
-    scalar_rows = {
-        row.path: row for row in scalar.diagnostics(scalar_input, env, None)
-    }
+    scalar_rows = {row.path: row for row in scalar.diagnostics(scalar_input, env, None)}
     assert set(scalar_rows) == {("amount",), ("phase",)}
     assert scalar_rows[("amount",)].seed_source == "2 * 3"
     assert scalar_rows[("amount",)].seed_status == "available"

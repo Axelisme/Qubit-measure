@@ -15,6 +15,8 @@ from zcu_tools.gui.form import (
     FormPathError,
     FormState,
     FormWritePath,
+    expr_text,
+    input_leaves,
 )
 
 
@@ -51,39 +53,18 @@ class FieldDiagnostic:
     uncalibrated: bool | None
 
 
-def seed_leaves(
-    data: JsonValue, path: FormWritePath = ()
-) -> dict[FormWritePath, JsonValue]:
-    """Read the path/value leaves of raw defaults or input; Expr tags stay whole.
-
-    Model-list dictionaries expand by original index; scalar lists stay whole.
-    This reads data only, without defaults, evaluation or source access.
-    """
-    if isinstance(data, dict) and not ("expr" in data or "__complex__" in data):
-        result: dict[FormWritePath, JsonValue] = {}
-        for name, value in data.items():
-            result.update(seed_leaves(value, (*path, name)))
-        return result
-    if isinstance(data, list) and data and all(isinstance(item, dict) for item in data):
-        result = {}
-        for index, value in enumerate(data):
-            result.update(seed_leaves(value, (*path, index)))
-        return result
-    return {path: data}
-
-
 def capture_seed_sources(
     raw: Mapping[str, JsonValue],
     evaluated: Mapping[str, JsonValue],
     origins: Mapping[FormWritePath, str],
 ) -> Mapping[FormWritePath, SeedSource]:
     """Record raw seed expressions and their evaluated Open/Reset availability."""
-    values = seed_leaves(dict(evaluated))
+    values = input_leaves(dict(evaluated))
     sources: dict[FormWritePath, SeedSource] = {}
-    leaves = seed_leaves(dict(raw))
+    leaves = input_leaves(dict(raw))
     for path in dict.fromkeys((*leaves, *origins)):
         value = leaves.get(path)
-        expression = value.get("expr") if isinstance(value, dict) else None
+        expression = expr_text(value)
         origin = next(
             (
                 origins[path[:size]]
@@ -118,7 +99,7 @@ def field_diagnostics(
     capture, defaults hooks, mutation or picker state are involved.
     """
     messages = errors.messages if errors is not None else {}
-    paths = dict.fromkeys((*sources, *seed_leaves(input.data), *messages, *metadata))
+    paths = dict.fromkeys((*sources, *input_leaves(input.data), *messages, *metadata))
     state = FormState(input)
     elements: dict[FormWritePath, dict[int, str]] = {}
     rows: list[FieldDiagnostic] = []

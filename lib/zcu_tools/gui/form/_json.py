@@ -49,6 +49,33 @@ def expr_text(value: JsonValue) -> str | None:
     return None
 
 
+def input_leaves(
+    data: JsonValue, path: tuple[str | int, ...] = ()
+) -> dict[tuple[str | int, ...], JsonValue]:
+    """Read raw input leaves without evaluating expressions or applying defaults.
+
+    Exactly {"expr": <str>} and single-key complex tags stay whole. Ordinary
+    objects expand by field name, including objects with an expr field plus
+    other keys. Lists of objects expand by original index; scalar lists stay
+    whole. Returned values borrow data and must not be mutated.
+    """
+    if (
+        isinstance(data, dict)
+        and expr_text(data) is None
+        and set(data) != {"__complex__"}
+    ):
+        result: dict[tuple[str | int, ...], JsonValue] = {}
+        for name, value in data.items():
+            result.update(input_leaves(value, (*path, name)))
+        return result
+    if isinstance(data, list) and data and all(isinstance(item, dict) for item in data):
+        result = {}
+        for index, value in enumerate(data):
+            result.update(input_leaves(value, (*path, index)))
+        return result
+    return {path: data}
+
+
 def default_json(value: object) -> JsonValue:
     """Encode an ordinary value as finite JSON, including models, tuples and complex."""
     if isinstance(value, BaseModel):
