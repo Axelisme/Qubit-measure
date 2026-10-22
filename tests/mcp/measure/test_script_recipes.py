@@ -108,7 +108,8 @@ class SyntheticGui:
                 "destination_context": {"active_label": "preview-context"},
             }
         if method == "tab.writeback_write":
-            return {"written": [{"id": "param-0", "target_name": "Q1.freq"}]}
+            assert set(params) == {"tab_id", "subtab_id", "write"}
+            return {"written": [{"id": "param-0", "target": "Q1.freq"}]}
         if method == "tab.get_analyze_result":
             return {"summary": {"estimate": 3.5}, "invalid": []}
         if method in {"tab.save_data", "tab.save_artifacts"}:
@@ -565,5 +566,34 @@ def test_save_preserves_raw_receipt_when_artifact_dispatch_fails(
         assert saved[0].status == "failed"
         assert saved[0].outputs[0].status == "saved"
         assert saved[0].outputs[0].format == "data_h5"
+    finally:
+        client.context.session.close()
+
+
+def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
+    tmp_path: Path,
+) -> None:
+    from ._recipe_support import LookbackGui
+
+    @recipe(
+        "synthetic", "Read complete Form observations without guessing native models"
+    )
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("lookback")
+        sweep = tab.read(("sweep",))
+        assert {"start", "stop", "n"}.issubset(sweep.fields)
+        module = tab.read(("modules", "readout"))
+        assert module.fields
+        assert tab.read(("rounds",)).value == 3
+        tab.set(("rounds",), inputs.count)
+        assert tab.read(("rounds",)).value == inputs.count
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, LookbackGui(), recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        outcome = execution.snapshot().outcome
+        assert outcome is not None and outcome.status == "completed"
     finally:
         client.context.session.close()
