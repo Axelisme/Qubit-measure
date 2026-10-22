@@ -150,16 +150,33 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         Task is cancelled and no connection is closed here.
         """
         try:
-            with use_pbar_factory(self._ports.progress):
-                summary = self._host.run(self._author())
-            if self._pending_error is not None:
-                raise self._pending_error
-            self._finish(summary)
+            summary: BaseModel | None = None
+            primary: Exception | None = None
+            try:
+                with use_pbar_factory(self._ports.progress):
+                    summary = self._host.run(self._author())
+            except Exception as error:
+                _logger.exception("Workflow execution failed")
+                primary = self._pending_error or error
+            try:
+                self._displays.close()
+            except Exception as cleanup_error:
+                _logger.exception("Workflow progress cleanup failed")
+                if primary is None:
+                    primary = cleanup_error
+                else:
+                    primary.add_note(
+                        f"Progress cleanup failed: {type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+            primary = self._pending_error or primary
+            if primary is not None:
+                self._fail(primary)
+            else:
+                self._finish(summary)
         except Exception as error:
-            _logger.exception("Workflow execution failed")
+            _logger.exception("Workflow finalization failed")
             self._fail(self._pending_error or error)
         finally:
-            self._displays.close()
             with self._lock:
                 self._executing = False
         return self.status()
@@ -252,8 +269,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._lifecycle = "paused"
 
     def _question_boundary(self, phase: Literal["waiting", "answered"]) -> None:
+        self._flush_answers()
         with self._lock:
-            self._flush_answers()
             if self._pending_error is not None:
                 raise self._pending_error
             if self._lifecycle in ("stopping", "failed"):
@@ -399,19 +416,30 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         return self.status()
 
     def _flush_answers(self) -> None:
-        with self._lock:
-            with self._answer_lock:
-                accepted = self._accepted_answers
-                self._accepted_answers = []
-            for pending, answer in accepted:
-                self._artifacts.append(
-                    QuestionAnswered(
-                        pending.request_id,
-                        type(pending.question).__name__,
-                        pending.question.model_dump(mode="json"),
-                        answer.model_dump(mode="json"),
-                    )
-                )
+        try:
+            with self._lock:
+                with self._answer_lock:
+                    accepted = self._accepted_answers
+                    self._accepted_answers = []
+                try:
+                    for pending, answer in accepted:
+                        self._artifacts.append(
+                            QuestionAnswered(
+                                pending.request_id,
+                                type(pending.question).__name__,
+                                pending.question.model_dump(mode="json"),
+                                answer.model_dump(mode="json"),
+                            )
+                        )
+                except Exception as error:
+                    # Retain the first cause before the other flush owner can
+                    # observe the broken journal or attempt a Resumed append.
+                    if self._pending_error is None:
+                        self._pending_error = error
+                    raise
+        except Exception as error:
+            self._control_failure(error)
+            raise
 
     def _control_failure(self, error: Exception) -> None:
         with self._lock:
@@ -420,7 +448,11 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             self._reason = (
                 f"{type(self._pending_error).__name__}: {self._pending_error}"
             )
-            self._lifecycle = "stopping" if self._executing else "failed"
+            self._lifecycle = (
+                "stopping"
+                if self._executing and self._lifecycle not in _TERMINAL
+                else "failed"
+            )
         # Acknowledgement may wait for the loop; never retain the Engine lock.
         self._host.cancel()
 
@@ -448,7 +480,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._pending_error = error
             raise
 
-    def _finish(self, summary: Summary) -> None:
+    def _finish(self, summary: BaseModel | None) -> None:
         _validate_summary(summary)
         with self._lock:
             lifecycle = "cancelled" if self._stop_requested else "done"
