@@ -6,12 +6,20 @@ from pathlib import Path
 from threading import Event, get_ident
 
 import pytest
+from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.workflows import Live, WorkflowEnv
 
 from tests.experiment._loop_hold import LoopHold
 
-from ._engine_fakes import Plan, Rig, Tunables, running
-from .test_engine_ask import Choose, Decision, pending
+from ._engine_fakes import Plan, Rig, Tunables, pending, running
+
+
+class Decision(Answer):
+    value: int
+
+
+class Choose(Question[Decision]):
+    point: int
 
 
 @pytest.fixture
