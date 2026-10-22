@@ -8,6 +8,7 @@ from typing import Self
 import pytest
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import Engine, EnginePorts, Live, WorkflowEnv
 
 from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed
@@ -15,7 +16,7 @@ from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed
 
 @pytest.fixture
 def rig(tmp_path: Path) -> Iterator[Rig]:
-    rig = Rig(tmp_path)
+    rig = Rig(tmp_path, native=True)
     yield rig
     rig.close()
 
@@ -108,6 +109,7 @@ def test_snapshot_read_failure_fails_before_callback_and_save(rig: Rig) -> None:
 def test_env_run_distinguishes_missing_devices_from_empty_port(
     rig: Rig, missing: bool
 ) -> None:
+    board = white_noise()
     rig.engine = Engine(
         EnginePorts(
             rig.plots,
@@ -115,6 +117,8 @@ def test_env_run_distinguishes_missing_devices_from_empty_port(
             rig.clock,
             context=7,
             devices=None if missing else rig.devices,
+            soc=board.soc,
+            soccfg=board.soccfg,
         )
     )
     callbacks: list[str] = []

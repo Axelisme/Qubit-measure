@@ -13,6 +13,7 @@ from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.script_host import PendingQuestion
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import (
     Completed,
     Engine,
@@ -101,6 +102,7 @@ class Rig:
     """One isolated Engine and its caller-owned ports and output roots."""
 
     root: Path
+    native: bool = False
     clock: ManualClock = field(default_factory=ManualClock)
     devices: RecordingDevices = field(default_factory=RecordingDevices)
     plots: Plots = field(default_factory=lambda: Plots(NonPresentingHost()))
@@ -110,6 +112,7 @@ class Rig:
 
     def __post_init__(self) -> None:
         self.paths = RunPaths(self.root / "metadata", self.root / "data")
+        board = white_noise() if self.native else None
         self.engine = Engine(
             EnginePorts(
                 self.plots,
@@ -117,6 +120,8 @@ class Rig:
                 self.clock,
                 context=7,
                 devices=self.devices,
+                soc=None if board is None else board.soc,
+                soccfg=None if board is None else board.soccfg,
             )
         )
 

@@ -25,7 +25,7 @@ from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed, paused, r
 
 @pytest.fixture
 def rig(tmp_path: Path) -> Iterator[Rig]:
-    rig = Rig(tmp_path)
+    rig = Rig(tmp_path, native=True)
     yield rig
     rig.close()
 

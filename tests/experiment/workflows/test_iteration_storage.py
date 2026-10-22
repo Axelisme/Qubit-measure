@@ -56,7 +56,7 @@ def test_allocated_directory_and_author_files_survive_pause(tmp_path: Path) -> N
 def test_acquisition_without_writer_returns_run_record_without_committing(
     tmp_path: Path,
 ) -> None:
-    rig = Rig(tmp_path)
+    rig = Rig(tmp_path, native=True)
     outcomes: list[Completed[RunRecord[Cfg, int]]] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
