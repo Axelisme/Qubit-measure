@@ -1,6 +1,7 @@
 """Entry selection is explicit when its qubit alias cannot choose a target."""
 
 from collections.abc import Iterator
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -14,31 +15,32 @@ from tests.gui._user_input import ComponentDriver
 
 @pytest.fixture
 def dialog(qapp, tmp_path: Path, request) -> Iterator[ComponentDriver]:
-    component_registry.register("qubit/fluxonium", ComponentSchema)
-    component_registry.register("resonator", ComponentSchema)
-    resource = ResultEntry.create(
-        "synthetic",
-        result_root=tmp_path / "result",
-        database_root=tmp_path / "Database",
-    )
-    resource.setup.add_component("R1", kind="resonator")
-    alias = request.param
-    if alias != "no_components":
-        resource.setup.add_component("Q1", kind="qubit/fluxonium")
-        resource.setup.add_component("Q2", kind="qubit/fluxonium")
-    aliases = {} if alias in (None, "no_components") else {"qubit": alias}
-    resource.save_aliases(EntryAliases(aliases=aliases))
-    view = EntryDialog(None, project_root=tmp_path)
-    view.show()
-    qapp.processEvents()
-    try:
-        yield ComponentDriver(view)
-    finally:
-        view.close()
-        view.deleteLater()
-        qapp.processEvents()
-        component_registry.unregister("qubit/fluxonium")
-        component_registry.unregister("resonator")
+    with ExitStack() as cleanup:
+        component_registry.register("qubit/fluxonium", ComponentSchema)
+        cleanup.callback(component_registry.unregister, "qubit/fluxonium")
+        component_registry.register("resonator", ComponentSchema)
+        cleanup.callback(component_registry.unregister, "resonator")
+        resource = ResultEntry.create(
+            "synthetic",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+        resource.setup.add_component("R1", kind="resonator")
+        alias = request.param
+        if alias != "no_components":
+            resource.setup.add_component("Q1", kind="qubit/fluxonium")
+            resource.setup.add_component("Q2", kind="qubit/fluxonium")
+        aliases = {} if alias in (None, "no_components") else {"qubit": alias}
+        resource.save_aliases(EntryAliases(aliases=aliases))
+        view = EntryDialog(None, project_root=tmp_path)
+        try:
+            view.show()
+            qapp.processEvents()
+            yield ComponentDriver(view)
+        finally:
+            view.close()
+            view.deleteLater()
+            qapp.processEvents()
 
 
 def _caption(driver: ComponentDriver, text: str) -> str:
@@ -75,6 +77,34 @@ def test_invalid_qubit_alias_requires_explicit_component_choice(
     assert dialog.observe(object_name="analysisComponent").text == "Q2"
     dialog.screenshot(tmp_path / "03-other-component.png")
     dialog.click(_caption(dialog, "OK"))
+    assert not dialog.visible().widgets
+
+
+@pytest.mark.parametrize("dialog", [None], indirect=True)
+def test_malformed_alias_reports_validation_and_allows_explicit_choice(
+    dialog: ComponentDriver,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "result" / "synthetic" / "aliases.yaml").write_text(
+        "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  qubit: null\n",
+        encoding="utf-8",
+    )
+    dialog.choose_option(object_name="analysisEntry", value="synthetic")
+    dialog.screenshot(tmp_path / "01-entry-selected.png")
+    dialog.click("Open entry")
+    dialog.screenshot(tmp_path / "02-invalid-alias.png")
+    visible_text = "\n".join(item.text for item in dialog.visible().widgets)
+    assert "aliases.qubit" in visible_text
+    assert "valid string" in visible_text
+    assert dialog.observe(object_name="analysisComponent").text == ""
+    assert not dialog.observe(_caption(dialog, "OK")).enabled
+    for index, component in enumerate(("Q1", "Q2"), start=3):
+        dialog.choose_option(object_name="analysisComponent", value=component)
+        dialog.screenshot(tmp_path / f"{index:02}-{component}.png")
+        assert dialog.observe(object_name="analysisComponent").text == component
+        assert dialog.observe(_caption(dialog, "OK")).enabled
+    dialog.click(_caption(dialog, "OK"))
+    dialog.screenshot(tmp_path / "05-submitted.png")
     assert not dialog.visible().widgets
 
 

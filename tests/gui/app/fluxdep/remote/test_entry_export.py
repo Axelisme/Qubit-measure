@@ -12,16 +12,8 @@ from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.entry.schema import ComponentSchema
 from zcu_tools.resources.predictor_file import load_predictor_file
 
+from tests.gui.app.fluxdep._components import SyntheticFluxonium
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
-
-
-class SyntheticFluxonium(ComponentSchema):
-    """Synthetic energy contract without optional flux-alignment fields."""
-
-    kind: str = "qubit/fluxonium"
-    EJ: float | None = None
-    EC: float | None = None
-    EL: float | None = None
 
 
 @pytest.fixture
