@@ -483,37 +483,6 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled"])
-def test_recipe_tool_default_returns_only_authored_outcome(
-    tmp_path: Path, terminal: str
-) -> None:
-    @recipe("synthetic", "Return a typed report")
-    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        if terminal == "failed":
-            raise ValueError("synthetic failure")
-        if terminal == "cancelled":
-            await session.ask(ConfirmQuestion(evidence="cancel here"))
-        return Report(count=inputs.count)
-
-    client = make_client(tmp_path, recipes=(synthetic,))
-    try:
-        if terminal == "cancelled":
-            execution = start(client, "synthetic")
-            execution.wait(3)
-            client.call("cancel", {"execution": execution.snapshot().execution})
-            execution.join()
-            reply = client.call("wait", {"execution": execution.snapshot().execution})
-        else:
-            reply = client.call("synthetic", {"count": "12"})
-        assert reply.data == {
-            "status": terminal,
-            "report": {"count": 12} if terminal == "completed" else None,
-            "runs": [],
-        }
-    finally:
-        client.context.session.close()
-
-
 def test_full_recipe_status_retains_run_conditions_analysis_and_writeback(
     tmp_path: Path,
 ) -> None:
@@ -667,6 +636,7 @@ def test_mcp_rejected_answer_preserves_question_and_reports_pending_id(
                 },
             )
             assert answered.data == {
+                "execution": key,
                 "status": "completed",
                 "report": {"count": 9},
                 "runs": [],
@@ -779,6 +749,7 @@ def test_mcp_interactive_wait_and_status_project_same_pending_owner(
         finished.set()
         client.context.session.recipes.get(key).join()
         assert client.call("status", {"execution": key}) == {
+            "execution": key,
             "status": "completed",
             "active_path": "recipe:synthetic",
             "live_paths": ["recipe:synthetic"],

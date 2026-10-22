@@ -194,14 +194,24 @@ def _script_execution(
     snapshot: dict[str, YamlValue], detail: ReplyDetail
 ) -> dict[str, YamlValue]:
     projected = TypeAdapter(dict[str, YamlValue]).validate_python(snapshot)
-    if detail == "full":
-        return projected
     status = projected["status"]
+    failure: dict[str, YamlValue] = {}
+    if status == "failed":
+        error = projected["error"]
+        if not isinstance(error, dict):
+            raise ValueError("Failed recipe is missing its error diagnostic")
+        failure["failure"] = {"phase": error["phase"], "reason": error["message"]}
+    if detail == "full":
+        return {**projected, **failure}
     if status == "needs_parameters":
         return {"status": status, "missing": projected["missing"], "outcome": None}
     outcome = projected.get("outcome")
     if isinstance(outcome, dict):
-        return {key: outcome[key] for key in ("status", "report", "runs")}
+        return {
+            **{key: outcome[key] for key in ("status", "report", "runs")},
+            "execution": projected["execution"],
+            **failure,
+        }
     result: dict[str, YamlValue] = {
         "status": status,
         "execution": projected["execution"],
@@ -220,8 +230,10 @@ def project_execution(
 ) -> dict[str, Any]:
     """Project a recipe outcome or standalone analysis without external reads.
 
-    Recipe terminal summaries contain only status/report/runs. Nonterminal
-    replies add execution and explicit pending question/analysis. Missing
+    Recipe terminal summaries contain status/report/runs/execution; failed
+    replies also contain failure with attempted phase and human reason, without
+    a formatted traceback. Nonterminal replies retain execution and explicit
+    pending question/analysis. Missing
     parameters return needs_parameters/missing/outcome=None. Full replies retain
     the complete snapshot, including detached per-Run conditions, native analysis
     estimates/invalid paths, explicit writeback candidates and errors.

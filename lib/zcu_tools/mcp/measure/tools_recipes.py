@@ -19,7 +19,8 @@ def run_recipe(
 ) -> ToolReply:
     """Validate authored inputs and wait at most 300 seconds for the next handoff.
 
-    Terminal replies contain only status/report/runs. Nonterminal replies expose
+    Terminal replies contain execution/status/report/runs; failed replies also
+    carry failure.phase and the human failure.reason. Nonterminal replies expose
     execution and pending question/analysis for further control. Timeout leaves
     work running. Busy/closed admission fails before GUI work.
     """
@@ -72,7 +73,7 @@ def build_recipe_tools(
     return {
         "answer": {
             "handler": partial(answer, context),
-            "description": "Answer the current question using its request_id and named answer fields from pending_question.answer_schema. A stale answer never consumes a question or writes. Only the recipe's explicit accept_writeback writes. Wait up to 300 seconds for the next handoff; timeout never cancels.",
+            "description": "Answer the current question using its request_id and named answer fields from pending_question.answer_schema. A stale answer never consumes a question or writes. Only the recipe's explicit accept_writeback writes. Terminal replies retain execution; failures include failure.phase and human failure.reason. Wait up to 300 seconds for the next handoff; timeout never cancels.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -88,7 +89,7 @@ def build_recipe_tools(
             definition.name: {
                 "handler": partial(run_recipe, context, definition),
                 "description": definition.description
-                + " Returns status, authored report and runs. Explicit questions require answer(execution, request_id, answer). Interactive analysis hands off pending(tab,stage,op). Use status(execution, detail=full) for captured owner evidence; waiting never cancels.",
+                + " Returns execution, status, authored report and runs. Failed recipes also return failure.phase (operation, result_read, image_save, figure_read or writeback_read) and human failure.reason without a traceback. Explicit questions require answer(execution, request_id, answer). Interactive analysis hands off pending(tab,stage,op). Use status(execution, detail=full) for captured owner evidence; waiting never cancels.",
                 "inputSchema": definition.inputs.model_json_schema(),
             }
             for definition in recipes

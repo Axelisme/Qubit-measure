@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import base64
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from threading import RLock
@@ -21,7 +22,10 @@ from zcu_tools.experiment.stop_signal import (
 from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage
-from zcu_tools.mcp.measure.analysis_execution import InvalidAnalysisValue
+from zcu_tools.mcp.measure.analysis_execution import (
+    ExecutionPhase,
+    InvalidAnalysisValue,
+)
 from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
@@ -183,6 +187,30 @@ class RecipeRuntime:
         self._images: list[PngImage] = []
         self._run_scope: Scope | None = None
         self._run_handle: int | None = None
+        self._failures: list[tuple[Exception, ExecutionPhase]] = []
+
+    def failure_phase(self, error: Exception) -> ExecutionPhase:
+        """Read the phase of this exact runtime failure, or operation for author errors.
+
+        Error identity survives author finally/cleanup and catches. Successful
+        cleanup cannot relabel an earlier failure; a new author error is not
+        classified using an unrelated, previously caught runtime failure.
+        """
+        with self._lock:
+            for failure, phase in reversed(self._failures):
+                if failure is error:
+                    return phase
+            return "operation"
+
+    @contextmanager
+    def _failure_phase(self, phase: ExecutionPhase) -> Generator[None]:
+        try:
+            yield
+        except Exception as error:
+            # Preserve the original exception so author-side recovery still works.
+            with self._lock:
+                self._failures.append((error, phase))
+            raise
 
     def runs(self) -> tuple[RecipeRun, ...]:
         """Read immutable acquisition/save facts in execution order, without RPCs."""
@@ -499,29 +527,31 @@ class RecipeRuntime:
             )
         finally:
             self._publish_analysis(None)
-        analysis = completion.result
-        if analysis.status == "failed":
-            return AnalysisResult(None, status="failed", reason=analysis.reason)
-        return AnalysisResult(TypeAdapter(result).validate_python(analysis.result))
+        with self._failure_phase("result_read"):
+            analysis = completion.result
+            if analysis.status == "failed":
+                return AnalysisResult(None, status="failed", reason=analysis.reason)
+            return AnalysisResult(TypeAdapter(result).validate_python(analysis.result))
 
     def save(self, tab: str) -> SaveResult:
         """Save fixed Run raw then all completed artifacts and retain the whole attempt."""
-        op = self._run_ops[tab]
-        reports: list[SaveReport] = []
-        try:
-            for method, extra in (
-                ("tab.save_data", {}),
-                ("tab.save_artifacts", {"artifacts": "all"}),
-            ):
-                reply = self._tools.gui.send_gui_rpc(
-                    method, {"tab_id": tab, **extra}, run_operation_handle=op
-                )
-                reports.append(TypeAdapter(SaveReport).validate_python(reply))
-        except Exception:
-            if reports:
-                self._record_save(tab, reports, failed=True)
-            raise
-        return self._record_save(tab, reports)
+        with self._failure_phase("image_save"):
+            op = self._run_ops[tab]
+            reports: list[SaveReport] = []
+            try:
+                for method, extra in (
+                    ("tab.save_data", {}),
+                    ("tab.save_artifacts", {"artifacts": "all"}),
+                ):
+                    reply = self._tools.gui.send_gui_rpc(
+                        method, {"tab_id": tab, **extra}, run_operation_handle=op
+                    )
+                    reports.append(TypeAdapter(SaveReport).validate_python(reply))
+            except Exception:
+                if reports:
+                    self._record_save(tab, reports, failed=True)
+                raise
+            return self._record_save(tab, reports)
 
     def _record_save(
         self, tab: str, reports: list[SaveReport], *, failed: bool = False
@@ -558,51 +588,54 @@ class RecipeRuntime:
 
     def preview(self, tab: str, pane: Literal["run", "analysis", "post"]) -> None:
         """Capture one explicitly selected PNG into execution reply memory."""
-        if pane not in ("run", "analysis", "post"):
-            raise ValueError("Unknown preview pane")
-        subtab = "post_analysis" if pane == "post" else pane
-        reply = self._tools.gui.send_gui_rpc(
-            "tab.get_figure",
-            {"tab_id": tab, "subtab_id": subtab},
-            run_operation_handle=self._run_ops[tab],
-        )
-        encoded = TypeAdapter(str).validate_python(reply["png_b64"])
-        self._images.append(validated_png(base64.b64decode(encoded, validate=True)))
+        with self._failure_phase("figure_read"):
+            if pane not in ("run", "analysis", "post"):
+                raise ValueError("Unknown preview pane")
+            subtab = "post_analysis" if pane == "post" else pane
+            reply = self._tools.gui.send_gui_rpc(
+                "tab.get_figure",
+                {"tab_id": tab, "subtab_id": subtab},
+                run_operation_handle=self._run_ops[tab],
+            )
+            encoded = TypeAdapter(str).validate_python(reply["png_b64"])
+            self._images.append(validated_png(base64.b64decode(encoded, validate=True)))
 
     def writeback_proposal(self, tab: str) -> WritebackProposal:
         """Capture candidates from completed stages; labels are preview-time display only."""
-        retained: list[tuple[WritebackItem, str]] = []
-        for stage, pane in (("primary", "analysis"), ("post", "post_analysis")):
-            op = self._analysis_ops.get((tab, stage))
-            if op is None:
-                continue
-            preview = _Preview.model_validate(
-                self._tools.gui.send_gui_rpc(
-                    "tab.writeback_preview",
-                    {"tab_id": tab, "subtab_id": pane},
-                    operation_handle=op,
+        with self._failure_phase("writeback_read"):
+            retained: list[tuple[WritebackItem, str]] = []
+            for stage, pane in (("primary", "analysis"), ("post", "post_analysis")):
+                op = self._analysis_ops.get((tab, stage))
+                if op is None:
+                    continue
+                preview = _Preview.model_validate(
+                    self._tools.gui.send_gui_rpc(
+                        "tab.writeback_preview",
+                        {"tab_id": tab, "subtab_id": pane},
+                        operation_handle=op,
+                    )
                 )
-            )
-            for candidate in preview.items if preview.has_draft else ():
-                item = WritebackItem(
-                    candidate.target_name,
-                    WritebackDestination(
-                        candidate.actual_path, preview.destination_context.active_label
-                    ),
-                    candidate.proposed,
-                    None,
-                    "primary" if stage == "primary" else "post",
+                for candidate in preview.items if preview.has_draft else ():
+                    item = WritebackItem(
+                        candidate.target_name,
+                        WritebackDestination(
+                            candidate.actual_path,
+                            preview.destination_context.active_label,
+                        ),
+                        candidate.proposed,
+                        None,
+                        "primary" if stage == "primary" else "post",
+                    )
+                    retained.append((item, candidate.id))
+            # Author-visible YamlValue mappings must not edit retained acceptance evidence.
+            self._candidates[tab] = deepcopy(tuple(retained))
+            proposal = WritebackProposal(tuple(item for item, _ in retained))
+            with self._lock:
+                index = self._detail_index(tab)
+                self._details[index] = replace(
+                    self._details[index], writeback=deepcopy(proposal)
                 )
-                retained.append((item, candidate.id))
-        # Author-visible YamlValue mappings must not edit retained acceptance evidence.
-        self._candidates[tab] = deepcopy(tuple(retained))
-        proposal = WritebackProposal(tuple(item for item, _ in retained))
-        with self._lock:
-            index = self._detail_index(tab)
-            self._details[index] = replace(
-                self._details[index], writeback=deepcopy(proposal)
-            )
-        return proposal
+            return proposal
 
     def accept_writeback(
         self, tab: str, items: Sequence[WritebackItem]
@@ -788,28 +821,29 @@ class RecipeRuntime:
             )
         if completion.status == "cancelled":
             return AnalysisResult(None, status="failed", reason="Analysis cancelled")
-        reply = self._tools.gui.send_gui_rpc(
-            "tab.get_analyze_result"
-            if stage == "primary"
-            else "tab.get_post_analyze_result",
-            {"tab_id": tab},
-            operation_handle=started.handle,
-        )
-        summary = TypeAdapter(YamlValue).validate_python(reply["summary"])
-        invalid = TypeAdapter(tuple[InvalidAnalysisValue, ...]).validate_python(
-            reply["invalid"]
-        )
-        captured = RecipeAnalysisDetail(
-            "primary" if stage == "primary" else "post",
-            started.handle,
-            summary,
-            invalid,
-        )
-        with self._lock:
-            index = self._detail_index(tab)
-            detail = self._details[index]
-            self._details[index] = replace(
-                detail, analyses=(*detail.analyses, captured)
+        with self._failure_phase("result_read"):
+            reply = self._tools.gui.send_gui_rpc(
+                "tab.get_analyze_result"
+                if stage == "primary"
+                else "tab.get_post_analyze_result",
+                {"tab_id": tab},
+                operation_handle=started.handle,
             )
-        self._analysis_ops[(tab, stage)] = started.handle
-        return AnalysisResult(summary)
+            summary = TypeAdapter(YamlValue).validate_python(reply["summary"])
+            invalid = TypeAdapter(tuple[InvalidAnalysisValue, ...]).validate_python(
+                reply["invalid"]
+            )
+            captured = RecipeAnalysisDetail(
+                "primary" if stage == "primary" else "post",
+                started.handle,
+                summary,
+                invalid,
+            )
+            with self._lock:
+                index = self._detail_index(tab)
+                detail = self._details[index]
+                self._details[index] = replace(
+                    detail, analyses=(*detail.analyses, captured)
+                )
+            self._analysis_ops[(tab, stage)] = started.handle
+            return AnalysisResult(summary)
