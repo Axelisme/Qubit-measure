@@ -162,6 +162,33 @@ class SyntheticGui:
         raise AssertionError(f"Unexpected GUI request: {method}")
 
 
+class MappingWritebackGui(SyntheticGui):
+    """A wire owner offering a structured module candidate and counting writes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes = 0
+
+    def respond(self, method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.writeback_accept":
+            self.writes += 1
+        reply = super().respond(method, params)
+        if method == "tab.writeback_preview":
+            return {
+                **reply,
+                "items": [
+                    {
+                        "id": "param-0",
+                        "kind": "module",
+                        "target_name": "Q1.pulses.pi",
+                        "actual_path": "library:opaque.key",
+                        "proposed": {"pulse": {"gain": 0.2}},
+                    }
+                ],
+            }
+        return reply
+
+
 def start(client: MeasureClient, name: str, count: int = 9) -> ScriptRecipeExecution:
     """Start through the shared registry, asserting the declaration route."""
     execution = client.context.session.recipes.start(

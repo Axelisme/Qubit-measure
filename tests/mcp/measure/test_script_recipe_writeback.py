@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.mcp.measure.recipe_api import (
     RecipeSession,
@@ -14,7 +15,14 @@ from zcu_tools.mcp.measure.recipe_api import (
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 from ._recipe_writeback_support import WritebackGui
-from ._script_recipe_support import Fit, Inputs, Report, SyntheticGui, start
+from ._script_recipe_support import (
+    Fit,
+    Inputs,
+    MappingWritebackGui,
+    Report,
+    SyntheticGui,
+    start,
+)
 from ._support import make_client
 
 
@@ -228,6 +236,94 @@ def test_captured_owner_writes_in_order_and_retains_confirmed_prefix(
             assert not current.lookup("general.ext.later").present
         assert snapshot.details[0].writeback_receipts == (receipt,)
         assert snapshot.outcome is not None and len(snapshot.outcome.runs[0].saves) == 1
+    finally:
+        client.context.session.close()
+
+
+def change_gain(value: YamlValue, gain: float) -> None:
+    """Edit the nested public module mapping, without replacing its outer object."""
+    assert isinstance(value, dict)
+    pulse = value["pulse"]
+    assert isinstance(pulse, dict)
+    pulse["gain"] = gain
+
+
+def test_mutated_nested_proposal_is_rejected_without_owner_write(
+    tmp_path: Path,
+) -> None:
+    gui = MappingWritebackGui()
+    rejected: list[str] = []
+
+    @recipe("synthetic", "Reject author edits to captured module values")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        proposal = tab.writeback_proposal()
+        change_gain(proposal.items[0].value, 0.9)
+        try:
+            tab.accept_writeback(proposal.items)
+        except ValueError as error:
+            rejected.append(str(error))
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        assert gui.writes == 0
+        assert rejected == ["Unknown, duplicate or modified writeback candidate"]
+        snapshot = execution.snapshot()
+        assert snapshot.status == "completed"
+        proposal = snapshot.details[0].writeback
+        assert proposal is not None
+        assert proposal.items[0].value == {"pulse": {"gain": 0.2}}
+        change_gain(proposal.items[0].value, 0.7)
+        fresh = execution.snapshot().details[0].writeback
+        assert fresh is not None and fresh.items[0].value == {"pulse": {"gain": 0.2}}
+    finally:
+        client.context.session.close()
+
+
+def test_receipt_mapping_cannot_mutate_retained_candidates_or_details(
+    tmp_path: Path,
+) -> None:
+    gui = MappingWritebackGui()
+    failures: list[str] = []
+
+    @recipe("synthetic", "Keep public receipt edits separate from captured evidence")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        proposal = tab.writeback_proposal()
+        receipt = tab.accept_writeback(proposal.items)
+        change_gain(receipt.items[0].value, 0.9)
+        try:
+            tab.accept_writeback(proposal.items).raise_for_error()
+        except ValueError as error:
+            failures.append(str(error))
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        snapshot = execution.snapshot()
+        assert snapshot.status == "completed"
+        assert failures == []
+        proposal = snapshot.details[0].writeback
+        assert proposal is not None
+        assert proposal.items[0].value == {"pulse": {"gain": 0.2}}
+        receipts = snapshot.details[0].writeback_receipts
+        assert len(receipts) == 2
+        assert all(
+            receipt.items[0].value == {"pulse": {"gain": 0.2}} for receipt in receipts
+        )
+        change_gain(receipts[0].items[0].value, 0.7)
+        assert execution.snapshot().details[0].writeback_receipts[0].items[0].value == {
+            "pulse": {"gain": 0.2}
+        }
     finally:
         client.context.session.close()
 
