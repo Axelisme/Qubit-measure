@@ -45,7 +45,7 @@ def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
     client = route_harness.client()
     try:
         opened = route_harness.request(
-            client, "project.setup", result_root=str(analysis_entry.result_path.parent),
+            client, "project.setup", project_root=str(analysis_entry.result_path.parent.parent),
             entry="synthetic",
         )
     except RemoteError as error:
