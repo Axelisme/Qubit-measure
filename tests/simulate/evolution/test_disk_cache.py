@@ -47,8 +47,10 @@ def launch(
 ) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
     environment.pop("NUMBA_CACHE_DIR", None)
+    environment.pop("PYTHONPYCACHEPREFIX", None)
     environment.update(
         PYTHONPATH=str(package.parent),
+        PYTHONDONTWRITEBYTECODE="1",
         ZCU_TOOLS_CACHE_DIR=str(cache),
         NUMBA_DEBUG_CACHE="1",
         OPENBLAS_NUM_THREADS="1",
