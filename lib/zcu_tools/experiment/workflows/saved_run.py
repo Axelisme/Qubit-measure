@@ -57,6 +57,7 @@ class SavedStarted(BaseModel):
     call_seq: int = Field(gt=0)
     commit_seq: int = Field(ge=0)
     revision: int = Field(ge=0)
+    revisions: tuple[int, ...]
 
 
 class SavedResult(BaseModel):
@@ -83,6 +84,7 @@ class SavedCommit(SavedResult):
     kind: Literal["step_committed"]
     commit_seq: int = Field(gt=0)
     encoded_record: EncodedRecord
+    revisions: tuple[int, ...]
 
 
 class SavedFinished(SavedResult):
@@ -126,7 +128,7 @@ class SavedIteration(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["zcu-workflow-iteration"]
-    format_version: Literal[1]
+    format_version: Literal[2]
     identity: RunIdentity
     workflow: str
     plan: JsonValue

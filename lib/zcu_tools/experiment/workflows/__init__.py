@@ -1,13 +1,13 @@
 """Qt-free named-workflow contracts and display tools."""
 
-from .declaration import WorkflowRegistry, WorkflowScript, WorkflowStep, workflow
+from .declaration import WorkflowRegistry, WorkflowScript, workflow
 from .display import (
     Dense,
     assemble_rows,
     assemble_scalars,
 )
 from .engine import Engine
-from .env import InitEnv, WorkflowEnv
+from .env import WorkflowEnv
 from .models import (
     Aborted,
     Actor,
@@ -23,6 +23,7 @@ from .models import (
     MissingCapability,
     Next,
     ProgressSnapshot,
+    QuestionMismatch,
     RevisionConflict,
     RunIdentity,
     RunMismatch,

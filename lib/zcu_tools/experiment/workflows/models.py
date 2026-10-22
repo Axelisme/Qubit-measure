@@ -10,9 +10,10 @@ from pydantic import JsonValue
 
 from zcu_tools.core.script_protocol import OperationResult, ScriptGenerator
 from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment.script_host import PendingQuestion
 
 type Lifecycle = Literal[
-    "running", "pausing", "paused", "stopping", "done", "aborted", "stopped", "failed"
+    "running", "pausing", "paused", "stopping", "done", "cancelled", "aborted", "stopped", "failed"
 ]
 
 
@@ -64,17 +65,17 @@ type Step[S, R] = ScriptGenerator[Next[R, S] | Done | Aborted]
 
 
 @dataclass(frozen=True)
-class Completed[Cfg, Result]:
-    """Successful experiment output, without a persistence guarantee.
+class Completed[T]:
+    """One callable's returned value, with its cooperative-stop snapshot.
 
-    ``cfg`` is a deepcopy of run.cfg at experiment return, never the last
-    Schedule's local cfg. ``result`` is the experiment's returned data.
-    Completed means measurement succeeded. The workflow decides whether and
-    where to save this pair.
+    value is the callable's output. For env.run it is a RunRecord pairing the
+    experiment's returned cfg copy and result. partial_result is True when the
+    operation token was stopped as the callable completed. It does not imply
+    persistence, and False does not validate the scientific completeness.
     """
 
-    cfg: Cfg
-    result: Result
+    value: T
+    partial_result: bool = False
 
 
 @dataclass(frozen=True)
@@ -160,6 +161,7 @@ class RunStatus:
     revision: int
     reason: str | None
     progress: tuple[ProgressSnapshot, ...]
+    pending: PendingQuestion | None = None
 
 
 @dataclass(frozen=True)
@@ -227,6 +229,18 @@ class CommittedRecord:
     revision: int
     encoded_record: EncodedRecord
     iteration_dir: str
+    revisions: tuple[int, ...] = ()
+
+
+class QuestionMismatch(ValueError):
+    """A stale answer; pending_request_id identifies the current question or None."""
+
+    def __init__(self, request_id: str, pending_request_id: str | None) -> None:
+        self.request_id = request_id
+        self.pending_request_id = pending_request_id
+        super().__init__(
+            f"Question {request_id!r} is not pending; current request is {pending_request_id!r}"
+        )
 
 
 class MissingCapability(RuntimeError):

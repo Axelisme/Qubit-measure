@@ -52,6 +52,7 @@ class IterationStarted:
     commit_seq: int
     revision: int
     iteration_dir: str
+    revisions: tuple[int, ...] = ()
     kind: Literal["iteration_started"] = field(default="iteration_started", init=False)
 
 
@@ -227,10 +228,11 @@ class RunEnded:
     call_seq is None before any invocation; commit_seq counts committed Nexts.
     """
 
-    lifecycle: Literal["done", "aborted", "stopped", "failed"]
+    lifecycle: Literal["done", "cancelled", "aborted", "stopped", "failed"]
     reason: str | None
     call_seq: int | None
     commit_seq: int
+    summary: bool = False
     kind: Literal["run_ended"] = field(default="run_ended", init=False)
 
 

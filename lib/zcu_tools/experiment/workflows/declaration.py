@@ -9,22 +9,9 @@ from typing import Protocol, get_args, get_origin, get_type_hints
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from .env import WorkflowEnv
-from .models import Step
 from .tunables import Live
 
 _METADATA_ATTRIBUTE = "__workflow_definition__"
-
-
-class WorkflowStep[P, T, S, R, C](Protocol):
-    """A generator callable taking env, fixed plan, tunables, and detached state.
-
-    Yield only via env effects; return Next(record, state), Done, or Aborted.
-    Each call receives fresh copies. Exceptions outside Schedule fail the run.
-    """
-
-    def __call__(
-        self, env: WorkflowEnv[C], plan: P, tun: T, state: S
-    ) -> Step[S, R]: ...
 
 
 class WorkflowScript[P, T, Summary: BaseModel | None, C](Protocol):

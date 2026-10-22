@@ -29,6 +29,7 @@ from .journal import (
 )
 from .models import (
     CommittedRecord,
+    EncodedRecord,
     Lifecycle,
     RunIdentity,
     RunPaths,
@@ -254,7 +255,7 @@ class RunArtifacts:
                 raise ValueError("Manifest updates require a lifecycle change")
             now = self._clock.now()
             _check_utc(now)
-            terminal = lifecycle in ("done", "aborted", "stopped", "failed")
+            terminal = lifecycle in ("done", "cancelled", "aborted", "stopped", "failed")
             manifest = replace(
                 self._manifest,
                 updated_at=now,
@@ -316,7 +317,7 @@ class RunArtifacts:
             del started["iteration_dir"]
             payload.update(
                 format="zcu-workflow-iteration",
-                format_version=1,
+                format_version=2,
                 started=started,
                 result=_json_object(result, _payload_adapter),
             )
@@ -325,6 +326,17 @@ class RunArtifacts:
             _logger.exception(
                 "Cannot save workflow iteration record for %s", iteration.iteration_dir
             )
+
+    def save_summary(self, summary: EncodedRecord) -> None:
+        """Atomically write an encoded done return to metadata_root/summary.json.
+
+        The execution owner calls this only for a non-None done return. Errors
+        propagate, retaining any temporary files; no journal line is added here.
+        """
+        payload = _json_object(summary, TypeAdapter(EncodedRecord))
+        temporary = self._paths.metadata_root / f".summary-{uuid4().hex}.tmp.json"
+        temporary.write_text(_json_line(payload), encoding="utf-8")
+        atomic_replace(temporary, self._paths.metadata_root / "summary.json")
 
     def new_iteration(self, call_seq: int) -> IterationArtifacts:
         """Create iter/<call_seq>/ and return its summary-writing seam.
