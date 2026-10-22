@@ -12,7 +12,7 @@ from zcu_tools.resources.predictor_file import (
     PredictorSource,
     save_predictor_file,
 )
-from zcu_tools.simulate.fluxonium import FluxoniumParams
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from ._entry_fakes import CoupledFluxonium, Fluxonium, Resonator
 
@@ -79,6 +79,8 @@ def analysis_entry(tmp_path):
         )
         entry.setup.add_component("r1", kind="resonator/test_dispersive", freq=5750.0)
         entry.save_aliases(EntryAliases(aliases={"qubit": "q1", "resonator": "r1"}))
+        entry.predictors_path.mkdir()
+        entry.dispersive_path.mkdir()
         save_predictor_file(
             entry.predictors_path / "fit.json",
             PredictorFile(

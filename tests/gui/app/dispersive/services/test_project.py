@@ -18,7 +18,7 @@ from zcu_tools.resources.predictor_file import (
     PredictorSource,
     save_predictor_file,
 )
-from zcu_tools.simulate.fluxonium import FluxoniumParams
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 
 @pytest.mark.parametrize(
