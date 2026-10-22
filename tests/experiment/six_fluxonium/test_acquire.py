@@ -65,7 +65,7 @@ def mux_program(
     )
 
 
-def pulse_program(env, frequencies):
+def pulse_program(env, frequencies, *, reps=256):
     gen, adc = readout_freq_words(
         env.soccfg, frequencies, gen_ch=13, ro_ch=6, mixer_freq=None, nqz=1
     )
@@ -80,7 +80,7 @@ def pulse_program(env, frequencies):
     )
     return ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=256),
+        ProgramV2Cfg(reps=reps),
         modules=[
             LoadWord("gen", gen, "axis", "gen_word"),
             LoadWord("adc", adc, "axis", "adc_word"),
@@ -232,8 +232,8 @@ def test_different_sweep_sizes_do_not_reuse_cavity_noise(output):
     with environment(document) as env:
         # Both acquires give cavity 1 a single-point partition starting at 0.
         # Extra points visit cavity 0, so only the total request size changes.
-        long = pulse_program(env, [FREQUENCIES[1], *([FREQUENCIES[0]] * 12)])
-        short = pulse_program(env, [FREQUENCIES[1]])
+        long = pulse_program(env, [FREQUENCIES[1], *([FREQUENCIES[0]] * 12)], reps=32)
+        short = pulse_program(env, [FREQUENCIES[1]], reps=32)
         if output == "decimated":
             first = long.acquire_decimated(env.soc, progress=False)
             second = short.acquire_decimated(env.soc, progress=False)
@@ -250,8 +250,8 @@ def test_different_sweep_sizes_do_not_reuse_cavity_noise(output):
         first_point = np.asarray(first[0]).reshape(13, -1, 2)[0]
         next_point = np.asarray(second[0]).reshape(1, -1, 2)[0]
     else:
-        first_point = np.asarray(first[0]).reshape(256, 13, -1, 2)[:, 0]
-        next_point = np.asarray(second[0]).reshape(256, 1, -1, 2)[:, 0]
+        first_point = np.asarray(first[0]).reshape(32, 13, -1, 2)[:, 0]
+        next_point = np.asarray(second[0]).reshape(32, 1, -1, 2)[:, 0]
     assert not np.array_equal(first_point, next_point), (
         "independent acquires must not reuse the same cavity receiver noise"
     )
