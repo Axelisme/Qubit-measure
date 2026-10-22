@@ -150,7 +150,11 @@ Nonterminal summaries include execution. A paused question supplies
 pending_question with request_id, evidence and answer_schema. Interactive
 analysis supplies pending={tab,stage,op}; complete that same GUI operation with
 tab_interact. Missing parameters return needs_parameters, missing paths and
-outcome=null, not a failed RecipeOutcome.
+outcome=null, not a failed RecipeOutcome. Cfg preflight also returns
+parameter_errors=[{path,message}] with all typed indexed paths and owner reasons.
+Mux participants/overrides apply as one require_valid batch; invalid candidates
+install no fields and start no Run. Earlier open/reset/library/inline actions
+remain. Run also checks the complete Form errors before starting acquisition.
 Full recipe detail retains per-Run/tab/operation conditions from the owner's
 fixed Form observation, native analysis estimates and invalid paths, and explicit
 writeback candidates. Reading detail never reruns analysis, writes or saves.

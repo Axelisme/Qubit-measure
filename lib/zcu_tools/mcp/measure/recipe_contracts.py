@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict
 
 from zcu_tools.mcp.measure.analysis_execution import AnalysisWriteback
+from zcu_tools.mcp.measure.recipe_form import RecipeFormError
 from zcu_tools.mcp.measure.writeback_recovery import WritebackRecovery
 
 AnalysisStage = Literal["primary", "post"]
@@ -34,9 +35,16 @@ class RecipeNeedsParameters(Exception):
     missing must be a non-empty tuple of MissingParameter values with non-empty
     strings. The same tuple is exposed as missing. Invalid declarations raise
     ValueError; the exception does not close a generator or perform a GUI action.
+    parameter_errors optionally retains complete owner cfg diagnostics with typed
+    paths; empty means an author-declared missing tool input, not cfg preflight.
     """
 
-    def __init__(self, missing: tuple[MissingParameter, ...]) -> None:
+    def __init__(
+        self,
+        missing: tuple[MissingParameter, ...],
+        *,
+        parameter_errors: tuple[RecipeFormError, ...] = (),
+    ) -> None:
         if not missing or any(
             not item.parameter or not item.reason for item in missing
         ):
@@ -44,6 +52,7 @@ class RecipeNeedsParameters(Exception):
                 "missing parameters must contain non-empty names and reasons"
             )
         self.missing = missing
+        self.parameter_errors = parameter_errors
         super().__init__(
             "; ".join(f"{item.parameter}: {item.reason}" for item in missing)
         )

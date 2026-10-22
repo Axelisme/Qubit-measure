@@ -60,9 +60,11 @@ The recipe opens or resets the tab, selects library entries, copies references
 inline, then applies participants and overrides in one batch. Each list runs in
 the order supplied. A null library key retains and validates the current
 selection. A null override value retains that input. Copy referenced parents
-before their children, outermost first. A later error leaves completed edits in
-the tab; it does not undo them. Invalid fields remain visible and block Run,
-even on nonparticipants.
+before their children, outermost first. The final participants/overrides batch
+requires a complete valid cfg, including nonparticipants. If it is invalid,
+the recipe returns needs_parameters with every owner-reported path and reason.
+It installs none of that batch and does not start Run. Earlier open, Reset,
+library selections and inline copies remain in the tab.
 
 Paths are JSON lists. Strings name fields and integers select positions in the
 complete tone list. For complete tones Q1/Q2/Q3, `participants: ["Q3", "Q1"]`

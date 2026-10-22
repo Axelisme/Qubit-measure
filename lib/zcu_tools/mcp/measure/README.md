@@ -83,6 +83,12 @@ Form path 是非空 tuple，str 是原始欄位名，int 是完整 list 的原�
 `set(path, None)` 保留 GUI input，停用 module 用明確的 `"off"`。
 Readonly、ref、selector、來源與 cfg admission 都由 Form owner 檢查，讀取不授權寫入。
 
+`tab.apply(edits, require_valid=False)` 一次送完整有序 batch，不逐欄提交。
+結構或來源拒絕不留下成功前綴。預設保留一般 invalid draft，再拋 invalid_cfg。
+`require_valid=True` 先驗證 detached candidate 與完整 native cfg，無效時不安裝欄位。
+空 batch 可驗證目前 cfg。先前 open、Reset、library 與 inline 操作不回滾。
+七個 mux recipe 在最後一批 participants／overrides 明填 require_valid=True。
+
 作者用 `await tab.run()`、`await tab.analyze("primary"|"post", result=T)`、
 `await tab.ask_writeback()` 與 `await session.ask(question)` 串接流程。
 Run 回 `RunResult`，不自動保存。
@@ -186,6 +192,9 @@ Analyze 的預期擬合失敗回 `AnalysisResult(result=None, status="failed", r
 
 Run 前的 `RecipeNeedsParameters` 使 execution 終態為 needs_parameters，
 snapshot 列具名 missing paths、outcome=None，並釋放 admission。
+Cfg preflight 額外回 `parameter_errors: [{path, message}]`，保留 owner 的全部 typed paths 與理由，包含未參與的 tone。
+Missing 的可讀路徑如 `tones[5].sweep.stop`，parameter_errors 的同一路徑為 `["tones", 5, "sweep", "stop"]`。
+`await tab.run()` 也先讀完整 Form errors，有錯就回 needs_parameters，不送 run_start。
 RecipeOutcome 仍只有 completed／failed／cancelled，不把缺參包成失敗。
 
 ### Runtime 與回覆
@@ -328,6 +337,19 @@ operation 的 cfg。Pause 打斷的 stale partial 在 Resume 後重試原 reques
 run_id 在保存前已存在，saved 只在 measurement_data 全部保存時為 true；
 尚未捕捉到觀察時 raw_data 為 null。
 這與 analysis artifact 保存分開，status 不重查目前 tab。
+
+Operation-bound analysis 回覆附 `presentation`，記錄來源 `run_id`、
+`stage`（primary／post）、目前 pane 的 `figure_names` 與 `figures_replaced`。
+Standalone summary 放在 `analysis.<stage>.presentation`，full 放在
+`result.presentation`；recipe full 放在 `details[].analyses[].presentation`。
+`figures_replaced=true` 表示同 Run、同 pane 原有非空圖集合已被這次分析替換，
+舊圖不能再從該 pane 取得。它不表示任何 Save 檔案已覆寫。
+需要比較模型時，先另存舊圖或保留當次 MCP image，再提交新分析。
+新 Run／Load 清除這個 pane 歷史；Primary 更新也使舊 Post 失效。
+缺來源 metadata 時 run_id 為 null，不拿目前工作點補歷史。
+Mux qubit summary 保留完整原始位置與 Q 名，例如 Q3／Q5 專掃仍為
+`position=2,name=Q3` 與 `position=4,name=Q5`，不把參與順序重編成 0／1。
+圖名仍由實驗定義，例如 `fit_2`；framework 不從圖名推測 Q 身分。
 
 Standalone analysis execution 等原 GUI operation 完成，讀結果、保存 analysis artifacts，
 再以原 opaque operation 讀一次 writeback preview。

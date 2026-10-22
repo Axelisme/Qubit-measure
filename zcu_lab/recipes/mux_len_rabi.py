@@ -175,7 +175,7 @@ async def mux_len_rabi(
         )
     ]
     edits.extend(mux_overrides(inputs.overrides))
-    tab.apply(edits)
+    tab.apply(edits, require_valid=True)
 
     # Acquire before fitting; the finally block saves raw and artifacts.
     await tab.run()

@@ -132,6 +132,21 @@ unclassified. Recipe converts the analysis classification to a failed value,
 while arbitrary errors still raise. Root cancellation uses ScriptCancelled after
 drain and does not overwrite genuine errors.
 
+## Analysis presentation
+
+Operation-bound `tab.get_analyze_result` and `tab.get_post_analyze_result`
+include `presentation: {run_id, stage, figure_names, figures_replaced}`.
+Run identity comes from the selected Run/Load metadata, not the live point or
+Save receipt. Missing metadata yields null. Stage is primary or post.
+Figure names are the native names in that pane's current collection.
+`figures_replaced` records whether this successful publication replaced a
+nonempty collection in the same Run and pane. It does not report disk writes.
+New Run/Load clears this history; Primary replacement also invalidates Post.
+An old operation-bound read rejects with `result_superseded` after replacement.
+Unbound summary reads retain their summary/invalid shape.
+Element names and original positions belong to the experiment's summary;
+the remote does not infer element identity from figure names or row offsets.
+
 ## Predictor sources
 
 `predictor.list_files` returns `{files: [filename, ...]}` from the current entry's
@@ -184,7 +199,7 @@ parameter errors retain their existing predictor reasons in `method_entries`.
 
 Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref。`RecipeFieldObservation.readonly` 在 wire 上仍名為 `readonly`，表示穿過 ref 祖先，不表示宣告唯讀。公開 Recipe helper 的屬性命名由 MCP 層負責，wire 不改名。讀取不改 input、base、cfg version 或通知，也不授權寫入。
 
-Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission。結構、source、宣告 readonly、ref ancestor 或 guard 拒絕不提交前綴。一般 invalid draft 可回 changed=true 加 logical preview errors。Select 回 changed 與同 turn 的 fresh field。Use_library 必須帶非空 actual key，其他 action 必須省略 key；explicit null 不等於省略。
+Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission。結構、source、宣告 readonly、ref ancestor 或 guard 拒絕不提交前綴。一般 invalid draft 可回 changed=true 加 logical preview errors。`require_valid=true` 先以固定來源驗證 detached candidate 與 native cfg，錯誤回 changed=false 與完整 logical errors，不安裝或發布候選。省略或 false 保留一般 invalid draft 行為。空 batch 也可要求驗證目前 cfg。Select 回 changed 與同 turn 的 fresh field。Use_library 必須帶非空 actual key，其他 action 必須省略 key；explicit null 不等於省略。
 
 Handler 將 LogicalEditError 投影為 invalid_params 與原 reason，保留 path、edit_index、selector_path、available_keys。FormPathError 保留 form_path，LogicalSourceError 回 precondition_failed/library_source，並帶 consuming path 與來源身分。Cfg/control 失敗沿既有投影。ParamSpec primitive/required/enum 失敗維持原生 reason；handler carrier 與 action/key 語義失敗才回 form_errors。Unexpected provider/declaration failures 不重分類。
 

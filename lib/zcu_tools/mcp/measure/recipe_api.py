@@ -422,16 +422,17 @@ class RecipeTab:
         """
         self._runtime.select(self.tab, path, ref=ref, inline=inline)
 
-    def apply(self, edits: Sequence[FieldEdit]) -> None:
-        """Apply edits in order; first error leaves the successful prefix intact.
+    def apply(self, edits: Sequence[FieldEdit], *, require_valid: bool = False) -> None:
+        """Apply one ordered batch, optionally requiring a complete executable cfg.
 
-        None retains input. Empty edits do nothing. Each source label must be
-        nonblank; this escape hatch does not bypass owner validation.
+        None retains input. Each source label must be nonblank. Structural and
+        source errors reject the entire batch. With require_valid=True, invalid
+        candidates leave input unchanged and raise RecipeNeedsParameters with
+        every owner-reported path and reason. Earlier selections are not rolled
+        back. False retains invalid drafts and raises invalid_cfg after commit.
+        An empty validated batch checks the current cfg without changing it.
         """
-        for edit in edits:
-            if not edit.source.strip():
-                raise ValueError("Edit source must be nonblank")
-            self.set(edit.path, edit.value)
+        self._runtime.apply_fields(self.tab, edits, require_valid=require_valid)
 
     def call[T](self, method: str, params: BaseModel, *, result: type[T]) -> T:
         """Call one named RPC and decode its reply as result, without retries.
