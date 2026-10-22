@@ -115,6 +115,65 @@ def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
     assert rig.engine.records("run") == ()
 
 
+@pytest.mark.parametrize(
+    "failed", [False, True], ids=["schedule_cancel", "acquire_failure"]
+)
+def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
+    rig: Rig,
+    failed: bool,
+) -> None:
+    observed: list[Completed[int] | Failed] = []
+    attempts: list[int] = []
+
+    class Program:
+        cfg_model = ProgramV2Cfg(rounds=1)
+
+        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
+            attempts.append(1)
+            raise OSError("readout disconnected")
+
+        acquire_decimated = acquire
+
+    def operation(ctx: CallContext) -> int:
+        with Schedule(Cfg(), SignalBuffer(1), stop=ctx.stop_signal) as schedule:
+            assert schedule.stop is not ctx.stop_signal, "Schedule must own a child"
+            if failed:
+                schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg()).run_program(
+                    Program(),
+                    raw2signal_fn=lambda raw: raw,
+                    options=AcquireOptions(retry=1),
+                )
+            else:
+                schedule.set_stop()
+            assert not ctx.stop_signal.is_set()
+            assert ctx.stop_signal.error is None
+        return 99
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        observed.append(await env.call(operation))
+        observed.append(
+            await env.call(
+                lambda ctx: (
+                    0
+                    if ctx.stop_signal.partial_result
+                    or ctx.stop_signal.error is not None
+                    else 7
+                )
+            )
+        )
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    if failed:
+        assert isinstance(observed[0], Failed)
+        assert "readout disconnected" in observed[0].reason
+        assert attempts == [1, 1]
+    else:
+        assert observed[0] == Completed(99, partial_result=True)
+    assert observed[1] == Completed(7, partial_result=False)
+
+
 @pytest.mark.parametrize("source", ["outside", "other_signal"])
 def test_arbitrary_exception_or_foreign_schedule_error_fails_run(
     rig: Rig, source: str

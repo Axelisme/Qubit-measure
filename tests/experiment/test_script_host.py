@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.util
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, get_ident
 from typing import TYPE_CHECKING
@@ -82,6 +83,122 @@ def test_child_error_stops_only_its_scope_and_preserves_first_error() -> None:
         assert not unaffected.is_set()
         assert unaffected.error is None
         unaffected.raise_if_error()
+
+
+def test_scope_labels_number_each_label_and_project_the_active_path() -> None:
+    root = StopSignal()
+    assert getattr(root, "label", None) == "operation"
+    script = StopSignal(label="script")
+    iteration = script.child(label="iteration")
+    first = iteration.child(label="operation")
+    schedule = first.child(label="schedule")
+    acquire = schedule.child(label="acquire")
+    assert script.active_path == ("script/iteration#1/operation#1/schedule#1/acquire#1")
+    assert acquire.sequence == 1
+    acquire.release()
+    assert script.active_path == "script/iteration#1/operation#1/schedule#1"
+    assert schedule.child(label="acquire").sequence == 2
+    assert iteration.child(label="run").sequence == 1
+    assert iteration.child().sequence == 2
+
+
+def test_active_child_restores_live_siblings_without_retaining_released_scopes() -> (
+    None
+):
+    root = StopSignal()
+    first = root.child()
+    assert getattr(root, "active_child", None) is first
+    middle = root.child()
+    newest = root.child()
+    middle.release()
+    assert root.active_child is newest
+    newest.release()
+    assert root.active_child is first
+    first.release()
+    assert root.active_child is None
+    assert root.active_path == "operation"
+    for _ in range(1000):
+        child = root.child()
+        reference = weakref.ref(child)
+        child.release()
+        del child
+        assert reference() is None, "Completed scopes must not accumulate in the tree"
+    assert root.active_child is None
+    assert root.child().sequence == 1004
+
+
+def test_release_hands_first_error_up_without_stop_and_stops_at_operation() -> None:
+    root = StopSignal()
+    assert getattr(root, "label", None) == "operation"
+    iteration = root.child(label="iteration")
+    operation = iteration.child(label="operation")
+    schedule = operation.child(label="schedule")
+    acquire = schedule.child(label="acquire")
+    cause = OSError("acquire disconnected")
+    acquire.set_error("failed", "first failure", cause)
+    first = acquire.error
+    assert schedule.error is None
+    acquire.release()
+    assert schedule.error is first
+    assert not schedule.is_set()
+    later = schedule.child(label="acquire")
+    later.set_error("failed", "second failure", ValueError("later"))
+    later.release()
+    assert schedule.error is first
+    schedule.release()
+    assert operation.error is first
+    assert not operation.is_set()
+    with pytest.raises(ScheduleOutcomeError, match="first failure") as caught:
+        operation.raise_if_error()
+    assert caught.value.__cause__ is cause
+    operation.release()
+    assert iteration.error is None
+    assert not iteration.is_set()
+    next_operation = iteration.child(label="operation")
+    assert next_operation.error is None
+    assert not next_operation.is_set()
+
+
+def test_release_delivers_partial_without_stopping_parent_or_next_operation() -> None:
+    iteration = StopSignal()
+    operation = iteration.child()
+    assert getattr(operation, "partial_result", None) is False
+    schedule = operation.child(label="schedule")
+    acquire = schedule.child(label="acquire")
+    acquire.set()
+    assert not schedule.partial_result
+    acquire.release()
+    assert schedule.partial_result
+    assert not schedule.is_set()
+    schedule.release()
+    assert operation.partial_result
+    assert not operation.is_set()
+    operation.release()
+    assert not iteration.partial_result
+    assert not iteration.child().partial_result
+
+
+def test_host_labels_calls_and_replaces_iteration_at_commit() -> None:
+    host = host_module().ScriptHost()
+    observed: list[str] = []
+
+    def observe(ctx) -> None:
+        assert getattr(ctx.stop_signal, "label", None) == "operation"
+        observed.append(host.active_path)
+
+    async def script() -> None:
+        await host.call(observe)
+        await host.call(observe)
+        await host.commit()
+        await host.call(observe)
+
+    host.run(script())
+    assert observed == [
+        "script/iteration#1/operation#1",
+        "script/iteration#1/operation#2",
+        "script/iteration#2/operation#1",
+    ]
+    assert host.active_path == "script"
 
 
 def test_call_runs_in_executor_and_author_finally_stays_on_worker() -> None:

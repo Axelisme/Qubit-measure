@@ -24,7 +24,65 @@ def test_schedule_uses_own_stop_signal():
     with Schedule(_cfg(), stop=stop) as sched:
         assert sched.is_stop() is False
         sched.set_stop()
-        assert stop.is_set() is True
+        assert stop.is_set() is False
+        assert sched.stop.is_set() is True
+
+
+@pytest.mark.parametrize("ending", ["completed", "stopped", "error", "flush_error"])
+def test_schedule_attaches_only_inside_context_and_releases_on_every_exit(
+    ending: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop = StopSignal()
+    fail_render = False
+    now = 100.0
+
+    def render(_data: np.ndarray) -> None:
+        nonlocal now
+        now += 1.0
+        if fail_render:
+            raise ValueError("flush error")
+
+    monkeypatch.setattr(time, "time", lambda: now)
+    buffer = SignalBuffer(1, on_update=render, update_interval=0.1)
+    sched = Schedule(_cfg(), buffer, stop=stop)
+    assert sched.stop is stop
+    try:
+        with sched:
+            assert sched.stop is not stop, "Schedule must own a child scope"
+            assert stop.active_child is sched.stop
+            assert stop.active_path == "operation/schedule#1"
+            if ending == "stopped":
+                sched.set_stop()
+            elif ending == "error":
+                raise ValueError("body error")
+            elif ending == "flush_error":
+                buffer.set(np.array([1.0]))
+                buffer.set(np.array([2.0]))
+                fail_render = True
+    except ValueError:
+        assert ending in {"error", "flush_error"}
+    assert stop.active_child is None
+    assert not stop.is_set()
+    with Schedule(_cfg(), stop=stop) as following:
+        assert following.stop.sequence == 2
+        assert not following.is_stop()
+
+
+def test_gui_run_root_receives_schedule_error_without_becoming_cancelled() -> None:
+    root = StopSignal()
+    assert getattr(root, "label", None) == "operation"
+    root = StopSignal(label="run")
+    cause = OSError("readout disconnected")
+    with Schedule(_cfg(), stop=root) as sched:
+        sched.mark_failed(cause)
+        assert root.error is None
+    assert not root.is_set()
+    assert root.active_path == "run"
+    with pytest.raises(ScheduleOutcomeError) as caught:
+        root.raise_if_error()
+    assert caught.value.exception is cause
+    assert caught.value is sched.stop.error
 
 
 def test_schedule_operations_require_context():
@@ -58,7 +116,8 @@ def test_schedule_body_interrupt_preserves_partial_and_marks_signal(loop: str) -
     np.testing.assert_allclose(buffer.data, [7.0, np.nan, np.nan], equal_nan=True)
     assert sched.outcome.status == "interrupted"
     assert sched.outcome.exception is interrupt
-    assert stop.is_set()
+    assert not stop.is_set()
+    assert sched.stop.is_set()
     with pytest.raises(ScheduleOutcomeError) as caught:
         stop.raise_if_error()
     assert caught.value.status == "interrupted"
