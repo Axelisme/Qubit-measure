@@ -171,12 +171,19 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 
 `program` 以 `type`／`style` 對應到執行用的 Module builder，取代 cfg 上的 `build()`。`resources` 的 module library 以核心 schema 作為 DocumentStore 的 model，並實作核心的 Protocol。驗證 context 注入固定 library 與 asset capability。Program 的 ModuleCfgFactory.from_core 集中轉換成 native cfg，透過 assets.path_for 取得絕對路徑。Native arb 只保留 data key 與必填 path，不保留 provider，不查 global DB。
 
-### 分析 app 的過渡 project owner
+### 分析 app 的 entry/component owner
 
 2026-10-20 裁決：「新增 gui/app/analysis_project/ 共用過渡 owner」。
 
-`gui.app.analysis_project` 集中 fluxdep／dispersive 共用的 ProjectInfo、ProjectDialog、
-ResultScopeManager、project CLI 與 RPC 投影，保留既有 chip／qubit 資料流。
+`gui.app.analysis_project` 集中 fluxdep／dispersive 共用的 AnalysisEntry、AnalysisTarget、
+EntryDialog、entry CLI 與 RPC 投影。AnalysisEntry 以 project_root 下的 result/ 與 Database/
+開啟既有 ResultEntry，目標只接受 fluxonium 類 component。Component 省略時解析 setup 的
+qubit alias。Dialog 在 alias 缺失或錯誤時要求使用者明示選擇，不自選第一個 component。
+分析 app 不使用舊 chip／qubit 兩級目錄與 params.json，也不呼叫 Database Save。
+Predictor 與 dispersive 格式由 resources 擁有。Fluxdep 匯出 predictor、更新 setup 已宣告欄位，
+並以 record_analysis 留 ledger。Dispersive 讀 entry-local predictor，匯出獨立 dispersive artifact。
+Lab kind 註冊留在 scripts 組合根，framework 不 import zcu_lab。
+Notebook 的既有 params.json handoff 仍由 resources.qubit_params 擁有，不是分析 app 的 fallback。
 共用 GUI、session、remote、measure 與 workflows 不依賴這個分析 owner。
 `.importlinter` 的 `shared-no-analysis-project` contract 保護此方向。
 中立的 `nearest_existing` 位於 `gui.widgets.file_dialog`，callers 直接匯入，不經分析 owner re-export。

@@ -24,11 +24,18 @@ jupyter:
     version: 3.13.11
 ---
 
-**Readers:** operator, lab-author. Fit resonator responses and compare measured dispersive shifts with fluxonium predictions.
+**Readers:** operator, lab-author. Fit resonator responses from an entry-local predictor and export a dispersive artifact.
+
+Select an existing entry and fluxonium component below. Predictor input comes from
+predictors/<component>.json. Resonator seeds come from the dispersive artifact,
+then the setup resonator alias, then 5 GHz. This notebook does not read params.json.
+The [dispersive GUI](../../lib/zcu_tools/gui/app/dispersive/README.md) owns the interactive workflow;
+its MCP interface remains read-only.
 
 ```python
 %load_ext autoreload
 from pathlib import Path
+from datetime import datetime, timezone
 
 import numpy as np
 from joblib import Parallel, delayed
@@ -38,7 +45,17 @@ from scipy.ndimage import gaussian_filter1d
 
 %autoreload 2
 import zcu_tools.notebook.analysis.dispersive as zd
-from zcu_tools.resources.qubit_params import DispersiveFit, QubitParams
+from zcu_lab.components import register_all
+from zcu_tools.resources.entry import (
+    ResultEntry, RoleResolutionError, component_registry, document_value, snapshot,
+)
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
+from zcu_tools.resources.predictor_file import load_predictor_file
+from zcu_tools.resources.analysis_source import AnalysisSource
+from zcu_tools.resources.dispersive_file import (
+    DispersiveFile, DispersiveParams, load_dispersive_file, save_dispersive_file,
+)
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate import value2flux
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
 from zcu_tools.notebook.analysis.plot import plot_dispersive_shift
@@ -51,35 +68,76 @@ from zcu_tools.analysis.fitting.resonance import (
 ```
 
 ```python
-chip_name = "Q12_2D[5]"
-qub_name = "Q1"
-
-result_dir = Path(f"../../result/{chip_name}/{qub_name}")
-param_path = result_dir / "params.json"
+project_root = Path("../..").resolve()
+entry_name = "fluxonium-analysis"
+component = "Q1"  # Existing fluxonium component in this entry.
+register_all(component_registry)
+entry = ResultEntry.open(
+    entry_name,
+    result_root=project_root / "result",
+    database_root=project_root / "Database",
+)
+component_model = snapshot(entry.setup).components[component]
+if not (
+    component_model.kind == "qubit/fluxonium"
+    or component_model.kind.startswith("qubit/fluxonium/")
+):
+    raise ValueError("Select a fluxonium component")
+result_dir = entry.result_path
+dispersive_path = entry.dispersive_path / f"{component}.json"
 
 image_dir = result_dir / "image" / "dispersive"
 web_dir = result_dir / "web" / "dispersive"
-image_dir.mkdir(exist_ok=True)
-web_dir.mkdir(exist_ok=True)
+image_dir.mkdir(parents=True, exist_ok=True)
+web_dir.mkdir(parents=True, exist_ok=True)
 ```
 
 ```python
-params_file = QubitParams(param_path, readonly=True)
-fit_inputs = params_file.require_dispersive_inputs(default_bare_rf=5.0)
-prior_dispersive = params_file.get_dispersive_fit()
+predictor_file = load_predictor_file(entry.predictors_path / f"{component}.json")
+if not isinstance(predictor_file.params, FluxoniumParams):
+    raise ValueError("Select a fluxonium predictor")
+predictor = predictor_file.params.build_predictor()
+prior = (
+    load_dispersive_file(dispersive_path).params
+    if dispersive_path.exists() else DispersiveParams()
+)
 
-params = fit_inputs.params
-flux_half = fit_inputs.flux_half
-flux_int = fit_inputs.flux_int
-flux_period = fit_inputs.flux_period
+params = predictor.params
+# value2flux below uses effective device coordinates, including stored bias.
+flux_half = predictor.flux_half - predictor.flux_bias
+flux_period = predictor.flux_period
+flux_int = flux_half + 0.5 * flux_period
 
 print("params = ", params, " GHz")
 print("flux_half = ", flux_half)
 print("flux_int = ", flux_int)
 print("flux_period = ", flux_period)
 
-bare_rf = fit_inputs.bare_rf_seed
-g = prior_dispersive.g if prior_dispersive is not None else 0.05  # GHz
+bare_rf = prior.bare_rf
+if bare_rf is None:
+    bare_rf = prior.plot_transitions.r_f
+if bare_rf is None:
+    aliases = AliasTable([
+        AliasRow(name, target) for name, target in entry.load_aliases().aliases.items()
+    ])
+    document = snapshot(entry.setup)
+    try:
+        resonator = aliases.resolve("resonator", document)
+    except RoleResolutionError as exc:
+        if exc.reason not in ("Unknown alias", "Alias is not bound"):
+            raise
+    else:
+        model = document.components[resonator]
+        if "freq" in type(model).model_fields:
+            freq = document_value(document, f"{resonator}.freq")
+            if freq is not None:
+                if isinstance(freq, bool) or not isinstance(freq, (int, float)):
+                    raise ValueError("Resonator freq must be MHz")
+                bare_rf = float(freq) * 1e-3
+if bare_rf is None:
+    bare_rf = 5.0
+
+g = prior.g if prior.g is not None else 0.05  # GHz
 print(f"bare rf = {bare_rf}", "GHz")
 print(f"g = {g}", "GHz")
 ```
@@ -226,8 +284,31 @@ fig.write_html(f"{web_dir}/{figname}.html", include_plotlyjs="cdn")
 fig.write_image(f"{image_dir}/{figname}.png", format="png", width=800, height=400)
 ```
 
-# Write back g to result
+# Export dispersive result
+
+Artifact and setup writes are separate commits. An I/O or schema failure preserves
+any successful earlier write. Only declared g/bare_rf fields are updated.
 
 ```python
-QubitParams(param_path).set_dispersive_fit(DispersiveFit(g=best_g, bare_rf=bare_rf))
+entry.dispersive_path.mkdir(parents=True, exist_ok=True)
+current = (
+    load_dispersive_file(dispersive_path).params
+    if dispersive_path.exists() else DispersiveParams()
+)
+save_dispersive_file(
+    dispersive_path,
+    DispersiveFile(
+        format="zcu.dispersive", version=1,
+        params=current.model_copy(update={"g": float(best_g), "bare_rf": float(bare_rf)}),
+        source=AnalysisSource(
+            run_id=None, created_at=datetime.now(timezone.utc).isoformat(),
+        ),
+    ),
+)
+entry.setup.refresh()
+component_model = snapshot(entry.setup).components[component]
+with entry.setup.edit() as draft:
+    for field, value in (("g", best_g), ("bare_rf", bare_rf)):
+        if field in type(component_model).model_fields:
+            draft.set(f"{component}.{field}", float(value))
 ```

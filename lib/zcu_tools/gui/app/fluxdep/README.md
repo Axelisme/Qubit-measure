@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -41,10 +41,13 @@ app 自帶（version table、worker 模式等仍 per-app）。
 
 ## Entry and export
 
-Project… 開啟 `project_root/result/<entry>`。CLI 使用 `--project-root`、`--entry`、
+Project… 使用共用 EntryDialog 開啟 `project_root/result/<entry>`。CLI 使用 `--project-root`、`--entry`、
 `--component`。未指定 component 時，app 解析 setup 的 `qubit` alias。
-目標必須是 `qubit/fluxonium` 或其子 kind。缺 entry、alias 或 component 會報錯，
-不建立新條目，不讀舊兩級目錄。啟動腳本註冊 lab component schema，框架不 import lab。
+目標必須是 `qubit/fluxonium` 或其子 kind。共用 owner 回報不存在的 entry/component 或無效的 alias。
+CLI 未指定 entry 時，GUI 保持未開啟。
+Dialog 列出全部合法 component，有效 qubit alias 只作預選。
+Alias 缺失或錯誤時，OK 保持停用，直到使用者明示選擇。
+不建立新條目，不讀舊兩級目錄或 params.json。啟動腳本註冊 lab component schema，框架不 import lab。
 
 Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 EJ／EC／EL
 與 flux 欄位，最後追加 analysis ledger。未宣告的 flux 欄位只留在 predictor。

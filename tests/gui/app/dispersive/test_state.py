@@ -1,4 +1,4 @@
-"""Tests for dispersive-fit-gui state: ProjectInfo derivation + version discipline."""
+"""Tests for dispersive state inputs, invalidation and version discipline."""
 
 from __future__ import annotations
 

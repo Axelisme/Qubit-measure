@@ -70,3 +70,6 @@ Worker 只回傳資料。Owner-thread on_done 記錄 state 並畫圖。
 Agent 只觀測，GUI 使用者負責 load、preprocess、tune、export。
 預設 port 為 8767。Dispersive 的 WIRE=6、GUI=8，與 measure 版本獨立。
 MCP server 位於 `zcu_tools.mcp.dispersive.server`。
+`dispersive_launch` 使用 project_root、entry、component 啟動腳本。
+`dispersive_project_info` 回傳 entry/component 路徑與已選的 predictor 檔名，未選時為 null。
+MCP 不提供 load、preprocess、tune 或 export 的 mutation tools。

@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **讀者：** agent。Fluxdep MCP 的控制流程、工具與診斷契約。
 
@@ -72,7 +72,11 @@ Local; a GUI lock or another online holder still permits connection. The reply
 contains native `control` (`holder`, `locked`, `online`, `me`), project paths,
 published spectrum stages/drafts and fit freshness. An optional project supplies
 `project_root`, `entry` and optional `component`. GUI opens `project_root/result/entry`
-and defaults the component to the setup qubit alias. Wire mismatch
+and defaults the component to the setup qubit alias. The project receipt contains
+result_root, entry, component, result_path and predictors_path. Unconfigured
+fields are null. GUI validates entry and component kind; MCP does not derive paths
+from chip/qubit names. Launch uses the same
+project_root, entry and component inputs. Wire mismatch
 still rejects the connection, but versions are not part of the agent receipt. `readonly` never acquires, even when its
 label matches the holder. Omitted label/mode retain the prior choices on reconnect;
 launch supports the same choices, including a later attach after auto_connect=false.
