@@ -8,7 +8,7 @@
 
 主要生成入口如下：
 
-- `Form(core_cfg, tree, *, extras=None, lower=None, fixed_elements=(), field_order=())`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。Form 的 cfg 結果型別具協變性，具體 `Form[SampleCfg]` 可交給 generic-free host，`to_cfg` 仍回傳 SampleCfg 或 FormErrors。Core annotations 決定形狀與驗證；樹決定起始值、唯讀屬性、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的 Expr start／stop 也沿用這個規則，不回落 LinRange 的 0／1。Range 端點為 None 時顯示空白且必填，對應 input key 缺席也不使用 0／1。Literal 端點與未宣告的掃描仍保留原有預設。
+- `Form(core_cfg, tree, *, extras=None, lower=None, fixed_elements=(), field_order=())`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。Form 的 cfg 結果型別具協變性，具體 `Form[SampleCfg]` 可交給 generic-free host，`to_cfg` 仍回傳 SampleCfg 或 FormErrors。Core annotations 決定形狀與驗證；樹決定起始值、唯讀屬性、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的端點與點數也沒有數值預設。端點為 None 或 Expr 求值失敗時保持空白必填。樹中明填的端點與點數保留原值。未宣告的掃描只選 Range + Expts，start／stop／n 留空必填。
 - `module_form(spec_type)`：為一個具體持久 module 或 waveform Spec class 建 Form。生成的 model 可當 FormState root，也可當 `ModuleInline` 的 module 欄位；host 的選項沿用自己的 `choices(env)`。`to_cfg` 回傳同一個 Spec，child library key 保持字串，不讀 library、asset，也不轉 native cfg。`Form.input_from_spec(spec, env)` 把既有 Spec（library entry 或 writeback proposal）投影成 input；它只接受這類 Form 的同型 Spec。
 - `FormContext(parameters)`：實驗 `make_form(ctx)` 使用的固定來源查詢。parameters 是捕捉的 ParameterContext，缺來源時為 None。`has(ref)` 接受 library root 或 point module slot，含 `$alias` 前綴。缺 key、未設定或懸空的 slot、缺或未綁 alias 回 False；語法錯誤、其他 alias 解析錯誤與來源故障仍 raise。它不 materialize module、不讀 asset、不 refresh。
 - `ModuleValues`：`Form.read_module` 回傳的單一 module 欄位實際值、模式與來源。
@@ -20,7 +20,7 @@
 
 生成器集中處理兩條翻譯政策，host 與 `gui.form` 使用轉換結果：
 
-- `FieldMeta` 的 label、unit、decimals、description、group、readonly 與 element_label 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。唯讀不把欄位改成單值 Literal，原有數值型別與精度保留。Sweep 的 decimals 傳到 start／stop、center／span 與 step float 欄位，不套外層 model 或 n。
+- `FieldMeta` 的 label、unit、decimals、description、group、readonly 與 element_label 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。`Display` 按明示屬性疊加，外層明示的 False／None 也優先；未指定屬性沿用 alias。生成器用 `Display.overlay` 加上 hidden 或 sweep 政策，保留其餘屬性的未指定狀態。`InputDefault` 等其他 metadata 仍整份覆蓋。唯讀不把欄位改成單值 Literal，原有數值型別與精度保留。Sweep 的 decimals 傳到 start／stop、center／span 與 step float 欄位，不套外層 model 或 n。
 - 生成 module 欄位時，選填的 `desc` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，原 description 被丟棄，所以編輯後會變回預設。Readout 的必填通道照常可編輯；Pulse cfg 不保存 `ro_ch`、`mux_*`、`mask` 或 `outsel`。範本 seed 屏蔽欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。屏蔽政策由生成器固定。
 
 生成的 `options(env)` 宣告可留空欄位的 None、依持久 Spec family 篩選的 captured library keys，以及每個可編輯 Inline kind。只有結構 tag 的 kind 不列為 Inline。對明確預設為 None 的 nullable module，生成器補入停用值，讓選單顯示 None 而非空白。只允許 None、卻沒有 None 預設的 required 欄位不自動停用。通用 Form 的 static defaults 仍省略 None，不影響 validator 推導值。所有 key input 使用 `{"kind": "ref", "name": key}`，inline 使用 `{"kind": "inline", "module": content}`，可留空時也接受 null。Options 的 value 只帶 key 或所選 kind 的 tag。fields 指向該 kind 的 wrapper 子表單，describe 所選欄位才列 children，不重複固定 tag。Ref 選項不帶 fields，也不顯示 entry 內容。切換由 `_converters.py` 集中處理，依 [ADR-0079](../../../../docs/adr/0079-form-field-transitions.md#共用-inline-政策) 共用同名同型別的 raw 繼承。
@@ -126,13 +126,13 @@ form = Form(Group, {
 
 ## Sweep 表示
 
-SweepCfg 生成 Range／Center × Expts／Step 四個 tagged branches，各自只保存 active 座標與 n 或 step。Fresh input 選 Range + Expts。Range 的 None 端點與求值失敗的 Expr 初始端點保持未填且必填，缺少 input key 也不補 0／1。`gui.form_adapter.sweep` 擁有四種數值 model 與換算。指令掛在 sweep row，以共用 Form 的 readonly snapshot、局部 evaluate 與原子安裝執行，不由葉欄位修改 parent。Step 的有效端點與 floor count 由這些 model 的驗證產生，`to_cfg` 使用這份結果與原 step，不另算步長或截短。既有 SweepCfg 仍驗證單點與點數一致性。Memento 保存 FormInput，因此模式與新 expression 不依賴 Qt view，read／preview／result 不暗改原稿。
+SweepCfg 生成 Range／Center × Expts／Step 四個 tagged branches，各自只保存 active 座標與 n 或 step。未指定初值的 fresh input 只選 Range + Expts，raw 為 `{"kind": "linrange"}`；start／stop／n 空白且必填。Range 的 None 端點與求值失敗的 Expr 初始端點保持未填且必填，缺少 input key 也不補 0／1。`gui.form_adapter.sweep` 擁有四種數值 model 與換算。指令掛在 sweep row，以共用 Form 的 readonly snapshot、局部 evaluate 與原子安裝執行，不由葉欄位修改 parent。Step 的有效端點與 floor count 由這些 model 的驗證產生，`to_cfg` 使用這份結果與原 step，不另算步長或截短。既有 SweepCfg 仍驗證單點與點數一致性。Memento 保存 FormInput，因此模式與新 expression 不依賴 Qt view，read／preview／result 不暗改原稿。
 
 完整的 sweep container logical edit 可以一次安裝 Range + Expts，不必讓舊 Center draft 可換算。Recipe 的完整 set_sweep 使用這條路徑；部分編輯仍只接受目前 active paths。
 
 Step 驗證保留 start 與 step，以 floor count 投影實際 stop／center／span。接近整數的商使用 1e-9 相對容差，不普遍 round。步長大於非零區間、零步長或方向錯誤保留錯誤草稿，不能縮成單點。Input 保存原稿，preview／result 提供有效端點，不回寫 input。不提供 explicit-list 分支。
 
-座標 command 不要求 n／step 有效，採樣 command 要求座標與目前採樣值有效。換算只在成功時將參與 expression 改為 direct 值；未參與 input 保留原文與缺席狀態。缺值、expression 或換算失敗不安裝部分結果。手寫表單可使用同一個 `SweepInput`。沒有宣告 default 或 default_factory 的欄位，透過 `InputDefault` metadata 建立 `static_defaults(LinRange)`，初值是 start 0、stop 1、n 3，與未指定起始樹的生成 sweep 相同。明確初值、default_factory 與 authored input 保持原值。Annotation 只接受部分分支時，description 與 execution 不提供其他分支的 command。
+座標 command 不要求 n／step 有效，採樣 command 要求座標與目前採樣值有效。換算只在成功時將參與 expression 改為 direct 值；未參與 input 保留原文與缺席狀態。缺值、expression 或換算失敗不安裝部分結果。手寫表單可使用同一個 `SweepInput`。沒有宣告 default 或 default_factory 的欄位，透過 `InputDefault` metadata 只選 Range + Expts，與未指定起始樹的生成 sweep 相同。四個 branch 的座標與採樣值都沒有數值預設。明確初值、default_factory 與 authored input 保持原值。Annotation 只接受部分分支時，description 與 execution 不提供其他分支的 command。
 
 ## Log／List 整數清單
 

@@ -87,8 +87,8 @@ def identity_input() -> dict[str, JsonValue]:
         "sequence": [{"kind": 2, "amount": 3.0}, {"kind": 3, "other": 4.0}],
         "fixed": [{"kind": 1, "amount": 3.0}, {"kind": 3, "other": 4.0}],
         "mapping": {"drive": {"kind": 2, "amount": 3.0}},
-        "restricted": {"kind": "linrange", "n": 2},
-        "unrestricted": {"kind": "linrange", "n": 4},
+        "restricted": {"kind": "linrange", "start": 0, "stop": 1, "n": 2},
+        "unrestricted": {"kind": "linrange", "start": 0, "stop": 1, "n": 4},
     }
 
 
@@ -140,7 +140,7 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
         assert count is not None and count.choices == (allowed_n,)
         candidate: dict[str, JsonValue] = {
             **before,
-            "restricted": {"kind": "linrange", "n": allowed_n},
+            "restricted": {"kind": "linrange", "start": 0, "stop": 1, "n": allowed_n},
         }
         if not empty:
             candidate_result = FormState(
@@ -171,7 +171,7 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
         assert state.input.data == before
     invalid: dict[str, JsonValue] = {
         **before,
-        "unrestricted": {"kind": "linrange", "n": 0},
+        "unrestricted": {"kind": "linrange", "start": 0, "stop": 1, "n": 0},
     }
     errors = FormState(FormInput(SchemaIdentityForm, invalid)).result(env)
     assert isinstance(errors, FormErrors)

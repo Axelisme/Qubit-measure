@@ -188,7 +188,7 @@ class BranchForm(RebuildingForm):
     branch: Annotated[
         StaticBranch | ContextBranch | RequiredBranch, Field(discriminator="kind")
     ] = Field(default_factory=StaticBranch)
-    fluxes: LinRange = Field(default_factory=LinRange)
+    fluxes: LinRange = Field(default_factory=lambda: LinRange(start=0, stop=1, n=3))
 
 
 class NullableBranchForm(RebuildingForm):
@@ -650,7 +650,9 @@ def test_compatible_restore_cannot_replace_an_unselected_model_object(
 class NullableRangeAliasForm(FormModel):
     """Expose the public linear range as a nullable active model section."""
 
-    fluxes: LinRange | None = Field(default_factory=LinRange)
+    fluxes: LinRange | None = Field(
+        default_factory=lambda: LinRange(start=0, stop=1, n=3)
+    )
 
 
 def test_nullable_range_alias_evaluates_expressions_and_canonical_errors() -> None:

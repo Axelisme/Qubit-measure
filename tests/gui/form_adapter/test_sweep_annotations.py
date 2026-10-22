@@ -11,7 +11,6 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    static_defaults,
 )
 from zcu_tools.gui.form_adapter import CenterSpan, LinRange, SweepInput
 
@@ -28,15 +27,20 @@ class ExplicitSweepForm(FormModel):
     sweep: SweepInput = CenterSpan(center=3, span=2, n=5)
 
 
-def test_required_sweep_fresh_input_matches_generated_range_defaults():
+def test_required_sweep_fresh_input_selects_range_without_coordinates():
     env = FormEnv()
     input = RequiredSweepForm.default_input(env)
-    assert input.data == {"sweep": static_defaults(LinRange)}
+    assert input.data == {"sweep": {"kind": "linrange"}}
     state = FormState(input)
     result = state.result(env)
-    assert not isinstance(result, FormErrors)
-    assert result.sweep == LinRange()
-    assert [field.name for field in state.describe(("sweep",), env).children] == [
+    assert isinstance(result, FormErrors)
+    assert result.messages == {
+        ("sweep", name): "Field required" for name in ("start", "stop", "n")
+    }
+    description = state.describe(("sweep",), env)
+    assert description.target is not None
+    assert description.target.selected == 0
+    assert [field.name for field in description.children] == [
         "start",
         "stop",
         "n",
@@ -71,14 +75,20 @@ def test_sweep_authored_branch_retains_values(raw):
     assert state.input.data == {"sweep": raw}
 
 
-def test_sweep_authored_partial_range_keeps_existing_endpoint_defaults():
+@pytest.mark.parametrize(
+    ("raw", "missing"),
+    [
+        ({"kind": "linrange", "n": 3}, ("start", "stop")),
+        ({"kind": "linrange", "start": 2, "stop": 4}, ("n",)),
+        ({"kind": "center", "center": 3, "span": 2}, ("n",)),
+    ],
+)
+def test_sweep_authored_partial_input_requires_missing_coordinates(raw, missing):
     env = FormEnv()
-    state = FormState(
-        FormInput(RequiredSweepForm, {"sweep": {"kind": "linrange", "n": 3}})
-    )
+    state = FormState(FormInput(RequiredSweepForm, {"sweep": raw}))
     result = state.result(env)
-    assert not isinstance(result, FormErrors)
-    assert result.sweep == LinRange(n=3)
+    assert isinstance(result, FormErrors)
+    assert result.messages == {("sweep", name): "Field required" for name in missing}
 
 
 def test_required_sweep_coordinates_can_roundtrip_through_commands():
@@ -98,12 +108,12 @@ def test_required_sweep_coordinates_can_roundtrip_through_commands():
 
 
 class FixedSweepForm(FormModel):
-    sweep: LinRange = Field(default_factory=LinRange)
+    sweep: LinRange = Field(default_factory=lambda: LinRange(start=0, stop=1, n=3))
 
 
 class CoordinateSweepForm(FormModel):
     sweep: Annotated[LinRange | CenterSpan, Field(discriminator="kind")] = Field(
-        default_factory=LinRange
+        default_factory=lambda: LinRange(start=0, stop=1, n=3)
     )
 
 
