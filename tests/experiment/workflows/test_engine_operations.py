@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from threading import Event, Thread, Timer
 from time import sleep
@@ -46,8 +46,11 @@ class Cfg(ExpCfgModel):
     value: int = 3
 
 
+type Rig = tuple[w.Engine[int], w.RunPaths, RecordingDevices]
+
+
 @pytest.fixture
-def rig(tmp_path: Path):
+def rig(tmp_path: Path) -> Iterator[Rig]:
     plots = Plots(NonPresentingHost())
     devices = RecordingDevices()
     engine = w.Engine(w.EnginePorts(plots, RecordingBar, ManualClock(), context=7, devices=devices))
@@ -98,7 +101,7 @@ def until(predicate: Callable[[], bool], label: str) -> None:
         timer.join()
 
 
-def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(rig) -> None:
+def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(rig: Rig) -> None:
     engine, paths, _devices = rig
     ready, entered = Event(), Event()
     outcomes: list[tuple[int, bool]] = []
@@ -144,7 +147,7 @@ def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(rig)
     assert saved_run.read_summary(paths.metadata_root) is None
 
 
-def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(rig) -> None:
+def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(rig: Rig) -> None:
     engine, paths, _devices = rig
     ready, entered = Event(), Event()
     calls: list[int] = []
@@ -173,19 +176,21 @@ def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(r
         assert ready.wait(30), "The worker must enter its operation or settle"
         assert entered.is_set(), statuses
         engine.pause("run")
-        until(lambda: engine.status().lifecycle == "paused", "paused operation")
+        until(lambda: (status := engine.status()) is not None and status.lifecycle == "paused", "paused operation")
         assert delivered == []
         engine.resume("run")
-    finally:
-        engine.stop("run") if thread.is_alive() and not delivered else None
         thread.join(30)
+    finally:
+        if thread.is_alive():
+            engine.stop("run")
+            thread.join(30)
     assert not thread.is_alive()
     assert delivered == [42]
     assert calls == [0, 1]
     assert statuses[-1].lifecycle == "done"
 
 
-def test_answers_are_bound_to_the_original_request_id(rig) -> None:
+def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
     engine, paths, _devices = rig
     ready = Event()
     answers: list[Reply | None] = []
@@ -225,7 +230,7 @@ def test_answers_are_bound_to_the_original_request_id(rig) -> None:
     assert answers == [Reply(approved=True), Reply(approved=False)]
 
 
-def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(rig) -> None:
+def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(rig: Rig) -> None:
     engine, paths, devices = rig
     records: list[tuple[int, int]] = []
     cfg = Cfg(value=3)
