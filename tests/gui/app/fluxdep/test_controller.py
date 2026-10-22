@@ -7,7 +7,6 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.search import ParamBounds
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
@@ -46,11 +45,12 @@ def test_get_project_root_falls_back_to_cwd_when_not_injected():
     assert ctrl.get_project_root() == os.getcwd()
 
 
-def test_setup_project_mutates_and_emits():
+def test_setup_project_mutates_and_emits(fluxonium_entry):
     ctrl = _ctrl()
     seen = _record(ctrl, ProjectChangedPayload)
-    ctrl.setup_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
-    assert ctrl.state.project.chip_name == "Q5_2D"
+    ctrl.setup_project(str(fluxonium_entry.result_path.parent.parent), "synthetic")
+    assert ctrl.state.project is not None
+    assert ctrl.state.project.component == "Q2"
     assert len(seen) == 1
 
 

@@ -3,7 +3,7 @@
 Wires State + Controller + MainWindow behind the shared GUI process runtime.
 Unlike measure-gui there is no registry/role-catalog (no experiment adapters)
 and no session-restore caretaker (v1 does not persist a session — the analysis
-tool starts fresh by loading an hdf5; exported spectrums.hdf5 / params.json are
+tool starts fresh by loading an hdf5; entry-scoped spectrums.hdf5 / predictor JSON are
 the only persisted artifacts).
 """
 
@@ -19,7 +19,7 @@ from zcu_tools.gui.runtime import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+    from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 
 
@@ -32,7 +32,7 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
 
     def __init__(
         self,
-        project: ProjectInfo | None = None,
+        project: AnalysisTarget | None = None,
         project_root: str | None = None,
     ) -> None:
         self._project = project

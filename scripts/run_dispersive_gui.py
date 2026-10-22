@@ -53,6 +53,11 @@ def main(argv: list[str] | None = None) -> int:
     project_root = str(PROJECT_ROOT)
 
     from zcu_tools.gui.app.dispersive.app import DispersiveGuiBehavior
+    from zcu_tools.resources.entry import component_registry
+
+    from zcu_lab.components import register_all
+
+    register_all(component_registry)
     from zcu_tools.gui.runtime import launch_gui_runtime
 
     return launch_gui_runtime(

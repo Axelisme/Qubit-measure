@@ -30,6 +30,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.analysis_project.entry_dialog import EntryDialog
+
     from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
 
 from qtpy.QtCore import Qt, QTimer
@@ -48,7 +50,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.app.analysis_project.project import DEFAULT_CHIP, DEFAULT_QUBIT
+from zcu_tools.gui.app.analysis_project.entry import require_target
 from zcu_tools.gui.app.fluxdep.controller import (
     Controller,
     PendingKind,
@@ -119,6 +121,7 @@ class MainWindow(QMainWindow):
         self._close_prompt_open = False
         self._close_confirmed = False
         self._control_disposed = False
+        self._project_dialog: EntryDialog | None = None
         # Set once an accepted close starts disposing views and owners.
         self._shutting_down = False
         self._shutdown_application: QApplication | None = None
@@ -160,6 +163,8 @@ class MainWindow(QMainWindow):
             self._current_editor.set_editable(editable=writable)
         if self._analyze_panel is not None:
             self._analyze_panel.set_writable(writable=writable)
+        if self._project_dialog is not None:
+            self._project_dialog.set_writable(writable=writable)
 
     # --- construction ----------------------------------------------------
 
@@ -417,12 +422,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_project(self) -> None:
         project = self._ctrl.state.project
-        if project.chip_name == DEFAULT_CHIP and project.qub_name == DEFAULT_QUBIT:
-            self._project_label.setText("Project: not set (use Project…)")
+        if project is None:
+            self._project_label.setText("Entry: not open (use Project…)")
         else:
-            self._project_label.setText(
-                f"Project: {project.chip_name} / {project.qub_name}"
-            )
+            self._project_label.setText(f"Entry: {project.entry} / {project.component}")
 
     def _refresh_list(self) -> None:
         """Rebuild the spectrum list from the Controller's published rows."""
@@ -818,15 +821,14 @@ class MainWindow(QMainWindow):
             self._ctrl.set_active_spectrum(successor)
 
     def _on_project_clicked(self) -> None:
-        """Edit the project chip/qubit names (and optional roots)."""
+        """Open an entry and select its fluxonium component."""
         if not self._writable:
             return
-        from zcu_tools.gui.app.analysis_project.project_dialog import ProjectDialog
+        from zcu_tools.gui.app.analysis_project.entry_dialog import EntryDialog
 
-        dialog = ProjectDialog(
+        dialog = EntryDialog(
             self._ctrl.state.project,
             parent=self,
-            db_label="Data root",
             project_root=self._ctrl.get_project_root(),
         )
         # Non-blocking open() keeps the Qt event loop (and the read-only control
@@ -834,7 +836,11 @@ class MainWindow(QMainWindow):
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         def _on_accepted() -> None:
-            self._ctrl.setup_project(dialog.result_project())
+            target = dialog.selected_target()
+            if target is not None:
+                self._ctrl.setup_project(
+                    str(target.result_root.parent), target.entry, target.component
+                )
 
         dialog.accepted.connect(_on_accepted)
         # Hold a reference so open()'s immediate return doesn't let the dialog be GC'd.
@@ -851,8 +857,14 @@ class MainWindow(QMainWindow):
 
         # The default path comes from the project's result dir (set via Project…);
         # the dialog only confirms / overrides the path.
-        project = self._ctrl.state.project
-        dialog = ExportSpectrumsDialog(result_dir=project.result_dir, parent=self)
+        try:
+            project = require_target(self._ctrl.state.project)
+        except RuntimeError as error:
+            self._show_error("Export", str(error))
+            return
+        dialog = ExportSpectrumsDialog(
+            result_path=str(project.resource.result_path), parent=self
+        )
         # Non-blocking open() keeps the Qt event loop (and the read-only control
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)

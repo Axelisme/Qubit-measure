@@ -24,7 +24,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.analysis.spectrum import SpectrumData
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
 
@@ -269,9 +269,9 @@ class FitState:
 class FluxDepState:
     """Passive GUI state container for the fluxdep analysis pipeline."""
 
-    def __init__(self, project: ProjectInfo | None = None) -> None:
+    def __init__(self, project: AnalysisTarget | None = None) -> None:
         self._owner_guard = OwnerThreadGuard()
-        self.project: ProjectInfo = project if project is not None else ProjectInfo()
+        self.project: AnalysisTarget | None = project
         self.spectrums: dict[str, SpectrumEntry] = {}
         self.active_spectrum: str | None = None
         self.selection: SelectionState = SelectionState()
@@ -548,7 +548,7 @@ class FluxDepState:
             ]
         )
 
-    def set_project(self, project: ProjectInfo) -> None:
+    def set_project(self, project: AnalysisTarget | None) -> None:
         self._assert_owner()
         self.project = project
         self.version.bump(PROJECT_VERSION_KEY)

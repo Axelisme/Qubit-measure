@@ -1,6 +1,4 @@
-"""Project identity inputs and GUI-computed paths through the shipped RPC route."""
-
-import os
+"""Entry target admission and failed opening through the shipped RPC route."""
 
 import pytest
 from zcu_tools.gui.app.fluxdep.event_bus import ProjectChangedPayload
@@ -12,6 +10,7 @@ from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
 
 def test_setup_emits_native_agent_fact_only_after_guard_admission(
     route_harness: RouteHarness,
+    fluxonium_entry,
 ) -> None:
     client = route_harness.client()
     facts: list[EventMeta] = []
@@ -26,78 +25,58 @@ def test_setup_emits_native_agent_fact_only_after_guard_admission(
         assert route_harness.request(client, "project.info")["ok"]
         assert facts == []
         assert route_harness.request(
-            client, "project.setup", chip_name="chip", qub_name="Q1"
+            client,
+            "project.setup",
+            project_root=str(fluxonium_entry.result_path.parent.parent),
+            entry="synthetic",
+            component="Q1",
         )["ok"]
         assert len(facts) == 1
         assert facts[0].origin.kind == "agent"
         assert facts[0].origin.client_id is not None
+        info = route_harness.request(client, "project.info")
+        assert info["ok"]
+        assert "result" in info
+        assert info["result"]["component"] == "Q1"
     finally:
         subscription.unsubscribe()
 
 
-def test_setup_computes_paths_from_identity_and_controller_root(
-    route_harness: RouteHarness,
-) -> None:
+@pytest.mark.parametrize("component", ["missing", ""])
+def test_unknown_component_preserves_previous_target(
+    route_harness, fluxonium_entry, component
+):
     client = route_harness.client()
-    root = route_harness.ctrl.get_project_root()
-    for name in ("first", "晶片"):
-        reply = route_harness.request(
-            client, "project.setup", chip_name=name, qub_name="Q:1"
+    root = str(fluxonium_entry.result_path.parent.parent)
+    assert route_harness.request(
+        client, "project.setup", project_root=root, entry="synthetic"
+    )["ok"]
+    before = route_harness.request(client, "project.info")
+    try:
+        rejected = route_harness.request(
+            client,
+            "project.setup",
+            project_root=root,
+            entry="synthetic",
+            component=component,
         )
-        assert reply["ok"] is True
-        project = {
-            "chip_name": name,
-            "qub_name": "Q:1",
-            "result_dir": os.path.join(root, "result", name, "Q:1"),
-            "data_root": os.path.join(root, "Database", name, "Q:1"),
-        }
-        assert reply["result"] == {"project": project}
-        observed = route_harness.request(client, "project.info")
-        assert observed["ok"] is True
-        assert observed["result"] == project
-    assert route_harness.ctrl.state.version.get("project") == 2
-
-
-@pytest.mark.parametrize("field", ["result_dir", "data_root"])
-def test_undeclared_paths_do_not_override_gui_computed_project(
-    route_harness: RouteHarness,
-    field: str,
-) -> None:
-    client = route_harness.client()
-    reply = route_harness.request(
-        client, "project.setup", chip_name="chip", qub_name="Q1", **{field: "/override"}
-    )
-    assert reply["ok"] is True
-    root = route_harness.ctrl.get_project_root()
-    assert reply["result"] == {
-        "project": {
-            "chip_name": "chip",
-            "qub_name": "Q1",
-            "result_dir": os.path.join(root, "result", "chip", "Q1"),
-            "data_root": os.path.join(root, "Database", "chip", "Q1"),
-        }
+    except RemoteError as error:
+        assert error.code is ErrorCode.INVALID_PARAMS
+    else:
+        assert not rejected["ok"]
+    assert route_harness.request(client, "project.info") == {
+        **before,
+        "id": str(route_harness.request_id),
     }
 
 
 @pytest.mark.parametrize(
     "params",
-    [
-        {},
-        {"chip_name": "chip"},
-        {"chip_name": "", "qub_name": "Q1"},
-        {"chip_name": None, "qub_name": "Q1"},
-        {"chip_name": 1, "qub_name": "Q1"},
-        {"chip_name": "chip", "qub_name": False},
-    ],
+    [{}, {"project_root": "root"}, {"project_root": False, "entry": "synthetic"}],
 )
-def test_malformed_setup_is_rejected_before_publication(
-    route_harness: RouteHarness,
-    params: dict[str, object],
-) -> None:
+def test_malformed_setup_is_rejected_before_publication(route_harness, params):
     client = route_harness.client()
-    initial = route_harness.ctrl.state.project
     with pytest.raises(RemoteError) as rejected:
         route_harness.request(client, "project.setup", **params)
     assert rejected.value.code is ErrorCode.INVALID_PARAMS
-    assert route_harness.ctrl.state.project is initial
-    assert route_harness.ctrl.state.version.get("project") == 0
+    assert route_harness.ctrl.state.project is None

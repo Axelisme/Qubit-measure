@@ -66,9 +66,14 @@ the indicator before cancelling search or an interactive session.
 
 Authority and connection rules are in
 [ADR-0070](../../../../../../docs/adr/0070-control-identity.md).
-`project.setup` accepts chip/qubit identity only; GUI derives `result_dir` and
-`data_root` from the controller root. Undeclared request keys follow shared
-parameter handling and cannot override those paths. Spectrum list/snapshot and
+`project.setup(project_root, entry, component?)` opens an existing entry under
+`project_root/result`. Omitted component resolves the setup qubit alias. The
+component must be a fluxonium qubit. `project.info` returns entry, component and
+Result paths, with null fields before opening. The Database binding is unused.
+`fit.export_params` accepts no path override. It writes the selected component
+predictor, declared setup fields and analysis ledger, then returns savepath,
+params, alignment_from, component and analysis_id. Failure preserves the
+successful write prefix without rollback. Spectrum list/snapshot and
 selection snapshot report unfinished drafts separately from published data.
 `spectrum.list` reports each published loaded/aligned/sampled stage and the count
 excluded by that spectrum's published Filter mask. Completed empty spectra remain

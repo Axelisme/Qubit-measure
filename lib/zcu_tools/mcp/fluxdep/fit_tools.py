@@ -30,9 +30,7 @@ class FitResultArguments(TypedDict):
 
 
 class FitExportArguments(TypedDict):
-    """Optional GUI-local output path; omission uses the GUI project default."""
-
-    savepath: NotRequired[str]
+    """No overrides: export to the opened entry and selected component."""
 
 
 class FitArguments(TypedDict):
@@ -156,7 +154,13 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
         return ToolReply(
             {
                 name: receipt.data[name]
-                for name in ("savepath", "params", "alignment_from")
+                for name in (
+                    "savepath",
+                    "params",
+                    "alignment_from",
+                    "component",
+                    "analysis_id",
+                )
             }
         )
 
@@ -204,8 +208,8 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
         bridge.config.tool_prefix + "fit_export_params": {
             "handler": export_params,
             "description": (
-                "Merge the accepted fit into params.json. Optional savepath is a "
-                "GUI-local destination; omission uses the GUI project default. "
+                "Write predictors/<component>.json and declared setup fields in "
+                "the opened entry, then append an analysis ledger record. "
                 "Return the GUI's successful path, full-precision EJ/EC/EL GHz "
                 "and actual calibration source. Stale fits are refused by GUI "
                 "with fit_stale. Native readiness, control and I/O failures "
@@ -213,7 +217,7 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
             ),
             "inputSchema": {
                 "type": "object",
-                "properties": {"savepath": {"type": "string"}},
+                "properties": {},
             },
         },
         bridge.config.tool_prefix + "database_info": {
