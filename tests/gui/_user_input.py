@@ -206,6 +206,22 @@ class ComponentDriver:
             fully_visible=on_screen and widget.visibleRegion().contains(widget.rect()),
             object_name=widget.objectName(),
             tooltip=widget.toolTip() if on_screen else "",
+            bounds=(
+                widget.mapToGlobal(QPoint()).x(),
+                widget.mapToGlobal(QPoint()).y(),
+                widget.width(),
+                widget.height(),
+            )
+            if on_screen
+            else None,
+            caption_fits=(
+                on_screen
+                and (
+                    not isinstance(widget, QAbstractButton)
+                    or widget.fontMetrics().horizontalAdvance(widget.text())
+                    <= widget.contentsRect().width()
+                )
+            ),
             checked=(
                 widget.isChecked()
                 if on_screen

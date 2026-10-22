@@ -153,6 +153,20 @@ class InputConverter:
 
 
 @dataclass(frozen=True)
+class InputDefault:
+    """Supply raw JSON for a fresh field without a declared Pydantic default.
+
+    factory runs once per static_defaults call only when the field has neither
+    a default nor a default_factory. Its detached finite JSON becomes authored
+    input, not a Pydantic value default. Writes and validation do not execute
+    the factory. Exceptions propagate to the caller.
+    On nested aliases, outer metadata overrides inner metadata.
+    """
+
+    factory: Callable[[], JsonValue]  # Build one field's fresh raw input.
+
+
+@dataclass(frozen=True)
 class InputPolicy:
     """Input capability restriction on an Annotated field.
 
@@ -330,7 +344,7 @@ class FormModel(BaseModel):
 
     @classmethod
     def default_input(cls, env: FormEnv) -> FormInput[Self]:
-        """Build isolated input from declared defaults; required keys stay absent.
+        """Build isolated input from declared defaults and InputDefault metadata.
 
         Owner overrides must call super first, then add only owner build
         admission. Core owns defaults, shape, sources and expression evaluation.
@@ -363,9 +377,10 @@ class FormModel(BaseModel):
         """Return initial input; converters may explicitly reuse this policy.
 
         Defaults depend only on the declaration and fixed env, never a prior
-        draft. The fallback uses Pydantic static defaults and leaves required
-        keys absent; it does not validate a partial model or replace missing
-        keys with None. Source failures propagate at the consuming field path.
+        draft. The fallback uses Pydantic static defaults and InputDefault
+        metadata. Other required keys stay absent. It does not validate a partial
+        model or replace missing keys with None. Source failures propagate at the
+        consuming field path.
         A text-field leaf may be {"expr": text} to derive its initial value from
         env, such as {"expr": "$flux_dev"}; default_input
         evaluate it into a direct value (see default_input), so it never stays
