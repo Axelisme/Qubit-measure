@@ -19,6 +19,7 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.operation_handles import OperationHandles
 
 from tests.gui._completion_helpers import on_analyze_failed
+from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure.services._analyze_support import (
     make_plots,
     make_service,
@@ -32,7 +33,7 @@ def test_framework_session_drives_committed_result_and_one_terminal_operation(qa
     state = make_state()
     captured = make_parameters({"rate": 1.0})
     state.update_tab_result(
-        "tab1", state.get_tab("tab1").run.result, parameters=captured
+        "tab1", require_record(state.get_tab("tab1").run), parameters=captured
     )
     state.set_context(
         replace(state.session_env, parameters=make_parameters({"rate": 2.0}))

@@ -20,7 +20,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 
-from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._load_support import historical_metadata, write_native_file
 from tests.gui.app.measure._reload_fakes import OldAdapter
 
 from ._helpers import Fixture, call, open_client, reset_inbox
@@ -95,6 +95,7 @@ def test_open_file_loads_without_soc_with_result(app, path):
     assert fx.state.get_tab(tab).run.result == RunRecord(
         cfg=None if path == "no-cfg.h5" else LoadedCfg(),
         result=LoadedResult(2.0 if path == "no-cfg.h5" else 1.0),
+        metadata=historical_metadata(),
     )
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["run_id"] is None

@@ -20,8 +20,9 @@ def record_with_metadata[Cfg: ExpCfgModel, Result](
 
     identity supplies startup provenance and the workflow run_id. experiment_tag
     is the persistence declaration's tag; snapshot is the plan's captured entry
-    state. Use only completed.facts for UTC times, iteration, attempt, stopped
-    status and pre-call devices, never live workflow state. The derived run_id is
+    state. Use completed.facts for UTC times, iteration, attempt and pre-call
+    devices. completed.partial_result selects stopped completion, including
+    descendant cancellation. Never inspect live workflow state. The derived run_id is
     <workflow run_id>-<six-digit iteration>-<attempt>. Invalid metadata raises
     ValueError. The input record is unchanged and large Result arrays stay shared.
     No device queries, provenance recapture, paths or writes occur.
@@ -32,7 +33,7 @@ def record_with_metadata[Cfg: ExpCfgModel, Result](
         experiment=experiment_tag,
         started_at=facts.started_at.isoformat(),
         finished_at=facts.finished_at.isoformat(),
-        completion="stopped" if facts.stopped else "complete",
+        completion="stopped" if completed.partial_result else "complete",
         snapshot=snapshot,
         provenance=identity.provenance,
         device_snapshot=facts.device_snapshot,
