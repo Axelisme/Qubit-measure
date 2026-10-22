@@ -2,10 +2,9 @@
 
 from math import isfinite
 
-from zcu_tools.cfg_model import Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.onetone._form_shared import initial_readout_timing
+from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
 
 from .core import RangeFindCfg
 
@@ -15,7 +14,8 @@ def initial_resonators(ctx: FormContext) -> list[str]:
 
     All members with present, finite MHz frequencies are sorted by frequency.
     Any missing/null frequency preserves the entire group order. Malformed
-    group names or set nonfinite/nonnumeric frequencies raise ValueError.
+    source types or set nonfinite/nonnumeric frequencies raise ValueError.
+    Duplicate names remain editable; only Analyze requires unique names.
     No readout settings are taken from the mux and no source is changed.
     """
     parameters = ctx.parameters
@@ -26,20 +26,20 @@ def initial_resonators(ctx: FormContext) -> list[str]:
     ):
         return []
     raw = parameters.value("$mux.resonators")
-    if not isinstance(raw, list) or not raw:
-        raise ValueError("$mux.resonators must be a nonempty list of names")
+    if not isinstance(raw, list):
+        raise ValueError("$mux.resonators must be a list of strings")
     names: list[str] = []
     for name in raw:
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("$mux.resonators must contain nonblank strings")
+        if not isinstance(name, str):
+            raise ValueError("$mux.resonators must contain strings")
         names.append(name)
-    if len(set(names)) != len(names):
-        raise ValueError("$mux.resonators must contain unique names")
-    frequencies: dict[str, float] = {}
+    frequencies: list[float] = []
+    missing_frequency = False
     for name in names:
         source = parameters.lookup_point(f"{name}.freq")
         value = source.value
         if not source.present or value is None:
+            missing_frequency = True
             continue
         if (
             isinstance(value, bool)
@@ -47,10 +47,15 @@ def initial_resonators(ctx: FormContext) -> list[str]:
             or not isfinite(value)
         ):
             raise ValueError(f"{name}.freq must be finite MHz to seed resonator order")
-        frequencies[name] = float(value)
-    if len(frequencies) != len(names):
+        frequencies.append(float(value))
+    if missing_frequency:
         return names
-    return sorted(names, key=frequencies.__getitem__)
+    return [
+        name
+        for _, name in sorted(
+            zip(frequencies, names, strict=True), key=lambda item: item[0]
+        )
+    ]
 
 
 def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
@@ -63,27 +68,7 @@ def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
     return Form(
         RangeFindCfg,
         tree={
-            "modules": {
-                "reset": Hidden(),
-                "readout": Template(
-                    "readout",
-                    bindings={"resonator": "$resonator"},
-                    set={
-                        "freq": Hidden(0.0),
-                        "gain": 0.05,
-                        **initial_readout_timing(ctx),
-                    },
-                ),
-            },
-            "sweep": {
-                "freq": Range.around(
-                    "$resonator.freq", "1.5 * $resonator.kappa", expts=301
-                )
-            },
-            "relax_delay": 1.0,
-            "reps": 100,
-            "rounds": 100,
-            "initial_delay": Hidden(),
+            **initial_spectrum_tree(ctx),
             "resonators": [name for name in initial_resonators(ctx)],
         },
     )

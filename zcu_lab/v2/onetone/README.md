@@ -6,7 +6,9 @@
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
-[`_shared.py`](_shared.py) 保存不依賴 GUI 的 cfg 與 linear acquisition，供 `freq` 與 `range_find` 共用。
+`freq` 與 `range_find` 另共用 `initial_spectrum_tree`，集中 readout、linear sweep 與平均次數的初值。
+[`_shared.py`](_shared.py) 保存不依賴 GUI 的 cfg、頻率格點與繪圖 buffer。
+兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。
 [`range_find`](range_find/guide.md) 掃大範圍絕對 MHz、找多個凹陷並提議各 resonator 的 `freq`。
 Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Template 建立初值。
 

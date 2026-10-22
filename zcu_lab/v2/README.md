@@ -28,7 +28,9 @@
 ## Mux readout 與表單初值
 
 `onetone/range_find` 使用普通 pulse readout 的 generator 與 ADC 硬體掃絕對 MHz。
-Acquisition 與 `onetone/freq` linear 共用純 core cfg 與掃頻流程，raw 是一維頻率與 complex IQ。
+它與 `onetone/freq` linear 共用純 core cfg、頻率格點與繪圖 buffer。
+兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。
+Raw 是一維頻率與 complex IQ。
 分析名單隨 cfg 保存，Run 可空，Analyze 必須非空且不重複。Open／Reset 有 `$mux` 時，
 全部成員都有目前 freq 才按 freq 升冪排序，否則保留 group 順序；無 `$mux` 時留空。
 Analyze／Load 從該次 cfg 取可編輯的名單初值，不讀目前 Form。

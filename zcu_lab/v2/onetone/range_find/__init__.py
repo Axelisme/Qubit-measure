@@ -6,7 +6,6 @@ from .core import (
     RangeFindOptions,
     RangeFindResult,
     ResonatorDip,
-    analyze,
 )
 
 __all__ = [
@@ -15,5 +14,4 @@ __all__ = [
     "RangeFindOptions",
     "RangeFindResult",
     "ResonatorDip",
-    "analyze",
 ]

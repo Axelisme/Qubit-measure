@@ -2,7 +2,7 @@
 
 from math import isfinite
 
-from zcu_tools.cfg_model import Expr, TemplateSeed
+from zcu_tools.cfg_model import Expr, FormNode, Hidden, Range, Template, TemplateSeed
 from zcu_tools.gui.form_adapter import FormContext
 
 from zcu_lab.templates import READOUT_PULSE_LENGTH_US
@@ -53,4 +53,35 @@ def initial_readout_timing(ctx: FormContext) -> dict[str, TemplateSeed]:
         "trig_offset": Expr(trigger),
         "ro_length": initial_ro_length(),
         "waveform.length": Expr(length),
+    }
+
+
+def initial_spectrum_tree(ctx: FormContext) -> dict[str, FormNode]:
+    """Seed editable pulse-readout, linear sweep and averaging for Open/Reset.
+
+    ctx supplies the fixed resonator capture used for timing and sweep expressions.
+    Run supplies the hidden readout frequency. Return a fresh tree with 301 points
+    over freq ± 1.5*kappa, gain 0.05, 100 reps/rounds and 1 us relax delay.
+    Timing source failures propagate from initial_readout_timing.
+    """
+    return {
+        "modules": {
+            "reset": Hidden(),
+            "readout": Template(
+                "readout",
+                bindings={"resonator": "$resonator"},
+                set={
+                    "freq": Hidden(0.0),
+                    "gain": 0.05,
+                    **initial_readout_timing(ctx),
+                },
+            ),
+        },
+        "sweep": {
+            "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=301)
+        },
+        "relax_delay": 1.0,
+        "reps": 100,
+        "rounds": 100,
+        "initial_delay": Hidden(),
     }

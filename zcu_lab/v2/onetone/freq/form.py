@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
-from zcu_tools.cfg_model import Hidden, Range, Template
+from zcu_tools.cfg_model import Hidden
 from zcu_tools.gui.form import (
     Display,
     FormCommandContext,
@@ -19,7 +19,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.onetone._form_shared import initial_readout_timing
+from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
 from zcu_lab.v2.onetone.freq.core import FreqCfg, HomophasalSamplingCfg
 
 
@@ -107,34 +107,12 @@ def lower_sampling(extras: SamplingInput, cfg: FreqCfg) -> FreqCfg:
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     """Build starting values and shape from the captured source availability."""
-    timing = initial_readout_timing(ctx)
     return Form(
         FreqCfg,
         tree={
-            "modules": {
-                "reset": Hidden(),
-                "readout": Template(
-                    "readout",
-                    bindings={"resonator": "$resonator"},
-                    set={
-                        # Run supplies the linear sweep or homophasal frequency grid.
-                        "freq": Hidden(0.0),
-                        "gain": 0.05,
-                        **timing,
-                    },
-                ),
-            },
-            "sweep": {
-                "freq": Range.around(
-                    "$resonator.freq", "1.5 * $resonator.kappa", expts=301
-                )
-            },
+            **initial_spectrum_tree(ctx),
             "sampling_mode": Hidden(),
             "homophasal": Hidden(),
-            "relax_delay": 1.0,
-            "reps": 100,
-            "rounds": 100,
-            "initial_delay": Hidden(),
         },
         extras=SamplingInput,
         lower=lower_sampling,

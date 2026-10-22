@@ -31,7 +31,6 @@ from .core import (
     RangeFindOptions,
     RangeFindResult,
     ResonatorDip,
-    analyze,
 )
 from .form import make_form
 
@@ -161,7 +160,9 @@ class RangeFindAdapter(
         calculation but omit their proposals and explain why in the summary.
         Invalid curves/options and insufficient dips raise ValueError.
         """
-        dips = analyze(req.run_result, req.analyze_params.to_options(), plots=plots)
+        dips = RangeFindExp().analyze(
+            req.run_result, req.analyze_params.to_options(), plots=plots
+        )
         if req.parameters is None:
             return RangeFindAnalysis(
                 dips, (), "No Run/Load parameter capture; no frequency proposals"
