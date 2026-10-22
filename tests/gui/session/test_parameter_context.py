@@ -21,15 +21,12 @@ from zcu_tools.resources.context.library import (
 from zcu_tools.resources.document_store import DocumentValue
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    ResultEntry,
     RoleResolutionError,
     RoleSpec,
     component_registry,
     role_registry,
-    snapshot,
-    source_path,
 )
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
 class CaptureDrive(ComponentSchema):
@@ -43,7 +40,7 @@ class CaptureSensor(ComponentSchema):
 
 
 @pytest.fixture
-def source(tmp_path: Path) -> Generator[tuple[PointDocument, LibrarySnapshot]]:
+def source() -> Generator[tuple[PointDocument, LibrarySnapshot]]:
     before = component_registry.kinds()
     component_registry.register("capture/drive", CaptureDrive)
     component_registry.register("capture/sensor", CaptureSensor)
@@ -52,14 +49,18 @@ def source(tmp_path: Path) -> Generator[tuple[PointDocument, LibrarySnapshot]]:
         "capture_sensor", RoleSpec("capture/sensor", "capture_driver.sense")
     )
     try:
-        entry = ResultEntry.create(
-            "projection",
-            result_root=tmp_path / "results",
-            database_root=tmp_path / "database",
+        # No backing point file exists; every read must use the capture.
+        document = PointDocument(
+            format="zcu.parameter-container",
+            format_version="2.0",
+            general=PointGeneral(
+                entry_id="00000000-0000-0000-0000-000000000001",
+                created_at="2026-10-09T00:00:00Z",
+                ext={"nullable": None, "nested": {"number": 2.0}},
+            ),
         )
         for name, rate, sense in (("Q1", 4300.0, "R1"), ("Q2", 5100.0, "R2")):
-            entry.setup.add_component(
-                name,
+            document.components[name] = CaptureDrive(
                 kind="capture/drive",
                 rate=rate,
                 sense=sense,
@@ -70,10 +71,9 @@ def source(tmp_path: Path) -> Generator[tuple[PointDocument, LibrarySnapshot]]:
                 },
             )
         for name in ("R1", "R2"):
-            entry.setup.add_component(name, kind="capture/sensor", rate=6500.0)
-        point = entry.new_point("working")
-        document = snapshot(point)
-        document.general.ext = {"nullable": None, "nested": {"number": 2.0}}
+            document.components[name] = CaptureSensor(
+                kind="capture/sensor", rate=6500.0
+            )
         library = LibrarySnapshot(
             ModuleLibraryDocument(
                 format="zcu.module-library",
@@ -94,8 +94,6 @@ def source(tmp_path: Path) -> Generator[tuple[PointDocument, LibrarySnapshot]]:
                 },
             )
         )
-        # All following reads must use the capture, not reopen the point file.
-        source_path(point).unlink()
         yield document, library
     finally:
         role_registry.unregister("capture_sensor")
