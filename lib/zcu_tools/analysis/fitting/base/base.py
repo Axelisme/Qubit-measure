@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable, Sequence
 from functools import wraps
 from typing import TypeVar
@@ -8,6 +7,8 @@ from typing import TypeVar
 import numpy as np
 import scipy as sp
 from numpy.typing import NDArray
+
+from zcu_tools.analysis.failure import AnalysisFailed
 
 Y_DataType = TypeVar("Y_DataType", bound=np.generic)
 
@@ -79,6 +80,15 @@ def fit_func(
     fixedparams: Sequence[float | None] | None = None,
     **kwargs,
 ) -> FitResult:
+    """Fit observations with SciPy, restoring explicitly fixed parameters.
+
+    init_p gives one initial value per model parameter; fixedparams marks fixed
+    values with numbers and free values with None. kwargs goes to curve_fit,
+    including its evaluation budget. Return parameters and covariance, never a
+    fallback seed. Known insufficient observations and optimizer nonconvergence
+    raise AnalysisFailed. Model callback and invalid configuration errors keep
+    their original exception and identity.
+    """
     has_fixedparams = fixedparams is not None and any(
         p is not None for p in fixedparams
     )
@@ -93,9 +103,26 @@ def fit_func(
             fitfunc, init_p, bounds, fixedparams
         )
 
+    if ydata.size == 0 or (init_p is not None and ydata.size < len(init_p)):
+        raise AnalysisFailed("Insufficient observations for the free fit parameters")
+
+    callback_error: Exception | None = None
+
+    def model(xs: NDArray[np.generic], *params: float) -> NDArray[Y_DataType]:
+        nonlocal callback_error
+        try:
+            return fitfunc(xs, *params)
+        except Exception as error:
+            # SciPy also uses RuntimeError for nonconvergence; preserve model bugs.
+            callback_error = error
+            raise
+
+    # SciPy infers parameter count from the original callable when no p0 is given.
+    # In that case signature preservation keeps its public initialization contract.
+    model = wraps(fitfunc)(model)
     try:
         pOpt, pCov = sp.optimize.curve_fit(
-            fitfunc,
+            model,
             xdata,
             ydata,
             p0=init_p,
@@ -103,16 +130,9 @@ def fit_func(
             **kwargs,
         )
     except RuntimeError as exc:
-        if init_p is None:
-            raise
-        warnings.warn(
-            "fit_func failed; returning init_p fallback with infinite covariance "
-            f"({exc})",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        pOpt = [p if p is not None else np.nan for p in init_p]
-        pCov = np.full(shape=(len(init_p), len(init_p)), fill_value=np.inf)
+        if callback_error is not None:
+            raise callback_error from None
+        raise AnalysisFailed(str(exc)) from exc
 
     if has_fixedparams:
         assert fixedparams is not None

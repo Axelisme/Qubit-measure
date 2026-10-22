@@ -26,6 +26,7 @@ def project_control(snapshot: dict[str, Any]) -> dict[str, Any]:
             "cancelled",
             "reason",
             "active_path",
+            "candidates",
         )
         if key in snapshot
     }

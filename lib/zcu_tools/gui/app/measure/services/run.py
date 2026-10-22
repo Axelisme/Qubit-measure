@@ -481,6 +481,17 @@ class RunService:
             return ""
         return signal.active_path
 
+    def live_paths_scope(self, operation_id: int) -> list[str]:
+        """Read all active Run leaf paths; stale/non-Run handles return [].
+
+        Call on the owner thread. Paths come from the same explicit Scope tree
+        as status_scope; no latest-child selection occurs at forks.
+        """
+        scope = self._active_stop
+        if operation_id != self._active_token or scope is None:
+            return []
+        return scope.live_paths
+
     def cancel_scope(
         self, operation_id: int, scope: str, *, expected: int | None = None
     ) -> CancelResult:

@@ -15,19 +15,19 @@ from uuid import uuid4
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.experiment import ScriptCancelled
 from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.experiment.script_host import ScriptStatus
 from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.recipe_api import (
-    RecipeCancelled,
     RecipeDeclaration,
     RecipeOutcome,
 )
 from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 from zcu_tools.mcp.measure.recipe_details import RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_host import RecipeHost, RecipeHostFactory
-from zcu_tools.mcp.measure.recipe_runtime import PendingAnalysis
+from zcu_tools.mcp.measure.recipe_runtime import PendingAnalysis, ScopeProjection
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 logger = logging.getLogger(__name__)
@@ -210,6 +210,15 @@ class ScriptRecipeExecution:
             }
         )
 
+    def scope_status(self) -> ScopeProjection:
+        """Read composite active_path and structured live_paths without driving code."""
+        with self._condition:
+            host = self._host
+        if host is None:
+            path = f"recipe:{self._definition.name}"
+            return ScopeProjection(path, [path])
+        return host.runtime.scope_status()
+
     @property
     def active_path(self) -> str:
         """Read local scopes plus the active GUI Run tail, without driving author code."""
@@ -317,7 +326,7 @@ class ScriptRecipeExecution:
             report = host.scheduler.run(
                 self._definition.coroutine(host.session, inputs)
             )
-        except RecipeCancelled as failure:
+        except ScriptCancelled as failure:
             error = failure
         except RecipeNeedsParameters as failure:
             error = failure
@@ -329,7 +338,7 @@ class ScriptRecipeExecution:
     def _finish(self, report: BaseModel | None, error: Exception | None) -> None:
         host = self._host
         cancelled = (
-            isinstance(error, RecipeCancelled)
+            isinstance(error, ScriptCancelled)
             or self._cancelled.is_set()
             or (host is not None and host.scheduler.status == "cancelled")
         )
@@ -358,7 +367,7 @@ class ScriptRecipeExecution:
                 pending_question=None,
                 outcome=RecipeOutcome(status, None if cancelled else report, runs),
                 error=ScriptRecipeError(type(error).__name__, str(error))
-                if error is not None and not isinstance(error, RecipeCancelled)
+                if error is not None and not isinstance(error, ScriptCancelled)
                 else None,
             )
             self._condition.notify_all()

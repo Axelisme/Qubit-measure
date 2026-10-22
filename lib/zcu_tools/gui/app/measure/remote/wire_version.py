@@ -12,7 +12,7 @@ from __future__ import annotations
 # Async recipe declarations use request-scoped answers and script/run cancellation.
 # Captured acceptance checks all pane revisions before any write.
 # Scoped Run control and result_state.partial_result preserve inner cancellation.
-WIRE_VERSION = 118
+WIRE_VERSION = 119
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.

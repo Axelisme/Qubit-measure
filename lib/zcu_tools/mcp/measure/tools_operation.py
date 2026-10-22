@@ -27,9 +27,10 @@ def _execution_status(
     if key.startswith("recipe-"):
         execution = ctx.session.recipes.get(key)
         snapshot = asdict(execution.snapshot())
+        paths = asdict(execution.scope_status())
         return {
             **project_execution(snapshot, detail=detail),
-            "active_path": execution.active_path,
+            **paths,
         }
     return project_execution(
         asdict(ctx.session.executions.get(key).snapshot()),
@@ -79,7 +80,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     ] + [
         {
             **asdict(item),
-            "active_path": ctx.session.recipes.get(item.execution).active_path,
+            **asdict(ctx.session.recipes.get(item.execution).scope_status()),
         }
         for item in ctx.session.recipes.snapshots()
     ]
@@ -97,7 +98,10 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
             {
                 **project_execution(item),
                 **(
-                    {"active_path": item["active_path"]}
+                    {
+                        "active_path": item["active_path"],
+                        "live_paths": item["live_paths"],
+                    }
                     if "active_path" in item
                     else {}
                 ),
@@ -236,7 +240,7 @@ def cancel(
         )
     else:
         op = _operation_id(arguments)
-        if label in {"schedule", "acquire"}:
+        if label in {"schedule", "acquire"} or "/" in label:
             target_op = op
         execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
     if execution is not None:
