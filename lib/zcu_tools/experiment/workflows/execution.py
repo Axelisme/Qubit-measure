@@ -183,6 +183,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._operation_finished,
                 self._device_setup,
             ),
+            identity=self._identity,
         )
         return await self._definition.script(
             env, deepcopy(self._plan), Live(self._read_tunables)

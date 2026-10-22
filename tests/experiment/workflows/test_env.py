@@ -1,6 +1,6 @@
 """Environment capabilities and retained displays through an async author."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
@@ -10,6 +10,7 @@ from threading import Event
 import numpy as np
 import pytest
 from qick import QickConfig
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
 from zcu_tools.experiment.workflows import (
     Engine,
@@ -17,11 +18,14 @@ from zcu_tools.experiment.workflows import (
     Live,
     MissingCapability,
     OperationFacts,
+    RunIdentity,
     WorkflowEnv,
+    saved_run,
+    workflow,
 )
 from zcu_tools.experiment.workflows.env import Displays, EnvHooks
 
-from ._engine_fakes import START, Plan, Point, Rig, Tunables, completed
+from ._engine_fakes import START, Cfg, Plan, Point, Rig, Tunables, completed, identity
 
 
 @pytest.fixture
@@ -74,6 +78,7 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
         host,
         Displays(rig.progress),
         hooks,
+        identity=identity(),
     )
 
     def acquire(ctx: CallContext) -> int:
@@ -143,6 +148,67 @@ def test_original_start_context_and_injected_handles_are_shared(rig: Rig) -> Non
     assert rig.engine.execute("run").lifecycle == "done"
     assert observed == [START, 7, soc, rig.devices, rig.plots]
     assert rig.devices.values == []
+
+
+def test_author_identity_matches_supplied_run_and_saved_manifest(rig: Rig) -> None:
+    supplied = replace(identity(), entry_id="point-7", entry_label="Sample point")
+    observed: list[RunIdentity] = []
+
+    @workflow("identity", "Expose the existing workflow run identity to savers")
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        assert hasattr(env, "identity"), "Authors must receive the existing RunIdentity"
+        observed.append(env.identity)
+        author_copy = env.identity
+        versions = author_copy.provenance.software_versions
+        if isinstance(versions, MutableMapping):
+            versions["author-only"] = "changed"
+        assert env.identity == supplied
+        await env.call(lambda ctx: None)
+        await env.commit(Point(value=1))
+        observed.append(env.identity)
+
+    rig.engine.start(
+        script,
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=supplied,
+    )
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert observed == [supplied, supplied]
+    assert saved_run.read_manifest(rig.paths.metadata_root).identity == supplied
+
+
+def test_run_accepts_typed_bound_callable_with_config_parameter(rig: Rig) -> None:
+    class Experiment:
+        def run(self, config: Cfg, *, context: RunContext) -> int:
+            assert context.plots is rig.plots
+            assert context.devices == {}
+            return config.value + 4
+
+    rig.engine = Engine(
+        EnginePorts(
+            rig.plots,
+            rig.progress,
+            rig.clock,
+            soc=object(),
+            soccfg=QickConfig({}),
+            devices=rig.devices,
+        )
+    )
+    experiment = Experiment()
+    results: list[int] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        outcome = completed(await env.run(experiment.run, Cfg(value=3)))
+        assert outcome.value.cfg == Cfg(value=3)
+        results.append(outcome.value.result)
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert results == [7]
 
 
 @pytest.mark.parametrize("capability", ["context", "soc", "devices"])
