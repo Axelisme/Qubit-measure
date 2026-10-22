@@ -6,7 +6,7 @@
 
 本模組擁有 parameter、module 與 sample 的 proposal、draft、service、control 與 Qt review widget。
 `items.py` 定義 adapter 的可變 proposals；`contracts.py` 定義 owner 的 edit、preview 與 submission records。
-`service.py` 保留 draft 生命週期、revision 檢查與寫入執行，也繼續匯出既有公開型別。
+`service.py` 保留 draft 生命週期、ID 檢查與寫入執行，也繼續匯出既有公開型別。
 
 ## Initial selection and notes
 
@@ -43,10 +43,9 @@ Apply 同步執行。
 
 ## Captured acceptance
 
-每個 draft 的 revision 在建立、selection、target、parameter value 或 module Form 改動時遞增。
-Module Form 的 write／command 經同一 subscription 升號。替換 draft 不重用舊 revision。
-`accept_drafts` 在同一次 owner 呼叫核對全部 selected drafts 的 revision 與 IDs，再依輸入群組順序寫入。
+`accept_drafts` 在同一次 owner 呼叫核對全部 selected drafts 的 IDs，再依輸入群組順序寫入。
+值與目的地取 owner 當下的 draft，不比對 preview、不還原捕捉時的 proposal。
 Writeback control 固定 Primary 在 Post 前，並在提交前檢查 permission、idle 與 active draft。
-任一 revision 過期就拒絕整批，錯誤列出變動群組、IDs 與前後 revision，不把 draft 還原成舊值。
+Unknown／duplicate IDs 在第一筆寫入前拒絕。Draft 編輯或替換本身不拒絕接受，見 ADR-0075。
 提交中的失敗回 confirmed IDs 成功前綴及診斷，不 retry／rollback。
 `apply_draft` 與單 pane `write_draft` 保留原有 raise 與 edit/write 契約。

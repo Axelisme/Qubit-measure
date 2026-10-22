@@ -39,10 +39,13 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 
 ## Captured writeback
 
-`tab.writeback_preview` 回 owner draft revision，沒有 draft 時 revision 為 null。
-`tab.writeback_accept(tab_id, stages)` 接受有序的 `{subtab_id, expected_revision, ids}` 清單。
-Owner 在同一次 dispatch 核對 Primary／Post 全部選定 revisions 與 IDs，任何 draft 改動或替換都回 `writeback_changed`，不開始寫入。
-通過後按 Primary、Post、各 pane 的候選順序寫入。回覆 `{status, written, error}`，written 以 pane 與穩定 item ID 記錄已確認成功前綴。
+`tab.writeback_preview` 回 owner 當下的 draft 候選，不帶 revision。
+`tab.writeback_accept(tab_id, stages)` 接受有序的 `{subtab_id, ids}` 清單，不帶 `expected_revision`。
+Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／duplicate 在第一筆寫入前拒絕。
+通過後按 Primary、Post、各 pane 的候選順序寫入 owner 當下 draft 的值與目的地，不還原捕捉時的 proposal。
+回覆 `{status, written, error}`，written 以 pane 與穩定 item ID 記錄已確認成功前綴，不是寫入值快照。
+Recipe receipt.items 是成功 ID 對應的原捕捉候選，實際值與目的地仍取提交當下的 draft。
+GUI／MCP 的所有權模型允許問答期間的 draft 編輯與替換，見 ADR-0075 的 2026-10-23 使用者裁定。
 第一次寫入失敗就停止，不 retry／rollback。單 pane `tab.writeback_set`／`tab.writeback_write` 仍編輯當前 draft。
 
 ## Workflow namespace
