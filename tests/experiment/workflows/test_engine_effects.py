@@ -182,8 +182,10 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         assert "readout disconnected" in observed[0].reason
         assert attempts == [1, 1]
     else:
-        assert observed[0] == Completed(99, partial_result=True)
-    assert observed[1] == Completed(7, partial_result=False)
+        first = completed(observed[0])
+        assert (first.value, first.partial_result) == (99, True)
+    second = completed(observed[1])
+    assert (second.value, second.partial_result) == (7, False)
 
 
 @pytest.mark.parametrize("source", ["outside", "other_signal"])
