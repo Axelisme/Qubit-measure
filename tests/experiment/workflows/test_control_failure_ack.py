@@ -80,3 +80,45 @@ def test_first_failure_stop_ack_does_not_wait_behind_author_finally(
     assert final.lifecycle == "failed"
     assert final.reason == "OSError: answer journal storage failed"
     assert len(cleanup_threads) == 1 and cleanup_threads[0] != hold.thread
+
+
+def test_engine_root_selector_does_not_add_another_loop_acknowledgement(
+    rig: Rig,
+) -> None:
+    cleanup_entered, release_cleanup, accepted = Event(), Event(), Event()
+
+    async def author(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        try:
+            await env.call(lambda ctx: 7)
+        finally:
+            cleanup_entered.set()
+            assert release_cleanup.wait(10), "Scenario releases author cleanup"
+
+    def cancel():
+        try:
+            return rig.engine.cancel("run", "workflow")
+        finally:
+            accepted.set()
+
+    rig.start(author)
+    with running(rig) as execution, ThreadPoolExecutor(max_workers=1) as pool:
+        assert cleanup_entered.wait(5), (
+            "Author finally holds its loop before cancellation"
+        )
+        caller = pool.submit(cancel)
+        try:
+            assert accepted.wait(2), (
+                "Engine must use the Host's immediate root acceptance"
+            )
+            acknowledgement = caller.result(timeout=5)
+            assert acknowledgement.cancelled
+            assert acknowledgement.active_path == "workflow:example"
+            assert not execution.done(), (
+                "The root acknowledgement is not a drain receipt"
+            )
+        finally:
+            release_cleanup.set()
+            caller.result(timeout=5)
+            final = execution.result(timeout=5)
+    assert final.lifecycle == "cancelled"
+    assert final.reason is None
