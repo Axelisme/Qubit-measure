@@ -93,16 +93,18 @@ def test_finished_returns_reason_and_status():
     ctrl.await_operation.assert_called_once_with(7, 5.0)
 
 
-def test_failed_returns_status_and_error():
+@pytest.mark.parametrize("failure_kind", [None, "analysis"])
+def test_failed_returns_status_error_and_classification(failure_kind):
     ctrl = _ctrl(
         AwaitResult(
-            reason="completed", outcome=OperationOutcome("failed", "hardware boom")
+            reason="completed", outcome=OperationOutcome("failed", "hardware boom", failure_kind)
         )
     )
     assert _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0}) == {
         "reason": "completed",
         "status": "failed",
         "error": {"reason": "failed", "message": "hardware boom"},
+        "failure_kind": failure_kind,
     }
 
 
