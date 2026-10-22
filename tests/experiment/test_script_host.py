@@ -233,3 +233,37 @@ def test_natural_completion_snapshot_is_not_retroactively_stopped_by_pause() -> 
     assert [(item.result, item.epoch, item.partial_result) for item in completions] == [
         (19, 0, False)
     ]
+
+
+def test_public_control_serializes_on_worker_returns_value_and_transports_errors() -> None:
+    module = host_module()
+    changed = Event()
+    host = module.ScriptHost(on_change=changed.set)
+    worker_ids: list[int] = []
+
+    class ControlFailure(Exception):
+        pass
+
+    failure = ControlFailure("specific callback diagnostic")
+
+    def broken() -> None:
+        raise failure
+
+    async def script() -> None:
+        worker_ids.append(get_ident())
+        await host.ask(Confirm(evidence="control"))
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(lambda: host.run(script()))
+        try:
+            assert changed.wait(3)
+            assert hasattr(host, "control"), "Host has no public memory-only control primitive"
+            assert host.control(lambda: (get_ident(), 23)) == (worker_ids[0], 23)
+            with pytest.raises(ControlFailure) as caught:
+                host.control(broken)
+            assert caught.value is failure
+        finally:
+            host.close()
+            future.result(timeout=3)
+    with pytest.raises(RuntimeError):
+        host.control(lambda: 1)
